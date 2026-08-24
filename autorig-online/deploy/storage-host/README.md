@@ -50,3 +50,13 @@ task failures, cache stalls, mail-ledger failures, and provider delivery failure
 are deduplicated before Telegram notification. Once the 72-hour window closes,
 the next scheduled pass writes `postmigration-72h.complete` and disables the
 timer.
+### Shared GPU workload broker
+
+The broker API is disabled by default.  Generate one bearer token outside the
+repository and store it as `AUTORIG_WORKLOAD_BROKER_TOKEN` in
+`/srv/autorig/secrets/backend.env`.  Roll out broker-aware converter and
+Freestock node payloads first; only then set
+`AUTORIG_WORKLOAD_BROKER_ENABLED=1` in
+`/srv/autorig/secrets/feature-flags.env`.  Never pass the token in a process
+argument or commit it.  `storage-host.env` keeps the non-secret two-slot
+AutoRig reserve and the F7/Raptor physical-resource alias.

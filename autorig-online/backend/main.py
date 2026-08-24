@@ -226,6 +226,10 @@ import re
 import httpx
 
 from namecheap_remote_api import router as namecheap_remote_router
+from workload_broker import (
+    canonical_physical_resource_id,
+    router as workload_broker_router,
+)
 from animal_animation_library import (
     ANIMAL_CLIP_IDS,
     ANIMAL_RIG_TYPES,
@@ -600,6 +604,36 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
         dispatch_now = datetime.utcnow()
         queued_result = await db.execute(dispatch_queue_statement(Task, dispatch_now))
         queued_tasks = sorted(queued_result.scalars().all(), key=dispatch_sort_key)
+        ambiguous_submissions = [
+            task
+            for task in queued_tasks
+            if task.workload_lease_id
+            and task.worker_api
+            and str(task.workload_lease_state or "") == "submission_unknown"
+        ]
+        if ambiguous_submissions:
+            # These rows already own durable central admission and their POST
+            # may already be running on the bound host.  Replay only the exact
+            # persisted worker/request identity before considering any fresh
+            # dispatch from this telemetry snapshot.
+            still_ambiguous = False
+            for task in ambiguous_submissions:
+                replayed, _error = await start_task_on_worker(
+                    db,
+                    task,
+                    str(task.worker_api),
+                    admission_locked=True,
+                )
+                still_ambiguous = still_ambiguous or (
+                    replayed.status == "created"
+                    and str(replayed.workload_lease_state or "")
+                    == "submission_unknown"
+                )
+            if still_ambiguous:
+                wake_task_scheduler()
+            # Re-read both host telemetry and DB bindings next cycle; the old
+            # free-worker snapshot predates these exact replays.
+            return
         interactive = [
             task for task in queued_tasks if task.queue_class != QUEUE_CLASS_BACKGROUND
         ]
@@ -689,7 +723,9 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
 
         async def _try_dispatch(worker, candidates: List[Task]) -> bool:
             async def _attempt(task: Task):
-                return await start_task_on_worker(db, task, worker.url)
+                return await start_task_on_worker(
+                    db, task, worker.url, admission_locked=True
+                )
 
             return await dispatch_fifo_candidate(candidates, _attempt)
 
@@ -793,7 +829,9 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 )
 
                 async def _dispatch_released(task: Task, worker) -> tuple:
-                    return await start_task_on_worker(db, task, worker.url)
+                    return await start_task_on_worker(
+                        db, task, worker.url, admission_locked=True
+                    )
 
                 dispatched_now = await dispatch_released_interactive(
                     interactive,
@@ -1349,6 +1387,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.state.limiter = limiter
 
 app.include_router(namecheap_remote_router)
+app.include_router(workload_broker_router)
 
 
 @app.middleware("http")
@@ -8650,8 +8689,47 @@ async def api_admin_scheduler_priority(
         background_queued=counts.get((QUEUE_CLASS_BACKGROUND, "created"), 0),
         interactive_active=counts.get((QUEUE_CLASS_INTERACTIVE, "processing"), 0),
         background_active=counts.get((QUEUE_CLASS_BACKGROUND, "processing"), 0),
-        reserved_full_slots=1 if healthy_full > 0 else 0,
+        reserved_full_slots=min(2, healthy_full),
     )
+
+
+_WORKER_POOLS = {"full_converter", "hunyuan_only", "comfy", "ai_vision", "shared_gpu"}
+_WORKER_ROLES = {"shared", "autorig_primary", "ai_primary", "background_only", "maintenance"}
+
+
+def _worker_pool(value: Any) -> str:
+    normalized = str(value or "full_converter").strip().lower()
+    if normalized not in _WORKER_POOLS:
+        raise HTTPException(status_code=422, detail="Invalid worker pool")
+    return normalized
+
+
+def _worker_role(value: Any) -> str:
+    normalized = str(value or "shared").strip().lower()
+    if normalized not in _WORKER_ROLES:
+        raise HTTPException(status_code=422, detail="Invalid worker role")
+    return normalized
+
+
+def _worker_capabilities(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=422, detail="Worker capabilities must be an object")
+    result: Dict[str, Any] = {}
+    for key, child in list(value.items())[:64]:
+        safe_key = str(key or "").strip()[:80]
+        if not safe_key or re.search(r"token|secret|password|authorization|cookie|api.?key", safe_key, re.I):
+            continue
+        if isinstance(child, (str, int, float, bool)) or child is None:
+            result[safe_key] = child if not isinstance(child, str) else child[:240]
+    return result
+
+
+def _worker_capabilities_from_json(raw: Any) -> Dict[str, Any]:
+    try:
+        value = json.loads(str(raw or "{}"))
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 @app.get("/api/admin/workers", response_model=AdminWorkerListResponse)
@@ -8712,6 +8790,10 @@ async def api_admin_workers(
                 url=w.url,
                 enabled=bool(w.enabled),
                 weight=int(w.weight or 0),
+                physical_resource_id=w.physical_resource_id,
+                pool=str(w.pool or "full_converter"),
+                role=str(w.role or "shared"),
+                capabilities=_worker_capabilities_from_json(w.capabilities_json),
                 created_at=w.created_at,
                 updated_at=w.updated_at,
                 done_tasks=int(stats_by_url.get(_norm(w.url), {}).get("done_tasks", 0)),
@@ -8737,7 +8819,14 @@ async def api_admin_create_worker(
     worker = WorkerEndpoint(
         url=url,
         enabled=bool(data.enabled),
-        weight=int(data.weight or 0)
+        weight=int(data.weight or 0),
+        physical_resource_id=(
+            canonical_physical_resource_id(data.physical_resource_id)
+            if data.physical_resource_id else None
+        ),
+        pool=_worker_pool(data.pool),
+        role=_worker_role(data.role),
+        capabilities_json=json.dumps(_worker_capabilities(data.capabilities), separators=(",", ":")),
     )
     db.add(worker)
     try:
@@ -8752,6 +8841,10 @@ async def api_admin_create_worker(
         url=worker.url,
         enabled=bool(worker.enabled),
         weight=int(worker.weight or 0),
+        physical_resource_id=worker.physical_resource_id,
+        pool=str(worker.pool or "full_converter"),
+        role=str(worker.role or "shared"),
+        capabilities=_worker_capabilities_from_json(worker.capabilities_json),
         created_at=worker.created_at,
         updated_at=worker.updated_at,
         done_tasks=0,
@@ -8779,6 +8872,19 @@ async def api_admin_update_worker(
         worker.enabled = bool(data.enabled)
     if data.weight is not None:
         worker.weight = int(data.weight)
+    if data.physical_resource_id is not None:
+        worker.physical_resource_id = (
+            canonical_physical_resource_id(data.physical_resource_id)
+            if str(data.physical_resource_id or "").strip() else None
+        )
+    if data.pool is not None:
+        worker.pool = _worker_pool(data.pool)
+    if data.role is not None:
+        worker.role = _worker_role(data.role)
+    if data.capabilities is not None:
+        worker.capabilities_json = json.dumps(
+            _worker_capabilities(data.capabilities), separators=(",", ":")
+        )
 
     try:
         await db.commit()
@@ -8792,6 +8898,10 @@ async def api_admin_update_worker(
         url=worker.url,
         enabled=bool(worker.enabled),
         weight=int(worker.weight or 0),
+        physical_resource_id=worker.physical_resource_id,
+        pool=str(worker.pool or "full_converter"),
+        role=str(worker.role or "shared"),
+        capabilities=_worker_capabilities_from_json(worker.capabilities_json),
         created_at=worker.created_at,
         updated_at=worker.updated_at,
         done_tasks=0,

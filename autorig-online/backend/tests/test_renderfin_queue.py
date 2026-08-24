@@ -2,12 +2,13 @@ import asyncio
 import tempfile
 import time
 import unittest
+import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from renderfin import comfy_adapter, config
+from renderfin import comfy_adapter, config, workload_lease
 from renderfin.models import (
     TASK_DONE,
     TASK_ERROR,
@@ -16,7 +17,7 @@ from renderfin.models import (
     RenderPrompt,
     RenderServer,
 )
-from renderfin.queue import RenderQueue
+from renderfin.queue import RenderQueue, _host_terminal_outcome
 from renderfin.registry import ServerRegistry
 
 
@@ -62,6 +63,782 @@ def _server(name="raptor", workflows=("gen_image.json",)):
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_real_host_bridge_terminal_status_aliases(self):
+        self.assertEqual(_host_terminal_outcome({"status": "Completed"}), "completed")
+        self.assertEqual(_host_terminal_outcome({"status": "Preempted"}), "preempted")
+        self.assertEqual(_host_terminal_outcome({"status": "Released"}), "released")
+
+    def test_host_bridge_409_completed_is_terminal_not_capacity(self):
+        async def scenario():
+            server = _server()
+            server.managed_workload = True
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                self.assertEqual(request.headers["Authorization"], "Bearer bridge-token")
+                return httpx.Response(409, json={"status": "Completed"})
+
+            mapping = json.dumps(
+                {
+                    "raptor": {
+                        "url": "https://converter-f7.freestock.online",
+                        "token": "bridge-token",
+                    }
+                }
+            )
+            with patch.dict(
+                "os.environ", {"RENDERFIN_GPU_CONTROL_NODES_JSON": mapping}
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    result = await workload_lease.host_comfy_control(
+                        client,
+                        server=server,
+                        action="preempt",
+                        prompt_id="prompt-1",
+                        logical_task_id="task-1",
+                        lease_id="lease-1",
+                        request_id="request-1",
+                    )
+            self.assertEqual(result["status"], "Completed")
+
+        run(scenario())
+
+    def test_host_bridge_423_artifact_pending_is_completed_not_capacity(self):
+        async def scenario():
+            server = _server()
+            server.managed_workload = True
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    423,
+                    json={
+                        "status_string": "artifact_pending",
+                        "prompt_id": "prompt-1",
+                        "logical_task_id": "task-1",
+                    },
+                )
+
+            mapping = json.dumps(
+                {
+                    "raptor": {
+                        "url": "https://converter-f7.freestock.online",
+                        "token": "bridge-token",
+                    }
+                }
+            )
+            with patch.dict(
+                "os.environ", {"RENDERFIN_GPU_CONTROL_NODES_JSON": mapping}
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    result = await workload_lease.host_comfy_control(
+                        client,
+                        server=server,
+                        action="preempt",
+                        prompt_id="prompt-1",
+                        logical_task_id="task-1",
+                        lease_id="lease-1",
+                        request_id="request-1",
+                    )
+            self.assertEqual(_host_terminal_outcome(result), "completed")
+            self.assertEqual(result["status_string"], "artifact_pending")
+
+        run(scenario())
+
+    def test_central_release_client_rejects_unconfirmed_terminal_state(self):
+        async def scenario():
+            responses = iter(("expired", "completed"))
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(200, json={"status_string": next(responses)})
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "RENDERFIN_WORKLOAD_BROKER_ENABLED": "1",
+                    "RENDERFIN_WORKLOAD_BROKER_TOKEN": "broker-token",
+                },
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(RuntimeError):
+                        await workload_lease.release(
+                            client,
+                            lease_id="lease-1",
+                            owner_task_id="task-1",
+                            request_id="request-1",
+                            outcome="completed",
+                        )
+                    await workload_lease.release(
+                        client,
+                        lease_id="lease-1",
+                        owner_task_id="task-1",
+                        request_id="request-1",
+                        outcome="completed",
+                    )
+
+        run(scenario())
+
+    def test_exact_host_preempt_accepts_already_expired_central_lease(self):
+        async def scenario():
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={
+                        "status_string": "expired",
+                        "lease_by_key": {"state_string": "expired"},
+                    },
+                )
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "RENDERFIN_WORKLOAD_BROKER_ENABLED": "1",
+                    "RENDERFIN_WORKLOAD_BROKER_TOKEN": "broker-token",
+                },
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    await workload_lease.release(
+                        client,
+                        lease_id="lease-expired",
+                        owner_task_id="task-1",
+                        request_id="request-1",
+                        outcome="preempted",
+                    )
+
+        run(scenario())
+
+    def test_expired_central_lease_exactly_reconciles_host_before_requeue(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "expired-prompt"
+                    task.started_at = time.time()
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-expired"
+                    task.workload_request_id = "request-expired"
+                    task.workload_physical_resource_id = "raptor"
+                    await queue._persist(task)
+
+                    terminal = workload_lease.WorkloadLeaseTerminal(
+                        {
+                            "status_string": "lease_terminal",
+                            "lease_by_key": {"state_string": "expired"},
+                        }
+                    )
+                    host_control = AsyncMock(
+                        return_value={"status": "Preempted"}
+                    )
+                    release = AsyncMock(return_value=None)
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(side_effect=terminal)
+                    ), patch.object(
+                        workload_lease, "host_comfy_control", new=host_control
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ), patch.object(
+                        comfy_adapter,
+                        "poll_history",
+                        new=AsyncMock(side_effect=AssertionError("old prompt polled")),
+                    ):
+                        await queue._poll_rendering()
+
+                    restored = queue.get(task.id)
+                    self.assertEqual(restored.status, TASK_PENDING)
+                    self.assertEqual(restored.started_at, 0)
+                    self.assertEqual(restored.comfy_prompt_id, "")
+                    self.assertEqual(restored.workload_lease_id, "")
+                    self.assertNotEqual(
+                        restored.workload_request_id, "request-expired"
+                    )
+                    host_control.assert_awaited_once()
+                    self.assertEqual(
+                        host_control.await_args.kwargs["action"], "preempt"
+                    )
+                    release.assert_awaited_once()
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_expired_central_and_local_artifact_hold_continue_old_prompt(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "artifact-prompt"
+                    task.started_at = time.time()
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-expired"
+                    task.workload_request_id = "request-expired"
+                    task.workload_physical_resource_id = "raptor"
+                    await queue._persist(task)
+                    terminal = workload_lease.WorkloadLeaseTerminal(
+                        {
+                            "status_string": "lease_terminal",
+                            "lease_by_key": {"state_string": "expired"},
+                        }
+                    )
+                    history = AsyncMock(return_value=("running", {}))
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(side_effect=terminal)
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(
+                            return_value={
+                                "status_string": "artifact_pending",
+                                "outcome_string": "completed",
+                            }
+                        ),
+                    ), patch.object(
+                        comfy_adapter, "poll_history", new=history
+                    ):
+                        await queue._poll_rendering()
+                    restored = queue.get(task.id)
+                    self.assertEqual(restored.status, TASK_RENDERING)
+                    self.assertEqual(restored.comfy_prompt_id, "artifact-prompt")
+                    self.assertEqual(restored.workload_lease_id, "lease-expired")
+                    history.assert_awaited_once()
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_both_ttls_after_history_success_download_once_and_complete(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="portrait", user_name="bot")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "artifact-prompt"
+                    task.started_at = time.time()
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-expired"
+                    task.workload_request_id = "request-expired"
+                    task.workload_physical_resource_id = "raptor"
+                    await queue._persist(task)
+                    entry = {
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": "artifact.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                    terminal = workload_lease.WorkloadLeaseTerminal(
+                        {
+                            "status_string": "lease_terminal",
+                            "lease_by_key": {"state_string": "expired"},
+                        }
+                    )
+
+                    async def host_control(*_args, **kwargs):
+                        if kwargs["action"] == "complete":
+                            return {"status": "Completed"}
+                        return {
+                            "status_string": "artifact_pending",
+                            "outcome_string": "completed",
+                        }
+
+                    host = AsyncMock(side_effect=host_control)
+                    download = AsyncMock(return_value=b"PNG-EXACT-ARTIFACT")
+                    release = AsyncMock(return_value=None)
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(side_effect=terminal)
+                    ), patch.object(
+                        workload_lease, "host_comfy_control", new=host
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ), patch.object(
+                        comfy_adapter,
+                        "poll_history",
+                        new=AsyncMock(return_value=("completed", entry)),
+                    ), patch.object(
+                        comfy_adapter, "download_artifact", new=download
+                    ):
+                        await queue._poll_rendering()
+                        await queue._finishers[task.id]
+
+                    restored = queue.get(task.id)
+                    self.assertEqual(restored.status, TASK_DONE)
+                    self.assertTrue(restored.artifact_sha256)
+                    self.assertEqual(restored.workload_lease_id, "")
+                    download.assert_awaited_once()
+                    release.assert_awaited_once()
+                    actions = [call.kwargs["action"] for call in host.await_args_list]
+                    self.assertEqual(actions, ["preempt", "preempt", "complete"])
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_managed_timeout_completed_wins_and_persists_artifact(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="portrait", user_name="bot")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "timeout-completed-prompt"
+                    task.started_at = 1.0
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-timeout-completed"
+                    task.workload_request_id = "request-timeout-completed"
+                    task.workload_physical_resource_id = "raptor"
+                    await queue._persist(task)
+                    entry = {
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": "timeout-completed.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    }
+                                ]
+                            }
+                        }
+                    }
+
+                    async def host_control(*_args, **kwargs):
+                        if kwargs["action"] == "preempt":
+                            return {
+                                "status_string": "artifact_pending",
+                                "outcome_string": "completed",
+                            }
+                        if kwargs["action"] == "complete":
+                            return {"status": "Completed"}
+                        return {"status": "Registered"}
+
+                    host = AsyncMock(side_effect=host_control)
+                    history = AsyncMock(return_value=("completed", entry))
+                    download = AsyncMock(return_value=b"TIMEOUT-COMPLETED-ARTIFACT")
+                    release = AsyncMock(return_value=None)
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(return_value=None)
+                    ), patch.object(
+                        workload_lease, "host_comfy_control", new=host
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ), patch.object(
+                        comfy_adapter, "poll_history", new=history
+                    ), patch.object(
+                        comfy_adapter, "download_artifact", new=download
+                    ):
+                        await queue._poll_rendering()
+
+                    restored = queue.get(task.id)
+                    self.assertEqual(restored.status, TASK_DONE)
+                    self.assertEqual(
+                        Path(restored.output_path).read_bytes(),
+                        b"TIMEOUT-COMPLETED-ARTIFACT",
+                    )
+                    self.assertTrue(restored.artifact_sha256)
+                    self.assertEqual(restored.workload_lease_id, "")
+                    self.assertNotIn(
+                        "timeout-completed-prompt", restored.retired_comfy_prompt_ids
+                    )
+                    history.assert_awaited_once()
+                    download.assert_awaited_once()
+                    release.assert_awaited_once()
+                    self.assertEqual(release.await_args.kwargs["outcome"], "completed")
+                    self.assertEqual(
+                        [call.kwargs["action"] for call in host.await_args_list],
+                        ["heartbeat", "preempt", "complete"],
+                    )
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_managed_timeout_ambiguous_preempt_retains_central_lease(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="portrait"))
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "timeout-ambiguous-prompt"
+                    task.started_at = 1.0
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-timeout-ambiguous"
+                    task.workload_request_id = "request-timeout-ambiguous"
+                    task.workload_physical_resource_id = "raptor"
+                    await queue._persist(task)
+
+                    async def host_control(*_args, **kwargs):
+                        if kwargs["action"] == "preempt":
+                            return {"status_string": "preempting"}
+                        return {"status": "Registered"}
+
+                    host = AsyncMock(side_effect=host_control)
+                    history = AsyncMock(
+                        side_effect=AssertionError("ambiguous prompt must not be polled")
+                    )
+                    release = AsyncMock(return_value=None)
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(return_value=None)
+                    ), patch.object(
+                        workload_lease, "host_comfy_control", new=host
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ), patch.object(
+                        comfy_adapter, "poll_history", new=history
+                    ):
+                        await queue._poll_rendering()
+
+                    restored = queue.get(task.id)
+                    self.assertEqual(restored.status, TASK_RENDERING)
+                    self.assertEqual(restored.error, "")
+                    self.assertEqual(restored.finished_at, 0)
+                    self.assertEqual(restored.server_name, server.render_server_name)
+                    self.assertEqual(
+                        restored.comfy_prompt_id, "timeout-ambiguous-prompt"
+                    )
+                    self.assertEqual(
+                        restored.workload_lease_id, "lease-timeout-ambiguous"
+                    )
+                    self.assertEqual(
+                        restored.workload_request_id, "request-timeout-ambiguous"
+                    )
+                    self.assertTrue(restored.host_comfy_registered)
+                    self.assertNotIn(
+                        "timeout-ambiguous-prompt", restored.retired_comfy_prompt_ids
+                    )
+                    history.assert_not_awaited()
+                    release.assert_not_awaited()
+                    self.assertEqual(
+                        [call.kwargs["action"] for call in host.await_args_list],
+                        ["heartbeat", "preempt"],
+                    )
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_central_heartbeat_surfaces_terminal_lease_identity(self):
+        async def scenario():
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    409,
+                    json={
+                        "status_string": "lease_terminal",
+                        "lease_by_key": {
+                            "lease_id_string": "lease-expired",
+                            "state_string": "expired",
+                        },
+                    },
+                )
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "RENDERFIN_WORKLOAD_BROKER_ENABLED": "1",
+                    "RENDERFIN_WORKLOAD_BROKER_TOKEN": "broker-token",
+                },
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(
+                        workload_lease.WorkloadLeaseTerminal
+                    ) as raised:
+                        await workload_lease.heartbeat(
+                            client,
+                            lease_id="lease-expired",
+                            owner_task_id="task-1",
+                            request_id="request-1",
+                        )
+            self.assertEqual(raised.exception.lease_state, "expired")
+            self.assertEqual(
+                raised.exception.payload["lease_by_key"]["lease_id_string"],
+                "lease-expired",
+            )
+
+        run(scenario())
+
+    def test_managed_register_423_returns_same_task_pending_without_attempt(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.managed_prompt = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    task.workload_physical_resource_id = "raptor"
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(
+                            side_effect=workload_lease.WorkloadCapacityWait(
+                                "gpu_busy", 2
+                            )
+                        ),
+                    ), patch.object(
+                        workload_lease, "release", new=AsyncMock(return_value=None)
+                    ):
+                        with self.assertRaises(workload_lease.WorkloadCapacityWait):
+                            await queue._submit_task(task, server)
+                    self.assertEqual(task.status, TASK_PENDING)
+                    self.assertEqual(task.started_at, 0)
+                    self.assertEqual(task.submit_failures, 0)
+                    self.assertFalse(task.workload_lease_id)
+                    self.assertNotEqual(task.workload_request_id, "request-1")
+                    self.assertTrue(task.retired_comfy_prompt_ids)
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_managed_prompt_423_exactly_cleans_host_then_returns_pending(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.managed_prompt = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    task.workload_physical_resource_id = "raptor"
+
+                    async def host_control(*_args, **kwargs):
+                        if kwargs["action"] == "register":
+                            return {"status_string": "registered"}
+                        return {"status_string": "preempted"}
+
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(side_effect=host_control),
+                    ), patch.object(
+                        comfy_adapter,
+                        "submit",
+                        new=AsyncMock(
+                            side_effect=comfy_adapter.ComfyCapacityWait("gpu leased")
+                        ),
+                    ), patch.object(
+                        workload_lease, "release", new=AsyncMock(return_value=None)
+                    ):
+                        with self.assertRaises(comfy_adapter.ComfyCapacityWait):
+                            await queue._submit_task(task, server)
+                    self.assertEqual(task.status, TASK_PENDING)
+                    self.assertEqual(task.started_at, 0)
+                    self.assertEqual(task.submit_failures, 0)
+                    self.assertFalse(task.workload_lease_id)
+                    self.assertFalse(task.host_comfy_registered)
+                    self.assertTrue(task.retired_comfy_prompt_ids)
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_unknown_register_result_retries_same_id_without_deadline(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.managed_prompt = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    task.workload_physical_resource_id = "raptor"
+                    register = AsyncMock(side_effect=RuntimeError("response lost"))
+                    with patch.object(
+                        workload_lease, "host_comfy_control", new=register
+                    ):
+                        with self.assertRaises(Exception):
+                            await queue._submit_task(task, server)
+                    prompt_id = task.comfy_prompt_id
+                    self.assertTrue(prompt_id)
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.started_at, 0)
+                    self.assertFalse(task.host_comfy_registered)
+
+                    async def recovered_control(*_args, **kwargs):
+                        return {"status": "registered"}
+
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(side_effect=recovered_control),
+                    ), patch.object(
+                        comfy_adapter,
+                        "submit",
+                        new=AsyncMock(return_value=prompt_id),
+                    ):
+                        await queue._poll_rendering()
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.comfy_prompt_id, prompt_id)
+                    self.assertTrue(task.host_comfy_registered)
+                    self.assertGreater(task.started_at, 0)
+                    self.assertEqual(task.submit_failures, 0)
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_lost_register_then_host_ttl_preempt_requeues_attempt_neutrally(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.managed_prompt = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    task.workload_physical_resource_id = "raptor"
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(side_effect=RuntimeError("response lost")),
+                    ):
+                        with self.assertRaises(Exception):
+                            await queue._submit_task(task, server)
+                    old_prompt_id = task.comfy_prompt_id
+                    old_request_id = task.workload_request_id
+
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(return_value={"status": "Preempted"}),
+                    ), patch.object(
+                        workload_lease, "release", new=AsyncMock(return_value=None)
+                    ):
+                        await queue._poll_rendering()
+                    self.assertEqual(task.status, TASK_PENDING)
+                    self.assertEqual(task.started_at, 0)
+                    self.assertEqual(task.submit_failures, 0)
+                    self.assertFalse(task.workload_lease_id)
+                    self.assertNotEqual(task.workload_request_id, old_request_id)
+                    self.assertIn(old_prompt_id, task.retired_comfy_prompt_ids)
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_resurrect_missing_managed_server_preserves_exact_binding(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                task.status = TASK_RENDERING
+                task.server_name = "missing-farm-node"
+                task.comfy_prompt_id = "managed-prompt"
+                task.started_at = time.time()
+                task.managed_prompt = True
+                task.host_comfy_registered = True
+                task.workload_lease_id = "lease-1"
+                task.workload_request_id = "request-1"
+                task.workload_physical_resource_id = "missing-gpu"
+                await queue._persist(task)
+                await queue.stop()
+
+                queue2 = RenderQueue(ServerRegistry(), db_path=config.DB_PATH)
+                await queue2.start()
+                queue2._pump_task.cancel()
+                try:
+                    restored = queue2.get(task.id)
+                    self.assertEqual(restored.status, TASK_RENDERING)
+                    self.assertEqual(restored.server_name, "missing-farm-node")
+                    self.assertEqual(restored.comfy_prompt_id, "managed-prompt")
+                    self.assertEqual(restored.workload_lease_id, "lease-1")
+                    await queue2._poll_rendering()
+                    self.assertEqual(restored.status, TASK_RENDERING)
+                    self.assertEqual(restored.comfy_prompt_id, "managed-prompt")
+                finally:
+                    await queue2.stop()
+
+        run(scenario())
+
     def test_artifact_download_gpu_lease_is_capacity_wait(self):
         async def scenario():
             server = _server()

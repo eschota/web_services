@@ -439,6 +439,10 @@ class AdminWorkerItem(BaseModel):
     url: str
     enabled: bool
     weight: int
+    physical_resource_id: Optional[str] = None
+    pool: str = "full_converter"
+    role: str = "shared"
+    capabilities: Dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     done_tasks: int = 0
@@ -454,12 +458,20 @@ class AdminWorkerCreate(BaseModel):
     url: str
     enabled: bool = True
     weight: int = 0
+    physical_resource_id: Optional[str] = None
+    pool: str = "full_converter"
+    role: str = "shared"
+    capabilities: Dict = Field(default_factory=dict)
 
 
 class AdminWorkerUpdate(BaseModel):
     url: Optional[str] = None
     enabled: Optional[bool] = None
     weight: Optional[int] = None
+    physical_resource_id: Optional[str] = None
+    pool: Optional[str] = None
+    role: Optional[str] = None
+    capabilities: Optional[Dict] = None
 
 
 # =============================================================================

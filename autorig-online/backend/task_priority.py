@@ -127,10 +127,10 @@ def select_preemption_victims(tasks: Iterable[Any], count: int) -> List[Any]:
 
 
 def background_dispatch_budget(free_workers: Sequence[Any], interactive_waiting: int) -> int:
-    """Keep one healthy full-converter slot unused by background work."""
+    """Keep two healthy full-converter slots unused by background work."""
     if int(interactive_waiting or 0) > 0:
         return 0
-    return max(0, len(free_workers) - 1)
+    return max(0, len(free_workers) - 2)
 
 
 async def dispatch_fifo_candidate(candidates: List[Any], attempt) -> bool:
@@ -302,6 +302,7 @@ async def _cas_requeue_preempted_task(
     worker_api: str,
     worker_task_id: str,
     request_id: str,
+    workload_lease_id: str = "",
     now: datetime,
 ) -> bool:
     """Atomically clear only the exact worker attempt that was recalled."""
@@ -345,6 +346,13 @@ async def _cas_requeue_preempted_task(
             dispatch_not_before=now + timedelta(seconds=PREEMPT_COOLDOWN_SECONDS),
             preemption_request_id=None,
             preemption_worker_boot_id=None,
+            workload_request_id=None,
+            workload_lease_id=None,
+            workload_physical_resource_id=None,
+            workload_node_id=None,
+            workload_class=None,
+            workload_lease_state=None,
+            workload_lease_heartbeat_at=None,
             updated_at=now,
         )
     )
@@ -352,6 +360,20 @@ async def _cas_requeue_preempted_task(
     if int(result.rowcount or 0) != 1:
         await db.rollback()
         return False
+    if workload_lease_id:
+        from database import WorkloadLease, WorkloadWaiter
+
+        lease = await db.get(WorkloadLease, workload_lease_id)
+        if lease is not None and lease.state in ("active", "preemption_requested"):
+            lease.state = "preempted"
+            lease.released_at = now
+            lease.expires_at = now
+            lease.updated_at = now
+            waiter = await db.get(WorkloadWaiter, lease.request_id)
+            if waiter is not None:
+                waiter.state = "preempted"
+                waiter.terminal_at = now
+                waiter.updated_at = now
     await db.commit()
     return True
 
@@ -389,19 +411,30 @@ async def _worker_task_status(
     return "", last
 
 
-async def preempt_background_task(task_id: str) -> bool:
+async def preempt_background_task(task_id: str, *, broker_requested: bool = False) -> bool:
     """Recall one full-conversion task and requeue the same DB row after proof."""
     if not PREEMPTION_ENABLED:
         return False
 
-    from database import AsyncSessionLocal, Task
+    from database import AsyncSessionLocal, Task, WorkloadLease
     from workers import clear_worker_quarantine, quarantine_worker
 
     started = time.monotonic()
     deadline = started + PREEMPT_DEADLINE_SECONDS
     async with AsyncSessionLocal() as db:
         task = await db.get(Task, task_id)
-        if task is None or task.status != "processing" or not is_background(task.queue_class):
+        if task is None or task.status != "processing":
+            return False
+        broker_lease = None
+        if task.workload_lease_id:
+            broker_lease = await db.get(WorkloadLease, task.workload_lease_id)
+        durable_broker_recall = bool(
+            broker_requested
+            and broker_lease is not None
+            and broker_lease.state == "preemption_requested"
+            and broker_lease.owner_task_id == task.id
+        )
+        if not is_background(task.queue_class) and not durable_broker_recall:
             return False
         worker = _control_worker(task.worker_api or "")
         if not worker or not task.worker_task_id:
@@ -415,12 +448,20 @@ async def preempt_background_task(task_id: str) -> bool:
         worker_task_id = str(task.worker_task_id)
         backend_task_id = str(task.id)
         worker_api = str(task.worker_api or "")
+        workload_lease_id = str(task.workload_lease_id or "")
+        requester_workload_class = "autorig_interactive"
+        if durable_broker_recall:
+            reason = str(broker_lease.preemption_reason or "")
+            requester_workload_class = (
+                "ai_vision" if "ai_vision" in reason else "autorig_interactive"
+            )
 
     _METRICS["preemption_requested"] += 1
     headers = {"Authorization": f"Bearer {worker['token']}"}
     body = {
         "backend_task_id": backend_task_id,
         "preemption_request_id": request_id,
+        "requester_workload_class": requester_workload_class,
     }
     control_url = (
         f"{worker['url']}/api-converter-glb/control/tasks/{worker_task_id}/preempt"
@@ -665,6 +706,7 @@ async def preempt_background_task(task_id: str) -> bool:
                 worker_api=worker_api,
                 worker_task_id=worker_task_id,
                 request_id=request_id,
+                workload_lease_id=workload_lease_id,
                 now=now,
             )
             if not requeued:
@@ -692,7 +734,7 @@ async def preempt_background_task(task_id: str) -> bool:
         _METRICS["preemption_resumed"] += 1
         _METRICS["preemption_latency_seconds_total"] += elapsed
         clear_worker_quarantine(worker_api)
-        print(f"[Priority] Preempted background task {task_id} in {elapsed:.1f}s; same row requeued")
+        print(f"[Priority] Preempted task {task_id} in {elapsed:.1f}s; same row requeued")
         return True
     except Exception as exc:
         _METRICS["preemption_failed"] += 1
@@ -714,15 +756,18 @@ async def recover_incomplete_preemptions() -> int:
         result = await db.execute(
             select(Task.id).where(
                 Task.status == "processing",
-                Task.queue_class == QUEUE_CLASS_BACKGROUND,
                 Task.preemption_state.in_((PREEMPTION_REQUESTED, PREEMPTION_STOPPING)),
+                or_(
+                    Task.queue_class == QUEUE_CLASS_BACKGROUND,
+                    Task.workload_lease_id.is_not(None),
+                ),
             )
         )
         task_ids = list(result.scalars().all())
     if not task_ids:
         return 0
     results = await asyncio.gather(
-        *(preempt_background_task(task_id) for task_id in task_ids),
+        *(preempt_background_task(task_id, broker_requested=True) for task_id in task_ids),
         return_exceptions=True,
     )
     return sum(result is True for result in results)

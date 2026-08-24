@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import time
+import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import aiosqlite
 import httpx
 
-from . import comfy_adapter, config, routing, templating
+from . import comfy_adapter, config, routing, templating, workload_lease
 from .models import (
     TASK_DONE,
     TASK_ERROR,
@@ -27,6 +29,23 @@ from .registry import ServerRegistry
 # backlog, so an unreachable box is never mistaken for an idle one - but still
 # finite, so it stays usable when every box is unreadable.
 _UNKNOWN_DEPTH = 10_000
+
+
+class ManagedComfyCleanupPending(RuntimeError):
+    """Host registration may exist; keep lease/binding until exact cleanup."""
+
+
+def _host_terminal_outcome(payload: Dict[str, Any]) -> str:
+    value = str(
+        payload.get("outcome_string")
+        or payload.get("status_string")
+        or payload.get("state_string")
+        or payload.get("status")
+        or ""
+    ).strip().lower()
+    if value in {"completed", "preempted", "released"}:
+        return value
+    return ""
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS render_tasks (
@@ -90,6 +109,7 @@ class RenderQueue:
         if self._client is None:
             self._client = httpx.AsyncClient(follow_redirects=True)
         await self._resurrect()
+        await self._reconcile_terminal_leases()
         self._stopped.clear()
         self._pump_task = asyncio.create_task(self._pump())
 
@@ -134,7 +154,13 @@ class RenderQueue:
                 still_known = bool(
                     task.server_name
                     and task.comfy_prompt_id
-                    and self.registry.get(task.server_name) is not None
+                    and (
+                        self.registry.get(task.server_name) is not None
+                        or (
+                            task.managed_prompt
+                            and task.workload_lease_id
+                        )
+                    )
                 )
                 if still_known:
                     # Keep the ORIGINAL clock. Restarting it hands a render a
@@ -156,11 +182,34 @@ class RenderQueue:
 
     # ---------- public API ----------
 
-    async def enqueue(self, prompt: RenderPrompt) -> RenderTask:
+    async def enqueue(
+        self,
+        prompt: RenderPrompt,
+        *,
+        queue_class: str = "interactive",
+        logical_owner_task_id: str = "",
+    ) -> RenderTask:
         token = routing.scheduling_token(prompt)
         workflow_file, forced = routing.resolve_workflow_file(prompt)
         ext = routing.output_extension(prompt)
-        task = RenderTask(prompt=prompt, workflow=token, workflow_file=workflow_file, output_ext=ext)
+        normalized_queue = (
+            "collection_background"
+            if str(queue_class or "").strip().lower() == "collection_background"
+            else "interactive"
+        )
+        task = RenderTask(
+            prompt=prompt,
+            workflow=token,
+            workflow_file=workflow_file,
+            output_ext=ext,
+            queue_class=normalized_queue,
+            logical_owner_task_id=str(logical_owner_task_id or ""),
+            workload_class=(
+                "collection_background"
+                if normalized_queue == "collection_background"
+                else "comfy"
+            ),
+        )
         task.output_url = (
             f"{config.PUBLIC_BASE_URL}/render/{prompt.user_name}/{task.id}{ext}"
         )
@@ -247,6 +296,8 @@ class RenderQueue:
             print(f"[Renderfin][Queue] heartbeat tick={self._tick_count} tasks={counts}")
         if self._tick_count % config.STATUS_REFRESH_TICKS == 1:
             await self._refresh_servers()
+        if self._tick_count % 10 == 1:
+            await self._reconcile_terminal_leases()
         now = time.time()
         if now - self._last_dispatch >= config.DISPATCH_INTERVAL_SECONDS:
             # dispatch in parallel: keep going while there are pending tasks
@@ -255,6 +306,43 @@ class RenderQueue:
                 pass
             self._last_dispatch = now
         await self._poll_rendering()
+
+    async def _reconcile_terminal_leases(self) -> None:
+        """Finish a lost-response completion handshake after restart."""
+        if self._client is None:
+            return
+        for task in list(self._tasks.values()):
+            if not (
+                task.status == TASK_DONE
+                and task.artifact_sha256
+                and task.managed_prompt
+                and task.workload_lease_id
+                and task.server_name
+                and task.comfy_prompt_id
+            ):
+                continue
+            server = self.registry.get(task.server_name)
+            if server is None:
+                continue
+            try:
+                result = await workload_lease.host_comfy_control(
+                    self._client,
+                    server=server,
+                    action="complete",
+                    prompt_id=task.comfy_prompt_id,
+                    logical_task_id=task.id,
+                    lease_id=task.workload_lease_id,
+                    request_id=task.workload_request_id,
+                    artifact_sha256=task.artifact_sha256,
+                )
+                if _host_terminal_outcome(result) != "completed":
+                    continue
+                await self._release_workload(task, outcome="completed")
+            except Exception as exc:
+                print(
+                    f"[Renderfin][Queue] terminal lease reconciliation "
+                    f"deferred for {task.id}: {exc}"
+                )
 
     async def _refresh_servers(self) -> None:
         assert self._client is not None
@@ -273,7 +361,10 @@ class RenderQueue:
         return busy
 
     def _pick_server(
-        self, token: str, depths: Optional[Dict[str, int]] = None
+        self,
+        token: str,
+        depths: Optional[Dict[str, int]] = None,
+        task: Optional[RenderTask] = None,
     ) -> Optional[RenderServer]:
         """Least-loaded box first, fastest box to break the tie.
 
@@ -303,6 +394,14 @@ class RenderQueue:
             and s.render_server_name not in busy
             and self._server_submit_cooldowns.get(s.render_server_name, 0) <= now
         ]
+        if task is not None and task.workload_lease_id and task.workload_physical_resource_id:
+            bound = [
+                server
+                for server in candidates
+                if workload_lease.server_identity(server)[1]
+                == task.workload_physical_resource_id
+            ]
+            return bound[0] if bound else None
         candidates.sort(
             key=lambda s: (
                 depths.get(s.render_server_name, _UNKNOWN_DEPTH),
@@ -335,10 +434,11 @@ class RenderQueue:
             return False
         depths = await self._queue_depths()
         for task in pending:
-            server = self._pick_server(task.workflow, depths)
+            server = self._pick_server(task.workflow, depths, task)
             if server is None:
                 continue
             try:
+                await self._ensure_workload_lease(task, server)
                 await self._submit_task(task, server)
                 return True
             except comfy_adapter.ComfyCapacityWait as exc:
@@ -354,6 +454,24 @@ class RenderQueue:
                 server.status = "offline"
                 self.registry.save(server)
                 return False
+            except workload_lease.WorkloadCapacityWait as exc:
+                # Central admission wait: keep request id/FIFO position and do
+                # not start render timeout or spend submit_failures.
+                task.workload_lease_state = "waiting"
+                task.started_at = 0
+                await self._persist(task)
+                print(
+                    f"[Renderfin][Queue] workload wait {task.id} on "
+                    f"{server.render_server_name}: {exc.status}"
+                )
+                return False
+            except ManagedComfyCleanupPending as exc:
+                # Unknown network result after host registration is fail-closed:
+                # keep the exact binding/lease and let the poller or TTL
+                # watchdog prove cleanup. No retry/deadline is consumed.
+                print(f"[Renderfin][Queue] managed cleanup pending {task.id}: {exc}")
+                await self._persist(task)
+                return False
             except (ValueError, KeyError) as exc:
                 # bad workflow/template/prompt: the task is broken, not the box
                 print(f"[Renderfin][Queue] task {task.id} rejected: {exc}")
@@ -364,6 +482,7 @@ class RenderQueue:
                     f"[Renderfin][Queue] submit {task.id} to "
                     f"{server.render_server_name} failed: {exc}"
                 )
+                await self._release_workload(task, outcome="released", retry=True)
                 task.submit_failures += 1
                 self._server_submit_cooldowns[server.render_server_name] = (
                     time.time() + config.SUBMIT_FAILURE_COOLDOWN_SECONDS
@@ -376,6 +495,126 @@ class RenderQueue:
                 self.registry.save(server)
                 continue
         return False
+
+    async def _ensure_workload_lease(
+        self, task: RenderTask, server: RenderServer
+    ) -> Dict[str, Any]:
+        assert self._client is not None
+        if not workload_lease.enabled() or not workload_lease.managed_server(server):
+            task.managed_prompt = False
+            task.host_comfy_registered = False
+            return {}
+        if task.workload_lease_id:
+            try:
+                await workload_lease.heartbeat(
+                    self._client,
+                    lease_id=task.workload_lease_id,
+                    owner_task_id=task.id,
+                    request_id=task.workload_request_id,
+                    server=server,
+                )
+            except workload_lease.WorkloadPreempted:
+                await self._release_workload(task, outcome="preempted", retry=True)
+                raise workload_lease.WorkloadCapacityWait("preemption_requested", 2)
+            task.workload_lease_state = "active"
+            task.workload_heartbeat_at = time.time()
+            await self._persist(task)
+            return {
+                "lease_id_string": task.workload_lease_id,
+                "request_id_string": task.workload_request_id,
+                "physical_resource_id_string": task.workload_physical_resource_id,
+                "node_id_string": task.workload_node_id,
+            }
+        lease = await workload_lease.acquire(
+            self._client,
+            server=server,
+            workload_class=task.workload_class,
+            owner_task_id=task.id,
+            request_id=task.workload_request_id,
+            metadata={
+                "logical_owner_task_id": task.logical_owner_task_id,
+                "workflow": task.workflow,
+                "queue_class": task.queue_class,
+                "managed_prompt": True,
+            },
+        )
+        if not lease:
+            task.managed_prompt = False
+            return {}
+        task.workload_lease_id = str(lease.get("lease_id_string") or "")
+        task.workload_physical_resource_id = str(
+            lease.get("physical_resource_id_string") or ""
+        )
+        task.workload_node_id = str(lease.get("node_id_string") or "")
+        task.workload_lease_state = "active"
+        task.workload_heartbeat_at = time.time()
+        task.managed_prompt = True
+        # Commit before POST /prompt. A restart resumes this exact lease.
+        await self._persist(task)
+        return lease
+
+    async def _release_workload(
+        self,
+        task: RenderTask,
+        *,
+        outcome: str,
+        retry: bool = False,
+    ) -> None:
+        assert self._client is not None
+        lease_id = str(task.workload_lease_id or "")
+        request_id = str(task.workload_request_id or "")
+        if retry:
+            old_prompt_id = str(task.comfy_prompt_id or "")
+            if old_prompt_id and old_prompt_id not in task.retired_comfy_prompt_ids:
+                task.retired_comfy_prompt_ids.append(old_prompt_id)
+            task.status = TASK_PENDING
+            task.server_name = ""
+            task.comfy_prompt_id = ""
+            task.started_at = 0
+            task.finished_at = 0
+            task.workload_request_id = f"rf_{uuid.uuid4().hex}"
+            task.workload_lease_id = ""
+            task.workload_physical_resource_id = ""
+            task.workload_node_id = ""
+            task.workload_lease_state = "waiting"
+            task.workload_heartbeat_at = 0
+            task.managed_prompt = False
+            # This commit retires the old prompt/binding before its central
+            # lease is released. A crash can therefore delay capacity via TTL,
+            # but can never make old and new prompts run concurrently.
+            await self._persist(task)
+        release_confirmed = not lease_id and not request_id
+        if lease_id:
+            try:
+                await workload_lease.release(
+                    self._client,
+                    lease_id=lease_id,
+                    owner_task_id=task.id,
+                    request_id=request_id,
+                    outcome=outcome,
+                )
+                release_confirmed = True
+            except Exception as exc:
+                print(f"[Renderfin][Queue] lease release {task.id} deferred to TTL: {exc}")
+        elif retry is False and request_id:
+            try:
+                await workload_lease.cancel_waiter(
+                    self._client,
+                    request_id=request_id,
+                    owner_task_id=task.id,
+                )
+                release_confirmed = True
+            except Exception as exc:
+                print(f"[Renderfin][Queue] waiter cancel {task.id} deferred: {exc}")
+        if not retry and release_confirmed:
+            task.workload_lease_state = outcome
+            if outcome in {"completed", "preempted", "released"}:
+                task.host_comfy_registered = False
+                task.workload_lease_id = ""
+                task.workload_physical_resource_id = ""
+                task.workload_node_id = ""
+                task.workload_heartbeat_at = 0
+        await self._persist(task)
 
     async def _submit_task(self, task: RenderTask, server: RenderServer) -> None:
         assert self._client is not None
@@ -410,12 +649,108 @@ class RenderQueue:
             workflow_type=prompt.type,
             seed=prompt.noise_seed or None,
         )
-        prompt_id = await comfy_adapter.submit(self._client, server, workflow)
+        prompt_id = task.comfy_prompt_id or str(uuid.uuid4())
         task.comfy_prompt_id = prompt_id
         task.server_name = server.render_server_name
-        self._server_submit_cooldowns.pop(server.render_server_name, None)
         task.status = TASK_RENDERING
         task.started_at = time.time()
+        # Durable identity first: the host registration and Comfy submit both
+        # use this caller-supplied prompt_id. A crash never leaves an accepted
+        # prompt that the Renderfin DB cannot identify.
+        await self._persist(task)
+        managed_identity = (
+            {
+                "logical_task_id": task.id,
+                "lease_id": task.workload_lease_id,
+                "request_id": task.workload_request_id,
+            }
+            if task.managed_prompt and task.workload_lease_id
+            else None
+        )
+        if managed_identity:
+            try:
+                registration = await workload_lease.host_comfy_control(
+                    self._client,
+                    server=server,
+                    action="register",
+                    prompt_id=prompt_id,
+                    logical_task_id=task.id,
+                    lease_id=task.workload_lease_id,
+                    request_id=task.workload_request_id,
+                )
+            except workload_lease.WorkloadCapacityWait:
+                # A known retryable rejection means no host registration was
+                # granted. Retire the preallocated binding before releasing
+                # central admission; attempts and stage clock remain neutral.
+                await self._release_workload(
+                    task, outcome="released", retry=True
+                )
+                raise
+            except Exception as exc:
+                # A timeout may have reached the host even though way-fr did
+                # not receive the response. Preserve exact identity/lease and
+                # let reconciliation prove whether registration exists.
+                task.started_at = 0
+                await self._persist(task)
+                raise ManagedComfyCleanupPending(
+                    f"host register outcome unknown: {exc}"
+                ) from exc
+            registration_outcome = _host_terminal_outcome(registration)
+            if registration_outcome in {"preempted", "released"}:
+                await self._release_workload(
+                    task, outcome="preempted", retry=True
+                )
+                raise workload_lease.WorkloadCapacityWait(
+                    "managed_prompt_already_preempted", 1
+                )
+            if registration_outcome == "completed":
+                # Never resubmit a terminal prompt id. Follow its durable
+                # history/artifact path; completion will win central release.
+                task.host_comfy_registered = True
+                task.started_at = task.started_at or time.time()
+                await self._persist(task)
+                return
+            task.host_comfy_registered = True
+            await self._persist(task)
+        try:
+            returned_prompt_id = await comfy_adapter.submit(
+                self._client,
+                server,
+                workflow,
+                managed_identity=managed_identity,
+                prompt_id=prompt_id,
+            )
+        except Exception as submit_exc:
+            if managed_identity:
+                try:
+                    cleanup = await workload_lease.host_comfy_control(
+                        self._client,
+                        server=server,
+                        action="preempt",
+                        prompt_id=prompt_id,
+                        logical_task_id=task.id,
+                        lease_id=task.workload_lease_id,
+                        request_id=task.workload_request_id,
+                    )
+                    if _host_terminal_outcome(cleanup) not in {
+                        "preempted",
+                        "released",
+                    }:
+                        raise RuntimeError(f"ambiguous cleanup outcome: {cleanup}")
+                    task.host_comfy_registered = False
+                    if isinstance(submit_exc, comfy_adapter.ComfyCapacityWait):
+                        await self._release_workload(
+                            task, outcome="released", retry=True
+                        )
+                except Exception as cleanup_exc:
+                    print(
+                        f"[Renderfin][Queue] host registration cleanup {task.id} "
+                        f"deferred: {cleanup_exc}"
+                    )
+                    raise ManagedComfyCleanupPending(str(cleanup_exc)) from submit_exc
+            raise submit_exc
+        task.comfy_prompt_id = returned_prompt_id
+        self._server_submit_cooldowns.pop(server.render_server_name, None)
         await self._persist(task)
         print(f"[Renderfin][Queue] task {task.id} -> {server.render_server_name} ({runtime_name})")
 
@@ -424,6 +759,126 @@ class RenderQueue:
         for task in list(self._tasks.values()):
             if task.status != TASK_RENDERING:
                 continue
+            # Once a completed history entry is being downloaded, that
+            # finisher exclusively owns lease heartbeat/terminal transition.
+            # The regular poller must not concurrently preempt the same task.
+            if task.id in self._finishers and not self._finishers[task.id].done():
+                continue
+            if task.workload_lease_id:
+                server = self.registry.get(task.server_name)
+                if server is None:
+                    # A missing registry/tunnel is not proof that the managed
+                    # host stopped. Preserve exact prompt+lease fail-closed;
+                    # never clear/requeue onto a second physical GPU.
+                    print(
+                        f"[Renderfin][Queue] managed server {task.server_name} "
+                        f"missing for {task.id}; preserving exact binding"
+                    )
+                    continue
+                if task.managed_prompt and not task.host_comfy_registered:
+                    try:
+                        # The earlier register response was unknown. Retry the
+                        # idempotent register and caller-supplied prompt_id;
+                        # started_at stays zero until this succeeds.
+                        await self._submit_task(task, server)
+                    except (
+                        workload_lease.WorkloadCapacityWait,
+                        comfy_adapter.ComfyCapacityWait,
+                        ManagedComfyCleanupPending,
+                    ) as exc:
+                        print(
+                            f"[Renderfin][Queue] managed submit recovery "
+                            f"waiting for {task.id}: {exc}"
+                        )
+                    except Exception as exc:
+                        print(
+                            f"[Renderfin][Queue] managed submit recovery failed "
+                            f"closed for {task.id}: {exc}"
+                        )
+                    continue
+                try:
+                    await workload_lease.heartbeat(
+                        self._client,
+                        lease_id=task.workload_lease_id,
+                        owner_task_id=task.id,
+                        request_id=task.workload_request_id,
+                        server=server,
+                    )
+                    host_heartbeat = await workload_lease.host_comfy_control(
+                        self._client,
+                        server=server,
+                        action="heartbeat",
+                        prompt_id=task.comfy_prompt_id,
+                        logical_task_id=task.id,
+                        lease_id=task.workload_lease_id,
+                        request_id=task.workload_request_id,
+                    )
+                    host_heartbeat_outcome = _host_terminal_outcome(host_heartbeat)
+                    if host_heartbeat_outcome in {"preempted", "released"}:
+                        old_prompt_id = task.comfy_prompt_id
+                        await self._release_workload(
+                            task, outcome="preempted", retry=True
+                        )
+                        print(
+                            f"[Renderfin][Queue] host TTL/watchdog retired "
+                            f"{old_prompt_id}; same task {task.id} returned Pending"
+                        )
+                        continue
+                    task.workload_heartbeat_at = time.time()
+                except (
+                    workload_lease.WorkloadPreempted,
+                    workload_lease.WorkloadLeaseTerminal,
+                ):
+                    if not task.managed_prompt:
+                        print(
+                            f"[Renderfin][Queue] fail-closed preempt proof missing "
+                            f"for {task.id}/{task.comfy_prompt_id}"
+                        )
+                        continue
+                    old_prompt_id = task.comfy_prompt_id
+                    try:
+                        host_result = await workload_lease.host_comfy_control(
+                            self._client,
+                            server=server,
+                            action="preempt",
+                            prompt_id=old_prompt_id,
+                            logical_task_id=task.id,
+                            lease_id=task.workload_lease_id,
+                            request_id=task.workload_request_id,
+                        )
+                    except Exception as exc:
+                        print(
+                            f"[Renderfin][Queue] fail-closed host preempt proof "
+                            f"missing for {task.id}/{old_prompt_id}: {exc}"
+                        )
+                        continue
+                    host_outcome = _host_terminal_outcome(host_result)
+                    if host_outcome == "completed":
+                        # The prompt crossed its terminal boundary before the
+                        # stop request. Continue to history/artifact download;
+                        # durable completion will release central admission.
+                        pass
+                    elif host_outcome in {"preempted", "released"}:
+                        await self._release_workload(
+                            task, outcome="preempted", retry=True
+                        )
+                        print(
+                            f"[Renderfin][Queue] centrally preempted {task.id}; "
+                            f"old prompt {old_prompt_id} will never be polled/reposted"
+                        )
+                        continue
+                    else:
+                        print(
+                            f"[Renderfin][Queue] fail-closed ambiguous host "
+                            f"preempt outcome for {task.id}: {host_result}"
+                        )
+                        continue
+                except workload_lease.WorkloadCapacityWait as exc:
+                    print(f"[Renderfin][Queue] lease heartbeat wait {task.id}: {exc.status}")
+                    continue
+                except Exception as exc:
+                    print(f"[Renderfin][Queue] lease heartbeat failed {task.id}: {exc}")
+                    continue
             if time.time() - task.started_at > config.TASK_TIMEOUT_SECONDS:
                 await self._fail(task, "render timeout")
                 continue
@@ -451,6 +906,43 @@ class RenderQueue:
                     print(f"[Renderfin][Queue] queue check {task.id} failed: {exc!r}")
                     continue
                 if still_queued:
+                    continue
+                if task.managed_prompt and task.workload_lease_id:
+                    try:
+                        host_result = await workload_lease.host_comfy_control(
+                            self._client,
+                            server=server,
+                            action="preempt",
+                            prompt_id=task.comfy_prompt_id,
+                            logical_task_id=task.id,
+                            lease_id=task.workload_lease_id,
+                            request_id=task.workload_request_id,
+                        )
+                    except Exception as exc:
+                        print(
+                            f"[Renderfin][Queue] vanished prompt {task.id} "
+                            f"not retired without host proof: {exc}"
+                        )
+                        continue
+                    host_outcome = _host_terminal_outcome(host_result)
+                    if host_outcome == "completed":
+                        # History may lag the host terminal ledger. Keep the
+                        # exact old identity and retry; never create hidden work.
+                        continue
+                    if host_outcome not in {"preempted", "released"}:
+                        print(
+                            f"[Renderfin][Queue] vanished prompt {task.id} has "
+                            f"ambiguous host outcome: {host_result}"
+                        )
+                        continue
+                    old_prompt_id = task.comfy_prompt_id
+                    await self._release_workload(
+                        task, outcome="preempted", retry=True
+                    )
+                    print(
+                        f"[Renderfin][Queue] vanished managed prompt {old_prompt_id} "
+                        f"retired; same task {task.id} returned Pending"
+                    )
                     continue
                 print(
                     f"[Renderfin][Queue] task {task.id} vanished from "
@@ -491,12 +983,58 @@ class RenderQueue:
             # next poll will retry the artifact without spending a render attempt
             # or holding the character job in a long fleet-error cooldown.
             print(f"[Renderfin][Queue] task {task.id} artifact gated; retrying: {exc}")
+        except (
+            workload_lease.WorkloadPreempted,
+            workload_lease.WorkloadLeaseTerminal,
+        ):
+            server = self.registry.get(task.server_name)
+            if server is None or not task.managed_prompt:
+                print(f"[Renderfin][Queue] fail-closed artifact preempt for {task.id}")
+                return
+            try:
+                old_prompt_id = task.comfy_prompt_id
+                host_result = await workload_lease.host_comfy_control(
+                    self._client,
+                    server=server,
+                    action="preempt",
+                    prompt_id=old_prompt_id,
+                    logical_task_id=task.id,
+                    lease_id=task.workload_lease_id,
+                    request_id=task.workload_request_id,
+                )
+                host_outcome = _host_terminal_outcome(host_result)
+                if host_outcome == "completed":
+                    await self._finish(
+                        task, server, entry, skip_lease_heartbeat=True
+                    )
+                elif host_outcome in {"preempted", "released"}:
+                    await self._release_workload(
+                        task, outcome="preempted", retry=True
+                    )
+                    print(
+                        f"[Renderfin][Queue] artifact-stage preempted {task.id}; "
+                        f"retired prompt {old_prompt_id}"
+                    )
+                else:
+                    print(
+                        f"[Renderfin][Queue] artifact preempt outcome ambiguous: "
+                        f"{host_result}"
+                    )
+            except Exception as exc:
+                print(f"[Renderfin][Queue] artifact preempt proof deferred: {exc}")
         except Exception as exc:
             await self._fail(task, f"artifact download failed: {exc}")
         finally:
             self._finishers.pop(task.id, None)
 
-    async def _finish(self, task: RenderTask, server: RenderServer, entry: dict) -> None:
+    async def _finish(
+        self,
+        task: RenderTask,
+        server: RenderServer,
+        entry: dict,
+        *,
+        skip_lease_heartbeat: bool = False,
+    ) -> None:
         assert self._client is not None
         preferred = ""
         ptype = (task.prompt.type or "").strip().lower()
@@ -522,6 +1060,25 @@ class RenderQueue:
             if non_isolated:
                 primary = non_isolated[0]
 
+        if task.workload_lease_id and not skip_lease_heartbeat:
+            await workload_lease.heartbeat(
+                self._client,
+                lease_id=task.workload_lease_id,
+                owner_task_id=task.id,
+                request_id=task.workload_request_id,
+                server=server,
+                ttl_seconds=900,
+            )
+            await workload_lease.host_comfy_control(
+                self._client,
+                server=server,
+                action="heartbeat",
+                prompt_id=task.comfy_prompt_id,
+                logical_task_id=task.id,
+                lease_id=task.workload_lease_id,
+                request_id=task.workload_request_id,
+                ttl_seconds=900,
+            )
         data = await comfy_adapter.download_artifact(self._client, server, primary)
         out_path = user_dir / f"{task.id}{task.output_ext}"
         out_path.write_bytes(data)
@@ -551,12 +1108,132 @@ class RenderQueue:
 
         task.status = TASK_DONE
         task.finished_at = time.time()
+        task.artifact_sha256 = hashlib.sha256(data).hexdigest()
+        # Artifact and terminal state are durable before either the host-local
+        # or central lease is released. Completion therefore wins a concurrent
+        # preemption/restart race without re-rendering the logical task.
         await self._persist(task)
+        if task.workload_lease_id:
+            try:
+                await workload_lease.host_comfy_control(
+                    self._client,
+                    server=server,
+                    action="complete",
+                    prompt_id=task.comfy_prompt_id,
+                    logical_task_id=task.id,
+                    lease_id=task.workload_lease_id,
+                    request_id=task.workload_request_id,
+                    artifact_sha256=task.artifact_sha256,
+                )
+                await self._release_workload(task, outcome="completed")
+            except Exception as exc:
+                print(
+                    f"[Renderfin][Queue] completed {task.id}; lease release "
+                    f"deferred to watchdog/TTL: {exc}"
+                )
         print(f"[Renderfin][Queue] task {task.id} done in {elapsed:.0f}s -> {task.output_url}")
 
     async def _fail(self, task: RenderTask, error: str) -> None:
+        if task.managed_prompt and task.workload_lease_id:
+            if self._client is None or not task.server_name or not task.comfy_prompt_id:
+                # An incomplete local control identity is itself ambiguous.  It
+                # cannot authorize releasing the central lease or forgetting a
+                # potentially live managed prompt.
+                print(
+                    f"[Renderfin][Queue] managed failure proof deferred for "
+                    f"{task.id}: exact host control identity is unavailable"
+                )
+                await self._persist(task)
+                return
+            server = self.registry.get(task.server_name)
+            if server is None:
+                # Losing the registry/tunnel is not proof that the host prompt
+                # stopped.  Preserve the exact binding so restart/recovery can
+                # reconcile it without admitting duplicate GPU work.
+                print(
+                    f"[Renderfin][Queue] managed failure proof deferred for "
+                    f"{task.id}: server {task.server_name} is unavailable"
+                )
+                await self._persist(task)
+                return
+            try:
+                host_result = await workload_lease.host_comfy_control(
+                    self._client,
+                    server=server,
+                    action="preempt",
+                    prompt_id=task.comfy_prompt_id,
+                    logical_task_id=task.id,
+                    lease_id=task.workload_lease_id,
+                    request_id=task.workload_request_id,
+                )
+            except Exception as exc:
+                # A timeout, bridge failure, or ambiguous response cannot
+                # authorize a DB Error transition or central lease release.
+                # The next poll retries the same exact prompt identity.
+                print(
+                    f"[Renderfin][Queue] managed failure proof deferred for "
+                    f"{task.id}: {exc}"
+                )
+                await self._persist(task)
+                return
+
+            host_outcome = _host_terminal_outcome(host_result)
+            if host_outcome == "completed":
+                # Completion wins the timeout/error race.  Keep the old prompt
+                # and lease, obtain its history entry, then use the normal
+                # download + checksum + durable Done + complete/release path.
+                try:
+                    state, entry = await comfy_adapter.poll_history(
+                        self._client, server, task.comfy_prompt_id
+                    )
+                    if state != "completed":
+                        print(
+                            f"[Renderfin][Queue] completed managed prompt "
+                            f"{task.id} history is not ready ({state}); retaining binding"
+                        )
+                        await self._persist(task)
+                        return
+                    await self._finish(
+                        task,
+                        server,
+                        entry or {},
+                        skip_lease_heartbeat=True,
+                    )
+                except Exception as exc:
+                    # Host completion is already proven.  Artifact retrieval
+                    # may be temporarily gated or incomplete, but it must never
+                    # turn the logical task into Error or cause a re-render.
+                    print(
+                        f"[Renderfin][Queue] completed managed prompt "
+                        f"{task.id} artifact completion deferred: {exc}"
+                    )
+                    await self._persist(task)
+                return
+
+            if host_outcome not in {"preempted", "released"}:
+                print(
+                    f"[Renderfin][Queue] managed failure proof ambiguous for "
+                    f"{task.id}: {host_result}"
+                )
+                await self._persist(task)
+                return
+
+            # Exact host Preempted/Released proof is the only managed failure
+            # result that permits the logical task to become Error.  Release
+            # central admission only after that proof, using the matching
+            # terminal outcome rather than a generic release.
+            task.status = TASK_ERROR
+            task.error = error[:1000]
+            task.finished_at = time.time()
+            await self._persist(task)
+            await self._release_workload(task, outcome="preempted")
+            print(f"[Renderfin][Queue] task {task.id} FAILED after exact preempt: {error[:200]}")
+            return
+
         task.status = TASK_ERROR
         task.error = error[:1000]
         task.finished_at = time.time()
         await self._persist(task)
+        if self._client is not None:
+            await self._release_workload(task, outcome="released")
         print(f"[Renderfin][Queue] task {task.id} FAILED: {error[:200]}")

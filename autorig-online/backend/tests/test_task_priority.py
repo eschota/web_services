@@ -151,7 +151,7 @@ class QueueClassTests(unittest.TestCase):
 class ReserveTests(unittest.TestCase):
     def test_background_can_use_at_most_n_minus_one(self):
         workers = [object(), object(), object(), object()]
-        self.assertEqual(background_dispatch_budget(workers, 0), 3)
+        self.assertEqual(background_dispatch_budget(workers, 0), 2)
 
     def test_background_never_uses_only_worker(self):
         self.assertEqual(background_dispatch_budget([object()], 0), 0)

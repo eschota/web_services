@@ -83,6 +83,11 @@ class WorkerTaskResult:
     viewer_prepared_glb_url: Optional[str] = None
     viewer_animations_glb_url: Optional[str] = None
     error: Optional[str] = None
+    # The POST may have been accepted even though no response reached the
+    # dispatcher.  Callers must retain the exact worker/request/lease binding
+    # and replay it; treating this as an ordinary transient failure can create
+    # a second worker task.
+    unknown_outcome: bool = False
     
     def __post_init__(self):
         if self.output_urls is None:
@@ -527,6 +532,37 @@ async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerI
         return WorkerInfo(url=worker_url, available=False, error=str(e))
 
 
+async def get_worker_workload_status(worker_url: str) -> Dict[str, Any]:
+    """Return the raw non-secret node snapshot used for central admission."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
+        if response.status_code != 200:
+            raise RuntimeError(f"worker status HTTP {response.status_code}")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("worker status is not an object")
+        return payload
+
+
+def worker_supports_submission_idempotency(status: Any) -> bool:
+    """Fail-closed capability gate for central identity/replay dispatch.
+
+    Rolling worker builds expose capabilities in slightly different additive
+    containers, so read the explicit boolean from all supported server-status
+    shapes.  A missing value, a string such as ``"true"``, or an arbitrary
+    truthy object is deliberately not accepted.
+    """
+    if not isinstance(status, dict):
+        return False
+    if status.get("submission_idempotency_v1") is True:
+        return True
+    for key in ("capabilities", "capability_by_key", "feature_flags"):
+        value = status.get(key)
+        if isinstance(value, dict) and value.get("submission_idempotency_v1") is True:
+            return True
+    return False
+
+
 async def get_all_workers_status(worker_urls: List[str]) -> List[WorkerInfo]:
     """Get status of provided workers"""
     async with httpx.AsyncClient() as client:
@@ -615,6 +651,7 @@ async def send_task_to_worker(
     metadata: Optional[Dict[str, Any]] = None,
     backend_task_id: Optional[str] = None,
     queue_class: str = "interactive",
+    workload_lease: Optional[Dict[str, Any]] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -699,6 +736,17 @@ async def send_task_to_worker(
                 if str(queue_class or "").strip().lower() == "collection_background"
                 else "interactive"
             )
+            payload["workload_class"] = (
+                "collection_background"
+                if payload["queue_class"] == "collection_background"
+                else "autorig_interactive"
+            )
+            if isinstance(workload_lease, dict) and workload_lease.get("lease_id_string"):
+                payload["workload_lease_id"] = str(workload_lease.get("lease_id_string"))
+                payload["workload_request_id"] = str(workload_lease.get("request_id_string") or "")
+                payload["physical_resource_id"] = str(
+                    workload_lease.get("physical_resource_id_string") or ""
+                )
 
             request_started_at = time.time()
             response = await client.post(
@@ -741,7 +789,15 @@ async def send_task_to_worker(
                     error=f"Worker returned HTTP {response.status_code}: {response.text[:200]}"
                 )
                 
+        except httpx.ConnectTimeout:
+            return WorkerTaskResult(success=False, error="Worker connect timeout")
         except httpx.TimeoutException:
+            if isinstance(workload_lease, dict) and workload_lease.get("request_id_string"):
+                return WorkerTaskResult(
+                    success=False,
+                    error="Worker submission outcome unknown after timeout",
+                    unknown_outcome=True,
+                )
             recovered = await _recover_worker_task_after_post_timeout(
                 client,
                 worker_url,
@@ -751,6 +807,17 @@ async def send_task_to_worker(
             if recovered is not None:
                 return recovered
             return WorkerTaskResult(success=False, error="Worker timeout")
+        except httpx.ConnectError as e:
+            return WorkerTaskResult(success=False, error=str(e))
+        except httpx.RequestError as e:
+            return WorkerTaskResult(
+                success=False,
+                error=f"Worker submission outcome unknown: {e}",
+                unknown_outcome=bool(
+                    isinstance(workload_lease, dict)
+                    and workload_lease.get("request_id_string")
+                ),
+            )
         except Exception as e:
             return WorkerTaskResult(success=False, error=str(e))
 

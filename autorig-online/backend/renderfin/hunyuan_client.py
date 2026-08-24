@@ -34,7 +34,7 @@ WORKER_INFLIGHT_CAP = int(os.getenv("RENDERFIN_HUNYUAN_INFLIGHT_CAP", "1"))
 # dispatched - starts timing out while the fleet is nominally healthy. Keep this
 # many boxes out of generation's reach so the rest of the service keeps moving;
 # generations queue on our side instead, which costs them nothing.
-RESERVED_FOR_OTHER_WORK = int(os.getenv("RENDERFIN_HUNYUAN_RESERVED_WORKERS", "1"))
+RESERVED_FOR_OTHER_WORK = int(os.getenv("RENDERFIN_HUNYUAN_RESERVED_WORKERS", "2"))
 
 _ORDINARY_QUEUE_CACHE: Tuple[float, bool] = (0.0, False)
 _ORDINARY_ACTIVE_STATES = {
@@ -100,6 +100,34 @@ class NoWorkerAvailable(RuntimeError):
 
 class HunyuanClientError(RuntimeError):
     pass
+
+
+class SubmissionOutcomeUnknown(HunyuanClientError):
+    """The generate-3d POST may have been accepted by one exact worker.
+
+    A response timeout/protocol loss after request transmission is not a
+    capacity failure and must never rotate the worker or the durable workload
+    identity.  The caller persists ``worker`` and replays the same
+    ``workload_request_id`` until the host's idempotency ledger returns the
+    accepted task identity.
+    """
+
+    def __init__(self, worker: Dict[str, Any], message: str):
+        super().__init__(message)
+        self.worker = dict(worker or {})
+
+
+def supports_submission_idempotency(status: Any) -> bool:
+    """Read the explicit v1 host-ledger capability from server-status."""
+    if not isinstance(status, dict):
+        return False
+    if status.get("submission_idempotency_v1") is True:
+        return True
+    for key in ("capabilities", "capability_by_key", "feature_flags"):
+        value = status.get(key)
+        if isinstance(value, dict) and value.get("submission_idempotency_v1") is True:
+            return True
+    return False
 
 
 def ordinary_conversion_waiting(*, force_refresh: bool = False) -> bool:
@@ -549,10 +577,12 @@ async def submit(
     queue_class: str = "interactive",
     in_flight: Optional[Dict[str, int]] = None,
     excluded: Optional[set[str]] = None,
+    worker_override: Optional[Dict[str, Any]] = None,
+    workload_lease: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, str], str]:
     """Create a generation task. Returns (worker, status_url)."""
     try:
-        worker = await pick_worker(
+        worker = worker_override or await pick_worker(
             client,
             in_flight,
             excluded,
@@ -591,14 +621,54 @@ async def submit(
             else "interactive"
         ),
     }
+    if isinstance(workload_lease, dict) and workload_lease.get("lease_id_string"):
+        body.update(
+            {
+                "workload_class": str(
+                    workload_lease.get("workload_class_string")
+                    or (
+                        "collection_background"
+                        if body["queue_class"] == "collection_background"
+                        else "hunyuan"
+                    )
+                ),
+                "workload_lease_id": str(workload_lease.get("lease_id_string") or ""),
+                "workload_request_id": str(workload_lease.get("request_id_string") or ""),
+                "physical_resource_id": str(
+                    workload_lease.get("physical_resource_id_string") or ""
+                ),
+            }
+        )
     if seed:
         body["seed"] = int(seed) & 0xFFFFFFFF
-    resp = await client.post(
-        f"{worker['url']}/api-converter-glb/generate-3d",
-        json=body,
-        headers=_headers(worker),
-        timeout=30.0,
-    )
+    endpoint = f"{worker['url']}/api-converter-glb/generate-3d"
+    try:
+        resp = await client.post(
+            endpoint,
+            json=body,
+            headers=_headers(worker),
+            timeout=30.0,
+        )
+    except httpx.ConnectTimeout:
+        # No TCP connection was established, so the host could not have
+        # accepted this request.  This remains an ordinary transport failure.
+        raise
+    except httpx.ConnectError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise SubmissionOutcomeUnknown(
+            worker,
+            f"generate-3d submission outcome unknown on {worker['name']}: "
+            f"{exc.__class__.__name__}",
+        ) from exc
+    except httpx.RequestError as exc:
+        # RemoteProtocolError/ReadError/WriteError can happen after the server
+        # durably accepted the body but before its response reached us.
+        raise SubmissionOutcomeUnknown(
+            worker,
+            f"generate-3d submission outcome unknown on {worker['name']}: "
+            f"{exc.__class__.__name__}",
+        ) from exc
     if resp.status_code in (401, 403):
         # The box re-provisions its token on restart, so ours goes stale
         # without anything being wrong with the job. Same class as an empty
@@ -869,6 +939,64 @@ async def _preempt_hunyuan_candidate(
     return None
 
 
+async def preempt_bound_task(
+    client: httpx.AsyncClient,
+    worker: Dict[str, Any],
+    status_url: str,
+    *,
+    backend_task_id: str,
+    requester_workload_class: str,
+    deadline_seconds: float = 60.0,
+) -> str:
+    """Preempt one exact centrally leased Hunyuan task.
+
+    Returns ``completed`` when natural completion wins or ``preempted`` only
+    after the worker reports an empty Hunyuan slot.
+    """
+    task_id = status_url.rstrip("/").rsplit("/", 1)[-1]
+    if not task_id:
+        raise RuntimeError("bound Hunyuan task id is missing")
+    deadline = time.monotonic() + max(1.0, min(60.0, deadline_seconds))
+    request_id = str(uuid.uuid4())
+    response = await client.post(
+        f"{worker['url']}/api-converter-glb/control/tasks/{task_id}/preempt",
+        json={
+            "backend_task_id": backend_task_id,
+            "preemption_request_id": request_id,
+            "requester_workload_class": requester_workload_class,
+        },
+        headers=_headers(worker),
+        timeout=min(15.0, max(1.0, deadline - time.monotonic())),
+    )
+    if response.status_code == 409:
+        try:
+            conflict = response.json()
+        except ValueError:
+            conflict = {}
+        if str(conflict.get("error") or "") != "task_already_completed":
+            raise RuntimeError(f"Hunyuan preempt rejected: {response.text[:200]}")
+    elif response.status_code not in {200, 202}:
+        raise RuntimeError(f"Hunyuan preempt HTTP {response.status_code}")
+    outcome = "completed" if response.status_code == 409 else ""
+    while time.monotonic() < deadline:
+        task_response = await client.get(
+            status_url,
+            headers=_headers(worker),
+            timeout=min(12.0, max(1.0, deadline - time.monotonic())),
+        )
+        if task_response.status_code == 200:
+            status = str(task_response.json().get("status") or "")
+            if status == "Completed":
+                outcome = "completed"
+            elif status == "Preempted":
+                outcome = "preempted"
+        status_payload = await server_status(client, worker)
+        if outcome and status_payload and _status_proves_hunyuan_idle(status_payload, task_id):
+            return outcome
+        await asyncio.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    raise TimeoutError("Hunyuan preempt did not prove an empty slot")
+
+
 async def preempt_background_hunyuan_many(
     client: httpx.AsyncClient,
     *,
@@ -975,6 +1103,7 @@ async def wait_for_model(
     *,
     timeout: Optional[float] = None,
     on_progress=None,
+    on_poll=None,
 ) -> Dict[str, Any]:
     """Poll until Completed; returns the final status payload (with output_urls)."""
     deadline = time.time() + (timeout or config.HUNYUAN_TIMEOUT_SECONDS)
@@ -982,6 +1111,8 @@ async def wait_for_model(
     misses = 0
     unreachable = 0
     while time.time() < deadline:
+        if on_poll is not None:
+            await on_poll()
         try:
             resp = await client.get(status_url, headers=_headers(worker), timeout=30.0)
         except Exception as exc:

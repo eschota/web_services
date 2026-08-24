@@ -118,6 +118,7 @@ class CollectionWorkerPayloadTests(unittest.TestCase):
                 self.assertEqual(captured[key], value)
             self.assertEqual(captured["backend_task_id"], "backend-task-7")
             self.assertEqual(captured["queue_class"], "collection_background")
+            self.assertEqual(captured["workload_class"], "collection_background")
 
         run(scenario())
 

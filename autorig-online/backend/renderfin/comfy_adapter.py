@@ -120,21 +120,124 @@ async def upload_image(
 
 
 async def submit(
-    client: httpx.AsyncClient, server: RenderServer, workflow: Dict[str, Any]
+    client: httpx.AsyncClient,
+    server: RenderServer,
+    workflow: Dict[str, Any],
+    *,
+    managed_identity: Optional[Dict[str, str]] = None,
+    prompt_id: str = "",
 ) -> str:
     """POST /prompt. Returns prompt_id."""
     base = _validate_server_url(server.render_server_url)
-    body = {"prompt": workflow, "client_id": CLIENT_ID}
-    resp = await client.post(f"{base}/prompt", json=body, timeout=60.0, auth=_auth_for(server))
+    body: Dict[str, Any] = {"prompt": workflow, "client_id": CLIENT_ID}
+    if prompt_id:
+        body["prompt_id"] = str(prompt_id)
+    headers: Dict[str, str] = {}
+    if isinstance(managed_identity, dict) and managed_identity.get("logical_task_id"):
+        identity = {
+            "logical_task_id": str(managed_identity.get("logical_task_id") or ""),
+            "lease_id": str(managed_identity.get("lease_id") or ""),
+            "request_id": str(managed_identity.get("request_id") or ""),
+            "preemption_mode": "central_requeue",
+        }
+        body["extra_data"] = {"autorig_workload": identity}
+        headers = {
+            "X-AutoRig-Managed-Task-Id": identity["logical_task_id"],
+            "X-AutoRig-Workload-Lease-Id": identity["lease_id"],
+            "X-AutoRig-Workload-Request-Id": identity["request_id"],
+            "X-AutoRig-Preemption-Mode": "central_requeue",
+        }
+    resp = await client.post(
+        f"{base}/prompt",
+        json=body,
+        headers=headers,
+        timeout=60.0,
+        auth=_auth_for(server),
+    )
     if _capacity_wait(resp):
         raise ComfyCapacityWait(f"Comfy GPU temporarily leased: HTTP {resp.status_code}")
     if resp.status_code != 200:
         raise ComfyAdapterError(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
     payload = resp.json()
-    prompt_id = str(payload.get("prompt_id") or "")
-    if not prompt_id:
+    returned_prompt_id = str(payload.get("prompt_id") or "")
+    if not returned_prompt_id:
         raise ComfyAdapterError(f"prompt submit returned no prompt_id: {json.dumps(payload)[:300]}")
-    return prompt_id
+    if prompt_id and returned_prompt_id != str(prompt_id):
+        raise ComfyAdapterError(
+            f"prompt submit identity mismatch: expected {prompt_id}, got {returned_prompt_id}"
+        )
+    return returned_prompt_id
+
+
+def _queue_prompt_ids(payload: Dict[str, Any], bucket: str) -> List[str]:
+    result: List[str] = []
+    for entry in payload.get(bucket) or []:
+        if isinstance(entry, (list, tuple)):
+            for item in entry:
+                if isinstance(item, str):
+                    result.append(item)
+                    break
+        elif isinstance(entry, dict):
+            prompt_id = str(entry.get("prompt_id") or "")
+            if prompt_id:
+                result.append(prompt_id)
+    return result
+
+
+async def preempt_owned_prompt(
+    client: httpx.AsyncClient,
+    server: RenderServer,
+    prompt_id: str,
+    *,
+    logical_task_id: str = "",
+) -> bool:
+    """Remove/interrupt only the exact centrally-owned Comfy prompt.
+
+    The caller resets the same RenderTask to Pending and clears prompt_id after
+    this returns.  The host arbiter must not repost prompts carrying
+    ``preemption_mode=central_requeue``.
+    """
+    base = _validate_server_url(server.render_server_url)
+    response = await client.get(f"{base}/queue", timeout=15.0, auth=_auth_for(server))
+    if response.status_code != 200:
+        return False
+    payload = response.json()
+    running = _queue_prompt_ids(payload, "queue_running")
+    pending = _queue_prompt_ids(payload, "queue_pending")
+    headers = {"X-AutoRig-Managed-Task-Id": logical_task_id or prompt_id}
+    if prompt_id in pending:
+        deleted = await client.post(
+            f"{base}/queue",
+            json={"delete": [prompt_id]},
+            headers=headers,
+            timeout=15.0,
+            auth=_auth_for(server),
+        )
+        if deleted.status_code not in {200, 204}:
+            return False
+    elif prompt_id in running:
+        # Comfy interrupt is process-wide, therefore exact ownership is proved
+        # by requiring this to be the sole running prompt on the node.
+        if running != [prompt_id]:
+            return False
+        interrupted = await client.post(
+            f"{base}/interrupt",
+            json={},
+            headers=headers,
+            timeout=15.0,
+            auth=_auth_for(server),
+        )
+        if interrupted.status_code not in {200, 204}:
+            return False
+    else:
+        return True
+    for _ in range(20):
+        if not await queue_contains(client, server, prompt_id):
+            return True
+        import asyncio
+
+        await asyncio.sleep(0.25)
+    return False
 
 
 async def queue_contains(

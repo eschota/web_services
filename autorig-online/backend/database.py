@@ -359,6 +359,19 @@ class Task(Base):
     # a worker reboot without guessing from a missing in-memory task record.
     preemption_worker_boot_id = Column(String(64), nullable=True)
 
+    # Durable central GPU workload admission.  The request identity exists
+    # while the task waits for capacity; the lease identity is written before
+    # the worker POST and is heartbeated by normal progress polling.  Keeping
+    # these on the same row prevents a backend restart from manufacturing a
+    # second worker binding for the same logical task.
+    workload_request_id = Column(String(128), nullable=True, unique=True)
+    workload_lease_id = Column(String(64), nullable=True, index=True)
+    workload_physical_resource_id = Column(String(240), nullable=True, index=True)
+    workload_node_id = Column(String(240), nullable=True)
+    workload_class = Column(String(48), nullable=True)
+    workload_lease_state = Column(String(32), nullable=True)
+    workload_lease_heartbeat_at = Column(DateTime, nullable=True)
+
     # YouTube auto-upload (server uses OAuth refresh token; see youtube_upload.py)
     youtube_video_id = Column(String(64), nullable=True)
     youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
@@ -710,8 +723,102 @@ class WorkerEndpoint(Base):
     url = Column(String(255), unique=True, nullable=False, index=True)
     enabled = Column(Boolean, default=True)
     weight = Column(Integer, default=0)  # Higher means higher priority
+    # Stable physical identity and capability metadata used by the shared
+    # workload broker.  ``url`` is transport identity and can change when a
+    # tunnel is rebuilt; it must not accidentally create a second GPU slot.
+    physical_resource_id = Column(String(240), nullable=True, index=True)
+    pool = Column(String(32), nullable=False, default="full_converter")
+    role = Column(String(32), nullable=False, default="shared")
+    capabilities_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkloadNodeState(Base):
+    """Fresh, non-secret host capability heartbeat for broker admission."""
+
+    __tablename__ = "workload_node_states"
+    __table_args__ = (
+        Index("ix_workload_node_states_heartbeat", "heartbeat_at"),
+        Index("ix_workload_node_states_full_converter", "full_converter", "heartbeat_at"),
+    )
+
+    physical_resource_id = Column(String(240), primary_key=True)
+    node_id = Column(String(240), nullable=False, index=True)
+    node_kind = Column(String(48), nullable=False, default="managed_farm")
+    full_converter = Column(Boolean, nullable=False, default=False)
+    ai_capable = Column(Boolean, nullable=False, default=False)
+    managed_farm = Column(Boolean, nullable=False, default=False)
+    healthy = Column(Boolean, nullable=False, default=False)
+    accepting = Column(Boolean, nullable=False, default=False)
+    reserve_role = Column(String(32), nullable=False, default="shared")
+    status_json = Column(Text, nullable=False, default="{}")
+    heartbeat_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    # Capability/arbiter readiness is authoritative only when it comes from a
+    # host bootstrap heartbeat. Renderfin and dispatcher lease probes may keep
+    # transport liveness fresh, but may not erase or refresh these facts.
+    authority_source = Column(String(64), nullable=True)
+    authority_heartbeat_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkloadLease(Base):
+    """Durable, idempotent lease for the single GPU workload on a host."""
+
+    __tablename__ = "workload_leases"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_workload_leases_request_id"),
+        Index("ix_workload_leases_resource_state", "physical_resource_id", "state"),
+        Index("ix_workload_leases_expiry", "state", "expires_at"),
+        Index("ix_workload_leases_owner", "owner_service", "owner_task_id"),
+    )
+
+    lease_id = Column(String(64), primary_key=True)
+    request_id = Column(String(128), nullable=False, unique=True)
+    physical_resource_id = Column(String(240), nullable=False, index=True)
+    node_id = Column(String(240), nullable=False, index=True)
+    workload_class = Column(String(48), nullable=False, index=True)
+    priority = Column(Integer, nullable=False, default=100)
+    owner_service = Column(String(120), nullable=False)
+    owner_task_id = Column(String(240), nullable=False)
+    state = Column(String(32), nullable=False, default="active", index=True)
+    preemption_reason = Column(String(240), nullable=True)
+    preemption_requested_at = Column(DateTime, nullable=True)
+    metadata_json = Column(Text, nullable=False, default="{}")
+    acquired_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    heartbeat_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    released_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkloadWaiter(Base):
+    """Durable request queue used to prevent priority/FIFO leapfrogging."""
+
+    __tablename__ = "workload_waiters"
+    __table_args__ = (
+        Index("ix_workload_waiters_state_priority", "state", "priority", "created_at"),
+        Index("ix_workload_waiters_resource_state", "physical_resource_id", "state"),
+        Index("ix_workload_waiters_owner", "owner_service", "owner_task_id"),
+    )
+
+    request_id = Column(String(128), primary_key=True)
+    physical_resource_id = Column(String(240), nullable=True, index=True)
+    node_id = Column(String(240), nullable=True, index=True)
+    workload_class = Column(String(48), nullable=False, index=True)
+    priority = Column(Integer, nullable=False, default=100)
+    owner_service = Column(String(120), nullable=False)
+    owner_task_id = Column(String(240), nullable=False)
+    state = Column(String(32), nullable=False, default="waiting", index=True)
+    lease_id = Column(String(64), nullable=True, index=True)
+    metadata_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    assigned_at = Column(DateTime, nullable=True)
+    terminal_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Session(Base):
@@ -1305,12 +1412,37 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN dispatch_not_before DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN preemption_request_id VARCHAR(36)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN preemption_worker_boot_id VARCHAR(64)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN workload_request_id VARCHAR(128)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN workload_lease_id VARCHAR(64)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN workload_physical_resource_id VARCHAR(240)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN workload_node_id VARCHAR(240)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN workload_class VARCHAR(48)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN workload_lease_state VARCHAR(32)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN workload_lease_heartbeat_at DATETIME")
+            await _try_add_column("ALTER TABLE workload_node_states ADD COLUMN authority_source VARCHAR(64)")
+            await _try_add_column("ALTER TABLE workload_node_states ADD COLUMN authority_heartbeat_at DATETIME")
             try:
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_collection_guid ON tasks (collection_guid)"
                 )
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_queue_class ON tasks (queue_class)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_workload_request_id "
+                    "ON tasks (workload_request_id) WHERE workload_request_id IS NOT NULL"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_workload_lease_id ON tasks (workload_lease_id)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_workload_physical_resource_id "
+                    "ON tasks (workload_physical_resource_id)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_workload_leases_one_active_per_resource "
+                    "ON workload_leases (physical_resource_id) "
+                    "WHERE state IN ('active', 'preemption_requested')"
                 )
             except Exception:
                 pass
@@ -1323,6 +1455,25 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_bytes BIGINT DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_full_until DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_error TEXT")
+            await _try_add_column(
+                "ALTER TABLE worker_endpoints ADD COLUMN physical_resource_id VARCHAR(240)"
+            )
+            await _try_add_column(
+                "ALTER TABLE worker_endpoints ADD COLUMN pool VARCHAR(32) NOT NULL DEFAULT 'full_converter'"
+            )
+            await _try_add_column(
+                "ALTER TABLE worker_endpoints ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'shared'"
+            )
+            await _try_add_column(
+                "ALTER TABLE worker_endpoints ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '{}'"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_worker_endpoints_physical_resource_id "
+                    "ON worker_endpoints (physical_resource_id)"
+                )
+            except Exception:
+                pass
             await _try_add_column(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 22"
             )
@@ -1793,12 +1944,55 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preemption_worker_boot_id VARCHAR(64)"
             )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workload_request_id VARCHAR(128)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workload_lease_id VARCHAR(64)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workload_physical_resource_id VARCHAR(240)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workload_node_id VARCHAR(240)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workload_class VARCHAR(48)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workload_lease_state VARCHAR(32)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workload_lease_heartbeat_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE workload_node_states ADD COLUMN IF NOT EXISTS authority_source VARCHAR(64)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE workload_node_states ADD COLUMN IF NOT EXISTS authority_heartbeat_at TIMESTAMP"
+            )
             try:
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_collection_guid ON tasks (collection_guid)"
                 )
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_queue_class ON tasks (queue_class)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_workload_request_id "
+                    "ON tasks (workload_request_id) WHERE workload_request_id IS NOT NULL"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_workload_lease_id ON tasks (workload_lease_id)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_workload_physical_resource_id "
+                    "ON tasks (workload_physical_resource_id)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_workload_leases_one_active_per_resource "
+                    "ON workload_leases (physical_resource_id) "
+                    "WHERE state IN ('active', 'preemption_requested')"
                 )
             except Exception:
                 pass
@@ -1829,6 +2023,25 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS artifact_cache_error TEXT"
             )
+            await _try_add_column_any(
+                "ALTER TABLE worker_endpoints ADD COLUMN IF NOT EXISTS physical_resource_id VARCHAR(240)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE worker_endpoints ADD COLUMN IF NOT EXISTS pool VARCHAR(32) NOT NULL DEFAULT 'full_converter'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE worker_endpoints ADD COLUMN IF NOT EXISTS role VARCHAR(32) NOT NULL DEFAULT 'shared'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE worker_endpoints ADD COLUMN IF NOT EXISTS capabilities_json TEXT NOT NULL DEFAULT '{}'"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_worker_endpoints_physical_resource_id "
+                    "ON worker_endpoints (physical_resource_id)"
+                )
+            except Exception:
+                pass
             await _try_add_column_any(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 22"
             )

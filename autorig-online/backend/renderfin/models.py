@@ -58,6 +58,16 @@ class RenderServer(BaseModel):
     basic_auth: bool = False
     date_update: Optional[str] = None
     online_since_utc: Optional[str] = None
+    # Shared-GPU admission identity. External Comfy nodes remain unmanaged and
+    # are never preempted by the central broker.
+    managed_workload: bool = False
+    node_id_string: str = ""
+    physical_resource_id_string: str = ""
+    full_converter_bool: bool = False
+    ai_capable_bool: bool = False
+    reserve_role_string: str = "shared"
+    arbiter_online_bool: bool = False
+    arbiter_accepting_ai_vision_bool: bool = False
 
 
 TASK_PENDING = "Pending"
@@ -85,6 +95,19 @@ class RenderTask(BaseModel):
     created_at: float = Field(default_factory=time.time)
     started_at: float = 0
     finished_at: float = 0
+    queue_class: str = "interactive"
+    logical_owner_task_id: str = ""
+    workload_class: str = "comfy"
+    workload_request_id: str = Field(default_factory=lambda: f"rf_{uuid.uuid4().hex}")
+    workload_lease_id: str = ""
+    workload_physical_resource_id: str = ""
+    workload_node_id: str = ""
+    workload_lease_state: str = "waiting"
+    workload_heartbeat_at: float = 0
+    managed_prompt: bool = False
+    host_comfy_registered: bool = False
+    retired_comfy_prompt_ids: List[str] = Field(default_factory=list)
+    artifact_sha256: str = ""
 
     def public_dict(self) -> Dict[str, Any]:
         return {
@@ -104,6 +127,8 @@ class RenderTask(BaseModel):
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "workload_class_string": self.workload_class,
+            "workload_lease_state_string": self.workload_lease_state,
         }
 
 
@@ -179,6 +204,16 @@ class CharacterGenJob(BaseModel):
     chosen_variant: str = ""
     hunyuan_task_id: str = ""
     hunyuan_worker: str = ""
+    # Persisted before generate-3d POST so a lost response is replayed to the
+    # exact endpoint even if the mutable worker registry changes its name/url
+    # mapping while the request outcome is ambiguous.
+    hunyuan_worker_url: str = ""
+    hunyuan_workload_request_id: str = ""
+    hunyuan_workload_lease_id: str = ""
+    hunyuan_workload_physical_resource_id: str = ""
+    hunyuan_workload_node_id: str = ""
+    hunyuan_workload_lease_state: str = ""
+    hunyuan_workload_heartbeat_at: float = 0
     # A worker that cannot DNS-resolve our owned image URL is temporarily
     # skipped for this job; otherwise the least-loaded picker selects the same
     # broken box on every automatic retry.
