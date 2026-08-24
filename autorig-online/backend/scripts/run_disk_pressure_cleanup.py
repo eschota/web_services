@@ -57,9 +57,20 @@ def _dir_size_bytes(path: Path) -> int:
 
 
 def _target_free_gb(*, min_free_gb: float, used_percent_threshold: float, buffer_gb: float) -> float:
-    snapshot = _disk_snapshot()
-    threshold_free_gb = snapshot["total_gb"] * max(0.0, 100.0 - float(used_percent_threshold)) / 100.0
-    return max(float(min_free_gb), threshold_free_gb + float(buffer_gb))
+    """Return the configured free-space floor, never a disk-size-derived one.
+
+    ``used_percent_threshold`` remains an early pressure signal and ``buffer_gb``
+    remains a compatible deployment setting, but neither may silently raise the
+    amount of user data the cleanup pass tries to reclaim.  On a large volume a
+    percentage-derived target otherwise overrides the explicit operator reserve
+    (for example, 90% used on an 878 GB filesystem turned a 60 GB floor into an
+    approximately 88.5 GB deletion target).
+    """
+    # Keep these keyword-only arguments in the internal contract so older
+    # deployments can retain their environment unchanged.  They are deliberately
+    # not part of the destructive cleanup target.
+    _ = used_percent_threshold, buffer_gb
+    return float(min_free_gb)
 
 
 def _age_cutoff_timestamp(min_age_hours: float) -> float:

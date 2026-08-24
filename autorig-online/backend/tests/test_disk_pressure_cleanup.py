@@ -33,6 +33,36 @@ class DiskPressureCleanupEntrypointContractTests(unittest.TestCase):
         self.assertNotIn("init_db", database_imports)
         self.assertNotIn("init_db", called_names)
 
+    def test_large_disk_percentage_signal_does_not_raise_configured_target(self):
+        with patch.object(
+            cleanup,
+            "_disk_snapshot",
+            return_value={"total_gb": 877.7, "free_gb": 84.0, "used_percent": 90.42},
+        ):
+            target = cleanup._target_free_gb(
+                min_free_gb=60,
+                used_percent_threshold=90,
+                buffer_gb=0.75,
+            )
+
+        self.assertEqual(target, 60.0)
+
+    def test_percentage_and_buffer_never_override_explicit_reserve(self):
+        cases = (
+            (60, 90, 0.75),
+            (60, 0, 500),
+            (12.5, 99.9, 100),
+        )
+        for reserve, threshold, buffer in cases:
+            with self.subTest(reserve=reserve, threshold=threshold, buffer=buffer):
+                self.assertEqual(
+                    cleanup._target_free_gb(
+                        min_free_gb=reserve,
+                        used_percent_threshold=threshold,
+                        buffer_gb=buffer,
+                    ),
+                    float(reserve),
+                )
 
 class _ScalarRows:
     def __init__(self, values):
