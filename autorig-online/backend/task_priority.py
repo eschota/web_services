@@ -161,6 +161,44 @@ async def dispatch_fifo_candidate(candidates: List[Any], attempt) -> bool:
     return False
 
 
+async def dispatch_released_interactive(
+    candidates: List[Any],
+    free_workers: Sequence[Any],
+    released_worker_urls: Iterable[str],
+    attempt,
+) -> int:
+    """Immediately reuse proven-empty preempted slots for interactive FIFO.
+
+    Waiting for the next scheduler cycle after a worker has confirmed
+    ``Preempted`` can push end-to-end admission beyond the 60-second recall
+    deadline.  The caller holds the common scheduler/fleet-admission lock and
+    supplies a fresh dispatchable-worker snapshot, so only explicitly released
+    compatible workers are eligible here.
+    """
+    released = {
+        str(url or "").strip().rstrip("/").lower()
+        for url in released_worker_urls
+        if str(url or "").strip()
+    }
+    if not candidates or not released:
+        return 0
+
+    dispatched = 0
+    for worker in free_workers:
+        if not candidates:
+            break
+        worker_url = str(getattr(worker, "url", "") or "").strip()
+        if worker_url.rstrip("/").lower() not in released:
+            continue
+
+        async def _attempt(task: Any, selected_worker=worker):
+            return await attempt(task, selected_worker)
+
+        if await dispatch_fifo_candidate(candidates, _attempt):
+            dispatched += 1
+    return dispatched
+
+
 def worker_supports_preemption(worker: Any) -> bool:
     flags = getattr(worker, "feature_flags", None)
     return bool(isinstance(flags, dict) and flags.get("collection_preemption_v1") is True)

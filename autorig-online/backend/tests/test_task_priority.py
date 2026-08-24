@@ -14,6 +14,7 @@ from task_priority import (
     QUEUE_CLASS_BACKGROUND,
     QUEUE_CLASS_INTERACTIVE,
     background_dispatch_budget,
+    dispatch_released_interactive,
     dispatch_sort_key,
     normalize_queue_class,
     select_preemption_victims,
@@ -163,6 +164,47 @@ class ReserveTests(unittest.TestCase):
         new = SimpleNamespace(feature_flags={"collection_preemption_v1": True})
         self.assertFalse(worker_supports_preemption(old))
         self.assertTrue(worker_supports_preemption(new))
+
+    def test_released_slots_dispatch_interactive_fifo_in_same_cycle(self):
+        oldest = SimpleNamespace(
+            id="user-oldest", status="created", source_attempt_count=0
+        )
+        newer = SimpleNamespace(
+            id="user-newer", status="created", source_attempt_count=0
+        )
+        candidates = [oldest, newer]
+        workers = [
+            SimpleNamespace(url="https://converter-f1.example/api-converter-glb"),
+            SimpleNamespace(url="https://converter-reserve.example/api-converter-glb"),
+            SimpleNamespace(url="https://converter-f13.example/api-converter-glb/"),
+        ]
+        calls = []
+
+        async def start(task_row, worker):
+            calls.append((task_row.id, worker.url))
+            task_row.status = "processing"
+            return task_row, None
+
+        dispatched = asyncio.run(
+            dispatch_released_interactive(
+                candidates,
+                workers,
+                {
+                    "https://converter-f1.example/api-converter-glb/",
+                    "HTTPS://CONVERTER-F13.EXAMPLE/api-converter-glb",
+                },
+                start,
+            )
+        )
+        self.assertEqual(dispatched, 2)
+        self.assertEqual(
+            calls,
+            [
+                ("user-oldest", workers[0].url),
+                ("user-newer", workers[2].url),
+            ],
+        )
+        self.assertEqual(candidates, [])
 
 
 class VictimSelectionTests(unittest.TestCase):

@@ -194,6 +194,7 @@ from task_priority import (
     backfill_active_collection_tasks,
     dispatch_fifo_candidate,
     dispatch_queue_statement,
+    dispatch_released_interactive,
     dispatch_sort_key,
     metrics_snapshot as priority_metrics_snapshot,
     preempt_background_task,
@@ -741,6 +742,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                     active_background.append(task)
             victims = select_preemption_victims(active_background, len(interactive))
             released_slots = 0
+            released_worker_urls: List[str] = []
             if victims:
                 print(
                     f"[Priority] Recalling {len(victims)} background task(s) "
@@ -751,6 +753,11 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                     return_exceptions=True,
                 )
                 released_slots = sum(result is True for result in results)
+                released_worker_urls.extend(
+                    str(task.worker_api or "")
+                    for task, result in zip(victims, results)
+                    if result is True and str(task.worker_api or "").strip()
+                )
 
             # A collection Hunyuan stage can occupy a shared full-converter
             # slot without having an AutoRig Task row in processing. Recall
@@ -767,8 +774,38 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                         shared_full_converter_only=True,
                     )
                     released_slots += len(released)
+                    released_worker_urls.extend(
+                        str(worker.get("url") or "")
+                        for worker in released
+                        if isinstance(worker, dict)
+                        and str(worker.get("url") or "").strip()
+                    )
             if released_slots:
-                wake_task_scheduler()
+                # The release proof is already terminal and this function owns
+                # the common scheduler/fleet lock.  Refresh worker telemetry and
+                # hand the oldest waiting interactive rows directly to only the
+                # slots that were just released, avoiding another up-to-5s loop.
+                fresh_queue_status = await get_global_queue_status(db=db)
+                fresh_free_workers = await get_dispatchable_workers(
+                    db, fresh_queue_status
+                )
+
+                async def _dispatch_released(task: Task, worker) -> tuple:
+                    return await start_task_on_worker(db, task, worker.url)
+
+                dispatched_now = await dispatch_released_interactive(
+                    interactive,
+                    fresh_free_workers,
+                    released_worker_urls,
+                    _dispatch_released,
+                )
+                if dispatched_now:
+                    print(
+                        f"[Priority] Dispatched {dispatched_now} interactive "
+                        "task(s) on freshly preempted slot(s)"
+                    )
+                if interactive or dispatched_now < released_slots:
+                    wake_task_scheduler()
 
         if queued_tasks and not free_workers and not (interactive and PREEMPTION_ENABLED):
             print(
