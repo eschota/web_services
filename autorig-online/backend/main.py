@@ -153,6 +153,7 @@ from workers import (
     normalize_task_type,
     get_backend_worker_processing_counts,
     get_worker_effective_active,
+    filter_workers_for_dispatch,
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from animal_submission_policy import (
@@ -285,7 +286,7 @@ async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quar
     worker before its live /api-converter-glb counters update.
     """
     backend_processing = await get_backend_worker_processing_counts(db)
-    return [
+    candidates = [
         w
         for w in (queue_status.workers if queue_status else [])
         if (
@@ -296,6 +297,7 @@ async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quar
             and (allow_quarantined or not is_worker_quarantined(w.url))
         )
     ]
+    return await filter_workers_for_dispatch(candidates)
 
 
 def _pop_preflight_render_image_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:

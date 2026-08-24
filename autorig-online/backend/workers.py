@@ -63,6 +63,15 @@ class WorkerInfo:
     error: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class WorkerDispatchAdmission:
+    """Dispatch-only health gate derived from the worker's extended status."""
+    allowed: bool
+    maintenance: Optional[bool] = None
+    free_disk_gb: Optional[float] = None
+    reason: Optional[str] = None
+
+
 @dataclass
 class WorkerTaskResult:
     """Result from creating a task on worker"""
@@ -298,8 +307,16 @@ def get_worker_effective_active(worker: Any, backend_counts: Optional[Dict[str, 
 
 WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
 WORKER_HEALTH_TIMEOUT_SECONDS = float(os.getenv("WORKER_HEALTH_TIMEOUT_SECONDS", "10"))
+WORKER_MIN_FREE_DISK_GB = max(
+    0.0, float(os.getenv("AUTORIG_WORKER_MIN_FREE_DISK_GB", "25"))
+)
+WORKER_DISPATCH_HEALTH_TTL_SECONDS = max(
+    5.0, float(os.getenv("AUTORIG_WORKER_DISPATCH_HEALTH_TTL_SECONDS", "30"))
+)
 _worker_quarantine_until: Dict[str, datetime] = {}
 _worker_quarantine_reason: Dict[str, str] = {}
+_worker_dispatch_health_cache: Dict[str, Tuple[float, WorkerDispatchAdmission]] = {}
+_worker_dispatch_last_reason: Dict[str, Optional[str]] = {}
 
 
 def _utcnow() -> datetime:
@@ -355,6 +372,137 @@ def get_quarantined_workers() -> Dict[str, dict]:
             "reason": _worker_quarantine_reason.get(url)
         }
     return snapshot
+
+
+def parse_worker_dispatch_admission(
+    payload: Any,
+    *,
+    min_free_disk_gb: float = WORKER_MIN_FREE_DISK_GB,
+) -> WorkerDispatchAdmission:
+    """
+    Interpret optional extended worker telemetry without breaking legacy nodes.
+
+    Explicit maintenance and an explicitly reported low system-disk value block
+    only *new* dispatch. Missing telemetry remains compatible with older workers;
+    their normal root health and queue counters are still authoritative.
+    """
+    if not isinstance(payload, dict):
+        return WorkerDispatchAdmission(allowed=True)
+
+    maintenance_raw = payload.get("maintenance")
+    maintenance = maintenance_raw if isinstance(maintenance_raw, bool) else None
+
+    free_disk_raw: Any = payload.get("disk_free_gb")
+    if free_disk_raw is None:
+        disk = payload.get("disk")
+        if isinstance(disk, dict):
+            free_disk_raw = disk.get("free_gb")
+    if free_disk_raw is None:
+        hunyuan = payload.get("hunyuan")
+        if isinstance(hunyuan, dict):
+            disk = hunyuan.get("disk")
+            if isinstance(disk, dict):
+                free_disk_raw = disk.get("free_gb")
+
+    free_disk_gb: Optional[float] = None
+    try:
+        if free_disk_raw is not None:
+            free_disk_gb = float(free_disk_raw)
+    except (TypeError, ValueError):
+        free_disk_gb = None
+
+    if maintenance is True:
+        return WorkerDispatchAdmission(
+            allowed=False,
+            maintenance=True,
+            free_disk_gb=free_disk_gb,
+            reason="maintenance",
+        )
+    if free_disk_gb is not None and free_disk_gb < max(0.0, min_free_disk_gb):
+        return WorkerDispatchAdmission(
+            allowed=False,
+            maintenance=maintenance,
+            free_disk_gb=free_disk_gb,
+            reason=f"low_disk:{free_disk_gb:.2f}<{max(0.0, min_free_disk_gb):.2f}GB",
+        )
+    return WorkerDispatchAdmission(
+        allowed=True,
+        maintenance=maintenance,
+        free_disk_gb=free_disk_gb,
+    )
+
+
+def clear_worker_dispatch_health_cache() -> None:
+    """Test/admin helper; normal operation relies on the short TTL."""
+    _worker_dispatch_health_cache.clear()
+    _worker_dispatch_last_reason.clear()
+
+
+async def get_worker_dispatch_admission(
+    worker_url: str,
+    client: httpx.AsyncClient,
+) -> WorkerDispatchAdmission:
+    """Fetch and briefly cache the dispatch-only `/server-status` gate."""
+    key = normalize_worker_url_key(worker_url)
+    now = time.monotonic()
+    cached = _worker_dispatch_health_cache.get(key)
+    if cached and now - cached[0] < WORKER_DISPATCH_HEALTH_TTL_SECONDS:
+        return cached[1]
+
+    admission = WorkerDispatchAdmission(allowed=True)
+    try:
+        response = await client.get(
+            f"{key}/server-status",
+            timeout=WORKER_HEALTH_TIMEOUT_SECONDS,
+        )
+        if response.status_code == 200:
+            admission = parse_worker_dispatch_admission(response.json())
+    except Exception:
+        # Legacy or temporarily degraded extended telemetry must not override a
+        # successful root health check. The normal dispatch POST remains the
+        # final admission authority and can reject transiently without retry use.
+        admission = WorkerDispatchAdmission(allowed=True)
+
+    _worker_dispatch_health_cache[key] = (now, admission)
+    return admission
+
+
+async def filter_workers_for_dispatch(
+    workers: List[Any],
+    *,
+    client: Optional[httpx.AsyncClient] = None,
+) -> List[Any]:
+    """Exclude only workers with a confirmed maintenance/low-disk gate."""
+    if not workers:
+        return []
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(follow_redirects=True)
+    try:
+        admissions = await asyncio.gather(
+            *(get_worker_dispatch_admission(worker.url, client) for worker in workers)
+        )
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    allowed: List[Any] = []
+    for worker, admission in zip(workers, admissions):
+        setattr(worker, "dispatch_allowed", admission.allowed)
+        setattr(worker, "maintenance", admission.maintenance)
+        setattr(worker, "free_disk_gb", admission.free_disk_gb)
+        setattr(worker, "dispatch_block_reason", admission.reason)
+        key = normalize_worker_url_key(worker.url)
+        previous = _worker_dispatch_last_reason.get(key)
+        if admission.reason != previous:
+            if admission.reason:
+                print(f"[Workers] Dispatch blocked for {worker.url}: {admission.reason}")
+            elif key in _worker_dispatch_last_reason:
+                print(f"[Workers] Dispatch gate recovered for {worker.url}")
+            _worker_dispatch_last_reason[key] = admission.reason
+        if admission.allowed:
+            allowed.append(worker)
+    return allowed
 
 
 async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerInfo:
@@ -413,7 +561,15 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
 
     statuses = await get_all_workers_status(worker_urls)
     backend_processing = await get_backend_worker_processing_counts(db)
-    available = [w for w in statuses if w.available]
+    responsive_available = [w for w in statuses if w.available]
+    available = responsive_available
+    if responsive_available:
+        available = await filter_workers_for_dispatch(responsive_available)
+        if not available:
+            # Every responsive node supplied an explicit maintenance/low-disk
+            # block. Never reinterpret that as a network outage and fall back
+            # to optimistic dispatch.
+            return None
     quarantine_safe_available = [w for w in available if not is_worker_quarantined(w.url)]
 
     if quarantine_safe_available:
