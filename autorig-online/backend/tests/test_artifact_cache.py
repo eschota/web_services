@@ -192,6 +192,185 @@ class ArtifactValidationTests(unittest.TestCase):
                 f"/_autorig_artifacts/{TASK_ID}/files/model%20files/hero.glb",
             )
 
+    def test_manifest_lookup_can_select_a_specific_lod_path(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-lod-") as tmp:
+            root = Path(tmp)
+            task_dir = root / TASK_ID
+            rows = []
+            for lod in ("1k", "100k"):
+                relative = f"files/model-files/hero_{lod}/hero_all_animations.glb"
+                artifact = task_dir / relative
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_bytes(b"glTF" + (2).to_bytes(4, "little") + b"x" * 16)
+                rows.append(
+                    {
+                        "source_url": f"https://f1.freestock.online/{lod}/hero.glb",
+                        "relative_path": relative,
+                        "size": artifact.stat().st_size,
+                        "role": "primary_glb",
+                    }
+                )
+            artifact_cache.write_manifest(root, TASK_ID, {"files": rows})
+
+            entry = artifact_cache.lookup_cached_artifact(
+                TASK_ID,
+                role="primary_glb",
+                basename="hero_all_animations.glb",
+                relative_path_fragment="_100k/",
+                root=root,
+            )
+
+            self.assertIsNotNone(entry)
+            self.assertIn("hero_100k/", entry["relative_path"])
+
+
+class CachedArchiveMemberTests(unittest.TestCase):
+    def _archive_entry(self, root: Path, *, role="deliverable_zip", members=None):
+        task_dir = root / TASK_ID
+        archive_path = task_dir / "files" / "model-files" / "hero.zip"
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, payload in (members or {}).items():
+                archive.writestr(name, payload)
+        payload = archive_path.read_bytes()
+        artifact_cache.write_manifest(
+            root,
+            TASK_ID,
+            {
+                "files": [
+                    {
+                        "source_url": "https://converter-f1.freestock.online/task/hero.zip",
+                        "relative_path": "files/model-files/hero.zip",
+                        "size": len(payload),
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                        "role": role,
+                        "long_lived": True,
+                    }
+                ]
+            },
+        )
+        return archive_path
+
+    def test_exact_member_is_read_and_ranged_without_extraction(self):
+        rig_payload = b'{"collection_guid":"collection-1","collection_index":14}'
+        glb_payload = (
+            b"glTF"
+            + (2).to_bytes(4, "little")
+            + (20).to_bytes(4, "little")
+            + b"payload!"
+        )
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-") as tmp:
+            root = Path(tmp)
+            self._archive_entry(
+                root,
+                members={"hero_rig.json": rig_payload, "hero.glb": glb_payload},
+            )
+
+            rig = artifact_cache.lookup_cached_archive_member(
+                TASK_ID,
+                basename="hero_rig.json",
+                max_uncompressed_bytes=1024,
+                root=root,
+            )
+            model = artifact_cache.lookup_cached_archive_member(
+                TASK_ID,
+                basename="hero.glb",
+                max_uncompressed_bytes=1024,
+                root=root,
+            )
+
+            self.assertIsNotNone(rig)
+            self.assertEqual(
+                artifact_cache.read_cached_archive_member(rig, max_bytes=1024),
+                rig_payload,
+            )
+            self.assertEqual(model["prefix"], glb_payload)
+            self.assertEqual(
+                b"".join(
+                    artifact_cache.iter_cached_archive_member(
+                        model,
+                        start=4,
+                        end=11,
+                        chunk_bytes=3,
+                    )
+                ),
+                glb_payload[4:12],
+            )
+            self.assertFalse((root / TASK_ID / "hero.glb").exists())
+
+    def test_lookup_rejects_unsafe_ambiguous_and_oversized_members(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-safe-") as tmp:
+            root = Path(tmp)
+            self._archive_entry(
+                root,
+                members={
+                    "../hero_rig.json": b"{}",
+                    "one/duplicate.json": b"one",
+                    "two/duplicate.json": b"two",
+                    "large.json": b"x" * 32,
+                },
+            )
+
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="../hero_rig.json",
+                    max_uncompressed_bytes=1024,
+                    root=root,
+                )
+            )
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="duplicate.json",
+                    max_uncompressed_bytes=1024,
+                    root=root,
+                )
+            )
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="large.json",
+                    max_uncompressed_bytes=16,
+                    root=root,
+                )
+            )
+
+    def test_non_deliverable_zip_is_not_a_recovery_source(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-role-") as tmp:
+            root = Path(tmp)
+            self._archive_entry(
+                root,
+                role="diagnostic",
+                members={"hero_rig.json": b"{}"},
+            )
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="hero_rig.json",
+                    max_uncompressed_bytes=1024,
+                    root=root,
+                )
+            )
+
+    def test_stream_fails_closed_if_archive_changes_after_lookup(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-change-") as tmp:
+            root = Path(tmp)
+            archive_path = self._archive_entry(
+                root,
+                members={"hero_rig.json": b"{}"},
+            )
+            entry = artifact_cache.lookup_cached_archive_member(
+                TASK_ID,
+                basename="hero_rig.json",
+                max_uncompressed_bytes=1024,
+                root=root,
+            )
+            archive_path.write_bytes(archive_path.read_bytes() + b"changed")
+
+            with self.assertRaisesRegex(RuntimeError, "changed"):
+                artifact_cache.read_cached_archive_member(entry, max_bytes=1024)
+
 
 class RetentionTests(unittest.TestCase):
     def _write_entry(self, root, task_id, name, *, full_until, long_lived, role):

@@ -18,7 +18,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Awaitable, Callable, Iterable, Optional, Sequence
+from typing import Any, Awaitable, Callable, Iterable, Iterator, Optional, Sequence
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
@@ -211,6 +211,7 @@ def lookup_cached_artifact(
     source_url: Optional[str] = None,
     role: Optional[str] = None,
     basename: Optional[str] = None,
+    relative_path_fragment: Optional[str] = None,
     root: Optional[Path] = None,
 ) -> Optional[dict[str, Any]]:
     cache_root = Path(root or ARTIFACT_CACHE_ROOT)
@@ -223,6 +224,7 @@ def lookup_cached_artifact(
         return None
     source_key = _normalized_url(source_url or "")
     basename_key = str(basename or "").lower()
+    relative_fragment_key = str(relative_path_fragment or "").replace("\\", "/").lower()
     for item in manifest.get("files", []):
         if not isinstance(item, dict):
             continue
@@ -239,6 +241,8 @@ def lookup_cached_artifact(
             continue
         if basename_key and path.name.lower() != basename_key:
             continue
+        if relative_fragment_key and relative_fragment_key not in str(relative).replace("\\", "/").lower():
+            continue
         result = dict(item)
         result["path"] = path
         result["internal_uri"] = "/_autorig_artifacts/" + "/".join(
@@ -246,6 +250,188 @@ def lookup_cached_artifact(
         )
         return result
     return None
+
+
+_CACHED_ARCHIVE_MEMBER_ROLES = frozenset({"deliverable_zip", "full_bundle"})
+
+
+def _safe_cached_archive_member_name(value: str) -> Optional[str]:
+    """Return a normalized ZIP member name, or ``None`` for unsafe entries."""
+    raw = str(value or "").replace("\\", "/")
+    candidate = PurePosixPath(raw)
+    if (
+        not raw
+        or "\x00" in raw
+        or candidate.is_absolute()
+        or any(part in ("", ".", "..") for part in candidate.parts)
+    ):
+        return None
+    return candidate.as_posix()
+
+
+def lookup_cached_archive_member(
+    task_id: str,
+    *,
+    basename: str,
+    max_uncompressed_bytes: int,
+    root: Optional[Path] = None,
+) -> Optional[dict[str, Any]]:
+    """Locate an exact file inside a verified, last-copy cached ZIP.
+
+    Converter task ZIPs contain the original GLB and ``*_rig.json`` even when
+    the worker has already evicted its public task directory.  This lookup is
+    intentionally read-only: callers stream the member from central storage
+    instead of copying a large bundle back to a disk-pressured worker.
+    """
+    requested = str(basename or "").strip()
+    if (
+        not requested
+        or requested != PurePosixPath(requested).name
+        or "/" in requested
+        or "\\" in requested
+        or "\x00" in requested
+    ):
+        return None
+    limit = max(1, int(max_uncompressed_bytes or 0))
+    cache_root = Path(root or ARTIFACT_CACHE_ROOT)
+    try:
+        manifest = read_manifest(cache_root, task_id)
+    except ValueError:
+        return None
+
+    # Prefer the small converter deliverable ZIP over a potentially hundreds
+    # of megabytes full bundle.  Both were already checksum/CRC validated when
+    # admitted to the durable cache.
+    rows = [item for item in manifest.get("files", []) if isinstance(item, dict)]
+    rows.sort(
+        key=lambda item: (
+            0 if str(item.get("role") or "").lower() == "deliverable_zip" else 1,
+            int(item.get("size") or 0),
+            str(item.get("relative_path") or ""),
+        )
+    )
+    for item in rows:
+        role = str(item.get("role") or "").lower()
+        if role not in _CACHED_ARCHIVE_MEMBER_ROLES:
+            continue
+        relative = str(item.get("relative_path") or "")
+        try:
+            archive_path = _safe_destination(cache_root, task_id, relative)
+            archive_size = archive_path.stat().st_size
+        except (OSError, ValueError):
+            continue
+        if (
+            not archive_path.is_file()
+            or archive_path.suffix.lower() != ".zip"
+            or archive_size != int(item.get("size") or -1)
+        ):
+            continue
+        try:
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                matches = []
+                for info in archive.infolist():
+                    safe_name = _safe_cached_archive_member_name(info.filename)
+                    if (
+                        safe_name
+                        and not info.is_dir()
+                        and PurePosixPath(safe_name).name.casefold() == requested.casefold()
+                    ):
+                        matches.append((safe_name, info))
+                exact_root = [row for row in matches if row[0].casefold() == requested.casefold()]
+                if len(exact_root) == 1:
+                    safe_name, info = exact_root[0]
+                elif len(matches) == 1:
+                    safe_name, info = matches[0]
+                else:
+                    # Ambiguous duplicate basenames are never guessed.
+                    continue
+                if info.flag_bits & 0x1 or info.file_size <= 0 or info.file_size > limit:
+                    continue
+                with archive.open(info, "r") as member:
+                    prefix = member.read(min(512, info.file_size))
+        except (OSError, RuntimeError, ValueError, zipfile.BadZipFile, NotImplementedError):
+            continue
+        archive_sha256 = str(item.get("sha256") or "")
+        etag_seed = archive_sha256[:24] or f"{archive_size:x}"
+        return {
+            "archive_path": archive_path,
+            "archive_size": archive_size,
+            "archive_sha256": archive_sha256,
+            "archive_relative_path": relative,
+            "archive_role": role,
+            "member_name": safe_name,
+            "member_size": int(info.file_size),
+            "member_crc32": int(info.CRC),
+            "member_compress_size": int(info.compress_size),
+            "prefix": prefix,
+            "etag": f'"zip-{etag_seed}-{int(info.CRC):08x}-{int(info.file_size):x}"',
+        }
+    return None
+
+
+def _validated_cached_archive_info(entry: dict[str, Any]) -> tuple[zipfile.ZipFile, zipfile.ZipInfo]:
+    """Re-open a previously resolved member and fail if the archive changed."""
+    archive_path = Path(entry["archive_path"])
+    if archive_path.stat().st_size != int(entry["archive_size"]):
+        raise RuntimeError("cached archive changed after member lookup")
+    archive = zipfile.ZipFile(archive_path, "r")
+    try:
+        info = archive.getinfo(str(entry["member_name"]))
+        if (
+            info.is_dir()
+            or info.flag_bits & 0x1
+            or info.file_size != int(entry["member_size"])
+            or info.CRC != int(entry["member_crc32"])
+        ):
+            raise RuntimeError("cached archive member changed after lookup")
+        return archive, info
+    except Exception:
+        archive.close()
+        raise
+
+
+def read_cached_archive_member(entry: dict[str, Any], *, max_bytes: int) -> bytes:
+    """Read one bounded member and verify its declared size and CRC."""
+    expected = int(entry["member_size"])
+    if expected <= 0 or expected > max(1, int(max_bytes or 0)):
+        raise RuntimeError("cached archive member exceeds read limit")
+    archive, info = _validated_cached_archive_info(entry)
+    try:
+        payload = archive.read(info)
+    finally:
+        archive.close()
+    if len(payload) != expected:
+        raise RuntimeError("cached archive member was truncated")
+    return payload
+
+
+def iter_cached_archive_member(
+    entry: dict[str, Any],
+    *,
+    start: int = 0,
+    end: Optional[int] = None,
+    chunk_bytes: int = 1024 * 1024,
+) -> Iterator[bytes]:
+    """Stream an exact byte range from a cached ZIP member without extracting it."""
+    total = int(entry["member_size"])
+    first = int(start)
+    last = total - 1 if end is None else int(end)
+    if first < 0 or first >= total or last < first or last >= total:
+        raise ValueError("invalid cached archive member range")
+    archive, info = _validated_cached_archive_info(entry)
+    try:
+        with archive.open(info, "r") as member:
+            if first:
+                member.seek(first)
+            remaining = last - first + 1
+            while remaining:
+                block = member.read(min(max(1, int(chunk_bytes)), remaining))
+                if not block:
+                    raise RuntimeError("cached archive member range was truncated")
+                remaining -= len(block)
+                yield block
+    finally:
+        archive.close()
 
 
 async def _safe_stream_request(

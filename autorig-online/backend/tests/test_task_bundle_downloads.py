@@ -40,10 +40,12 @@ def _task():
     )
 
 
-def _request(*, anon_id=None):
+def _request(*, anon_id=None, range_header=None):
     headers = []
     if anon_id:
         headers.append((b"cookie", f"{main.ANON_COOKIE}={anon_id}".encode("ascii")))
+    if range_header:
+        headers.append((b"range", range_header.encode("ascii")))
     return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
 
 
@@ -135,6 +137,126 @@ class _BufferedRangeClient:
 
 
 class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_glb_streams_exact_range_from_central_deliverable_zip(self):
+        task = _task()
+        payload = (
+            b"glTF"
+            + (2).to_bytes(4, "little")
+            + (20).to_bytes(4, "little")
+            + b"payload!"
+        )
+        entry = {
+            "member_size": len(payload),
+            "prefix": payload,
+            "etag": '"zip-test"',
+        }
+
+        def iter_member(_entry, *, start, end):
+            yield payload[start:end + 1]
+
+        with (
+            patch.object(main, "get_task_by_id", AsyncMock(return_value=task)),
+            patch.object(main, "lookup_cached_artifact", return_value=None),
+            patch.object(main, "lookup_cached_archive_member", return_value=entry),
+            patch.object(main, "iter_cached_archive_member", side_effect=iter_member),
+            patch.object(main, "_proxy_model_file", AsyncMock()) as worker_proxy,
+        ):
+            response = await main.api_proxy_model_glb(
+                task.id,
+                _request(range_header="bytes=0-3"),
+                db=object(),
+            )
+            body = b"".join([chunk async for chunk in response.body_iterator])
+
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.headers["content-range"], f"bytes 0-3/{len(payload)}")
+        self.assertEqual(response.headers["x-artifact-cache"], "archive-member")
+        self.assertEqual(body, b"glTF")
+        worker_proxy.assert_not_awaited()
+
+    async def test_rig_json_is_recovered_with_exact_collection_identity(self):
+        task = _task()
+        task.status = "done"
+        task.collection_guid = "collection-1"
+        task.collection_index = 14
+        raw = json.dumps(
+            {
+                "collection_guid": task.collection_guid,
+                "collection_index": task.collection_index,
+                "collection_title": "Mystical Fantasy Beings",
+            }
+        ).encode("utf-8")
+        entry = {
+            "member_size": len(raw),
+            "prefix": raw,
+            "etag": '"zip-rig"',
+        }
+        with (
+            patch.object(main, "get_task_by_id", AsyncMock(return_value=task)),
+            patch.object(main, "lookup_cached_artifact", return_value=None),
+            patch.object(main, "lookup_cached_archive_member", return_value=entry),
+            patch.object(main, "read_cached_archive_member", return_value=raw),
+        ):
+            response = await main.api_task_rig_json(
+                task.id,
+                _request(),
+                db=object(),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-artifact-cache"], "archive-member")
+        self.assertEqual(json.loads(response.body), json.loads(raw))
+
+    async def test_rig_json_fails_closed_on_collection_mismatch(self):
+        task = _task()
+        task.status = "done"
+        task.collection_guid = "collection-1"
+        task.collection_index = 14
+        raw = b'{"collection_guid":"other","collection_index":14}'
+        entry = {"member_size": len(raw), "prefix": raw, "etag": '"zip-rig"'}
+        with (
+            patch.object(main, "get_task_by_id", AsyncMock(return_value=task)),
+            patch.object(main, "lookup_cached_artifact", return_value=None),
+            patch.object(main, "lookup_cached_archive_member", return_value=entry),
+            patch.object(main, "read_cached_archive_member", return_value=raw),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await main.api_task_rig_json(task.id, _request(), db=object())
+
+        self.assertEqual(raised.exception.status_code, 503)
+
+    async def test_animations_glb_prefers_central_cached_100k_before_worker(self):
+        task = _task()
+        task.viewer_animations_glb_url = None
+        durable = {
+            "path": Path("central/hero_100k/hero_all_animations.glb"),
+            "internal_uri": "/_autorig_artifacts/task/hero_100k/animations.glb",
+        }
+
+        def cache_lookup(_task_id, **kwargs):
+            if kwargs.get("relative_path_fragment") == "_100k/":
+                return durable
+            return None
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(main, "GLB_CACHE_DIR", Path(tmp)),
+            patch.object(main, "get_task_by_id", AsyncMock(return_value=task)),
+            patch.object(main, "lookup_cached_artifact", side_effect=cache_lookup) as lookup,
+            patch.object(main, "_validate_viewer_animation_glb_file", return_value=True),
+            patch.object(main, "_get_cached_glb", AsyncMock()) as worker_cache,
+        ):
+            response = await main.api_proxy_animations_glb(
+                task.id,
+                _request(),
+                db=object(),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-artifact-cache"], "hit")
+        self.assertEqual(lookup.call_args.kwargs["relative_path_fragment"], "_100k/")
+        worker_cache.assert_not_awaited()
+
     def test_worker_bundle_prefers_declared_nested_zip_and_keeps_legacy_fallback(self):
         task = _task()
         nested = f"https://worker.invalid/converter/glb/{GUID}/{GUID}.zip"
