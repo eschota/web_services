@@ -839,6 +839,30 @@ class StageDeadlineTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_long_wait_persists_new_stage_clock_before_restart(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                await manager._persisted_stage_budget(job, 3600.0)
+                started_at = job.stage_started_at
+                await manager.stop()
+
+                manager2 = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager2.start()
+                try:
+                    revived = manager2.get(job.id)
+                    self.assertEqual(revived.timed_stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertAlmostEqual(revived.stage_started_at, started_at, delta=0.01)
+                    self.assertLess(manager2._stage_budget(revived, 3600.0), 3600.0)
+                finally:
+                    await manager2.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_exhausted_window_leaves_no_time(self):
         async def scenario():
             with _Env():

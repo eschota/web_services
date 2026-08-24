@@ -1108,6 +1108,16 @@ class CharacterGenManager:
             job.stage_started_at = now
         return max(0.0, ceiling - (now - job.stage_started_at))
 
+    async def _persisted_stage_budget(
+        self, job: CharacterGenJob, ceiling: float
+    ) -> float:
+        """Persist a newly-started deadline before entering a long wait."""
+        previous = (job.timed_stage, job.stage_started_at)
+        budget = self._stage_budget(job, ceiling)
+        if (job.timed_stage, job.stage_started_at) != previous:
+            await self._persist(job)
+        return budget
+
     async def _await_render(self, task_id: str, timeout: float):
         task = await self.queue.wait_for(task_id, timeout=timeout)
         if task.status != TASK_DONE:
@@ -1144,7 +1154,8 @@ class CharacterGenManager:
             await self._persist(job)
 
         task = await self._await_render(
-            job.flux_task_id, self._stage_budget(job, FLUX_STAGE_TIMEOUT)
+            job.flux_task_id,
+            await self._persisted_stage_budget(job, FLUX_STAGE_TIMEOUT),
         )
         job.image_url = task.output_url
         isolated = task.extra_outputs.get("isolated")
@@ -1159,7 +1170,8 @@ class CharacterGenManager:
             # a failed second variant must not sink the job: one image is enough
             try:
                 task_b = await self._await_render(
-                    job.flux_task_id_b, self._stage_budget(job, FLUX_STAGE_TIMEOUT)
+                    job.flux_task_id_b,
+                    await self._persisted_stage_budget(job, FLUX_STAGE_TIMEOUT),
                 )
                 job.image_url_b = task_b.output_url
                 job.isolated_url_b = (
@@ -1265,7 +1277,9 @@ class CharacterGenManager:
                 client,
                 worker,
                 job.hunyuan_task_id,
-                timeout=self._stage_budget(job, HUNYUAN_STAGE_TIMEOUT),
+                timeout=await self._persisted_stage_budget(
+                    job, HUNYUAN_STAGE_TIMEOUT
+                ),
             )
             model_url = str((payload.get("output_urls") or {}).get("model"))
             data = await hunyuan_client.download_model(client, worker, model_url)
@@ -1288,7 +1302,8 @@ class CharacterGenManager:
             job.hunyuan_task_id = task.id
             await self._persist(job)
         task = await self._await_render(
-            job.hunyuan_task_id, self._stage_budget(job, HUNYUAN_STAGE_TIMEOUT)
+            job.hunyuan_task_id,
+            await self._persisted_stage_budget(job, HUNYUAN_STAGE_TIMEOUT),
         )
         job.glb_url = task.output_url
 
