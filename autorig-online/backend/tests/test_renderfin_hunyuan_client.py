@@ -830,6 +830,151 @@ class WorkerSelectionTests(unittest.TestCase):
                 connection.close()
             run(scenario(database))
 
+    def test_cross_pipeline_capacity_counts_hunyuan_quarantined_full_worker(self):
+        async def scenario(database: Path):
+            pool = [
+                {
+                    "name": name,
+                    "url": f"https://converter-{name}.freestock.online",
+                    "token": f"tok-{name}",
+                    "pool": "shared_converter",
+                    "capability_mode": "full",
+                }
+                for name in ("f1", "f2", "f13")
+            ]
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                name = request.url.host.split(".", 1)[0].split("converter-", 1)[-1]
+                occupied = name in {"f1", "f13"}
+                return httpx.Response(200, json={
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "feature_flags": {
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "hunyuan": {
+                        "enabled": name != "f11",
+                        "installed": True,
+                        "service_state": "idle",
+                    },
+                    "processing_tasks": ([{
+                        "task_id": f"background-{name}",
+                        "queue_class": "collection_background",
+                    }] if occupied else []),
+                    "pending_tasks": [],
+                    "tasks_summary": {
+                        "queue_size": 0,
+                        "processing": 1 if occupied else 0,
+                    },
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: pool), patch.object(
+                config, "AUTORIG_QUEUE_DB_PATH", database
+            ), patch.object(hunyuan_client, "RESERVED_FOR_OTHER_WORK", 1):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    snapshot = await hunyuan_client.shared_full_background_capacity(
+                        client
+                    )
+            self.assertEqual(snapshot["healthy"], 4)
+            self.assertEqual(snapshot["background_occupied"], 2)
+            self.assertEqual(snapshot["background_limit"], 3)
+            self.assertEqual(snapshot["available_background_slots"], 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "autorig.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "CREATE TABLE tasks (worker_api TEXT, status TEXT, queue_class TEXT)"
+                )
+                connection.execute(
+                    "CREATE TABLE worker_endpoints (url TEXT, enabled INTEGER)"
+                )
+                connection.executemany(
+                    "INSERT INTO worker_endpoints VALUES (?, 1)",
+                    [
+                        (f"https://converter-{name}.freestock.online/api-converter-glb",)
+                        for name in ("f1", "f2", "f11", "f13")
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            run(scenario(database))
+
+    def test_background_hunyuan_reserve_counts_conversion_only_full_worker(self):
+        async def scenario(database: Path):
+            pool = [
+                {
+                    "name": name,
+                    "url": f"https://converter-{name}.freestock.online",
+                    "token": f"tok-{name}",
+                    "pool": "shared_converter",
+                    "capability_mode": "full",
+                }
+                for name in ("f1", "f2", "f13")
+            ]
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                name = request.url.host.split(".", 1)[0].split("converter-", 1)[-1]
+                occupied = name in {"f1", "f13"}
+                return httpx.Response(200, json={
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "feature_flags": {
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "hunyuan": {
+                        "enabled": name != "f11",
+                        "installed": True,
+                        "service_state": "idle",
+                    },
+                    "processing_tasks": ([{
+                        "task_id": f"background-{name}",
+                        "queue_class": "collection_background",
+                    }] if occupied else []),
+                    "pending_tasks": [],
+                    "tasks_summary": {
+                        "queue_size": 0,
+                        "processing": 1 if occupied else 0,
+                    },
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: pool), patch.object(
+                config, "AUTORIG_QUEUE_DB_PATH", database
+            ), patch.object(hunyuan_client, "RESERVED_FOR_OTHER_WORK", 1):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    worker = await hunyuan_client.pick_worker(
+                        client, queue_class="collection_background"
+                    )
+            self.assertEqual(worker["name"], "f2")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "autorig.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "CREATE TABLE tasks (worker_api TEXT, status TEXT, queue_class TEXT)"
+                )
+                connection.execute(
+                    "CREATE TABLE worker_endpoints (url TEXT, enabled INTEGER)"
+                )
+                connection.executemany(
+                    "INSERT INTO worker_endpoints VALUES (?, 1)",
+                    [
+                        (f"https://converter-{name}.freestock.online/api-converter-glb",)
+                        for name in ("f1", "f2", "f11", "f13")
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            run(scenario(database))
+
     def test_background_hunyuan_never_uses_the_only_full_converter(self):
         async def scenario():
             worker = {

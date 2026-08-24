@@ -215,6 +215,101 @@ def _worker_name_for_binding(
     return None
 
 
+def _converter_name_from_url(worker_url: str) -> Optional[str]:
+    """Derive a stable farm name from a public converter endpoint."""
+    try:
+        host = str(urlsplit(str(worker_url or "")).hostname or "").strip().lower()
+    except ValueError:
+        return None
+    first_label = host.split(".", 1)[0]
+    if first_label.startswith("converter-"):
+        first_label = first_label.split("converter-", 1)[1]
+    return first_label or None
+
+
+def _converter_status_base(worker_url: str) -> str:
+    """Normalize an AutoRig API binding to the worker web-server root."""
+    value = str(worker_url or "").strip().rstrip("/")
+    suffix = "/api-converter-glb"
+    if value.lower().endswith(suffix):
+        value = value[: -len(suffix)]
+    return value.rstrip("/")
+
+
+def full_converter_registry(
+    pool: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Return enabled full converters, including Hunyuan-quarantined nodes.
+
+    The Hunyuan registry intentionally omits a node whose Hunyuan runtime is
+    quarantined. That must not also erase a healthy ordinary-converter slot
+    from the cross-pipeline N-1 calculation. The authoritative AutoRig worker
+    registry supplies those conversion-only rows; worker telemetry still has
+    to prove each row is a live full converter before it contributes capacity.
+
+    Missing legacy schema falls back to the Hunyuan registry. Any other read
+    failure also keeps the conservative, smaller registry rather than
+    inventing capacity.
+    """
+    configured = list(pool if pool is not None else workers())
+    registry = [
+        dict(worker)
+        for worker in configured
+        if str(worker.get("pool") or "shared_converter") != "dedicated"
+        and str(worker.get("capability_mode") or "").strip().lower() == "full"
+    ]
+    path = config.AUTORIG_QUEUE_DB_PATH
+    if not path.is_file():
+        return registry
+    try:
+        connection = sqlite3.connect(
+            f"file:{path.as_posix()}?mode=ro",
+            uri=True,
+            timeout=0.5,
+        )
+        try:
+            rows = connection.execute(
+                "SELECT url FROM worker_endpoints WHERE enabled = 1"
+            ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            print(
+                "[Renderfin][Hunyuan] full converter registry probe failed "
+                f"closed: {exc}"
+            )
+        return registry
+    except Exception as exc:
+        print(
+            "[Renderfin][Hunyuan] full converter registry probe failed "
+            f"closed: {exc}"
+        )
+        return registry
+
+    by_name = {
+        str(worker.get("name") or "").strip().lower(): worker
+        for worker in registry
+        if str(worker.get("name") or "").strip()
+    }
+    for (raw_url,) in rows:
+        url = _converter_status_base(str(raw_url or ""))
+        name = _converter_name_from_url(url)
+        if not url or not name or name.lower() in by_name:
+            continue
+        worker = {
+            "name": name,
+            "url": url,
+            "token": "",
+            "pool": "shared_converter",
+            "capability_mode": "full",
+            "conversion_only": True,
+        }
+        registry.append(worker)
+        by_name[name.lower()] = worker
+    return registry
+
+
 def background_conversion_workers(
     pool: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[set[str]]:
@@ -392,8 +487,27 @@ async def pick_worker(
 
     reserve = max(0, RESERVED_FOR_OTHER_WORK) if background else 0
     if background:
+        capacity_registry = full_converter_registry(pool)
+        capacity_by_name = {
+            str(worker.get("name") or ""): worker for worker in capacity_registry
+        }
+        missing_capacity_workers = [
+            worker
+            for name, worker in capacity_by_name.items()
+            if name and name not in shared_full_statuses
+        ]
+        if missing_capacity_workers:
+            capacity_results = await asyncio.gather(
+                *(server_status(client, worker) for worker in missing_capacity_workers),
+                return_exceptions=True,
+            )
+            for worker, result in zip(missing_capacity_workers, capacity_results):
+                if isinstance(result, Exception) or not isinstance(result, dict):
+                    continue
+                if _status_is_full_converter(result):
+                    shared_full_statuses[str(worker["name"])] = result
         background_occupied = _background_occupied_workers(
-            pool,
+            capacity_registry,
             shared_full_statuses,
             in_flight=in_flight,
         )
@@ -601,12 +715,7 @@ async def shared_full_background_capacity(
     must fail closed.
     """
     pool = workers()
-    shared = [
-        worker
-        for worker in pool
-        if str(worker.get("pool") or "shared_converter") != "dedicated"
-        and str(worker.get("capability_mode") or "").strip().lower() == "full"
-    ]
+    shared = full_converter_registry(pool)
     results = await asyncio.gather(
         *(server_status(client, worker) for worker in shared),
         return_exceptions=True,
@@ -615,15 +724,9 @@ async def shared_full_background_capacity(
     for worker, result in zip(shared, results):
         if isinstance(result, Exception) or not isinstance(result, dict):
             continue
-        hunyuan = result.get("hunyuan")
-        if (
-            isinstance(hunyuan, dict)
-            and hunyuan.get("enabled") is True
-            and hunyuan.get("installed") is True
-            and _status_is_full_converter(result)
-        ):
+        if _status_is_full_converter(result):
             statuses[str(worker["name"])] = result
-    occupied = _background_occupied_workers(pool, statuses)
+    occupied = _background_occupied_workers(shared, statuses)
     if occupied is None:
         return None
     healthy = len(statuses)
