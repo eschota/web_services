@@ -2546,13 +2546,32 @@ async def _ensure_full_task_unlock(
 
 def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
     """
-    Absolute URL to the worker-built full bundle: {worker_root}/{guid}.zip
-    (worker_root is http://host/converter/glb — same inference as gallery / artifacts).
+    Absolute URL to the worker-built full bundle.
+
+    Current full converters publish the archive inside the task directory as
+    ``{worker_root}/{guid}/{guid}.zip`` and declare that exact URL in
+    ``ready_urls``.  Older workers published ``{worker_root}/{guid}.zip``.
+    Prefer the worker-declared nested URL and retain the legacy root-level
+    fallback for old tasks whose declared artifact list has no bundle.
     """
     worker_root, inferred_guid = _infer_worker_root_and_guid(task)
     guid = ((getattr(task, "guid", None) or "") or "").strip() or inferred_guid
     if not worker_root or not guid:
         return None
+
+    expected_name = f"{guid}.zip".casefold()
+    nested_prefix = f"{worker_root.rstrip('/')}/{guid}/"
+    declared_urls = [
+        *(getattr(task, "ready_urls", None) or []),
+        *(getattr(task, "output_urls", None) or []),
+    ]
+    for raw_url in declared_urls:
+        value = str(raw_url or "").strip()
+        if not value or not value.startswith(nested_prefix):
+            continue
+        name = Path(unquote(urlsplit(value).path or "")).name.casefold()
+        if name == expected_name:
+            return value
     return f"{worker_root.rstrip('/')}/{guid}.zip"
 
 
@@ -15762,6 +15781,14 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
             str(task.video_url or ""),
         ]
     ))
+    if bundle_url:
+        # The full bundle already has a durable cache role/path above.  Current
+        # workers also declare the same ZIP in ready_urls; caching it again as
+        # a generic model file doubles both worker traffic and central storage.
+        declared_urls = [
+            value for value in declared_urls
+            if str(value or "").strip() != bundle_url
+        ]
     poster_url = resolve_poster_url_for_task(task)
     if poster_url:
         declared_urls.append(poster_url)

@@ -135,6 +135,45 @@ class _BufferedRangeClient:
 
 
 class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
+    def test_worker_bundle_prefers_declared_nested_zip_and_keeps_legacy_fallback(self):
+        task = _task()
+        nested = f"https://worker.invalid/converter/glb/{GUID}/{GUID}.zip"
+        task.ready_urls.append(nested)
+        task.output_urls.append(nested)
+
+        self.assertEqual(main.resolve_worker_full_bundle_zip_url(task), nested)
+
+        task.ready_urls = [url for url in task.ready_urls if url != nested]
+        task.output_urls = [url for url in task.output_urls if url != nested]
+        self.assertEqual(
+            main.resolve_worker_full_bundle_zip_url(task),
+            f"https://worker.invalid/converter/glb/{GUID}.zip",
+        )
+
+    async def test_artifact_discovery_caches_declared_bundle_only_once(self):
+        task = _task()
+        nested = f"https://worker.invalid/converter/glb/{GUID}/{GUID}.zip"
+        task.ready_urls.append(nested)
+        task.output_urls.append(nested)
+        task.viewer_prepared_glb_url = None
+        task.viewer_animations_glb_url = None
+        task.video_url = None
+
+        with (
+            patch.object(
+                main,
+                "_fetch_worker_model_files",
+                AsyncMock(return_value=(False, [], None, "not needed")),
+            ),
+            patch.object(main, "resolve_poster_url_for_task", return_value=None),
+        ):
+            sources = await main._discover_task_artifact_sources(task)
+
+        matching = [source for source in sources if source.url == nested]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0].role, "full_bundle")
+        self.assertEqual(matching[0].relative_path, f"deliverables/{GUID}.zip")
+
     async def test_cached_files_quotes_durable_urls_without_local_task_directory(self):
         task = SimpleNamespace(
             id="durable-only-task",
