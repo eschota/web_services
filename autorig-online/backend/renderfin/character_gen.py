@@ -1438,7 +1438,36 @@ class CharacterGenManager:
         arbiter = status.get("gpu_arbiter") or status.get("arbiter_by_key") or {}
         if not isinstance(arbiter, dict):
             arbiter = {}
-        physical = str(worker.get("physical_node") or worker.get("name") or "")
+        control = (
+            status.get("workload_control")
+            if isinstance(status.get("workload_control"), dict)
+            else {}
+        )
+        expected_physical = str(
+            worker.get("physical_resource_id_string") or ""
+        ).strip().lower()
+        reported_physical = str(
+            status.get("physical_node")
+            or status.get("physical_resource_id_string")
+            or control.get("physical_node")
+            or ""
+        ).strip().lower()
+        expected_role = workload_lease.canonical_workload_role(
+            worker.get("workload_role")
+        )
+        reported_role = workload_lease.canonical_workload_role(
+            status.get("workload_role")
+            or status.get("workload_role_string")
+            or control.get("workload_role")
+        )
+        identity_verified = bool(
+            workload_lease.verified_machine_role(
+                expected_physical, expected_role
+            )
+            and expected_physical == reported_physical
+            and expected_role == reported_role
+        )
+        physical = reported_physical if identity_verified else ""
         return RenderServer(
             render_server_name=str(worker.get("name") or physical),
             render_server_url=str(worker.get("url") or ""),
@@ -1450,7 +1479,7 @@ class CharacterGenManager:
                 str(worker.get("pool") or "shared_converter") != "dedicated"
             ),
             ai_capable_bool=bool(status.get("ai_capable_bool") is True),
-            reserve_role_string=str(status.get("workload_role") or "shared"),
+            reserve_role_string=reported_role or "maintenance",
             arbiter_online_bool=bool(
                 arbiter.get("online_bool") is True
                 or status.get("arbiter_ready_bool") is True
@@ -1459,6 +1488,7 @@ class CharacterGenManager:
                 arbiter.get("accepting_ai_vision_bool") is True
                 or status.get("accepting_ai_vision_bool") is True
             ),
+            workload_identity_verified_bool=identity_verified,
         )
 
     async def _clear_hunyuan_workload(
@@ -1537,6 +1567,10 @@ class CharacterGenManager:
             return {}
         lease_server = self._hunyuan_lease_server(worker, status)
         _node_id, physical = workload_lease.server_identity(lease_server)
+        if not physical:
+            raise hunyuan_client.NoWorkerAvailable(
+                "Hunyuan worker physical identity/role is not verified"
+            )
         if job.hunyuan_workload_lease_id:
             if job.hunyuan_workload_physical_resource_id != physical:
                 raise hunyuan_client.NoWorkerAvailable(

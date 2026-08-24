@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import tempfile
 import time
 import unittest
@@ -17,7 +18,11 @@ from renderfin.models import (
     RenderPrompt,
     RenderServer,
 )
-from renderfin.queue import RenderQueue, _host_terminal_outcome
+from renderfin.queue import (
+    ManagedComfyCleanupPending,
+    RenderQueue,
+    _host_terminal_outcome,
+)
 from renderfin.registry import ServerRegistry
 
 
@@ -62,7 +67,749 @@ def _server(name="raptor", workflows=("gen_image.json",)):
     )
 
 
+def _terminal_receipt(task, outcome="Completed", **values):
+    return {
+        "status": outcome,
+        "prompt_id": task.comfy_prompt_id,
+        "logical_task_id": task.id,
+        "central_lease_id": task.workload_lease_id,
+        "request_id": task.workload_request_id,
+        **values,
+    }
+
+
+def _spool_stage_receipt(task, data=b"FULL-ARTIFACT"):
+    return {
+        "status": "artifact_spooled",
+        "status_string": "artifact_spooled",
+        "artifact_spool_ready_bool": True,
+        "artifact_spool_protocol_string": (
+            workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+        ),
+        "artifact_cpu_spool_persisted_bool": True,
+        "artifact_checksum_persisted_bool": True,
+        "gpu_detached_bool": True,
+        "artifact_sha256": hashlib.sha256(data).hexdigest(),
+        "artifact_size_int": len(data),
+        "prompt_id": task.comfy_prompt_id,
+        "logical_task_id": task.id,
+        "lease_id": task.workload_lease_id,
+        "request_id": task.workload_request_id,
+    }
+
+
+def _spool_ack_receipt(task):
+    return _terminal_receipt(
+        task,
+        "Completed",
+        status_string="Completed",
+        artifact_spool_protocol_string=(
+            workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+        ),
+        artifact_sha256=task.artifact_sha256,
+        artifact_size_int=task.managed_comfy_artifact_size_int,
+        artifact_ack_tombstone_bool=True,
+        central_persisted_bool=True,
+        central_persistence_receipt_id_string=(
+            task.managed_comfy_central_persistence_receipt_id_string
+        ),
+    )
+
+
 class QueueDispatchTests(unittest.TestCase):
+    def test_renderfin_broker_feature_flag_defaults_off(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(workload_lease.enabled())
+
+    def test_exact_host_spool_stage_get_ack_wire_and_central_fsync_copy(self):
+        async def scenario():
+            server = _server()
+            server.managed_workload = True
+            artifact = b"EXACT-HOST-SPOOL-ARTIFACT"
+            checksum = hashlib.sha256(artifact).hexdigest()
+            receipt = "renderfin_bundle_v1_" + "a" * 64
+            seen = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                self.assertEqual(
+                    request.headers["Authorization"], "Bearer bridge-token"
+                )
+                if request.url.path.endswith("/comfy/stage"):
+                    seen.append("stage")
+                    body = json.loads(request.content)
+                    self.assertEqual(
+                        set(body),
+                        {
+                            "prompt_id",
+                            "logical_task_id",
+                            "lease_id",
+                            "request_id",
+                            "artifact_relative_path_string",
+                        },
+                    )
+                    self.assertEqual(
+                        body["artifact_relative_path_string"], "render/full.png"
+                    )
+                    return httpx.Response(
+                        200,
+                        json={
+                            "status": "artifact_spooled",
+                            "status_string": "artifact_spooled",
+                            "artifact_spool_ready_bool": True,
+                            "artifact_spool_protocol_string": (
+                                workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+                            ),
+                            "artifact_cpu_spool_persisted_bool": True,
+                            "artifact_checksum_persisted_bool": True,
+                            "gpu_detached_bool": True,
+                            "artifact_sha256": checksum,
+                            "artifact_size_int": len(artifact),
+                            "prompt_id": "prompt-1",
+                            "logical_task_id": "task-1",
+                            "lease_id": "lease-1",
+                            "request_id": "request-1",
+                        },
+                    )
+                if request.url.path.endswith("/comfy/artifact"):
+                    seen.append("get")
+                    self.assertEqual(
+                        dict(request.url.params),
+                        {
+                            "prompt_id": "prompt-1",
+                            "logical_task_id": "task-1",
+                            "lease_id": "lease-1",
+                            "request_id": "request-1",
+                        },
+                    )
+                    return httpx.Response(
+                        200,
+                        content=artifact,
+                        headers={
+                            "Content-Type": "application/octet-stream",
+                            "X-AutoRig-Artifact-SHA256": checksum,
+                            "X-AutoRig-Artifact-Size": str(len(artifact)),
+                            "X-AutoRig-Artifact-Protocol": (
+                                workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+                            ),
+                        },
+                    )
+                if request.url.path.endswith("/comfy/ack"):
+                    seen.append("ack")
+                    body = json.loads(request.content)
+                    self.assertEqual(
+                        body,
+                        {
+                            "prompt_id": "prompt-1",
+                            "logical_task_id": "task-1",
+                            "lease_id": "lease-1",
+                            "request_id": "request-1",
+                            "artifact_sha256": checksum,
+                            "artifact_size_int": len(artifact),
+                            "central_persisted_bool": True,
+                            "central_persistence_receipt_id_string": receipt,
+                        },
+                    )
+                    return httpx.Response(
+                        200,
+                        json={
+                            "status": "Completed",
+                            "status_string": "Completed",
+                            "artifact_spool_protocol_string": (
+                                workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+                            ),
+                            "artifact_sha256": checksum,
+                            "artifact_size_int": len(artifact),
+                            "artifact_ack_tombstone_bool": True,
+                            "central_persisted_bool": True,
+                            "central_persistence_receipt_id_string": receipt,
+                            "prompt_id": "prompt-1",
+                            "logical_task_id": "task-1",
+                            "lease_id": "lease-1",
+                            "request_id": "request-1",
+                        },
+                    )
+                return httpx.Response(404)
+
+            mapping = json.dumps(
+                {
+                    "raptor": {
+                        "url": "https://converter-f7.freestock.online",
+                        "token": "bridge-token",
+                    }
+                }
+            )
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(
+                "os.environ", {"RENDERFIN_GPU_CONTROL_NODES_JSON": mapping}
+            ):
+                destination = Path(tmp) / "central" / "artifact.png"
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    staged = await workload_lease.host_comfy_stage_artifact(
+                        client,
+                        server=server,
+                        prompt_id="prompt-1",
+                        logical_task_id="task-1",
+                        lease_id="lease-1",
+                        request_id="request-1",
+                        artifact_relative_path_string="render/full.png",
+                    )
+                    await workload_lease.host_comfy_download_artifact(
+                        client,
+                        server=server,
+                        prompt_id="prompt-1",
+                        logical_task_id="task-1",
+                        lease_id="lease-1",
+                        request_id="request-1",
+                        destination_path=destination,
+                        expected_sha256=staged["artifact_sha256"],
+                        expected_size_int=staged["artifact_size_int"],
+                    )
+                    acknowledged = await workload_lease.host_comfy_ack_artifact(
+                        client,
+                        server=server,
+                        prompt_id="prompt-1",
+                        logical_task_id="task-1",
+                        lease_id="lease-1",
+                        request_id="request-1",
+                        artifact_sha256=checksum,
+                        artifact_size_int=len(artifact),
+                        central_persistence_receipt_id_string=receipt,
+                    )
+                self.assertEqual(destination.read_bytes(), artifact)
+                self.assertEqual(acknowledged["status"], "Completed")
+                self.assertEqual(seen, ["stage", "get", "ack"])
+
+        run(scenario())
+
+    def test_spool_terminal_receipts_require_exact_four_ids(self):
+        async def scenario():
+            server = _server()
+            server.managed_workload = True
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "Completed",
+                        "prompt_id": "wrong-prompt",
+                        "logical_task_id": "task-1",
+                        "lease_id": "lease-1",
+                        "request_id": "request-1",
+                    },
+                )
+
+            mapping = json.dumps(
+                {
+                    "raptor": {
+                        "url": "https://converter-f7.freestock.online",
+                        "token": "bridge-token",
+                    }
+                }
+            )
+            with patch.dict(
+                "os.environ", {"RENDERFIN_GPU_CONTROL_NODES_JSON": mapping}
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(
+                        workload_lease.HostComfyReceiptMismatch
+                    ):
+                        await workload_lease.host_comfy_stage_artifact(
+                            client,
+                            server=server,
+                            prompt_id="prompt-1",
+                            logical_task_id="task-1",
+                            lease_id="lease-1",
+                            request_id="request-1",
+                            artifact_relative_path_string="full.png",
+                        )
+
+        run(scenario())
+
+    def test_managed_tpose_spool_persists_isolated_before_stage_and_ack(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                server.managed_comfy_artifact_spool_required_bool = True
+                server.managed_comfy_artifact_spool_ready_bool = True
+                server.managed_comfy_artifact_spool_protocol_string = (
+                    workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+                )
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="t_pose", user_name="bot")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "spool-prompt"
+                    task.started_at = time.time() - 30
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-spool"
+                    task.workload_request_id = "request-spool"
+                    await queue._persist(task)
+                    entry = {
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": "collection/FULL.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    },
+                                    {
+                                        "filename": "collection/FULL_Isolated_output.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                    order = []
+                    full = b"FULL-ARTIFACT"
+
+                    async def download_isolated(*_args, **_kwargs):
+                        order.append("isolated")
+                        return b"ISOLATED-ARTIFACT"
+
+                    async def stage(*_args, **kwargs):
+                        order.append("stage")
+                        self.assertTrue(
+                            workload_lease.verify_central_artifact(
+                                Path(task.managed_comfy_isolated_output_path),
+                                expected_sha256=task.managed_comfy_isolated_sha256,
+                                expected_size=task.managed_comfy_isolated_size_int,
+                            )
+                        )
+                        self.assertEqual(
+                            kwargs["artifact_relative_path_string"],
+                            "collection/FULL.png",
+                        )
+                        return _spool_stage_receipt(task, full)
+
+                    async def get_artifact(*_args, **kwargs):
+                        order.append("get")
+                        destination = Path(kwargs["destination_path"])
+                        destination.write_bytes(full)
+                        return {
+                            "artifact_sha256": hashlib.sha256(full).hexdigest(),
+                            "artifact_size_int": len(full),
+                        }
+
+                    async def ack(*_args, **kwargs):
+                        order.append("ack")
+                        self.assertTrue(queue._managed_bundle_is_durable(task))
+                        async with queue._db.execute(
+                            "SELECT payload FROM render_tasks WHERE id = ?",
+                            (task.id,),
+                        ) as cursor:
+                            payload = json.loads((await cursor.fetchone())[0])
+                        self.assertEqual(
+                            payload["managed_comfy_artifact_spool_state"],
+                            "central_persisted",
+                        )
+                        self.assertEqual(
+                            kwargs["central_persistence_receipt_id_string"],
+                            payload[
+                                "managed_comfy_central_persistence_receipt_id_string"
+                            ],
+                        )
+                        return _spool_ack_receipt(task)
+
+                    with patch.object(
+                        comfy_adapter,
+                        "download_artifact",
+                        new=AsyncMock(side_effect=download_isolated),
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_stage_artifact",
+                        new=AsyncMock(side_effect=stage),
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_download_artifact",
+                        new=AsyncMock(side_effect=get_artifact),
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_ack_artifact",
+                        new=AsyncMock(side_effect=ack),
+                    ), patch.object(
+                        workload_lease, "release", new=AsyncMock(return_value=None)
+                    ):
+                        await queue._finish(task, server, entry)
+
+                    self.assertEqual(order, ["isolated", "stage", "get", "ack"])
+                    self.assertEqual(task.status, TASK_DONE)
+                    self.assertEqual(
+                        task.managed_comfy_artifact_spool_state, "acknowledged"
+                    )
+                    self.assertEqual(Path(task.output_path).read_bytes(), full)
+                    self.assertIn("isolated", task.extra_outputs)
+                    self.assertEqual(task.submit_failures, 0)
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_managed_tpose_missing_isolated_keeps_binding_attempt_neutral(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                server.managed_comfy_artifact_spool_required_bool = True
+                server.managed_comfy_artifact_spool_ready_bool = True
+                server.managed_comfy_artifact_spool_protocol_string = (
+                    workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+                )
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="t_pose", user_name="bot")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "spool-prompt"
+                    task.started_at = time.time() - 10
+                    original_started_at = task.started_at
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-spool"
+                    task.workload_request_id = "request-spool"
+                    await queue._persist(task)
+                    entry = {
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": "FULL.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                    stage = AsyncMock(
+                        side_effect=AssertionError("incomplete bundle staged")
+                    )
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_stage_artifact",
+                        new=stage,
+                    ):
+                        await queue._finish_guarded(task, server, entry)
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.started_at, original_started_at)
+                    self.assertEqual(task.workload_lease_id, "lease-spool")
+                    self.assertEqual(task.submit_failures, 0)
+                    self.assertEqual(task.managed_comfy_artifact_spool_state, "")
+                    stage.assert_not_awaited()
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_required_spool_status_fails_closed_until_exact_v1_ready(self):
+        async def scenario(protocol, ready):
+            server = _server("f5")
+            server.managed_workload = True
+            machine = "machine_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            mapping = json.dumps(
+                {
+                    "f5": {
+                        "url": "https://converter-f5.freestock.online",
+                        "token": "bridge-token",
+                        "physical_resource_id_string": machine,
+                        "workload_role": "shared",
+                    }
+                }
+            )
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={
+                        "physical_node": machine,
+                        "workload_role": "shared",
+                        "gpu_arbiter_enabled": True,
+                        "accepting_ai_vision": True,
+                        "managed_comfy_artifact_spool_required_bool": True,
+                        "managed_comfy_artifact_spool_ready_bool": ready,
+                        "managed_comfy_artifact_spool_protocol_string": protocol,
+                    },
+                )
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "RENDERFIN_WORKLOAD_BROKER_ENABLED": "1",
+                    "RENDERFIN_GPU_CONTROL_NODES_JSON": mapping,
+                },
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    accepted = await workload_lease.refresh_managed_identity(
+                        client, server
+                    )
+            return accepted, server
+
+        accepted, server = run(
+            scenario(workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL, True)
+        )
+        self.assertTrue(accepted)
+        self.assertTrue(server.managed_comfy_artifact_spool_required_bool)
+
+        accepted, server = run(scenario("wrong-protocol", True))
+        self.assertFalse(accepted)
+        self.assertTrue(server.workload_identity_verified_bool)
+
+        accepted, _server_state = run(
+            scenario(workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL, False)
+        )
+        self.assertFalse(accepted)
+
+    def test_spool_ack_mismatch_is_attempt_neutral_and_restarts_at_ack(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                server.managed_comfy_artifact_spool_required_bool = True
+                server.managed_comfy_artifact_spool_ready_bool = True
+                server.managed_comfy_artifact_spool_protocol_string = (
+                    workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+                )
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="portrait", user_name="bot")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "spool-prompt"
+                    task.started_at = time.time() - 20
+                    original_started_at = task.started_at
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-spool"
+                    task.workload_request_id = "request-spool"
+                    await queue._persist(task)
+                    full = b"FULL-ARTIFACT"
+                    entry = {
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": "FULL.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    }
+                                ]
+                            }
+                        }
+                    }
+
+                    async def get_artifact(*_args, **kwargs):
+                        Path(kwargs["destination_path"]).write_bytes(full)
+                        return {}
+
+                    acknowledgements = AsyncMock(
+                        side_effect=[
+                            workload_lease.HostComfyReceiptMismatch(
+                                "ack", {"prompt_id": "other"}
+                            ),
+                            None,
+                        ]
+                    )
+
+                    async def ack_dispatch(*_args, **_kwargs):
+                        result = await acknowledgements()
+                        return result or _spool_ack_receipt(task)
+
+                    stage = AsyncMock(return_value=_spool_stage_receipt(task, full))
+                    get = AsyncMock(side_effect=get_artifact)
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_stage_artifact",
+                        new=stage,
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_download_artifact",
+                        new=get,
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_ack_artifact",
+                        new=AsyncMock(side_effect=ack_dispatch),
+                    ), patch.object(
+                        workload_lease, "release", new=AsyncMock(return_value=None)
+                    ):
+                        await queue._finish_guarded(task, server, entry)
+                        self.assertEqual(task.status, TASK_RENDERING)
+                        self.assertEqual(
+                            task.managed_comfy_artifact_spool_state,
+                            "central_persisted",
+                        )
+                        self.assertEqual(task.workload_lease_id, "lease-spool")
+                        self.assertEqual(task.started_at, original_started_at)
+                        self.assertEqual(task.submit_failures, 0)
+                        # Crash/restart after central persistence but before a
+                        # trustworthy ACK response resumes at ACK only.
+                        await queue.stop()
+                        queue = RenderQueue(registry, db_path=config.DB_PATH)
+                        await queue.start()
+                        queue._pump_task.cancel()
+                        task = queue.get(task.id)
+                        self.assertEqual(
+                            task.managed_comfy_artifact_spool_state,
+                            "central_persisted",
+                        )
+                        await queue._poll_rendering()
+                        await queue._finishers[task.id]
+
+                    self.assertEqual(task.status, TASK_DONE)
+                    self.assertEqual(stage.await_count, 1)
+                    self.assertEqual(get.await_count, 1)
+                    self.assertEqual(acknowledgements.await_count, 2)
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_renderfin_f7_and_raptor_are_distinct_transport_aliases(self):
+        self.assertEqual(workload_lease._safe_node("F7"), "f7")
+        self.assertEqual(workload_lease._safe_node("FARM-F7"), "farm-f7")
+        self.assertEqual(workload_lease._safe_node("RYZEN-SERVER"), "raptor")
+        self.assertEqual(workload_lease._safe_node("Raptor-GPU0"), "raptor")
+        self.assertLess(
+            workload_lease.server_role_rank("ai_vision", "ai_vision_primary"),
+            workload_lease.server_role_rank("ai_vision", "autorig_primary"),
+        )
+        self.assertLess(
+            workload_lease.server_role_rank("comfy", "shared"),
+            workload_lease.server_role_rank("comfy", "ai_vision_primary"),
+        )
+
+    def test_managed_identity_requires_authenticated_exact_machine_and_role(self):
+        async def scenario(reported_physical, reported_role):
+            server = _server("f5")
+            server.managed_workload = True
+            mapping = json.dumps(
+                {
+                    "f5": {
+                        "url": "https://converter-f5.freestock.online",
+                        "token": "bridge-token",
+                        "physical_resource_id_string": (
+                            "machine_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        ),
+                        "workload_role": "ai_vision_primary",
+                    }
+                }
+            )
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                self.assertEqual(
+                    str(request.url),
+                    "https://converter-f5.freestock.online/api-converter-glb/server-status",
+                )
+                self.assertEqual(
+                    request.headers["Authorization"], "Bearer bridge-token"
+                )
+                return httpx.Response(
+                    200,
+                    json={
+                        "physical_node": reported_physical,
+                        "workload_role": reported_role,
+                        "gpu_arbiter_enabled": True,
+                        "accepting_ai_vision": True,
+                    },
+                )
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "RENDERFIN_WORKLOAD_BROKER_ENABLED": "1",
+                    "RENDERFIN_GPU_CONTROL_NODES_JSON": mapping,
+                },
+                clear=False,
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    verified = await workload_lease.refresh_managed_identity(
+                        client, server
+                    )
+            return verified, server
+
+        exact = "machine_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        verified, server = run(scenario(exact, "ai_vision_primary"))
+        self.assertTrue(verified)
+        self.assertTrue(server.workload_identity_verified_bool)
+        self.assertEqual(workload_lease.server_identity(server)[1], exact)
+        self.assertEqual(server.reserve_role_string, "ai_vision_primary")
+        self.assertTrue(server.arbiter_online_bool)
+
+        verified, mismatch = run(
+            scenario(
+                "machine_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "ai_vision_primary",
+            )
+        )
+        self.assertFalse(verified)
+        self.assertFalse(mismatch.workload_identity_verified_bool)
+        self.assertEqual(workload_lease.server_identity(mismatch)[1], "")
+
+        verified, mismatch = run(scenario(exact, "autorig_primary"))
+        self.assertFalse(verified)
+        self.assertFalse(mismatch.workload_identity_verified_bool)
+
+    def test_managed_identity_config_without_exact_machine_is_fail_closed(self):
+        async def scenario():
+            server = _server("f5")
+            server.managed_workload = True
+            mapping = json.dumps(
+                {
+                    "f5": {
+                        "url": "https://converter-f5.freestock.online",
+                        "token": "bridge-token",
+                        "workload_role": "shared",
+                    }
+                }
+            )
+            with patch.dict(
+                "os.environ",
+                {
+                    "RENDERFIN_WORKLOAD_BROKER_ENABLED": "1",
+                    "RENDERFIN_GPU_CONTROL_NODES_JSON": mapping,
+                },
+                clear=False,
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(
+                        lambda _request: httpx.Response(500)
+                    )
+                ) as client:
+                    return await workload_lease.refresh_managed_identity(
+                        client, server
+                    )
+
+        self.assertFalse(run(scenario()))
+
     def test_real_host_bridge_terminal_status_aliases(self):
         self.assertEqual(_host_terminal_outcome({"status": "Completed"}), "completed")
         self.assertEqual(_host_terminal_outcome({"status": "Preempted"}), "preempted")
@@ -75,7 +822,16 @@ class QueueDispatchTests(unittest.TestCase):
 
             def handler(request: httpx.Request) -> httpx.Response:
                 self.assertEqual(request.headers["Authorization"], "Bearer bridge-token")
-                return httpx.Response(409, json={"status": "Completed"})
+                return httpx.Response(
+                    409,
+                    json={
+                        "status": "Completed",
+                        "prompt_id": "prompt-1",
+                        "logical_task_id": "task-1",
+                        "central_lease_id": "lease-1",
+                        "request_id": "request-1",
+                    },
+                )
 
             mapping = json.dumps(
                 {
@@ -103,7 +859,6 @@ class QueueDispatchTests(unittest.TestCase):
             self.assertEqual(result["status"], "Completed")
 
         run(scenario())
-
     def test_host_bridge_423_artifact_pending_is_completed_not_capacity(self):
         async def scenario():
             server = _server()
@@ -116,6 +871,8 @@ class QueueDispatchTests(unittest.TestCase):
                         "status_string": "artifact_pending",
                         "prompt_id": "prompt-1",
                         "logical_task_id": "task-1",
+                        "central_lease_id": "lease-1",
+                        "request_id": "request-1",
                     },
                 )
 
@@ -144,6 +901,322 @@ class QueueDispatchTests(unittest.TestCase):
                     )
             self.assertEqual(_host_terminal_outcome(result), "completed")
             self.assertEqual(result["status_string"], "artifact_pending")
+
+        run(scenario())
+
+    def test_host_terminal_receipt_requires_exact_four_ids_for_every_action(self):
+        async def scenario(action):
+            server = _server()
+            server.managed_workload = True
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "Completed",
+                        "prompt_id": "different-prompt",
+                        "logical_task_id": "task-1",
+                        "central_lease_id": "lease-1",
+                        "request_id": "request-1",
+                    },
+                )
+
+            mapping = json.dumps(
+                {
+                    "raptor": {
+                        "url": "https://converter-f7.freestock.online",
+                        "token": "bridge-token",
+                    }
+                }
+            )
+            with patch.dict(
+                "os.environ", {"RENDERFIN_GPU_CONTROL_NODES_JSON": mapping}
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(
+                        workload_lease.HostComfyReceiptMismatch
+                    ) as raised:
+                        await workload_lease.host_comfy_control(
+                            client,
+                            server=server,
+                            action=action,
+                            prompt_id="prompt-1",
+                            logical_task_id="task-1",
+                            lease_id="lease-1",
+                            request_id="request-1",
+                        )
+            self.assertEqual(
+                raised.exception.status,
+                f"host_comfy_{action}_receipt_mismatch",
+            )
+            self.assertEqual(raised.exception.retry_after, 2)
+
+        for action in ("register", "heartbeat", "preempt", "complete"):
+            with self.subTest(action=action):
+                run(scenario(action))
+
+    def test_completed_wins_with_exact_receipt_for_every_control_action(self):
+        async def scenario(action):
+            server = _server()
+            server.managed_workload = True
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "Completed",
+                        "prompt_id": "prompt-1",
+                        "logical_task_id": "task-1",
+                        "central_lease_id": "lease-1",
+                        "request_id": "request-1",
+                    },
+                )
+
+            mapping = json.dumps(
+                {
+                    "raptor": {
+                        "url": "https://converter-f7.freestock.online",
+                        "token": "bridge-token",
+                    }
+                }
+            )
+            with patch.dict(
+                "os.environ", {"RENDERFIN_GPU_CONTROL_NODES_JSON": mapping}
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    result = await workload_lease.host_comfy_control(
+                        client,
+                        server=server,
+                        action=action,
+                        prompt_id="prompt-1",
+                        logical_task_id="task-1",
+                        lease_id="lease-1",
+                        request_id="request-1",
+                    )
+            self.assertEqual(_host_terminal_outcome(result), "completed")
+
+        for action in ("register", "heartbeat", "preempt", "complete"):
+            with self.subTest(action=action):
+                run(scenario(action))
+
+    def test_mismatched_register_receipt_keeps_exact_binding_attempt_neutral(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.managed_prompt = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    task.workload_physical_resource_id = "raptor"
+                    submit = AsyncMock(
+                        side_effect=AssertionError("mismatched terminal resubmitted")
+                    )
+
+                    def mismatched(*_args, **_kwargs):
+                        return {
+                            "status": "Completed",
+                            "prompt_id": "some-other-prompt",
+                            "logical_task_id": task.id,
+                            "central_lease_id": task.workload_lease_id,
+                            "request_id": task.workload_request_id,
+                        }
+
+                    with patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(side_effect=mismatched),
+                    ), patch.object(comfy_adapter, "submit", new=submit):
+                        with self.assertRaises(ManagedComfyCleanupPending):
+                            await queue._submit_task(task, server)
+
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.started_at, 0)
+                    self.assertEqual(task.workload_lease_id, "lease-1")
+                    self.assertEqual(task.workload_request_id, "request-1")
+                    self.assertFalse(task.host_comfy_registered)
+                    self.assertEqual(task.submit_failures, 0)
+                    submit.assert_not_awaited()
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_mismatched_heartbeat_receipt_is_retryable_noop(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="portrait"))
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "prompt-1"
+                    task.started_at = time.time()
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    await queue._persist(task)
+                    mismatched = _terminal_receipt(task, "Completed")
+                    mismatched["request_id"] = "some-other-request"
+                    release = AsyncMock(return_value=None)
+                    history = AsyncMock(
+                        side_effect=AssertionError("mismatched heartbeat was trusted")
+                    )
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(return_value={})
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(return_value=mismatched),
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ), patch.object(
+                        comfy_adapter, "poll_history", new=history
+                    ):
+                        await queue._poll_rendering()
+
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.comfy_prompt_id, "prompt-1")
+                    self.assertEqual(task.workload_lease_id, "lease-1")
+                    self.assertEqual(task.workload_request_id, "request-1")
+                    self.assertEqual(task.submit_failures, 0)
+                    release.assert_not_awaited()
+                    history.assert_not_awaited()
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_mismatched_preempt_receipt_cannot_requeue_bound_prompt(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="portrait"))
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "prompt-1"
+                    task.started_at = time.time()
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    await queue._persist(task)
+                    mismatch = _terminal_receipt(task, "Preempted")
+                    mismatch["central_lease_id"] = "some-other-lease"
+                    release = AsyncMock(return_value=None)
+                    terminal = workload_lease.WorkloadPreempted(
+                        {"status_string": "preemption_requested"}
+                    )
+                    with patch.object(
+                        workload_lease,
+                        "heartbeat",
+                        new=AsyncMock(side_effect=terminal),
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(return_value=mismatch),
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ):
+                        await queue._poll_rendering()
+
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.comfy_prompt_id, "prompt-1")
+                    self.assertEqual(task.workload_lease_id, "lease-1")
+                    self.assertEqual(task.workload_request_id, "request-1")
+                    self.assertNotIn("prompt-1", task.retired_comfy_prompt_ids)
+                    release.assert_not_awaited()
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_mismatched_complete_receipt_keeps_durable_done_lease_bound(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="portrait", user_name="bot")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "prompt-1"
+                    task.started_at = time.time()
+                    task.managed_prompt = True
+                    task.host_comfy_registered = True
+                    task.workload_lease_id = "lease-1"
+                    task.workload_request_id = "request-1"
+                    await queue._persist(task)
+                    entry = {
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": "artifact.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                    mismatch = _terminal_receipt(task, "Completed")
+                    mismatch["logical_task_id"] = "some-other-task"
+                    release = AsyncMock(return_value=None)
+                    with patch.object(
+                        comfy_adapter,
+                        "download_artifact",
+                        new=AsyncMock(return_value=b"DURABLE-ARTIFACT"),
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(return_value=mismatch),
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ):
+                        await queue._finish(
+                            task, server, entry, skip_lease_heartbeat=True
+                        )
+
+                    self.assertEqual(task.status, TASK_DONE)
+                    self.assertTrue(task.artifact_sha256)
+                    self.assertEqual(task.workload_lease_id, "lease-1")
+                    self.assertTrue(task.host_comfy_registered)
+                    self.assertEqual(task.submit_failures, 0)
+                    release.assert_not_awaited()
+                finally:
+                    await queue.stop()
 
         run(scenario())
 
@@ -243,7 +1316,7 @@ class QueueDispatchTests(unittest.TestCase):
                         }
                     )
                     host_control = AsyncMock(
-                        return_value={"status": "Preempted"}
+                        return_value=_terminal_receipt(task, "Preempted")
                     )
                     release = AsyncMock(return_value=None)
                     with patch.object(
@@ -312,10 +1385,12 @@ class QueueDispatchTests(unittest.TestCase):
                         workload_lease,
                         "host_comfy_control",
                         new=AsyncMock(
-                            return_value={
-                                "status_string": "artifact_pending",
-                                "outcome_string": "completed",
-                            }
+                            return_value=_terminal_receipt(
+                                task,
+                                "Completed",
+                                status_string="artifact_pending",
+                                outcome_string="completed",
+                            )
                         ),
                     ), patch.object(
                         comfy_adapter, "poll_history", new=history
@@ -377,11 +1452,13 @@ class QueueDispatchTests(unittest.TestCase):
 
                     async def host_control(*_args, **kwargs):
                         if kwargs["action"] == "complete":
-                            return {"status": "Completed"}
-                        return {
-                            "status_string": "artifact_pending",
-                            "outcome_string": "completed",
-                        }
+                            return _terminal_receipt(task, "Completed")
+                        return _terminal_receipt(
+                            task,
+                            "Completed",
+                            status_string="artifact_pending",
+                            outcome_string="completed",
+                        )
 
                     host = AsyncMock(side_effect=host_control)
                     download = AsyncMock(return_value=b"PNG-EXACT-ARTIFACT")
@@ -458,9 +1535,13 @@ class QueueDispatchTests(unittest.TestCase):
                             return {
                                 "status_string": "artifact_pending",
                                 "outcome_string": "completed",
+                                "prompt_id": task.comfy_prompt_id,
+                                "logical_task_id": task.id,
+                                "central_lease_id": task.workload_lease_id,
+                                "request_id": task.workload_request_id,
                             }
                         if kwargs["action"] == "complete":
-                            return {"status": "Completed"}
+                            return _terminal_receipt(task, "Completed")
                         return {"status": "Registered"}
 
                     host = AsyncMock(side_effect=host_control)
@@ -678,7 +1759,9 @@ class QueueDispatchTests(unittest.TestCase):
                     async def host_control(*_args, **kwargs):
                         if kwargs["action"] == "register":
                             return {"status_string": "registered"}
-                        return {"status_string": "preempted"}
+                        return _terminal_receipt(
+                            task, "Preempted", status_string="preempted"
+                        )
 
                     with patch.object(
                         workload_lease,
@@ -786,7 +1869,9 @@ class QueueDispatchTests(unittest.TestCase):
                     with patch.object(
                         workload_lease,
                         "host_comfy_control",
-                        new=AsyncMock(return_value={"status": "Preempted"}),
+                        new=AsyncMock(
+                            return_value=_terminal_receipt(task, "Preempted")
+                        ),
                     ), patch.object(
                         workload_lease, "release", new=AsyncMock(return_value=None)
                     ):
@@ -1288,40 +2373,8 @@ class RenderClockTests(unittest.TestCase):
     2026-08-03 after three restarts in an afternoon.
     """
 
-    def test_a_surviving_render_keeps_its_original_deadline(self):
-        async def scenario():
-            with _Env():
-                registry = ServerRegistry()
-                registry.save(_server())
-                queue = self._q(registry)
-                await queue.start()
-                queue._pump_task.cancel()
-                started = time.time() - 3600  # an hour in already
-                try:
-                    task = await queue.enqueue(
-                        RenderPrompt(prompt="x", type="t_pose", user_name="u")
-                    )
-                    task.status = TASK_RENDERING
-                    task.server_name = "raptor"
-                    task.comfy_prompt_id = "p-1"
-                    task.started_at = started
-                    await queue._persist(task)
-                    await queue.stop()
-
-                    revived = self._q(registry)
-                    await revived.start()
-                    revived._pump_task.cancel()
-                    try:
-                        again = revived.get(task.id)
-                        self.assertEqual(again.status, TASK_RENDERING)
-                        self.assertAlmostEqual(again.started_at, started, delta=2)
-                    finally:
-                        await revived.stop()
-                except Exception:
-                    await queue.stop()
-                    raise
-
-        run(scenario())
+    def _q(self, registry):
+        return RenderQueue(registry, db_path=config.DB_PATH)
 
     def test_a_render_with_no_clock_gets_one(self):
         """started_at 0 would otherwise read as 'running since 1970' and fail."""
@@ -1357,5 +2410,302 @@ class RenderClockTests(unittest.TestCase):
 
         run(scenario())
 
-    def _q(self, registry):
-        return RenderQueue(registry, db_path=config.DB_PATH)
+    def test_a_surviving_render_keeps_its_original_deadline(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                registry.save(_server())
+                queue = self._q(registry)
+                await queue.start()
+                queue._pump_task.cancel()
+                started = time.time() - 3600  # an hour in already
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="x", type="t_pose", user_name="u")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = "raptor"
+                    task.comfy_prompt_id = "p-1"
+                    task.started_at = started
+                    await queue._persist(task)
+                    await queue.stop()
+
+                    revived = self._q(registry)
+                    await revived.start()
+                    revived._pump_task.cancel()
+                    try:
+                        again = revived.get(task.id)
+                        self.assertEqual(again.status, TASK_RENDERING)
+                        self.assertAlmostEqual(again.started_at, started, delta=2)
+                    finally:
+                        await revived.stop()
+                except Exception:
+                    await queue.stop()
+                    raise
+
+        run(scenario())
+
+
+class ManagedComfyNoProgressWatchdogTests(unittest.TestCase):
+    def test_default_managed_no_progress_ceiling_is_one_hour(self):
+        self.assertEqual(
+            config.MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS,
+            3600.0,
+        )
+
+    @staticmethod
+    async def _managed_task(queue, server, *, started_at):
+        task = await queue.enqueue(RenderPrompt(prompt="a", type="portrait"))
+        task.status = TASK_RENDERING
+        task.server_name = server.render_server_name
+        task.comfy_prompt_id = "watchdog-prompt"
+        task.started_at = started_at
+        task.managed_prompt = True
+        task.host_comfy_registered = True
+        task.workload_lease_id = "watchdog-lease"
+        task.workload_request_id = "watchdog-request"
+        task.workload_physical_resource_id = "machine_aaaaaaaaaaaaaaaaaaaaaaaa"
+        task.managed_comfy_progress_signature = json.dumps(
+            {"state": "submitted", "stage": "", "marker": ""},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        task.managed_comfy_last_progress_at = started_at
+        await queue._persist(task)
+        return task
+
+    @staticmethod
+    def _host_status(task, **values):
+        return {
+            "prompt_id": task.comfy_prompt_id,
+            "logical_task_id": task.id,
+            "central_lease_id": task.workload_lease_id,
+            "request_id": task.workload_request_id,
+            **values,
+        }
+
+    def test_one_hour_without_progress_exactly_requeues_same_task_retry_neutrally(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await self._managed_task(
+                        queue, server, started_at=time.time() - 3605
+                    )
+                    original_id = task.id
+                    original_request = task.workload_request_id
+
+                    async def host_control(*_args, **kwargs):
+                        if kwargs["action"] == "heartbeat":
+                            return self._host_status(task, state="queued")
+                        if kwargs["action"] == "preempt":
+                            return self._host_status(task, state="Preempted")
+                        raise AssertionError(kwargs["action"])
+
+                    host = AsyncMock(side_effect=host_control)
+                    release = AsyncMock(return_value=None)
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(return_value={})
+                    ), patch.object(
+                        workload_lease, "host_comfy_control", new=host
+                    ), patch.object(
+                        workload_lease, "release", new=release
+                    ), patch.object(
+                        comfy_adapter,
+                        "poll_history",
+                        new=AsyncMock(side_effect=AssertionError("old prompt polled")),
+                    ):
+                        await queue._poll_rendering()
+
+                    restored = queue.get(original_id)
+                    self.assertIs(restored, task)
+                    self.assertEqual(restored.status, TASK_PENDING)
+                    self.assertEqual(restored.submit_failures, 0)
+                    self.assertEqual(restored.error, "")
+                    self.assertEqual(restored.started_at, 0)
+                    self.assertEqual(restored.comfy_prompt_id, "")
+                    self.assertIn("watchdog-prompt", restored.retired_comfy_prompt_ids)
+                    self.assertNotEqual(restored.workload_request_id, original_request)
+                    self.assertEqual(
+                        [call.kwargs["action"] for call in host.await_args_list],
+                        ["heartbeat", "preempt"],
+                    )
+                    release.assert_awaited_once()
+                    self.assertEqual(release.await_args.kwargs["outcome"], "preempted")
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_exact_host_stale_signal_recalls_before_central_hour(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await self._managed_task(
+                        queue, server, started_at=time.time() - 120
+                    )
+
+                    async def host_control(*_args, **kwargs):
+                        if kwargs["action"] == "heartbeat":
+                            return self._host_status(
+                                task, state="stale", stale_at=time.time() - 1
+                            )
+                        return self._host_status(task, state="Preempted")
+
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(return_value={})
+                    ), patch.object(
+                        workload_lease,
+                        "host_comfy_control",
+                        new=AsyncMock(side_effect=host_control),
+                    ), patch.object(
+                        workload_lease, "release", new=AsyncMock(return_value=None)
+                    ):
+                        await queue._poll_rendering()
+                    self.assertEqual(task.status, TASK_PENDING)
+                    self.assertEqual(task.submit_failures, 0)
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_real_host_progress_advances_durable_clock(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await self._managed_task(
+                        queue, server, started_at=time.time() - 7200
+                    )
+                    observed_at = time.time() - 2
+                    host = AsyncMock(
+                        return_value=self._host_status(
+                            task,
+                            state="running",
+                            progress_by_key={
+                                "current_stage_string": "sampler",
+                                "progress_percent": 25,
+                                "last_progress_at": observed_at,
+                            },
+                        )
+                    )
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(return_value={})
+                    ), patch.object(
+                        workload_lease, "host_comfy_control", new=host
+                    ), patch.object(
+                        comfy_adapter,
+                        "poll_history",
+                        new=AsyncMock(return_value=("pending", None)),
+                    ):
+                        await queue._poll_rendering()
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.comfy_prompt_id, "watchdog-prompt")
+                    self.assertEqual(task.managed_comfy_progress_percent, 25)
+                    self.assertAlmostEqual(
+                        task.managed_comfy_last_progress_at, observed_at, delta=1
+                    )
+                    self.assertEqual(
+                        [call.kwargs["action"] for call in host.await_args_list],
+                        ["heartbeat"],
+                    )
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_mismatched_or_malformed_stale_schema_is_ignored(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await self._managed_task(
+                        queue, server, started_at=time.time() - 120
+                    )
+                    mismatched = self._host_status(
+                        task,
+                        prompt_id="some-other-prompt",
+                        state="stale",
+                        stale_at=float("nan"),
+                        progress_percent=float("inf"),
+                    )
+                    host = AsyncMock(return_value=mismatched)
+                    with patch.object(
+                        workload_lease, "heartbeat", new=AsyncMock(return_value={})
+                    ), patch.object(
+                        workload_lease, "host_comfy_control", new=host
+                    ), patch.object(
+                        comfy_adapter,
+                        "poll_history",
+                        new=AsyncMock(return_value=("pending", None)),
+                    ):
+                        await queue._poll_rendering()
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(
+                        [call.kwargs["action"] for call in host.await_args_list],
+                        ["heartbeat"],
+                    )
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_watchdog_clock_survives_service_restart(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                server.managed_workload = True
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                started = time.time() - 3500
+                task = await self._managed_task(queue, server, started_at=started)
+                task.managed_comfy_progress_percent = 17
+                await queue._persist(task)
+                await queue.stop()
+
+                revived_queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await revived_queue.start()
+                revived_queue._pump_task.cancel()
+                try:
+                    revived = revived_queue.get(task.id)
+                    self.assertEqual(revived.status, TASK_RENDERING)
+                    self.assertAlmostEqual(
+                        revived.managed_comfy_last_progress_at, started, delta=1
+                    )
+                    self.assertEqual(revived.managed_comfy_progress_percent, 17)
+                    self.assertEqual(
+                        revived.managed_comfy_progress_signature,
+                        task.managed_comfy_progress_signature,
+                    )
+                finally:
+                    await revived_queue.stop()
+
+        run(scenario())

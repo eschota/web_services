@@ -210,7 +210,9 @@ class HunyuanConverterPathTests(unittest.TestCase):
                         "name": "f12",
                         "url": "https://converter-f12.example",
                         "token": "worker-token",
-                        "physical_node": "f12",
+                        "physical_node": "machine_12121212121212121212121212121212",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
+                        "workload_role": "ai_vision_primary",
                         "pool": "dedicated",
                     }
                     job = await _idle_job(
@@ -232,7 +234,8 @@ class HunyuanConverterPathTests(unittest.TestCase):
                                         "installed": True,
                                         "service_state": "idle",
                                     },
-                                    "physical_resource_id_string": "f12",
+                                    "physical_node": "machine_12121212121212121212121212121212",
+                                    "workload_role": "ai_vision_primary",
                                     "capabilities": {
                                         "submission_idempotency_v1": True
                                     },
@@ -264,7 +267,7 @@ class HunyuanConverterPathTests(unittest.TestCase):
 
                     lease = {
                         "lease_id_string": "lease-hunyuan-response-loss",
-                        "physical_resource_id_string": "f12",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
                         "node_id_string": "f12",
                         "workload_class_string": "hunyuan",
                     }
@@ -1723,7 +1726,9 @@ class EmptyFleetTests(unittest.TestCase):
                         "name": "f12",
                         "url": "https://f12",
                         "token": "worker-token",
-                        "physical_node": "f12",
+                        "physical_node": "machine_12121212121212121212121212121212",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
+                        "workload_role": "ai_vision_primary",
                         "pool": "dedicated",
                     }
                     job = await _idle_job(
@@ -1734,7 +1739,9 @@ class EmptyFleetTests(unittest.TestCase):
                     )
                     job.hunyuan_workload_lease_id = "lease-artifact"
                     job.hunyuan_workload_request_id = "request-artifact"
-                    job.hunyuan_workload_physical_resource_id = "f12"
+                    job.hunyuan_workload_physical_resource_id = (
+                        "machine_12121212121212121212121212121212"
+                    )
                     job.hunyuan_workload_node_id = "f12"
                     job.hunyuan_workload_lease_state = "active"
                     await manager._persist(job)
@@ -1829,7 +1836,9 @@ class EmptyFleetTests(unittest.TestCase):
                         "name": "f12",
                         "url": "https://f12",
                         "token": "worker-token",
-                        "physical_node": "f12",
+                        "physical_node": "machine_12121212121212121212121212121212",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
+                        "workload_role": "ai_vision_primary",
                         "pool": "dedicated",
                     }
                     job = await _idle_job(
@@ -1840,7 +1849,9 @@ class EmptyFleetTests(unittest.TestCase):
                     )
                     job.hunyuan_workload_lease_id = "lease-completed-wins"
                     job.hunyuan_workload_request_id = "request-completed-wins"
-                    job.hunyuan_workload_physical_resource_id = "f12"
+                    job.hunyuan_workload_physical_resource_id = (
+                        "machine_12121212121212121212121212121212"
+                    )
                     job.hunyuan_workload_node_id = "f12"
                     await manager._persist(job)
                     release = AsyncMock(return_value=True)
@@ -1864,7 +1875,13 @@ class EmptyFleetTests(unittest.TestCase):
                         new=release,
                     ):
                         lease = await manager._ensure_hunyuan_workload(
-                            job, AsyncMock(), worker, {}
+                            job,
+                            AsyncMock(),
+                            worker,
+                            {
+                                "physical_node": "machine_12121212121212121212121212121212",
+                                "workload_role": "ai_vision_primary",
+                            },
                         )
 
                     release.assert_not_awaited()

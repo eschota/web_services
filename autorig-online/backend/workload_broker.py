@@ -81,7 +81,19 @@ _DEFAULT_PHYSICAL_ALIASES = {
     "ryzen-server": "raptor",
     "ryzen_server": "raptor",
 }
+RESERVE_ROLE_AI_PRIMARY = "ai_vision_primary"
+RESERVE_ROLE_AUTORIG_PRIMARY = "autorig_primary"
+RESERVE_ROLE_SHARED = "shared"
+RESERVE_ROLE_MAINTENANCE = "maintenance"
+RESERVE_ROLES = {
+    RESERVE_ROLE_AI_PRIMARY,
+    RESERVE_ROLE_AUTORIG_PRIMARY,
+    RESERVE_ROLE_SHARED,
+    "background_only",
+    RESERVE_ROLE_MAINTENANCE,
+}
 _SECRET_KEY_RE = re.compile(r"token|secret|password|authorization|cookie|api.?key", re.I)
+_STABLE_MACHINE_RE = re.compile(r"machine_[a-f0-9]{24,128}")
 
 
 def _enabled() -> bool:
@@ -184,6 +196,52 @@ def normalize_workload_class(value: Any) -> str:
     return normalized if normalized in WORKLOAD_CLASSES else ""
 
 
+def normalize_reserve_role(value: Any, *, missing: str = RESERVE_ROLE_SHARED) -> str:
+    """Return the one fleet-wide role spelling used by hosts and schedulers.
+
+    ``ai_primary`` existed briefly in the AutoRig admin API while the converter
+    arbiter shipped ``ai_vision_primary``.  Accept the old spelling only as a
+    migration alias; persisted/status output is always canonical.
+    """
+    raw = _safe_identifier(value, maximum=32).lower()
+    if not raw:
+        raw = missing
+    if raw == "ai_primary":
+        raw = RESERVE_ROLE_AI_PRIMARY
+    return raw if raw in RESERVE_ROLES else RESERVE_ROLE_MAINTENANCE
+
+
+def reserve_role_rank(workload_class: str, reserve_role: Any) -> int:
+    """Prefer a workload's home role while allowing idle-capacity borrowing."""
+    role = normalize_reserve_role(reserve_role)
+    if role in {RESERVE_ROLE_MAINTENANCE, "background_only"}:
+        return 100
+    if workload_class == WORKLOAD_CLASS_AI:
+        order = (
+            RESERVE_ROLE_AI_PRIMARY,
+            RESERVE_ROLE_SHARED,
+            RESERVE_ROLE_AUTORIG_PRIMARY,
+        )
+    elif workload_class == WORKLOAD_CLASS_AUTORIG:
+        order = (
+            RESERVE_ROLE_AUTORIG_PRIMARY,
+            RESERVE_ROLE_SHARED,
+            RESERVE_ROLE_AI_PRIMARY,
+        )
+    else:
+        # Background/render work borrows neutral capacity first and protects
+        # both latency-sensitive role pools from avoidable occupation.
+        order = (
+            RESERVE_ROLE_SHARED,
+            RESERVE_ROLE_AUTORIG_PRIMARY,
+            RESERVE_ROLE_AI_PRIMARY,
+        )
+    try:
+        return order.index(role)
+    except ValueError:
+        return 100
+
+
 def _redacted_json_value(value: Any, *, depth: int = 0) -> Any:
     if depth >= 5:
         return "[truncated]"
@@ -253,15 +311,21 @@ def node_state_from_status(payload: Dict[str, Any]) -> Dict[str, Any]:
     capability = _dict_at(payload, "capability_by_key")
     ai_status = _dict_at(payload, "ai_vision_by_key") or _dict_at(capability, "ai_vision_by_key")
     arbiter = _dict_at(payload, "arbiter_by_key") or _dict_at(capability, "arbiter_by_key")
+    reported_node_kind = _safe_identifier(
+        payload.get("node_kind_string") or "", maximum=48
+    ).lower()
     full_converter = _bool_from(
         payload,
         ("full_converter_bool", "is_full_converter_bool"),
         _bool_from(capability, ("full_converter_bool", "converter_bool"), False),
     )
-    managed_farm = _bool_from(
-        payload,
-        ("managed_farm_bool", "farm_managed_bool"),
-        _bool_from(capability, ("managed_farm_bool",), False),
+    managed_farm = (
+        _bool_from(
+            payload,
+            ("managed_farm_bool", "farm_managed_bool"),
+            _bool_from(capability, ("managed_farm_bool",), False),
+        )
+        or reported_node_kind == "managed_farm"
     )
     freestock_runtime_ready = all(
         _bool_from(payload, (key,), False)
@@ -290,8 +354,22 @@ def node_state_from_status(payload: Dict[str, Any]) -> Dict[str, Any]:
             _bool_from(payload, ("arbiter_accepting_ai_vision_bool",), False),
         ),
     )
+    reported_role = (
+        payload.get("reserve_role_string")
+        or payload.get("workload_role")
+        or payload.get("workload_role_string")
+        or arbiter.get("workload_role")
+        or arbiter.get("workload_role_string")
+    )
+    # An older desktop client may omit a role and retain the historical shared
+    # policy. Managed farm capacity is different: only an explicit canonical
+    # role may make it healthy/accepting, otherwise it is maintenance fail-closed.
+    reserve_role = normalize_reserve_role(
+        reported_role,
+        missing=(RESERVE_ROLE_MAINTENANCE if managed_farm else RESERVE_ROLE_SHARED),
+    )
     maintenance = _bool_from(payload, ("maintenance_bool", "maintenance"), False)
-    if maintenance or str(payload.get("reserve_role_string") or "").strip().lower() == "maintenance":
+    if maintenance or reserve_role == RESERVE_ROLE_MAINTENANCE:
         healthy = False
         accepting = False
     # Managed farm AI admission is fail-closed unless the host arbiter is
@@ -304,13 +382,13 @@ def node_state_from_status(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         accepting = accepting and arbiter_online
     return {
-        "node_kind": _safe_identifier(payload.get("node_kind_string") or ("managed_farm" if managed_farm else "desktop"), maximum=48),
+        "node_kind": reported_node_kind or ("managed_farm" if managed_farm else "desktop"),
         "full_converter": full_converter,
         "ai_capable": ai_capable,
         "managed_farm": managed_farm,
         "healthy": healthy,
         "accepting": accepting,
-        "reserve_role": _safe_identifier(payload.get("reserve_role_string") or "shared", maximum=32).lower(),
+        "reserve_role": reserve_role,
         "status_json": json.dumps(_redacted_json_value(payload), ensure_ascii=False, separators=(",", ":")),
     }
 
@@ -399,6 +477,40 @@ def _node_supports(node: WorkloadNodeState, workload_class: str) -> bool:
     if workload_class == WORKLOAD_CLASS_AUTORIG:
         return bool(node.full_converter)
     return True
+
+
+def _preferred_idle_node(
+    *,
+    current: WorkloadNodeState,
+    workload_class: str,
+    nodes: Iterable[WorkloadNodeState],
+    active_by_resource: Dict[str, WorkloadLease],
+) -> Optional[WorkloadNodeState]:
+    """Find a strictly better idle home-role node for targeted admission.
+
+    Callers still choose a concrete host, but the broker is the last admission
+    authority. Rejecting a worse borrowed role while a better compatible node
+    is idle prevents stale client scoring from defeating the fleet partition.
+    Busy home-role capacity does not block borrowing; higher-priority waiters
+    and normal preemption rules handle that case.
+    """
+    current_rank = reserve_role_rank(workload_class, current.reserve_role)
+    candidates = [
+        node
+        for node in nodes
+        if str(node.physical_resource_id) != str(current.physical_resource_id)
+        and _node_supports(node, workload_class)
+        and bool(node.accepting)
+        and str(node.physical_resource_id) not in active_by_resource
+        and reserve_role_rank(workload_class, node.reserve_role) < current_rank
+    ]
+    candidates.sort(
+        key=lambda node: (
+            reserve_role_rank(workload_class, node.reserve_role),
+            str(node.physical_resource_id),
+        )
+    )
+    return candidates[0] if candidates else None
 
 
 async def _upsert_waiter(
@@ -776,9 +888,23 @@ async def _reconcile_autorig_reserve(db: AsyncSession, now: datetime) -> int:
         and lease.workload_class != WORKLOAD_CLASS_AUTORIG
         and lease.state == "active"
     ]
-    # Recall the lowest priority/progress work first; AI is last but is still
-    # recallable when needed to restore the hard two-slot AutoRig reserve.
-    victims.sort(key=lambda lease: (WORKLOAD_CLASS_PRIORITY.get(lease.workload_class, 999), lease.priority, lease.acquired_at), reverse=True)
+    role_by_resource = {
+        str(node.physical_resource_id): node.reserve_role for node in full_nodes
+    }
+    # Restore an AutoRig-primary slot before recalling borrowed work from the
+    # AI-primary pool. Within the same role, lowest-priority/newest work yields
+    # first. AI remains recallable only when required by the hard reserve.
+    victims.sort(
+        key=lambda lease: (
+            reserve_role_rank(
+                WORKLOAD_CLASS_AUTORIG,
+                role_by_resource.get(str(lease.physical_resource_id), "shared"),
+            ),
+            -WORKLOAD_CLASS_PRIORITY.get(lease.workload_class, 999),
+            -int(lease.priority or 0),
+            -(lease.acquired_at.timestamp() if lease.acquired_at else 0.0),
+        )
+    )
     for lease in victims[:missing]:
         await _mark_preemption(lease, reason="autorig_reserve_recall", now=now)
     return min(missing, len(victims))
@@ -946,6 +1072,27 @@ async def acquire_lease(
             < reserve_admission_target
         )
 
+        preferred_idle = _preferred_idle_node(
+            current=node,
+            workload_class=workload_class,
+            nodes=fresh_nodes,
+            active_by_resource=active_by_resource,
+        )
+        if preferred_idle is not None:
+            await db.commit()
+            return 423, {
+                "status_string": "preferred_role_available",
+                "error_code_string": "preferred_role_available",
+                "retryable_bool": True,
+                "retry_after_seconds_int": 1,
+                "preferred_physical_resource_id_string": str(
+                    preferred_idle.physical_resource_id
+                ),
+                "preferred_reserve_role_string": normalize_reserve_role(
+                    preferred_idle.reserve_role
+                ),
+            }
+
         blocker = await _blocking_waiter(
             db,
             current=waiter,
@@ -966,7 +1113,9 @@ async def acquire_lease(
         if active is not None:
             incoming_rank = WORKLOAD_CLASS_PRIORITY[workload_class]
             active_rank = WORKLOAD_CLASS_PRIORITY.get(active.workload_class, 999)
-            if active.state == "preemption_requested" and incoming_rank < active_rank:
+            incoming_order = (incoming_rank, requested_priority)
+            active_order = (active_rank, int(active.priority or 0))
+            if active.state == "preemption_requested" and incoming_order < active_order:
                 await db.commit()
                 return 423, {
                     "status_string": "preemption_requested",
@@ -974,7 +1123,11 @@ async def acquire_lease(
                     "retry_after_seconds_int": 2,
                     "victim_lease_by_key": _lease_payload(active),
                 }
-            may_preempt = incoming_rank < active_rank
+            # Gateway urgency is a strict sub-priority inside AI Vision:
+            # p0 can recall p90, while p90 can never recall p0. The same tuple
+            # is already used for durable waiter ordering, so queued and active
+            # admission cannot contradict each other.
+            may_preempt = incoming_order < active_order
             if workload_class == WORKLOAD_CLASS_AI and active.workload_class == WORKLOAD_CLASS_AUTORIG and demand > 0:
                 other_usable = _autorig_usable_full_count(
                     fresh_nodes,
@@ -1277,6 +1430,7 @@ async def broker_status(db: AsyncSession, *, now: Optional[datetime] = None) -> 
                 {
                     "physical_resource_id_string": node.physical_resource_id,
                     "node_id_string": node.node_id,
+                    "reserve_role_string": normalize_reserve_role(node.reserve_role),
                     "accepting_ai_vision_bool": bool(
                         node in ai_accepting
                     ),
@@ -1542,13 +1696,51 @@ async def _worker_identity(
     endpoint = endpoint_result.scalar_one_or_none()
     parsed = re.sub(r"^converter-", "", str(urlparse(worker_url).hostname or "").lower())
     parsed = parsed.split(".", 1)[0]
-    physical = canonical_physical_resource_id(
-        (endpoint.physical_resource_id if endpoint is not None else "")
-        or node_status.get("physical_resource_id_string")
+    control = (
+        node_status.get("workload_control")
+        if isinstance(node_status.get("workload_control"), dict)
+        else {}
+    )
+    reported_physical = canonical_physical_resource_id(
+        node_status.get("physical_resource_id_string")
         or node_status.get("physical_gpu_id")
         or node_status.get("physical_node")
-        or parsed
+        or control.get("physical_node")
     )
+    configured_physical = canonical_physical_resource_id(
+        endpoint.physical_resource_id if endpoint is not None else ""
+    )
+    reported_role = normalize_reserve_role(
+        node_status.get("reserve_role_string")
+        or node_status.get("workload_role")
+        or node_status.get("workload_role_string")
+        or control.get("workload_role"),
+        missing=RESERVE_ROLE_MAINTENANCE,
+    )
+    configured_role = normalize_reserve_role(
+        endpoint.role if endpoint is not None else "",
+        missing=RESERVE_ROLE_MAINTENANCE,
+    )
+    identity_error = ""
+    if _enabled():
+        if endpoint is None:
+            identity_error = "worker_endpoint_not_registered"
+        elif not _STABLE_MACHINE_RE.fullmatch(configured_physical):
+            identity_error = "worker_config_physical_identity_unverified"
+        elif not _STABLE_MACHINE_RE.fullmatch(reported_physical):
+            identity_error = "worker_live_physical_identity_unverified"
+        elif configured_physical != reported_physical:
+            identity_error = "worker_physical_identity_mismatch"
+        elif configured_role != reported_role:
+            identity_error = "worker_role_mismatch"
+    if identity_error:
+        physical = ""
+    elif reported_physical:
+        physical = reported_physical
+    elif configured_physical:
+        physical = configured_physical
+    else:
+        physical = parsed
     node_id = _safe_identifier(
         node_status.get("node_id_string")
         or node_status.get("node_name")
@@ -1556,6 +1748,12 @@ async def _worker_identity(
         or physical
     )
     snapshot = dict(node_status or {})
+    if identity_error:
+        snapshot["_identity_error_string"] = identity_error
+        snapshot["healthy_bool"] = False
+        snapshot["accepting_bool"] = False
+        snapshot["reserve_role_string"] = RESERVE_ROLE_MAINTENANCE
+        return node_id, "", snapshot
     snapshot.setdefault("node_kind_string", "managed_farm")
     snapshot.setdefault("managed_farm_bool", True)
     snapshot.setdefault("full_converter_bool", True)
@@ -1565,7 +1763,8 @@ async def _worker_identity(
         not _bool_from(snapshot, ("maintenance_bool", "maintenance"), False),
     )
     if endpoint is not None:
-        snapshot.setdefault("reserve_role_string", str(endpoint.role or "shared"))
+        snapshot["reserve_role_string"] = configured_role
+    snapshot["physical_resource_id_string"] = physical
     return node_id, physical, snapshot
 
 
@@ -1581,6 +1780,16 @@ async def acquire_task_workload_lease(
     if not _enabled():
         return True, {}
     node_id, physical, snapshot = await _worker_identity(db, worker_url, node_status)
+    if not physical:
+        return False, {
+            "status_string": str(
+                snapshot.get("_identity_error_string")
+                or "worker_identity_unverified"
+            ),
+            "error_code_string": "worker_identity_unverified",
+            "retryable_bool": True,
+            "retry_after_seconds_int": 5,
+        }
     workload_class = task_workload_class(task)
     await node_heartbeat(
         db,

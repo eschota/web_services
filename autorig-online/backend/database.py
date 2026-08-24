@@ -1467,6 +1467,17 @@ async def init_db():
             await _try_add_column(
                 "ALTER TABLE worker_endpoints ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '{}'"
             )
+            # Canonical host/arbiter spelling. The former admin-only alias is
+            # migrated in place so one physical node cannot advertise two
+            # logical reserve roles after the workload broker is enabled.
+            await conn.exec_driver_sql(
+                "UPDATE worker_endpoints SET role='ai_vision_primary' "
+                "WHERE lower(role)='ai_primary'"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE workload_node_states SET reserve_role='ai_vision_primary' "
+                "WHERE lower(reserve_role)='ai_primary'"
+            )
             try:
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_worker_endpoints_physical_resource_id "
@@ -2034,6 +2045,14 @@ async def init_db():
             )
             await _try_add_column_any(
                 "ALTER TABLE worker_endpoints ADD COLUMN IF NOT EXISTS capabilities_json TEXT NOT NULL DEFAULT '{}'"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE worker_endpoints SET role='ai_vision_primary' "
+                "WHERE lower(role)='ai_primary'"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE workload_node_states SET reserve_role='ai_vision_primary' "
+                "WHERE lower(reserve_role)='ai_primary'"
             )
             try:
                 await conn.exec_driver_sql(

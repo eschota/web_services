@@ -5,9 +5,11 @@ import asyncio
 import hashlib
 import io
 import json
+import math
+import os
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 
 import aiosqlite
@@ -35,17 +37,139 @@ class ManagedComfyCleanupPending(RuntimeError):
     """Host registration may exist; keep lease/binding until exact cleanup."""
 
 
-def _host_terminal_outcome(payload: Dict[str, Any]) -> str:
-    value = str(
-        payload.get("outcome_string")
-        or payload.get("status_string")
-        or payload.get("state_string")
-        or payload.get("status")
+def _host_terminal_outcome(
+    payload: Dict[str, Any],
+    task: Optional[RenderTask] = None,
+    *,
+    action: str = "host_control",
+) -> str:
+    """Return only a terminal receipt that belongs to this exact task.
+
+    The task-less form is retained for status-normalization tests. Every queue
+    control path supplies ``task`` so an authenticated-but-mismatched host
+    response is retryable and cannot mutate a different logical prompt.
+    """
+
+    if task is None:
+        return workload_lease.host_comfy_terminal_outcome(payload)
+    return workload_lease.validate_host_comfy_terminal_receipt(
+        payload,
+        action=action,
+        prompt_id=task.comfy_prompt_id,
+        logical_task_id=task.id,
+        lease_id=task.workload_lease_id,
+        request_id=task.workload_request_id,
+    )
+
+
+def _finite_number(value: Any) -> Optional[float]:
+    """Parse a finite number without accepting booleans or NaN/Infinity."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _host_managed_progress(
+    payload: Dict[str, Any], task: RenderTask, *, now: Optional[float] = None
+) -> Dict[str, Any]:
+    """Normalize an authenticated exact host stale/progress observation.
+
+    Host releases may add fields over time.  Accept a small set of aliases but
+    never let a malformed or mismatched response reset the watchdog or recall a
+    different prompt.  Volatile heartbeat/expiry timestamps deliberately do
+    not participate in the progress signature.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    if not workload_lease.host_comfy_receipt_matches(
+        payload,
+        prompt_id=task.comfy_prompt_id,
+        logical_task_id=task.id,
+        lease_id=task.workload_lease_id,
+        request_id=task.workload_request_id,
+    ):
+        return {}
+    entry = workload_lease.host_comfy_receipt_entry(payload)
+
+    def first(*keys: str) -> str:
+        for key in keys:
+            value = entry.get(key)
+            if value is None:
+                value = payload.get(key)
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    progress = entry.get("progress_by_key")
+    progress = progress if isinstance(progress, dict) else entry
+    state = first("state", "state_string", "status", "status_string").lower()
+    stage = str(
+        progress.get("current_stage_string")
+        or progress.get("current_stage")
+        or progress.get("stage_string")
+        or progress.get("stage")
         or ""
-    ).strip().lower()
-    if value in {"completed", "preempted", "released"}:
-        return value
-    return ""
+    ).strip()[:160]
+    marker = str(
+        progress.get("progress_marker_string")
+        or progress.get("progress_marker")
+        or ""
+    ).strip()[:240]
+    percent = _finite_number(
+        progress.get("progress_percent")
+        if "progress_percent" in progress
+        else progress.get("progress_percent_float")
+    )
+    if percent is not None and not 0 <= percent <= 100:
+        percent = None
+    signature_parts = {
+        "state": state if state not in {"stale", "artifact_pending"} else "",
+        "stage": stage,
+        "marker": marker,
+    }
+    signature = json.dumps(signature_parts, sort_keys=True, separators=(",", ":"))
+    if not any(signature_parts.values()):
+        signature = ""
+
+    current = float(now if now is not None else time.time())
+    host_progress_at = _finite_number(
+        progress.get("last_progress_at")
+        if "last_progress_at" in progress
+        else progress.get("last_progress_at_utc_timestamp")
+    )
+    # A host clock far in the future could postpone recovery indefinitely.  An
+    # observation before this exact prompt started is equally non-authoritative.
+    if host_progress_at is not None and not (
+        max(0.0, float(task.started_at or 0) - 60.0)
+        <= host_progress_at
+        <= current + 60.0
+    ):
+        host_progress_at = None
+    no_progress_seconds = _finite_number(
+        progress.get("no_progress_seconds")
+        if "no_progress_seconds" in progress
+        else progress.get("stale_for_seconds")
+    )
+    if no_progress_seconds is not None and no_progress_seconds < 0:
+        no_progress_seconds = None
+    stale_at = _finite_number(entry.get("stale_at"))
+    stale_bool = entry.get("stale_bool") is True or entry.get("stale") is True
+    return {
+        "state": state,
+        "stage": stage,
+        "marker": marker,
+        "signature": signature,
+        "percent": percent,
+        "last_progress_at": host_progress_at,
+        "no_progress_seconds": no_progress_seconds,
+        "stale": bool(state == "stale" or stale_bool),
+        "stale_at": stale_at,
+    }
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS render_tasks (
@@ -68,6 +192,105 @@ def _jpeg_sibling(png_path: Path) -> None:
             rgb.save(png_path.with_suffix(".jpg"), "JPEG", quality=85)
     except Exception as exc:
         print(f"[Renderfin][Queue] jpeg sibling failed for {png_path.name}: {exc}")
+
+
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | int(getattr(os, "O_DIRECTORY", 0))
+    try:
+        descriptor = os.open(str(path), flags)
+    except OSError as exc:
+        if os.name == "nt":
+            return
+        raise workload_lease.HostComfyArtifactWait(
+            "central_managed_comfy_directory_fsync_open_failed", 2
+        ) from exc
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as exc:
+            if os.name != "nt":
+                raise workload_lease.HostComfyArtifactWait(
+                    "central_managed_comfy_directory_fsync_failed", 2
+                ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_fsync_bytes(path: Path, data: bytes) -> tuple[str, int]:
+    """Persist task-owned bytes before an exact host artifact ACK."""
+
+    if not data or len(data) > 512 * 1024 * 1024:
+        raise workload_lease.HostComfyArtifactWait(
+            "central_managed_comfy_artifact_size_invalid", 2
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(
+        f".{path.name}.{uuid.uuid4().hex}.managed-comfy-part"
+    )
+    digest = hashlib.sha256(data).hexdigest()
+    try:
+        with temporary.open("xb") as sink:
+            sink.write(data)
+            sink.flush()
+            os.fsync(sink.fileno())
+        os.replace(str(temporary), str(path))
+        _fsync_directory(path.parent)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    if not workload_lease.verify_central_artifact(
+        path, expected_sha256=digest, expected_size=len(data)
+    ):
+        raise workload_lease.HostComfyArtifactWait(
+            "central_managed_comfy_artifact_verify_failed", 2
+        )
+    return digest, len(data)
+
+
+def _managed_artifact_relative_path(artifact: Dict[str, str]) -> str:
+    """Build the canonical host output-relative path accepted by spool v1."""
+
+    if str(artifact.get("type") or "output").strip().lower() != "output":
+        raise workload_lease.HostComfyArtifactWait(
+            "managed_comfy_artifact_not_output", 10
+        )
+    filename = str(artifact.get("filename") or "").strip().replace("\\", "/")
+    subfolder = str(artifact.get("subfolder") or "").strip().replace("\\", "/")
+    raw = "/".join(part for part in (subfolder.strip("/"), filename) if part)
+    relative = PurePosixPath(raw)
+    if (
+        not raw
+        or relative.is_absolute()
+        or ":" in raw
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or relative.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}
+    ):
+        raise workload_lease.HostComfyArtifactWait(
+            "managed_comfy_artifact_path_not_allowlisted", 10
+        )
+    return relative.as_posix()
+
+
+def _bundle_receipt_id(task: RenderTask) -> str:
+    """Return a deterministic receipt for every centrally durable bundle file."""
+
+    payload = {
+        "protocol": workload_lease.MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL,
+        "prompt_id": task.comfy_prompt_id,
+        "logical_task_id": task.id,
+        "lease_id": task.workload_lease_id,
+        "request_id": task.workload_request_id,
+        "primary_sha256": task.artifact_sha256,
+        "primary_size_int": task.managed_comfy_artifact_size_int,
+        "isolated_sha256": task.managed_comfy_isolated_sha256,
+        "isolated_size_int": task.managed_comfy_isolated_size_int,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"renderfin_bundle_v1_{digest}"
 
 
 class RenderQueue:
@@ -307,6 +530,71 @@ class RenderQueue:
             self._last_dispatch = now
         await self._poll_rendering()
 
+    @staticmethod
+    def _uses_managed_artifact_spool(
+        task: RenderTask, server: RenderServer
+    ) -> bool:
+        # Once a durable handshake has started, status-probe drift cannot send
+        # the task back through legacy /view + /complete.
+        return bool(task.managed_comfy_artifact_spool_state) or bool(
+            task.managed_prompt
+            and task.workload_lease_id
+            and getattr(
+                server, "managed_comfy_artifact_spool_required_bool", False
+            )
+        )
+
+    @staticmethod
+    def _managed_bundle_is_durable(task: RenderTask) -> bool:
+        if not (
+            task.output_path
+            and workload_lease.verify_central_artifact(
+                Path(task.output_path),
+                expected_sha256=task.artifact_sha256,
+                expected_size=task.managed_comfy_artifact_size_int,
+            )
+        ):
+            return False
+        ptype = str(task.prompt.type or "").strip().lower()
+        if ptype in {"t_pose", "t_poses"}:
+            return bool(
+                task.managed_comfy_isolated_output_path
+                and workload_lease.verify_central_artifact(
+                    Path(task.managed_comfy_isolated_output_path),
+                    expected_sha256=task.managed_comfy_isolated_sha256,
+                    expected_size=task.managed_comfy_isolated_size_int,
+                )
+            )
+        return True
+
+    async def _ack_managed_artifact(
+        self, task: RenderTask, server: RenderServer
+    ) -> Dict[str, Any]:
+        assert self._client is not None
+        if not self._managed_bundle_is_durable(task):
+            raise workload_lease.HostComfyArtifactWait(
+                "central_managed_comfy_bundle_not_durable", 2
+            )
+        expected_receipt = _bundle_receipt_id(task)
+        if (
+            task.managed_comfy_central_persistence_receipt_id_string
+            != expected_receipt
+        ):
+            raise workload_lease.HostComfyArtifactWait(
+                "central_managed_comfy_bundle_receipt_mismatch", 2
+            )
+        return await workload_lease.host_comfy_ack_artifact(
+            self._client,
+            server=server,
+            prompt_id=task.comfy_prompt_id,
+            logical_task_id=task.id,
+            lease_id=task.workload_lease_id,
+            request_id=task.workload_request_id,
+            artifact_sha256=task.artifact_sha256,
+            artifact_size_int=task.managed_comfy_artifact_size_int,
+            central_persistence_receipt_id_string=expected_receipt,
+        )
+
     async def _reconcile_terminal_leases(self) -> None:
         """Finish a lost-response completion handshake after restart."""
         if self._client is None:
@@ -325,18 +613,27 @@ class RenderQueue:
             if server is None:
                 continue
             try:
-                result = await workload_lease.host_comfy_control(
-                    self._client,
-                    server=server,
-                    action="complete",
-                    prompt_id=task.comfy_prompt_id,
-                    logical_task_id=task.id,
-                    lease_id=task.workload_lease_id,
-                    request_id=task.workload_request_id,
-                    artifact_sha256=task.artifact_sha256,
-                )
-                if _host_terminal_outcome(result) != "completed":
-                    continue
+                if self._uses_managed_artifact_spool(task, server):
+                    result = await self._ack_managed_artifact(task, server)
+                    if _host_terminal_outcome(
+                        result, task, action="ack"
+                    ) != "completed":
+                        continue
+                else:
+                    result = await workload_lease.host_comfy_control(
+                        self._client,
+                        server=server,
+                        action="complete",
+                        prompt_id=task.comfy_prompt_id,
+                        logical_task_id=task.id,
+                        lease_id=task.workload_lease_id,
+                        request_id=task.workload_request_id,
+                        artifact_sha256=task.artifact_sha256,
+                    )
+                    if _host_terminal_outcome(
+                        result, task, action="complete"
+                    ) != "completed":
+                        continue
                 await self._release_workload(task, outcome="completed")
             except Exception as exc:
                 print(
@@ -348,8 +645,11 @@ class RenderQueue:
         assert self._client is not None
         for server in self.registry.all():
             online = await comfy_adapter.check_server_online(self._client, server)
-            new_status = "online" if online else "offline"
-            if server.status != new_status:
+            identity_ok = await workload_lease.refresh_managed_identity(
+                self._client, server
+            )
+            new_status = "online" if online and identity_ok else "offline"
+            if server.status != new_status or workload_lease.managed_server(server):
                 server.status = new_status
                 self.registry.save(server)
 
@@ -402,8 +702,15 @@ class RenderQueue:
                 == task.workload_physical_resource_id
             ]
             return bound[0] if bound else None
+        workload_class = str(
+            getattr(task, "workload_class", "") or "comfy"
+        )
         candidates.sort(
             key=lambda s: (
+                workload_lease.server_role_rank(
+                    workload_class,
+                    getattr(s, "reserve_role_string", "shared"),
+                ),
                 depths.get(s.render_server_name, _UNKNOWN_DEPTH),
                 s.average_render_time or 1e9,
             )
@@ -579,6 +886,22 @@ class RenderQueue:
             task.workload_lease_state = "waiting"
             task.workload_heartbeat_at = 0
             task.managed_prompt = False
+            task.managed_comfy_progress_signature = ""
+            task.managed_comfy_progress_percent = -1.0
+            task.managed_comfy_last_progress_at = 0
+            task.managed_comfy_host_stale_at = 0
+            task.managed_comfy_watchdog_requested_at = 0
+            task.artifact_sha256 = ""
+            task.output_path = ""
+            task.extra_outputs = {}
+            task.managed_comfy_artifact_spool_state = ""
+            task.managed_comfy_artifact_relative_path_string = ""
+            task.managed_comfy_artifact_size_int = 0
+            task.managed_comfy_artifact_spool_protocol_string = ""
+            task.managed_comfy_central_persistence_receipt_id_string = ""
+            task.managed_comfy_isolated_output_path = ""
+            task.managed_comfy_isolated_sha256 = ""
+            task.managed_comfy_isolated_size_int = 0
             # This commit retires the old prompt/binding before its central
             # lease is released. A crash can therefore delay capacity via TTL,
             # but can never make old and new prompts run concurrently.
@@ -615,6 +938,174 @@ class RenderQueue:
                 task.workload_node_id = ""
                 task.workload_heartbeat_at = 0
         await self._persist(task)
+
+    async def _managed_watchdog_reason(
+        self,
+        task: RenderTask,
+        host_status: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Persist real progress and return a reason when exact recall is due."""
+        now = time.time()
+        timeout = max(
+            60.0, float(config.MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS or 3600)
+        )
+        dirty = False
+        observation = _host_managed_progress(host_status or {}, task, now=now)
+        if observation:
+            stale_at = observation.get("stale_at")
+            if (
+                observation.get("stale")
+                and isinstance(stale_at, (int, float))
+                and max(0.0, float(task.started_at or 0) - 60.0)
+                <= float(stale_at)
+                <= now + 60.0
+                and float(stale_at) > task.managed_comfy_host_stale_at
+            ):
+                task.managed_comfy_host_stale_at = float(stale_at)
+                dirty = True
+
+            signature = str(observation.get("signature") or "")
+            previous_signature = task.managed_comfy_progress_signature
+            advanced = False
+            if signature and signature != previous_signature:
+                task.managed_comfy_progress_signature = signature
+                dirty = True
+                # An initial observation after a service upgrade is not proof
+                # that progress happened now.  A later state/stage/marker
+                # change is.  Percentage >0 and an explicit host timestamp are
+                # handled independently below.
+                if previous_signature and (
+                    str(observation.get("state") or "")
+                    in {"running", "rendering", "executing", "processing"}
+                    or bool(observation.get("stage"))
+                    or bool(observation.get("marker"))
+                ):
+                    advanced = True
+
+            percent = observation.get("percent")
+            if isinstance(percent, (int, float)):
+                percent = float(percent)
+                if percent > task.managed_comfy_progress_percent:
+                    if percent > 0:
+                        advanced = True
+                    task.managed_comfy_progress_percent = percent
+                    dirty = True
+
+            host_progress_at = observation.get("last_progress_at")
+            if isinstance(host_progress_at, (int, float)) and float(
+                host_progress_at
+            ) > task.managed_comfy_last_progress_at:
+                task.managed_comfy_last_progress_at = float(host_progress_at)
+                dirty = True
+                advanced = False  # the authoritative host time already won
+            elif advanced:
+                task.managed_comfy_last_progress_at = now
+                dirty = True
+
+        if not task.managed_comfy_last_progress_at and task.started_at:
+            # Establish the durable baseline without manufacturing progress.
+            task.managed_comfy_last_progress_at = float(task.started_at)
+            dirty = True
+        if dirty:
+            await self._persist(task)
+
+        if observation.get("stale"):
+            return "host_reported_stale"
+        host_no_progress = observation.get("no_progress_seconds")
+        if isinstance(host_no_progress, (int, float)) and float(
+            host_no_progress
+        ) >= timeout:
+            return f"host_no_progress_{float(host_no_progress):.0f}s"
+        baseline = float(
+            task.managed_comfy_last_progress_at or task.started_at or 0
+        )
+        if baseline and now - baseline >= timeout:
+            return f"central_no_progress_{now - baseline:.0f}s"
+        return ""
+
+    async def _recall_managed_prompt(
+        self,
+        task: RenderTask,
+        server: RenderServer,
+        *,
+        reason: str,
+    ) -> None:
+        """Exactly stop one managed prompt and retry the same logical task.
+
+        A missing/ambiguous acknowledgement keeps the old binding fail-closed.
+        Host Completed always wins and follows the old prompt to its artifact.
+        """
+        old_prompt_id = str(task.comfy_prompt_id or "")
+        now = time.time()
+        if (
+            task.managed_comfy_watchdog_requested_at
+            and now - task.managed_comfy_watchdog_requested_at < 15.0
+        ):
+            return
+        task.managed_comfy_watchdog_requested_at = now
+        await self._persist(task)
+        try:
+            host_result = await workload_lease.host_comfy_control(
+                self._client,
+                server=server,
+                action="preempt",
+                prompt_id=old_prompt_id,
+                logical_task_id=task.id,
+                lease_id=task.workload_lease_id,
+                request_id=task.workload_request_id,
+            )
+            host_outcome = _host_terminal_outcome(
+                host_result, task, action="preempt"
+            )
+        except Exception as exc:
+            print(
+                f"[Renderfin][Queue] managed watchdog proof deferred for "
+                f"{task.id}/{old_prompt_id}: {exc}"
+            )
+            return
+
+        # The authenticated bridge is necessary but not sufficient proof: its
+        # terminal receipt must echo all four identities for this exact prompt.
+        if not _host_managed_progress(host_result, task):
+            print(
+                f"[Renderfin][Queue] managed watchdog exact receipt missing for "
+                f"{task.id}/{old_prompt_id}: {host_result}"
+            )
+            return
+        if host_outcome == "completed":
+            try:
+                state, entry = await comfy_adapter.poll_history(
+                    self._client, server, old_prompt_id
+                )
+                if state not in {"success", "completed"}:
+                    print(
+                        f"[Renderfin][Queue] watchdog Completed for {task.id} "
+                        f"but history is {state}; retaining exact binding"
+                    )
+                    return
+                await self._finish(
+                    task, server, entry or {}, skip_lease_heartbeat=True
+                )
+            except Exception as exc:
+                # Completion is authoritative; artifact transport failure must
+                # not turn it into a second render or spend a retry.
+                print(
+                    f"[Renderfin][Queue] watchdog completed artifact deferred "
+                    f"for {task.id}: {exc}"
+                )
+            return
+        if host_outcome not in {"preempted", "released"}:
+            print(
+                f"[Renderfin][Queue] managed watchdog outcome ambiguous for "
+                f"{task.id}/{old_prompt_id}: {host_result}"
+            )
+            return
+
+        await self._release_workload(task, outcome="preempted", retry=True)
+        print(
+            f"[Renderfin][Queue] managed watchdog recalled {old_prompt_id} "
+            f"({reason}); same task {task.id} returned Pending attempt-neutrally"
+        )
 
     async def _submit_task(self, task: RenderTask, server: RenderServer) -> None:
         assert self._client is not None
@@ -654,6 +1145,16 @@ class RenderQueue:
         task.server_name = server.render_server_name
         task.status = TASK_RENDERING
         task.started_at = time.time()
+        if task.managed_prompt and task.workload_lease_id:
+            task.managed_comfy_progress_signature = json.dumps(
+                {"state": "submitted", "stage": "", "marker": ""},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            task.managed_comfy_progress_percent = -1.0
+            task.managed_comfy_last_progress_at = task.started_at
+            task.managed_comfy_host_stale_at = 0
+            task.managed_comfy_watchdog_requested_at = 0
         # Durable identity first: the host registration and Comfy submit both
         # use this caller-supplied prompt_id. A crash never leaves an accepted
         # prompt that the Renderfin DB cannot identify.
@@ -678,6 +1179,17 @@ class RenderQueue:
                     lease_id=task.workload_lease_id,
                     request_id=task.workload_request_id,
                 )
+                registration_outcome = _host_terminal_outcome(
+                    registration, task, action="register"
+                )
+            except workload_lease.HostComfyReceiptMismatch as exc:
+                # The host may have processed register, but its response cannot
+                # prove which prompt reached a terminal boundary. Preserve the
+                # exact binding and retry the idempotent registration.
+                task.started_at = 0
+                task.managed_comfy_last_progress_at = 0
+                await self._persist(task)
+                raise ManagedComfyCleanupPending(str(exc)) from exc
             except workload_lease.WorkloadCapacityWait:
                 # A known retryable rejection means no host registration was
                 # granted. Retire the preallocated binding before releasing
@@ -691,11 +1203,11 @@ class RenderQueue:
                 # not receive the response. Preserve exact identity/lease and
                 # let reconciliation prove whether registration exists.
                 task.started_at = 0
+                task.managed_comfy_last_progress_at = 0
                 await self._persist(task)
                 raise ManagedComfyCleanupPending(
                     f"host register outcome unknown: {exc}"
                 ) from exc
-            registration_outcome = _host_terminal_outcome(registration)
             if registration_outcome in {"preempted", "released"}:
                 await self._release_workload(
                     task, outcome="preempted", retry=True
@@ -732,7 +1244,9 @@ class RenderQueue:
                         lease_id=task.workload_lease_id,
                         request_id=task.workload_request_id,
                     )
-                    if _host_terminal_outcome(cleanup) not in {
+                    if _host_terminal_outcome(
+                        cleanup, task, action="preempt"
+                    ) not in {
                         "preempted",
                         "released",
                     }:
@@ -775,6 +1289,21 @@ class RenderQueue:
                         f"missing for {task.id}; preserving exact binding"
                     )
                     continue
+                if task.managed_comfy_artifact_spool_state in {
+                    "prepared",
+                    "staged",
+                    "central_persisted",
+                    "acknowledged",
+                }:
+                    # Recovery no longer depends on Comfy /history once the
+                    # exact primary path and any required isolated companion
+                    # are durably recorded. Retry the same stage/GET/ACK
+                    # identity directly; do not let artifact_spooled heartbeat
+                    # gating hide the recovery path.
+                    self._finishers[task.id] = asyncio.create_task(
+                        self._finish_guarded(task, server, {})
+                    )
+                    continue
                 if task.managed_prompt and not task.host_comfy_registered:
                     try:
                         # The earlier register response was unknown. Retry the
@@ -796,6 +1325,8 @@ class RenderQueue:
                             f"closed for {task.id}: {exc}"
                         )
                     continue
+                host_heartbeat: Dict[str, Any] = {}
+                host_completion_proven = False
                 try:
                     await workload_lease.heartbeat(
                         self._client,
@@ -813,7 +1344,9 @@ class RenderQueue:
                         lease_id=task.workload_lease_id,
                         request_id=task.workload_request_id,
                     )
-                    host_heartbeat_outcome = _host_terminal_outcome(host_heartbeat)
+                    host_heartbeat_outcome = _host_terminal_outcome(
+                        host_heartbeat, task, action="heartbeat"
+                    )
                     if host_heartbeat_outcome in {"preempted", "released"}:
                         old_prompt_id = task.comfy_prompt_id
                         await self._release_workload(
@@ -824,6 +1357,8 @@ class RenderQueue:
                             f"{old_prompt_id}; same task {task.id} returned Pending"
                         )
                         continue
+                    if host_heartbeat_outcome == "completed":
+                        host_completion_proven = True
                     task.workload_heartbeat_at = time.time()
                 except (
                     workload_lease.WorkloadPreempted,
@@ -846,18 +1381,20 @@ class RenderQueue:
                             lease_id=task.workload_lease_id,
                             request_id=task.workload_request_id,
                         )
+                        host_outcome = _host_terminal_outcome(
+                            host_result, task, action="preempt"
+                        )
                     except Exception as exc:
                         print(
                             f"[Renderfin][Queue] fail-closed host preempt proof "
                             f"missing for {task.id}/{old_prompt_id}: {exc}"
                         )
                         continue
-                    host_outcome = _host_terminal_outcome(host_result)
                     if host_outcome == "completed":
                         # The prompt crossed its terminal boundary before the
                         # stop request. Continue to history/artifact download;
                         # durable completion will release central admission.
-                        pass
+                        host_completion_proven = True
                     elif host_outcome in {"preempted", "released"}:
                         await self._release_workload(
                             task, outcome="preempted", retry=True
@@ -875,11 +1412,33 @@ class RenderQueue:
                         continue
                 except workload_lease.WorkloadCapacityWait as exc:
                     print(f"[Renderfin][Queue] lease heartbeat wait {task.id}: {exc.status}")
+                    watchdog_reason = await self._managed_watchdog_reason(task)
+                    if watchdog_reason:
+                        await self._recall_managed_prompt(
+                            task, server, reason=watchdog_reason
+                        )
                     continue
                 except Exception as exc:
                     print(f"[Renderfin][Queue] lease heartbeat failed {task.id}: {exc}")
+                    watchdog_reason = await self._managed_watchdog_reason(task)
+                    if watchdog_reason:
+                        await self._recall_managed_prompt(
+                            task, server, reason=watchdog_reason
+                        )
                     continue
-            if time.time() - task.started_at > config.TASK_TIMEOUT_SECONDS:
+                if task.managed_prompt and not host_completion_proven:
+                    watchdog_reason = await self._managed_watchdog_reason(
+                        task, host_heartbeat
+                    )
+                    if watchdog_reason:
+                        await self._recall_managed_prompt(
+                            task, server, reason=watchdog_reason
+                        )
+                        continue
+            if (
+                not (task.managed_prompt and task.workload_lease_id)
+                and time.time() - task.started_at > config.TASK_TIMEOUT_SECONDS
+            ):
                 await self._fail(task, "render timeout")
                 continue
             server = self.registry.get(task.server_name)
@@ -918,13 +1477,15 @@ class RenderQueue:
                             lease_id=task.workload_lease_id,
                             request_id=task.workload_request_id,
                         )
+                        host_outcome = _host_terminal_outcome(
+                            host_result, task, action="preempt"
+                        )
                     except Exception as exc:
                         print(
                             f"[Renderfin][Queue] vanished prompt {task.id} "
                             f"not retired without host proof: {exc}"
                         )
                         continue
-                    host_outcome = _host_terminal_outcome(host_result)
                     if host_outcome == "completed":
                         # History may lag the host terminal ledger. Keep the
                         # exact old identity and retry; never create hidden work.
@@ -976,7 +1537,10 @@ class RenderQueue:
                 await self._finish(task, server, entry)
         except asyncio.CancelledError:
             raise
-        except comfy_adapter.ComfyCapacityWait as exc:
+        except (
+            comfy_adapter.ComfyCapacityWait,
+            workload_lease.WorkloadCapacityWait,
+        ) as exc:
             # The prompt has already completed and its history entry is durable,
             # but a shared node may grant Hunyuan the GPU lease before we fetch
             # /view.  Keep following the same prompt: once Comfy is restored the
@@ -1002,7 +1566,9 @@ class RenderQueue:
                     lease_id=task.workload_lease_id,
                     request_id=task.workload_request_id,
                 )
-                host_outcome = _host_terminal_outcome(host_result)
+                host_outcome = _host_terminal_outcome(
+                    host_result, task, action="preempt"
+                )
                 if host_outcome == "completed":
                     await self._finish(
                         task, server, entry, skip_lease_heartbeat=True
@@ -1036,6 +1602,9 @@ class RenderQueue:
         skip_lease_heartbeat: bool = False,
     ) -> None:
         assert self._client is not None
+        if self._uses_managed_artifact_spool(task, server):
+            await self._finish_managed_spooled(task, server, entry)
+            return
         preferred = ""
         ptype = (task.prompt.type or "").strip().lower()
         if ptype in ("t_pose", "t_poses", "inpaint"):
@@ -1069,7 +1638,7 @@ class RenderQueue:
                 server=server,
                 ttl_seconds=900,
             )
-            await workload_lease.host_comfy_control(
+            host_heartbeat = await workload_lease.host_comfy_control(
                 self._client,
                 server=server,
                 action="heartbeat",
@@ -1079,6 +1648,7 @@ class RenderQueue:
                 request_id=task.workload_request_id,
                 ttl_seconds=900,
             )
+            _host_terminal_outcome(host_heartbeat, task, action="heartbeat")
         data = await comfy_adapter.download_artifact(self._client, server, primary)
         out_path = user_dir / f"{task.id}{task.output_ext}"
         out_path.write_bytes(data)
@@ -1115,7 +1685,7 @@ class RenderQueue:
         await self._persist(task)
         if task.workload_lease_id:
             try:
-                await workload_lease.host_comfy_control(
+                completion = await workload_lease.host_comfy_control(
                     self._client,
                     server=server,
                     action="complete",
@@ -1125,6 +1695,12 @@ class RenderQueue:
                     request_id=task.workload_request_id,
                     artifact_sha256=task.artifact_sha256,
                 )
+                if _host_terminal_outcome(
+                    completion, task, action="complete"
+                ) != "completed":
+                    raise workload_lease.WorkloadCapacityWait(
+                        "host_comfy_complete_receipt_pending", 2
+                    )
                 await self._release_workload(task, outcome="completed")
             except Exception as exc:
                 print(
@@ -1132,6 +1708,208 @@ class RenderQueue:
                     f"deferred to watchdog/TTL: {exc}"
                 )
         print(f"[Renderfin][Queue] task {task.id} done in {elapsed:.0f}s -> {task.output_url}")
+
+    async def _finish_managed_spooled(
+        self,
+        task: RenderTask,
+        server: RenderServer,
+        entry: Dict[str, Any],
+    ) -> None:
+        """Complete the exact host spool v1 handshake without GPU ambiguity.
+
+        For t-pose, `_Isolated_` must be centrally fsynced first because the
+        v1 host spool intentionally accepts one artifact per four-part prompt
+        identity. The FULL primary is then staged, streamed to a central
+        fsynced file and ACKed with a deterministic receipt covering both.
+        """
+
+        assert self._client is not None
+        state = str(task.managed_comfy_artifact_spool_state or "").strip()
+        allowed_states = {
+            "",
+            "prepared",
+            "staged",
+            "central_persisted",
+            "acknowledged",
+        }
+        if state not in allowed_states:
+            raise workload_lease.HostComfyArtifactWait(
+                "central_managed_comfy_spool_state_invalid", 2
+            )
+        ptype = str(task.prompt.type or "").strip().lower()
+        user_dir = config.RENDER_DIR / task.prompt.user_name
+        user_dir.mkdir(parents=True, exist_ok=True)
+        out_path = user_dir / f"{task.id}{task.output_ext}"
+
+        if not task.managed_comfy_artifact_relative_path_string:
+            preferred = "_Isolated_" if ptype in {"t_pose", "t_poses", "inpaint"} else ""
+            artifacts = comfy_adapter.resolve_artifacts(
+                entry,
+                output_ext=task.output_ext,
+                preferred_fragment=preferred,
+            )
+            if not artifacts:
+                raise workload_lease.HostComfyArtifactWait(
+                    "central_managed_comfy_history_has_no_artifacts", 2
+                )
+            primary = artifacts[0]
+            if ptype in {"t_pose", "t_poses"}:
+                non_isolated = [
+                    artifact
+                    for artifact in artifacts
+                    if "_isolated_"
+                    not in str(artifact.get("filename") or "").lower()
+                ]
+                isolated = [
+                    artifact
+                    for artifact in artifacts
+                    if "_isolated_"
+                    in str(artifact.get("filename") or "").lower()
+                ]
+                if not non_isolated or not isolated:
+                    raise workload_lease.HostComfyArtifactWait(
+                        "central_managed_comfy_tpose_bundle_incomplete", 2
+                    )
+                primary = non_isolated[0]
+                # The singular spool cannot safely detach until this required
+                # companion exists durably on central storage.
+                isolated_data = await comfy_adapter.download_artifact(
+                    self._client, server, isolated[0]
+                )
+                isolated_path = user_dir / f"{task.id}_Isolated.png"
+                isolated_sha, isolated_size = _atomic_fsync_bytes(
+                    isolated_path, isolated_data
+                )
+                task.managed_comfy_isolated_output_path = str(isolated_path)
+                task.managed_comfy_isolated_sha256 = isolated_sha
+                task.managed_comfy_isolated_size_int = isolated_size
+                task.extra_outputs["isolated"] = (
+                    f"{config.PUBLIC_BASE_URL}/render/"
+                    f"{task.prompt.user_name}/{task.id}_Isolated.png"
+                )
+            task.managed_comfy_artifact_relative_path_string = (
+                _managed_artifact_relative_path(primary)
+            )
+            task.managed_comfy_artifact_spool_state = "prepared"
+            # Persist path provenance and the isolated checksum before stage:
+            # a crash after host detach can resume without /view.
+            await self._persist(task)
+            state = "prepared"
+
+        if ptype in {"t_pose", "t_poses"}:
+            if not (
+                task.managed_comfy_isolated_output_path
+                and workload_lease.verify_central_artifact(
+                    Path(task.managed_comfy_isolated_output_path),
+                    expected_sha256=task.managed_comfy_isolated_sha256,
+                    expected_size=task.managed_comfy_isolated_size_int,
+                )
+            ):
+                raise workload_lease.HostComfyArtifactWait(
+                    "central_managed_comfy_isolated_not_durable", 2
+                )
+            task.extra_outputs["isolated"] = (
+                f"{config.PUBLIC_BASE_URL}/render/"
+                f"{task.prompt.user_name}/{task.id}_Isolated.png"
+            )
+
+        if state == "prepared":
+            staged = await workload_lease.host_comfy_stage_artifact(
+                self._client,
+                server=server,
+                prompt_id=task.comfy_prompt_id,
+                logical_task_id=task.id,
+                lease_id=task.workload_lease_id,
+                request_id=task.workload_request_id,
+                artifact_relative_path_string=(
+                    task.managed_comfy_artifact_relative_path_string
+                ),
+            )
+            stage_outcome = _host_terminal_outcome(
+                staged, task, action="stage"
+            )
+            if stage_outcome == "completed":
+                # Completed wins and the old binding remains authoritative,
+                # but ACK can only have happened after a durable local record.
+                # With no such record here, fail closed instead of inventing
+                # persistence or re-rendering.
+                raise workload_lease.HostComfyArtifactWait(
+                    "host_comfy_stage_completed_without_central_receipt", 2
+                )
+            task.artifact_sha256 = str(
+                staged.get("artifact_sha256") or ""
+            ).strip().lower()
+            task.managed_comfy_artifact_size_int = int(
+                staged.get("artifact_size_int") or 0
+            )
+            task.managed_comfy_artifact_spool_protocol_string = str(
+                staged.get("artifact_spool_protocol_string") or ""
+            ).strip()
+            task.managed_comfy_artifact_spool_state = "staged"
+            await self._persist(task)
+            state = "staged"
+
+        if state == "staged":
+            await workload_lease.host_comfy_download_artifact(
+                self._client,
+                server=server,
+                prompt_id=task.comfy_prompt_id,
+                logical_task_id=task.id,
+                lease_id=task.workload_lease_id,
+                request_id=task.workload_request_id,
+                destination_path=out_path,
+                expected_sha256=task.artifact_sha256,
+                expected_size_int=task.managed_comfy_artifact_size_int,
+            )
+            task.output_path = str(out_path)
+            if task.output_ext == ".png":
+                _jpeg_sibling(out_path)
+            task.managed_comfy_central_persistence_receipt_id_string = (
+                _bundle_receipt_id(task)
+            )
+            task.managed_comfy_artifact_spool_state = "central_persisted"
+            # The fsynced bundle checksums and receipt must survive a process
+            # crash before the host is allowed to tombstone/delete its bytes.
+            await self._persist(task)
+            state = "central_persisted"
+
+        if state == "central_persisted":
+            acknowledgement = await self._ack_managed_artifact(task, server)
+            if _host_terminal_outcome(
+                acknowledgement, task, action="ack"
+            ) != "completed":
+                raise workload_lease.HostComfyArtifactWait(
+                    "host_comfy_artifact_ack_not_completed", 2
+                )
+            task.managed_comfy_artifact_spool_state = "acknowledged"
+            state = "acknowledged"
+
+        if state != "acknowledged" or not self._managed_bundle_is_durable(task):
+            raise workload_lease.HostComfyArtifactWait(
+                "central_managed_comfy_bundle_completion_unproven", 2
+            )
+
+        elapsed = max(0.0, time.time() - float(task.started_at or time.time()))
+        server.average_render_time = (
+            elapsed
+            if not server.average_render_time
+            else (server.average_render_time * 0.7 + elapsed * 0.3)
+        )
+        self.registry.save(server)
+        task.status = TASK_DONE
+        task.finished_at = time.time()
+        await self._persist(task)
+        try:
+            await self._release_workload(task, outcome="completed")
+        except Exception as exc:
+            print(
+                f"[Renderfin][Queue] spooled completion {task.id}; central "
+                f"lease release deferred to reconciliation/TTL: {exc}"
+            )
+        print(
+            f"[Renderfin][Queue] task {task.id} spooled bundle done in "
+            f"{elapsed:.0f}s -> {task.output_url}"
+        )
 
     async def _fail(self, task: RenderTask, error: str) -> None:
         if task.managed_prompt and task.workload_lease_id:
@@ -1166,6 +1944,9 @@ class RenderQueue:
                     lease_id=task.workload_lease_id,
                     request_id=task.workload_request_id,
                 )
+                host_outcome = _host_terminal_outcome(
+                    host_result, task, action="preempt"
+                )
             except Exception as exc:
                 # A timeout, bridge failure, or ambiguous response cannot
                 # authorize a DB Error transition or central lease release.
@@ -1177,7 +1958,6 @@ class RenderQueue:
                 await self._persist(task)
                 return
 
-            host_outcome = _host_terminal_outcome(host_result)
             if host_outcome == "completed":
                 # Completion wins the timeout/error race.  Keep the old prompt
                 # and lease, obtain its history entry, then use the normal
@@ -1186,7 +1966,7 @@ class RenderQueue:
                     state, entry = await comfy_adapter.poll_history(
                         self._client, server, task.comfy_prompt_id
                     )
-                    if state != "completed":
+                    if state not in {"success", "completed"}:
                         print(
                             f"[Renderfin][Queue] completed managed prompt "
                             f"{task.id} history is not ready ({state}); retaining binding"

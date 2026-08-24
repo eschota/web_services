@@ -7,9 +7,12 @@ stage deadlines; callers start those clocks only after a lease is persisted.
 """
 from __future__ import annotations
 
-import os
+import hashlib
 import json
+import os
 import re
+import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
@@ -17,11 +20,47 @@ import httpx
 from .models import RenderServer
 
 
+_STABLE_MACHINE_RE = re.compile(r"machine_[a-f0-9]{24,128}")
+_ALLOWED_WORKLOAD_ROLES = {
+    "ai_vision_primary",
+    "autorig_primary",
+    "shared",
+    "background_only",
+    "maintenance",
+}
+MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL = "autorig-managed-comfy-spool-v1"
+_ARTIFACT_SHA256_RE = re.compile(r"[a-f0-9]{64}")
+_MAX_MANAGED_COMFY_ARTIFACT_BYTES = 512 * 1024 * 1024
+
+
 class WorkloadCapacityWait(RuntimeError):
     def __init__(self, status: str, retry_after: int = 2):
         super().__init__(status or "workload capacity wait")
         self.status = status or "capacity_wait"
         self.retry_after = max(1, int(retry_after or 2))
+
+
+class HostComfyReceiptMismatch(WorkloadCapacityWait):
+    """An authenticated host terminal receipt did not name our exact work.
+
+    The bridge bearer authenticates the host, not an individual prompt.  A
+    terminal response is therefore authoritative only when it echoes the
+    prompt, logical task, central lease and request ids supplied by the caller.
+    Treat a missing/mismatched echo as an attempt-neutral retry while retaining
+    the old binding fail-closed.
+    """
+
+    def __init__(self, action: str, payload: Optional[Dict[str, Any]] = None):
+        self.action = str(action or "host_control").strip().lower()
+        self.payload = dict(payload or {})
+        super().__init__(f"host_comfy_{self.action}_receipt_mismatch", 2)
+
+
+class HostComfyArtifactWait(WorkloadCapacityWait):
+    """Fail-closed, attempt-neutral durable artifact handoff wait."""
+
+    def __init__(self, status: str, retry_after: int = 2):
+        super().__init__(str(status or "host_comfy_artifact_wait"), retry_after)
 
 
 class WorkloadPreempted(RuntimeError):
@@ -97,17 +136,281 @@ def _headers() -> Dict[str, str]:
 def _safe_node(value: Any) -> str:
     raw = str(value or "").strip().lower()
     if re.fullmatch(
-        r"(?:raptor|f7|farm-f7|ryzen-server|ryzen_server)(?:[-_:]?gpu[-_:]?0)",
+        r"(?:raptor|ryzen-server|ryzen_server)(?:[-_:]?gpu[-_:]?0)",
         raw,
     ):
         return "raptor"
     aliases = {
-        "f7": "raptor",
-        "farm-f7": "raptor",
         "ryzen-server": "raptor",
         "ryzen_server": "raptor",
     }
     return aliases.get(raw, raw)
+
+
+def _safe_role(value: Any) -> str:
+    role = str(value or "").strip().lower()
+    if role == "ai_primary":
+        role = "ai_vision_primary"
+    return role if role in _ALLOWED_WORKLOAD_ROLES else ""
+
+
+def verified_machine_role(physical: Any, role: Any) -> bool:
+    return bool(
+        _STABLE_MACHINE_RE.fullmatch(str(physical or "").strip().lower())
+        and _safe_role(role)
+    )
+
+
+def canonical_workload_role(role: Any) -> str:
+    return _safe_role(role)
+
+
+def host_comfy_terminal_outcome(payload: Dict[str, Any]) -> str:
+    """Return a host terminal outcome without implying receipt ownership."""
+
+    if not isinstance(payload, dict):
+        return ""
+    entry = host_comfy_receipt_entry(payload)
+    for source in (entry, payload):
+        value = str(
+            source.get("outcome_string")
+            or source.get("status_string")
+            or source.get("state_string")
+            or source.get("state")
+            or source.get("status")
+            or ""
+        ).strip().lower()
+        if value in {"completed", "preempted", "released"}:
+            return value
+        if source is payload:
+            break
+    return ""
+
+
+def host_comfy_receipt_entry(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the host prompt ledger entry from known response envelopes."""
+
+    if not isinstance(payload, dict):
+        return {}
+    for key in (
+        "managed_prompt_by_key",
+        "managed_comfy_prompt_by_key",
+        "prompt_by_key",
+    ):
+        candidate = payload.get(key)
+        if isinstance(candidate, dict):
+            return candidate
+    return payload
+
+
+def host_comfy_receipt_matches(
+    payload: Dict[str, Any],
+    *,
+    prompt_id: str,
+    logical_task_id: str,
+    lease_id: str,
+    request_id: str,
+) -> bool:
+    """Require the exact four-part identity from an authenticated host."""
+
+    if not isinstance(payload, dict):
+        return False
+    entry = host_comfy_receipt_entry(payload)
+
+    def first(*keys: str) -> str:
+        for key in keys:
+            value = entry.get(key)
+            if value is None:
+                value = payload.get(key)
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    actual = (
+        first("prompt_id", "prompt_id_string"),
+        first("logical_task_id", "logical_task_id_string"),
+        first(
+            "central_lease_id",
+            "central_lease_id_string",
+            "lease_id",
+            "lease_id_string",
+        ),
+        first("request_id", "request_id_string"),
+    )
+    expected = tuple(
+        str(value or "").strip()
+        for value in (prompt_id, logical_task_id, lease_id, request_id)
+    )
+    return bool(all(actual) and all(expected) and actual == expected)
+
+
+def validate_host_comfy_terminal_receipt(
+    payload: Dict[str, Any],
+    *,
+    action: str,
+    prompt_id: str,
+    logical_task_id: str,
+    lease_id: str,
+    request_id: str,
+) -> str:
+    """Validate any terminal outcome, regardless of which control action saw it.
+
+    Completed is intentionally valid for register, heartbeat and preempt: the
+    prompt may cross its terminal boundary before the requested control action.
+    Non-terminal responses are returned unchanged for normal progress handling.
+    """
+
+    outcome = host_comfy_terminal_outcome(payload)
+    if outcome and not host_comfy_receipt_matches(
+        payload,
+        prompt_id=prompt_id,
+        logical_task_id=logical_task_id,
+        lease_id=lease_id,
+        request_id=request_id,
+    ):
+        raise HostComfyReceiptMismatch(action, payload)
+    return outcome
+
+
+def _exact_artifact_metadata(payload: Dict[str, Any], *, action: str) -> tuple[str, int]:
+    checksum = str(payload.get("artifact_sha256") or "").strip().lower()
+    size = payload.get("artifact_size_int")
+    if (
+        not _ARTIFACT_SHA256_RE.fullmatch(checksum)
+        or isinstance(size, bool)
+        or not isinstance(size, int)
+        or size <= 0
+        or size > _MAX_MANAGED_COMFY_ARTIFACT_BYTES
+    ):
+        raise HostComfyArtifactWait(
+            f"host_comfy_{action}_artifact_metadata_invalid", 2
+        )
+    return checksum, size
+
+
+def _artifact_protocol_matches(payload: Dict[str, Any]) -> bool:
+    return str(
+        payload.get("artifact_spool_protocol_string") or ""
+    ).strip() == MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+
+
+def _exact_spool_identity_matches(
+    payload: Dict[str, Any], identity: Dict[str, str]
+) -> bool:
+    """Spool v1 echoes the exact request field names, not legacy aliases."""
+
+    return bool(isinstance(payload, dict) and all(identity.values())) and all(
+        str(payload.get(key) or "").strip() == str(value or "").strip()
+        for key, value in identity.items()
+    )
+
+
+def _fsync_directory(path: Path) -> None:
+    """Persist an atomic rename on filesystems which support directory fsync."""
+
+    flags = os.O_RDONLY | int(getattr(os, "O_DIRECTORY", 0))
+    try:
+        descriptor = os.open(str(path), flags)
+    except OSError as exc:
+        # Windows does not permit opening a directory this way. Production is
+        # Linux, where this is required and supported; the file itself has
+        # already been fsynced on every platform.
+        if os.name == "nt":
+            return
+        raise HostComfyArtifactWait(
+            "central_managed_comfy_directory_fsync_open_failed", 2
+        ) from exc
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as exc:
+            if os.name != "nt":
+                raise HostComfyArtifactWait(
+                    "central_managed_comfy_directory_fsync_failed", 2
+                ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def verify_central_artifact(
+    path: Path,
+    *,
+    expected_sha256: str,
+    expected_size: int,
+) -> bool:
+    """Re-hash a central artifact before an irreversible host ACK."""
+
+    expected_sha256 = str(expected_sha256 or "").strip().lower()
+    if (
+        not _ARTIFACT_SHA256_RE.fullmatch(expected_sha256)
+        or isinstance(expected_size, bool)
+        or not isinstance(expected_size, int)
+        or expected_size <= 0
+    ):
+        return False
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size != expected_size:
+            return False
+        digest = hashlib.sha256()
+        size = 0
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                size += len(chunk)
+                digest.update(chunk)
+        return size == expected_size and digest.hexdigest() == expected_sha256
+    except OSError:
+        return False
+
+
+def server_role_rank(workload_class: str, role: Any) -> int:
+    canonical = _safe_role(role) or "maintenance"
+    if workload_class == "ai_vision":
+        order = ("ai_vision_primary", "shared", "autorig_primary")
+    elif workload_class == "autorig_interactive":
+        order = ("autorig_primary", "shared", "ai_vision_primary")
+    else:
+        order = ("shared", "autorig_primary", "ai_vision_primary")
+    try:
+        return order.index(canonical)
+    except ValueError:
+        return 100
+
+
+def _host_control_nodes() -> Dict[str, Dict[str, Any]]:
+    raw = str(os.getenv("RENDERFIN_GPU_CONTROL_NODES_JSON") or "").strip()
+    if not raw:
+        return {}
+    try:
+        configured = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(configured, dict):
+        return {}
+    return {
+        str(key).strip().lower(): value
+        for key, value in configured.items()
+        if str(key).strip() and isinstance(value, dict)
+    }
+
+
+def _host_control_entry(server: RenderServer) -> Dict[str, Any]:
+    configured = _host_control_nodes()
+    names = [
+        str(server.render_server_name or "").strip().lower(),
+        str(getattr(server, "node_id_string", "") or "").strip().lower(),
+        str(getattr(server, "physical_resource_id_string", "") or "").strip().lower(),
+    ]
+    expanded = []
+    for name in names:
+        if not name:
+            continue
+        expanded.extend((name, _safe_node(name)))
+    for name in expanded:
+        entry = configured.get(name)
+        if isinstance(entry, dict):
+            return entry
+    return {}
 
 
 def managed_server(server: RenderServer) -> bool:
@@ -133,7 +436,133 @@ def server_identity(server: RenderServer) -> tuple[str, str]:
         or getattr(server, "physical_resource_id", "")
         or node_id
     )
-    return node_id, _safe_node(physical)
+    physical = _safe_node(physical)
+    if managed_server(server):
+        if not bool(getattr(server, "workload_identity_verified_bool", False)):
+            return node_id, ""
+        if not _STABLE_MACHINE_RE.fullmatch(physical):
+            return node_id, ""
+        if not _safe_role(getattr(server, "reserve_role_string", "")):
+            return node_id, ""
+    return node_id, physical
+
+
+async def refresh_managed_identity(
+    client: httpx.AsyncClient,
+    server: RenderServer,
+) -> bool:
+    """Authenticate and bind a Renderfin transport name to one physical GPU.
+
+    Display names and tunnel URLs are not resource identities. Both the
+    deployment registry and the live converter must independently report the
+    same stable ``machine_*`` id and canonical workload role before Renderfin
+    may publish/acquire a central lease for the node.
+    """
+    if not managed_server(server):
+        return True
+    if not enabled():
+        # Rollout order is converter -> registry -> broker flag. Until the
+        # broker is deliberately enabled, identity enforcement must not alter
+        # the existing production Comfy pool.
+        return True
+    server.workload_identity_verified_bool = False
+    server.arbiter_online_bool = False
+    server.arbiter_accepting_ai_vision_bool = False
+    server.managed_comfy_artifact_spool_required_bool = False
+    server.managed_comfy_artifact_spool_ready_bool = False
+    server.managed_comfy_artifact_spool_protocol_string = ""
+    entry = _host_control_entry(server)
+    url = str(entry.get("url_string") or entry.get("url") or "").strip().rstrip("/")
+    token = str(entry.get("token_string") or entry.get("token") or "").strip()
+    expected_physical = str(
+        entry.get("physical_resource_id_string")
+        or entry.get("physical_node")
+        or ""
+    ).strip().lower()
+    expected_role = _safe_role(
+        entry.get("reserve_role_string")
+        or entry.get("workload_role")
+        or entry.get("workload_role_string")
+    )
+    if url.lower().endswith("/api-converter-glb"):
+        url = url[: -len("/api-converter-glb")].rstrip("/")
+    if not (
+        url
+        and token
+        and _STABLE_MACHINE_RE.fullmatch(expected_physical)
+        and expected_role
+    ):
+        return False
+    try:
+        response = await client.get(
+            f"{url}/api-converter-glb/server-status",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15.0,
+        )
+        if response.status_code != 200:
+            return False
+        payload = response.json() if response.content else {}
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    control = payload.get("workload_control")
+    control = control if isinstance(control, dict) else {}
+    reported_physical = str(
+        payload.get("physical_node")
+        or payload.get("physical_resource_id_string")
+        or control.get("physical_node")
+        or ""
+    ).strip().lower()
+    reported_role = _safe_role(
+        payload.get("workload_role")
+        or payload.get("workload_role_string")
+        or control.get("workload_role")
+    )
+    if reported_physical != expected_physical or reported_role != expected_role:
+        return False
+    arbiter_enabled = bool(
+        payload.get("gpu_arbiter_enabled")
+        if "gpu_arbiter_enabled" in payload
+        else control.get("arbiter_enabled")
+    )
+    spool_required = bool(
+        payload.get("managed_comfy_artifact_spool_required_bool")
+        if "managed_comfy_artifact_spool_required_bool" in payload
+        else control.get("managed_comfy_artifact_spool_required_bool")
+    )
+    spool_ready = bool(
+        payload.get("managed_comfy_artifact_spool_ready_bool")
+        if "managed_comfy_artifact_spool_ready_bool" in payload
+        else control.get("managed_comfy_artifact_spool_ready_bool")
+    )
+    spool_protocol = str(
+        payload.get("managed_comfy_artifact_spool_protocol_string")
+        or control.get("managed_comfy_artifact_spool_protocol_string")
+        or ""
+    ).strip()
+    server.physical_resource_id_string = reported_physical
+    server.reserve_role_string = reported_role
+    server.node_id_string = str(
+        payload.get("node_id_string") or server.render_server_name
+    )
+    server.arbiter_online_bool = arbiter_enabled
+    server.arbiter_accepting_ai_vision_bool = bool(
+        payload.get("accepting_ai_vision")
+    ) and arbiter_enabled
+    server.managed_comfy_artifact_spool_required_bool = spool_required
+    server.managed_comfy_artifact_spool_ready_bool = spool_ready
+    server.managed_comfy_artifact_spool_protocol_string = spool_protocol
+    server.workload_identity_verified_bool = True
+    # A host which requires the durable handoff but cannot currently provide
+    # the exact protocol is kept in maintenance for new dispatch. Existing
+    # bound tasks retain the server object and reconcile fail-closed.
+    if spool_required and (
+        not spool_ready
+        or spool_protocol != MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+    ):
+        return False
+    return True
 
 
 def server_status(server: RenderServer) -> Dict[str, Any]:
@@ -147,7 +576,17 @@ def server_status(server: RenderServer) -> Dict[str, Any]:
         "healthy_bool": accepting,
         "accepting_bool": accepting,
         "reserve_role_string": str(
-            getattr(server, "reserve_role_string", "shared") or "shared"
+            _safe_role(getattr(server, "reserve_role_string", "")) or "maintenance"
+        ),
+        "managed_comfy_artifact_spool_required_bool": bool(
+            getattr(server, "managed_comfy_artifact_spool_required_bool", False)
+        ),
+        "managed_comfy_artifact_spool_ready_bool": bool(
+            getattr(server, "managed_comfy_artifact_spool_ready_bool", False)
+        ),
+        "managed_comfy_artifact_spool_protocol_string": str(
+            getattr(server, "managed_comfy_artifact_spool_protocol_string", "")
+            or ""
         ),
         "arbiter_by_key": {
             # Never manufacture AI capacity from a registry row.  These bits
@@ -165,6 +604,8 @@ async def node_heartbeat(client: httpx.AsyncClient, *, server: RenderServer) -> 
     if not enabled() or not managed_server(server):
         return {"status_string": "not_required"}
     node_id, physical = server_identity(server)
+    if not physical:
+        raise WorkloadCapacityWait("managed_identity_unverified", 5)
     response = await client.post(
         f"{_base_url()}/nodes/heartbeat",
         headers=_headers(),
@@ -196,6 +637,8 @@ async def acquire(
         return {}
     await node_heartbeat(client, server=server)
     node_id, physical = server_identity(server)
+    if not physical:
+        raise WorkloadCapacityWait("managed_identity_unverified", 5)
     response = await client.post(
         f"{_base_url()}/leases/acquire",
         headers=_headers(),
@@ -267,23 +710,8 @@ async def heartbeat(
 
 
 def _host_control_config(server: RenderServer) -> tuple[str, str]:
-    raw = str(os.getenv("RENDERFIN_GPU_CONTROL_NODES_JSON") or "").strip()
-    if not raw:
-        return "", ""
-    try:
-        configured = json.loads(raw)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return "", ""
-    if not isinstance(configured, dict):
-        return "", ""
-    node_id, physical = server_identity(server)
-    entry = None
-    for key in (physical, _safe_node(node_id), server.render_server_name):
-        candidate = configured.get(key)
-        if isinstance(candidate, dict):
-            entry = candidate
-            break
-    if not isinstance(entry, dict):
+    entry = _host_control_entry(server)
+    if not entry:
         return "", ""
     url = str(entry.get("url_string") or entry.get("url") or "").strip().rstrip("/")
     token = str(entry.get("token_string") or entry.get("token") or "").strip()
@@ -330,35 +758,370 @@ async def host_comfy_control(
     )
     payload = response.json() if response.content else {}
     status = str(payload.get("status_string") or payload.get("error_code_string") or "")
+    receipt_identity = {
+        "action": action,
+        "prompt_id": prompt_id,
+        "logical_task_id": logical_task_id,
+        "lease_id": lease_id,
+        "request_id": request_id,
+    }
     if response.status_code == 200:
+        validate_host_comfy_terminal_receipt(payload, **receipt_identity)
         return payload
-    terminal = str(
+    control_state = str(
         payload.get("outcome_string")
         or payload.get("status_string")
         or payload.get("state_string")
         or payload.get("status")
         or ""
     ).strip().lower()
-    if response.status_code == 423 and terminal == "artifact_pending":
+    if response.status_code == 423 and control_state in {
+        "artifact_pending",
+        "artifact_spooled",
+    }:
         # The host crossed the GPU completion boundary and is deliberately
         # holding the lease while Renderfin downloads/checksums the artifact.
+        # ``artifact_spooled`` is the response-loss/restart variant: retry the
+        # exact stage/GET/ACK flow rather than treating it as fresh capacity.
         # This is Completed-wins, not a capacity retry and not permission to
         # requeue the logical task.
         normalized = dict(payload)
         normalized["outcome_string"] = "completed"
         normalized.setdefault("status", "Completed")
+        validate_host_comfy_terminal_receipt(normalized, **receipt_identity)
         return normalized
-    if response.status_code == 409 and terminal in {
+    terminal = host_comfy_terminal_outcome(payload)
+    if response.status_code in {409, 423} and terminal in {
         "completed",
         "preempted",
         "released",
     }:
         # Completed-wins is an exact terminal acknowledgement, not capacity.
+        validate_host_comfy_terminal_receipt(payload, **receipt_identity)
         return payload
     if response.status_code in {423, 429, 503} or payload.get("retryable_bool") is True:
         raise WorkloadCapacityWait(status or f"host_comfy_{action}_busy", 2)
     raise RuntimeError(
         f"host managed Comfy {action} failed: {status or response.status_code}"
+    )
+
+
+async def host_comfy_stage_artifact(
+    client: httpx.AsyncClient,
+    *,
+    server: RenderServer,
+    prompt_id: str,
+    logical_task_id: str,
+    lease_id: str,
+    request_id: str,
+    artifact_relative_path_string: str,
+    artifact_sha256: str = "",
+    artifact_size_int: int = 0,
+) -> Dict[str, Any]:
+    """Copy one exact successful Comfy output into the host CPU spool."""
+
+    url, token = _host_control_config(server)
+    if not url or not token:
+        raise HostComfyArtifactWait("host_comfy_artifact_stage_not_configured", 10)
+    identity = {
+        "prompt_id": str(prompt_id or "").strip(),
+        "logical_task_id": str(logical_task_id or "").strip(),
+        "lease_id": str(lease_id or "").strip(),
+        "request_id": str(request_id or "").strip(),
+    }
+    if not all(identity.values()):
+        raise HostComfyReceiptMismatch("stage", identity)
+    relative = str(artifact_relative_path_string or "").strip()
+    if not relative:
+        raise HostComfyArtifactWait("host_comfy_artifact_stage_path_missing", 2)
+    body: Dict[str, Any] = {
+        **identity,
+        "artifact_relative_path_string": relative,
+    }
+    checksum = str(artifact_sha256 or "").strip().lower()
+    if checksum:
+        if not _ARTIFACT_SHA256_RE.fullmatch(checksum):
+            raise HostComfyArtifactWait("host_comfy_artifact_stage_sha_invalid", 2)
+        body["artifact_sha256"] = checksum
+    if artifact_size_int:
+        if (
+            isinstance(artifact_size_int, bool)
+            or not isinstance(artifact_size_int, int)
+            or artifact_size_int <= 0
+        ):
+            raise HostComfyArtifactWait("host_comfy_artifact_stage_size_invalid", 2)
+        body["artifact_size_int"] = artifact_size_int
+    response = await client.post(
+        f"{url}/api-converter-glb/control/comfy/stage",
+        headers={"Authorization": f"Bearer {token}"},
+        json=body,
+        timeout=30.0,
+    )
+    try:
+        payload = response.json() if response.content else {}
+    except Exception:
+        payload = {}
+    receipt_identity = {
+        "action": "stage",
+        **identity,
+    }
+    if response.status_code == 200:
+        terminal = validate_host_comfy_terminal_receipt(
+            payload, **receipt_identity
+        )
+        if not _exact_spool_identity_matches(payload, identity):
+            raise HostComfyReceiptMismatch("stage", payload)
+        if terminal:
+            # A response-lost retry after an ACK is exact Completed. The queue
+            # may trust it only alongside its already-persisted central bundle.
+            return payload
+        if str(payload.get("status_string") or "").strip() != "artifact_spooled":
+            raise HostComfyArtifactWait("host_comfy_artifact_stage_status_invalid", 2)
+        if not _artifact_protocol_matches(payload):
+            raise HostComfyArtifactWait("host_comfy_artifact_stage_protocol_invalid", 2)
+        if not (
+            payload.get("artifact_spool_ready_bool") is True
+            and payload.get("artifact_cpu_spool_persisted_bool") is True
+            and payload.get("artifact_checksum_persisted_bool") is True
+            and payload.get("gpu_detached_bool") is True
+        ):
+            raise HostComfyArtifactWait("host_comfy_artifact_stage_not_durable", 2)
+        _exact_artifact_metadata(payload, action="stage")
+        return payload
+    if response.status_code == 409:
+        raise HostComfyReceiptMismatch("stage", payload)
+    status = str(
+        payload.get("status_string")
+        or payload.get("error")
+        or payload.get("error_code_string")
+        or f"http_{response.status_code}"
+    ).strip()
+    if response.status_code in {423, 429, 503} or payload.get("retryable") is True:
+        raise HostComfyArtifactWait(f"host_comfy_artifact_stage_{status}", 2)
+    # Invalid provenance must never cause a second render or release an exact
+    # binding. It is a fail-closed operational error for this same prompt.
+    raise HostComfyArtifactWait(f"host_comfy_artifact_stage_{status}", 10)
+
+
+async def host_comfy_download_artifact(
+    client: httpx.AsyncClient,
+    *,
+    server: RenderServer,
+    prompt_id: str,
+    logical_task_id: str,
+    lease_id: str,
+    request_id: str,
+    destination_path: Path,
+    expected_sha256: str,
+    expected_size_int: int,
+) -> Dict[str, Any]:
+    """Stream, checksum, fsync and atomically persist the exact host spool."""
+
+    url, token = _host_control_config(server)
+    if not url or not token:
+        raise HostComfyArtifactWait("host_comfy_artifact_get_not_configured", 10)
+    identity = {
+        "prompt_id": str(prompt_id or "").strip(),
+        "logical_task_id": str(logical_task_id or "").strip(),
+        "lease_id": str(lease_id or "").strip(),
+        "request_id": str(request_id or "").strip(),
+    }
+    if not all(identity.values()):
+        raise HostComfyReceiptMismatch("artifact_get", identity)
+    checksum = str(expected_sha256 or "").strip().lower()
+    size_expected = expected_size_int
+    if (
+        not _ARTIFACT_SHA256_RE.fullmatch(checksum)
+        or isinstance(size_expected, bool)
+        or not isinstance(size_expected, int)
+        or size_expected <= 0
+        or size_expected > _MAX_MANAGED_COMFY_ARTIFACT_BYTES
+    ):
+        raise HostComfyArtifactWait("host_comfy_artifact_get_expectation_invalid", 2)
+
+    destination = Path(destination_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(
+        f".{destination.name}.{uuid.uuid4().hex}.managed-comfy-part"
+    )
+    try:
+        async with client.stream(
+            "GET",
+            f"{url}/api-converter-glb/control/comfy/artifact",
+            headers={"Authorization": f"Bearer {token}"},
+            params=identity,
+            timeout=httpx.Timeout(300.0, connect=30.0),
+        ) as response:
+            if response.status_code != 200:
+                raw = await response.aread()
+                try:
+                    payload = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception:
+                    payload = {}
+                if response.status_code == 409:
+                    raise HostComfyReceiptMismatch("artifact_get", payload)
+                status = str(
+                    payload.get("status_string")
+                    or payload.get("error")
+                    or f"http_{response.status_code}"
+                ).strip()
+                raise HostComfyArtifactWait(
+                    f"host_comfy_artifact_get_{status}",
+                    2 if response.status_code in {410, 423, 429, 503} else 10,
+                )
+            protocol = str(
+                response.headers.get("X-AutoRig-Artifact-Protocol") or ""
+            ).strip()
+            header_sha = str(
+                response.headers.get("X-AutoRig-Artifact-SHA256") or ""
+            ).strip().lower()
+            header_size_text = str(
+                response.headers.get("X-AutoRig-Artifact-Size") or ""
+            ).strip()
+            if (
+                protocol != MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+                or not _ARTIFACT_SHA256_RE.fullmatch(header_sha)
+                or not header_size_text.isdigit()
+                or int(header_size_text) <= 0
+                or header_sha != checksum
+                or int(header_size_text) != size_expected
+            ):
+                raise HostComfyArtifactWait(
+                    "host_comfy_artifact_get_headers_mismatch", 2
+                )
+            digest = hashlib.sha256()
+            actual_size = 0
+            with temporary.open("xb") as sink:
+                async for chunk in response.aiter_bytes(1024 * 1024):
+                    actual_size += len(chunk)
+                    if actual_size > _MAX_MANAGED_COMFY_ARTIFACT_BYTES:
+                        raise HostComfyArtifactWait(
+                            "host_comfy_artifact_get_too_large", 10
+                        )
+                    digest.update(chunk)
+                    sink.write(chunk)
+                sink.flush()
+                os.fsync(sink.fileno())
+            if actual_size != size_expected or digest.hexdigest() != checksum:
+                raise HostComfyArtifactWait(
+                    "host_comfy_artifact_get_checksum_mismatch", 2
+                )
+        os.replace(str(temporary), str(destination))
+        _fsync_directory(destination.parent)
+        if not verify_central_artifact(
+            destination,
+            expected_sha256=checksum,
+            expected_size=size_expected,
+        ):
+            raise HostComfyArtifactWait(
+                "host_comfy_artifact_get_persistence_verification_failed", 2
+            )
+        return {
+            "artifact_sha256": checksum,
+            "artifact_size_int": size_expected,
+            "artifact_spool_protocol_string": (
+                MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
+            ),
+            "central_persisted_bool": True,
+        }
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+async def host_comfy_ack_artifact(
+    client: httpx.AsyncClient,
+    *,
+    server: RenderServer,
+    prompt_id: str,
+    logical_task_id: str,
+    lease_id: str,
+    request_id: str,
+    artifact_sha256: str,
+    artifact_size_int: int,
+    central_persistence_receipt_id_string: str,
+) -> Dict[str, Any]:
+    """Tombstone the host spool only after verified central persistence."""
+
+    url, token = _host_control_config(server)
+    if not url or not token:
+        raise HostComfyArtifactWait("host_comfy_artifact_ack_not_configured", 10)
+    identity = {
+        "prompt_id": str(prompt_id or "").strip(),
+        "logical_task_id": str(logical_task_id or "").strip(),
+        "lease_id": str(lease_id or "").strip(),
+        "request_id": str(request_id or "").strip(),
+    }
+    checksum = str(artifact_sha256 or "").strip().lower()
+    receipt = str(central_persistence_receipt_id_string or "").strip()
+    if not all(identity.values()):
+        raise HostComfyReceiptMismatch("ack", identity)
+    if (
+        not _ARTIFACT_SHA256_RE.fullmatch(checksum)
+        or isinstance(artifact_size_int, bool)
+        or not isinstance(artifact_size_int, int)
+        or artifact_size_int <= 0
+        or not receipt
+        or len(receipt) > 256
+        or any(ord(char) < 33 or ord(char) > 126 for char in receipt)
+    ):
+        raise HostComfyArtifactWait("host_comfy_artifact_ack_input_invalid", 2)
+    body: Dict[str, Any] = {
+        **identity,
+        "artifact_sha256": checksum,
+        "artifact_size_int": artifact_size_int,
+        "central_persisted_bool": True,
+        "central_persistence_receipt_id_string": receipt,
+    }
+    response = await client.post(
+        f"{url}/api-converter-glb/control/comfy/ack",
+        headers={"Authorization": f"Bearer {token}"},
+        json=body,
+        timeout=30.0,
+    )
+    try:
+        payload = response.json() if response.content else {}
+    except Exception:
+        payload = {}
+    if response.status_code == 200:
+        outcome = validate_host_comfy_terminal_receipt(
+            payload,
+            action="ack",
+            **identity,
+        )
+        if not _exact_spool_identity_matches(payload, identity):
+            raise HostComfyReceiptMismatch("ack", payload)
+        returned_sha, returned_size = _exact_artifact_metadata(
+            payload, action="ack"
+        )
+        if (
+            outcome != "completed"
+            or not _artifact_protocol_matches(payload)
+            or payload.get("artifact_ack_tombstone_bool") is not True
+            or payload.get("central_persisted_bool") is not True
+            or returned_sha != checksum
+            or returned_size != artifact_size_int
+            or str(
+                payload.get("central_persistence_receipt_id_string") or ""
+            ).strip()
+            != receipt
+        ):
+            raise HostComfyArtifactWait(
+                "host_comfy_artifact_ack_receipt_invalid", 2
+            )
+        return payload
+    if response.status_code == 409:
+        raise HostComfyReceiptMismatch("ack", payload)
+    status = str(
+        payload.get("status_string")
+        or payload.get("error")
+        or f"http_{response.status_code}"
+    ).strip()
+    raise HostComfyArtifactWait(
+        f"host_comfy_artifact_ack_{status}",
+        2 if response.status_code in {423, 429, 503} else 10,
     )
 
 

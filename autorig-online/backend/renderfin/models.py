@@ -68,6 +68,12 @@ class RenderServer(BaseModel):
     reserve_role_string: str = "shared"
     arbiter_online_bool: bool = False
     arbiter_accepting_ai_vision_bool: bool = False
+    managed_comfy_artifact_spool_required_bool: bool = False
+    managed_comfy_artifact_spool_ready_bool: bool = False
+    managed_comfy_artifact_spool_protocol_string: str = ""
+    # Set only after an authenticated converter status probe matches the exact
+    # machine_* identity and role pinned in deployment configuration.
+    workload_identity_verified_bool: bool = False
 
 
 TASK_PENDING = "Pending"
@@ -108,6 +114,27 @@ class RenderTask(BaseModel):
     host_comfy_registered: bool = False
     retired_comfy_prompt_ids: List[str] = Field(default_factory=list)
     artifact_sha256: str = ""
+    # Durable managed-Comfy artifact handoff.  The host spool is singular for
+    # one exact (prompt, logical task, lease, request) identity.  T-pose's
+    # isolated companion is therefore persisted centrally before the FULL
+    # primary is staged/detached on the host.
+    managed_comfy_artifact_spool_state: str = ""
+    managed_comfy_artifact_relative_path_string: str = ""
+    managed_comfy_artifact_size_int: int = 0
+    managed_comfy_artifact_spool_protocol_string: str = ""
+    managed_comfy_central_persistence_receipt_id_string: str = ""
+    managed_comfy_isolated_output_path: str = ""
+    managed_comfy_isolated_sha256: str = ""
+    managed_comfy_isolated_size_int: int = 0
+    # Durable no-progress watchdog state.  Host heartbeat timestamps are not
+    # used as progress because Renderfin itself refreshes them; only a changed
+    # state/stage/marker, an increased percentage, or a validated host
+    # last_progress_at advances this clock.
+    managed_comfy_progress_signature: str = ""
+    managed_comfy_progress_percent: float = -1.0
+    managed_comfy_last_progress_at: float = 0
+    managed_comfy_host_stale_at: float = 0
+    managed_comfy_watchdog_requested_at: float = 0
 
     def public_dict(self) -> Dict[str, Any]:
         return {

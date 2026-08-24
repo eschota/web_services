@@ -36,6 +36,14 @@ WORKER_BASIC_AUTH = os.getenv("RENDERFIN_WORKER_BASIC_AUTH", "")
 # A shared ComfyUI box can hold a submitted prompt behind other work for a long
 # time; the wall-clock ceiling has to cover the queue wait, not just the render.
 TASK_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_TASK_TIMEOUT_SECONDS", "5400"))
+# Managed farm prompts have an exact, idempotent host-side preemption contract.
+# A prompt which makes no observable progress for an hour is therefore recalled
+# and the same durable RenderTask is returned to Pending without charging an
+# attempt.  Unmanaged Comfy prompts retain the older wall-clock timeout above:
+# they cannot be safely requeued after an ambiguous process-wide interrupt.
+MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS = float(
+    os.getenv("RENDERFIN_MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS", "3600")
+)
 PUMP_TICK_SECONDS = float(os.getenv("RENDERFIN_PUMP_TICK_SECONDS", "1.5"))
 DISPATCH_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_DISPATCH_INTERVAL_SECONDS", "5"))
 STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
@@ -123,7 +131,11 @@ def hunyuan_workers() -> list[dict]:
                     )
                     continue
                 name = str(entry.get("name") or url)
-                physical_node = str(entry.get("physical_node") or name).strip().lower()
+                physical_node = str(
+                    entry.get("physical_resource_id_string")
+                    or entry.get("physical_node")
+                    or name
+                ).strip().lower()
                 if physical_node in physical_nodes:
                     notices.add(
                         f"[Renderfin] ignoring duplicate Hunyuan physical node "
@@ -150,6 +162,14 @@ def hunyuan_workers() -> list[dict]:
                                 or "full"
                             ),
                             "physical_node": physical_node,
+                            "physical_resource_id_string": str(
+                                entry.get("physical_resource_id_string") or ""
+                            ).strip().lower(),
+                            "workload_role": str(
+                                entry.get("workload_role")
+                                or entry.get("reserve_role_string")
+                                or ""
+                            ).strip().lower(),
                         }
                     )
     except Exception as exc:  # a broken file must not take the service down

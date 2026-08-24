@@ -227,7 +227,11 @@ import httpx
 
 from namecheap_remote_api import router as namecheap_remote_router
 from workload_broker import (
+    WORKLOAD_CLASS_AUTORIG,
+    WORKLOAD_CLASS_BACKGROUND,
     canonical_physical_resource_id,
+    normalize_reserve_role,
+    reserve_role_rank,
     router as workload_broker_router,
 )
 from animal_animation_library import (
@@ -283,7 +287,46 @@ PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
 
 
-async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quarantined: bool = False) -> List[Any]:
+async def _order_workers_for_workload(
+    db: AsyncSession,
+    workers: List[Any],
+    workload_class: str,
+) -> List[Any]:
+    """Stable role-aware ordering; role capacity remains borrowable when idle."""
+    if not workers:
+        return []
+    rows = (
+        await db.execute(
+            select(WorkerEndpoint.url, WorkerEndpoint.role).where(
+                WorkerEndpoint.enabled.is_(True)
+            )
+        )
+    ).all()
+    role_by_url = {
+        normalize_worker_url_key(url): normalize_reserve_role(role)
+        for url, role in rows
+        if str(url or "").strip()
+    }
+    original_order = {normalize_worker_url_key(worker.url): index for index, worker in enumerate(workers)}
+    return sorted(
+        workers,
+        key=lambda worker: (
+            reserve_role_rank(
+                workload_class,
+                role_by_url.get(normalize_worker_url_key(worker.url), "shared"),
+            ),
+            original_order.get(normalize_worker_url_key(worker.url), 0),
+        ),
+    )
+
+
+async def get_dispatchable_workers(
+    db: AsyncSession,
+    queue_status,
+    *,
+    allow_quarantined: bool = False,
+    workload_class: str = WORKLOAD_CLASS_AUTORIG,
+) -> List[Any]:
     """
     Return workers that are free according to both worker API and backend DB.
     The DB overlay avoids burst dispatch races where several tasks pick the same
@@ -301,7 +344,8 @@ async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quar
             and (allow_quarantined or not is_worker_quarantined(w.url))
         )
     ]
-    return await filter_workers_for_dispatch(candidates)
+    allowed = await filter_workers_for_dispatch(candidates)
+    return await _order_workers_for_workload(db, allowed, workload_class)
 
 
 def _pop_preflight_render_image_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -742,6 +786,11 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             for worker in remaining_free
             if worker_supports_preemption(worker) and not is_worker_quarantined(worker.url)
         ]
+        background_workers = await _order_workers_for_workload(
+            db,
+            background_workers,
+            WORKLOAD_CLASS_BACKGROUND,
+        )
         background_budget = min(
             len(background),
             len(background_workers),
@@ -8694,7 +8743,13 @@ async def api_admin_scheduler_priority(
 
 
 _WORKER_POOLS = {"full_converter", "hunyuan_only", "comfy", "ai_vision", "shared_gpu"}
-_WORKER_ROLES = {"shared", "autorig_primary", "ai_primary", "background_only", "maintenance"}
+_WORKER_ROLES = {
+    "shared",
+    "autorig_primary",
+    "ai_vision_primary",
+    "background_only",
+    "maintenance",
+}
 
 
 def _worker_pool(value: Any) -> str:
@@ -8706,6 +8761,8 @@ def _worker_pool(value: Any) -> str:
 
 def _worker_role(value: Any) -> str:
     normalized = str(value or "shared").strip().lower()
+    if normalized == "ai_primary":
+        normalized = "ai_vision_primary"
     if normalized not in _WORKER_ROLES:
         raise HTTPException(status_code=422, detail="Invalid worker role")
     return normalized

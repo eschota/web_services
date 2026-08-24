@@ -24,15 +24,20 @@ from workload_broker import (
     canonical_physical_resource_id,
     heartbeat_lease,
     heartbeat_task_workload_lease,
+    node_state_from_status,
     node_heartbeat,
+    normalize_reserve_role,
     release_lease,
     release_task_workload_lease,
+    reserve_role_rank,
+    workload_broker_enabled,
 )
 
 
 def _node_status(*, full=True, ai=True, accepting=True):
     return {
         "managed_farm_bool": True,
+        "workload_role": "shared",
         "full_converter_bool": full,
         "ai_capable_bool": ai,
         "healthy_bool": True,
@@ -56,6 +61,13 @@ def _request(node, workload, task, request, *, status=None, priority=0):
         "ttl_seconds_int": 60,
         "node_status_by_key": status or _node_status(),
     }
+
+
+def _worker_status(machine: str, role: str, *, ai: bool = False):
+    status = _node_status(ai=ai)
+    status["physical_node"] = machine
+    status["workload_role"] = role
+    return status
 
 
 async def acquire_lease(db, payload, *, now=None, admission_locked=False):
@@ -116,6 +128,135 @@ def test_physical_aliases_keep_f7_distinct_and_preserve_machine_hash():
     assert canonical_physical_resource_id("Raptor-GPU0") == "raptor"
     fingerprint = "a1234567890bcdefa1234567890bcdef"
     assert canonical_physical_resource_id(fingerprint) == fingerprint
+
+
+def test_central_broker_feature_flag_defaults_off(monkeypatch):
+    monkeypatch.delenv("AUTORIG_WORKLOAD_BROKER_ENABLED", raising=False)
+    assert workload_broker_enabled() is False
+
+
+def test_workload_role_alias_is_canonical_and_nested_host_role_is_used():
+    assert normalize_reserve_role("ai_primary") == "ai_vision_primary"
+    assert reserve_role_rank("ai_vision", "ai_vision_primary") == 0
+    assert reserve_role_rank("autorig_interactive", "autorig_primary") == 0
+    parsed = node_state_from_status(
+        {
+            **_node_status(),
+            "workload_role": "ai_vision_primary",
+        }
+    )
+    assert parsed["reserve_role"] == "ai_vision_primary"
+    invalid = node_state_from_status(
+        {
+            **_node_status(),
+            "workload_role": "invented_role",
+        }
+    )
+    assert invalid["reserve_role"] == "maintenance"
+    assert invalid["healthy"] is False
+    assert invalid["accepting"] is False
+
+
+def test_managed_missing_role_is_maintenance_but_explicit_shared_is_healthy():
+    missing = _node_status()
+    missing.pop("workload_role")
+    parsed_missing = node_state_from_status(missing)
+    assert parsed_missing["reserve_role"] == "maintenance"
+    assert parsed_missing["healthy"] is False
+    assert parsed_missing["accepting"] is False
+
+    kind_only = dict(missing)
+    kind_only.pop("managed_farm_bool")
+    kind_only["node_kind_string"] = "managed_farm"
+    parsed_kind_only = node_state_from_status(kind_only)
+    assert parsed_kind_only["managed_farm"] is True
+    assert parsed_kind_only["reserve_role"] == "maintenance"
+    assert parsed_kind_only["healthy"] is False
+    assert parsed_kind_only["accepting"] is False
+
+    parsed_shared = node_state_from_status(_node_status())
+    assert parsed_shared["reserve_role"] == "shared"
+    assert parsed_shared["healthy"] is True
+    assert parsed_shared["accepting"] is True
+
+    # Preserve compatibility only for non-managed desktop clients. A missing
+    # role can never silently manufacture managed shared-farm capacity.
+    desktop = node_state_from_status(
+        {
+            "managed_farm_bool": False,
+            "healthy_bool": True,
+            "accepting_work_bool": True,
+        }
+    )
+    assert desktop["reserve_role"] == "shared"
+    assert desktop["healthy"] is True
+    assert desktop["accepting"] is True
+
+
+def test_targeted_admission_prefers_home_role_but_borrows_when_home_busy():
+    async def scenario(db):
+        start = datetime.utcnow()
+        nodes = {
+            "machine_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "ai_vision_primary",
+            "machine_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "shared",
+            "machine_cccccccccccccccccccccccccccccccc": "autorig_primary",
+        }
+        for index, (node, role) in enumerate(nodes.items()):
+            status = _node_status()
+            status["workload_role"] = role
+            code, _ = await node_heartbeat(
+                db,
+                {
+                    "node_id_string": f"node-{index}",
+                    "physical_resource_id_string": node,
+                    "source_scope_string": "host_agent",
+                    "node_status_by_key": status,
+                },
+                now=start,
+            )
+            assert code == 200
+
+        ai_home, shared, autorig_home = nodes
+        code, redirected = await broker_acquire_lease(
+            db,
+            _request(shared, "ai_vision", "vision-borrow", "vision-borrow"),
+            now=start + timedelta(seconds=1),
+        )
+        assert code == 423
+        assert redirected["status_string"] == "preferred_role_available"
+        assert redirected["preferred_physical_resource_id_string"] == ai_home
+
+        code, first = await broker_acquire_lease(
+            db,
+            _request(ai_home, "ai_vision", "vision-home", "vision-home"),
+            now=start + timedelta(seconds=2),
+        )
+        assert code == 200
+        code, borrowed = await broker_acquire_lease(
+            db,
+            _request(shared, "ai_vision", "vision-borrow", "vision-borrow"),
+            now=start + timedelta(seconds=3),
+        )
+        assert code == 200
+        assert borrowed["lease_by_key"]["physical_resource_id_string"] == shared
+
+        code, redirected = await broker_acquire_lease(
+            db,
+            _request(ai_home, "autorig_interactive", "rig-redirect", "rig-redirect"),
+            now=start + timedelta(seconds=4),
+        )
+        # The AI home is occupied, but the response must still never grant a
+        # second lease. The idle AutoRig-primary node is the preferred target.
+        assert code == 423
+        assert redirected["status_string"] in {
+            "preferred_role_available",
+            "gpu_busy",
+            "higher_priority_waiting",
+        }
+        if redirected["status_string"] == "preferred_role_available":
+            assert redirected["preferred_physical_resource_id_string"] == autorig_home
+
+    _run(scenario)
 
 
 def test_all_raptor_aliases_share_one_physical_lease_slot():
@@ -493,6 +634,85 @@ def test_heartbeat_reports_preemption_without_extending_execution():
     _run(scenario)
 
 
+def test_ai_priority_zero_preempts_priority_ninety_but_not_reverse():
+    async def scenario(db):
+        start = datetime.utcnow()
+        code, p90 = await acquire_lease(
+            db,
+            _request(
+                "f5",
+                "ai_vision",
+                "vision-p90",
+                "vision-p90-request",
+                priority=90,
+            ),
+            now=start,
+        )
+        assert code == 200
+        code, waiting = await acquire_lease(
+            db,
+            _request(
+                "f5",
+                "ai_vision",
+                "vision-p0",
+                "vision-p0-request",
+                priority=0,
+            ),
+            now=start + timedelta(seconds=1),
+        )
+        assert code == 423
+        assert waiting["status_string"] == "preemption_requested"
+        victim = await db.get(
+            WorkloadLease, p90["lease_by_key"]["lease_id_string"]
+        )
+        assert victim.state == "preemption_requested"
+        assert victim.priority == 90
+
+        await release_lease(
+            db,
+            victim.lease_id,
+            {
+                "owner_service_string": "test",
+                "owner_task_id_string": "vision-p90",
+                "request_id_string": "vision-p90-request",
+                "outcome_string": "preempted",
+            },
+            now=start + timedelta(seconds=2),
+        )
+        code, p0 = await acquire_lease(
+            db,
+            _request(
+                "f5",
+                "ai_vision",
+                "vision-p0",
+                "vision-p0-request",
+                priority=0,
+            ),
+            now=start + timedelta(seconds=3),
+        )
+        assert code == 200
+        code, lower = await acquire_lease(
+            db,
+            _request(
+                "f5",
+                "ai_vision",
+                "vision-later-p90",
+                "vision-later-p90-request",
+                priority=90,
+            ),
+            now=start + timedelta(seconds=4),
+        )
+        assert code == 423
+        assert lower["status_string"] == "gpu_busy"
+        active = await db.get(
+            WorkloadLease, p0["lease_by_key"]["lease_id_string"]
+        )
+        assert active.state == "active"
+        assert active.priority == 0
+
+    _run(scenario)
+
+
 def test_durable_ai_waiter_blocks_lower_work_and_retry_is_idempotent():
     async def scenario(db):
         start = datetime.utcnow()
@@ -777,6 +997,7 @@ def test_freestock_flat_heartbeat_aliases_are_fail_closed_and_expiry_is_canonica
                 "physical_resource_id_string": "farm-f7",
                 "node_kind_string": "managed_farm",
                 "managed_farm_bool": True,
+                "workload_role": "shared",
                 "full_converter_bool": True,
                 "runtime_ready_bool": True,
                 "model_ready_bool": True,
@@ -799,6 +1020,7 @@ def test_freestock_flat_heartbeat_aliases_are_fail_closed_and_expiry_is_canonica
                 "freestock-request",
                 status={
                     "managed_farm_bool": True,
+                    "workload_role": "shared",
                     "full_converter_bool": True,
                     "runtime_ready_bool": True,
                     "model_ready_bool": True,
@@ -823,11 +1045,12 @@ def test_freestock_flat_heartbeat_aliases_are_fail_closed_and_expiry_is_canonica
 def test_autorig_task_persists_one_lease_before_binding_and_reuses_it():
     async def scenario(db):
         worker_url = "https://converter-f1.example/api-converter-glb/"
+        physical = "machine_11111111111111111111111111111111"
         db.add(
             WorkerEndpoint(
                 url=worker_url,
                 enabled=True,
-                physical_resource_id="f1",
+                physical_resource_id=physical,
                 role="autorig_primary",
             )
         )
@@ -849,7 +1072,7 @@ def test_autorig_task_persists_one_lease_before_binding_and_reuses_it():
                 db,
                 task,
                 worker_url.rstrip("/"),
-                _node_status(ai=False),
+                _worker_status(physical, "autorig_primary"),
             )
             assert acquired is True
             assert task.status == "created"
@@ -863,7 +1086,7 @@ def test_autorig_task_persists_one_lease_before_binding_and_reuses_it():
                 db,
                 task,
                 worker_url.rstrip("/"),
-                _node_status(ai=False),
+                _worker_status(physical, "autorig_primary"),
             )
             assert acquired is True
             assert task.workload_request_id == first_request
@@ -883,11 +1106,12 @@ def test_autorig_task_persists_one_lease_before_binding_and_reuses_it():
 def test_ambiguous_autorig_submission_survives_terminal_lease_and_preemption():
     async def scenario(db):
         worker_url = "https://converter-f13.example/api-converter-glb"
+        physical = "machine_13131313131313131313131313131313"
         db.add(
             WorkerEndpoint(
                 url=worker_url,
                 enabled=True,
-                physical_resource_id="f13",
+                physical_resource_id=physical,
                 role="autorig_primary",
             )
         )
@@ -903,7 +1127,7 @@ def test_ambiguous_autorig_submission_survives_terminal_lease_and_preemption():
         await db.commit()
         with patch.dict("os.environ", {"AUTORIG_WORKLOAD_BROKER_ENABLED": "1"}):
             acquired, _response = await acquire_task_workload_lease(
-                db, task, worker_url, _node_status(ai=False)
+                db, task, worker_url, _worker_status(physical, "autorig_primary")
             )
             assert acquired is True
             original = (
@@ -918,7 +1142,7 @@ def test_ambiguous_autorig_submission_survives_terminal_lease_and_preemption():
             await db.commit()
 
             acquired, terminal_replay = await acquire_task_workload_lease(
-                db, task, worker_url, _node_status(ai=False)
+                db, task, worker_url, _worker_status(physical, "autorig_primary")
             )
             assert acquired is True
             assert (
@@ -937,7 +1161,7 @@ def test_ambiguous_autorig_submission_survives_terminal_lease_and_preemption():
             lease.expires_at = datetime.utcnow() + timedelta(minutes=5)
             await db.commit()
             acquired, preempt_replay = await acquire_task_workload_lease(
-                db, task, worker_url, _node_status(ai=False)
+                db, task, worker_url, _worker_status(physical, "autorig_primary")
             )
             assert acquired is True
             assert (
@@ -948,6 +1172,46 @@ def test_ambiguous_autorig_submission_survives_terminal_lease_and_preemption():
             assert task.workload_lease_state == "preemption_requested"
             assert preempt_replay["request_id_string"] == original[0]
             assert preempt_replay["lease_id_string"] == original[1]
+
+    _run(scenario)
+
+
+def test_autorig_worker_identity_mismatch_is_capacity_wait_without_lease():
+    async def scenario(db):
+        worker_url = "https://converter-f2.example/api-converter-glb"
+        configured = "machine_22222222222222222222222222222222"
+        reported = "machine_33333333333333333333333333333333"
+        db.add(
+            WorkerEndpoint(
+                url=worker_url,
+                enabled=True,
+                physical_resource_id=configured,
+                role="autorig_primary",
+            )
+        )
+        task = Task(
+            id="autorig-identity-mismatch",
+            owner_type="user",
+            owner_id="user@example.com",
+            queue_class="interactive",
+            pipeline_kind="rig",
+            status="created",
+        )
+        db.add(task)
+        await db.commit()
+        with patch.dict("os.environ", {"AUTORIG_WORKLOAD_BROKER_ENABLED": "1"}):
+            acquired, response = await acquire_task_workload_lease(
+                db,
+                task,
+                worker_url,
+                _worker_status(reported, "autorig_primary"),
+            )
+        assert acquired is False
+        assert response["status_string"] == "worker_physical_identity_mismatch"
+        assert response["retryable_bool"] is True
+        assert task.workload_lease_id is None
+        leases = list((await db.execute(select(WorkloadLease))).scalars().all())
+        assert leases == []
 
     _run(scenario)
 
