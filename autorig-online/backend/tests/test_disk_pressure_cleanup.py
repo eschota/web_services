@@ -144,7 +144,7 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(deferred.youtube_upload_status, "skipped")
             self.assertEqual(deferred.youtube_upload_error, "quota_window_expired")
 
-    async def test_expired_preview_cleanup_runs_with_healthy_headroom(self):
+    async def test_expired_preview_cleanup_stops_with_healthy_headroom(self):
         with tempfile.TemporaryDirectory(prefix="autorig-video-pressure-") as tmp:
             video = Path(tmp) / "uploaded-old.mp4"
             video.write_bytes(b"video-bytes")
@@ -167,10 +167,10 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
                     preflight_render_dir=poster_dir,
                 )
 
-            self.assertEqual((removed, freed), (1, len(b"video-bytes")))
-            self.assertFalse(video.exists())
-            self.assertFalse(task.video_ready)
-            self.assertIsNone(task.video_url)
+            self.assertEqual((removed, freed), (0, 0))
+            self.assertTrue(video.exists())
+            self.assertTrue(task.video_ready)
+            self.assertIsNotNone(task.video_url)
 
 
 if __name__ == "__main__":

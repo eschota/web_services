@@ -454,14 +454,16 @@ async def _purge_uploaded_video_cache_until(
     preflight_render_dir: Path | None = None,
 ) -> tuple[int, int]:
     """
-    Enforce bounded retention for backend-cached task previews.
+    Reclaim backend-cached task previews only while disk pressure is active.
 
-    Expired previews are removable even when disk headroom is currently healthy;
-    otherwise a 72-hour retention setting would only take effect after the next
-    pressure incident. A poster or viewer GLB must remain available.
-    Deliverables are never touched.
+    Age only determines the order and eligibility of candidates; it is never a
+    reason to delete a user-facing preview while free space is at or above the
+    configured reserve. A poster or viewer GLB must remain available, and
+    deliverables are never touched.
     """
     if not video_cache_dir.exists():
+        return 0, 0
+    if _free_gb() >= target_free_gb:
         return 0, 0
 
     from database import Task
@@ -502,6 +504,8 @@ async def _purge_uploaded_video_cache_until(
     freed = 0
     now = datetime.utcnow()
     for _mtime, size, path, task in candidates:
+        if removed and _free_gb() >= target_free_gb:
+            break
         try:
             path.unlink()
         except FileNotFoundError:
@@ -565,12 +569,9 @@ async def run() -> None:
             max_gb=float(PERIODIC_TASK_CACHE_MAX_GB),
             min_age_hours=float(PERIODIC_TASK_CACHE_MIN_AGE_HOURS),
         )
-        # Videos are purged before cleanup_disk_space, not after it. These MP4s
-        # are previews of tasks already uploaded to YouTube, so a second copy
-        # exists; a task's cached downloads are what the user came for and are
-        # routinely the last copy once the worker evicts its output. With the
-        # purge running last the pressure was always relieved by deleting
-        # deliverables first, and 8.7 GB of redundant video was never reached.
+        # Videos are considered before cleanup_disk_space, but only while the
+        # filesystem is below the reserve. Age is an eligibility preference,
+        # never a standalone retention policy for user-facing previews.
         video_cache_dir = Path("/var/autorig/videos")
         video_cache_gb_before = _dir_size_bytes(video_cache_dir) / (1024**3)
         video_deleted, video_freed_bytes = await _purge_uploaded_video_cache_until(
