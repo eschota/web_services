@@ -153,6 +153,7 @@ from workers import (
     quarantine_worker,
     clear_worker_quarantine,
     is_worker_quarantined,
+    normalize_worker_url_key,
     normalize_task_type,
     get_backend_worker_processing_counts,
     get_worker_effective_active,
