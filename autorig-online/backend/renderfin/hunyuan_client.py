@@ -442,7 +442,7 @@ async def pick_worker(
         if not hunyuan.get("enabled") or not hunyuan.get("installed"):
             continue
         worker_pool = str(worker.get("pool") or "shared_converter")
-        if worker_pool != "dedicated" and _status_is_full_converter(status):
+        if worker_pool != "dedicated" and _status_is_healthy_full_converter(status):
             shared_full_statuses[str(worker["name"])] = status
         if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
             at_capacity.append(worker["name"])
@@ -504,7 +504,7 @@ async def pick_worker(
             for worker, result in zip(missing_capacity_workers, capacity_results):
                 if isinstance(result, Exception) or not isinstance(result, dict):
                     continue
-                if _status_is_full_converter(result):
+                if _status_is_healthy_full_converter(result):
                     shared_full_statuses[str(worker["name"])] = result
         background_occupied = _background_occupied_workers(
             capacity_registry,
@@ -724,7 +724,7 @@ async def shared_full_background_capacity(
     for worker, result in zip(shared, results):
         if isinstance(result, Exception) or not isinstance(result, dict):
             continue
-        if _status_is_full_converter(result):
+        if _status_is_healthy_full_converter(result):
             statuses[str(worker["name"])] = result
     occupied = _background_occupied_workers(shared, statuses)
     if occupied is None:
@@ -790,6 +790,21 @@ def _status_is_full_converter(status: Dict[str, Any]) -> bool:
         == "full"
         and flags.get("legacy_conversion_enabled") is True
     )
+
+
+def _status_is_healthy_full_converter(status: Dict[str, Any]) -> bool:
+    """Count only slots that can actually serve as the interactive reserve."""
+    if not _status_is_full_converter(status):
+        return False
+    if status.get("maintenance") is True:
+        return False
+    preflight = status.get("asset_preflight")
+    if isinstance(preflight, dict) and preflight.get("healthy") is False:
+        return False
+    stuck = status.get("stuck_tasks")
+    if isinstance(stuck, (dict, list, tuple, set)) and bool(stuck):
+        return False
+    return True
 
 
 async def _preempt_hunyuan_candidate(

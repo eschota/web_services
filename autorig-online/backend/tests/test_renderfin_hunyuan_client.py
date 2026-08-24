@@ -1022,6 +1022,94 @@ class WorkerSelectionTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_maintenance_worker_does_not_inflate_shared_reserve(self):
+        async def scenario(database: Path):
+            pool = [
+                {
+                    "name": name,
+                    "url": f"http://127.0.0.1:{port}",
+                    "token": f"tok-{name}",
+                    "pool": "shared_converter",
+                    "capability_mode": "full",
+                }
+                for name, port in (
+                    ("f11", 15533),
+                    ("f2", 15279),
+                    ("f1", 15132),
+                    ("f13", 15267),
+                )
+            ]
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                name = next(
+                    worker["name"]
+                    for worker in pool
+                    if request.url.port == int(worker["url"].rsplit(":", 1)[1])
+                )
+                occupied = name in {"f11", "f13"}
+                return httpx.Response(200, json={
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "feature_flags": {
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "maintenance": name == "f1",
+                    "asset_preflight": {"healthy": True},
+                    "stuck_tasks": [],
+                    "hunyuan": {
+                        "enabled": True,
+                        "installed": True,
+                        "service_state": "idle",
+                    },
+                    "processing_tasks": ([{
+                        "task_id": f"background-{name}",
+                        "queue_class": "collection_background",
+                    }] if occupied else []),
+                    "pending_tasks": [],
+                    "tasks_summary": {
+                        "queue_size": 0,
+                        "processing": 1 if occupied else 0,
+                    },
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: pool), patch.object(
+                config, "AUTORIG_QUEUE_DB_PATH", database
+            ), patch.object(hunyuan_client, "RESERVED_FOR_OTHER_WORK", 1):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+                        await hunyuan_client.pick_worker(
+                            client, queue_class="collection_background"
+                        )
+                    snapshot = await hunyuan_client.shared_full_background_capacity(
+                        client
+                    )
+            self.assertIn("2/3", str(caught.exception))
+            self.assertEqual(snapshot["healthy"], 3)
+            self.assertEqual(snapshot["background_limit"], 2)
+            self.assertEqual(snapshot["background_occupied"], 2)
+            self.assertEqual(snapshot["available_background_slots"], 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "autorig.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "CREATE TABLE tasks (worker_api TEXT, status TEXT, queue_class TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO tasks VALUES (?, 'processing', 'collection_background')",
+                    [
+                        ("https://converter-f11.freestock.online/api-converter-glb",),
+                        ("https://converter-f13.freestock.online/api-converter-glb",),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            run(scenario(database))
+
 
 class PollToleranceTests(unittest.TestCase):
     def test_transient_404_tolerated_then_completes(self):
