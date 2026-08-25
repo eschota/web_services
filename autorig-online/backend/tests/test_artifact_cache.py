@@ -160,6 +160,24 @@ class ArtifactValidationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 artifact_cache.validate_file(path, role="full_bundle")
 
+    def test_full_bundle_member_count_must_match_worker_sidecar_contract(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-bundle-contract-") as tmp:
+            path = Path(tmp) / "bundle.zip"
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as archive:
+                archive.writestr("model.glb", b"glTF" + b"x" * 128)
+                archive.writestr("model_rig.json", b"{}")
+            artifact_cache.validate_file(
+                path,
+                role="full_bundle",
+                expected_archive_file_count=2,
+            )
+            with self.assertRaisesRegex(RuntimeError, "member count mismatch"):
+                artifact_cache.validate_file(
+                    path,
+                    role="full_bundle",
+                    expected_archive_file_count=188,
+                )
+
     def test_manifest_lookup_builds_internal_nginx_uri(self):
         with tempfile.TemporaryDirectory(prefix="autorig-cache-lookup-") as tmp:
             root = Path(tmp)

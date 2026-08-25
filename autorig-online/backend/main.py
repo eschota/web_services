@@ -1303,7 +1303,10 @@ async def lifespan(app: FastAPI):
     (
         app.state.artifact_cache_stop,
         app.state.artifact_cache_workers,
-    ) = await start_artifact_cache_workers(_discover_task_artifact_sources)
+    ) = await start_artifact_cache_workers(
+        _discover_task_artifact_sources,
+        _confirm_worker_artifact_cache,
+    )
     app.state.artifact_cache_retention = asyncio.create_task(
         _artifact_cache_retention_loop(),
         name="artifact-cache-retention",
@@ -2617,6 +2620,144 @@ def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
         if name == expected_name:
             return value
     return f"{worker_root.rstrip('/')}/{guid}.zip"
+
+
+async def _load_declared_full_bundle_contract(
+    bundle_url: str,
+) -> tuple[Optional[int], Optional[int], str]:
+    """Load the worker sidecar that proves a declared ZIP is the full bundle.
+
+    The FAB collector intentionally replaces a centrally persisted full ZIP
+    with a tiny marker later.  A ZIP signature/CRC check cannot distinguish
+    that marker from the 188-file pipeline archive, so the central cache must
+    pin both the byte size and member count before it can acknowledge durable
+    storage to the worker.
+    """
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as client:
+            response = await client.get(
+                f"{str(bundle_url).rstrip()}.meta.json",
+                headers={"Accept": "application/json"},
+            )
+        if response.status_code != 200:
+            return None, None, f"full bundle metadata returned HTTP {response.status_code}"
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return None, None, "full bundle metadata is not an object"
+        if str(payload.get("source") or "") != "pipeline_zip":
+            return None, None, "full bundle metadata source is not pipeline_zip"
+        expected_size = int(payload.get("zip_size") or 0)
+        expected_members = int(payload.get("file_count") or 0)
+        if expected_size <= 0 or expected_members <= 0:
+            return None, None, "full bundle metadata has no positive size/member count"
+        return expected_size, expected_members, ""
+    except Exception as exc:
+        return None, None, f"full bundle metadata unavailable: {exc}"
+
+
+def _artifact_cache_worker_control_credentials(source_url: str) -> Optional[Dict[str, str]]:
+    """Resolve a worker's private control tunnel without exposing its token."""
+
+    identity = artifact_worker_identity(source_url)
+    if not identity:
+        return None
+    try:
+        from renderfin import config as renderfin_config
+
+        path = Path(renderfin_config.HUNYUAN_WORKERS_FILE)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        entries = payload.get("workers") if isinstance(payload, dict) else payload
+        for entry in entries or []:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip().lower()
+            url = str(entry.get("url") or "").strip().rstrip("/")
+            token = str(entry.get("token") or "").strip()
+            entry_identity = artifact_worker_identity(url) or name
+            if entry_identity == identity and url and token:
+                return {"url": url, "token": token}
+    except Exception as exc:
+        print(f"[ArtifactCache] Worker control registry unavailable: {exc}")
+    return None
+
+
+async def _confirm_worker_artifact_cache(
+    task: Task,
+    manifest: Dict[str, Any],
+) -> None:
+    """Deliver an authenticated, idempotent durable-cache receipt to a worker."""
+
+    rows = [item for item in manifest.get("files", []) if isinstance(item, dict)]
+    bundles = [
+        item
+        for item in rows
+        if item.get("role") == "full_bundle"
+        and item.get("bundle_contract_verified") is True
+    ]
+    # Legacy tasks without a declared full bundle may still cache their public
+    # per-file artifacts, but they must not gain permission to delete the only
+    # worker-side complete archive.
+    if not bundles:
+        return
+    if len(bundles) != 1:
+        raise RuntimeError("durable cache has an ambiguous full bundle")
+    bundle = bundles[0]
+    model_guid = str(task.guid or "").strip().lower()
+    if not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        model_guid,
+    ):
+        raise RuntimeError("task has no valid model GUID for cache confirmation")
+    source_url = str(bundle.get("source_url") or "").strip()
+    credentials = _artifact_cache_worker_control_credentials(source_url)
+    if not credentials:
+        raise RuntimeError("worker control credentials unavailable for cache confirmation")
+    full_sha256 = str(bundle.get("sha256") or "").strip().lower()
+    full_bytes = int(bundle.get("size") or 0)
+    full_members = int(bundle.get("archive_file_count") or 0)
+    if not re.fullmatch(r"[0-9a-f]{64}", full_sha256) or full_bytes <= 0 or full_members <= 0:
+        raise RuntimeError("verified full bundle manifest identity is incomplete")
+    cache_bytes = sum(max(0, int(item.get("size") or 0)) for item in rows)
+    confirmation_id = hashlib.sha256(
+        f"{task.id}\n{model_guid}\n{full_sha256}\n{full_bytes}\n{full_members}".encode("utf-8")
+    ).hexdigest()
+    payload = {
+        "schema": 1,
+        "confirmation_id": confirmation_id,
+        "task_id": str(task.id),
+        "model_guid": model_guid,
+        "artifact_cache_status": "ready",
+        "full_bundle_cached": True,
+        "full_bundle_source_url": source_url,
+        "full_bundle_sha256": full_sha256,
+        "full_bundle_bytes": full_bytes,
+        "full_bundle_file_count": full_members,
+        "cache_file_count": len(rows),
+        "cache_bytes": cache_bytes,
+        "confirmed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    endpoint = (
+        f"{credentials['url']}/api-converter-glb/control/artifact-cache/"
+        f"{quote(model_guid, safe='')}/confirm"
+    )
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+        response = await client.post(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {credentials['token']}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if response.status_code != 200:
+        raise RuntimeError(f"worker cache confirmation returned HTTP {response.status_code}")
+    try:
+        response_payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"worker cache confirmation returned invalid JSON: {exc}") from exc
+    if str(response_payload.get("confirmation_id") or "") != confirmation_id:
+        raise RuntimeError("worker cache confirmation identity mismatch")
 
 
 async def _credit_task_owner_for_sale(db: AsyncSession, task, buyer_user: User, amount: int) -> None:
@@ -16051,12 +16192,18 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
     )
     if bundle_is_declared:
         safe_guid = str(task.guid or task.id)
+        expected_size, expected_members, contract_error = (
+            await _load_declared_full_bundle_contract(bundle_url)
+        )
         candidates.append(
             ArtifactSource(
                 url=bundle_url,
                 relative_path=f"deliverables/{safe_guid}.zip",
                 role="full_bundle",
                 assigned_worker=_artifact_worker_assignment(task, bundle_url),
+                expected_size=expected_size,
+                expected_archive_file_count=expected_members,
+                contract_error=contract_error,
                 required=True,
                 long_lived=True,
             )

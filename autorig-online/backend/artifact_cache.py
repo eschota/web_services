@@ -56,6 +56,8 @@ class ArtifactSource:
     role: str
     assigned_worker: str = ""
     expected_size: Optional[int] = None
+    expected_archive_file_count: Optional[int] = None
+    contract_error: str = ""
     required: bool = True
     long_lived: Optional[bool] = None
 
@@ -616,6 +618,7 @@ def validate_file(
     role: str,
     content_type: str = "",
     declared_name: Optional[str] = None,
+    expected_archive_file_count: Optional[int] = None,
 ) -> None:
     size = path.stat().st_size
     if size <= 0:
@@ -640,8 +643,17 @@ def validate_file(
                 bad = archive.testzip()
                 if bad:
                     raise RuntimeError(f"ZIP CRC failed for {bad}")
-                if not archive.namelist():
+                names = archive.namelist()
+                if not names:
                     raise RuntimeError("ZIP is empty")
+                if (
+                    expected_archive_file_count is not None
+                    and len(names) != int(expected_archive_file_count)
+                ):
+                    raise RuntimeError(
+                        "ZIP member count mismatch: "
+                        f"expected {int(expected_archive_file_count)}, received {len(names)}"
+                    )
         except zipfile.BadZipFile as exc:
             raise RuntimeError("invalid ZIP archive") from exc
     elif suffix == ".fbx":
@@ -668,22 +680,49 @@ async def cache_source(
     *,
     client: httpx.AsyncClient,
 ) -> dict[str, Any]:
+    if source.contract_error:
+        raise RuntimeError(str(source.contract_error))
     validated_url = validate_source_url(source.url, source.assigned_worker)
     destination = _safe_destination(root, task_id, source.relative_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_file():
-        validate_file(destination, role=source.role)
-        return {
-            "source_url": validated_url,
-            "relative_path": safe_relative_path(source.relative_path),
-            "size": destination.stat().st_size,
-            "sha256": _sha256(destination),
-            "etag": None,
-            "last_modified": None,
-            "role": source.role,
-            "cached_at": _iso_now(),
-            "long_lived": _is_long_lived(source),
-        }
+        try:
+            if (
+                source.expected_size not in (None, 0)
+                and destination.stat().st_size != int(source.expected_size)
+            ):
+                raise RuntimeError(
+                    "cached size does not match the declared bundle contract"
+                )
+            validate_file(
+                destination,
+                role=source.role,
+                expected_archive_file_count=source.expected_archive_file_count,
+            )
+        except (OSError, RuntimeError):
+            # Keep the previous central copy in place until a replacement has
+            # downloaded and validated successfully.  This also self-heals a
+            # marker ZIP cached by an older backend without discarding it on a
+            # transient worker outage.
+            pass
+        else:
+            return {
+                "source_url": validated_url,
+                "relative_path": safe_relative_path(source.relative_path),
+                "size": destination.stat().st_size,
+                "sha256": _sha256(destination),
+                "etag": None,
+                "last_modified": None,
+                "role": source.role,
+                "cached_at": _iso_now(),
+                "long_lived": _is_long_lived(source),
+                "archive_file_count": source.expected_archive_file_count,
+                "bundle_contract_verified": bool(
+                    source.role == "full_bundle"
+                    and source.expected_size not in (None, 0)
+                    and source.expected_archive_file_count not in (None, 0)
+                ),
+            }
 
     probe = await _probe_source(client, source)
     if source.expected_size not in (None, 0) and int(source.expected_size) != int(probe["size"]):
@@ -700,6 +739,7 @@ async def cache_source(
         role=source.role,
         content_type=probe.get("content_type") or "",
         declared_name=source.relative_path,
+        expected_archive_file_count=source.expected_archive_file_count,
     )
     if partial.stat().st_size != int(probe["size"]):
         raise RuntimeError("downloaded size does not match source")
@@ -714,6 +754,12 @@ async def cache_source(
         "role": source.role,
         "cached_at": _iso_now(),
         "long_lived": _is_long_lived(source),
+        "archive_file_count": source.expected_archive_file_count,
+        "bundle_contract_verified": bool(
+            source.role == "full_bundle"
+            and source.expected_size not in (None, 0)
+            and source.expected_archive_file_count not in (None, 0)
+        ),
     }
 
 
@@ -954,6 +1000,7 @@ async def _process_claimed_job(
     job_id: int,
     task_id: str,
     discover: Callable[[Task], Awaitable[Sequence[ArtifactSource]]],
+    confirm: Optional[Callable[[Task, dict[str, Any]], Awaitable[None]]] = None,
 ) -> None:
     manifest: Optional[dict[str, Any]] = None
     errors: list[str] = []
@@ -990,6 +1037,8 @@ async def _process_claimed_job(
         }
         missing = sorted(required_paths - cached_paths)
         errors.extend(f"required artifact missing: {path}" for path in missing)
+        if not errors and confirm is not None:
+            await confirm(task, manifest)
     except ArtifactCacheReserveError as exc:
         reserve_error = str(exc)
         try:
@@ -1008,6 +1057,7 @@ async def artifact_cache_worker(
     discover: Callable[[Task], Awaitable[Sequence[ArtifactSource]]],
     *,
     stop_event: asyncio.Event,
+    confirm: Optional[Callable[[Task, dict[str, Any]], Awaitable[None]]] = None,
 ) -> None:
     while not stop_event.is_set():
         claim = await _claim_due_job()
@@ -1020,11 +1070,12 @@ async def artifact_cache_worker(
         job_id, task_id, worker_key = claim
         lock = _worker_locks.setdefault(worker_key, asyncio.Lock())
         async with lock:
-            await _process_claimed_job(job_id, task_id, discover)
+            await _process_claimed_job(job_id, task_id, discover, confirm)
 
 
 async def start_artifact_cache_workers(
     discover: Callable[[Task], Awaitable[Sequence[ArtifactSource]]],
+    confirm: Optional[Callable[[Task, dict[str, Any]], Awaitable[None]]] = None,
 ) -> tuple[asyncio.Event, list[asyncio.Task]]:
     await recover_interrupted_jobs()
     async with AsyncSessionLocal() as db:
@@ -1033,7 +1084,7 @@ async def start_artifact_cache_workers(
     stop_event = asyncio.Event()
     workers = [
         asyncio.create_task(
-            artifact_cache_worker(discover, stop_event=stop_event),
+            artifact_cache_worker(discover, stop_event=stop_event, confirm=confirm),
             name=f"artifact-cache-{index + 1}",
         )
         for index in range(ARTIFACT_CACHE_CONCURRENCY)

@@ -288,6 +288,11 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=(False, [], None, "not needed")),
             ),
             patch.object(main, "resolve_poster_url_for_task", return_value=None),
+            patch.object(
+                main,
+                "_load_declared_full_bundle_contract",
+                AsyncMock(return_value=(477_449_054, 188, "")),
+            ),
         ):
             sources = await main._discover_task_artifact_sources(task)
 
@@ -295,6 +300,71 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0].role, "full_bundle")
         self.assertEqual(matching[0].relative_path, f"deliverables/{GUID}.zip")
+        self.assertEqual(matching[0].expected_size, 477_449_054)
+        self.assertEqual(matching[0].expected_archive_file_count, 188)
+        self.assertEqual(matching[0].contract_error, "")
+
+    async def test_central_receipt_is_sent_only_for_checksum_bound_full_bundle(self):
+        task = _task()
+        source_url = f"https://converter-f1.freestock.online/converter/glb/{GUID}/{GUID}.zip"
+        manifest = {
+            "files": [
+                {
+                    "source_url": source_url,
+                    "relative_path": f"deliverables/{GUID}.zip",
+                    "size": 477_449_054,
+                    "sha256": "ab" * 32,
+                    "role": "full_bundle",
+                    "archive_file_count": 188,
+                    "bundle_contract_verified": True,
+                },
+                {
+                    "source_url": f"https://converter-f1.freestock.online/{GUID}.glb",
+                    "relative_path": "files/model-files/model.glb",
+                    "size": 10_000,
+                    "sha256": "cd" * 32,
+                    "role": "viewer_glb",
+                },
+            ]
+        }
+        captured = {}
+
+        class Response:
+            status_code = 200
+
+            def json(self):
+                return {"confirmation_id": captured["json"]["confirmation_id"]}
+
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, url, **kwargs):
+                captured["url"] = url
+                captured.update(kwargs)
+                return Response()
+
+        with (
+            patch.object(
+                main,
+                "_artifact_cache_worker_control_credentials",
+                return_value={"url": "http://127.0.0.1:15132", "token": "secret"},
+            ),
+            patch.object(main.httpx, "AsyncClient", return_value=Client()),
+        ):
+            await main._confirm_worker_artifact_cache(task, manifest)
+
+        self.assertEqual(
+            captured["url"],
+            f"http://127.0.0.1:15132/api-converter-glb/control/artifact-cache/{GUID}/confirm",
+        )
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer secret")
+        self.assertTrue(captured["json"]["full_bundle_cached"])
+        self.assertEqual(captured["json"]["full_bundle_file_count"], 188)
+        self.assertEqual(captured["json"]["cache_file_count"], 2)
 
     async def test_artifact_discovery_does_not_require_synthesized_bundle(self):
         task = _task()
