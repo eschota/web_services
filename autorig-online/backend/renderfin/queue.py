@@ -1170,6 +1170,13 @@ class RenderQueue:
         )
         if managed_identity:
             try:
+                expected_submission_sha256 = (
+                    comfy_adapter.managed_submission_sha256(
+                        workflow,
+                        managed_identity=managed_identity,
+                        prompt_id=prompt_id,
+                    )
+                )
                 registration = await workload_lease.host_comfy_control(
                     self._client,
                     server=server,
@@ -1178,6 +1185,9 @@ class RenderQueue:
                     logical_task_id=task.id,
                     lease_id=task.workload_lease_id,
                     request_id=task.workload_request_id,
+                    expected_canonical_submission_sha256=(
+                        expected_submission_sha256
+                    ),
                 )
                 registration_outcome = _host_terminal_outcome(
                     registration, task, action="register"

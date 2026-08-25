@@ -7,6 +7,7 @@ per-request templated workflows.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -119,16 +120,14 @@ async def upload_image(
     return f"{subfolder}/{name}" if subfolder else name
 
 
-async def submit(
-    client: httpx.AsyncClient,
-    server: RenderServer,
+def managed_submission_payload(
     workflow: Dict[str, Any],
     *,
     managed_identity: Optional[Dict[str, str]] = None,
     prompt_id: str = "",
-) -> str:
-    """POST /prompt. Returns prompt_id."""
-    base = _validate_server_url(server.render_server_url)
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """Build the exact JSON body and identity headers for `/prompt`."""
+
     body: Dict[str, Any] = {"prompt": workflow, "client_id": CLIENT_ID}
     if prompt_id:
         body["prompt_id"] = str(prompt_id)
@@ -147,6 +146,47 @@ async def submit(
             "X-AutoRig-Workload-Request-Id": identity["request_id"],
             "X-AutoRig-Preemption-Mode": "central_requeue",
         }
+    return body, headers
+
+
+def managed_submission_sha256(
+    workflow: Dict[str, Any],
+    *,
+    managed_identity: Dict[str, str],
+    prompt_id: str,
+) -> str:
+    """Bind central registration to the canonical full `/prompt` body."""
+
+    body, _headers = managed_submission_payload(
+        workflow,
+        managed_identity=managed_identity,
+        prompt_id=prompt_id,
+    )
+    canonical = json.dumps(
+        body,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+async def submit(
+    client: httpx.AsyncClient,
+    server: RenderServer,
+    workflow: Dict[str, Any],
+    *,
+    managed_identity: Optional[Dict[str, str]] = None,
+    prompt_id: str = "",
+) -> str:
+    """POST /prompt. Returns prompt_id."""
+    base = _validate_server_url(server.render_server_url)
+    body, headers = managed_submission_payload(
+        workflow,
+        managed_identity=managed_identity,
+        prompt_id=prompt_id,
+    )
     resp = await client.post(
         f"{base}/prompt",
         json=body,

@@ -71,6 +71,7 @@ class RenderServer(BaseModel):
     managed_comfy_artifact_spool_required_bool: bool = False
     managed_comfy_artifact_spool_ready_bool: bool = False
     managed_comfy_artifact_spool_protocol_string: str = ""
+    managed_comfy_central_control_ready_bool: bool = False
     # Set only after an authenticated converter status probe matches the exact
     # machine_* identity and role pinned in deployment configuration.
     workload_identity_verified_bool: bool = False

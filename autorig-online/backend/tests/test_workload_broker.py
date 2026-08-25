@@ -18,9 +18,12 @@ from database import (
     WorkloadWaiter,
 )
 from workload_broker import (
+    _broker_auth_principal,
+    _principal_allows_payload,
     acquire_lease as broker_acquire_lease,
     acquire_task_workload_lease,
     broker_status,
+    cancel_waiter,
     canonical_physical_resource_id,
     heartbeat_lease,
     heartbeat_task_workload_lease,
@@ -32,6 +35,11 @@ from workload_broker import (
     reserve_role_rank,
     workload_broker_enabled,
 )
+
+
+class _HeaderRequest:
+    def __init__(self, token):
+        self.headers = {"authorization": f"Bearer {token}"}
 
 
 def _node_status(*, full=True, ai=True, accepting=True):
@@ -128,6 +136,81 @@ def test_physical_aliases_keep_f7_distinct_and_preserve_machine_hash():
     assert canonical_physical_resource_id("Raptor-GPU0") == "raptor"
     fingerprint = "a1234567890bcdefa1234567890bcdef"
     assert canonical_physical_resource_id(fingerprint) == fingerprint
+
+
+def test_scoped_broker_credentials_cannot_upgrade_owner_or_class():
+    gateway = {
+        "owner_service_string": "freestock_gateway",
+        "workload_class_string": "ai_vision",
+    }
+    assert _principal_allows_payload("gateway", "acquire", gateway)
+    assert not _principal_allows_payload(
+        "gateway",
+        "acquire",
+        {**gateway, "workload_class_string": "autorig_interactive"},
+    )
+    assert not _principal_allows_payload(
+        "gateway",
+        "acquire",
+        {**gateway, "owner_service_string": "renderfin"},
+    )
+    renderfin = {
+        "owner_service_string": "renderfin",
+        "workload_class_string": "comfy",
+    }
+    assert _principal_allows_payload("renderfin", "acquire", renderfin)
+    assert not _principal_allows_payload(
+        "renderfin",
+        "acquire",
+        {**renderfin, "workload_class_string": "ai_vision"},
+    )
+    assert _principal_allows_payload(
+        "gateway",
+        "node_heartbeat",
+        {"source_scope_string": "lease_probe"},
+    )
+    assert not _principal_allows_payload(
+        "gateway",
+        "node_heartbeat",
+        {"source_scope_string": "host_agent"},
+    )
+    assert _principal_allows_payload(
+        "host_agent",
+        "node_heartbeat",
+        {"source_scope_string": "host_agent"},
+    )
+    assert _principal_allows_payload("admin", "status", {})
+    assert not _principal_allows_payload("gateway", "status", {})
+
+
+def test_broker_auth_rejects_legacy_and_aliased_scoped_tokens_by_default():
+    scoped = {
+        "AUTORIG_WORKLOAD_BROKER_ENABLED": "1",
+        "AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN": "gateway-token-1234567890",
+        "AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN": "renderfin-token-123456789",
+        "AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN": "host-agent-token-12345678",
+        "AUTORIG_WORKLOAD_BROKER_ADMIN_TOKEN": "admin-token-123456789012",
+        "AUTORIG_WORKLOAD_BROKER_TOKEN": "legacy-token-12345678901",
+    }
+    with patch.dict("os.environ", scoped, clear=True):
+        principal, error = _broker_auth_principal(
+            _HeaderRequest(scoped["AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN"])
+        )
+        assert principal == "gateway" and error is None
+        principal, error = _broker_auth_principal(
+            _HeaderRequest(scoped["AUTORIG_WORKLOAD_BROKER_TOKEN"])
+        )
+        assert not principal and error is not None and error.status_code == 401
+
+    aliased = dict(scoped)
+    aliased["AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN"] = aliased[
+        "AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN"
+    ]
+    with patch.dict("os.environ", aliased, clear=True):
+        principal, error = _broker_auth_principal(
+            _HeaderRequest(aliased["AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN"])
+        )
+        assert not principal and error is not None and error.status_code == 503
 
 
 def test_central_broker_feature_flag_defaults_off(monkeypatch):
@@ -1313,6 +1396,69 @@ def test_lease_heartbeat_and_release_require_exact_three_part_owner():
         )
         assert release_code == duplicate_code == 200
         assert first["status_string"] == duplicate["status_string"] == "released"
+
+    _run(scenario)
+
+
+def test_waiter_cancel_requires_exact_service_and_task_owner():
+    async def scenario(db):
+        now = datetime.utcnow()
+        db.add(
+            WorkloadWaiter(
+                request_id="vision-request",
+                physical_resource_id="f5",
+                node_id="f5",
+                workload_class="ai_vision",
+                priority=0,
+                owner_service="freestock_gateway",
+                owner_task_id="vision",
+                state="waiting",
+                metadata_json="{}",
+                created_at=now,
+                last_seen_at=now,
+                updated_at=now,
+            )
+        )
+        await db.commit()
+
+        for candidate in (
+            {},
+            {"owner_service_string": "freestock_gateway"},
+            {"owner_task_id_string": "vision"},
+            {
+                "owner_service_string": "wrong_service",
+                "owner_task_id_string": "vision",
+            },
+            {
+                "owner_service_string": "freestock_gateway",
+                "owner_task_id_string": "wrong_task",
+            },
+        ):
+            cancel_code, rejected = await cancel_waiter(
+                db, "vision-request", candidate
+            )
+            assert cancel_code == 409
+            assert rejected["status_string"] == "request_owner_mismatch"
+            waiter = await db.get(WorkloadWaiter, "vision-request")
+            assert waiter is not None and waiter.state == "waiting"
+
+        exact = {
+            "owner_service_string": "freestock_gateway",
+            "owner_task_id_string": "vision",
+        }
+        cancel_code, cancelled = await cancel_waiter(
+            db, "vision-request", exact
+        )
+        assert cancel_code == 200
+        assert cancelled["status_string"] == "cancelled"
+        waiter = await db.get(WorkloadWaiter, "vision-request")
+        assert waiter is not None and waiter.state == "cancelled"
+
+        replay_code, replay = await cancel_waiter(
+            db, "vision-request", exact
+        )
+        assert replay_code == 200
+        assert replay["status_string"] == "cancelled"
 
     _run(scenario)
 

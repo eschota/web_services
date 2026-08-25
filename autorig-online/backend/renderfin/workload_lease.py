@@ -11,9 +11,12 @@ import hashlib
 import json
 import os
 import re
+import ssl
+import stat
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -125,7 +128,7 @@ def _base_url() -> str:
 def _headers() -> Dict[str, str]:
     token = str(
         os.getenv("RENDERFIN_WORKLOAD_BROKER_TOKEN")
-        or os.getenv("AUTORIG_WORKLOAD_BROKER_TOKEN")
+        or os.getenv("AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN")
         or ""
     ).strip()
     if not token:
@@ -254,15 +257,17 @@ def validate_host_comfy_terminal_receipt(
     lease_id: str,
     request_id: str,
 ) -> str:
-    """Validate any terminal outcome, regardless of which control action saw it.
+    """Validate the exact four-ID receipt for every lifecycle response.
 
     Completed is intentionally valid for register, heartbeat and preempt: the
     prompt may cross its terminal boundary before the requested control action.
-    Non-terminal responses are returned unchanged for normal progress handling.
+    Non-terminal progress is still bound to the same prompt/task/lease/request;
+    accepting an unbound `registered` or `heartbeat` response could authorize a
+    different prompt on the same physical GPU.
     """
 
     outcome = host_comfy_terminal_outcome(payload)
-    if outcome and not host_comfy_receipt_matches(
+    if not host_comfy_receipt_matches(
         payload,
         prompt_id=prompt_id,
         logical_task_id=logical_task_id,
@@ -471,7 +476,13 @@ async def refresh_managed_identity(
     server.managed_comfy_artifact_spool_required_bool = False
     server.managed_comfy_artifact_spool_ready_bool = False
     server.managed_comfy_artifact_spool_protocol_string = ""
+    server.managed_comfy_central_control_ready_bool = False
     entry = _host_control_entry(server)
+    capability_mode = str(
+        entry.get("capability_mode_string")
+        or entry.get("capability_mode")
+        or "full"
+    ).strip().lower()
     url = str(entry.get("url_string") or entry.get("url") or "").strip().rstrip("/")
     token = str(entry.get("token_string") or entry.get("token") or "").strip()
     expected_physical = str(
@@ -487,23 +498,52 @@ async def refresh_managed_identity(
     if url.lower().endswith("/api-converter-glb"):
         url = url[: -len("/api-converter-glb")].rstrip("/")
     if not (
-        url
-        and token
-        and _STABLE_MACHINE_RE.fullmatch(expected_physical)
+        _STABLE_MACHINE_RE.fullmatch(expected_physical)
         and expected_role
+        and capability_mode in {"full", "comfy_ai"}
     ):
         return False
-    try:
-        response = await client.get(
-            f"{url}/api-converter-glb/server-status",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15.0,
-        )
-        if response.status_code != 200:
+    if capability_mode == "comfy_ai":
+        control_config = _central_arbiter_control_config(server)
+        if not control_config:
             return False
-        payload = response.json() if response.content else {}
-    except Exception:
-        return False
+        control_client, close_client_bool = _central_control_http_client(
+            client, control_config
+        )
+        try:
+            response = await control_client.get(
+                f"{control_config['url_string']}/status",
+                headers={
+                    "Authorization": (
+                        f"Bearer {control_config['token_string']}"
+                    )
+                },
+                timeout=15.0,
+                follow_redirects=False,
+            )
+            if response.status_code != 200:
+                return False
+            payload = response.json() if response.content else {}
+        except Exception:
+            return False
+        finally:
+            if close_client_bool:
+                await control_client.aclose()
+    else:
+        if not url or not token:
+            return False
+        try:
+            response = await client.get(
+                f"{url}/api-converter-glb/server-status",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15.0,
+                follow_redirects=False,
+            )
+            if response.status_code != 200:
+                return False
+            payload = response.json() if response.content else {}
+        except Exception:
+            return False
     if not isinstance(payload, dict):
         return False
     control = payload.get("workload_control")
@@ -511,6 +551,7 @@ async def refresh_managed_identity(
     reported_physical = str(
         payload.get("physical_node")
         or payload.get("physical_resource_id_string")
+        or payload.get("physical_gpu_id")
         or control.get("physical_node")
         or ""
     ).strip().lower()
@@ -521,10 +562,29 @@ async def refresh_managed_identity(
     )
     if reported_physical != expected_physical or reported_role != expected_role:
         return False
+    reported_capability_mode = str(
+        payload.get("capability_mode")
+        or payload.get("capability_mode_string")
+        or control.get("capability_mode")
+        or capability_mode
+    ).strip().lower()
+    if reported_capability_mode != capability_mode:
+        return False
+    central_control_ready = bool(
+        payload.get("managed_comfy_central_control_ready_bool")
+        if "managed_comfy_central_control_ready_bool" in payload
+        else control.get("managed_comfy_central_control_ready_bool")
+    )
     arbiter_enabled = bool(
-        payload.get("gpu_arbiter_enabled")
-        if "gpu_arbiter_enabled" in payload
-        else control.get("arbiter_enabled")
+        central_control_ready
+        and (
+            capability_mode == "comfy_ai"
+            or (
+                payload.get("gpu_arbiter_enabled")
+                if "gpu_arbiter_enabled" in payload
+                else control.get("arbiter_enabled")
+            )
+        )
     )
     spool_required = bool(
         payload.get("managed_comfy_artifact_spool_required_bool")
@@ -553,6 +613,7 @@ async def refresh_managed_identity(
     server.managed_comfy_artifact_spool_required_bool = spool_required
     server.managed_comfy_artifact_spool_ready_bool = spool_ready
     server.managed_comfy_artifact_spool_protocol_string = spool_protocol
+    server.managed_comfy_central_control_ready_bool = central_control_ready
     server.workload_identity_verified_bool = True
     # A host which requires the durable handoff but cannot currently provide
     # the exact protocol is kept in maintenance for new dispatch. Existing
@@ -561,6 +622,8 @@ async def refresh_managed_identity(
         not spool_ready
         or spool_protocol != MANAGED_COMFY_ARTIFACT_SPOOL_PROTOCOL
     ):
+        return False
+    if not central_control_ready:
         return False
     return True
 
@@ -587,6 +650,13 @@ def server_status(server: RenderServer) -> Dict[str, Any]:
         "managed_comfy_artifact_spool_protocol_string": str(
             getattr(server, "managed_comfy_artifact_spool_protocol_string", "")
             or ""
+        ),
+        "managed_comfy_central_control_ready_bool": bool(
+            getattr(
+                server,
+                "managed_comfy_central_control_ready_bool",
+                False,
+            )
         ),
         "arbiter_by_key": {
             # Never manufacture AI capacity from a registry row.  These bits
@@ -720,6 +790,173 @@ def _host_control_config(server: RenderServer) -> tuple[str, str]:
     return url, token
 
 
+def _protected_control_file_path(
+    path_text: str,
+    *,
+    secret_bool: bool,
+) -> str:
+    path = Path(str(path_text or "").strip())
+    try:
+        if (
+            not path.is_absolute()
+            or path.is_symlink()
+            or not path.is_file()
+            or path.resolve(strict=True) != path.absolute()
+        ):
+            return ""
+        file_stat = path.stat()
+        mode = stat.S_IMODE(file_stat.st_mode)
+        allowed_modes = {0o400, 0o440}
+        if not secret_bool:
+            allowed_modes.add(0o444)
+        # Windows chmod emulation exposes read-only fixture files as 0444.
+        # Production is Linux and still requires 0400/0440 for secret files.
+        if os.name == "nt":
+            allowed_modes.add(0o444)
+        if mode not in allowed_modes:
+            return ""
+        if hasattr(os, "geteuid"):
+            effective_uid = os.geteuid()
+            effective_gid = os.getegid()
+            supplementary = set(os.getgroups())
+            if file_stat.st_uid not in {0, effective_uid}:
+                return ""
+            if mode == 0o440 and file_stat.st_gid not in {
+                effective_gid,
+                *supplementary,
+            }:
+                return ""
+    except (OSError, ValueError):
+        return ""
+    return str(path)
+
+
+def _central_arbiter_control_config(server: RenderServer) -> Dict[str, str]:
+    """Return strict mTLS configuration for one node's central listener.
+
+    Managed-Comfy durability traffic must not traverse the converter or
+    Hunyuan webserver because those processes run as the workload SID.  Each
+    node therefore has a distinct SSH tunnel whose way-fr end binds only to
+    127.0.0.1 and reaches the SYSTEM arbiter's mTLS-only 127.0.0.1:5200.
+    Missing files, plaintext HTTP, a non-loopback URL, or an aliased workload
+    token are deliberately not backward compatible: callers wait without
+    consuming an attempt and never fall back to the workload bridge.
+    """
+
+    entry = _host_control_entry(server)
+    if not entry:
+        return {}
+    url = str(entry.get("arbiter_control_url_string") or "").strip().rstrip("/")
+    # Inline/env tokens are intentionally rejected.  The systemd environment
+    # contains only a path into /srv/autorig/secrets; the service reads the
+    # credential at request time so rotation does not require putting it in a
+    # process environment or command line.
+    if str(entry.get("central_token_string") or "").strip():
+        return {}
+    token_path_text = str(entry.get("central_token_file_string") or "").strip()
+    ca_path_text = str(entry.get("central_tls_ca_file_string") or "").strip()
+    cert_path_text = str(
+        entry.get("central_tls_client_cert_file_string") or ""
+    ).strip()
+    key_path_text = str(
+        entry.get("central_tls_client_key_file_string") or ""
+    ).strip()
+    workload_token = str(
+        entry.get("token_string") or entry.get("token") or ""
+    ).strip()
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError:
+        return {}
+    if not (
+        parsed.scheme == "https"
+        and parsed.hostname == "127.0.0.1"
+        and port
+        and parsed.path in {"", "/"}
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+    ):
+        return {}
+    token_path_string = _protected_control_file_path(
+        token_path_text, secret_bool=True
+    )
+    ca_path_string = _protected_control_file_path(
+        ca_path_text, secret_bool=False
+    )
+    cert_path_string = _protected_control_file_path(
+        cert_path_text, secret_bool=False
+    )
+    key_path_string = _protected_control_file_path(
+        key_path_text, secret_bool=True
+    )
+    if not all(
+        (
+            token_path_string,
+            ca_path_string,
+            cert_path_string,
+            key_path_string,
+        )
+    ):
+        return {}
+    try:
+        raw = Path(token_path_string).read_text(encoding="utf-8")
+    except (OSError, UnicodeError, ValueError):
+        return {}
+    token = raw.strip()
+    if (
+        len(token) < 20
+        or token == workload_token
+        or raw not in {token, token + "\n"}
+    ):
+        return {}
+    return {
+        "url_string": url,
+        "token_string": token,
+        "ca_file_string": ca_path_string,
+        "client_cert_file_string": cert_path_string,
+        "client_key_file_string": key_path_string,
+    }
+
+
+def _central_control_http_client(
+    injected_client: Optional[httpx.AsyncClient],
+    control_config: Dict[str, str],
+) -> tuple[httpx.AsyncClient, bool]:
+    """Return an isolated no-proxy/no-redirect mTLS client.
+
+    A MockTransport is accepted only as an in-process test seam.  Runtime
+    callers pass the queue's ordinary client, which is deliberately ignored so
+    its proxy, redirect and public-web trust policy cannot leak into central
+    lifecycle traffic.
+    """
+
+    if isinstance(
+        getattr(injected_client, "_transport", None), httpx.MockTransport
+    ):
+        return injected_client, False
+    context = ssl.create_default_context(
+        cafile=control_config["ca_file_string"]
+    )
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.load_cert_chain(
+        certfile=control_config["client_cert_file_string"],
+        keyfile=control_config["client_key_file_string"],
+    )
+    return (
+        httpx.AsyncClient(
+            verify=context,
+            trust_env=False,
+            follow_redirects=False,
+        ),
+        True,
+    )
+
+
 async def host_comfy_control(
     client: httpx.AsyncClient,
     *,
@@ -730,16 +967,17 @@ async def host_comfy_control(
     lease_id: str,
     request_id: str,
     artifact_sha256: str = "",
+    expected_canonical_submission_sha256: str = "",
     ttl_seconds: int = 300,
 ) -> Dict[str, Any]:
-    """Bridge way-fr to the host-local 5199 arbiter through protected 5198."""
+    """Call the host's central-only 5200 mTLS managed-Comfy listener."""
     if not managed_server(server):
         return {"status_string": "not_required"}
     action = str(action or "").strip().lower()
     if action not in {"register", "heartbeat", "complete", "preempt"}:
         raise ValueError(f"unsupported managed Comfy control action: {action}")
-    url, token = _host_control_config(server)
-    if not url or not token:
+    control_config = _central_arbiter_control_config(server)
+    if not control_config:
         raise WorkloadCapacityWait("host_comfy_control_not_configured", 10)
     body: Dict[str, Any] = {
         "prompt_id": prompt_id,
@@ -750,12 +988,33 @@ async def host_comfy_control(
     }
     if artifact_sha256:
         body["artifact_sha256"] = artifact_sha256
-    response = await client.post(
-        f"{url}/api-converter-glb/control/comfy/{action}",
-        headers={"Authorization": f"Bearer {token}"},
-        json=body,
-        timeout=30.0,
+    if action == "register":
+        submission_sha256 = str(
+            expected_canonical_submission_sha256 or ""
+        ).strip().lower()
+        if not _ARTIFACT_SHA256_RE.fullmatch(submission_sha256):
+            raise WorkloadCapacityWait(
+                "host_comfy_submission_binding_not_configured", 10
+            )
+        body["expected_canonical_submission_sha256"] = submission_sha256
+    control_client, close_client_bool = _central_control_http_client(
+        client, control_config
     )
+    try:
+        response = await control_client.post(
+            f"{control_config['url_string']}/comfy/{action}",
+            headers={
+                "Authorization": (
+                    f"Bearer {control_config['token_string']}"
+                )
+            },
+            json=body,
+            timeout=30.0,
+            follow_redirects=False,
+        )
+    finally:
+        if close_client_bool:
+            await control_client.aclose()
     payload = response.json() if response.content else {}
     status = str(payload.get("status_string") or payload.get("error_code_string") or "")
     receipt_identity = {
@@ -820,8 +1079,8 @@ async def host_comfy_stage_artifact(
 ) -> Dict[str, Any]:
     """Copy one exact successful Comfy output into the host CPU spool."""
 
-    url, token = _host_control_config(server)
-    if not url or not token:
+    control_config = _central_arbiter_control_config(server)
+    if not control_config:
         raise HostComfyArtifactWait("host_comfy_artifact_stage_not_configured", 10)
     identity = {
         "prompt_id": str(prompt_id or "").strip(),
@@ -851,12 +1110,24 @@ async def host_comfy_stage_artifact(
         ):
             raise HostComfyArtifactWait("host_comfy_artifact_stage_size_invalid", 2)
         body["artifact_size_int"] = artifact_size_int
-    response = await client.post(
-        f"{url}/api-converter-glb/control/comfy/stage",
-        headers={"Authorization": f"Bearer {token}"},
-        json=body,
-        timeout=30.0,
+    control_client, close_client_bool = _central_control_http_client(
+        client, control_config
     )
+    try:
+        response = await control_client.post(
+            f"{control_config['url_string']}/comfy/stage",
+            headers={
+                "Authorization": (
+                    f"Bearer {control_config['token_string']}"
+                )
+            },
+            json=body,
+            timeout=30.0,
+            follow_redirects=False,
+        )
+    finally:
+        if close_client_bool:
+            await control_client.aclose()
     try:
         payload = response.json() if response.content else {}
     except Exception:
@@ -917,8 +1188,8 @@ async def host_comfy_download_artifact(
 ) -> Dict[str, Any]:
     """Stream, checksum, fsync and atomically persist the exact host spool."""
 
-    url, token = _host_control_config(server)
-    if not url or not token:
+    control_config = _central_arbiter_control_config(server)
+    if not control_config:
         raise HostComfyArtifactWait("host_comfy_artifact_get_not_configured", 10)
     identity = {
         "prompt_id": str(prompt_id or "").strip(),
@@ -944,13 +1215,21 @@ async def host_comfy_download_artifact(
     temporary = destination.with_name(
         f".{destination.name}.{uuid.uuid4().hex}.managed-comfy-part"
     )
+    control_client, close_client_bool = _central_control_http_client(
+        client, control_config
+    )
     try:
-        async with client.stream(
+        async with control_client.stream(
             "GET",
-            f"{url}/api-converter-glb/control/comfy/artifact",
-            headers={"Authorization": f"Bearer {token}"},
+            f"{control_config['url_string']}/comfy/artifact",
+            headers={
+                "Authorization": (
+                    f"Bearer {control_config['token_string']}"
+                )
+            },
             params=identity,
             timeout=httpx.Timeout(300.0, connect=30.0),
+            follow_redirects=False,
         ) as response:
             if response.status_code != 200:
                 raw = await response.aread()
@@ -1029,6 +1308,8 @@ async def host_comfy_download_artifact(
             temporary.unlink()
         except FileNotFoundError:
             pass
+        if close_client_bool:
+            await control_client.aclose()
 
 
 async def host_comfy_ack_artifact(
@@ -1045,8 +1326,8 @@ async def host_comfy_ack_artifact(
 ) -> Dict[str, Any]:
     """Tombstone the host spool only after verified central persistence."""
 
-    url, token = _host_control_config(server)
-    if not url or not token:
+    control_config = _central_arbiter_control_config(server)
+    if not control_config:
         raise HostComfyArtifactWait("host_comfy_artifact_ack_not_configured", 10)
     identity = {
         "prompt_id": str(prompt_id or "").strip(),
@@ -1075,12 +1356,24 @@ async def host_comfy_ack_artifact(
         "central_persisted_bool": True,
         "central_persistence_receipt_id_string": receipt,
     }
-    response = await client.post(
-        f"{url}/api-converter-glb/control/comfy/ack",
-        headers={"Authorization": f"Bearer {token}"},
-        json=body,
-        timeout=30.0,
+    control_client, close_client_bool = _central_control_http_client(
+        client, control_config
     )
+    try:
+        response = await control_client.post(
+            f"{control_config['url_string']}/comfy/ack",
+            headers={
+                "Authorization": (
+                    f"Bearer {control_config['token_string']}"
+                )
+            },
+            json=body,
+            timeout=30.0,
+            follow_redirects=False,
+        )
+    finally:
+        if close_client_bool:
+            await control_client.aclose()
     try:
         payload = response.json() if response.content else {}
     except Exception:

@@ -393,23 +393,128 @@ def node_state_from_status(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _token_valid(request: Request) -> bool:
-    configured = str(os.getenv("AUTORIG_WORKLOAD_BROKER_TOKEN", "") or "")
-    if not configured:
-        return False
-    authorization = str(request.headers.get("authorization") or "")
-    supplied = authorization.split(" ", 1)[1].strip() if authorization.lower().startswith("bearer ") else ""
-    return bool(supplied) and hmac.compare_digest(configured, supplied)
+_BROKER_PRINCIPAL_TOKEN_ENV = {
+    "gateway": "AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN",
+    "renderfin": "AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN",
+    "host_agent": "AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN",
+    "admin": "AUTORIG_WORKLOAD_BROKER_ADMIN_TOKEN",
+}
 
 
-def _auth_error(request: Request) -> Optional[JSONResponse]:
+def _legacy_token_enabled() -> bool:
+    return str(
+        os.getenv("AUTORIG_WORKLOAD_BROKER_ALLOW_LEGACY_TOKEN", "0") or "0"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configured_broker_principals() -> Tuple[Dict[str, str], bool]:
+    configured = {
+        principal: str(os.getenv(env_name, "") or "").strip()
+        for principal, env_name in _BROKER_PRINCIPAL_TOKEN_ENV.items()
+    }
+    configured = {
+        principal: token
+        for principal, token in configured.items()
+        if len(token) >= 20
+    }
+    if _legacy_token_enabled():
+        legacy = str(os.getenv("AUTORIG_WORKLOAD_BROKER_TOKEN", "") or "").strip()
+        if len(legacy) >= 20:
+            configured["legacy"] = legacy
+    values = list(configured.values())
+    return configured, len(values) != len(set(values))
+
+
+def _broker_auth_principal(request: Request) -> Tuple[str, Optional[JSONResponse]]:
     if not _enabled():
-        return JSONResponse(status_code=503, content={"status_string": "disabled", "retryable_bool": True})
-    if not str(os.getenv("AUTORIG_WORKLOAD_BROKER_TOKEN", "") or ""):
-        return JSONResponse(status_code=503, content={"status_string": "token_not_configured", "retryable_bool": True})
-    if not _token_valid(request):
-        return JSONResponse(status_code=401, content={"status_string": "unauthorized"})
-    return None
+        return "", JSONResponse(
+            status_code=503,
+            content={"status_string": "disabled", "retryable_bool": True},
+        )
+    configured, ambiguous = _configured_broker_principals()
+    if ambiguous:
+        return "", JSONResponse(
+            status_code=503,
+            content={
+                "status_string": "credential_configuration_invalid",
+                "retryable_bool": True,
+            },
+        )
+    if not configured:
+        return "", JSONResponse(
+            status_code=503,
+            content={
+                "status_string": "scoped_tokens_not_configured",
+                "retryable_bool": True,
+            },
+        )
+    authorization = str(request.headers.get("authorization") or "")
+    supplied = (
+        authorization.split(" ", 1)[1].strip()
+        if authorization.lower().startswith("bearer ")
+        else ""
+    )
+    matched = ""
+    for principal, token in configured.items():
+        if supplied and hmac.compare_digest(token, supplied):
+            matched = principal
+    if not matched:
+        return "", JSONResponse(
+            status_code=401, content={"status_string": "unauthorized"}
+        )
+    return matched, None
+
+
+def _principal_allows_payload(
+    principal: str, action: str, payload: Dict[str, Any]
+) -> bool:
+    if principal == "legacy":
+        return True
+    owner_service = _safe_identifier(
+        payload.get("owner_service_string"), maximum=120
+    ).lower()
+    workload_class = normalize_workload_class(payload.get("workload_class_string"))
+    source_scope = _safe_identifier(
+        payload.get("source_scope_string"), maximum=64
+    ).lower()
+    if action == "status":
+        return principal == "admin"
+    if action == "node_heartbeat":
+        return bool(
+            (principal == "gateway" and source_scope == "lease_probe")
+            or (principal == "renderfin" and source_scope == "renderfin_probe")
+            or (principal == "host_agent" and source_scope == "host_agent")
+        )
+    if principal == "gateway":
+        if owner_service != "freestock_gateway":
+            return False
+        return action != "acquire" or workload_class == WORKLOAD_CLASS_AI
+    if principal == "renderfin":
+        if owner_service != "renderfin":
+            return False
+        return action != "acquire" or workload_class in {
+            WORKLOAD_CLASS_COMFY,
+            WORKLOAD_CLASS_HUNYUAN,
+            WORKLOAD_CLASS_BACKGROUND,
+        }
+    return False
+
+
+def _principal_error(
+    request: Request, action: str, payload: Dict[str, Any]
+) -> Tuple[str, Optional[JSONResponse]]:
+    principal, error = _broker_auth_principal(request)
+    if error is not None:
+        return "", error
+    if not _principal_allows_payload(principal, action, payload):
+        return "", JSONResponse(
+            status_code=403,
+            content={
+                "status_string": "credential_scope_forbidden",
+                "retryable_bool": False,
+            },
+        )
+    return principal, None
 
 
 async def _expire_leases(db: AsyncSession, now: datetime) -> int:
@@ -1575,8 +1680,16 @@ async def cancel_waiter(
         waiter = await db.get(WorkloadWaiter, request_id)
         if waiter is None:
             return 200, {"status_string": "already_cancelled", "request_id_string": request_id}
+        owner_service = _safe_identifier(
+            payload.get("owner_service_string"), maximum=120
+        )
         owner_task_id = _safe_identifier(payload.get("owner_task_id_string"))
-        if owner_task_id and owner_task_id != waiter.owner_task_id:
+        if (
+            not owner_service
+            or not owner_task_id
+            or owner_service != waiter.owner_service
+            or owner_task_id != waiter.owner_task_id
+        ):
             return 409, {
                 "status_string": "request_owner_mismatch",
                 "error_code_string": "request_owner_mismatch",
@@ -1615,53 +1728,66 @@ def _response(result: Tuple[int, Dict[str, Any]]) -> JSONResponse:
 
 @router.post("/leases/acquire")
 async def route_acquire_lease(request: Request, db: AsyncSession = Depends(get_db)):
-    error = _auth_error(request)
+    payload = await _json_payload(request)
+    _, error = _principal_error(request, "acquire", payload)
     if error:
         return error
-    return _response(await acquire_lease(db, await _json_payload(request)))
+    return _response(await acquire_lease(db, payload))
 
 
 @router.post("/leases/{lease_id}/heartbeat")
 async def route_heartbeat_lease(lease_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    error = _auth_error(request)
+    payload = await _json_payload(request)
+    _, error = _principal_error(request, "heartbeat", payload)
     if error:
         return error
-    return _response(await heartbeat_lease(db, _safe_identifier(lease_id, maximum=64), await _json_payload(request)))
+    return _response(
+        await heartbeat_lease(
+            db, _safe_identifier(lease_id, maximum=64), payload
+        )
+    )
 
 
 @router.post("/leases/{lease_id}/release")
 async def route_release_lease(lease_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    error = _auth_error(request)
+    payload = await _json_payload(request)
+    _, error = _principal_error(request, "release", payload)
     if error:
         return error
-    return _response(await release_lease(db, _safe_identifier(lease_id, maximum=64), await _json_payload(request)))
+    return _response(
+        await release_lease(
+            db, _safe_identifier(lease_id, maximum=64), payload
+        )
+    )
 
 
 @router.post("/nodes/heartbeat")
 async def route_node_heartbeat(request: Request, db: AsyncSession = Depends(get_db)):
-    error = _auth_error(request)
+    payload = await _json_payload(request)
+    _, error = _principal_error(request, "node_heartbeat", payload)
     if error:
         return error
-    return _response(await node_heartbeat(db, await _json_payload(request)))
+    return _response(await node_heartbeat(db, payload))
 
 
 @router.post("/requests/{request_id}/cancel")
 async def route_cancel_waiter(request_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    error = _auth_error(request)
+    payload = await _json_payload(request)
+    _, error = _principal_error(request, "cancel", payload)
     if error:
         return error
     return _response(
         await cancel_waiter(
             db,
             _safe_identifier(request_id, maximum=128),
-            await _json_payload(request),
+            payload,
         )
     )
 
 
 @router.get("/status")
 async def route_broker_status(request: Request, db: AsyncSession = Depends(get_db)):
-    error = _auth_error(request)
+    _, error = _principal_error(request, "status", {})
     if error:
         return error
     return JSONResponse(content=await broker_status(db))
@@ -1669,7 +1795,10 @@ async def route_broker_status(request: Request, db: AsyncSession = Depends(get_d
 
 def token_fingerprint() -> str:
     """Non-secret deployment diagnostic; never expose the token itself."""
-    token = str(os.getenv("AUTORIG_WORKLOAD_BROKER_TOKEN", "") or "")
+    configured, ambiguous = _configured_broker_principals()
+    if ambiguous:
+        return "invalid"
+    token = str(configured.get("admin") or "")
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12] if token else ""
 
 
