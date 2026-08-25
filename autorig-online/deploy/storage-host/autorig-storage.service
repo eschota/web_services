@@ -12,11 +12,11 @@ Slice=autorig.slice
 WorkingDirectory=/srv/autorig/current/autorig-online/backend
 Environment="PATH=/srv/autorig/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
-EnvironmentFile=-/srv/autorig/secrets/feature-flags.env
 EnvironmentFile=-/srv/autorig/secrets/backend.env
 EnvironmentFile=-/srv/autorig/secrets/telegram.env
 EnvironmentFile=/srv/autorig/secrets/storage-host.env
 EnvironmentFile=-/srv/autorig/secrets/migration-mode.env
+EnvironmentFile=-/srv/autorig/secrets/feature-flags.env
 ExecStart=/srv/autorig/venv/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8200 --workers 1 --no-access-log
 Restart=always
 RestartSec=5

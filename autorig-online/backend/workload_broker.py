@@ -546,6 +546,19 @@ def _principal_error(
     principal, error = _broker_auth_principal(request)
     if error is not None:
         return "", error
+    if not _enabled():
+        staging_allowed = bool(
+            (principal == "host_agent" and action == "node_heartbeat")
+            or (principal == "admin" and action == "status")
+        )
+        if not staging_allowed:
+            return "", JSONResponse(
+                status_code=503,
+                content={
+                    "status_string": "api_staging_only",
+                    "retryable_bool": True,
+                },
+            )
     if not _principal_allows_payload(principal, action, payload):
         return "", JSONResponse(
             status_code=403,

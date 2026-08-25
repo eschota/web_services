@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,6 +21,7 @@ from database import (
 from workload_broker import (
     _broker_auth_principal,
     _principal_allows_payload,
+    _principal_error,
     acquire_lease as broker_acquire_lease,
     acquire_task_workload_lease,
     broker_status,
@@ -33,6 +35,12 @@ from workload_broker import (
     release_lease,
     release_task_workload_lease,
     reserve_role_rank,
+    route_acquire_lease,
+    route_broker_status,
+    route_cancel_waiter,
+    route_heartbeat_lease,
+    route_node_heartbeat,
+    route_release_lease,
     workload_broker_api_enabled,
     workload_broker_enabled,
 )
@@ -41,6 +49,15 @@ from workload_broker import (
 class _HeaderRequest:
     def __init__(self, token):
         self.headers = {"authorization": f"Bearer {token}"}
+
+
+class _JsonRequest(_HeaderRequest):
+    def __init__(self, token, payload):
+        super().__init__(token)
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
 
 
 def _node_status(*, full=True, ai=True, accepting=True):
@@ -221,7 +238,7 @@ def test_central_broker_feature_flag_defaults_off(monkeypatch):
     assert workload_broker_api_enabled() is False
 
 
-def test_api_only_flag_accepts_scoped_host_agent_without_enforcing_dispatch():
+def test_api_only_flag_exposes_only_host_heartbeat_and_admin_status():
     scoped = {
         "AUTORIG_WORKLOAD_BROKER_API_ENABLED": "1",
         "AUTORIG_WORKLOAD_BROKER_ENABLED": "0",
@@ -237,14 +254,122 @@ def test_api_only_flag_accepts_scoped_host_agent_without_enforcing_dispatch():
             _HeaderRequest(scoped["AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN"])
         )
         assert principal == "host_agent" and error is None
+
+        principal, error = _principal_error(
+            _HeaderRequest(scoped["AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN"]),
+            "node_heartbeat",
+            {"source_scope_string": "host_agent"},
+        )
+        assert principal == "host_agent" and error is None
+        principal, error = _principal_error(
+            _HeaderRequest(scoped["AUTORIG_WORKLOAD_BROKER_ADMIN_TOKEN"]),
+            "status",
+            {},
+        )
+        assert principal == "admin" and error is None
+
+        blocked = [
+            (
+                "gateway",
+                "acquire",
+                {
+                    "owner_service_string": "freestock_gateway",
+                    "workload_class_string": "ai_vision",
+                },
+            ),
+            (
+                "gateway",
+                "heartbeat",
+                {"owner_service_string": "freestock_gateway"},
+            ),
+            ("gateway", "release", {"owner_service_string": "freestock_gateway"}),
+            ("renderfin", "cancel", {"owner_service_string": "renderfin"}),
+            ("gateway", "node_heartbeat", {"source_scope_string": "lease_probe"}),
+        ]
+        for principal_name, action, payload in blocked:
+            _, error = _principal_error(
+                _HeaderRequest(scoped[
+                    "AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN"
+                    if principal_name == "gateway"
+                    else "AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN"
+                ]),
+                action,
+                payload,
+            )
+            assert error is not None and error.status_code == 503
+            assert json.loads(error.body)["status_string"] == "api_staging_only"
+
+        gateway_request = _JsonRequest(
+            scoped["AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN"],
+            {
+                "owner_service_string": "freestock_gateway",
+                "workload_class_string": "ai_vision",
+            },
+        )
+        for route_call in (
+            lambda: route_acquire_lease(gateway_request, None),
+            lambda: route_heartbeat_lease("lease-1", gateway_request, None),
+            lambda: route_release_lease("lease-1", gateway_request, None),
+            lambda: route_cancel_waiter("request-1", gateway_request, None),
+        ):
+            response = asyncio.run(route_call())
+            assert response.status_code == 503
+            assert json.loads(response.body)["status_string"] == "api_staging_only"
+
+        async def verify_staging_routes(db):
+            node_response = await route_node_heartbeat(
+                _JsonRequest(
+                    scoped["AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN"],
+                    {
+                        "node_id_string": "F7",
+                        "physical_resource_id_string": "F7",
+                        "source_scope_string": "host_agent",
+                        "node_status_by_key": _node_status(),
+                    },
+                ),
+                db,
+            )
+            assert node_response.status_code == 200
+            assert json.loads(node_response.body)["bootstrap_accepted_bool"] is True
+            status_response = await route_broker_status(
+                _HeaderRequest(scoped["AUTORIG_WORKLOAD_BROKER_ADMIN_TOKEN"]),
+                db,
+            )
+            assert status_response.status_code == 200
+            assert json.loads(status_response.body)["broker_mode_by_key"] == {
+                "api_enabled_bool": True,
+                "lease_enforcement_enabled_bool": False,
+            }
+
+        _run(verify_staging_routes)
+
         assert asyncio.run(
             acquire_task_workload_lease(None, None, "", {})
         ) == (True, {})
+        assert asyncio.run(
+            heartbeat_task_workload_lease(None, None)
+        ) == (200, {"status_string": "not_required"})
+        assert asyncio.run(
+            release_task_workload_lease(None, None, outcome="preempted")
+        ) is None
         status = _run(lambda db: broker_status(db))
         assert status["broker_mode_by_key"] == {
             "api_enabled_bool": True,
             "lease_enforcement_enabled_bool": False,
         }
+
+
+def test_lease_enforcement_always_implies_api_availability():
+    with patch.dict(
+        "os.environ",
+        {
+            "AUTORIG_WORKLOAD_BROKER_API_ENABLED": "0",
+            "AUTORIG_WORKLOAD_BROKER_ENABLED": "1",
+        },
+        clear=True,
+    ):
+        assert workload_broker_enabled() is True
+        assert workload_broker_api_enabled() is True
 
 
 def test_workload_role_alias_is_canonical_and_nested_host_role_is_used():
