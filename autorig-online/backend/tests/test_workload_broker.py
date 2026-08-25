@@ -1570,6 +1570,131 @@ def test_ai_lease_requires_fresh_authoritative_host_heartbeat():
     _run(scenario)
 
 
+def test_probe_cannot_keep_active_ai_lease_alive_after_host_authority_expires():
+    async def scenario(db):
+        start = datetime.utcnow()
+        authority = {
+            "node_id_string": "f5",
+            "physical_resource_id_string": "f5",
+            "source_scope_string": "host_agent",
+            "node_status_by_key": _node_status(
+                full=False, ai=True, accepting=True
+            ),
+        }
+        code, _ = await node_heartbeat(db, authority, now=start)
+        assert code == 200
+
+        request = _request(
+            "f5", "ai_vision", "vision-active", "vision-request-active"
+        )
+        request["ttl_seconds_int"] = 600
+        code, acquired = await broker_acquire_lease(
+            db, request, now=start + timedelta(seconds=1)
+        )
+        assert code == 200
+        lease_id = acquired["lease_by_key"]["lease_id_string"]
+        exact_owner = {
+            "owner_service_string": "test",
+            "owner_task_id_string": "vision-active",
+            "request_id_string": "vision-request-active",
+            "ttl_seconds_int": 600,
+        }
+        lease = await db.get(WorkloadLease, lease_id)
+        waiter = await db.get(WorkloadWaiter, "vision-request-active")
+        original_heartbeat = lease.heartbeat_at
+        original_expiry = lease.expires_at
+        original_waiter_seen = waiter.last_seen_at
+        original_owner = (
+            lease.owner_service,
+            lease.owner_task_id,
+            lease.request_id,
+            lease.physical_resource_id,
+        )
+
+        # A transport probe is fresh, but host arbitration authority is not.
+        probe = dict(authority)
+        probe["source_scope_string"] = "lease_probe"
+        code, _ = await node_heartbeat(
+            db, probe, now=start + timedelta(seconds=181)
+        )
+        assert code == 200
+        node = await db.get(WorkloadNodeState, "f5")
+        assert node.heartbeat_at == start + timedelta(seconds=181)
+        assert node.authority_heartbeat_at == start
+        assert node.authority_source == "host_agent"
+
+        code, replay_denied = await broker_acquire_lease(
+            db, request, now=start + timedelta(seconds=182)
+        )
+        assert code == 423
+        assert (
+            replay_denied["status_string"]
+            == "authoritative_heartbeat_required"
+        )
+        assert replay_denied["retryable_bool"] is True
+        assert replay_denied["lease_by_key"]["lease_id_string"] == lease_id
+
+        code, heartbeat_denied = await heartbeat_lease(
+            db,
+            lease_id,
+            exact_owner,
+            now=start + timedelta(seconds=183),
+        )
+        assert code == 423
+        assert (
+            heartbeat_denied["status_string"]
+            == "authoritative_heartbeat_required"
+        )
+        assert heartbeat_denied["retryable_bool"] is True
+        assert heartbeat_denied["lease_by_key"]["lease_id_string"] == lease_id
+
+        lease = await db.get(WorkloadLease, lease_id)
+        waiter = await db.get(WorkloadWaiter, "vision-request-active")
+        assert lease.state == "active"
+        assert lease.heartbeat_at == original_heartbeat
+        assert lease.expires_at == original_expiry
+        assert waiter.last_seen_at == original_waiter_seen
+        assert (
+            lease.owner_service,
+            lease.owner_task_id,
+            lease.request_id,
+            lease.physical_resource_id,
+        ) == original_owner
+
+        # Restoring host authority lets the exact same request and lease IDs
+        # continue idempotently; no replacement owner or lease is created.
+        code, _ = await node_heartbeat(
+            db, authority, now=start + timedelta(seconds=184)
+        )
+        assert code == 200
+        code, replay = await broker_acquire_lease(
+            db, request, now=start + timedelta(seconds=185)
+        )
+        assert code == 200
+        assert replay["status_string"] == "renewed"
+        assert replay["lease_by_key"]["lease_id_string"] == lease_id
+        code, heartbeat = await heartbeat_lease(
+            db,
+            lease_id,
+            exact_owner,
+            now=start + timedelta(seconds=186),
+        )
+        assert code == 200
+        assert heartbeat["status_string"] == "active"
+        assert heartbeat["lease_by_key"]["lease_id_string"] == lease_id
+
+        leases = list((await db.execute(select(WorkloadLease))).scalars().all())
+        assert len(leases) == 1
+        assert (
+            leases[0].owner_service,
+            leases[0].owner_task_id,
+            leases[0].request_id,
+            leases[0].physical_resource_id,
+        ) == original_owner
+
+    _run(scenario)
+
+
 def test_lease_heartbeat_and_release_require_exact_three_part_owner():
     async def scenario(db):
         code, acquired = await acquire_lease(

@@ -130,6 +130,26 @@ def _heartbeat_ttl_seconds() -> int:
         return 180
 
 
+def _has_fresh_host_authority(
+    node: Optional[WorkloadNodeState], *, now: datetime
+) -> bool:
+    """Only a fresh host-agent heartbeat may authorize AI GPU work.
+
+    Transport and workload probes intentionally share ``heartbeat_at`` for
+    reachability, but they are not the GPU arbiter authority.  Keeping this
+    check separate prevents a live probe from renewing or admitting AI work
+    after the host agent (and therefore its arbitration state) disappears.
+    """
+
+    return bool(
+        node is not None
+        and str(node.authority_source or "").lower() == "host_agent"
+        and node.authority_heartbeat_at is not None
+        and node.authority_heartbeat_at
+        >= now - timedelta(seconds=_heartbeat_ttl_seconds())
+    )
+
+
 def _waiter_ttl_seconds() -> int:
     """Bound how long an absent claimant can retain its FIFO position.
 
@@ -821,12 +841,10 @@ def _accepting_ai_for_resource(
     interactive_demand: int,
     reserve: int,
 ) -> bool:
-    authority_cutoff = now - timedelta(seconds=_heartbeat_ttl_seconds())
     if not (
         node.healthy
         and node.ai_capable
-        and node.authority_heartbeat_at is not None
-        and node.authority_heartbeat_at >= authority_cutoff
+        and _has_fresh_host_authority(node, now=now)
     ):
         return False
     resource = str(node.physical_resource_id or "")
@@ -1080,6 +1098,18 @@ async def acquire_lease(
                         "retry_after_seconds_int": 5,
                         "lease_by_key": _lease_payload(existing_request),
                     }
+                if (
+                    existing_request.workload_class == WORKLOAD_CLASS_AI
+                    and not _has_fresh_host_authority(existing_node, now=now)
+                ):
+                    await db.commit()
+                    return 423, {
+                        "status_string": "authoritative_heartbeat_required",
+                        "error_code_string": "authoritative_heartbeat_required",
+                        "retryable_bool": True,
+                        "retry_after_seconds_int": 5,
+                        "lease_by_key": _lease_payload(existing_request),
+                    }
                 existing_request.heartbeat_at = now
                 existing_request.expires_at = now + timedelta(seconds=ttl)
                 existing_request.updated_at = now
@@ -1108,10 +1138,8 @@ async def acquire_lease(
                 "retryable_bool": True,
                 "retry_after_seconds_int": 5,
             }
-        if workload_class == WORKLOAD_CLASS_AI and (
-            not node.authority_heartbeat_at
-            or node.authority_heartbeat_at
-            < now - timedelta(seconds=_heartbeat_ttl_seconds())
+        if workload_class == WORKLOAD_CLASS_AI and not _has_fresh_host_authority(
+            node, now=now
         ):
             await db.commit()
             return 423, {
@@ -1376,6 +1404,18 @@ async def heartbeat_lease(
                 "retry_after_seconds_int": 5,
                 "lease_by_key": _lease_payload(lease),
             }
+        if (
+            lease.workload_class == WORKLOAD_CLASS_AI
+            and not _has_fresh_host_authority(node, now=now)
+        ):
+            await db.commit()
+            return 423, {
+                "status_string": "authoritative_heartbeat_required",
+                "error_code_string": "authoritative_heartbeat_required",
+                "retryable_bool": True,
+                "retry_after_seconds_int": 5,
+                "lease_by_key": _lease_payload(lease),
+            }
         lease.heartbeat_at = now
         lease.expires_at = now + timedelta(seconds=_lease_ttl_seconds(payload.get("ttl_seconds_int")))
         lease.updated_at = now
@@ -1460,13 +1500,11 @@ async def broker_status(db: AsyncSession, *, now: Optional[datetime] = None) -> 
                 or active_by_resource.get(str(node.physical_resource_id)) is not None
             )
         ]
-        authority_cutoff = now - timedelta(seconds=_heartbeat_ttl_seconds())
         ai_nodes = [
             node
             for node in nodes
             if node.ai_capable
-            and node.authority_heartbeat_at is not None
-            and node.authority_heartbeat_at >= authority_cutoff
+            and _has_fresh_host_authority(node, now=now)
         ]
         reserve = min(_reserve_count(), len(full_nodes))
         ai_accepting = [
