@@ -1473,7 +1473,10 @@ async def cancel_waiter(
     response = await client.post(
         f"{_base_url()}/requests/{request_id}/cancel",
         headers=_headers(),
-        json={"owner_task_id_string": owner_task_id},
+        json={
+            "owner_service_string": "renderfin",
+            "owner_task_id_string": owner_task_id,
+        },
         timeout=15.0,
     )
     if response.status_code != 200:

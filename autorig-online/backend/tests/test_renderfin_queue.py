@@ -198,6 +198,44 @@ class QueueDispatchTests(unittest.TestCase):
                 {"Authorization": "Bearer renderfin-token-1234567890"},
             )
 
+    def test_renderfin_waiter_cancel_sends_exact_service_and_task_owner(self):
+        async def scenario():
+            client = AsyncMock()
+            client.post.return_value = httpx.Response(
+                200,
+                json={"status_string": "cancelled"},
+                request=httpx.Request("POST", "https://autorig.example/cancel"),
+            )
+            with patch.dict(
+                "os.environ",
+                {
+                    "RENDERFIN_WORKLOAD_BROKER_ENABLED": "1",
+                    "RENDERFIN_WORKLOAD_BROKER_URL": (
+                        "https://autorig.example/api/workload-broker"
+                    ),
+                    "AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN": (
+                        "renderfin-token-1234567890"
+                    ),
+                },
+                clear=True,
+            ):
+                await workload_lease.cancel_waiter(
+                    client,
+                    request_id="renderfin-request",
+                    owner_task_id="renderfin-task",
+                )
+            client.post.assert_awaited_once()
+            call = client.post.await_args
+            self.assertEqual(
+                call.kwargs["json"],
+                {
+                    "owner_service_string": "renderfin",
+                    "owner_task_id_string": "renderfin-task",
+                },
+            )
+
+        run(scenario())
+
     def test_central_control_transport_is_mtls_no_proxy_no_redirect(self):
         calls = {}
 

@@ -10,7 +10,8 @@ Priority is deliberately two-dimensional:
 
 * AI Vision is the highest ordinary workload.
 * AutoRig keeps a hard reserve of two *healthy* full converters while it has
-  interactive demand.  AI may preempt AutoRig only above that reserve.
+  interactive demand.  AI Vision is never recalled for that reserve; the
+  reserve is supplied by dedicated AutoRig-primary capacity.
 * Hunyuan, Comfy and collection work use remaining capacity and are recalled
   before interactive work.
 
@@ -990,15 +991,17 @@ async def _reconcile_autorig_reserve(db: AsyncSession, now: datetime) -> int:
     victims = [
         lease for lease in leases
         if lease.physical_resource_id in {node.physical_resource_id for node in full_nodes}
-        and lease.workload_class != WORKLOAD_CLASS_AUTORIG
+        and lease.workload_class
+        not in {WORKLOAD_CLASS_AUTORIG, WORKLOAD_CLASS_AI}
         and lease.state == "active"
     ]
     role_by_resource = {
         str(node.physical_resource_id): node.reserve_role for node in full_nodes
     }
-    # Restore an AutoRig-primary slot before recalling borrowed work from the
-    # AI-primary pool. Within the same role, lowest-priority/newest work yields
-    # first. AI remains recallable only when required by the hard reserve.
+    # Restore an AutoRig-primary slot before recalling borrowed lower-priority
+    # work.  AI Vision is deliberately absent from ``victims``: it is the
+    # fleet's highest-priority workload and cannot be stopped to manufacture a
+    # reserve.  F11/F13-style AutoRig-primary capacity supplies that reserve.
     victims.sort(
         key=lambda lease: (
             reserve_role_rank(
@@ -1240,9 +1243,15 @@ async def acquire_lease(
                     simulated_unavailable_resource=physical_resource_id,
                 )
                 may_preempt = other_usable >= reserve
-            if workload_class == WORKLOAD_CLASS_AUTORIG and active.workload_class == WORKLOAD_CLASS_AI:
-                usable = _autorig_usable_full_count(fresh_nodes, active_by_resource)
-                may_preempt = demand > 0 and usable < reserve
+            if (
+                workload_class == WORKLOAD_CLASS_AUTORIG
+                and active.workload_class == WORKLOAD_CLASS_AI
+            ):
+                # AI Vision is the absolute top production class.  AutoRig's
+                # hard reserve is provided by dedicated AutoRig-primary nodes;
+                # central admission must never request a preemption that the
+                # host arbiter and AI worker correctly refuse.
+                may_preempt = False
             if may_preempt and active.state == "active":
                 await _mark_preemption(active, reason=f"higher_priority_{workload_class}", now=now)
                 await db.commit()
@@ -2128,12 +2137,25 @@ async def release_task_workload_lease(
             admission_locked=admission_locked,
         )
     elif task.workload_request_id:
-        await cancel_waiter(
+        cancel_code, cancel_response = await cancel_waiter(
             db,
             str(task.workload_request_id),
-            {"owner_task_id_string": task.id},
+            {
+                "owner_service_string": "autorig_dispatcher",
+                "owner_task_id_string": task.id,
+            },
             admission_locked=admission_locked,
         )
+        if cancel_code != 200:
+            # Preserve the durable waiter binding until the exact-owner cancel
+            # is confirmed.  Clearing it here would orphan a live waiter and
+            # allow a duplicate request to be created on the next dispatch.
+            task.workload_lease_state = str(
+                cancel_response.get("status_string") or "cancel_pending"
+            )
+            task.workload_lease_heartbeat_at = datetime.utcnow()
+            await db.commit()
+            return
     task.workload_lease_state = outcome
     task.workload_lease_heartbeat_at = datetime.utcnow()
     if clear_for_retry:

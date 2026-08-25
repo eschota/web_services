@@ -488,6 +488,95 @@ def test_ai_may_preempt_autorig_only_above_the_two_slot_reserve():
     _run(scenario)
 
 
+def test_autorig_reserve_never_preempts_active_ai_vision():
+    async def scenario(db):
+        now = datetime.utcnow()
+        status = _node_status()
+        status["workload_role"] = "ai_vision_primary"
+        code, _ = await node_heartbeat(
+            db,
+            {
+                "node_id_string": "f1",
+                "physical_resource_id_string": "f1",
+                "source_scope_string": "host_agent",
+                "node_status_by_key": status,
+            },
+            now=now,
+        )
+        assert code == 200
+
+        code, vision = await acquire_lease(
+            db,
+            _request("f1", "ai_vision", "vision-active", "vision-active-request"),
+            now=now + timedelta(seconds=1),
+        )
+        assert code == 200
+        db.add(
+            Task(
+                id="interactive-needs-reserve",
+                owner_type="user",
+                owner_id="user@example.com",
+                queue_class="interactive",
+                pipeline_kind="rig",
+                status="created",
+            )
+        )
+        await db.commit()
+
+        await broker_status(db, now=now + timedelta(seconds=2))
+        active_ai = await db.get(
+            WorkloadLease, vision["lease_by_key"]["lease_id_string"]
+        )
+        assert active_ai is not None
+        assert active_ai.state == "active"
+        assert active_ai.preemption_requested_at is None
+
+        code, blocked = await acquire_lease(
+            db,
+            _request(
+                "f1",
+                "autorig_interactive",
+                "autorig-cannot-recall-ai",
+                "autorig-cannot-recall-ai-request",
+            ),
+            now=now + timedelta(seconds=3),
+        )
+        assert code == 423
+        assert blocked["status_string"] == "gpu_busy"
+        active_ai = await db.get(
+            WorkloadLease, vision["lease_by_key"]["lease_id_string"]
+        )
+        assert active_ai.state == "active"
+
+        reserve_status = _node_status()
+        reserve_status["workload_role"] = "autorig_primary"
+        code, _ = await node_heartbeat(
+            db,
+            {
+                "node_id_string": "f11",
+                "physical_resource_id_string": "f11",
+                "source_scope_string": "host_agent",
+                "node_status_by_key": reserve_status,
+            },
+            now=now + timedelta(seconds=3),
+        )
+        assert code == 200
+        code, reserved = await acquire_lease(
+            db,
+            _request(
+                "f11",
+                "autorig_interactive",
+                "autorig-reserved",
+                "autorig-reserved-request",
+            ),
+            now=now + timedelta(seconds=4),
+        )
+        assert code == 200
+        assert reserved["status_string"] == "acquired"
+
+    _run(scenario)
+
+
 def test_busy_lower_priority_full_leases_still_satisfy_autorig_reserve():
     async def scenario(db):
         now = datetime.utcnow()
@@ -1005,20 +1094,29 @@ def test_fifo_within_same_class_still_prevents_same_gpu_leapfrog():
     _run(scenario)
 
 
-def test_ai_work_steals_idle_primary_then_interactive_demand_recalls_two_slots():
+def test_ai_stays_active_while_dedicated_autorig_primary_nodes_supply_reserve():
     async def scenario(db):
         start = datetime.utcnow()
-        for node in ("f1", "f2"):
+        for node, role in (
+            ("f1", "ai_vision_primary"),
+            ("f2", "ai_vision_primary"),
+            ("f11", "autorig_primary"),
+            ("f13", "autorig_primary"),
+        ):
+            node_status = _node_status()
+            node_status["workload_role"] = role
             code, _ = await node_heartbeat(
                 db,
                 {
                     "node_id_string": node,
                     "physical_resource_id_string": node,
-                    "node_status_by_key": _node_status(),
+                    "source_scope_string": "host_agent",
+                    "node_status_by_key": node_status,
                 },
                 now=start,
             )
             assert code == 200
+        for node in ("f1", "f2"):
             code, acquired = await acquire_lease(
                 db,
                 _request(node, "ai_vision", f"vision-{node}", f"vision-request-{node}"),
@@ -1040,32 +1138,30 @@ def test_ai_work_steals_idle_primary_then_interactive_demand_recalls_two_slots()
         await db.commit()
         status = await broker_status(db, now=start + timedelta(seconds=2))
         assert status["policy_by_key"]["interactive_demand_int"] == 1
-        assert status["metrics_by_key"]["preemption_requested_total_int"] == 2
-        victims = list(
-            (
-                await db.execute(
-                    select(WorkloadLease).where(
-                        WorkloadLease.state == "preemption_requested"
-                    )
-                )
-            ).scalars().all()
+        assert status["metrics_by_key"]["preemption_requested_total_int"] == 0
+        active_ai = list(
+            (await db.execute(select(WorkloadLease))).scalars().all()
         )
-        assert {victim.physical_resource_id for victim in victims} == {"f1", "f2"}
-        for victim in victims:
-            code, _ = await release_lease(
+        assert {lease.physical_resource_id for lease in active_ai} == {"f1", "f2"}
+        assert all(lease.state == "active" for lease in active_ai)
+
+        for index, node in enumerate(("f11", "f13"), 1):
+            code, acquired = await acquire_lease(
                 db,
-                victim.lease_id,
-                {
-                    "owner_service_string": victim.owner_service,
-                    "owner_task_id_string": victim.owner_task_id,
-                    "request_id_string": victim.request_id,
-                    "outcome_string": "preempted",
-                },
+                _request(
+                    node,
+                    "autorig_interactive",
+                    f"autorig-{index}",
+                    f"autorig-request-{index}",
+                ),
                 now=start + timedelta(seconds=3),
             )
             assert code == 200
-        restored = await broker_status(db, now=start + timedelta(seconds=4))
-        assert restored["capacity_by_key"]["autorig_usable_full_slots_int"] == 2
+            assert acquired["status_string"] == "acquired"
+
+        final_status = await broker_status(db, now=start + timedelta(seconds=4))
+        assert final_status["active_by_class_key"]["ai_vision"] == 2
+        assert final_status["active_by_class_key"]["autorig_interactive"] == 2
 
     _run(scenario)
 
@@ -1182,6 +1278,63 @@ def test_autorig_task_persists_one_lease_before_binding_and_reuses_it():
             )
             assert task.workload_request_id is None
             assert task.workload_lease_id is None
+
+    _run(scenario)
+
+
+def test_autorig_waiter_cancel_preserves_binding_until_exact_owner_confirmation():
+    async def scenario(db):
+        now = datetime.utcnow()
+        task = Task(
+            id="autorig-waiter-task",
+            owner_type="user",
+            owner_id="user@example.com",
+            queue_class="interactive",
+            pipeline_kind="rig",
+            status="created",
+            workload_request_id="autorig-waiter-request",
+            workload_lease_state="waiting",
+        )
+        db.add(task)
+        db.add(
+            WorkloadWaiter(
+                request_id="autorig-waiter-request",
+                physical_resource_id="f11",
+                node_id="f11",
+                workload_class="autorig_interactive",
+                priority=0,
+                owner_service="wrong-owner",
+                owner_task_id=task.id,
+                state="waiting",
+                metadata_json="{}",
+                created_at=now,
+                last_seen_at=now,
+                updated_at=now,
+            )
+        )
+        await db.commit()
+        with patch.dict("os.environ", {"AUTORIG_WORKLOAD_BROKER_ENABLED": "1"}):
+            await release_task_workload_lease(
+                db,
+                task,
+                outcome="released",
+                clear_for_retry=True,
+            )
+            assert task.workload_request_id == "autorig-waiter-request"
+            assert task.workload_lease_state == "request_owner_mismatch"
+
+            waiter = await db.get(WorkloadWaiter, "autorig-waiter-request")
+            waiter.owner_service = "autorig_dispatcher"
+            await db.commit()
+            await release_task_workload_lease(
+                db,
+                task,
+                outcome="released",
+                clear_for_retry=True,
+            )
+            assert task.workload_request_id is None
+            assert task.workload_lease_id is None
+            assert waiter.state == "cancelled"
 
     _run(scenario)
 
@@ -1352,6 +1505,67 @@ def test_renderfin_probe_cannot_erase_authoritative_host_capabilities():
         )
         assert code == 200
         assert acquired["status_string"] == "acquired"
+
+    _run(scenario)
+
+
+def test_ai_lease_requires_fresh_authoritative_host_heartbeat():
+    async def scenario(db):
+        start = datetime.utcnow()
+        probe = {
+            "node_id_string": "f5",
+            "physical_resource_id_string": "f5",
+            "source_scope_string": "lease_probe",
+            "node_status_by_key": _node_status(full=False, ai=True, accepting=True),
+        }
+        code, _ = await node_heartbeat(db, probe, now=start)
+        assert code == 200
+        code, denied = await broker_acquire_lease(
+            db,
+            _request("f5", "ai_vision", "vision", "vision-request"),
+            now=start + timedelta(seconds=1),
+        )
+        assert code == 423
+        assert denied["status_string"] == "authoritative_heartbeat_required"
+
+        authority = dict(probe)
+        authority["source_scope_string"] = "host_agent"
+        code, _ = await node_heartbeat(
+            db, authority, now=start + timedelta(seconds=2)
+        )
+        assert code == 200
+        code, acquired = await broker_acquire_lease(
+            db,
+            _request("f5", "ai_vision", "vision", "vision-request"),
+            now=start + timedelta(seconds=3),
+        )
+        assert code == 200
+        lease = acquired["lease_by_key"]
+        code, _ = await release_lease(
+            db,
+            lease["lease_id_string"],
+            {
+                "owner_service_string": "test",
+                "owner_task_id_string": "vision",
+                "request_id_string": "vision-request",
+                "outcome_string": "completed",
+            },
+            now=start + timedelta(seconds=4),
+        )
+        assert code == 200
+
+        # A later probe refreshes transport liveness but not host authority.
+        code, _ = await node_heartbeat(
+            db, probe, now=start + timedelta(seconds=901)
+        )
+        assert code == 200
+        code, expired = await broker_acquire_lease(
+            db,
+            _request("f5", "ai_vision", "vision-2", "vision-request-2"),
+            now=start + timedelta(seconds=902),
+        )
+        assert code == 423
+        assert expired["status_string"] == "authoritative_heartbeat_required"
 
     _run(scenario)
 
