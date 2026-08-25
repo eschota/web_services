@@ -107,6 +107,25 @@ def workload_broker_enabled() -> bool:
     return _enabled()
 
 
+def _api_enabled() -> bool:
+    """Expose broker APIs without enforcing leases in AutoRig dispatch.
+
+    A rolling GPU-node cutover must prove its authenticated host-agent
+    heartbeat before ordinary user conversions are required to acquire broker
+    leases.  Enforcement therefore implies API availability, while API-only
+    mode never changes scheduler behaviour on its own.
+    """
+    if _enabled():
+        return True
+    return str(
+        os.getenv("AUTORIG_WORKLOAD_BROKER_API_ENABLED", "0") or "0"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def workload_broker_api_enabled() -> bool:
+    return _api_enabled()
+
+
 @asynccontextmanager
 async def _admission_guard(already_locked: bool):
     if already_locked:
@@ -447,7 +466,7 @@ def _configured_broker_principals() -> Tuple[Dict[str, str], bool]:
 
 
 def _broker_auth_principal(request: Request) -> Tuple[str, Optional[JSONResponse]]:
-    if not _enabled():
+    if not _api_enabled():
         return "", JSONResponse(
             status_code=503,
             content={"status_string": "disabled", "retryable_bool": True},
@@ -1601,6 +1620,10 @@ async def broker_status(db: AsyncSession, *, now: Optional[datetime] = None) -> 
         return {
             "status_string": "ok",
             "generated_at_string": now.isoformat() + "Z",
+            "broker_mode_by_key": {
+                "api_enabled_bool": _api_enabled(),
+                "lease_enforcement_enabled_bool": _enabled(),
+            },
             "policy_by_key": {
                 "priority_order_list": [
                     WORKLOAD_CLASS_AI,

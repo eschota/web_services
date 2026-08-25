@@ -67,15 +67,18 @@ the next scheduled pass writes `postmigration-72h.complete` and disables the
 timer.
 ### Shared GPU workload broker
 
-The broker API is disabled by default. Generate four independent bearer
-credentials outside the repository and store them in
+The broker API and lease enforcement are disabled by default. Generate four
+independent bearer credentials outside the repository and store them in
 `/srv/autorig/secrets/backend.env` as
 `AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN`,
 `AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN`,
 `AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN`, and
 `AUTORIG_WORKLOAD_BROKER_ADMIN_TOKEN`. Reusing one value across scopes makes
-the broker fail closed. Roll out broker-aware converter and Freestock node
-payloads first; only then set
+the broker fail closed. During a rolling node canary,
+`AUTORIG_WORKLOAD_BROKER_API_ENABLED=1` may expose only the authenticated API
+so host-agent readiness can be proved while AutoRig dispatch remains on its
+existing path. Roll out broker-aware converter and Freestock node payloads
+first; only then set
 `AUTORIG_WORKLOAD_BROKER_ENABLED=1` in
 `/srv/autorig/secrets/feature-flags.env`.  Never pass the token in a process
 argument or commit it. Keep the Gateway-side scoped values in its protected

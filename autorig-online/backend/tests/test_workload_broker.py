@@ -33,6 +33,7 @@ from workload_broker import (
     release_lease,
     release_task_workload_lease,
     reserve_role_rank,
+    workload_broker_api_enabled,
     workload_broker_enabled,
 )
 
@@ -215,7 +216,35 @@ def test_broker_auth_rejects_legacy_and_aliased_scoped_tokens_by_default():
 
 def test_central_broker_feature_flag_defaults_off(monkeypatch):
     monkeypatch.delenv("AUTORIG_WORKLOAD_BROKER_ENABLED", raising=False)
+    monkeypatch.delenv("AUTORIG_WORKLOAD_BROKER_API_ENABLED", raising=False)
     assert workload_broker_enabled() is False
+    assert workload_broker_api_enabled() is False
+
+
+def test_api_only_flag_accepts_scoped_host_agent_without_enforcing_dispatch():
+    scoped = {
+        "AUTORIG_WORKLOAD_BROKER_API_ENABLED": "1",
+        "AUTORIG_WORKLOAD_BROKER_ENABLED": "0",
+        "AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN": "gateway-token-1234567890",
+        "AUTORIG_WORKLOAD_BROKER_RENDERFIN_TOKEN": "renderfin-token-123456789",
+        "AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN": "host-agent-token-12345678",
+        "AUTORIG_WORKLOAD_BROKER_ADMIN_TOKEN": "admin-token-123456789012",
+    }
+    with patch.dict("os.environ", scoped, clear=True):
+        assert workload_broker_api_enabled() is True
+        assert workload_broker_enabled() is False
+        principal, error = _broker_auth_principal(
+            _HeaderRequest(scoped["AUTORIG_WORKLOAD_BROKER_HOST_AGENT_TOKEN"])
+        )
+        assert principal == "host_agent" and error is None
+        assert asyncio.run(
+            acquire_task_workload_lease(None, None, "", {})
+        ) == (True, {})
+        status = _run(lambda db: broker_status(db))
+        assert status["broker_mode_by_key"] == {
+            "api_enabled_bool": True,
+            "lease_enforcement_enabled_bool": False,
+        }
 
 
 def test_workload_role_alias_is_canonical_and_nested_host_role_is_used():
