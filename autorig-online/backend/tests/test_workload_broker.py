@@ -24,6 +24,7 @@ from workload_broker import (
     _principal_error,
     acquire_lease as broker_acquire_lease,
     acquire_task_workload_lease,
+    autorig_workload_broker_enabled,
     broker_status,
     cancel_waiter,
     canonical_physical_resource_id,
@@ -238,6 +239,30 @@ def test_central_broker_feature_flag_defaults_off(monkeypatch):
     assert workload_broker_api_enabled() is False
 
 
+def test_autorig_dispatch_can_stage_behind_live_gateway_broker():
+    with patch.dict(
+        "os.environ",
+        {
+            "AUTORIG_WORKLOAD_BROKER_ENABLED": "1",
+            "AUTORIG_WORKLOAD_BROKER_API_ENABLED": "1",
+            "AUTORIG_WORKLOAD_BROKER_AUTORIG_ENFORCED": "0",
+        },
+        clear=True,
+    ):
+        assert workload_broker_enabled() is True
+        assert workload_broker_api_enabled() is True
+        assert autorig_workload_broker_enabled() is False
+
+
+def test_autorig_dispatch_enforcement_defaults_to_global_broker():
+    with patch.dict(
+        "os.environ",
+        {"AUTORIG_WORKLOAD_BROKER_ENABLED": "1"},
+        clear=True,
+    ):
+        assert autorig_workload_broker_enabled() is True
+
+
 def test_api_only_flag_exposes_only_host_heartbeat_and_admin_status():
     scoped = {
         "AUTORIG_WORKLOAD_BROKER_API_ENABLED": "1",
@@ -339,6 +364,7 @@ def test_api_only_flag_exposes_only_host_heartbeat_and_admin_status():
             assert json.loads(status_response.body)["broker_mode_by_key"] == {
                 "api_enabled_bool": True,
                 "lease_enforcement_enabled_bool": False,
+                "autorig_dispatch_enforcement_enabled_bool": False,
             }
 
         _run(verify_staging_routes)
@@ -356,6 +382,7 @@ def test_api_only_flag_exposes_only_host_heartbeat_and_admin_status():
         assert status["broker_mode_by_key"] == {
             "api_enabled_bool": True,
             "lease_enforcement_enabled_bool": False,
+            "autorig_dispatch_enforcement_enabled_bool": False,
         }
 
 

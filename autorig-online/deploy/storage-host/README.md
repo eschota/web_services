@@ -89,3 +89,12 @@ service environment as `FREESTOCK_AUTORIG_WORKLOAD_BROKER_GATEWAY_TOKEN` and
 `FREESTOCK_AUTORIG_WORKLOAD_BROKER_ADMIN_TOKEN`; Renderfin may reuse the
 backend's Renderfin-scoped value. `storage-host.env` keeps the non-secret two-slot
 AutoRig reserve and the F7/Raptor physical-resource alias.
+
+If Gateway lease enforcement must go live before the dedicated F11/F13
+AutoRig-primary reserves expose their exact protected `machine_*` identity,
+set `AUTORIG_WORKLOAD_BROKER_AUTORIG_ENFORCED=0` in the feature-flags file
+while leaving `AUTORIG_WORKLOAD_BROKER_ENABLED=1`. This disables central lease
+acquisition only for AutoRig converter dispatch; Gateway AI Vision remains
+brokered. During this narrow transition, `worker_endpoints` must enable only
+the dedicated AutoRig reserves. Remove the override immediately after their
+identity/role canary succeeds; it is not a permanent operating mode.

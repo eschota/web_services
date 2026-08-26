@@ -107,7 +107,9 @@ class SourcePreflightDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         preempt = AsyncMock(return_value=True)
         with (
-            patch.object(tasks, "workload_broker_enabled", return_value=True),
+            patch.object(
+                tasks, "autorig_workload_broker_enabled", return_value=True
+            ),
             patch.object(
                 tasks,
                 "preflight_task_source",
@@ -187,7 +189,9 @@ class SourcePreflightDispatchTests(unittest.IsolatedAsyncioTestCase):
         task = make_task()
         worker_url = "https://converter-legacy.example/api-converter-glb"
         with (
-            patch.object(tasks, "workload_broker_enabled", return_value=True),
+            patch.object(
+                tasks, "autorig_workload_broker_enabled", return_value=True
+            ),
             patch.object(
                 tasks,
                 "preflight_task_source",

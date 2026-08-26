@@ -107,6 +107,25 @@ def workload_broker_enabled() -> bool:
     return _enabled()
 
 
+def autorig_workload_broker_enabled() -> bool:
+    """Whether AutoRig converter dispatch must acquire a central GPU lease.
+
+    Gateway AI Vision and the broker API can be live before legacy reserve
+    converters expose their protected ``machine_*`` identity.  This separate
+    rollout gate lets those dedicated AutoRig-only reserves keep serving users
+    without disabling the central broker for AI Vision.  The default follows
+    the global enforcement flag so existing deployments remain fail closed.
+    """
+    if not _enabled():
+        return False
+    configured = str(
+        os.getenv("AUTORIG_WORKLOAD_BROKER_AUTORIG_ENFORCED", "") or ""
+    ).strip()
+    if not configured:
+        return True
+    return configured.lower() in {"1", "true", "yes", "on"}
+
+
 def _api_enabled() -> bool:
     """Expose broker APIs without enforcing leases in AutoRig dispatch.
 
@@ -1636,6 +1655,9 @@ async def broker_status(db: AsyncSession, *, now: Optional[datetime] = None) -> 
             "broker_mode_by_key": {
                 "api_enabled_bool": _api_enabled(),
                 "lease_enforcement_enabled_bool": _enabled(),
+                "autorig_dispatch_enforcement_enabled_bool": (
+                    autorig_workload_broker_enabled()
+                ),
             },
             "policy_by_key": {
                 "priority_order_list": [

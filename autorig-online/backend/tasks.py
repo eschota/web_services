@@ -49,9 +49,9 @@ from workers import (
 )
 from workload_broker import (
     acquire_task_workload_lease,
+    autorig_workload_broker_enabled,
     heartbeat_task_workload_lease,
     release_task_workload_lease,
-    workload_broker_enabled,
 )
 
 
@@ -760,7 +760,7 @@ async def start_task_on_worker(
         )
 
     workload_lease: Dict[str, Any] = {}
-    if workload_broker_enabled():
+    if autorig_workload_broker_enabled():
         try:
             node_status = await get_worker_workload_status(worker_url)
         except Exception as exc:
