@@ -15,7 +15,14 @@ from typing import Any, Dict, List, Optional
 import aiosqlite
 import httpx
 
-from . import comfy_adapter, config, routing, templating, workload_lease
+from . import (
+    comfy_adapter,
+    config,
+    image_quality,
+    routing,
+    templating,
+    workload_lease,
+)
 from .models import (
     TASK_DONE,
     TASK_ERROR,
@@ -35,6 +42,46 @@ _UNKNOWN_DEPTH = 10_000
 
 class ManagedComfyCleanupPending(RuntimeError):
     """Host registration may exist; keep lease/binding until exact cleanup."""
+
+
+def _artifact_owned_by_task(artifact: Dict[str, str], task_id: str) -> bool:
+    """Only accept SaveImage outputs carrying this logical task prefix."""
+
+    filename = PurePosixPath(
+        str(artifact.get("filename") or "").replace("\\", "/")
+    ).name.lower()
+    owner = str(task_id or "").strip().lower()
+    return bool(
+        owner
+        and (
+            filename == owner
+            or filename.startswith(owner + "_")
+            or filename.startswith(owner + ".")
+        )
+    )
+
+
+def _artifact_contract_error(
+    task: RenderTask, machine_code: str, message: str, artifacts: List[Dict[str, str]]
+) -> image_quality.RenderArtifactQualityError:
+    return image_quality.RenderArtifactQualityError(
+        machine_code,
+        message,
+        {
+            "schema": "renderfin.render_artifact_contract.v1",
+            "passed": False,
+            "task_id": task.id,
+            "prompt_type": str(task.prompt.type or ""),
+            "artifacts": [
+                {
+                    "filename": str(item.get("filename") or ""),
+                    "subfolder": str(item.get("subfolder") or ""),
+                    "type": str(item.get("type") or ""),
+                }
+                for item in artifacts
+            ],
+        },
+    )
 
 
 def _host_terminal_outcome(
@@ -1541,12 +1588,156 @@ class RenderQueue:
                 self._finish_guarded(task, server, entry or {})
             )
 
+    async def _validate_tpose_bundle_bytes(
+        self,
+        task: RenderTask,
+        server: RenderServer,
+        *,
+        primary_data: bytes,
+        isolated_data: bytes,
+        primary_artifact: Optional[Dict[str, str]] = None,
+        isolated_artifact: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        assert self._client is not None
+        reference_data: Optional[bytes] = None
+        try:
+            _reference_name, reference_data = await comfy_adapter.download_input_image(
+                self._client, task.prompt.image_url
+            )
+            return image_quality.validate_tpose_bundle(
+                primary_data,
+                isolated_data,
+                reference_data,
+            )
+        except image_quality.RenderArtifactQualityError as exc:
+            report = dict(exc.report)
+            report["context"] = {
+                "task_id": task.id,
+                "server_name": server.render_server_name,
+                "prompt_id": task.comfy_prompt_id,
+                "primary_artifact": dict(primary_artifact or {}),
+                "isolated_artifact": dict(isolated_artifact or {}),
+            }
+            try:
+                archived = image_quality.archive_rejected_bundle(
+                    config.DATA_DIR / "rejected" / "tpose" / task.id,
+                    primary_bytes=primary_data,
+                    isolated_bytes=isolated_data,
+                    reference_bytes=reference_data,
+                    report=report,
+                    label=server.render_server_name or "unknown-server",
+                )
+                print(
+                    f"[Renderfin][Queue] rejected T-pose bundle {task.id} "
+                    f"archived at {archived}"
+                )
+            except Exception as archive_exc:
+                # Archiving is evidence preservation, not permission to accept
+                # bytes that already failed the quality contract.
+                print(
+                    f"[Renderfin][Queue] rejected bundle archive failed for "
+                    f"{task.id}: {archive_exc}"
+                )
+            raise
+        except Exception as exc:
+            raise image_quality.RenderArtifactQualityError(
+                "control_mask_reference_unavailable",
+                "the exact T-pose control input could not be loaded for validation",
+                {
+                    "schema": "renderfin.tpose_bundle_quality.v1",
+                    "passed": False,
+                    "task_id": task.id,
+                    "server_name": server.render_server_name,
+                    "error_type": type(exc).__name__,
+                },
+            ) from exc
+
+    async def _reject_artifact_quality(
+        self,
+        task: RenderTask,
+        server: RenderServer,
+        exc: image_quality.RenderArtifactQualityError,
+    ) -> None:
+        """Retire one exact bad Comfy result and quarantine its producer."""
+
+        cooldown = max(
+            60.0,
+            float(os.getenv("RENDERFIN_RENDER_QUALITY_COOLDOWN_SECONDS", "3600")),
+        )
+        self._server_submit_cooldowns[server.render_server_name] = (
+            time.time() + cooldown
+        )
+        server.status = "render_quality_error"
+        self.registry.save(server)
+        error = (
+            f"render artifact quality rejected on {server.render_server_name}: "
+            f"{exc}"
+        )
+
+        host_outcome = ""
+        if task.managed_prompt and task.workload_lease_id:
+            if (
+                task.managed_comfy_artifact_spool_state == "central_persisted"
+                and self._managed_bundle_is_durable(task)
+            ):
+                acknowledgement = await self._ack_managed_artifact(task, server)
+                host_outcome = _host_terminal_outcome(
+                    acknowledgement, task, action="ack"
+                )
+                if host_outcome != "completed":
+                    raise workload_lease.HostComfyArtifactWait(
+                        "bad_artifact_archive_ack_not_completed", 2
+                    )
+                task.managed_comfy_artifact_spool_state = "acknowledged"
+            else:
+                terminal = await workload_lease.host_comfy_control(
+                    self._client,
+                    server=server,
+                    action="preempt",
+                    prompt_id=task.comfy_prompt_id,
+                    logical_task_id=task.id,
+                    lease_id=task.workload_lease_id,
+                    request_id=task.workload_request_id,
+                )
+                host_outcome = _host_terminal_outcome(
+                    terminal, task, action="preempt"
+                )
+                if host_outcome not in {"completed", "preempted", "released"}:
+                    raise workload_lease.HostComfyArtifactWait(
+                        "bad_artifact_terminal_proof_pending", 2
+                    )
+
+        task.status = TASK_ERROR
+        task.error = error[:1000]
+        task.finished_at = time.time()
+        await self._persist(task)
+        if task.workload_lease_id:
+            await self._release_workload(
+                task,
+                outcome=("completed" if host_outcome == "completed" else "preempted"),
+            )
+        print(
+            f"[Renderfin][Queue] task {task.id} rejected by quality gate; "
+            f"{server.render_server_name} cooled down for {int(cooldown)}s"
+        )
+
     async def _finish_guarded(self, task: RenderTask, server: RenderServer, entry: dict) -> None:
         try:
             async with self._download_slots:
                 await self._finish(task, server, entry)
         except asyncio.CancelledError:
             raise
+        except image_quality.RenderArtifactQualityError as exc:
+            try:
+                await self._reject_artifact_quality(task, server, exc)
+            except Exception as reject_exc:
+                # Keep the exact managed binding when terminal proof/ACK is
+                # temporarily unavailable. The next poll retries this same
+                # artifact and never admits a duplicate prompt.
+                print(
+                    f"[Renderfin][Queue] quality rejection deferred for "
+                    f"{task.id}: {reject_exc}"
+                )
         except (
             comfy_adapter.ComfyCapacityWait,
             workload_lease.WorkloadCapacityWait,
@@ -1623,7 +1814,26 @@ class RenderQueue:
             entry, output_ext=task.output_ext, preferred_fragment=preferred
         )
         if not artifacts:
-            raise comfy_adapter.ComfyAdapterError("no artifacts in history outputs")
+            raise _artifact_contract_error(
+                task,
+                "real_output_artifact_missing",
+                "history contains no non-temporary output artifact",
+                [],
+            )
+        history_artifacts = artifacts
+        if ptype in {"t_pose", "t_poses"}:
+            artifacts = [
+                artifact
+                for artifact in history_artifacts
+                if _artifact_owned_by_task(artifact, task.id)
+            ]
+            if not artifacts:
+                raise _artifact_contract_error(
+                    task,
+                    "task_owned_artifact_missing",
+                    "history contains no T-pose output owned by this logical task",
+                    history_artifacts,
+                )
 
         user_dir = config.RENDER_DIR / task.prompt.user_name
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -1632,12 +1842,22 @@ class RenderQueue:
         # _Isolated_ fragment) at output_url; the isolated one is stored as an
         # extra output. For inpaint the C# primary IS the isolated file.
         primary = artifacts[0]
+        isolated: List[Dict[str, str]] = []
         if ptype in ("t_pose", "t_poses"):
             non_isolated = [
                 a for a in artifacts if "_isolated_" not in a.get("filename", "").lower()
             ]
-            if non_isolated:
-                primary = non_isolated[0]
+            isolated = [
+                a for a in artifacts if "_isolated_" in a.get("filename", "").lower()
+            ]
+            if not non_isolated or not isolated:
+                raise _artifact_contract_error(
+                    task,
+                    "tpose_output_bundle_incomplete",
+                    "T-pose output requires task-owned FULL and _Isolated_ images",
+                    artifacts,
+                )
+            primary = non_isolated[0]
 
         if task.workload_lease_id and not skip_lease_heartbeat:
             await workload_lease.heartbeat(
@@ -1660,23 +1880,33 @@ class RenderQueue:
             )
             _host_terminal_outcome(host_heartbeat, task, action="heartbeat")
         data = await comfy_adapter.download_artifact(self._client, server, primary)
+        iso_data: Optional[bytes] = None
+        if ptype in ("t_pose", "t_poses"):
+            iso_data = await comfy_adapter.download_artifact(
+                self._client, server, isolated[0]
+            )
+            await self._validate_tpose_bundle_bytes(
+                task,
+                server,
+                primary_data=data,
+                isolated_data=iso_data,
+                primary_artifact=primary,
+                isolated_artifact=isolated[0],
+            )
+
         out_path = user_dir / f"{task.id}{task.output_ext}"
-        out_path.write_bytes(data)
+        _atomic_fsync_bytes(out_path, data)
         task.output_path = str(out_path)
         if task.output_ext == ".png":
             _jpeg_sibling(out_path)
 
         if ptype in ("t_pose", "t_poses"):
-            isolated = [
-                a for a in artifacts if "_isolated_" in a.get("filename", "").lower()
-            ]
-            if isolated:
-                iso_data = await comfy_adapter.download_artifact(self._client, server, isolated[0])
-                iso_path = user_dir / f"{task.id}_Isolated.png"
-                iso_path.write_bytes(iso_data)
-                task.extra_outputs["isolated"] = (
-                    f"{config.PUBLIC_BASE_URL}/render/{task.prompt.user_name}/{task.id}_Isolated.png"
-                )
+            assert iso_data is not None
+            iso_path = user_dir / f"{task.id}_Isolated.png"
+            _atomic_fsync_bytes(iso_path, iso_data)
+            task.extra_outputs["isolated"] = (
+                f"{config.PUBLIC_BASE_URL}/render/{task.prompt.user_name}/{task.id}_Isolated.png"
+            )
 
         elapsed = time.time() - task.started_at
         server.average_render_time = (
@@ -1759,9 +1989,26 @@ class RenderQueue:
                 preferred_fragment=preferred,
             )
             if not artifacts:
-                raise workload_lease.HostComfyArtifactWait(
-                    "central_managed_comfy_history_has_no_artifacts", 2
+                raise _artifact_contract_error(
+                    task,
+                    "real_output_artifact_missing",
+                    "managed history contains no non-temporary output artifact",
+                    [],
                 )
+            history_artifacts = artifacts
+            if ptype in {"t_pose", "t_poses"}:
+                artifacts = [
+                    artifact
+                    for artifact in history_artifacts
+                    if _artifact_owned_by_task(artifact, task.id)
+                ]
+                if not artifacts:
+                    raise _artifact_contract_error(
+                        task,
+                        "task_owned_artifact_missing",
+                        "managed history contains no T-pose output owned by this logical task",
+                        history_artifacts,
+                    )
             primary = artifacts[0]
             if ptype in {"t_pose", "t_poses"}:
                 non_isolated = [
@@ -1777,8 +2024,11 @@ class RenderQueue:
                     in str(artifact.get("filename") or "").lower()
                 ]
                 if not non_isolated or not isolated:
-                    raise workload_lease.HostComfyArtifactWait(
-                        "central_managed_comfy_tpose_bundle_incomplete", 2
+                    raise _artifact_contract_error(
+                        task,
+                        "tpose_output_bundle_incomplete",
+                        "managed T-pose output requires task-owned FULL and _Isolated_ images",
+                        artifacts,
                     )
                 primary = non_isolated[0]
                 # The singular spool cannot safely detach until this required
@@ -1872,7 +2122,7 @@ class RenderQueue:
                 expected_size_int=task.managed_comfy_artifact_size_int,
             )
             task.output_path = str(out_path)
-            if task.output_ext == ".png":
+            if task.output_ext == ".png" and ptype not in {"t_pose", "t_poses"}:
                 _jpeg_sibling(out_path)
             task.managed_comfy_central_persistence_receipt_id_string = (
                 _bundle_receipt_id(task)
@@ -1882,6 +2132,37 @@ class RenderQueue:
             # crash before the host is allowed to tombstone/delete its bytes.
             await self._persist(task)
             state = "central_persisted"
+
+        if state in {"central_persisted", "acknowledged"} and ptype in {
+            "t_pose",
+            "t_poses",
+        }:
+            primary_data = out_path.read_bytes()
+            isolated_path = Path(task.managed_comfy_isolated_output_path)
+            isolated_data = isolated_path.read_bytes()
+            await self._validate_tpose_bundle_bytes(
+                task,
+                server,
+                primary_data=primary_data,
+                isolated_data=isolated_data,
+                primary_artifact={
+                    "filename": PurePosixPath(
+                        task.managed_comfy_artifact_relative_path_string
+                    ).name,
+                    "subfolder": str(
+                        PurePosixPath(
+                            task.managed_comfy_artifact_relative_path_string
+                        ).parent
+                    ),
+                    "type": "output",
+                },
+                isolated_artifact={
+                    "filename": isolated_path.name,
+                    "type": "central",
+                },
+            )
+            if task.output_ext == ".png":
+                _jpeg_sibling(out_path)
 
         if state == "central_persisted":
             acknowledgement = await self._ack_managed_artifact(task, server)

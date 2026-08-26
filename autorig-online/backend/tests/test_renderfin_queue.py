@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from renderfin import comfy_adapter, config, workload_lease
+from renderfin import comfy_adapter, config, image_quality, workload_lease
 from renderfin.models import (
     TASK_DONE,
     TASK_ERROR,
@@ -172,6 +172,121 @@ def _spool_ack_receipt(task):
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_comfy_http_200_with_node_errors_is_rejected(self):
+        async def scenario():
+            server = _server()
+
+            def handler(request):
+                self.assertEqual(request.url.path, "/prompt")
+                return httpx.Response(
+                    200,
+                    json={
+                        "prompt_id": "prompt-bad",
+                        "node_errors": {
+                            "11": {
+                                "errors": [
+                                    {"message": "required model is not installed"}
+                                ]
+                            }
+                        },
+                    },
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            ) as client:
+                with self.assertRaises(comfy_adapter.ComfyAdapterError) as raised:
+                    await comfy_adapter.submit(client, server, {"1": {}})
+            self.assertIn("prompt validation failed", str(raised.exception))
+            self.assertIn("node_errors", str(raised.exception))
+
+        run(scenario())
+
+    def test_resolver_never_promotes_temporary_preview(self):
+        artifacts = comfy_adapter.resolve_artifacts(
+            {
+                "outputs": {
+                    "114": {
+                        "images": [
+                            {
+                                "filename": "uploaded-pose-preview.png",
+                                "subfolder": "",
+                                "type": "temp",
+                            }
+                        ]
+                    }
+                }
+            },
+            output_ext=".png",
+        )
+        self.assertEqual(artifacts, [])
+
+    def test_bad_tpose_bundle_becomes_error_and_cools_worker(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(
+                            prompt="a",
+                            type="t_pose",
+                            image_url="https://autorig.online/render/masks/t_pose.jpg",
+                            user_name="bot",
+                        )
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.started_at = time.time()
+                    entry = {
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": f"{task.id}_00001_.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    },
+                                    {
+                                        "filename": f"{task.id}_Isolated_00001_.png",
+                                        "subfolder": "",
+                                        "type": "output",
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                    rejection = image_quality.RenderArtifactQualityError(
+                        "primary_matches_control_mask",
+                        "primary render echoed the control mask",
+                        {"schema": "test", "passed": False},
+                    )
+                    with patch.object(
+                        comfy_adapter,
+                        "download_artifact",
+                        new=AsyncMock(return_value=b"invalid-but-exact-bytes"),
+                    ), patch.object(
+                        queue,
+                        "_validate_tpose_bundle_bytes",
+                        new=AsyncMock(side_effect=rejection),
+                    ):
+                        await queue._finish_guarded(task, server, entry)
+
+                    self.assertEqual(task.status, TASK_ERROR)
+                    self.assertIn("quality rejected", task.error)
+                    self.assertGreater(
+                        queue._server_submit_cooldowns[server.render_server_name],
+                        time.time(),
+                    )
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
     def test_renderfin_broker_feature_flag_defaults_off(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertFalse(workload_lease.enabled())
@@ -621,12 +736,12 @@ class QueueDispatchTests(unittest.TestCase):
                             "9": {
                                 "images": [
                                     {
-                                        "filename": "collection/FULL.png",
+                                        "filename": f"collection/{task.id}_FULL.png",
                                         "subfolder": "",
                                         "type": "output",
                                     },
                                     {
-                                        "filename": "collection/FULL_Isolated_output.png",
+                                        "filename": f"collection/{task.id}_FULL_Isolated_output.png",
                                         "subfolder": "",
                                         "type": "output",
                                     },
@@ -652,7 +767,7 @@ class QueueDispatchTests(unittest.TestCase):
                         )
                         self.assertEqual(
                             kwargs["artifact_relative_path_string"],
-                            "collection/FULL.png",
+                            f"collection/{task.id}_FULL.png",
                         )
                         return _spool_stage_receipt(task, full)
 
@@ -703,6 +818,10 @@ class QueueDispatchTests(unittest.TestCase):
                         new=AsyncMock(side_effect=ack),
                     ), patch.object(
                         workload_lease, "release", new=AsyncMock(return_value=None)
+                    ), patch.object(
+                        queue,
+                        "_validate_tpose_bundle_bytes",
+                        new=AsyncMock(return_value={"passed": True}),
                     ):
                         await queue._finish(task, server, entry)
 
@@ -2609,6 +2728,10 @@ class QueueDispatchTests(unittest.TestCase):
 
                     with patch(
                         "renderfin.comfy_adapter.download_artifact", side_effect=fake_download
+                    ), patch.object(
+                        queue,
+                        "_validate_tpose_bundle_bytes",
+                        new=AsyncMock(return_value={"passed": True}),
                     ):
                         await queue._finish(task, server, entry)
 

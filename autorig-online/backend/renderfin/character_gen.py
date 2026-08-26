@@ -7,6 +7,7 @@ service can resume interrupted jobs after a restart.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -20,7 +21,7 @@ import httpx
 
 from fleet_admission import fleet_admission_lock
 
-from . import config, hunyuan_client, turntable, workload_lease
+from . import config, glb_quality, hunyuan_client, turntable, workload_lease
 from .models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
@@ -54,6 +55,82 @@ CREATE INDEX IF NOT EXISTS idx_chargen_stage ON chargen_jobs(stage);
 _ACTIVE_STAGES = (CHARGEN_STAGE_FLUX, CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_TURNTABLE)
 
 
+def _atomic_artifact_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.quality-part")
+    try:
+        with temporary.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(str(temporary), str(path))
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _archive_rejected_glb(
+    job: CharacterGenJob,
+    data: bytes,
+    exc: glb_quality.GlbQualityError,
+    *,
+    source: str,
+) -> Path:
+    root = config.DATA_DIR / "rejected" / "glb" / job.id
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    target = root / f"{stamp}_r{int(job.artifact_revision or 0)}_{uuid.uuid4().hex}"
+    target.mkdir(parents=False, exist_ok=False)
+    report = {
+        "schema": "renderfin.rejected_glb.v1",
+        "job_id": job.id,
+        "artifact_revision": int(job.artifact_revision or 0),
+        "collection_guid": job.collection_guid or None,
+        "collection_index": int(job.collection_index or 0) or None,
+        "hunyuan_worker": job.hunyuan_worker or None,
+        "hunyuan_task_id": job.hunyuan_task_id or None,
+        "source": source,
+        "file_bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "error": exc.as_dict(),
+    }
+    _atomic_artifact_bytes(target / "model.glb", data)
+    _atomic_artifact_bytes(
+        target / "report.json",
+        (json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(
+            "utf-8"
+        ),
+    )
+    return target
+
+
+def _archive_rejected_glb_best_effort(
+    job: CharacterGenJob,
+    data: bytes,
+    exc: glb_quality.GlbQualityError,
+    *,
+    source: str,
+) -> Optional[Path]:
+    """Preserve rejection evidence without masking the quality failure.
+
+    Archiving can itself fail under the exact disk-pressure conditions where a
+    fail-closed validator matters most.  The caller must still raise the
+    original ``GlbQualityError`` so its terminal lease is released and the
+    logical job follows the quality retry path instead of leaking a binding.
+    """
+
+    try:
+        return _archive_rejected_glb(job, data, exc, source=source)
+    except Exception as archive_exc:
+        print(
+            f"[Renderfin][CharGen] rejected GLB archive failed for {job.id} "
+            f"from {source}: {archive_exc}"
+        )
+        return None
+
+
 @asynccontextmanager
 async def _gpu_admission_guard():
     # The central broker owns the cross-process lock when enabled. Taking the
@@ -81,6 +158,9 @@ HUNYUAN_STAGE_TIMEOUT = float(
 # Automatic stage recovery: how many times a stage retries itself before the
 # job is reported as failed, and how long to wait between attempts.
 MAX_STAGE_ATTEMPTS = int(os.getenv("RENDERFIN_CHARGEN_STAGE_ATTEMPTS", "3"))
+MAX_GLB_QUALITY_ATTEMPTS = int(
+    os.getenv("RENDERFIN_CHARGEN_GLB_QUALITY_ATTEMPTS", "5")
+)
 RETRY_BACKOFF_SECONDS = (30.0, 120.0, 600.0)
 # An empty 3D fleet says nothing about the job, so waiting is free and giving
 # up is wrong: the user pressed the button and is owed the result whenever the
@@ -573,6 +653,13 @@ class CharacterGenManager:
             return None
         job.stage = CHARGEN_STAGE_SUBMITTED
         if task_id:
+            previous_task_id = str(job.submitted_task_id or "")
+            if previous_task_id and previous_task_id != str(task_id):
+                job.superseded_task_ids = list(
+                    dict.fromkeys(
+                        [*(job.superseded_task_ids or []), previous_task_id]
+                    )
+                )
             job.submitted_task_id = str(task_id)
         await self._persist(job)
         return job
@@ -1079,6 +1166,64 @@ class CharacterGenManager:
                     await self._persist(job)
                     return
 
+        if (
+            stage == CHARGEN_STAGE_FLUX
+            and "render artifact quality rejected" in str(exc).lower()
+        ):
+            # The input/prompt remains valid; the renderer returned no genuine
+            # task-owned bundle. Queue-level worker cooldown rotates this same
+            # logical collection member without consuming its model attempts.
+            for attr in ("flux_task_id", "flux_task_id_b"):
+                task_id = getattr(job, attr)
+                previous = self.queue.get(task_id) if task_id else None
+                if previous is None or previous.status == TASK_ERROR:
+                    setattr(job, attr, "")
+            job.retry_at = time.time() + SLOT_WAIT_SECONDS
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} rejected a bad Flux "
+                "bundle; retrying on another renderer"
+            )
+            return
+
+        glb_quality_failure = isinstance(exc, glb_quality.GlbQualityError)
+        if glb_quality_failure and stage == CHARGEN_STAGE_TURNTABLE:
+            # A legacy or externally-written GLB can reach turntable without
+            # the download gate. Rewind to Hunyuan, not turntable: rendering
+            # the same bad geometry again can never heal it.
+            stage = CHARGEN_STAGE_HUNYUAN
+            job.stage = CHARGEN_STAGE_HUNYUAN
+        if glb_quality_failure and exc.code != "semantic_geometry_corrupt":
+            # A malformed/textureless GLB is a worker/post-process contract
+            # failure. Rotate that worker and retry without charging the
+            # character's stochastic quality budget.
+            failed_worker = str(job.hunyuan_worker or "")
+            if failed_worker:
+                cooldown_until = time.time() + FARM_WORKER_COOLDOWN_SECONDS
+                cooldowns = dict(job.hunyuan_worker_cooldowns or {})
+                cooldowns[failed_worker] = cooldown_until
+                job.hunyuan_worker_cooldowns = cooldowns
+                self._farm_worker_cooldowns[failed_worker] = cooldown_until
+            job.hunyuan_task_id = ""
+            job.hunyuan_seed = 0
+            job.hunyuan_worker = ""
+            job.hunyuan_worker_url = ""
+            job.glb_url = ""
+            job.video_url = ""
+            job.retry_at = time.time() + SLOT_WAIT_SECONDS
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} rejected malformed GLB "
+                f"({exc.code}); rotating worker without spending an attempt"
+            )
+            return
+
         if _is_farm_breakage(str(exc)) or _is_collection_infrastructure_failure(
             job, str(exc)
         ):
@@ -1208,7 +1353,12 @@ class CharacterGenManager:
         job.attempts = attempts
         count = attempts[stage]
 
-        if count >= MAX_STAGE_ATTEMPTS:
+        attempt_limit = (
+            MAX_GLB_QUALITY_ATTEMPTS
+            if glb_quality_failure
+            else MAX_STAGE_ATTEMPTS
+        )
+        if count >= attempt_limit:
             job.error = job.last_error
             job.stage = CHARGEN_STAGE_FAILED
             job.retry_at = 0
@@ -1222,8 +1372,12 @@ class CharacterGenManager:
         # drop references to the dead attempt so the retry starts clean
         if stage == CHARGEN_STAGE_HUNYUAN:
             job.hunyuan_task_id = ""
+            job.hunyuan_seed = 0
             job.hunyuan_worker = ""
             job.hunyuan_worker_url = ""
+            if glb_quality_failure:
+                job.glb_url = ""
+                job.video_url = ""
         elif stage == CHARGEN_STAGE_FLUX:
             previous = self.queue.get(job.flux_task_id) if job.flux_task_id else None
             if previous is None or previous.status == TASK_ERROR:
@@ -1359,11 +1513,11 @@ class CharacterGenManager:
         job.image_url = task.output_url
         isolated = task.extra_outputs.get("isolated")
         if not isolated:
-            # Hunyuan works far better on a matted character; say so instead of
-            # silently feeding it the full frame.
-            job.warning = "RMBG isolated render missing; using the full frame for 3D"
-            print(f"[Renderfin][CharGen] job {job.id} WARNING: {job.warning}")
-        job.isolated_url = isolated or task.output_url
+            raise RuntimeError(
+                "render artifact quality rejected: required RMBG isolated "
+                "t-pose output is missing"
+            )
+        job.isolated_url = isolated
 
         if job.flux_task_id_b:
             # a failed second variant must not sink the job: one image is enough
@@ -1374,9 +1528,12 @@ class CharacterGenManager:
                     FLUX_STAGE_TIMEOUT,
                 )
                 job.image_url_b = task_b.output_url
-                job.isolated_url_b = (
-                    task_b.extra_outputs.get("isolated") or task_b.output_url
-                )
+                job.isolated_url_b = task_b.extra_outputs.get("isolated") or ""
+                if not job.isolated_url_b:
+                    raise RuntimeError(
+                        "render artifact quality rejected: variant B RMBG "
+                        "isolated t-pose output is missing"
+                    )
             except Exception as exc:
                 print(f"[Renderfin][CharGen] job {job.id} variant B failed: {exc}")
                 job.flux_task_id_b = ""
@@ -1761,6 +1918,9 @@ class CharacterGenManager:
                         "retaining the exact submission identity"
                     )
             if not job.hunyuan_task_id:
+                if not job.hunyuan_seed:
+                    job.hunyuan_seed = uuid.uuid4().int & 0xFFFFFFFF or 1
+                    await self._persist(job)
                 # The lock is held until the job is written down, so the
                 # slot count the next job reads already includes this one.
                 # A separate "claimed but not yet persisted" counter is the
@@ -1829,6 +1989,7 @@ class CharacterGenManager:
                         worker, status_url = await hunyuan_client.submit(
                             client,
                             image_url=job.isolated_url,
+                            seed=job.hunyuan_seed,
                             backend_task_id=job.id,
                             queue_class=job.queue_class,
                             in_flight=self.in_flight_by_worker(),
@@ -1908,10 +2069,45 @@ class CharacterGenManager:
             )
             model_url = str((payload.get("output_urls") or {}).get("model"))
             data = await hunyuan_client.download_model(client, worker, model_url)
+            try:
+                quality_report = glb_quality.validate_glb_bytes(
+                    data,
+                    policy=glb_quality.HUNYUAN_STANDARD_PBR_POLICY,
+                )
+            except glb_quality.GlbQualityError as exc:
+                archived = _archive_rejected_glb_best_effort(
+                    job, data, exc, source=f"converter:{worker['name']}"
+                )
+                job.glb_quality_rejection_count = int(
+                    job.glb_quality_rejection_count or 0
+                ) + 1
+                job.glb_quality_report = dict(
+                    (exc.details or {}).get("report") or exc.as_dict()
+                )
+                await self._persist(job)
+                # wait_for_model has proved the worker task terminal. Release
+                # its exact central lease before the retry is allowed to pick
+                # another worker/seed; otherwise two generations can overlap.
+                if job.hunyuan_workload_lease_id:
+                    released = await self._release_hunyuan_workload(
+                        job, outcome="completed", new_request=True
+                    )
+                    if not released:
+                        raise hunyuan_client.NoWorkerAvailable(
+                            "invalid GLB archived but terminal Hunyuan lease "
+                            "release is awaiting confirmation"
+                        ) from exc
+                print(
+                    f"[Renderfin][CharGen] job {job.id} rejected GLB from "
+                    f"{worker['name']} ({exc.code}); "
+                    f"archive={archived or 'unavailable'}"
+                )
+                raise
             user_dir = config.RENDER_DIR / job.user_name
             user_dir.mkdir(parents=True, exist_ok=True)
             glb_path = user_dir / f"{job.id}.glb"
-            glb_path.write_bytes(data)
+            _atomic_artifact_bytes(glb_path, data)
+            job.glb_quality_report = quality_report
             job.glb_url = (
                 f"{config.PUBLIC_BASE_URL}/render/{job.user_name}/{job.id}.glb"
             )
@@ -1933,8 +2129,15 @@ class CharacterGenManager:
                     image_url=job.isolated_url,
                     type="image_to_3d",
                     user_name=job.user_name,
+                    noise_seed=(
+                        job.hunyuan_seed
+                        or (uuid.uuid4().int & 0xFFFFFFFF)
+                        or 1
+                    ),
                 ),
             )
+            if not job.hunyuan_seed:
+                job.hunyuan_seed = int(task.prompt.noise_seed or 0)
             job.hunyuan_task_id = task.id
             await self._persist(job)
         task = await self._await_render(
@@ -1942,6 +2145,31 @@ class CharacterGenManager:
             job.hunyuan_task_id,
             HUNYUAN_STAGE_TIMEOUT,
         )
+        glb_path = Path(task.output_path) if task.output_path else None
+        if glb_path is None or not glb_path.is_file():
+            raise RuntimeError("generated Comfy GLB is missing from central storage")
+        data = glb_path.read_bytes()
+        try:
+            job.glb_quality_report = glb_quality.validate_glb_bytes(
+                data,
+                policy=glb_quality.HUNYUAN_STANDARD_PBR_POLICY,
+            )
+        except glb_quality.GlbQualityError as exc:
+            archived = _archive_rejected_glb_best_effort(
+                job, data, exc, source="comfy-image-to-3d"
+            )
+            job.glb_quality_rejection_count = int(
+                job.glb_quality_rejection_count or 0
+            ) + 1
+            job.glb_quality_report = dict(
+                (exc.details or {}).get("report") or exc.as_dict()
+            )
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} rejected Comfy GLB "
+                f"({exc.code}); archive={archived or 'unavailable'}"
+            )
+            raise
         job.glb_url = task.output_url
 
     async def _stage_turntable(self, job: CharacterGenJob) -> None:
@@ -1956,6 +2184,30 @@ class CharacterGenManager:
                 glb_path = config.RENDER_DIR / job.glb_url[len(prefix):]
         if glb_path is None or not glb_path.is_file():
             raise RuntimeError("generated glb not found on disk")
+
+        data = glb_path.read_bytes()
+        try:
+            job.glb_quality_report = glb_quality.validate_glb_bytes(
+                data,
+                policy=glb_quality.HUNYUAN_STANDARD_PBR_POLICY,
+            )
+        except glb_quality.GlbQualityError as exc:
+            archived = _archive_rejected_glb_best_effort(
+                job, data, exc, source="turntable-preflight"
+            )
+            job.glb_quality_rejection_count = int(
+                job.glb_quality_rejection_count or 0
+            ) + 1
+            job.glb_quality_report = dict(
+                (exc.details or {}).get("report") or exc.as_dict()
+            )
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} turntable preflight "
+                f"rejected GLB ({exc.code}); "
+                f"archive={archived or 'unavailable'}"
+            )
+            raise
 
         out_path = config.RENDER_DIR / job.user_name / f"{job.id}_turntable.mp4"
         await turntable.render_turntable(glb_path, out_path)

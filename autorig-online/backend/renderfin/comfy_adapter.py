@@ -199,6 +199,16 @@ async def submit(
     if resp.status_code != 200:
         raise ComfyAdapterError(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
     payload = resp.json()
+    node_errors = payload.get("node_errors")
+    if isinstance(node_errors, dict) and node_errors:
+        # Comfy can return HTTP 200 and a prompt id even when required model
+        # validation failed.  In that state PreviewImage nodes may still run
+        # and expose the uploaded control image as a temporary artifact.  A
+        # render with rejected output nodes was never accepted successfully.
+        summary = json.dumps(node_errors, ensure_ascii=True, sort_keys=True)
+        raise ComfyAdapterError(
+            f"prompt validation failed: node_errors={summary[:1500]}"
+        )
     returned_prompt_id = str(payload.get("prompt_id") or "")
     if not returned_prompt_id:
         raise ComfyAdapterError(f"prompt submit returned no prompt_id: {json.dumps(payload)[:300]}")
@@ -363,8 +373,10 @@ def resolve_artifacts(
     outputs, order by preference (fragment match, then extension match)."""
     found: List[Dict[str, str]] = []
     _walk_filenames(history_entry.get("outputs") or {}, found)
-    # keep only real outputs (skip temp previews)
-    outputs = [f for f in found if f.get("type") != "temp"] or found
+    # Temporary previews are not deliverables.  Falling back to them when all
+    # SaveImage nodes failed turns an uploaded pose/control image into an
+    # apparently successful result, which downstream 3D faithfully corrupts.
+    outputs = [f for f in found if f.get("type") != "temp"]
 
     def rank(f: Dict[str, str]) -> Tuple[int, int]:
         name = f.get("filename", "").lower()

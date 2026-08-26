@@ -2563,6 +2563,7 @@ async def _handle_generate_callback(update, context) -> None:
 async def _submit_generated_model(
     glb_url: str, *, collection_metadata: dict | None = None,
     queue_class: str = "interactive",
+    existing_task_id: str = "",
 ) -> tuple[str | None, str | None]:
     """Create the FULL conversion task from the generated GLB.
 
@@ -2572,9 +2573,65 @@ async def _submit_generated_model(
     Dispatch is handled by the main backend's background loop, which picks up
     status=created tasks within seconds.
     """
-    from tasks import create_conversion_task
+    from tasks import create_conversion_task, normalize_queue_class, notify_scheduler
 
     async with AsyncSessionLocal() as db:
+        existing_id = str(existing_task_id or "").strip()
+        if existing_id:
+            existing = await db.get(Task, existing_id)
+            if existing is not None:
+                status = str(existing.status or "").strip().lower()
+                bound = bool(existing.worker_api or existing.worker_task_id)
+                if status == "created" and bound:
+                    return None, (
+                        f"existing task {existing_id} is already worker-bound; "
+                        "waiting instead of duplicating it"
+                    )
+                if status == "processing":
+                    return None, (
+                        f"existing task {existing_id} is still processing; "
+                        "waiting instead of duplicating it"
+                    )
+                if status == "created":
+                    collection = (
+                        collection_metadata
+                        if isinstance(collection_metadata, dict)
+                        else {}
+                    )
+                    expected_guid = str(collection.get("collection_guid") or "").strip()
+                    expected_index = int(collection.get("collection_index") or 0)
+                    expected_size = int(collection.get("collection_size") or 0)
+                    mismatches = []
+                    if str(existing.collection_guid or "") != expected_guid:
+                        mismatches.append("collection_guid")
+                    if int(existing.collection_index or 0) != expected_index:
+                        mismatches.append("collection_index")
+                    if int(existing.collection_size or 0) != expected_size:
+                        mismatches.append("collection_size")
+                    if normalize_queue_class(existing.queue_class) != normalize_queue_class(
+                        queue_class
+                    ):
+                        mismatches.append("queue_class")
+                    if mismatches:
+                        return None, (
+                            f"existing task {existing_id} identity mismatch: "
+                            + ",".join(mismatches)
+                        )
+                    # The old input remains on Renderfin storage as incident
+                    # evidence.  Only the unbound queue row is repointed to the
+                    # corrected revision, preserving its public task URL/ID.
+                    existing.input_url = glb_url
+                    existing.input_type = "t_pose"
+                    existing.pipeline_kind = "convert"
+                    existing.dispatch_not_before = None
+                    existing.updated_at = datetime.utcnow()
+                    await db.commit()
+                    notify_scheduler()
+                    print(
+                        f"[Telegram][Renderfin] repaired job reused unbound "
+                        f"AutoRig task {existing_id}"
+                    )
+                    return existing.id, None
         task, error = await create_conversion_task(
             db,
             input_url=glb_url,
@@ -2620,8 +2677,14 @@ async def _auto_submit_ready_jobs() -> None:
         chat_id = int(job.get("telegram_chat_id") or 0)
         if not job_id or not glb_url:
             continue
-        # one submit per job, even across bot restarts
-        if not await reserve_notification(chat_id or 0, "renderfin_submit", job_id):
+        revision = max(0, int(job.get("artifact_revision") or 0))
+        submit_kind = (
+            "renderfin_submit"
+            if revision == 0
+            else f"renderfin_submit_r{revision}"
+        )
+        # one submit per artifact revision, even across bot restarts
+        if not await reserve_notification(chat_id or 0, submit_kind, job_id):
             continue
         try:
             collection_metadata = {
@@ -2645,6 +2708,7 @@ async def _auto_submit_ready_jobs() -> None:
                     if collection_metadata.get("collection_guid")
                     else "interactive"
                 ),
+                existing_task_id=str(job.get("submitted_task_id") or ""),
             )
             if task_id is None:
                 raise RuntimeError(error or "не удалось создать задачу")
@@ -2656,7 +2720,7 @@ async def _auto_submit_ready_jobs() -> None:
             print(f"[Telegram][Renderfin] job {job_id} auto-submitted as task {task_id}")
         except Exception as exc:
             # the reservation would otherwise block the next attempt forever
-            await release_notification(chat_id or 0, "renderfin_submit", job_id)
+            await release_notification(chat_id or 0, submit_kind, job_id)
             print(f"[Telegram][Renderfin] auto-submit failed for {job_id}: {exc}")
 
 

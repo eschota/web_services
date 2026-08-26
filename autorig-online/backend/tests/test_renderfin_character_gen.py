@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import time
 
-from renderfin import character_gen, config, hunyuan_client, workload_lease
+from renderfin import character_gen, config, glb_quality, hunyuan_client, workload_lease
 from renderfin.character_gen import CharacterGenManager
 from renderfin.models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
@@ -96,6 +96,111 @@ class HunyuanAdmissionOrderTests(unittest.TestCase):
         )
 
 
+class QualityRetryContractTests(unittest.TestCase):
+    def test_rejected_glb_archive_failure_does_not_mask_quality_error(self):
+        job = CharacterGenJob(id="quality-job")
+        error = glb_quality.GlbQualityError(
+            "semantic_geometry_corrupt",
+            "sparse character geometry",
+        )
+
+        with patch.object(
+            character_gen,
+            "_archive_rejected_glb",
+            side_effect=OSError("disk pressure"),
+        ):
+            archived = character_gen._archive_rejected_glb_best_effort(
+                job,
+                b"bad-glb",
+                error,
+                source="test-worker",
+            )
+
+        self.assertIsNone(archived)
+
+    def test_semantic_glb_rejection_retries_hunyuan_with_new_seed(self):
+        async def scenario():
+            manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+            manager._persist = AsyncMock()
+            job = CharacterGenJob(
+                stage=CHARGEN_STAGE_HUNYUAN,
+                hunyuan_task_id="https://worker/status/old",
+                hunyuan_seed=123,
+                hunyuan_worker="f12",
+                hunyuan_worker_url="https://worker",
+                glb_url="https://autorig.online/old.glb",
+            )
+            error = glb_quality.GlbQualityError(
+                "semantic_geometry_corrupt",
+                "sparse character geometry",
+                details={"report": {"ok": False}},
+            )
+
+            with patch.object(character_gen, "RETRY_BACKOFF_SECONDS", (0.0,)):
+                await manager._handle_stage_error(job, error)
+
+            self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+            self.assertEqual(job.attempts[CHARGEN_STAGE_HUNYUAN], 1)
+            self.assertEqual(job.hunyuan_task_id, "")
+            self.assertEqual(job.hunyuan_seed, 0)
+            self.assertEqual(job.glb_url, "")
+            self.assertEqual(job.error, "")
+
+        run(scenario())
+
+    def test_structural_glb_rejection_rotates_worker_attempt_neutral(self):
+        async def scenario():
+            manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+            manager._persist = AsyncMock()
+            job = CharacterGenJob(
+                stage=CHARGEN_STAGE_HUNYUAN,
+                hunyuan_task_id="https://worker/status/old",
+                hunyuan_seed=123,
+                hunyuan_worker="f12",
+                hunyuan_worker_url="https://worker",
+            )
+            error = glb_quality.GlbQualityError(
+                "glb_length_mismatch", "truncated GLB"
+            )
+
+            await manager._handle_stage_error(job, error)
+
+            self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+            self.assertEqual(job.attempts, {})
+            self.assertEqual(job.hunyuan_task_id, "")
+            self.assertEqual(job.hunyuan_seed, 0)
+            self.assertIn("f12", job.hunyuan_worker_cooldowns)
+            self.assertGreater(job.retry_at, time.time())
+
+        run(scenario())
+
+    def test_turntable_quality_rejection_rewinds_to_hunyuan(self):
+        async def scenario():
+            manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+            manager._persist = AsyncMock()
+            job = CharacterGenJob(
+                stage=CHARGEN_STAGE_TURNTABLE,
+                hunyuan_task_id="old-completed-task",
+                hunyuan_seed=456,
+                glb_url="https://autorig.online/old.glb",
+            )
+            error = glb_quality.GlbQualityError(
+                "semantic_geometry_corrupt",
+                "sparse character geometry",
+                details={"report": {"ok": False}},
+            )
+
+            with patch.object(character_gen, "RETRY_BACKOFF_SECONDS", (0.0,)):
+                await manager._handle_stage_error(job, error)
+
+            self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+            self.assertEqual(job.attempts[CHARGEN_STAGE_HUNYUAN], 1)
+            self.assertEqual(job.hunyuan_task_id, "")
+            self.assertEqual(job.glb_url, "")
+
+        run(scenario())
+
+
 class _Env:
     def __init__(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -112,6 +217,14 @@ class _Env:
             patch.object(config, "HUNYUAN_WORKERS_FILE", root / "no-workers.json"),
             patch.object(config, "HUNYUAN_WORKERS", []),
             patch.object(config, "HUNYUAN_API_TOKEN", ""),
+            # Most orchestration tests intentionally use tiny fake GLB bytes;
+            # the validator itself and integration retry contract are covered
+            # by dedicated tests below.
+            patch.object(
+                glb_quality,
+                "validate_glb_bytes",
+                return_value={"schema": "test.glb-quality", "ok": True},
+            ),
         ]
 
     def __enter__(self):

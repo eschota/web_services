@@ -224,6 +224,13 @@ class CharacterGenJob(BaseModel):
     # completion is what makes the job finished, so it is what triggers the
     # chat cleanup.
     submitted_task_id: str = ""
+    # Every semantic repair keeps the same logical collection member/job id,
+    # but produces a fresh image/GLB generation.  The revision also scopes
+    # Telegram auto-submit idempotency so an earlier bad result cannot block
+    # the corrected one from entering conversion.
+    artifact_revision: int = 0
+    superseded_task_ids: List[str] = Field(default_factory=list)
+    quality_repair_reason: str = ""
     stage: str = CHARGEN_STAGE_FLUX
     flux_task_id: str = ""
     flux_task_id_b: str = ""
@@ -231,6 +238,9 @@ class CharacterGenJob(BaseModel):
     isolated_url_b: str = ""
     chosen_variant: str = ""
     hunyuan_task_id: str = ""
+    # Stable for one idempotent worker submission, regenerated only after a
+    # terminal quality rejection so the retry is not byte-for-byte identical.
+    hunyuan_seed: int = 0
     hunyuan_worker: str = ""
     # Persisted before generate-3d POST so a lost response is replayed to the
     # exact endpoint even if the mutable worker registry changes its name/url
@@ -277,6 +287,8 @@ class CharacterGenJob(BaseModel):
     image_url: str = ""       # full t_pose render
     isolated_url: str = ""    # alpha-isolated character
     glb_url: str = ""
+    glb_quality_report: Dict[str, Any] = Field(default_factory=dict)
+    glb_quality_rejection_count: int = 0
     video_url: str = ""
     error: str = ""
     created_at: float = Field(default_factory=time.time)
@@ -301,6 +313,9 @@ class CharacterGenJob(BaseModel):
             "collection_size": self.collection_size or None,
             "collection_member_title": self.collection_member_title or None,
             "submitted_task_id": self.submitted_task_id or None,
+            "artifact_revision": int(self.artifact_revision or 0),
+            "superseded_task_ids": list(self.superseded_task_ids or []),
+            "quality_repair_reason": self.quality_repair_reason or None,
             "prompt_b": self.prompt_b or None,
             "image_url": self.image_url or None,
             "isolated_url": self.isolated_url or None,
@@ -308,6 +323,10 @@ class CharacterGenJob(BaseModel):
             "isolated_url_b": self.isolated_url_b or None,
             "chosen_variant": self.chosen_variant or None,
             "glb_url": self.glb_url or None,
+            "glb_quality_report": dict(self.glb_quality_report or {}),
+            "glb_quality_rejection_count": int(
+                self.glb_quality_rejection_count or 0
+            ),
             "video_url": self.video_url or None,
             "error": self.error or None,
             "warning": self.warning or None,
@@ -315,6 +334,7 @@ class CharacterGenJob(BaseModel):
             "attempts": dict(self.attempts or {}),
             "retry_at": self.retry_at or None,
             "last_error": self.last_error or None,
+            "hunyuan_seed": int(self.hunyuan_seed or 0) or None,
             "hunyuan_worker_cooldowns": dict(self.hunyuan_worker_cooldowns or {}),
             "telegram_chat_id": self.telegram_chat_id or None,
             "telegram_message_id": self.telegram_message_id or None,
