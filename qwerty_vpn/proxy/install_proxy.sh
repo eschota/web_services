@@ -113,6 +113,9 @@ Type=forking
 PIDFile=/var/run/3proxy.pid
 ExecStart=/usr/local/bin/3proxy /etc/3proxy/3proxy.cfg
 ExecReload=/bin/kill -USR1 $MAINPID
+# Access traffic is already written by 3proxy's log directive.
+StandardOutput=null
+StandardError=journal
 Restart=always
 RestartSec=5
 
