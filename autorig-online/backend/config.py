@@ -38,7 +38,7 @@ AUTORIG_MIGRATION_READ_ONLY = os.getenv("AUTORIG_MIGRATION_READ_ONLY", "0").stri
 ARTIFACT_CACHE_ROOT = os.getenv("ARTIFACT_CACHE_ROOT", "/var/autorig/artifact-cache").strip()
 ARTIFACT_CACHE_FULL_HOURS = max(24, int(os.getenv("ARTIFACT_CACHE_FULL_HOURS", "24")))
 ARTIFACT_CACHE_SOFT_CAP_GB = float(os.getenv("ARTIFACT_CACHE_SOFT_CAP_GB", "250"))
-ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("ARTIFACT_CACHE_RESERVE_GB", "60"))
+ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("ARTIFACT_CACHE_RESERVE_GB", "65"))
 ARTIFACT_CACHE_CONCURRENCY = max(1, min(2, int(os.getenv("ARTIFACT_CACHE_CONCURRENCY", "2"))))
 
 # =============================================================================
