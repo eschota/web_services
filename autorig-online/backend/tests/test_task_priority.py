@@ -153,7 +153,7 @@ class QueueClassTests(unittest.TestCase):
             id="oldest",
             status="created",
             source_attempt_count=0,
-            dispatch_not_before=now + timedelta(seconds=60),
+            dispatch_not_before=now + timedelta(seconds=600),
         )
         newer = SimpleNamespace(
             id="newer",
