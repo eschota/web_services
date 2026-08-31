@@ -690,16 +690,9 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
         ]
 
         free_workers = await get_dispatchable_workers(db, queue_status)
-        if not free_workers and interactive:
-            fallback_workers = await get_dispatchable_workers(
-                db, queue_status, allow_quarantined=True
-            )
-            if fallback_workers:
-                free_workers = fallback_workers
-                print(
-                    "[Priority] All free workers quarantined; degraded fallback "
-                    "is available to interactive work only"
-                )
+        # Quarantine is admission control, not a hint. Fresh tasks must never
+        # be sent back to an endpoint that just timed out/returned 5xx. Exact
+        # submission_unknown replay is handled above on its persisted worker.
 
         cross_background_capacity = None
         if PREEMPTION_ENABLED:
@@ -13069,10 +13062,19 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
         await asyncio.to_thread(run_artifact_cache_retention)
         cache_block = artifact_creation_block_reason()
     if cache_block:
-        raise HTTPException(
-            status_code=503,
-            detail=cache_block,
-            headers={"Retry-After": "600"},
+        free_gb = shutil.disk_usage("/").free / (1024**3)
+        if free_gb < NEW_TASK_MIN_FREE_GB:
+            raise HTTPException(
+                status_code=503,
+                detail=cache_block,
+                headers={"Retry-After": "600"},
+            )
+        # The artifact marker pauses background cache writes.  It must not
+        # reject an interactive task while the filesystem is above the hard
+        # 60 GB floor (for example after a stale marker survived a restart).
+        print(
+            f"[Request Disk] Ignoring background artifact-cache marker for "
+            f"{context}: {free_gb:.2f}GB free"
         )
     try:
         await enforce_task_cache_max_size(db)

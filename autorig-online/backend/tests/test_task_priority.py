@@ -147,6 +147,31 @@ class QueueClassTests(unittest.TestCase):
         )
         self.assertEqual(candidates, [oldest])
 
+    def test_transient_cooldown_yields_fifo_head_to_next_task(self):
+        now = datetime.utcnow()
+        oldest = SimpleNamespace(
+            id="oldest",
+            status="created",
+            source_attempt_count=0,
+            dispatch_not_before=now + timedelta(seconds=60),
+        )
+        newer = SimpleNamespace(
+            id="newer",
+            status="created",
+            source_attempt_count=0,
+            dispatch_not_before=None,
+        )
+        candidates = [oldest, newer]
+
+        async def reject(task_row):
+            return task_row, "worker timeout"
+
+        accepted = asyncio.run(
+            task_priority.dispatch_fifo_candidate(candidates, reject)
+        )
+        self.assertFalse(accepted)
+        self.assertEqual(candidates, [newer])
+
 
 class ReserveTests(unittest.TestCase):
     def test_background_can_use_at_most_n_minus_one(self):

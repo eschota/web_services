@@ -22,7 +22,11 @@ from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
 from task_timeout_contract import task_hard_timeout_reference
 from collection_retry_policy import collection_error_retry_due
-from task_priority import normalize_queue_class, preemption_in_progress
+from task_priority import (
+    TRANSIENT_DISPATCH_COOLDOWN_SECONDS,
+    normalize_queue_class,
+    preemption_in_progress,
+)
 from scheduler_wakeup import notify_scheduler
 from animal_submission_policy import animal_detection_accepted
 from worker_artifact_urls import (
@@ -886,6 +890,13 @@ async def start_task_on_worker(
                 # A short admission cooldown prevents a hot loop without
                 # consuming source/retry budgets or changing task identity.
                 task.dispatch_not_before = datetime.utcnow() + timedelta(seconds=5)
+            else:
+                # A timeout/5xx can be input-specific even when the worker
+                # reports healthy.  Do not let one FIFO head serialize the
+                # entire interactive queue or hammer a quarantined endpoint.
+                task.dispatch_not_before = datetime.utcnow() + timedelta(
+                    seconds=TRANSIENT_DISPATCH_COOLDOWN_SECONDS
+                )
             task.updated_at = datetime.utcnow()
             await db.commit()
             await db.refresh(task)

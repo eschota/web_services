@@ -636,6 +636,43 @@ class NotificationReservationTests(unittest.TestCase):
         run(scenario())
 
 
+class DiskPressureNotificationPolicyTests(unittest.TestCase):
+    def test_healthy_large_disk_does_not_alert_on_used_percent(self):
+        action, state, _key = telegram_bot._disk_pressure_transition(
+            {}, now=1000, free_gb=67, hard_floor_gb=60,
+            recovery_free_gb=65, reminder_hours=24,
+        )
+        self.assertIsNone(action)
+        self.assertEqual(state["state"], "healthy")
+
+    def test_pressure_reminds_daily_and_recovers_with_hysteresis(self):
+        action, pressure, _key = telegram_bot._disk_pressure_transition(
+            {}, now=1000, free_gb=59.9, hard_floor_gb=60,
+            recovery_free_gb=65, reminder_hours=24,
+        )
+        self.assertEqual(action, "pressure")
+
+        action, waiting, _key = telegram_bot._disk_pressure_transition(
+            pressure, now=1000 + 23 * 3600, free_gb=62,
+            hard_floor_gb=60, recovery_free_gb=65, reminder_hours=24,
+        )
+        self.assertIsNone(action)
+        self.assertEqual(waiting["state"], "pressure")
+
+        action, reminder, _key = telegram_bot._disk_pressure_transition(
+            pressure, now=1000 + 24 * 3600, free_gb=59.8,
+            hard_floor_gb=60, recovery_free_gb=65, reminder_hours=24,
+        )
+        self.assertEqual(action, "reminder")
+
+        action, recovered, _key = telegram_bot._disk_pressure_transition(
+            reminder, now=1000 + 25 * 3600, free_gb=65,
+            hard_floor_gb=60, recovery_free_gb=65, reminder_hours=24,
+        )
+        self.assertEqual(action, "recovery")
+        self.assertEqual(recovered["state"], "healthy")
+
+
 class PrivateChatScopeTests(unittest.TestCase):
     """DMs are reserved for the 3D generation pipeline; general site traffic
     stays in the group chats."""

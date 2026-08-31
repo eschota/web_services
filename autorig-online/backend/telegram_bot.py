@@ -15,6 +15,8 @@ import hashlib
 import html
 import json
 import re
+import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -1164,6 +1166,90 @@ async def broadcast_disk_space_low(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+def _disk_pressure_transition(
+    state: dict,
+    *,
+    now: float,
+    free_gb: float,
+    hard_floor_gb: float,
+    recovery_free_gb: float,
+    reminder_hours: float,
+) -> tuple[str | None, dict, str]:
+    """Return (action, proposed state, stable event key)."""
+
+    current = str(state.get("state") or "healthy")
+    incident_started = float(state.get("incident_started_at") or 0.0)
+    last_sent = float(state.get("last_sent_at") or 0.0)
+    reminder_seconds = max(3600.0, float(reminder_hours) * 3600.0)
+
+    if float(free_gb) < float(hard_floor_gb):
+        if current != "pressure" or incident_started <= 0:
+            incident_started = float(now)
+            action = "pressure"
+        elif float(now) - last_sent >= reminder_seconds:
+            action = "reminder"
+        else:
+            action = None
+        proposed = {
+            "schema": "autorig.disk_pressure_state.v1",
+            "state": "pressure",
+            "incident_started_at": incident_started,
+            "last_sent_at": float(now) if action else last_sent,
+            "last_free_gb": float(free_gb),
+        }
+        suffix = "start" if action == "pressure" else "reminder"
+        return action, proposed, f"{int(incident_started)}_{suffix}_{int(now // 86400)}"
+
+    if current == "pressure" and float(free_gb) >= float(recovery_free_gb):
+        proposed = {
+            "schema": "autorig.disk_pressure_state.v1",
+            "state": "healthy",
+            "incident_started_at": incident_started,
+            "last_sent_at": last_sent,
+            "last_free_gb": float(free_gb),
+            "recovered_at": float(now),
+        }
+        return "recovery", proposed, f"{int(incident_started)}_recovery"
+
+    if current == "pressure":
+        proposed = dict(state)
+        proposed["last_free_gb"] = float(free_gb)
+        if float(now) - last_sent >= reminder_seconds:
+            proposed["last_sent_at"] = float(now)
+            return (
+                "reminder",
+                proposed,
+                f"{int(incident_started)}_reminder_{int(now // 86400)}",
+            )
+        return None, proposed, f"{int(incident_started)}_waiting"
+
+    return None, {
+        "schema": "autorig.disk_pressure_state.v1",
+        "state": "healthy",
+        "last_free_gb": float(free_gb),
+    }, "healthy"
+
+
+def _write_disk_pressure_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(state, stream, ensure_ascii=False, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
 async def broadcast_disk_usage_warning(
     *,
     free_gb: float,
@@ -1174,11 +1260,12 @@ async def broadcast_disk_usage_warning(
     glb_cache_gb: float,
     periodic_task_cache_cap_gb: float,
     glb_cache_cap_gb: float,
+    recovery_free_gb: float = 65.0,
+    reminder_hours: float = 24.0,
+    artifact_cache_gb: float = 0.0,
+    artifact_cache_cap_gb: float = 0.0,
 ) -> None:
-    """
-    Send a live disk-pressure warning at most once per UTC hour per chat while
-    the root filesystem remains above the configured used-percent threshold.
-    """
+    """Notify only on incident entry, daily reminder, and recovery."""
     token = _get_token()
     if not token:
         print("[Telegram] No token, skipping disk usage warning")
@@ -1187,45 +1274,85 @@ async def broadcast_disk_usage_warning(
     from telegram import Bot
     from telegram.constants import ParseMode
 
-    text = (
-        "🚨 <b>AutoRig disk pressure</b>\n"
-        f"Root usage: <b>{used_percent:.1f}%</b> of <code>/</code>\n"
-        f"Free: <b>{free_gb:.2f} GB</b> / <b>{total_gb:.2f} GB</b>\n"
-        f"Cleanup target: <b>{target_free_gb:.2f} GB free</b>\n"
-        f"Task cache: <code>{task_cache_gb:.2f} GB</code> (cap <code>{periodic_task_cache_cap_gb:.2f} GB</code>)\n"
-        f"GLB cache: <code>{glb_cache_gb:.2f} GB</code> (cap <code>{glb_cache_cap_gb:.2f} GB</code>)"
+    state_path = Path(
+        os.getenv(
+            "DISK_PRESSURE_STATE_PATH",
+            "/srv/autorig/data/var/disk_pressure_alert_state.json",
+        )
     )
+    lock_path = state_path.with_suffix(state_path.suffix + ".lock")
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_stream = lock_path.open("a+", encoding="utf-8")
+    import fcntl
 
-    bot = Bot(token=token)
-    chat_ids = await get_broadcast_chat_ids()
-    if not chat_ids:
-        return
-
-    hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
-    event_key = f"pressure_{hour_bucket}"
-
-    # Process-independent guard: the cleanup timer fires every minute, and a
-    # single failed DB reservation (sqlite write contention) used to turn that
-    # into a per-minute alert storm. The stamp file makes the hourly cadence
-    # hold even if the DB write races or rolls back.
-    stamp = Path("/var/autorig/disk_pressure_alert.stamp")
     try:
-        stamp.parent.mkdir(parents=True, exist_ok=True)
-        if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == event_key:
-            print(f"[Telegram] Disk-pressure warning already sent this hour ({hour_bucket})")
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+        except Exception:
+            state = {}
+        action, proposed, event_key = _disk_pressure_transition(
+            state,
+            now=time.time(),
+            free_gb=free_gb,
+            hard_floor_gb=target_free_gb,
+            recovery_free_gb=recovery_free_gb,
+            reminder_hours=reminder_hours,
+        )
+        if action is None:
+            _write_disk_pressure_state(state_path, proposed)
+            print(
+                f"[Telegram] Disk state unchanged ({proposed.get('state')}); "
+                f"free={free_gb:.2f}GB"
+            )
             return
-        stamp.write_text(event_key, encoding="utf-8")
-    except Exception as e:
-        print(f"[Telegram] Disk-pressure stamp unavailable ({e}); falling back to DB guard")
 
-    sem = asyncio.Semaphore(1)
+        title = {
+            "pressure": "🚨 <b>AutoRig disk pressure</b>",
+            "reminder": "⚠️ <b>AutoRig disk pressure continues</b>",
+            "recovery": "✅ <b>AutoRig disk pressure recovered</b>",
+        }[action]
+        text = (
+            f"{title}\n"
+            f"Root usage: <b>{used_percent:.1f}%</b> of <code>/</code>\n"
+            f"Free: <b>{free_gb:.2f} GB</b> / <b>{total_gb:.2f} GB</b>\n"
+            f"Hard floor: <b>{target_free_gb:.2f} GB</b>; "
+            f"recovery: <b>{recovery_free_gb:.2f} GB</b>\n"
+            f"Task cache: <code>{task_cache_gb:.2f} GB</code> "
+            f"(cap <code>{periodic_task_cache_cap_gb:.2f} GB</code>)\n"
+            f"GLB cache: <code>{glb_cache_gb:.2f} GB</code> "
+            f"(cap <code>{glb_cache_cap_gb:.2f} GB</code>)\n"
+            f"Artifact cache: <code>{artifact_cache_gb:.2f} GB</code> "
+            f"(soft cap <code>{artifact_cache_cap_gb:.2f} GB</code>)"
+        )
 
-    async def _one(chat_id: int):
-        async with sem:
-            reserved = await reserve_notification(chat_id, "disk_pressure", event_key)
+        bot = Bot(token=token)
+        chat_ids = await get_broadcast_chat_ids()
+        if not chat_ids:
+            return
+        sent_any = False
+        for chat_id in chat_ids:
+            reserved = await reserve_notification(
+                chat_id, "disk_pressure_incident", event_key
+            )
             if not reserved:
-                print(f"[Telegram] Skip duplicate disk-pressure warning chat={chat_id} hour={hour_bucket}")
-                return
+                message_id = await peek_notification_message_id(
+                    chat_id, "disk_pressure_incident", event_key
+                )
+                if message_id is not None:
+                    sent_any = True
+                    continue
+                # A process may have died after reserving but before sending.
+                # The file lock excludes a live sibling, so an id-less record
+                # is safe to release and retry once.
+                await release_notification(
+                    chat_id, "disk_pressure_incident", event_key
+                )
+                reserved = await reserve_notification(
+                    chat_id, "disk_pressure_incident", event_key
+                )
+                if not reserved:
+                    continue
             result = await _send_with_retry(
                 lambda cid=chat_id: bot.send_message(
                     chat_id=cid,
@@ -1235,9 +1362,25 @@ async def broadcast_disk_usage_warning(
                 )
             )
             if result:
-                print(f"[Telegram] Disk usage warning sent to chat {chat_id}")
-
-    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+                sent_any = True
+                await attach_notification_message_id(
+                    chat_id,
+                    "disk_pressure_incident",
+                    event_key,
+                    getattr(result, "message_id", None),
+                )
+                print(f"[Telegram] Disk {action} notice sent to chat {chat_id}")
+            else:
+                await release_notification(
+                    chat_id, "disk_pressure_incident", event_key
+                )
+        if sent_any:
+            _write_disk_pressure_state(state_path, proposed)
+    finally:
+        try:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_stream.close()
 
 
 async def broadcast_feedback_submitted(

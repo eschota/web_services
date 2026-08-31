@@ -338,6 +338,12 @@ DISK_CLEANUP_USED_PERCENT = float(
 DISK_CLEANUP_TARGET_BUFFER_GB = float(
     os.getenv("DISK_CLEANUP_TARGET_BUFFER_GB", "0.75")
 )  # Extra free-space margin above the used-percent threshold after cleanup
+DISK_RECOVERY_FREE_GB = float(
+    os.getenv("DISK_RECOVERY_FREE_GB", "65")
+)  # Clear an active disk-pressure incident only after this hysteresis target
+DISK_ALERT_REMINDER_HOURS = max(
+    1.0, float(os.getenv("DISK_ALERT_REMINDER_HOURS", "24"))
+)
 GLB_CACHE_MAX_GB = float(
     os.getenv("GLB_CACHE_MAX_GB", "6.0")
 )  # Hard cap for regenerable static/glb_cache during periodic cleanup

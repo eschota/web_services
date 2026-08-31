@@ -541,9 +541,13 @@ async def _purge_uploaded_video_cache_until(
 async def run() -> None:
     from config import (
         AUTOMATIC_TASK_DB_DELETION,
+        ARTIFACT_CACHE_ROOT,
+        ARTIFACT_CACHE_SOFT_CAP_GB,
+        DISK_ALERT_REMINDER_HOURS,
         DISK_ALERT_USED_PERCENT,
         DISK_CLEANUP_TARGET_BUFFER_GB,
         DISK_CLEANUP_USED_PERCENT,
+        DISK_RECOVERY_FREE_GB,
         GLB_CACHE_MAX_GB,
         GLB_CACHE_MIN_AGE_HOURS,
         MIN_FREE_SPACE_GB,
@@ -601,18 +605,25 @@ async def run() -> None:
 
     task_cache_gb = _dir_size_bytes(TASK_CACHE_DIR) / (1024**3)
     glb_cache_gb = _dir_size_bytes(GLB_CACHE_DIR) / (1024**3)
+    artifact_cache_gb = _dir_size_bytes(Path(ARTIFACT_CACHE_ROOT)) / (1024**3)
 
-    if after["used_percent"] >= float(DISK_ALERT_USED_PERCENT):
-        await broadcast_disk_usage_warning(
-            free_gb=after["free_gb"],
-            total_gb=after["total_gb"],
-            used_percent=after["used_percent"],
-            target_free_gb=target_free_gb,
-            task_cache_gb=task_cache_gb,
-            glb_cache_gb=glb_cache_gb,
-            periodic_task_cache_cap_gb=float(PERIODIC_TASK_CACHE_MAX_GB),
-            glb_cache_cap_gb=float(GLB_CACHE_MAX_GB),
-        )
+    # The used-percent threshold is telemetry only.  On an 878 GB volume,
+    # 92% used still leaves more than the explicit 60 GB operating floor.
+    # The notifier owns the hard-floor/recovery state machine and daily dedupe.
+    await broadcast_disk_usage_warning(
+        free_gb=after["free_gb"],
+        total_gb=after["total_gb"],
+        used_percent=after["used_percent"],
+        target_free_gb=target_free_gb,
+        recovery_free_gb=float(DISK_RECOVERY_FREE_GB),
+        reminder_hours=float(DISK_ALERT_REMINDER_HOURS),
+        task_cache_gb=task_cache_gb,
+        glb_cache_gb=glb_cache_gb,
+        artifact_cache_gb=artifact_cache_gb,
+        periodic_task_cache_cap_gb=float(PERIODIC_TASK_CACHE_MAX_GB),
+        glb_cache_cap_gb=float(GLB_CACHE_MAX_GB),
+        artifact_cache_cap_gb=float(ARTIFACT_CACHE_SOFT_CAP_GB),
+    )
 
     summary = {
         "deleted_count": int(result.get("deleted_count", 0) or 0) + int(video_deleted),
@@ -632,6 +643,10 @@ async def run() -> None:
         "disk_cleanup_used_percent": round(float(DISK_CLEANUP_USED_PERCENT), 2),
         "task_cache_gb": round(float(task_cache_gb), 4),
         "glb_cache_gb": round(float(glb_cache_gb), 4),
+        "artifact_cache_gb": round(float(artifact_cache_gb), 4),
+        "artifact_cache_soft_cap_gb": round(float(ARTIFACT_CACHE_SOFT_CAP_GB), 4),
+        "recovery_free_gb": round(float(DISK_RECOVERY_FREE_GB), 4),
+        "disk_alert_reminder_hours": round(float(DISK_ALERT_REMINDER_HOURS), 2),
         "periodic_task_cache_cap_gb": round(float(PERIODIC_TASK_CACHE_MAX_GB), 4),
         "periodic_task_cache_min_age_hours": round(float(PERIODIC_TASK_CACHE_MIN_AGE_HOURS), 2),
         "glb_cache_cap_gb": round(float(GLB_CACHE_MAX_GB), 4),

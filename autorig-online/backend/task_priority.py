@@ -27,6 +27,9 @@ PREEMPTION_NONE = "none"
 PREEMPTION_REQUESTED = "requested"
 PREEMPTION_STOPPING = "stopping"
 PREEMPT_COOLDOWN_SECONDS = int(os.getenv("AUTORIG_COLLECTION_PREEMPT_COOLDOWN", "300"))
+TRANSIENT_DISPATCH_COOLDOWN_SECONDS = max(
+    5, int(os.getenv("AUTORIG_TRANSIENT_DISPATCH_COOLDOWN", "60"))
+)
 PREEMPT_DEADLINE_SECONDS = max(
     1, min(60, int(os.getenv("AUTORIG_COLLECTION_PREEMPT_DEADLINE", "60")))
 )
@@ -156,7 +159,14 @@ async def dispatch_fifo_candidate(candidates: List[Any], attempt) -> bool:
             )
             continue
         if dispatch_error:
-            candidates.insert(0, task)
+            not_before = getattr(started_task, "dispatch_not_before", None)
+            if not_before is None or not_before <= datetime.utcnow():
+                candidates.insert(0, task)
+            else:
+                print(
+                    f"[Priority] Deferred FIFO head {task.id} until "
+                    f"{not_before.isoformat()} after transient worker rejection"
+                )
             return False
     return False
 
