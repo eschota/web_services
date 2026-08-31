@@ -29,6 +29,11 @@ from task_priority import (
 )
 from scheduler_wakeup import notify_scheduler
 from animal_submission_policy import animal_detection_accepted
+from input_normalization import (
+    InputNormalizationDeferred,
+    InputNormalizationError,
+    normalize_local_meshopt,
+)
 from worker_artifact_urls import (
     canonical_worker_artifact_url,
     viewer_artifact_kind,
@@ -709,6 +714,65 @@ async def start_task_on_worker(
                 admission_locked=admission_locked,
             )
         return task, error
+
+    if not replaying_unknown_submission:
+        try:
+            normalized = await asyncio.to_thread(
+                normalize_local_meshopt, task.input_url
+            )
+        except InputNormalizationDeferred as exc:
+            task.status = "created"
+            task.worker_api = None
+            task.worker_task_id = None
+            task.processing_started_at = None
+            task.error_message = None
+            task.dispatch_not_before = datetime.utcnow() + timedelta(seconds=60)
+            task.updated_at = datetime.utcnow()
+            await release_task_workload_lease(
+                db,
+                task,
+                outcome="released",
+                clear_for_retry=True,
+                admission_locked=admission_locked,
+            )
+            await db.commit()
+            await db.refresh(task)
+            print(f"[InputNormalize] Deferred task {task.id}: {exc}")
+            return task, str(exc)
+        except InputNormalizationError as exc:
+            task.status = "error"
+            task.worker_api = None
+            task.worker_task_id = None
+            task.processing_started_at = None
+            task.error_message = str(exc)
+            task.updated_at = datetime.utcnow()
+            await release_task_workload_lease(
+                db, task, outcome="released", admission_locked=admission_locked
+            )
+            await db.commit()
+            await db.refresh(task)
+            _schedule_task_error_notification(task.id)
+            return task, task.error_message
+        if normalized.changed:
+            try:
+                settings = json.loads(task.viewer_settings or "{}")
+            except Exception:
+                settings = {}
+            if not isinstance(settings, dict):
+                settings = {}
+            settings["input_normalization"] = normalized.record
+            task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+            task.input_url = normalized.effective_url
+            task.input_bytes = int(
+                normalized.record.get("derived_bytes") or task.input_bytes or 0
+            ) or None
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            print(
+                f"[InputNormalize] task {task.id} meshopt decoded -> "
+                f"{normalized.effective_url}"
+            )
 
     # Best-effort: generate LLM poster metadata from the pre-convert preview
     # (browser preflight render, else the renderfin turntable frame) so the
