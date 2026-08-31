@@ -80,6 +80,22 @@ def test_basis_texture_sources_are_counted_and_validated():
         normalizer._basis_image_count(document)
 
 
+def test_basis_texture_budget_uses_real_dimensions(tmp_path):
+    ktx2 = bytearray(68)
+    ktx2[:12] = normalizer.KTX2_MAGIC
+    struct.pack_into("<IIIII", ktx2, 20, 2048, 1024, 0, 0, 1)
+    source = tmp_path / "texture.glb"
+    document = {
+        "asset": {"version": "2.0"},
+        "buffers": [{"byteLength": len(ktx2)}],
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(ktx2)}],
+        "images": [{"bufferView": 0, "mimeType": "image/ktx2"}],
+        "textures": [{"extensions": {"KHR_texture_basisu": {"source": 0}}}],
+    }
+    write_glb(source, document, bytes(ktx2))
+    assert normalizer._basis_decoded_bytes(source, document) == 2048 * 1024 * 4
+
+
 def test_missing_runtime_is_retryable_without_input_failure(tmp_path):
     token = "11111111-2222-3333-4444-555566667777"
     directory = tmp_path / token

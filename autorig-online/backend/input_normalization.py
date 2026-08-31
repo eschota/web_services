@@ -21,6 +21,7 @@ from config import APP_URL, NEW_TASK_MIN_FREE_GB, UPLOAD_DIR
 MAX_INPUT_BYTES = 512 * 1024 * 1024
 MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_DECODED_BYTES = 512 * 1024 * 1024
+KTX2_MAGIC = bytes.fromhex("ab4b5458203230bb0d0a1a0a")
 NODE_EXE = os.getenv("MESHOPT_NODE_EXE", "/usr/bin/node")
 KTX_EXE = os.getenv(
     "KTX_EXE", "/srv/autorig/tools/KTX-Software-4.4.2-Linux-x86_64/bin/ktx"
@@ -100,7 +101,7 @@ def _glb_document(path: Path) -> tuple[dict, int, int]:
     return document, meshopt_views, decoded_bytes
 
 
-def _basis_image_count(document: dict) -> int:
+def _basis_image_sources(document: dict) -> set[int]:
     images = document.get("images") or []
     sources: set[int] = {
         index
@@ -127,7 +128,73 @@ def _basis_image_count(document: dict) -> int:
                 "KTX2_SCHEMA", "KHR_texture_basisu source is outside images"
             )
         sources.add(source)
-    return len(sources)
+    return sources
+
+
+def _basis_image_count(document: dict) -> int:
+    return len(_basis_image_sources(document))
+
+
+def _basis_decoded_bytes(path: Path, document: dict) -> int:
+    sources = _basis_image_sources(document)
+    if not sources:
+        return 0
+    views = document.get("bufferViews") or []
+    images = document.get("images") or []
+    with path.open("rb") as stream:
+        stream.seek(12)
+        json_length, json_type = struct.unpack("<II", stream.read(8))
+        if json_type != 0x4E4F534A:
+            raise InputNormalizationError("GLB_JSON", "GLB JSON chunk is missing")
+        stream.seek(20 + json_length)
+        binary_length, binary_type = struct.unpack("<II", stream.read(8))
+        if binary_type != 0x004E4942:
+            raise InputNormalizationError("GLB_BIN", "GLB BIN chunk is missing")
+        binary_start = 28 + json_length
+        total = 0
+        for source in sources:
+            image = images[source]
+            try:
+                view = views[int(image["bufferView"])]
+                if int(view.get("buffer", 0)) != 0:
+                    raise ValueError
+                offset = int(view.get("byteOffset", 0))
+                length = int(view["byteLength"])
+            except (IndexError, KeyError, TypeError, ValueError) as exc:
+                raise InputNormalizationError(
+                    "KTX2_SCHEMA", "invalid KTX2 image bufferView"
+                ) from exc
+            if offset < 0 or length < 68 or offset + length > binary_length:
+                raise InputNormalizationError(
+                    "KTX2_SCHEMA", "KTX2 image bytes are outside the BIN chunk"
+                )
+            stream.seek(binary_start + offset)
+            header = stream.read(68)
+            if len(header) != 68 or header[:12] != KTX2_MAGIC:
+                raise InputNormalizationError("KTX2_SCHEMA", "image is not KTX2")
+            width, height, depth, layers, faces = struct.unpack_from(
+                "<IIIII", header, 20
+            )
+            pixels = int(width) * int(height)
+            if (
+                width <= 0
+                or height <= 0
+                or width > 16384
+                or height > 16384
+                or depth > 1
+                or layers > 1
+                or faces != 1
+                or pixels > 64 * 1024 * 1024
+            ):
+                raise InputNormalizationError(
+                    "KTX2_SIZE", "KTX2 dimensions are outside policy"
+                )
+            total += pixels * 4
+            if total > MAX_DECODED_BYTES:
+                raise InputNormalizationError(
+                    "KTX2_SIZE", "decoded KTX2 textures exceed policy"
+                )
+    return total
 
 
 def _local_upload(input_url: str) -> tuple[Path, str, str] | None:
@@ -208,6 +275,7 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
         return NormalizedInput(input_url, False, {})
     document, meshopt_views, decoded_bytes = _glb_document(source)
     basis_images = _basis_image_count(document)
+    basis_decoded_bytes = _basis_decoded_bytes(source, document)
     if meshopt_views == 0 and basis_images == 0:
         return NormalizedInput(input_url, False, {})
 
@@ -236,7 +304,7 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
         estimated_output = (
             source.stat().st_size
             + decoded_bytes
-            + basis_images * 256 * 1024 * 1024
+            + basis_decoded_bytes
             + MAX_JSON_BYTES
         )
         free = shutil.disk_usage(source.parent).free
