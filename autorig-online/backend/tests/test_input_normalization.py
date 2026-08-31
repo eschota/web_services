@@ -69,6 +69,17 @@ def test_upload_path_rejects_non_uuid_token(tmp_path):
             normalizer._local_upload("https://autorig.online/u/not-a-uuid/model.glb")
 
 
+def test_basis_texture_sources_are_counted_and_validated():
+    document = {
+        "images": [{"bufferView": 0, "mimeType": "image/ktx2"}],
+        "textures": [{"extensions": {"KHR_texture_basisu": {"source": 0}}}],
+    }
+    assert normalizer._basis_image_count(document) == 1
+    document["textures"][0]["extensions"]["KHR_texture_basisu"]["source"] = 3
+    with pytest.raises(normalizer.InputNormalizationError, match="KTX2_SCHEMA"):
+        normalizer._basis_image_count(document)
+
+
 def test_missing_runtime_is_retryable_without_input_failure(tmp_path):
     token = "11111111-2222-3333-4444-555566667777"
     directory = tmp_path / token

@@ -22,6 +22,9 @@ MAX_INPUT_BYTES = 512 * 1024 * 1024
 MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_DECODED_BYTES = 512 * 1024 * 1024
 NODE_EXE = os.getenv("MESHOPT_NODE_EXE", "/usr/bin/node")
+KTX_EXE = os.getenv(
+    "KTX_EXE", "/srv/autorig/tools/KTX-Software-4.4.2-Linux-x86_64/bin/ktx"
+)
 DECODER_SCRIPT = Path(__file__).resolve().parent / "scripts" / "decode_meshopt_glb.mjs"
 _NORMALIZATION_LOCK = threading.Lock()
 
@@ -95,6 +98,36 @@ def _glb_document(path: Path) -> tuple[dict, int, int]:
         if decoded_bytes > MAX_DECODED_BYTES:
             raise InputNormalizationError("MESHOPT_SIZE", "decoded meshopt buffers exceed policy")
     return document, meshopt_views, decoded_bytes
+
+
+def _basis_image_count(document: dict) -> int:
+    images = document.get("images") or []
+    sources: set[int] = {
+        index
+        for index, image in enumerate(images)
+        if isinstance(image, dict)
+        and str(image.get("mimeType") or "").lower() == "image/ktx2"
+    }
+    for texture in document.get("textures") or []:
+        extension = (
+            (texture.get("extensions") or {}).get("KHR_texture_basisu")
+            if isinstance(texture, dict)
+            else None
+        )
+        if not isinstance(extension, dict):
+            continue
+        try:
+            source = int(extension["source"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InputNormalizationError(
+                "KTX2_SCHEMA", "invalid KHR_texture_basisu source"
+            ) from exc
+        if source < 0 or source >= len(images):
+            raise InputNormalizationError(
+                "KTX2_SCHEMA", "KHR_texture_basisu source is outside images"
+            )
+        sources.add(source)
+    return len(sources)
 
 
 def _local_upload(input_url: str) -> tuple[Path, str, str] | None:
@@ -173,12 +206,13 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
     source, token, filename = resolved
     if source.suffix.lower() != ".glb":
         return NormalizedInput(input_url, False, {})
-    _document, meshopt_views, decoded_bytes = _glb_document(source)
-    if meshopt_views == 0:
+    document, meshopt_views, decoded_bytes = _glb_document(source)
+    basis_images = _basis_image_count(document)
+    if meshopt_views == 0 and basis_images == 0:
         return NormalizedInput(input_url, False, {})
 
     original_sha = _sha256(source)
-    derived_name = f"{source.stem}.meshopt-decoded-{original_sha[:12]}.glb"
+    derived_name = f"{source.stem}.normalized-{original_sha[:12]}.glb"
     derived = source.with_name(derived_name)
     manifest = derived.with_suffix(derived.suffix + ".normalization.json")
     lock_path = source.with_suffix(source.suffix + ".meshopt.lock")
@@ -199,7 +233,12 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
                     record,
                 )
 
-        estimated_output = source.stat().st_size + decoded_bytes + MAX_JSON_BYTES
+        estimated_output = (
+            source.stat().st_size
+            + decoded_bytes
+            + basis_images * 256 * 1024 * 1024
+            + MAX_JSON_BYTES
+        )
         free = shutil.disk_usage(source.parent).free
         reserve = int(float(NEW_TASK_MIN_FREE_GB) * 1024**3)
         if free - estimated_output < reserve:
@@ -210,6 +249,10 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
         if not Path(NODE_EXE).is_file() or not DECODER_SCRIPT.is_file():
             raise InputNormalizationDeferred(
                 "MESHOPT_RUNTIME", "meshopt decoder runtime is unavailable"
+            )
+        if basis_images and not Path(KTX_EXE).is_file():
+            raise InputNormalizationDeferred(
+                "KTX2_RUNTIME", "KTX2 decoder runtime is unavailable"
             )
 
         descriptor, temp_name = tempfile.mkstemp(
@@ -225,8 +268,9 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
-                    timeout=180,
+                    timeout=360,
                     check=False,
+                    env={**os.environ, "KTX_EXE": KTX_EXE},
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise InputNormalizationDeferred(
@@ -234,11 +278,15 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
                 ) from exc
             if completed.returncode != 0 or not temp_path.is_file():
                 detail = (completed.stderr or completed.stdout or "decoder failed").strip()
-                raise InputNormalizationError("MESHOPT_DECODE", detail[-1000:])
+                raise InputNormalizationError("NORMALIZATION_DECODE", detail[-1000:])
             report = json.loads((completed.stdout or "").strip().splitlines()[-1])
-            _decoded_document, remaining_views, _decoded_size = _glb_document(temp_path)
-            if remaining_views:
-                raise InputNormalizationError("MESHOPT_DECODE", "derived GLB still uses meshopt")
+            decoded_document, remaining_views, _decoded_size = _glb_document(temp_path)
+            remaining_basis = _basis_image_count(decoded_document)
+            if remaining_views or remaining_basis:
+                raise InputNormalizationError(
+                    "NORMALIZATION_INCOMPLETE",
+                    "derived GLB still uses meshopt or KTX2 textures",
+                )
             derived_sha = _sha256(temp_path)
             if report.get("input_sha256") != original_sha or report.get("output_sha256") != derived_sha:
                 raise InputNormalizationError("MESHOPT_RECEIPT", "decoder checksum mismatch")
@@ -256,6 +304,8 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
                 "derived_sha256": derived_sha,
                 "decoder_version": report.get("decoder_version"),
                 "decoded_views": int(report.get("decoded_views") or 0),
+                "decoded_textures": int(report.get("decoded_textures") or 0),
+                "texture_decoder_version": report.get("texture_decoder_version"),
                 "original_bytes": source.stat().st_size,
                 "derived_bytes": derived.stat().st_size,
             }

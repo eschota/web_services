@@ -760,6 +760,14 @@ async def start_task_on_worker(
                 settings = {}
             if not isinstance(settings, dict):
                 settings = {}
+            previous_normalization = settings.get("input_normalization")
+            if isinstance(previous_normalization, dict) and previous_normalization:
+                history = settings.get("input_normalization_history")
+                if not isinstance(history, list):
+                    history = []
+                if previous_normalization not in history:
+                    history.append(previous_normalization)
+                settings["input_normalization_history"] = history[-8:]
             settings["input_normalization"] = normalized.record
             task.viewer_settings = json.dumps(settings, ensure_ascii=False)
             task.input_url = normalized.effective_url

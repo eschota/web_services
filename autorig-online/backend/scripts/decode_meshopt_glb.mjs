@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { MeshoptDecoder } from '../vendor/meshoptimizer/meshopt_decoder.mjs';
 
 const [inputPath, outputPath] = process.argv.slice(2);
@@ -9,6 +12,9 @@ if (!inputPath || !outputPath) throw new Error('usage: decode_meshopt_glb.mjs IN
 const MAX_INPUT = 512 * 1024 * 1024;
 const MAX_JSON = 16 * 1024 * 1024;
 const MAX_DECODED = 512 * 1024 * 1024;
+const MAX_OUTPUT = 1024 * 1024 * 1024;
+const KTX_EXE = process.env.KTX_EXE || '/srv/autorig/tools/KTX-Software-4.4.2-Linux-x86_64/bin/ktx';
+const KTX2_MAGIC = Buffer.from([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a]);
 const source = fs.readFileSync(inputPath);
 if (source.length < 20 || source.length > MAX_INPUT) throw new Error('input size is outside policy');
 if (source.toString('ascii', 0, 4) !== 'glTF') throw new Error('input is not GLB');
@@ -50,6 +56,7 @@ const parts = [Buffer.from(originalBin)];
 let outputLength = originalBin.byteLength;
 let decodedTotal = 0;
 let decodedViews = 0;
+let decodedTextures = 0;
 
 for (const [index, view] of (document.bufferViews || []).entries()) {
   const extension = view?.extensions?.EXT_meshopt_compression;
@@ -91,14 +98,111 @@ for (const [index, view] of (document.bufferViews || []).entries()) {
   decodedTotal += decoded.byteLength;
   decodedViews += 1;
 }
-if (decodedViews === 0) throw new Error('input does not use EXT_meshopt_compression');
+
+const basisSources = new Set();
+for (const [textureIndex, texture] of (document.textures || []).entries()) {
+  const extension = texture?.extensions?.KHR_texture_basisu;
+  if (!extension) continue;
+  const sourceIndex = Number(extension.source);
+  if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= (document.images || []).length) {
+    throw new Error(`invalid KHR_texture_basisu source at texture ${textureIndex}`);
+  }
+  basisSources.add(sourceIndex);
+}
+for (const [imageIndex, image] of (document.images || []).entries()) {
+  if (String(image?.mimeType || '').toLowerCase() === 'image/ktx2') basisSources.add(imageIndex);
+}
+
+let textureDecodedBudget = 0;
+let textureTempRoot = null;
+try {
+  if (basisSources.size > 0) {
+    if (!fs.existsSync(KTX_EXE)) throw new Error('KTX decoder runtime is unavailable');
+    textureTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autorig-ktx2-'));
+  }
+  for (const imageIndex of basisSources) {
+    const image = document.images?.[imageIndex];
+    const viewIndex = Number(image?.bufferView);
+    const view = document.bufferViews?.[viewIndex];
+    const viewOffset = Number(view?.byteOffset || 0);
+    const viewLength = Number(view?.byteLength);
+    if (
+      !Number.isInteger(viewIndex) || !view || view.buffer !== 0 ||
+      !Number.isInteger(viewOffset) || !Number.isInteger(viewLength) ||
+      viewOffset < 0 || viewLength < 68 || viewOffset + viewLength > originalBin.byteLength
+    ) throw new Error(`invalid KTX2 image bufferView ${viewIndex}`);
+    const ktx2 = Buffer.from(originalBin.subarray(viewOffset, viewOffset + viewLength));
+    if (!ktx2.subarray(0, 12).equals(KTX2_MAGIC)) throw new Error(`image ${imageIndex} is not KTX2`);
+    const width = ktx2.readUInt32LE(20);
+    const height = ktx2.readUInt32LE(24);
+    const depth = ktx2.readUInt32LE(28);
+    const layers = ktx2.readUInt32LE(32);
+    const faces = ktx2.readUInt32LE(36);
+    const pixels = width * height;
+    if (
+      width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
+      depth > 1 || layers > 1 || faces !== 1 || !Number.isSafeInteger(pixels) ||
+      pixels > 64 * 1024 * 1024
+    ) throw new Error(`KTX2 image ${imageIndex} dimensions are outside policy`);
+    textureDecodedBudget += pixels * 4;
+    if (textureDecodedBudget > MAX_DECODED) throw new Error('decoded KTX2 textures exceed policy');
+
+    const inputKtx = path.join(textureTempRoot, `image-${imageIndex}.ktx2`);
+    const outputPng = path.join(textureTempRoot, `image-${imageIndex}.png`);
+    fs.writeFileSync(inputKtx, ktx2, { flag: 'wx' });
+    const converted = spawnSync(
+      KTX_EXE,
+      ['extract', '--transcode', 'rgba8', inputKtx, outputPng],
+      { encoding: 'utf8', timeout: 120000, windowsHide: true },
+    );
+    if (converted.error || converted.status !== 0 || !fs.existsSync(outputPng)) {
+      const detail = String(converted.stderr || converted.stdout || converted.error || 'KTX extract failed');
+      throw new Error(`KTX2 decode failed: ${detail.slice(-1000)}`);
+    }
+    const png = fs.readFileSync(outputPng);
+    if (png.length < 8 || png.toString('hex', 0, 8) !== '89504e470d0a1a0a') {
+      throw new Error(`KTX2 decode did not produce PNG for image ${imageIndex}`);
+    }
+    const padding = (4 - (outputLength % 4)) % 4;
+    if (padding) {
+      parts.push(Buffer.alloc(padding));
+      outputLength += padding;
+    }
+    if (outputLength + png.length > MAX_OUTPUT) throw new Error('normalized GLB exceeds output policy');
+    const pngViewIndex = document.bufferViews.length;
+    document.bufferViews.push({ buffer: 0, byteOffset: outputLength, byteLength: png.length });
+    image.bufferView = pngViewIndex;
+    image.mimeType = 'image/png';
+    delete image.uri;
+    parts.push(png);
+    outputLength += png.length;
+    decodedTextures += 1;
+  }
+} finally {
+  if (textureTempRoot) fs.rmSync(textureTempRoot, { recursive: true, force: true });
+}
+
+for (const texture of (document.textures || [])) {
+  const extension = texture?.extensions?.KHR_texture_basisu;
+  if (!extension) continue;
+  texture.source = Number(extension.source);
+  delete texture.extensions.KHR_texture_basisu;
+  if (Object.keys(texture.extensions).length === 0) delete texture.extensions;
+}
+
+if (decodedViews === 0 && decodedTextures === 0) {
+  throw new Error('input does not use a supported normalization extension');
+}
 
 for (const key of ['extensionsRequired', 'extensionsUsed']) {
   if (!Array.isArray(document[key])) continue;
-  document[key] = document[key].filter((name) => name !== 'EXT_meshopt_compression');
+  document[key] = document[key].filter(
+    (name) => name !== 'EXT_meshopt_compression' && name !== 'KHR_texture_basisu',
+  );
   if (document[key].length === 0) delete document[key];
 }
 const bin = Buffer.concat(parts);
+if (bin.length > MAX_OUTPUT) throw new Error('normalized GLB exceeds output policy');
 for (const [index, view] of (document.bufferViews || []).entries()) {
   if (view?.buffer !== 0) throw new Error(`bufferView ${index} still references a virtual buffer`);
 }
@@ -130,4 +234,6 @@ console.log(JSON.stringify({
   output_bytes: result.length,
   decoded_views: decodedViews,
   decoded_bytes: decodedTotal,
+  decoded_textures: decodedTextures,
+  texture_decoder_version: decodedTextures ? 'KTX-Software-4.4.2' : null,
 }));
