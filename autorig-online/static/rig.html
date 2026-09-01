@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rig Architecture — Inside the AutoRig Pipeline</title>
+    <meta name="description" content="A technical map of how AutoRig builds a character rig: source preflight, GPU farm dispatch, humanoid and animal rigging branches, quality gates, animations and deliverables.">
+    <meta name="keywords" content="auto rig architecture, rigging pipeline, character rig, animal rig, openpose skeleton, auto skinning, rig quality gates">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Rig Architecture — Inside the AutoRig Pipeline">
+    <meta property="og:description" content="How AutoRig turns a model into a rigged, animated character: the full pipeline scheme with quality gates and deliverables.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/rig">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+
+    <style>
+        /* Hero */
+        .rig-hero {
+            padding: 4rem 0 3rem;
+            text-align: center;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .rig-hero h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 1.5rem;
+            line-height: 1.2;
+        }
+        .rig-hero .lead {
+            font-size: 1.15rem;
+            color: var(--text-primary);
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.7;
+            opacity: 0.9;
+        }
+
+        .rig-section {
+            padding: 4rem 0;
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .rig-section:last-of-type { border-bottom: none; }
+        .rig-section h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            text-align: center;
+            margin-bottom: 0.75rem;
+        }
+        .rig-section .section-sub {
+            text-align: center;
+            color: var(--text-secondary);
+            max-width: 720px;
+            margin: 0 auto 2.5rem;
+            line-height: 1.6;
+        }
+
+        /* Pipeline flow */
+        .rig-flow {
+            max-width: 860px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .rig-entry-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .rig-node {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 1.25rem 1.5rem;
+            position: relative;
+        }
+        .rig-node .step-tag {
+            display: inline-block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--accent-hover);
+            background: rgba(99, 102, 241, 0.12);
+            border-radius: 999px;
+            padding: 0.2rem 0.65rem;
+            margin-bottom: 0.5rem;
+        }
+        .rig-node h3 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.35rem;
+        }
+        .rig-node p {
+            font-size: 0.92rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
+            margin: 0;
+        }
+        .rig-node.gate { border-left: 4px solid var(--accent); }
+        .rig-arrow {
+            text-align: center;
+            color: var(--accent);
+            font-size: 1.3rem;
+            line-height: 1;
+            padding: 0.55rem 0;
+        }
+        .rig-arrow small {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.15rem;
+        }
+
+        /* Branch split */
+        .rig-branches {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .rig-branch {
+            background: rgba(99, 102, 241, 0.05);
+            border: 1px dashed rgba(99, 102, 241, 0.35);
+            border-radius: var(--radius-lg);
+            padding: 1rem;
+        }
+        .rig-branch > .branch-title {
+            text-align: center;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 0.75rem;
+        }
+        .rig-branch .rig-node { margin-bottom: 0.6rem; }
+        .rig-branch .rig-node:last-child { margin-bottom: 0; }
+        .rig-branch .mini-arrow {
+            text-align: center;
+            color: var(--accent);
+            padding: 0.15rem 0 0.55rem;
+        }
+
+        /* Watchdog aside */
+        .rig-watchdog {
+            max-width: 860px;
+            margin: 2rem auto 0;
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-left: 4px solid var(--warning, #f59e0b);
+            border-radius: var(--radius);
+            padding: 1.1rem 1.5rem;
+            font-size: 0.92rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .rig-watchdog strong { color: var(--text-primary); }
+
+        /* Spec cards */
+        .rig-specs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .rig-spec-card {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+        }
+        .rig-spec-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+        }
+        .rig-spec-card ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .rig-spec-card li {
+            position: relative;
+            padding: 0.4rem 0 0.4rem 1.4rem;
+            color: var(--text-secondary);
+            font-size: 0.94rem;
+            line-height: 1.55;
+        }
+        .rig-spec-card li::before {
+            content: "▸";
+            position: absolute;
+            left: 0;
+            color: var(--accent);
+        }
+
+        /* Gates grid */
+        .rig-gates {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        .rig-gate-card {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-left: 4px solid var(--accent);
+            border-radius: var(--radius);
+            padding: 1.1rem 1.25rem;
+        }
+        .rig-gate-card h4 {
+            font-size: 0.98rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.3rem;
+        }
+        .rig-gate-card p {
+            font-size: 0.86rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        /* Modes */
+        .rig-modes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        /* CTA */
+        .rig-cta {
+            text-align: center;
+            padding: 3.5rem 0 4rem;
+        }
+        .rig-cta .cta-button {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            font-weight: 600;
+            padding: 0.9rem 2.2rem;
+            border-radius: var(--radius);
+            text-decoration: none;
+            transition: var(--transition);
+        }
+        .rig-cta .cta-button:hover { background: var(--accent-hover); }
+        .rig-cta .cta-links {
+            margin-top: 1.25rem;
+            font-size: 0.92rem;
+        }
+        .rig-cta .cta-links a {
+            color: var(--accent-hover);
+            text-decoration: none;
+            margin: 0 0.6rem;
+        }
+        .rig-cta .cta-links a:hover { text-decoration: underline; }
+
+        @media (max-width: 768px) {
+            .rig-entry-row, .rig-branches { grid-template-columns: 1fr; }
+            .rig-section { padding: 3rem 0; }
+        }
+    </style>
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <div id="site-header"></div>
+
+    <!-- Hero -->
+    <section class="rig-hero">
+        <div class="container">
+            <h1>Rig Architecture</h1>
+            <p class="lead">
+                A transparent map of what happens between "upload" and a production-ready
+                rigged character: every stage, every quality gate, and everything the rig
+                contains when it lands in your downloads.
+            </p>
+        </div>
+    </section>
+
+    <!-- Pipeline scheme -->
+    <section class="rig-section">
+        <div class="container">
+            <h2>The Pipeline</h2>
+            <p class="section-sub">
+                Every task moves through the same guarded route:
+                <em>created → processing → done</em>. Each box below is a real stage of the
+                system, not marketing — this is how the service is actually wired.
+            </p>
+
+            <div class="rig-flow">
+                <div class="rig-entry-row">
+                    <div class="rig-node">
+                        <span class="step-tag">Entry A</span>
+                        <h3>Upload a model</h3>
+                        <p>GLB, FBX or OBJ — direct upload or a link. ASCII FBX is rejected; binary FBX is pre-converted to GLB on the farm before rigging.</p>
+                    </div>
+                    <div class="rig-node">
+                        <span class="step-tag">Entry B</span>
+                        <h3>Generate from an image</h3>
+                        <p>An AI vision check decides if the picture is riggable, then Flux renders a clean pose and Hunyuan3D builds the mesh. The result is auto-submitted to the same rigging pipeline.</p>
+                    </div>
+                </div>
+
+                <div class="rig-arrow">↓</div>
+
+                <div class="rig-node">
+                    <span class="step-tag">Queue</span>
+                    <h3>Task created</h3>
+                    <p>The task enters the queue. The scheduler only hands work to free GPU workers, so a busy farm means waiting in <em>created</em> — never a silent failure.</p>
+                </div>
+
+                <div class="rig-arrow">↓</div>
+
+                <div class="rig-node gate">
+                    <span class="step-tag">Gate 1</span>
+                    <h3>Source preflight</h3>
+                    <p>The first bytes of the source are checked against real binary signatures (glTF, binary FBX, OBJ). An HTML page, an empty response or a corrupt file is rejected before a GPU minute is spent.</p>
+                </div>
+
+                <div class="rig-arrow">↓</div>
+
+                <div class="rig-node">
+                    <span class="step-tag">Metadata</span>
+                    <h3>AI model description</h3>
+                    <p>A vision model writes the title, category and keywords for the model. This metadata travels with the task and drives animation selection and gallery listing.</p>
+                </div>
+
+                <div class="rig-arrow">↓</div>
+
+                <div class="rig-node">
+                    <span class="step-tag">Dispatch</span>
+                    <h3>GPU converter farm</h3>
+                    <p>The task is sent to a GPU rigging worker. If a worker misbehaves, it is quarantined for 15 minutes and the task silently re-queues — no user-visible error for transient farm hiccups.</p>
+                </div>
+
+                <div class="rig-arrow">↓<small>the pipeline splits by character type</small></div>
+
+                <div class="rig-branches">
+                    <div class="rig-branch">
+                        <div class="branch-title">🧍 Humanoid branch</div>
+                        <div class="rig-node">
+                            <h3>Pose detection</h3>
+                            <p>Up to 137 OpenPose markers: 25 body, 21 per hand, 70 face. Orientation, scale and T-pose are normalized; fingers are detected individually.</p>
+                        </div>
+                        <div class="mini-arrow">↓</div>
+                        <div class="rig-node">
+                            <h3>Skeleton + auto skinning</h3>
+                            <p>An AI-placed skeleton (spine, limbs, head, fingers) with automatic weight painting, plus a full Blender control rig for manual animation.</p>
+                        </div>
+                        <div class="mini-arrow">↓</div>
+                        <div class="rig-node">
+                            <h3>64 animation clips</h3>
+                            <p>Retargeted onto the new skeleton: 12 walks, 12 fight moves, 10 emotes, 8 runs, 6 idles, 5 dances, 4 jumps, 3 deaths and more.</p>
+                        </div>
+                    </div>
+                    <div class="rig-branch">
+                        <div class="branch-title">🐾 Animal branch</div>
+                        <div class="rig-node">
+                            <h3>Species detection</h3>
+                            <p>AI vision classifies the animal into one of 12 supported species and must be confident before rigging starts — no guessing on ambiguous creatures.</p>
+                        </div>
+                        <div class="mini-arrow">↓</div>
+                        <div class="rig-node">
+                            <h3>Geometry analysis + rig</h3>
+                            <p>The mesh goes through staged geometry analysis (limb tips, body segments, forward-axis semantics) before an animal control rig is built and bound.</p>
+                        </div>
+                        <div class="mini-arrow">↓</div>
+                        <div class="rig-node">
+                            <h3>30 canonical clips × 24 variants</h3>
+                            <p>A versioned animation library: 30 clips (idles, gaits, turns, jumps, attacks, death, eat, sleep…) fitted to 12 species in 2 orientations.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rig-arrow">↓</div>
+
+                <div class="rig-node gate">
+                    <span class="step-tag">Gate 2</span>
+                    <h3>Completion contract</h3>
+                    <p>A task only counts as done when the worker reports it finalized with zero errors, and the preview video, poster and downloadable archive all actually exist.</p>
+                </div>
+
+                <div class="rig-arrow">↓</div>
+
+                <div class="rig-node gate">
+                    <span class="step-tag">Publish</span>
+                    <h3>Viewer + durable cache</h3>
+                    <p>Viewer files (prepared.glb, animations.glb) are validated byte-for-byte before publishing. All deliverables are mirrored into a durable cache on the web host, so downloads survive farm cleanups, and are streamed with HTTP range support.</p>
+                </div>
+            </div>
+
+            <div class="rig-watchdog">
+                <strong>Watchdog, the whole way through:</strong> a task with no progress for
+                30 minutes is pulled back and re-queued automatically (up to 3 restarts); a hard
+                2-hour limit guarantees nothing hangs forever. Failed members of batch
+                collections retry themselves without any manual action.
+            </div>
+        </div>
+    </section>
+
+    <!-- Inside the rig -->
+    <section class="rig-section">
+        <div class="container">
+            <h2>What's Inside the Rig</h2>
+            <p class="section-sub">Two rig families, one delivery standard.</p>
+            <div class="rig-specs">
+                <div class="rig-spec-card">
+                    <h3>🧍 Humanoid rig</h3>
+                    <ul>
+                        <li>Skeleton derived from up to 137 OpenPose markers (25 body + 42 hand + 70 face)</li>
+                        <li>Automatic skin weights on the full body and fingers</li>
+                        <li>Blender control rig (.blend) for hand-keyed animation</li>
+                        <li>64 baked animation clips ready for game engines</li>
+                        <li>Unity HDRP .unitypackage with the character set up</li>
+                        <li>All-animations FBX + skeleton.json</li>
+                        <li>Prepared GLB for the built-in web viewer</li>
+                    </ul>
+                </div>
+                <div class="rig-spec-card">
+                    <h3>🐾 Animal rig</h3>
+                    <ul>
+                        <li>12 species: dog, bear, cat, cow, deer, elephant, giraffe, horse, mouse, pig, rabbit, turtle</li>
+                        <li>2 orientations per species → 24 rig variants per task</li>
+                        <li>30 canonical clips: 5 idles, walk/trot/run/sprint, turns, jumps, attacks, hits, death, eat, sleep, vocalize</li>
+                        <li>Versioned animation library — clips are pinned to your task's revision and verified by checksum</li>
+                        <li>Per variant: .blend, .fbx, skeleton.json and a viewer animations.glb</li>
+                        <li>Rig blueprint: skeleton JSON + rig preview video</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quality gates -->
+    <section class="rig-section">
+        <div class="container">
+            <h2>Quality Gates</h2>
+            <p class="section-sub">
+                Every stage that can produce a bad rig has a gate in front of it. If a gate
+                fails, the task fails loudly — a broken rig is never silently delivered.
+            </p>
+            <div class="rig-gates">
+                <div class="rig-gate-card">
+                    <h4>Binary signature preflight</h4>
+                    <p>Sources are verified against real file magic before queueing; web pages and corrupt files never reach the farm.</p>
+                </div>
+                <div class="rig-gate-card">
+                    <h4>Riggability vision check</h4>
+                    <p>Generated characters are screened for pose and separated limbs before any credits are spent on rigging.</p>
+                </div>
+                <div class="rig-gate-card">
+                    <h4>Topology check at creation</h4>
+                    <p>Unsupported animal body topologies are rejected at task creation with a clear error, not mid-pipeline.</p>
+                </div>
+                <div class="rig-gate-card">
+                    <h4>Worker completion contract</h4>
+                    <p>Workers must explicitly report a finalized, error-free result — partial output can't masquerade as success.</p>
+                </div>
+                <div class="rig-gate-card">
+                    <h4>Deliverables completeness</h4>
+                    <p>Preview video, poster and the downloadable archive are verified to exist before a task is marked done.</p>
+                </div>
+                <div class="rig-gate-card">
+                    <h4>Strict viewer validation</h4>
+                    <p>Viewer GLBs are checked for a valid binary glTF header and exact declared size before they are published.</p>
+                </div>
+                <div class="rig-gate-card">
+                    <h4>Checksummed animation library</h4>
+                    <p>Animal clips ship from a versioned library with sha256-verified manifests and a visual phase QA pass.</p>
+                </div>
+                <div class="rig-gate-card">
+                    <h4>Watchdog + auto-restarts</h4>
+                    <p>Stalled tasks are re-queued automatically up to 3 times; a global timeout guarantees a definite outcome.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Modes -->
+    <section class="rig-section">
+        <div class="container">
+            <h2>Three Ways In, One Pipeline</h2>
+            <div class="rig-modes">
+                <div class="rig-spec-card">
+                    <h3>⚡ Auto Rig</h3>
+                    <ul>
+                        <li>The default mode for uploads</li>
+                        <li>Rig, skinning, animations and previews</li>
+                        <li>Keeps your original geometry untouched</li>
+                    </ul>
+                </div>
+                <div class="rig-spec-card">
+                    <h3>🏭 Full Convert</h3>
+                    <ul>
+                        <li>Launched from a completed rig</li>
+                        <li>Retopology at three LODs: 1k / 10k / 100k</li>
+                        <li>Texture bake + 3ds Max, Maya, Cinema 4D, Unity, Unreal and Marmoset exports</li>
+                    </ul>
+                </div>
+                <div class="rig-spec-card">
+                    <h3>🎨 Generate</h3>
+                    <ul>
+                        <li>Start from a single image or prompt</li>
+                        <li>Flux pose render → Hunyuan3D mesh</li>
+                        <li>Auto-submitted into the same rigging pipeline</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="rig-cta">
+        <div class="container">
+            <a class="cta-button" href="/">Upload your model</a>
+            <div class="cta-links">
+                <a href="/how-it-works">How it works</a>
+                <a href="/animal-rig">Animal rigging</a>
+                <a href="/faq">FAQ</a>
+            </div>
+        </div>
+    </section>
+
+    <div id="site-footer"></div>
+
+    <!-- Scripts -->
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

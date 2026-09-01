@@ -129,6 +129,14 @@
   </url>
 
   <url>
+    <loc>https://autorig.online/rig</loc>
+    <lastmod>2026-09-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rig"/>
+  </url>
+
+  <url>
     <loc>https://autorig.online/faq</loc>
     <lastmod>2026-01-01</lastmod>
     <changefreq>monthly</changefreq>

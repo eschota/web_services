@@ -16203,6 +16203,7 @@ STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "fbx-auto-rig.html": "/fbx-auto-rig",
     "obj-auto-rig.html": "/obj-auto-rig",
     "how-it-works.html": "/how-it-works",
+    "rig.html": "/rig",
     "faq.html": "/faq",
     "terms-of-use.html": "/terms",
     "user-agreement.html": "/user-agreement",
@@ -17288,6 +17289,12 @@ async def obj_auto_rig_page():
 async def how_it_works_page():
     """How it works page"""
     return _static_html_response("how-it-works.html")
+
+
+@app.get("/rig")
+async def rig_architecture_page():
+    """Rig architecture scheme page"""
+    return _static_html_response("rig.html")
 
 
 @app.get("/faq")
