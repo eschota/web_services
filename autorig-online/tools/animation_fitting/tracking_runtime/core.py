@@ -1214,6 +1214,18 @@ def select_anchor_seeds(
             rig, canonical_rgb, browser_reference
         )
 
+    def _mask_hit_near(mask: np.ndarray, x: int, y: int, radius: int = 1) -> bool:
+        """Anchor pixels sit on the silhouette boundary by construction.
+
+        The canonical mask is rasterized with binary single-sample coverage
+        (no AA), so a boundary anchor can round to the background pixel one
+        step outside the silhouette. Accept a hit anywhere in the small
+        neighborhood instead of requiring the exact pixel.
+        """
+        y0, y1 = max(0, y - radius), min(mask.shape[0], y + radius + 1)
+        x0, x1 = max(0, x - radius), min(mask.shape[1], x + radius + 1)
+        return bool(mask[y0:y1, x0:x1].any())
+
     grouped: dict[str, list[tuple[str, np.ndarray, float, int]]] = {}
     visible_by_anchor: dict[str, tuple[str, str, np.ndarray]] = {}
     for anchor_id, anchor in rig.anchors.items():
@@ -1223,7 +1235,7 @@ def select_anchor_seeds(
         x, y = int(round(float(xy[0]))), int(round(float(xy[1])))
         if x < 0 or x >= rig.camera.width or y < 0 or y >= rig.camera.height:
             continue
-        if not reference_mask[y, x]:
+        if not _mask_hit_near(reference_mask, x, y):
             continue
         point = np.asarray(xy, dtype=np.float32)
         grouped.setdefault(anchor.bone, []).append(
