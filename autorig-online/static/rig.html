@@ -200,6 +200,95 @@
             color: var(--accent);
         }
 
+        /* Skeleton section */
+        .rig-skeleton-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Animal pipeline flow */
+        .rig-animal-flow {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 0.75rem;
+            max-width: 1100px;
+            margin: 0 auto 2.5rem;
+        }
+        .rig-animal-stage {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-top: 3px solid var(--accent);
+            border-radius: var(--radius);
+            padding: 1rem 1.1rem;
+        }
+        .rig-animal-stage .stage-no {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            color: var(--accent-hover);
+            text-transform: uppercase;
+            margin-bottom: 0.35rem;
+        }
+        .rig-animal-stage h4 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.3rem;
+        }
+        .rig-animal-stage p {
+            font-size: 0.83rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        /* Clip taxonomy table */
+        .rig-clips-wrap {
+            max-width: 1000px;
+            margin: 0 auto;
+            overflow-x: auto;
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem 1.5rem;
+        }
+        table.rig-clips {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+        table.rig-clips th {
+            text-align: left;
+            color: var(--text-primary);
+            font-weight: 600;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--glass-border);
+            white-space: nowrap;
+        }
+        table.rig-clips td {
+            padding: 0.5rem 0.75rem;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--glass-border);
+            vertical-align: top;
+            line-height: 1.5;
+        }
+        table.rig-clips tr:last-child td { border-bottom: none; }
+        table.rig-clips .cat {
+            color: var(--accent-hover);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .rig-note {
+            max-width: 1000px;
+            margin: 1.25rem auto 0;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.55;
+        }
+
         /* Gates grid */
         .rig-gates {
             display: grid;
@@ -445,6 +534,143 @@
                     </ul>
                 </div>
             </div>
+        </div>
+    </section>
+
+    <!-- Skeleton structure -->
+    <section class="rig-section">
+        <div class="container">
+            <h2>Inside the Skeleton</h2>
+            <p class="section-sub">
+                Every rig is built as two layers: a control rig for animators and a deform
+                skeleton that actually moves the mesh in engines.
+            </p>
+            <div class="rig-skeleton-grid">
+                <div class="rig-spec-card">
+                    <h3>🎛 Control layer</h3>
+                    <ul>
+                        <li>Full IK/FK control rig (Auto-Rig Pro architecture): root and trajectory masters, IK chains with pole targets, FK switches per limb</li>
+                        <li>Shipped in the .blend files — this is what you animate by hand in Blender</li>
+                        <li>Quadruped rigs carry 300+ nodes end-to-end; humanoids are built from the OpenPose marker set (25 body + 42 hand + 70 face)</li>
+                    </ul>
+                </div>
+                <div class="rig-spec-card">
+                    <h3>🦴 Deform layer</h3>
+                    <ul>
+                        <li>The bones that carry skin weights and drive the mesh in Unity, Unreal and the web viewer</li>
+                        <li>Exported inside every GLB/FBX with the skinned mesh and baked clips</li>
+                        <li>Published per task as <code>skeleton.json</code> — the exact joint hierarchy contract, machine-readable</li>
+                    </ul>
+                </div>
+                <div class="rig-spec-card">
+                    <h3>📐 Contracts</h3>
+                    <ul>
+                        <li>Viewer GLBs must contain a valid skin and a mesh bound to it — a rig without skinning fails the contract and the task fails loudly</li>
+                        <li>Animal tasks additionally publish a rig blueprint: <code>blueprint/skeleton.json</code> + a rig preview video</li>
+                        <li>Animation manifests carry sha256, clip count and revision headers, so a viewer can verify what it plays</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Animal rig deep dive -->
+    <section class="rig-section">
+        <div class="container">
+            <h2>Animal Rig, In Depth</h2>
+            <p class="section-sub">
+                Non-humanoid rigging is its own pipeline: geometry understanding first,
+                skeleton second, and a canonical animation taxonomy on top.
+            </p>
+
+            <div class="rig-animal-flow">
+                <div class="rig-animal-stage">
+                    <div class="stage-no">Stage 0</div>
+                    <h4>Species detection</h4>
+                    <p>AI vision classifies the model into one of 12 supported species and must clear a confidence threshold before rigging starts. Unsupported body topologies are rejected at task creation.</p>
+                </div>
+                <div class="rig-animal-stage">
+                    <div class="stage-no">Stage 1</div>
+                    <h4>Geometry field (MCF)</h4>
+                    <p>The mesh is analyzed as a single closed body; disconnected shells and non-manifold glue are detected here, before any bones exist.</p>
+                </div>
+                <div class="rig-animal-stage">
+                    <div class="stage-no">Stage 2.1</div>
+                    <h4>Pre-semantics</h4>
+                    <p>Terminal tips are extracted — a quadruped needs all four leg tips found on the mesh, plus tail and head candidates.</p>
+                </div>
+                <div class="rig-animal-stage">
+                    <div class="stage-no">Stage 2.2</div>
+                    <h4>Body semantics</h4>
+                    <p>The forward axis is chosen and every limb gets a role (front-left leg, tail, neck…), cross-checked by independent sanity rules.</p>
+                </div>
+                <div class="rig-animal-stage">
+                    <div class="stage-no">Stage 3</div>
+                    <h4>Rig &amp; bind</h4>
+                    <p>An Auto-Rig Pro quadruped control rig is generated on the semantic markers and the mesh is bound with automatic weights.</p>
+                </div>
+                <div class="rig-animal-stage">
+                    <div class="stage-no">Stage 4</div>
+                    <h4>Clips &amp; variants</h4>
+                    <p>Animation clips are retargeted onto the new skeleton and the task publishes its variant files: .blend, .fbx, skeleton.json and a viewer animations GLB.</p>
+                </div>
+            </div>
+
+            <h2 style="font-size:1.35rem; margin-top:1rem;">The Canonical Animation Taxonomy</h2>
+            <p class="section-sub">
+                All animal animation work targets one canonical 30-clip set — enough to build
+                a complete animation controller for an RPG-style creature without custom work.
+                Clips snap together through four shared junction poses
+                (<em>default, locomotion contact, airborne, death end</em>), so any clip can
+                transition into any compatible neighbour.
+            </p>
+            <div class="rig-clips-wrap">
+                <table class="rig-clips">
+                    <thead>
+                        <tr><th>Category</th><th>Clips</th><th>Frames&nbsp;@30fps</th><th>Loop</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="cat">Idle ×5</td>
+                            <td>neutral, alert, relaxed, look around, fidget</td>
+                            <td>97</td>
+                            <td>yes</td>
+                        </tr>
+                        <tr>
+                            <td class="cat">Locomotion ×9</td>
+                            <td>walk, walk backward, trot, run (gallop), sprint, turn left 90°, turn right 90°, turn 180°, stop/brake</td>
+                            <td>49 / 33</td>
+                            <td>gaits loop</td>
+                        </tr>
+                        <tr>
+                            <td class="cat">Air ×5</td>
+                            <td>jump start, air loop, jump land, full jump, fall</td>
+                            <td>33–49</td>
+                            <td>air loop only</td>
+                        </tr>
+                        <tr>
+                            <td class="cat">Combat ×8</td>
+                            <td>attack primary / secondary / heavy, hit front / left / right, death, get up</td>
+                            <td>33–65</td>
+                            <td>no</td>
+                        </tr>
+                        <tr>
+                            <td class="cat">Behavior ×3</td>
+                            <td>eat, sleep/rest, vocalize (roar / bark / neigh)</td>
+                            <td>97 / 33</td>
+                            <td>eat &amp; sleep loop</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="rig-note">
+                Every species ships in two orientations (front / back) — 12 species × 2
+                orientations = 24 rig variants per task, with the detected species as the
+                primary. Animation libraries are versioned: each artifact carries a
+                sha256-verified manifest, and a task is permanently pinned to the library
+                revision that was active when it was created — a later library update never
+                silently changes an existing rig.
+            </p>
         </div>
     </section>
 
