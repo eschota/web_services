@@ -1,0 +1,248 @@
+{
+  "checkpoint": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+    }
+  },
+  "lora": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "checkpoint",
+        0
+      ],
+      "lora_name": "ltx-2-19b-lora-camera-control-static.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "text_encoder": {
+    "class_type": "LTXAVTextEncoderLoader",
+    "inputs": {
+      "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
+      "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors",
+      "device": "default"
+    }
+  },
+  "positive_prompt": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "text_encoder",
+        0
+      ],
+      "text": "$prompt"
+    }
+  },
+  "negative_prompt": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "text_encoder",
+        0
+      ],
+      "text": "camera movement, zoom, scene cut, extra limb, missing limb, deformed anatomy, foot sliding, text, watermark"
+    }
+  },
+  "conditioning": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "positive_prompt",
+        0
+      ],
+      "negative": [
+        "negative_prompt",
+        0
+      ],
+      "frame_rate": 25.0
+    }
+  },
+  "ref_image": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "$image"
+    }
+  },
+  "preprocess": {
+    "class_type": "LTXVPreprocess",
+    "inputs": {
+      "image": [
+        "ref_image",
+        0
+      ],
+      "img_compression": 33
+    }
+  },
+  "empty_video_latent": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": {
+      "width": 768,
+      "height": 448,
+      "length": 49,
+      "batch_size": 1
+    }
+  },
+  "img_to_video": {
+    "class_type": "LTXVImgToVideoInplace",
+    "inputs": {
+      "vae": [
+        "checkpoint",
+        2
+      ],
+      "image": [
+        "preprocess",
+        0
+      ],
+      "latent": [
+        "empty_video_latent",
+        0
+      ],
+      "strength": 1.0,
+      "bypass": false
+    }
+  },
+  "audio_vae": {
+    "class_type": "LTXVAudioVAELoader",
+    "inputs": {
+      "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+    }
+  },
+  "empty_audio_latent": {
+    "class_type": "LTXVEmptyLatentAudio",
+    "inputs": {
+      "frames_number": 49,
+      "frame_rate": 25,
+      "batch_size": 1,
+      "audio_vae": [
+        "audio_vae",
+        0
+      ]
+    }
+  },
+  "concat_av_latent": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "img_to_video",
+        0
+      ],
+      "audio_latent": [
+        "empty_audio_latent",
+        0
+      ]
+    }
+  },
+  "noise": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 42
+    }
+  },
+  "sampler_select": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "guider": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "lora",
+        0
+      ],
+      "positive": [
+        "conditioning",
+        0
+      ],
+      "negative": [
+        "conditioning",
+        1
+      ],
+      "cfg": 1.0
+    }
+  },
+  "sigmas": {
+    "class_type": "ManualSigmas",
+    "inputs": {
+      "sigmas": "1., 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+    }
+  },
+  "sampler": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "noise",
+        0
+      ],
+      "guider": [
+        "guider",
+        0
+      ],
+      "sampler": [
+        "sampler_select",
+        0
+      ],
+      "sigmas": [
+        "sigmas",
+        0
+      ],
+      "latent_image": [
+        "concat_av_latent",
+        0
+      ]
+    }
+  },
+  "separate_av_latent": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "sampler",
+        1
+      ]
+    }
+  },
+  "vae_decode": {
+    "class_type": "LTXVSpatioTemporalTiledVAEDecode",
+    "inputs": {
+      "vae": [
+        "checkpoint",
+        2
+      ],
+      "latents": [
+        "separate_av_latent",
+        0
+      ],
+      "spatial_tiles": 4,
+      "spatial_overlap": 4,
+      "temporal_tile_length": 16,
+      "temporal_overlap": 4,
+      "last_frame_fix": false,
+      "working_device": "auto",
+      "working_dtype": "auto"
+    }
+  },
+  "create_video": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "vae_decode",
+        0
+      ],
+      "fps": 25.0
+    }
+  },
+  "save_video": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "create_video",
+        0
+      ],
+      "filename_prefix": "$output_prefix",
+      "format": "mp4",
+      "codec": "h264"
+    }
+  }
+}
