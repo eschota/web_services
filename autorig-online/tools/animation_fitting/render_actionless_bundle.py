@@ -700,6 +700,13 @@ def render_silhouette_mask(
     scene.view_settings.look = "None"
     scene.view_settings.exposure = 0.0
     scene.view_settings.gamma = 1.0
+    # Binary per-pixel coverage: the mask and the semantic overlay are
+    # thresholded against each other pixel-exactly, so both passes must
+    # rasterize without AA jitter (Eevee Next in Blender 5.x otherwise
+    # produces divergent luminance/alpha edges).
+    if hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples"):
+        scene.eevee.taa_render_samples = 1
+    scene.render.filter_size = 0.0
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "BW"
     scene.render.image_settings.color_depth = "8"
@@ -937,6 +944,12 @@ def render_semantic_ltx_reference(
         "exposure": scene.view_settings.exposure,
         "gamma": scene.view_settings.gamma,
         "ground_hide_render": bool(ground.hide_render),
+        "filter_size": float(render.filter_size),
+        "taa_render_samples": (
+            int(scene.eevee.taa_render_samples)
+            if hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples")
+            else None
+        ),
     }
     overlay_path = output_dir / ".reference_ltx_semantic_overlay.png"
     face_offset = 0
@@ -960,6 +973,11 @@ def render_semantic_ltx_reference(
         if compositor_group_supported:
             scene.compositing_node_group = None
         render.film_transparent = True
+        # Match render_silhouette_mask: single-sample, zero filter width, so
+        # the alpha edge is pixel-identical to the mask's luminance edge.
+        if hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples"):
+            scene.eevee.taa_render_samples = 1
+        render.filter_size = 0.0
         render.image_settings.file_format = "PNG"
         render.image_settings.color_mode = "RGBA"
         render.image_settings.color_depth = "8"
@@ -992,6 +1010,9 @@ def render_semantic_ltx_reference(
         scene.view_settings.look = render_state["look"]
         scene.view_settings.exposure = render_state["exposure"]
         scene.view_settings.gamma = render_state["gamma"]
+        render.filter_size = render_state["filter_size"]
+        if render_state["taa_render_samples"] is not None:
+            scene.eevee.taa_render_samples = render_state["taa_render_samples"]
         for material in semantic_materials.values():
             bpy.data.materials.remove(material)
     if overlay_rgba is None:
