@@ -1122,7 +1122,13 @@ def _load_mask(path: Path) -> np.ndarray:
         ) from exc
     try:
         with Image.open(path) as image:
-            mask = np.asarray(image.convert("L"), dtype=np.uint8) > 0
+            # The actionless bundle mask contract is binary single-sample
+            # coverage thresholded at 0.5 (>= 128 in 8-bit): the producer's
+            # framing QA, camera-Z validity mask, and canary tests all decode
+            # it that way. Decoding at > 0 admits Blender's 8-bit save dither
+            # (background speckle at value 1), which silently inflates the
+            # calibration foreground and breaks coverage QA.
+            mask = np.asarray(image.convert("L"), dtype=np.uint8) >= 128
     except Exception as exc:
         raise ContractError(f"Cannot read mask {path}: {exc}") from exc
     if not np.any(mask):

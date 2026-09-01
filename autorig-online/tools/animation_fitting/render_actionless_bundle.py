@@ -569,6 +569,11 @@ def configure_render(scene: bpy.types.Scene, width: int, height: int, samples: i
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGB"
     scene.render.image_settings.color_depth = "8"
+    # Blender's default dither (1.0) adds +-1 LSB noise to every 8-bit save.
+    # The silhouette mask and semantic overlay are binary/exact-color
+    # contracts, so dither turns background 0 into a speckle of value-1
+    # pixels and foreground 1.0 into a 254/255 mix. Disable it scene-wide.
+    scene.render.dither_intensity = 0.0
     scene.render.film_transparent = False
     scene.render.use_file_extension = True
     scene.render.resolution_percentage = 100
