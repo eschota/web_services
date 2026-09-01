@@ -1,10 +1,16 @@
 import { fitBrowserAnimation } from './animation-fitting-browser-core.js?v=3';
-import { assessHorseWalkGait } from './animation-fitting-semantic-tracker.js?v=1';
+import {
+    assessHorseTrotGait,
+    assessHorseWalkGait,
+} from './animation-fitting-semantic-tracker.js?v=1';
 
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const GROUND_EVIDENCE_SCHEMA = 'autorig-browser-sam2-ground-evidence.v1';
 const CONTACT_SCHEDULE_SCHEMA = 'autorig-browser-hoof-contact-schedule.v1';
 const CONTACT_REFIT_PROVENANCE_SCHEMA = 'autorig-browser-contact-refit-provenance.v1';
+const TROT_DIAGNOSTIC_SCHEMA = 'autorig-browser-horse-trot-contact-diagnostic.v1';
+const TROT_CONTACT_SCHEDULE_SCHEMA = 'autorig-browser-horse-trot-contact-schedule.v1';
+const TROT_CONTACT_REFIT_PROVENANCE_SCHEMA = 'autorig-browser-trot-contact-refit-provenance.v1';
 const TRACKER_BACKEND = 'google-deepmind-tapnextpp-online';
 const SEGMENTER_BACKEND = 'facebookresearch-sam2.1-video';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -15,6 +21,36 @@ const WALK_FOOT_ORDER = Object.freeze([
     'hind_right',
     'fore_right',
 ]);
+
+const TROT_FOOT_ORDER = Object.freeze([
+    'fore_left',
+    'hind_right',
+    'fore_right',
+    'hind_left',
+]);
+
+const TROT_DIAGONAL_PAIRS = Object.freeze([
+    Object.freeze({
+        id: 'left_fore_right_hind',
+        feet: Object.freeze(['fore_left', 'hind_right']),
+    }),
+    Object.freeze({
+        id: 'right_fore_left_hind',
+        feet: Object.freeze(['fore_right', 'hind_left']),
+    }),
+]);
+
+const TROT_PROFILE = Object.freeze({
+    id: 'horse.diagonal_pair_trot.v1',
+    gait: 'diagonal_pair_trot',
+    diagonalPairs: TROT_DIAGONAL_PAIRS,
+    distinctFromWalkProfile: true,
+});
+
+const TROT_CONTACT_REFIT_THRESHOLDS = Object.freeze({
+    contactWeight: 1,
+    maximumFittedContactSlideRatio: 0.002,
+});
 
 const DEFAULTS = Object.freeze({
     loop: true,
@@ -827,6 +863,167 @@ function exactShaPins(value, observations) {
     return normalized;
 }
 
+function canonicalJson(value) {
+    if (Array.isArray(value)) return value.map(canonicalJson);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+    }
+    return value;
+}
+
+function exactJsonEqual(first, second) {
+    return JSON.stringify(canonicalJson(first)) === JSON.stringify(canonicalJson(second));
+}
+
+function characteristicHoofHeightPx(normalized, foot) {
+    const proximal = normalized.tracks.get(`${foot}.proximal`);
+    const hoof = normalized.tracks.get(`${foot}.hoof`);
+    const lengths = Array.from({ length: normalized.frameCount }, (_, frame) => {
+        const first = proximal[frame];
+        const second = hoof[frame];
+        return first.visible && second.visible ? distance([first.x, first.y], [second.x, second.y]) : null;
+    }).filter((value) => Number.isFinite(value) && value > 0);
+    if (!lengths.length) throw new Error(`TROT characteristic hoof height is unavailable for ${foot}`);
+    return median(lengths);
+}
+
+function trotContactsFromQa(qa, normalized) {
+    const uniqueFrameCount = qa.uniqueFrameCount;
+    return TROT_FOOT_ORDER.map((foot) => {
+        const limb = object(qa.limbs?.[foot], `TROT qa.limbs.${foot}`);
+        const uniqueFrames = exactIntegerFrames(
+            limb.contactFrames,
+            `TROT qa.limbs.${foot}.contactFrames`,
+            uniqueFrameCount,
+        );
+        const frames = uniqueFrames.includes(0)
+            ? [...uniqueFrames, uniqueFrameCount]
+            : [...uniqueFrames];
+        return {
+            anchor_id: `${foot}.hoof`,
+            frames,
+            weight: TROT_CONTACT_REFIT_THRESHOLDS.contactWeight,
+            characteristicHeightPx: characteristicHoofHeightPx(normalized, foot),
+        };
+    });
+}
+
+/**
+ * Recompute and validate the immutable diagonal-pair TROT diagnostic.  No
+ * declared status, pair score or contact list is trusted: all are compared to
+ * assessHorseTrotGait and the solver contacts are generated from that result.
+ */
+export function validatePinnedHorseTrotDiagnostic({
+    observations: observationValue,
+    diagnostic: diagnosticValue,
+} = {}) {
+    const normalized = normalizeObservations(observationValue);
+    const diagnostic = object(diagnosticValue, 'diagnostic');
+    if (diagnostic.schema !== TROT_DIAGNOSTIC_SCHEMA || diagnostic.status !== 'PASS') {
+        throw new Error(`pinned TROT diagnostic must be a PASS ${TROT_DIAGNOSTIC_SCHEMA}`);
+    }
+    if (Object.hasOwn(diagnostic, 'schedule') || Object.hasOwn(diagnostic, 'contacts')) {
+        throw new Error('pinned TROT diagnostic must not supply solver contacts');
+    }
+    const recomputedQa = assessHorseTrotGait(observationValue, { loopEndpointDuplicated: true });
+    if (recomputedQa.status !== 'PASS' || recomputedQa.accepted !== true
+        || !Array.isArray(recomputedQa.failures) || recomputedQa.failures.length) {
+        throw new Error('pinned TROT observations fail the code-owned diagonal-pair profile');
+    }
+    if (!exactJsonEqual(recomputedQa.profile, TROT_PROFILE)
+        || !exactJsonEqual(diagnostic.profile, TROT_PROFILE)) {
+        throw new Error('pinned TROT diagnostic changed the code-owned TROT profile');
+    }
+    if (!exactJsonEqual(diagnostic.qa, recomputedQa)) {
+        throw new Error('pinned TROT diagnostic QA does not equal the recomputed observations QA');
+    }
+    const decision = object(diagnostic.decision, 'diagnostic.decision');
+    if (decision.eligibleForContactConstrainedRefit !== true
+        || decision.approvedForAnimationLibrary !== false
+        || decision.humanFixedCameraReviewRequired !== true) {
+        throw new Error('pinned TROT diagnostic decision contract is invalid');
+    }
+    const contacts = trotContactsFromQa(recomputedQa, normalized);
+    return {
+        diagnostic,
+        gaitQa: recomputedQa,
+        schedule: {
+            schema: TROT_CONTACT_SCHEDULE_SCHEMA,
+            status: 'PASS',
+            frameCount: normalized.frameCount,
+            uniqueFrameCount: normalized.frameCount - 1,
+            fps: normalized.fps,
+            loop: true,
+            profile: structuredClone(TROT_PROFILE),
+            contacts: contacts.map(({ characteristicHeightPx, ...contact }) => contact),
+            feet: Object.fromEntries(contacts.map((contact) => [
+                contact.anchor_id.slice(0, -'.hoof'.length),
+                {
+                    contactFrames: [...contact.frames],
+                    characteristicHeightPx: contact.characteristicHeightPx,
+                },
+            ])),
+            qa: structuredClone(recomputedQa),
+            thresholds: { ...TROT_CONTACT_REFIT_THRESHOLDS },
+        },
+    };
+}
+
+/** Apply only contacts derived from the recomputed TROT diagnostic. */
+export function applyPinnedHorseTrotDiagnostic({
+    observations,
+    solverObservations = observations,
+    diagnostic,
+    pins,
+} = {}) {
+    const validated = validatePinnedHorseTrotDiagnostic({ observations, diagnostic });
+    const normalizedPins = exactShaPins(pins, observations);
+    const normalizedSolver = normalizeObservations(solverObservations);
+    exactShaPins(pins, solverObservations);
+    if (normalizedSolver.frameCount !== validated.schedule.frameCount
+        || Math.abs(normalizedSolver.fps - validated.schedule.fps) > 1e-9) {
+        throw new Error('TROT solver observations changed the pinned diagnostic timeline');
+    }
+    const solverContacts = validated.schedule.contacts.map((contact) => ({
+        ...contact,
+        frames: [...contact.frames],
+    }));
+    const solverSchedule = {
+        ...structuredClone(validated.schedule),
+        contacts: solverContacts,
+        feet: Object.fromEntries(TROT_FOOT_ORDER.map((foot) => [foot, {
+            ...structuredClone(validated.schedule.feet[foot]),
+            characteristicHeightPx: characteristicHoofHeightPx(normalizedSolver, foot),
+        }])),
+    };
+    const hoofIds = new Set(TROT_FOOT_ORDER.map((foot) => `${foot}.hoof`));
+    const result = structuredClone(solverObservations);
+    result.contacts = [
+        ...(Array.isArray(result.contacts) ? result.contacts : [])
+            .filter((contact) => !hoofIds.has(contact?.anchor_id)),
+        ...solverContacts,
+    ];
+    result.provenance = {
+        ...(result.provenance || {}),
+        browser_trot_hoof_contacts: {
+            schema: TROT_CONTACT_REFIT_PROVENANCE_SCHEMA,
+            source: 'immutable_pass_trot_diagnostic_recomputed',
+            profile: structuredClone(TROT_PROFILE),
+            browserOnly: true,
+            blenderUsed: false,
+            mixerUsed: false,
+            humanReviewRequired: true,
+            ...normalizedPins,
+        },
+    };
+    return {
+        observations: result,
+        schedule: solverSchedule,
+        gaitQa: validated.gaitQa,
+        pins: normalizedPins,
+    };
+}
+
 /**
  * Validate an immutable PASS schedule before it is allowed to become solver
  * input.  The status string is not trusted: the four semantic contacts,
@@ -1193,12 +1390,132 @@ export function fitBrowserAnimationWithPinnedHoofContacts({
     };
 }
 
+function fittedTrotObservations(fitted, schedule) {
+    if (!fitted || typeof fitted !== 'object' || !fitted.qa) {
+        throw new Error('fitted browser animation QA is required for TROT');
+    }
+    if (fitted.frameCount !== schedule.frameCount || fitted.fps !== schedule.fps || fitted.loop !== true) {
+        throw new Error('fitted TROT timeline does not match its contact schedule');
+    }
+    if (!Array.isArray(fitted.frames) || fitted.frames.length !== fitted.frameCount) {
+        throw new Error('fitted TROT debug projections must cover every frame');
+    }
+    return {
+        schema: OBSERVATION_SCHEMA,
+        frame_count: fitted.frameCount,
+        width: 1,
+        height: 1,
+        fps: fitted.fps,
+        tracks: TROT_FOOT_ORDER.map((foot) => ({
+            anchor_id: `${foot}.hoof`,
+            points: fitted.frames.map((frame, frameIndex) => {
+                const points = frame?.limbs?.[foot]?.points;
+                if (!Array.isArray(points) || points.length < 2) {
+                    throw new Error(`fitted TROT frame ${frameIndex} is missing ${foot} projections`);
+                }
+                const point = points.at(-1);
+                if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) {
+                    throw new Error(`fitted TROT frame ${frameIndex} has invalid ${foot} hoof projection`);
+                }
+                return {
+                    frame: frameIndex,
+                    x: point[0],
+                    y: point[1],
+                    visible: true,
+                    confidence: 1,
+                };
+            }),
+        })),
+    };
+}
+
+/** Verify projected fitted hoof motion, diagonal pairing, and normalized slide. */
+export function gateFittedTrot({ fitted, schedule } = {}) {
+    if (!schedule || schedule.schema !== TROT_CONTACT_SCHEDULE_SCHEMA || schedule.status !== 'PASS'
+        || !exactJsonEqual(schedule.profile, TROT_PROFILE)) {
+        throw new Error('a code-owned PASS TROT contact schedule is required');
+    }
+    const projectedObservations = fittedTrotObservations(fitted, schedule);
+    const gaitQa = assessHorseTrotGait(projectedObservations, { loopEndpointDuplicated: true });
+    const maximumSlidePx = finite(fitted.qa.maximumContactSlidePx, 'fitted.qa.maximumContactSlidePx');
+    const characteristicHeightPx = median(TROT_FOOT_ORDER.map((foot) => {
+        const value = finite(
+            schedule.feet?.[foot]?.characteristicHeightPx,
+            `schedule.feet.${foot}.characteristicHeightPx`,
+        );
+        if (value <= 0) throw new Error(`schedule.feet.${foot}.characteristicHeightPx must be positive`);
+        return value;
+    }));
+    const maximumContactSlideRatio = maximumSlidePx / characteristicHeightPx;
+    const thresholdRatio = TROT_CONTACT_REFIT_THRESHOLDS.maximumFittedContactSlideRatio;
+    const failures = [
+        ...(gaitQa.accepted === true ? [] : ['fitted_projected_diagonal_trot']),
+        ...(maximumContactSlideRatio <= thresholdRatio ? [] : ['fitted_trot_contact_slide']),
+    ];
+    return {
+        status: failures.length ? 'FAIL' : 'PASS',
+        failures,
+        gaitQa,
+        maximumContactSlidePx: maximumSlidePx,
+        characteristicHeightPx,
+        maximumContactSlideRatio,
+        thresholdRatio,
+    };
+}
+
+/** Dedicated pure-browser diagonal TROT contact refit. */
+export function fitBrowserAnimationWithPinnedTrotContacts({
+    skeleton,
+    observations,
+    diagnosticObservations = observations,
+    diagnostic,
+    pins,
+    fitOptions = {},
+} = {}) {
+    if ((fitOptions.loop ?? true) !== true) {
+        throw new Error('pinned Horse TROT contact refit requires fitOptions.loop=true');
+    }
+    const applied = applyPinnedHorseTrotDiagnostic({
+        observations: diagnosticObservations,
+        solverObservations: observations,
+        diagnostic,
+        pins,
+    });
+    const fitted = fitBrowserAnimation({
+        skeleton,
+        observations: applied.observations,
+        options: { ...fitOptions, loop: true },
+    });
+    const fittedTrotQa = gateFittedTrot({ fitted, schedule: applied.schedule });
+    if (fittedTrotQa.status !== 'PASS') {
+        const error = new Error(`pinned Horse TROT contact refit rejected: ${fittedTrotQa.failures.join(', ')}`);
+        error.schedule = applied.schedule;
+        error.fitted = fitted;
+        error.fittedTrotQa = fittedTrotQa;
+        throw error;
+    }
+    return {
+        fitted,
+        schedule: applied.schedule,
+        sourceGaitQa: applied.gaitQa,
+        fittedTrotQa,
+        observations: applied.observations,
+        pins: applied.pins,
+        runtime: { browserOnly: true, blenderUsed: false, mixerUsed: false },
+    };
+}
+
 export const HOOF_CONTACT_INFERENCE_CONTRACT = Object.freeze({
     observations: OBSERVATION_SCHEMA,
     groundEvidence: GROUND_EVIDENCE_SCHEMA,
     schedule: CONTACT_SCHEDULE_SCHEMA,
     contactRefitProvenance: CONTACT_REFIT_PROVENANCE_SCHEMA,
     contactRefitThresholds: CONTACT_REFIT_THRESHOLDS,
+    trotDiagnostic: TROT_DIAGNOSTIC_SCHEMA,
+    trotSchedule: TROT_CONTACT_SCHEDULE_SCHEMA,
+    trotContactRefitProvenance: TROT_CONTACT_REFIT_PROVENANCE_SCHEMA,
+    trotProfile: TROT_PROFILE,
+    trotContactRefitThresholds: TROT_CONTACT_REFIT_THRESHOLDS,
     trackerBackend: TRACKER_BACKEND,
     segmenterBackend: SEGMENTER_BACKEND,
     footOrder: WALK_FOOT_ORDER,

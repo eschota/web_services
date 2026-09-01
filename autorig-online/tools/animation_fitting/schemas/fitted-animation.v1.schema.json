@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/animation-fitting/fitted-animation.v1.schema.json",
+  "title": "AutoRig fitted animation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "rig_bundle", "observations", "frame_count", "fps", "duration_seconds",
+    "loop", "transform_contract", "active_bones", "degrees_of_freedom", "config", "optimizer", "qa", "frames"
+  ],
+  "properties": {
+    "schema": {"const": "autorig-fitted-animation.v1"},
+    "rig_bundle": {"$ref": "#/$defs/source"},
+    "observations": {
+      "allOf": [{"$ref": "#/$defs/source"}],
+      "type": "object",
+      "properties": {"provenance": {"type": "object"}}
+    },
+    "frame_count": {"type": "integer", "minimum": 2},
+    "fps": {"type": "number", "exclusiveMinimum": 0},
+    "duration_seconds": {"type": "number", "minimum": 0},
+    "loop": {"type": "boolean"},
+    "transform_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "source_armature_name", "source_armature_world_matrix",
+        "root_local_matrix_space", "child_local_matrix_space", "rotation_channel",
+        "scale_animation", "translation_policy"
+      ],
+      "properties": {
+        "schema": {"const": "autorig-fitted-transform-contract.v1"},
+        "source_armature_name": {"type": "string", "minLength": 1},
+        "source_armature_world_matrix": {
+          "type": "array", "minItems": 16, "maxItems": 16, "items": {"type": "number"}
+        },
+        "root_local_matrix_space": {"const": "WORLD"},
+        "child_local_matrix_space": {"const": "PARENT_BONE"},
+        "rotation_channel": {"const": "QUATERNION"},
+        "scale_animation": {"const": false},
+        "translation_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "bones"],
+          "properties": {
+            "mode": {"enum": ["root_only", "explicit_bones"]},
+            "bones": {
+              "type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "active_bones": {"type": "array", "items": {"type": "string"}},
+    "degrees_of_freedom": {"type": "array", "items": {"type": "string"}},
+    "config": {"type": "object"},
+    "optimizer": {"type": "object"},
+    "qa": {"type": "object"},
+    "frames": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["frame", "time_seconds", "root_translation", "root_rotation_rotvec", "bones"],
+        "properties": {
+          "frame": {"type": "integer", "minimum": 0},
+          "time_seconds": {"type": "number", "minimum": 0},
+          "root_translation": {"$ref": "#/$defs/vector3"},
+          "root_rotation_rotvec": {"$ref": "#/$defs/vector3"},
+          "bones": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["parent", "local_matrix", "local_translation", "local_rotation_xyzw"],
+              "properties": {
+                "parent": {"type": ["string", "null"]},
+                "local_matrix": {
+                  "type": "array", "minItems": 16, "maxItems": 16, "items": {"type": "number"}
+                },
+                "local_translation": {"$ref": "#/$defs/vector3"},
+                "local_rotation_xyzw": {
+                  "type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "vector3": {
+      "type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}
+    }
+  }
+}

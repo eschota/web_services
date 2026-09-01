@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/animation-fitting/tracker-anchor-map.v1.schema.json",
+  "title": "Explicit tracker point to rig surface anchor mapping",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "tracks"],
+  "properties": {
+    "schema": {"const": "autorig-tracker-anchor-map.v1"},
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["track_id", "anchor_id"],
+        "properties": {
+          "track_id": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "integer"}]},
+          "anchor_id": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/anatomical-rig-profile.v1.schema.json",
+  "title": "AutoRig Anatomical Rig Profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile_id",
+    "revision",
+    "species",
+    "source_rig_type",
+    "minimum_blender_version",
+    "canonical_source",
+    "target",
+    "linearization",
+    "approval_contract"
+  ],
+  "properties": {
+    "schema": {
+      "const": "autorig-anatomical-rig-profile.v1"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "species": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_rig_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "minimum_blender_version": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "canonical_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filename",
+        "sha256",
+        "armature_name",
+        "mesh_names",
+        "vertex_count",
+        "deform_bone_count",
+        "maximum_vertex_influences"
+      ],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "armature_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mesh_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "vertex_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "deform_bone_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maximum_vertex_influences": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "master_root",
+        "deformation_model",
+        "translation_policy",
+        "scale_policy",
+        "parent_map"
+      ],
+      "properties": {
+        "master_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deformation_model": {
+          "const": "normalized_linear_blend_skinning"
+        },
+        "translation_policy": {
+          "const": "master_root_only"
+        },
+        "scale_policy": {
+          "const": "identity"
+        },
+        "parent_map": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "linearization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_deformation_model",
+        "target_deformation_model",
+        "bbone_bones",
+        "horse_gallop_reference"
+      ],
+      "properties": {
+        "source_deformation_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_deformation_model": {
+          "const": "normalized_linear_blend_skinning"
+        },
+        "bbone_bones": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "horse_gallop_reference": {
+          "type": "object"
+        }
+      }
+    },
+    "approval_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "joint_limit_profile_required",
+        "joint_limit_profile",
+        "fitting_ready",
+        "blocking_reasons"
+      ],
+      "properties": {
+        "joint_limit_profile_required": {
+          "const": true
+        },
+        "joint_limit_profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fitting_ready": {
+          "type": "boolean"
+        },
+        "blocking_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
