@@ -15,7 +15,7 @@ import os
 import shutil
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -88,6 +88,124 @@ GLB_CACHE_PRUNABLE_SUFFIXES = (".glb", ".fbx")
 GLB_CACHE_ORPHAN_SUFFIXES = (".tmp",)
 # Never touch something that may still be streaming to disk.
 GLB_CACHE_HARD_MIN_AGE_SECONDS = 600.0
+
+# Rolling eviction of the durable artifact cache: newest tasks stay fully
+# cached, the oldest cached tasks are dropped first (operator decision,
+# 2026-09-01). A dropped entry is permanent once the farm's own LRU cleanup
+# removes the worker copy.
+ARTIFACT_CACHE_EVICT_MIN_AGE_HOURS = float(
+    os.getenv("ARTIFACT_CACHE_EVICT_MIN_AGE_HOURS", "72")
+)
+ARTIFACT_CACHE_EVICT_HEADROOM_GB = float(
+    os.getenv("ARTIFACT_CACHE_EVICT_HEADROOM_GB", "25")
+)
+ARTIFACT_CACHE_EVICT_MAX_DIRS_PER_RUN = int(
+    os.getenv("ARTIFACT_CACHE_EVICT_MAX_DIRS_PER_RUN", "200")
+)
+
+
+def _cache_age_key(value) -> str:
+    """Normalize DB timestamps (datetime or SQLite text) to a sortable string."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)[:19]
+
+
+async def _evict_artifact_cache_until(
+    db,
+    *,
+    cache_root: Path,
+    target_free_gb: float,
+    soft_cap_gb: float,
+    min_age_hours: float,
+    max_dirs: int,
+) -> dict:
+    """
+    Age-based rolling eviction of whole artifact-cache task directories.
+
+    Evicts the oldest cached tasks (by task creation time; orphan directories
+    without a task row go first) while the cache is over its soft cap or the
+    filesystem is below the write-reserve target, so caching of NEW tasks can
+    always resume. Entries younger than min_age_hours are never touched.
+    """
+    summary = {"evicted": 0, "freed_gb": 0.0, "status_updates": 0, "stop_reason": ""}
+    if not cache_root.is_dir():
+        summary["stop_reason"] = "no cache root"
+        return summary
+
+    from database import Task
+    from sqlalchemy import select
+
+    dir_ids = [p.name for p in cache_root.iterdir() if p.is_dir()]
+    if not dir_ids:
+        summary["stop_reason"] = "empty cache"
+        return summary
+
+    ages: dict[str, str] = {}
+    for chunk_start in range(0, len(dir_ids), 500):
+        chunk = dir_ids[chunk_start:chunk_start + 500]
+        result = await db.execute(
+            select(Task.id, Task.created_at).where(Task.id.in_(chunk))
+        )
+        for row in result.all():
+            ages[str(row[0])] = _cache_age_key(row[1])
+
+    cutoff_key = _cache_age_key(
+        datetime.utcnow() - timedelta(hours=max(0.0, float(min_age_hours)))
+    )
+    candidates = sorted(dir_ids, key=lambda i: ages.get(i, ""))
+
+    cap_bytes = int(float(soft_cap_gb) * 1024**3)
+    cache_bytes = _dir_size_bytes(cache_root)
+
+    def _pressured() -> bool:
+        return cache_bytes > cap_bytes or _free_gb() < float(target_free_gb)
+
+    for task_id in candidates:
+        if summary["evicted"] >= int(max_dirs):
+            summary["stop_reason"] = "per-run limit"
+            break
+        if not _pressured():
+            summary["stop_reason"] = "pressure relieved"
+            break
+        age_key = ages.get(task_id, "")
+        if age_key and age_key > cutoff_key:
+            summary["stop_reason"] = (
+                f"remaining entries younger than {float(min_age_hours):.0f}h"
+            )
+            break
+        target = cache_root / task_id
+        try:
+            before = _dir_size_bytes(target)
+            shutil.rmtree(target)
+        except OSError as exc:
+            print(f"[ArtifactCacheEvict] failed to remove {target}: {exc}")
+            continue
+        cache_bytes -= before
+        summary["evicted"] += 1
+        summary["freed_gb"] += before / (1024**3)
+        if task_id in ages:
+            row = (
+                await db.execute(select(Task).where(Task.id == task_id))
+            ).scalar_one_or_none()
+            if row is not None:
+                row.artifact_cache_status = "expired"
+                row.artifact_cache_error = None
+                row.artifact_cache_file_count = 0
+                row.artifact_cache_bytes = 0
+                summary["status_updates"] += 1
+    if summary["evicted"]:
+        await db.commit()
+    if not summary["stop_reason"]:
+        summary["stop_reason"] = "no eligible candidates"
+    print(
+        f"[ArtifactCacheEvict] evicted={summary['evicted']} "
+        f"freed={summary['freed_gb']:.1f}GB "
+        f"status_updates={summary['status_updates']} stop={summary['stop_reason']}"
+    )
+    return summary
 # Upstream probing is network-bound; keep it bounded per run.
 GLB_CACHE_MAX_PROBES = int(os.getenv("GLB_CACHE_MAX_UPSTREAM_PROBES", "60"))
 # Verdicts are remembered so the probe budget is spent on entries nobody has
@@ -541,6 +659,7 @@ async def _purge_uploaded_video_cache_until(
 async def run() -> None:
     from config import (
         AUTOMATIC_TASK_DB_DELETION,
+        ARTIFACT_CACHE_RESERVE_GB,
         ARTIFACT_CACHE_ROOT,
         ARTIFACT_CACHE_SOFT_CAP_GB,
         DISK_ALERT_REMINDER_HOURS,
@@ -579,6 +698,19 @@ async def run() -> None:
             glb_cache_min_age_hours=float(GLB_CACHE_MIN_AGE_HOURS),
         )
         after_prepass = _disk_snapshot()
+        # Rolling artifact-cache eviction targets enough free space that the
+        # cache WRITER (reserve + headroom) always resumes for new tasks.
+        artifact_evict = await _evict_artifact_cache_until(
+            db,
+            cache_root=Path(ARTIFACT_CACHE_ROOT),
+            target_free_gb=max(
+                float(target_free_gb),
+                float(ARTIFACT_CACHE_RESERVE_GB) + ARTIFACT_CACHE_EVICT_HEADROOM_GB,
+            ),
+            soft_cap_gb=float(ARTIFACT_CACHE_SOFT_CAP_GB),
+            min_age_hours=ARTIFACT_CACHE_EVICT_MIN_AGE_HOURS,
+            max_dirs=ARTIFACT_CACHE_EVICT_MAX_DIRS_PER_RUN,
+        )
         task_cache_summary = await _enforce_periodic_task_cache_max_size(
             db,
             max_gb=float(PERIODIC_TASK_CACHE_MAX_GB),
@@ -667,6 +799,17 @@ async def run() -> None:
             4,
         ),
     }
+    summary.update(
+        {
+            "artifact_cache_evicted_dirs": int(artifact_evict.get("evicted", 0) or 0),
+            "artifact_cache_evict_freed_gb": round(
+                float(artifact_evict.get("freed_gb", 0.0) or 0.0), 4
+            ),
+            "artifact_cache_evict_stop_reason": str(
+                artifact_evict.get("stop_reason", "") or ""
+            ),
+        }
+    )
     summary.update(
         {
             "prepass_zip_deleted": prepass["prepass_zip_deleted"],
