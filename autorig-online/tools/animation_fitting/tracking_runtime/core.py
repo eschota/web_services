@@ -1214,7 +1214,7 @@ def select_anchor_seeds(
             rig, canonical_rgb, browser_reference
         )
 
-    def _mask_hit_near(mask: np.ndarray, x: int, y: int, radius: int = 1) -> bool:
+    def _mask_hit_near(mask: np.ndarray, x: int, y: int, radius: int = 2) -> bool:
         """Anchor pixels sit on the silhouette boundary by construction.
 
         The canonical mask is rasterized with binary single-sample coverage
