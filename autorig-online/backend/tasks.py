@@ -32,7 +32,7 @@ from animal_submission_policy import animal_detection_accepted
 from input_normalization import (
     InputNormalizationDeferred,
     InputNormalizationError,
-    normalize_local_meshopt,
+    normalize_task_input,
 )
 from worker_artifact_urls import (
     canonical_worker_artifact_url,
@@ -718,7 +718,7 @@ async def start_task_on_worker(
     if not replaying_unknown_submission:
         try:
             normalized = await asyncio.to_thread(
-                normalize_local_meshopt, task.input_url
+                normalize_task_input, task.input_url
             )
         except InputNormalizationDeferred as exc:
             task.status = "created"
@@ -998,6 +998,9 @@ async def start_task_on_worker(
     await persist_validated_worker_viewer_artifacts(task, result)
     task.total_count = len(result.output_urls)
     task.status = "processing"
+    # Queue/processing split in metrics and Telegram depends on this stamp;
+    # it was only ever cleared on reset paths and never set here.
+    task.processing_started_at = datetime.utcnow()
     # Start stale timer from (re)dispatch moment, not from original task creation time.
     task.last_progress_at = datetime.utcnow()
     task.updated_at = datetime.utcnow()

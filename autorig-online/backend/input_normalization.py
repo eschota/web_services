@@ -9,6 +9,7 @@ import struct
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -382,3 +383,132 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
         finally:
             if temp_path.exists():
                 temp_path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Remote GLB mirroring: external .glb links bypass meshopt/KTX2 normalization
+# because it only understands local /u/ uploads. Mirror such sources into a
+# deterministic local upload (uuid5 of the source URL) so the exact same
+# normalization path applies, and the worker downloads from this host instead
+# of a possibly-flaky external origin. Fail-open: any fetch problem keeps the
+# original URL and the pre-mirror behavior.
+# ---------------------------------------------------------------------------
+
+MIRROR_TIMEOUT_SECONDS = float(os.getenv("INPUT_MIRROR_TIMEOUT_SECONDS", "300"))
+_GLB_MAGIC = b"glTF"
+
+
+def _mirror_remote_glb(input_url: str) -> NormalizedInput | None:
+    value = str(input_url or "").strip()
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    app = urlparse(APP_URL)
+    if parsed.netloc.lower() == app.netloc.lower():
+        return None
+    filename = Path(unquote(parsed.path)).name
+    if not filename.lower().endswith(".glb"):
+        return None
+    if any(sep in filename for sep in ("/", "\\")) or filename.startswith("."):
+        filename = "model.glb"
+
+    token = str(uuid.uuid5(uuid.NAMESPACE_URL, value))
+    upload_root = Path(UPLOAD_DIR).resolve()
+    directory = upload_root / token
+    target = directory / filename
+    manifest = directory / f"{filename}.mirror.json"
+    local_url = f"{APP_URL.rstrip('/')}/u/{token}/{quote(filename)}"
+
+    if target.is_file() and manifest.is_file():
+        try:
+            record = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = {}
+        if (
+            record.get("schema") == "autorig.input_mirror.v1"
+            and int(record.get("bytes") or 0) == target.stat().st_size
+        ):
+            return NormalizedInput(local_url, True, record)
+
+    free = shutil.disk_usage(upload_root).free
+    reserve = int(float(NEW_TASK_MIN_FREE_GB) * 1024**3)
+    if free - MAX_INPUT_BYTES < reserve:
+        raise InputNormalizationDeferred(
+            "DISK_RESERVE",
+            f"remote mirror would cross the {NEW_TASK_MIN_FREE_GB:.0f} GB reserve",
+        )
+
+    try:
+        import httpx
+
+        directory.mkdir(parents=True, exist_ok=True)
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=".tmp", dir=directory
+        )
+        temp_path = Path(temp_name)
+        received = 0
+        digest = hashlib.sha256()
+        try:
+            with os.fdopen(descriptor, "wb") as stream, httpx.Client(
+                follow_redirects=True, timeout=httpx.Timeout(30.0, read=60.0)
+            ) as client:
+                started = time.monotonic()
+                with client.stream("GET", value) as response:
+                    if response.status_code != 200:
+                        raise OSError(f"source returned HTTP {response.status_code}")
+                    head = b""
+                    for chunk in response.iter_bytes(chunk_size=1024 * 1024):
+                        if len(head) < 4:
+                            head += chunk[: 4 - len(head)]
+                            if len(head) >= 4 and head[:4] != _GLB_MAGIC:
+                                raise OSError("source is not a binary glTF file")
+                        received += len(chunk)
+                        if received > MAX_INPUT_BYTES:
+                            raise OSError("source exceeds mirror size limit")
+                        if time.monotonic() - started > MIRROR_TIMEOUT_SECONDS:
+                            raise OSError("mirror download timed out")
+                        digest.update(chunk)
+                        stream.write(chunk)
+            if received < 12:
+                raise OSError("source returned a truncated GLB")
+            os.replace(temp_path, target)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+    except InputNormalizationDeferred:
+        raise
+    except Exception as exc:
+        print(f"[InputMirror] fail-open for {value}: {exc}")
+        return None
+
+    record = {
+        "schema": "autorig.input_mirror.v1",
+        "type": "remote_mirror",
+        "original_url": value,
+        "derived_url": local_url,
+        "sha256": digest.hexdigest(),
+        "bytes": received,
+    }
+    try:
+        _atomic_json(manifest, record)
+    except OSError as exc:
+        print(f"[InputMirror] manifest write failed for {value}: {exc}")
+    return NormalizedInput(local_url, True, record)
+
+
+def normalize_task_input(input_url: str) -> NormalizedInput:
+    """Mirror remote GLB links locally, then apply meshopt/KTX2 normalization.
+
+    The returned record is the innermost transformation; a mirror-only result
+    carries the mirror record so provenance survives in viewer_settings.
+    """
+    mirrored = _mirror_remote_glb(input_url)
+    effective = mirrored.effective_url if mirrored is not None else input_url
+    normalized = normalize_local_meshopt(effective)
+    if normalized.changed:
+        if mirrored is not None:
+            normalized.record.setdefault("mirrored_from", input_url)
+        return normalized
+    if mirrored is not None:
+        return mirrored
+    return normalized
