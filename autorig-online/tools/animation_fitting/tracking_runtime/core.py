@@ -1665,8 +1665,15 @@ def _validate_results(
         np.sum(point_inside_mask & visible) / visible_denominator
     )
     seed_rounded = np.rint(seeds.points_xy).astype(np.int64)
+    # Boundary seeds sit on the silhouette edge by construction; the canonical
+    # mask is rasterized with binary single-sample coverage (no AA), so apply
+    # the same dilation tolerance the per-frame track membership check uses.
+    seed_canonical_mask = binary_dilation(
+        np.asarray(seeds.canonical_mask, dtype=bool),
+        iterations=max(2, int(round(diagonal * 0.005))),
+    )
     seed_inside = [
-        0 <= x < width and 0 <= y < height and bool(seeds.canonical_mask[y, x])
+        0 <= x < width and 0 <= y < height and bool(seed_canonical_mask[y, x])
         for x, y in seed_rounded
     ]
     seed_inside_ratio = float(np.mean(seed_inside))
