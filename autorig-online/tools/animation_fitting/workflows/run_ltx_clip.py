@@ -94,7 +94,34 @@ FREE_CYCLE_TAIL = (
 )
 
 
-def compose_prompt(action_id, species="horse", free_cycle=False):
+# Identity anchor (owner's call): the reference is a MANNEQUIN, not an animal.
+# Without this LTX "repairs" the low-poly proxy into a photoreal horse within
+# ~1.5 s and the color-coded legs dissolve.
+IDENTITY_PREFIX_CLAY = (
+    "The subject is a matte grey clay 3D model of a {{species}}: a smooth "
+    "untextured grey plastic figure with solid brightly colored legs (each "
+    "leg a single flat color). It is a 3D dummy in a plain grey studio, not "
+    "a living animal. Keep it exactly this untextured grey clay model in "
+    "every frame - same shape, same flat grey plastic, same solid leg colors "
+    "- while it moves."
+)
+IDENTITY_PREFIX = (
+    "The subject is a stylized low-poly faceted 3D mannequin of a {{species}}: "
+    "a flat-shaded matte grey plastic figure with hard polygonal edges and "
+    "solid brightly colored legs (each leg a single flat color). It is a 3D "
+    "dummy in a plain grey studio, not a living animal. Keep it exactly this "
+    "untextured faceted mannequin in every frame — same polygons, same flat "
+    "grey plastic, same solid leg colors — while it moves."
+)
+IDENTITY_NEGATIVE = (
+    ", realistic horse, photorealistic animal, fur, hair, skin texture, "
+    "muscles, veins, smooth organic surface, subsurface scattering, mane "
+    "strands, tail hair, added detail, changing leg colors, color bleeding "
+    "between legs"
+)
+
+
+def compose_prompt(action_id, species="horse", free_cycle=False, identity="lowpoly"):
     d = json.load(open(SPECS, encoding="utf-8"))
     action = next(a for a in d["actions_array"] if a["action_id_string"] == action_id)
     motion = ACTION_OVERRIDES.get(action_id) or action["motion_prompt_string"]
@@ -103,10 +130,12 @@ def compose_prompt(action_id, species="horse", free_cycle=False):
         tail = FREE_CYCLE_TAIL
     else:
         tail = d["loop_instruction_string"] if mode == "loop" else d["one_shot_instruction_string"]
+    identity_prefix = IDENTITY_PREFIX_CLAY if identity == "clay" else IDENTITY_PREFIX
     prompt = " ".join([
-        d["common_positive_prefix_string"], motion, tail,
+        identity_prefix, d["common_positive_prefix_string"], motion, tail,
     ]).replace("{{species}}", species)
-    return prompt, d["common_negative_prompt_string"], int(action["frame_count_int"]), mode
+    negative = d["common_negative_prompt_string"] + IDENTITY_NEGATIVE
+    return prompt, negative, int(action["frame_count_int"]), mode
 
 
 def upload_image(path):
@@ -134,6 +163,8 @@ def main():
     ap.add_argument("--tiles", type=int, default=2)
     ap.add_argument("--frames", type=int, default=0, help="override taxonomy frame count")
     ap.add_argument("--timeout-min", type=int, default=120)
+    ap.add_argument("--identity", choices=("lowpoly", "clay"), default="lowpoly",
+                    help="identity wording: lowpoly proxy mannequin or smooth clay model")
     ap.add_argument("--free-cycle", action="store_true",
                     help="gait mode: continuous locomotion, no end-frame guide, "
                          "loop is extracted later from the steady state")
@@ -143,7 +174,7 @@ def main():
     # Free-running (no end guide) only on explicit request: the end guide is
     # what keeps the canonical identity stable across the whole clip.
     free_cycle = args.free_cycle
-    prompt, negative, frames, mode = compose_prompt(args.action, free_cycle=free_cycle)
+    prompt, negative, frames, mode = compose_prompt(args.action, free_cycle=free_cycle, identity=args.identity)
     if gen_frames:
         frames = gen_frames
     if args.frames:
