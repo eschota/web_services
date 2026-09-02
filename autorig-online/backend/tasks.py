@@ -1124,7 +1124,20 @@ def _restore_worker_api_from_progress_page(task: Task) -> bool:
     return True
 
 
-def _worker_outputs_look_complete(urls: List[str]) -> bool:
+def _worker_outputs_look_complete(
+    urls: List[str],
+    *,
+    require_preview: bool = True,
+) -> bool:
+    """Return whether the concrete worker artifact set is usable.
+
+    Completion-contract v2 makes the worker's finalized terminal state the
+    source of truth.  Standard converters may intentionally finish without a
+    Unity preview video/poster, so those optional preview files must not keep a
+    finalized task bound to an otherwise idle worker forever.  Legacy workers
+    still need the historical preview evidence because they do not provide the
+    stronger terminal contract.
+    """
     names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
     has_video = any(
         n.endswith("_rig_preview.mp4")
@@ -1139,7 +1152,11 @@ def _worker_outputs_look_complete(urls: List[str]) -> bool:
         or n.endswith(".zip")
         for n in names
     )
-    return has_video and has_poster and has_download
+    if not has_download:
+        return False
+    if not require_preview:
+        return True
+    return has_video and has_poster
 
 
 async def _fetch_concrete_worker_artifacts(
@@ -1647,7 +1664,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         if (
             task.status not in ("done", "error")
             and concrete_urls
-            and _worker_outputs_look_complete(concrete_urls)
+            and _worker_outputs_look_complete(
+                concrete_urls,
+                require_preview=not (contract_v2 and worker_finalized),
+            )
             and not completion_probe_unavailable
             and (not contract_v2 or worker_finalized)
         ):

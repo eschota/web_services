@@ -117,6 +117,8 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
             video_url=None,
             viewer_prepared_glb_url=None,
             viewer_animations_glb_url=None,
+            workload_lease_id=None,
+            preemption_state="none",
             last_progress_at=None,
             error_message=None,
             owner_type="agent",
@@ -180,6 +182,42 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
             ready=([task.output_urls[0]], 1),
         )
         self.assertEqual(result.status, "done")
+
+    async def test_finalized_v2_without_optional_preview_reconciles_and_completes(self):
+        task = self.task()
+        concrete = [
+            "https://worker/model_hdrp.unitypackage",
+            "https://worker/model.glb",
+        ]
+        result, _db = await self._run(
+            task,
+            {
+                "completion_contract_version": 2,
+                "status": "Completed",
+                "finalized": True,
+            },
+            ready=([], 0),
+            concrete=(concrete, None, None),
+        )
+        self.assertEqual(result.status, "done")
+        self.assertEqual(result.output_urls, concrete)
+        self.assertEqual(result.ready_count, len(concrete))
+        self.assertFalse(result.video_ready)
+
+    async def test_legacy_concrete_outputs_still_require_preview_evidence(self):
+        task = self.task()
+        concrete = [
+            "https://worker/model_hdrp.unitypackage",
+            "https://worker/model.glb",
+        ]
+        result, _db = await self._run(
+            task,
+            {"status": "Completed"},
+            ready=([], 0),
+            concrete=(concrete, None, None),
+        )
+        self.assertEqual(result.status, "processing")
+        self.assertEqual(result.output_urls, ["https://worker/expected.glb"])
 
     async def test_v1_fallback_can_complete_from_ready_urls(self):
         task = self.task(status="queued")

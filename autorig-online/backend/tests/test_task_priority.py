@@ -261,6 +261,7 @@ class PreemptionRecoveryTests(unittest.TestCase):
         reboot=False,
         recovering=False,
         initial_worker_status="Processing",
+        initial_task_visible=True,
     ):
         import database
 
@@ -324,7 +325,11 @@ class PreemptionRecoveryTests(unittest.TestCase):
                         ),
                         "processing_tasks": (
                             []
-                            if released or initial_worker_status == "Pending"
+                            if (
+                                released
+                                or initial_worker_status == "Pending"
+                                or not initial_task_visible
+                            )
                             else [{"task_id": "worker-1", "status": "Processing"}]
                         ),
                         "pending_tasks": (
@@ -392,6 +397,14 @@ class PreemptionRecoveryTests(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(row.status, "processing")
         self.assertEqual(row.worker_task_id, "worker-1")
+
+    def test_completed_before_first_recall_probe_clears_request_without_quarantine(self):
+        result, row, _ = self._run("Completed", initial_task_visible=False)
+        self.assertFalse(result)
+        self.assertEqual(row.status, "processing")
+        self.assertEqual(row.worker_task_id, "worker-1")
+        self.assertEqual(row.preemption_state, "none")
+        self.assertIsNone(row.preemption_request_id)
 
     def test_worker_reboot_requeues_only_after_boot_change_and_empty_slot_proof(self):
         result, row, _ = self._run("", reboot=True)

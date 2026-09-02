@@ -580,8 +580,46 @@ async def preempt_background_task(task_id: str, *, broker_requested: bool = Fals
                         raise RuntimeError(
                             "persisted preemption has neither its bound task nor release proof"
                         )
-            elif not current_boot_id or not bound_task_visible:
-                raise RuntimeError("worker did not prove the bound task and boot identity")
+            elif not current_boot_id:
+                raise RuntimeError("worker did not prove its boot identity")
+            elif not bound_task_visible:
+                # The worker can naturally finish between the scheduler's
+                # queue snapshot and the first recall probe.  Completed tasks
+                # disappear from the active slot buckets, so absence alone is
+                # not a quarantine-worthy identity failure.  Confirm the exact
+                # immutable worker task before clearing the recall request;
+                # the regular synchronizer will then persist its artifacts.
+                previous_status, _ = await _worker_task_status(
+                    client, worker, worker_task_id, deadline=deadline
+                )
+                if previous_status == "Completed":
+                    async with AsyncSessionLocal() as db:
+                        await db.execute(
+                            update(Task)
+                            .where(
+                                Task.id == task_id,
+                                Task.worker_api == worker_api,
+                                Task.worker_task_id == worker_task_id,
+                                Task.preemption_request_id == request_id,
+                            )
+                            .values(
+                                preemption_state=PREEMPTION_NONE,
+                                preemption_request_id=None,
+                                preemption_worker_boot_id=None,
+                            )
+                        )
+                        await db.commit()
+                    return False
+                if (
+                    previous_status == "Preempted"
+                    and _status_is_slot_empty(initial_payload, worker_task_id)
+                ):
+                    terminal_status = "Preempted"
+                    already_released = True
+                else:
+                    raise RuntimeError(
+                        "worker did not prove the bound task or terminal release"
+                    )
             else:
                 # Persist the immutable process identity before sending the
                 # cancellation request.  A backend crash after the POST can
