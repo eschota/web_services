@@ -142,6 +142,8 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
             tasks, "_mark_task_worker_failed_if_reported", AsyncMock(return_value=False)
         ), patch.object(
             tasks, "check_video_availability", AsyncMock(return_value=(False, None))
+        ), patch(
+            "artifact_cache.enqueue_artifact_cache", AsyncMock()
         ), patch.object(
             tasks, "_schedule_task_error_notification"
         ):
