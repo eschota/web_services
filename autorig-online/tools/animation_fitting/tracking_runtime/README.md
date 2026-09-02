@@ -3,7 +3,10 @@
 This package turns an LTX horse/animal MP4 plus an immutable actionless fitting
 bundle into optimizer-compatible observations. Production inference uses
 commit-pinned official checkouts of Google DeepMind TAPNext++, Meta SAM 2, and
-optional Video Depth Anything Small. Model weights and the isolated Python venv
+optional Video Depth Anything (Large `vitl` by default when its pinned
+checkpoint is present, Small `vits` otherwise; override with
+`AUTORIG_FITTING_VDA_ENCODER`, fail-closed against the runtime lock).
+Model weights and the isolated Python venv
 live outside this repository under `R:\ComfyUI-data\autorig-fitting\runtimes`.
 Each checkpoint is hash/size pinned and linked to the pinned source repository
 and its license file for provenance. That linkage is deliberately recorded as
@@ -16,7 +19,14 @@ collapses, points leave the frame, mask area jumps, or point/mask consistency
 is too low. Both a minimum visible confidence and a median visible-confidence
 threshold are configurable; zero-confidence visible tracks fail by default.
 Relative VDA depth is saved only in `observations.npz`; it is never mislabeled
-as metric camera depth.
+as metric camera depth. With a v2+ bundle `camera_z` artifact the relative
+depth is calibrated to metric camera-Z against the actionless reference;
+when a contact profile supplies priority hoof anchors, the median/p95
+height-error QA is evaluated only inside local disks (2.5% of the frame
+diagonal) around those anchor projections, because the contact solver
+consumes depth exclusively at the hooves. Coverage and Spearman rank QA
+stay global, and the whole-body errors remain reported as informational
+`global_*` metrics in the calibration provenance.
 
 The canonical bundle RGB remains the default first-frame alignment reference.
 Loop candidates generated from the v11 unified browser static scene, the v12
