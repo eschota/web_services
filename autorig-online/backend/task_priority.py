@@ -147,39 +147,53 @@ def background_dispatch_budget(free_workers: Sequence[Any], interactive_waiting:
     return max(0, len(free_workers) - max(0, BACKGROUND_DISPATCH_RESERVE))
 
 
-async def dispatch_fifo_candidate(candidates: List[Any], attempt) -> bool:
-    """Dispatch one task, preserving the head on worker-transient rejection."""
-    while candidates:
-        task = candidates.pop(0)
-        source_attempts_before = int(getattr(task, "source_attempt_count", 0) or 0)
-        try:
-            started_task, dispatch_error = await attempt(task)
-        except Exception as exc:
-            print(f"[Priority] Error dispatching task {task.id}: {exc}")
-            candidates.insert(0, task)
-            return False
-        if started_task.status == "processing":
-            return True
-        source_attempts_after = int(
-            getattr(started_task, "source_attempt_count", 0) or 0
-        )
-        if started_task.status == "error" or source_attempts_after > source_attempts_before:
-            print(
-                f"[Priority] Skipping task {task.id} after task-specific "
-                "dispatch rejection"
-            )
-            continue
-        if dispatch_error:
-            not_before = getattr(started_task, "dispatch_not_before", None)
-            if not_before is None or not_before <= datetime.utcnow():
+async def dispatch_fifo_candidate(candidates: List[Any], attempt, *, eligible=None) -> bool:
+    """Dispatch one task, preserving the head on worker-transient rejection.
+
+    ``eligible`` filters by worker capability (a rig-only box cannot run a
+    ``convert`` task).  A task the chosen worker cannot serve is put back in its
+    original queue position instead of being consumed, so the FIFO head keeps
+    waiting for a compatible worker while the next eligible task is dispatched.
+    """
+    skipped: List[Any] = []
+    try:
+        while candidates:
+            task = candidates.pop(0)
+            if eligible is not None and not eligible(task):
+                skipped.append(task)
+                continue
+            source_attempts_before = int(getattr(task, "source_attempt_count", 0) or 0)
+            try:
+                started_task, dispatch_error = await attempt(task)
+            except Exception as exc:
+                print(f"[Priority] Error dispatching task {task.id}: {exc}")
                 candidates.insert(0, task)
-            else:
+                return False
+            if started_task.status == "processing":
+                return True
+            source_attempts_after = int(
+                getattr(started_task, "source_attempt_count", 0) or 0
+            )
+            if started_task.status == "error" or source_attempts_after > source_attempts_before:
                 print(
-                    f"[Priority] Deferred FIFO head {task.id} until "
-                    f"{not_before.isoformat()} after transient worker rejection"
+                    f"[Priority] Skipping task {task.id} after task-specific "
+                    "dispatch rejection"
                 )
-            return False
-    return False
+                continue
+            if dispatch_error:
+                not_before = getattr(started_task, "dispatch_not_before", None)
+                if not_before is None or not_before <= datetime.utcnow():
+                    candidates.insert(0, task)
+                else:
+                    print(
+                        f"[Priority] Deferred FIFO head {task.id} until "
+                        f"{not_before.isoformat()} after transient worker rejection"
+                    )
+                return False
+        return False
+    finally:
+        for task in reversed(skipped):
+            candidates.insert(0, task)
 
 
 async def dispatch_released_interactive(
@@ -187,6 +201,8 @@ async def dispatch_released_interactive(
     free_workers: Sequence[Any],
     released_worker_urls: Iterable[str],
     attempt,
+    *,
+    eligible=None,
 ) -> int:
     """Immediately reuse proven-empty preempted slots for interactive FIFO.
 
@@ -194,7 +210,8 @@ async def dispatch_released_interactive(
     ``Preempted`` can push end-to-end admission beyond the 60-second recall
     deadline.  The caller holds the common scheduler/fleet-admission lock and
     supplies a fresh dispatchable-worker snapshot, so only explicitly released
-    compatible workers are eligible here.
+    compatible workers are eligible here.  ``eligible(task, worker)`` additionally
+    keeps a task away from a worker that cannot run its pipeline kind.
     """
     released = {
         str(url or "").strip().rstrip("/").lower()
@@ -215,7 +232,14 @@ async def dispatch_released_interactive(
         async def _attempt(task: Any, selected_worker=worker):
             return await attempt(task, selected_worker)
 
-        if await dispatch_fifo_candidate(candidates, _attempt):
+        worker_eligible = (
+            (lambda task, selected_worker=worker: eligible(task, selected_worker))
+            if eligible is not None
+            else None
+        )
+        if await dispatch_fifo_candidate(
+            candidates, _attempt, eligible=worker_eligible
+        ):
             dispatched += 1
     return dispatched
 

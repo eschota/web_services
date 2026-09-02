@@ -52,6 +52,125 @@ def is_worker_disabled(worker_url: Optional[str]) -> bool:
 
 
 # =============================================================================
+# Worker capability routing
+# =============================================================================
+# ``worker_endpoints.pool`` value for boxes that run Auto Rig only: they have no
+# retopo/3ds Max/Maya/C4D toolchain, so ``pipeline_kind == "convert"`` would fail
+# on them.  Their ``/server-status`` publishes ``capabilities.mode == "only_rig"``
+# with ``legacy_conversion: false``.
+WORKER_POOL_FULL_CONVERTER = "full_converter"
+WORKER_POOL_RIG_ONLY = "rig_only"
+CAPABILITY_MODE_RIG_ONLY = "only_rig"
+CAPABILITY_MODE_HUNYUAN_ONLY = "hunyuan_only"
+
+PIPELINE_KIND_RIG = "rig"
+PIPELINE_KIND_CONVERT = "convert"
+
+
+def normalize_pipeline_kind(value: Any) -> str:
+    """Match ``start_task_on_worker``: anything unknown is a rig task."""
+    kind = str(value or "").strip().lower()
+    return kind if kind in (PIPELINE_KIND_RIG, PIPELINE_KIND_CONVERT) else PIPELINE_KIND_RIG
+
+
+def normalize_worker_pool(value: Any) -> str:
+    """Normalize ``worker_endpoints.pool``; anything unknown stays a full converter."""
+    pool = str(value or "").strip().lower().replace("-", "_")
+    if pool in (WORKER_POOL_RIG_ONLY, CAPABILITY_MODE_RIG_ONLY):
+        return WORKER_POOL_RIG_ONLY
+    return WORKER_POOL_FULL_CONVERTER
+
+
+def pool_is_rig_only(value: Any) -> bool:
+    return normalize_worker_pool(value) == WORKER_POOL_RIG_ONLY
+
+
+@dataclass(frozen=True)
+class WorkerPipelineCapabilities:
+    """Which ``pipeline_kind`` values a worker is allowed to receive.
+
+    Both default to ``True`` so a legacy node that publishes no capability block
+    keeps its current behaviour; only an explicit denial narrows routing.
+    """
+    rig: bool = True
+    convert: bool = True
+
+    def accepts(self, pipeline_kind: Any) -> bool:
+        return (
+            self.convert
+            if normalize_pipeline_kind(pipeline_kind) == PIPELINE_KIND_CONVERT
+            else self.rig
+        )
+
+
+FULL_PIPELINE_CAPABILITIES = WorkerPipelineCapabilities()
+RIG_ONLY_PIPELINE_CAPABILITIES = WorkerPipelineCapabilities(rig=True, convert=False)
+
+
+def parse_worker_pipeline_capabilities(payload: Any) -> WorkerPipelineCapabilities:
+    """Read routing capabilities from the worker's ``/server-status`` payload."""
+    if not isinstance(payload, dict):
+        return FULL_PIPELINE_CAPABILITIES
+    capabilities = payload.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return FULL_PIPELINE_CAPABILITIES
+    mode = str(capabilities.get("mode") or "").strip().lower()
+    rig = not (
+        capabilities.get("autorig") is False or mode == CAPABILITY_MODE_HUNYUAN_ONLY
+    )
+    convert = not (
+        capabilities.get("legacy_conversion") is False
+        or mode in (CAPABILITY_MODE_RIG_ONLY, CAPABILITY_MODE_HUNYUAN_ONLY)
+    )
+    return WorkerPipelineCapabilities(rig=rig, convert=convert)
+
+
+def worker_pipeline_capabilities(worker: Any) -> WorkerPipelineCapabilities:
+    value = getattr(worker, "pipeline_capabilities", None)
+    return value if isinstance(value, WorkerPipelineCapabilities) else FULL_PIPELINE_CAPABILITIES
+
+
+def worker_accepts_pipeline_kind(worker: Any, pipeline_kind: Any) -> bool:
+    """True unless the worker has proven it cannot run this pipeline kind."""
+    return worker_pipeline_capabilities(worker).accepts(pipeline_kind)
+
+
+def mark_rig_only_workers(workers_list: List[Any], rig_only_urls: set[str]) -> None:
+    """A ``rig_only`` registry row bans full conversion before telemetry arrives."""
+    if not rig_only_urls:
+        return
+    for worker in workers_list:
+        if normalize_worker_url_key(getattr(worker, "url", "")) not in rig_only_urls:
+            continue
+        current = worker_pipeline_capabilities(worker)
+        setattr(
+            worker,
+            "pipeline_capabilities",
+            WorkerPipelineCapabilities(rig=current.rig, convert=False),
+        )
+
+
+async def get_rig_only_worker_urls(db: Optional[AsyncSession] = None) -> set[str]:
+    """Normalized URLs of enabled endpoints registered in the rig-only pool."""
+    if not db:
+        return set()
+    try:
+        res = await db.execute(
+            select(WorkerEndpoint.url, WorkerEndpoint.pool)
+            .where(WorkerEndpoint.enabled.is_(True))
+        )
+        rows = res.all()
+    except Exception as e:
+        print(f"[Workers] Could not read worker pools: {e}")
+        return set()
+    return {
+        normalize_worker_url_key(url)
+        for (url, pool) in rows
+        if str(url or "").strip() and pool_is_rig_only(pool)
+    }
+
+
+# =============================================================================
 # Data Classes
 # =============================================================================
 @dataclass
@@ -70,6 +189,7 @@ class WorkerDispatchAdmission:
     maintenance: Optional[bool] = None
     free_disk_gb: Optional[float] = None
     reason: Optional[str] = None
+    pipeline_capabilities: WorkerPipelineCapabilities = FULL_PIPELINE_CAPABILITIES
 
 
 @dataclass
@@ -390,10 +510,14 @@ def parse_worker_dispatch_admission(
     Explicit maintenance and an explicitly reported low system-disk value block
     only *new* dispatch. Missing telemetry remains compatible with older workers;
     their normal root health and queue counters are still authoritative.
+
+    The same payload carries ``capabilities``, which decides which
+    ``pipeline_kind`` values this node may receive at all.
     """
     if not isinstance(payload, dict):
         return WorkerDispatchAdmission(allowed=True)
 
+    capabilities = parse_worker_pipeline_capabilities(payload)
     maintenance_raw = payload.get("maintenance")
     maintenance = maintenance_raw if isinstance(maintenance_raw, bool) else None
 
@@ -422,6 +546,7 @@ def parse_worker_dispatch_admission(
             maintenance=True,
             free_disk_gb=free_disk_gb,
             reason="maintenance",
+            pipeline_capabilities=capabilities,
         )
     if free_disk_gb is not None and free_disk_gb < max(0.0, min_free_disk_gb):
         return WorkerDispatchAdmission(
@@ -429,11 +554,13 @@ def parse_worker_dispatch_admission(
             maintenance=maintenance,
             free_disk_gb=free_disk_gb,
             reason=f"low_disk:{free_disk_gb:.2f}<{max(0.0, min_free_disk_gb):.2f}GB",
+            pipeline_capabilities=capabilities,
         )
     return WorkerDispatchAdmission(
         allowed=True,
         maintenance=maintenance,
         free_disk_gb=free_disk_gb,
+        pipeline_capabilities=capabilities,
     )
 
 
@@ -497,6 +624,7 @@ async def filter_workers_for_dispatch(
         setattr(worker, "maintenance", admission.maintenance)
         setattr(worker, "free_disk_gb", admission.free_disk_gb)
         setattr(worker, "dispatch_block_reason", admission.reason)
+        setattr(worker, "pipeline_capabilities", admission.pipeline_capabilities)
         key = normalize_worker_url_key(worker.url)
         previous = _worker_dispatch_last_reason.get(key)
         if admission.reason != previous:
@@ -582,10 +710,16 @@ async def get_all_workers_status(worker_urls: List[str]) -> List[WorkerInfo]:
         return workers
 
 
-async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]:
+async def select_best_worker(
+    db: Optional[AsyncSession] = None,
+    *,
+    pipeline_kind: str = PIPELINE_KIND_RIG,
+) -> Optional[str]:
     """
     Select best worker for a new task.
     Strategy:
+    - Skip workers that cannot run this ``pipeline_kind`` (rig-only boxes have
+      no retopo/DCC toolchain and must never receive a ``convert`` task).
     - Prefer higher weight (priority).
     - Within the highest-weight available group, pick least busy (min load).
     - If none respond, fallback to first configured URL (still weight-ordered).
@@ -595,6 +729,7 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
     if not worker_urls:
         return None
 
+    rig_only_urls = await get_rig_only_worker_urls(db)
     statuses = await get_all_workers_status(worker_urls)
     backend_processing = await get_backend_worker_processing_counts(db)
     responsive_available = [w for w in statuses if w.available]
@@ -606,6 +741,13 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
             # block. Never reinterpret that as a network outage and fall back
             # to optimistic dispatch.
             return None
+        mark_rig_only_workers(available, rig_only_urls)
+        available = [
+            w for w in available if worker_accepts_pipeline_kind(w, pipeline_kind)
+        ]
+        if not available:
+            # Reachable capacity exists but none of it can run this pipeline.
+            return None
     quarantine_safe_available = [w for w in available if not is_worker_quarantined(w.url)]
 
     if quarantine_safe_available:
@@ -616,9 +758,17 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
         candidates_pool = available
         print("[Workers] All available workers are quarantined, using degraded fallback")
     else:
-        # No worker responded as available. Prefer non-quarantined URL for optimistic dispatch.
-        non_quarantined_urls = [u for u in worker_urls if not is_worker_quarantined(u)]
-        return (non_quarantined_urls or worker_urls)[0]
+        # No worker responded as available. Prefer non-quarantined URL for optimistic dispatch,
+        # but never guess a rig-only endpoint for a full-conversion task.
+        eligible_urls = [
+            u
+            for u in worker_urls
+            if normalize_pipeline_kind(pipeline_kind) != PIPELINE_KIND_CONVERT
+            or normalize_worker_url_key(u) not in rig_only_urls
+        ]
+        non_quarantined_urls = [u for u in eligible_urls if not is_worker_quarantined(u)]
+        fallback = non_quarantined_urls or eligible_urls
+        return fallback[0] if fallback else None
 
     # For direct restart/admin dispatch, avoid piling new work onto a high-weight
     # worker that is already busy when lower-weight idle workers are available.

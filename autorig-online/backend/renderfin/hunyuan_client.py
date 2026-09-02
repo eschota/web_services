@@ -36,6 +36,22 @@ WORKER_INFLIGHT_CAP = int(os.getenv("RENDERFIN_HUNYUAN_INFLIGHT_CAP", "1"))
 # generations queue on our side instead, which costs them nothing.
 RESERVED_FOR_OTHER_WORK = int(os.getenv("RENDERFIN_HUNYUAN_RESERVED_WORKERS", "2"))
 
+# AutoRig-only converter boxes: ``worker_endpoints.pool`` value and the matching
+# ``/server-status`` capability mode. They run rig tasks but have no retopo/DCC
+# toolchain and no Hunyuan runtime, so they are never part of the shared
+# full-converter reserve. Kept as literals so this package stays importable
+# without the AutoRig backend modules.
+RIG_ONLY_POOL = "rig_only"
+RIG_ONLY_CAPABILITY_MODE = "only_rig"
+
+
+def _is_rig_only(value: Any) -> bool:
+    return str(value or "").strip().lower().replace("-", "_") in {
+        RIG_ONLY_POOL,
+        RIG_ONLY_CAPABILITY_MODE,
+    }
+
+
 _ORDINARY_QUEUE_CACHE: Tuple[float, bool] = (0.0, False)
 _ORDINARY_ACTIVE_STATES = {
     "created",
@@ -278,6 +294,10 @@ def full_converter_registry(
     Missing legacy schema falls back to the Hunyuan registry. Any other read
     failure also keeps the conservative, smaller registry rather than
     inventing capacity.
+
+    Rows in the ``rig_only`` pool are skipped: those boxes run Auto Rig without
+    the retopo/DCC toolchain, so they are not interchangeable capacity for the
+    N-1 cross-pipeline reserve.
     """
     configured = list(pool if pool is not None else workers())
     registry = [
@@ -296,9 +316,20 @@ def full_converter_registry(
             timeout=0.5,
         )
         try:
-            rows = connection.execute(
-                "SELECT url FROM worker_endpoints WHERE enabled = 1"
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    "SELECT url, pool FROM worker_endpoints WHERE enabled = 1"
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if "no such column" not in str(exc).lower():
+                    raise
+                # Legacy schema predating the capability pool column.
+                rows = [
+                    (url, None)
+                    for (url,) in connection.execute(
+                        "SELECT url FROM worker_endpoints WHERE enabled = 1"
+                    ).fetchall()
+                ]
         finally:
             connection.close()
     except sqlite3.OperationalError as exc:
@@ -320,7 +351,9 @@ def full_converter_registry(
         for worker in registry
         if str(worker.get("name") or "").strip()
     }
-    for (raw_url,) in rows:
+    for raw_url, raw_pool in rows:
+        if _is_rig_only(raw_pool):
+            continue
         url = _converter_status_base(str(raw_url or ""))
         name = _converter_name_from_url(url)
         if not url or not name or name.lower() in by_name:
@@ -848,10 +881,16 @@ def _status_proves_hunyuan_idle(status: Dict[str, Any], task_id: str) -> bool:
 
 
 def _status_is_full_converter(status: Dict[str, Any]) -> bool:
-    """Fail closed when a Hunyuan-only node is presented as a shared worker."""
+    """Fail closed when a Hunyuan-only or rig-only node is presented as shared."""
     capabilities = status.get("capabilities")
     flags = status.get("feature_flags")
     if not isinstance(capabilities, dict) or not isinstance(flags, dict):
+        return False
+    if _is_rig_only(capabilities.get("mode")) or capabilities.get(
+        "legacy_conversion"
+    ) is False:
+        # An Auto-Rig-only box has no retopo/DCC toolchain and no Hunyuan
+        # runtime; it can never serve as the interactive full-converter reserve.
         return False
     return (
         str(capabilities.get("mode") or "").strip().lower() == "full"

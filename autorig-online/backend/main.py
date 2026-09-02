@@ -156,8 +156,12 @@ from workers import (
     normalize_worker_url_key,
     normalize_task_type,
     get_backend_worker_processing_counts,
+    get_rig_only_worker_urls,
     get_worker_effective_active,
     filter_workers_for_dispatch,
+    mark_rig_only_workers,
+    worker_accepts_pipeline_kind,
+    WORKER_POOL_RIG_ONLY,
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from animal_submission_policy import (
@@ -335,6 +339,10 @@ async def get_dispatchable_workers(
     Return workers that are free according to both worker API and backend DB.
     The DB overlay avoids burst dispatch races where several tasks pick the same
     worker before its live /api-converter-glb counters update.
+
+    Each returned worker carries ``pipeline_capabilities``; callers must check
+    ``worker_accepts_pipeline_kind`` before handing it a task, because a
+    ``rig_only`` box cannot run the full conversion pipeline.
     """
     backend_processing = await get_backend_worker_processing_counts(db)
     candidates = [
@@ -349,6 +357,9 @@ async def get_dispatchable_workers(
         )
     ]
     allowed = await filter_workers_for_dispatch(candidates)
+    # A ``rig_only`` registry row is authoritative even before (or without) the
+    # worker's own capability telemetry.
+    mark_rig_only_workers(allowed, await get_rig_only_worker_urls(db))
     return await _order_workers_for_workload(db, allowed, workload_class)
 
 
@@ -762,13 +773,25 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             # cycle; do not dispatch from the stale over-capacity snapshot.
             return
 
+        def _worker_can_run(worker, task: Task) -> bool:
+            return worker_accepts_pipeline_kind(
+                worker, getattr(task, "pipeline_kind", None)
+            )
+
         async def _try_dispatch(worker, candidates: List[Task]) -> bool:
             async def _attempt(task: Task):
                 return await start_task_on_worker(
                     db, task, worker.url, admission_locked=True
                 )
 
-            return await dispatch_fifo_candidate(candidates, _attempt)
+            # A rig-only box skips ``convert`` rows instead of consuming them, so
+            # a convert task at the FIFO head keeps waiting for a full converter
+            # while the next rig task uses the free rig-only slot.
+            return await dispatch_fifo_candidate(
+                candidates,
+                _attempt,
+                eligible=lambda task: _worker_can_run(worker, task),
+            )
 
         used_workers: set[str] = set()
         for worker in free_workers:
@@ -884,6 +907,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                     fresh_free_workers,
                     released_worker_urls,
                     _dispatch_released,
+                    eligible=lambda task, worker: _worker_can_run(worker, task),
                 )
                 if dispatched_now:
                     print(
@@ -7672,17 +7696,17 @@ async def api_restart_task(
     await db.commit()
     await db.refresh(task)
 
+    pk_restart = getattr(task, "pipeline_kind", None) or "rig"
+    if pk_restart not in ("rig", "convert"):
+        pk_restart = "rig"
+
     # Start pipeline for the same task_id without blocking on FBX pre-conversion.
-    worker_url = await select_best_worker(db=db)
+    worker_url = await select_best_worker(db=db, pipeline_kind=pk_restart)
     if not worker_url:
         raise HTTPException(status_code=500, detail="No workers available")
 
     task.worker_api = worker_url
     task.status = "processing"
-
-    pk_restart = getattr(task, "pipeline_kind", None) or "rig"
-    if pk_restart not in ("rig", "convert"):
-        pk_restart = "rig"
 
     # Parse transform params from request body (rig pipeline only)
     transform_params = None
@@ -8725,10 +8749,13 @@ async def api_admin_scheduler_priority(
         for queue_class, status, count in rows.all()
     }
     queue_status = await get_global_queue_status(db=db)
+    rig_only_urls = await get_rig_only_worker_urls(db)
     healthy_full = sum(
         1
         for worker in queue_status.workers
-        if worker.available and not is_worker_quarantined(worker.url)
+        if worker.available
+        and not is_worker_quarantined(worker.url)
+        and normalize_worker_url_key(worker.url) not in rig_only_urls
     )
     return priority_metrics_snapshot(
         interactive_queued=counts.get((QUEUE_CLASS_INTERACTIVE, "created"), 0),
@@ -8739,7 +8766,16 @@ async def api_admin_scheduler_priority(
     )
 
 
-_WORKER_POOLS = {"full_converter", "hunyuan_only", "comfy", "ai_vision", "shared_gpu"}
+_WORKER_POOLS = {
+    "full_converter",
+    # Auto Rig only: no retopo/3ds Max/Maya/C4D toolchain, so it may receive
+    # pipeline_kind == "rig" and never "convert".
+    WORKER_POOL_RIG_ONLY,
+    "hunyuan_only",
+    "comfy",
+    "ai_vision",
+    "shared_gpu",
+}
 _WORKER_ROLES = {
     "shared",
     "autorig_primary",
@@ -9792,21 +9828,21 @@ async def api_admin_restart_incomplete_tasks(
                     task.viewer_prepared_glb_url = None
                     task.viewer_animations_glb_url = None
                     
+                    pk_ad = getattr(task, "pipeline_kind", None) or "rig"
+                    if pk_ad not in ("rig", "convert"):
+                        pk_ad = "rig"
+
                     # Select worker and send task
-                    worker_url = await select_best_worker(db=bg_db)
+                    worker_url = await select_best_worker(db=bg_db, pipeline_kind=pk_ad)
                     if not worker_url:
                         task.status = "error"
                         task.error_message = "No workers available"
                         errors.append(f"{task_id[:8]}: no workers")
                         await bg_db.commit()
                         continue
-                    
+
                     task.worker_api = worker_url
                     task.status = "processing"
-                    
-                    pk_ad = getattr(task, "pipeline_kind", None) or "rig"
-                    if pk_ad not in ("rig", "convert"):
-                        pk_ad = "rig"
                     send_result = await send_task_to_worker(
                         worker_url,
                         task.input_url,
