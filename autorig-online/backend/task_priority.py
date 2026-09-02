@@ -283,7 +283,7 @@ def _control_worker(worker_url: str) -> Optional[Dict[str, Any]]:
     try:
         from renderfin import config as renderfin_config
 
-        for worker in renderfin_config.hunyuan_workers():
+        for worker in renderfin_config.converter_control_workers():
             if str(worker.get("name") or "").strip().lower() == name:
                 return worker
     except Exception as exc:

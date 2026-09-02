@@ -203,6 +203,53 @@ def hunyuan_workers() -> list[dict]:
         )
     _emit_hunyuan_worker_notices(notices)
     return []
+
+
+def converter_control_workers() -> list[dict]:
+    """Return authenticated converter control routes, including parked Hunyuan nodes.
+
+    A node such as F11 can be deliberately disabled only for Hunyuan while it
+    remains a healthy full converter.  Preemption is a converter concern, so
+    resolving its control token through :func:`hunyuan_workers` incorrectly
+    makes that full-converter task impossible to recall.  Read the same
+    protected registry without applying Hunyuan admission gates.
+    """
+    workers: list[dict] = []
+    try:
+        if HUNYUAN_WORKERS_FILE.is_file():
+            data = json.loads(HUNYUAN_WORKERS_FILE.read_text(encoding="utf-8"))
+            entries = data.get("workers") if isinstance(data, dict) else data
+            for entry in entries or []:
+                if not isinstance(entry, dict):
+                    continue
+                url = str(entry.get("url") or "").strip().rstrip("/")
+                token = str(entry.get("token") or "").strip() or HUNYUAN_API_TOKEN
+                if not url or not token:
+                    continue
+                workers.append({
+                    "name": str(entry.get("name") or url),
+                    "url": url,
+                    "token": token,
+                    "capability_mode": str(
+                        entry.get("capability_mode")
+                        or entry.get("mode")
+                        or "full"
+                    ),
+                })
+    except Exception as exc:
+        print(f"[Renderfin] converter control registry unreadable: {exc}")
+        return []
+    if workers:
+        return workers
+    return [
+        {
+            "name": worker.get("name"),
+            "url": worker.get("url"),
+            "token": worker.get("token"),
+            "capability_mode": worker.get("capability_mode", "full"),
+        }
+        for worker in hunyuan_workers()
+    ]
 HUNYUAN_QUALITY = os.getenv("RENDERFIN_HUNYUAN_QUALITY", "standard").strip() or "standard"
 HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))
 # A standard-quality generation takes ~65 min on the farm's GTX 1080 Ti boxes

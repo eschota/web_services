@@ -1291,6 +1291,17 @@ class ParkedWorkerTests(unittest.TestCase):
             with patch.object(config, "HUNYUAN_WORKERS_FILE", path):
                 return config.hunyuan_workers()
 
+    def _control_pool_from(self, entries):
+        import json as _json
+        import tempfile
+        from pathlib import Path as _P
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _P(tmp) / "workers.json"
+            path.write_text(_json.dumps(entries), encoding="utf-8")
+            with patch.object(config, "HUNYUAN_WORKERS_FILE", path):
+                return config.converter_control_workers()
+
     def test_a_disabled_worker_is_not_offered(self):
         pool = self._pool_from([
             {"name": "f7", "url": "https://f7", "token": "t", "enabled": False,
@@ -1298,6 +1309,23 @@ class ParkedWorkerTests(unittest.TestCase):
             {"name": "f13", "url": "https://f13", "token": "t"},
         ])
         self.assertEqual([w["name"] for w in pool], ["f13"])
+
+    def test_hunyuan_parked_full_worker_remains_in_converter_control_registry(self):
+        entries = [
+            {
+                "name": "f11",
+                "url": "https://f11",
+                "token": "control-token",
+                "enabled": False,
+                "disabled_reason": "Hunyuan runtime quarantined",
+                "capability_mode": "full",
+            },
+            {"name": "f13", "url": "https://f13", "token": "control-token"},
+        ]
+        self.assertEqual(
+            [worker["name"] for worker in self._control_pool_from(entries)],
+            ["f11", "f13"],
+        )
 
     def test_unchanged_parked_worker_notice_is_logged_once(self):
         import json as _json
