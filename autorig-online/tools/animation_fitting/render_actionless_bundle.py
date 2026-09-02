@@ -469,6 +469,10 @@ def look_at(obj: bpy.types.Object, target: Vector) -> None:
 CAMERA_PRESETS: dict[str, tuple[float, float, float]] = {
     "three_quarter": (1.45, 1.0, 0.68),
     "side": (0.28, 1.0, 0.30),
+    # Slightly more frontal than "side": real (narrow-stance) horses need
+    # extra near/far depth separation on the hind legs for the semantic
+    # contract while the far legs stay mostly unoccluded.
+    "side_plus": (0.62, 1.0, 0.36),
 }
 
 
