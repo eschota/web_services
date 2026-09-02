@@ -100,6 +100,130 @@ def test_camera_z_calibration_rejects_sparse_later_frame() -> None:
         )
 
 
+def _hoof_local_fixture() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Reference plane, exact relative depth, mask and four hoof-like anchors."""
+
+    yy, xx = np.mgrid[0:240, 0:320]
+    reference = 3.0 + 0.004 * xx + 0.003 * yy
+    relative = (reference - 1.2) / 2.3
+    mask = np.ones(reference.shape, dtype=bool)
+    anchors = np.asarray(
+        [[60.0, 210.0], [120.0, 214.0], [200.0, 208.0], [260.0, 212.0]],
+        dtype=np.float64,
+    )
+    return reference, relative, mask, anchors
+
+
+def _distance_to_anchors(shape: tuple[int, int], anchors: np.ndarray) -> np.ndarray:
+    yy, xx = np.mgrid[0 : shape[0], 0 : shape[1]]
+    distance = np.full(shape, np.inf, dtype=np.float64)
+    for x, y in anchors:
+        distance = np.minimum(distance, np.hypot(xx - x, yy - y))
+    return distance
+
+
+def test_camera_z_calibration_hoof_local_qa_gates_only_anchor_neighborhoods() -> None:
+    reference, relative, mask, anchors = _hoof_local_fixture()
+    # Zero-mean sinusoidal body distortion away from every hoof neighborhood:
+    # the global median/p95 blow past the gates while hooves stay accurate.
+    distance = _distance_to_anchors(reference.shape, anchors)
+    yy, xx = np.mgrid[0:240, 0:320]
+    corrupted = relative + np.where(
+        distance > 14.0, 0.03 * np.sin(0.9 * xx + 0.7 * yy), 0.0
+    )
+
+    result = calibrate_relative_depth_to_camera_z(
+        corrupted[None, ...],
+        reference.astype(np.float32),
+        mask,
+        characteristic_height=HORSE_HEIGHT,
+        config=_depth_config(min_abs_spearman=0.90),
+        qa_anchor_points_xy=anchors,
+    )
+
+    assert result.mode == "affine"
+    assert result.scale == pytest.approx(2.3, abs=5e-2)
+    assert result.offset == pytest.approx(1.2, abs=5e-2)
+    selected = result.provenance["selected"]
+    assert selected["error_qa_region"]["mode"] == "contact_anchor_local"
+    assert selected["error_qa_region"]["anchor_count"] == 4
+    assert selected["error_qa_region"]["pixels"] >= 100
+    # ~2.5% of the frame diagonal (240x320 -> diagonal 400 -> 10 px).
+    assert selected["error_qa_region"]["radius_px"] == pytest.approx(10.0)
+    assert selected["median_abs_error_height"] <= 0.005
+    assert selected["p95_abs_error_height"] <= 0.02
+    assert selected["global_median_abs_error_height"] > 0.005
+    assert selected["global_median_abs_error_world"] > selected["median_abs_error_world"]
+
+
+def test_camera_z_calibration_hoof_local_qa_rejects_wrong_hoof_depth() -> None:
+    reference, relative, mask, anchors = _hoof_local_fixture()
+    # One-sided bias only inside the hoof neighborhoods: globally negligible,
+    # locally fatal for contact inference, so QA must fail closed.
+    distance = _distance_to_anchors(reference.shape, anchors)
+    corrupted = relative + np.where(distance <= 14.0, 0.05, 0.0)
+
+    with pytest.raises(ContractError, match="Camera-Z calibration QA rejected"):
+        calibrate_relative_depth_to_camera_z(
+            corrupted[None, ...],
+            reference.astype(np.float32),
+            mask,
+            characteristic_height=HORSE_HEIGHT,
+            config=_depth_config(),
+            qa_anchor_points_xy=anchors,
+        )
+
+
+def test_camera_z_calibration_hoof_local_qa_requires_region_pixels() -> None:
+    reference, relative, mask, _ = _hoof_local_fixture()
+    outside = np.asarray([[-500.0, -500.0]], dtype=np.float64)
+
+    with pytest.raises(ContractError, match="No camera-Z calibration model is valid"):
+        calibrate_relative_depth_to_camera_z(
+            relative[None, ...],
+            reference.astype(np.float32),
+            mask,
+            characteristic_height=HORSE_HEIGHT,
+            config=_depth_config(),
+            qa_anchor_points_xy=outside,
+        )
+
+
+def test_camera_z_calibration_rejects_non_finite_anchor_projections() -> None:
+    reference, relative, mask, anchors = _hoof_local_fixture()
+    anchors = anchors.copy()
+    anchors[0, 0] = np.nan
+
+    with pytest.raises(ContractError, match="qa_anchor_points_xy"):
+        calibrate_relative_depth_to_camera_z(
+            relative[None, ...],
+            reference.astype(np.float32),
+            mask,
+            characteristic_height=HORSE_HEIGHT,
+            config=_depth_config(),
+            qa_anchor_points_xy=anchors,
+        )
+
+
+def test_camera_z_calibration_empty_anchor_set_falls_back_to_global_qa() -> None:
+    reference, relative, mask, _ = _hoof_local_fixture()
+
+    result = calibrate_relative_depth_to_camera_z(
+        relative[None, ...],
+        reference.astype(np.float32),
+        mask,
+        characteristic_height=HORSE_HEIGHT,
+        config=_depth_config(),
+        qa_anchor_points_xy=np.zeros((0, 2), dtype=np.float64),
+    )
+
+    selected = result.provenance["selected"]
+    assert selected["error_qa_region"]["mode"] == "global_foreground"
+    assert selected["median_abs_error_world"] == pytest.approx(
+        selected["global_median_abs_error_world"]
+    )
+
+
 def test_camera_z_calibration_rejects_uncorrelated_depth() -> None:
     yy, xx = np.mgrid[0:32, 0:40]
     reference = 2.5 + 0.02 * xx + 0.01 * yy

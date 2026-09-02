@@ -2003,10 +2003,34 @@ def run_observation_pipeline(
     mask_array = np.asarray(mask_result.masks, dtype=bool)
     depth_calibration = None
     if depth_result is not None and "camera_z" in rig.artifacts:
+        qa_anchor_points = None
+        if profile is not None:
+            seed_index_by_anchor = {
+                anchor_id: index
+                for index, anchor_id in enumerate(aligned_seeds.anchor_ids)
+            }
+            missing_qa_anchors = sorted(
+                anchor_id
+                for anchor_id in profile.priority_anchor_ids
+                if anchor_id not in seed_index_by_anchor
+            )
+            if missing_qa_anchors:
+                raise ContractError(
+                    "Depth-QA priority contact anchors were not seeded: "
+                    f"{missing_qa_anchors}"
+                )
+            qa_anchor_points = np.asarray(
+                [
+                    aligned_seeds.points_xy[seed_index_by_anchor[anchor_id]]
+                    for anchor_id in profile.priority_anchor_ids
+                ],
+                dtype=np.float64,
+            )
         depth_calibration = calibrate_bundle_camera_z(
             rig,
             np.asarray(depth_result.relative_depth),
             aligned_seeds.canonical_mask,
+            qa_anchor_points_xy=qa_anchor_points,
         )
     if profile is not None and depth_calibration is None:
         raise ContractError(

@@ -38,6 +38,12 @@
       "bytes": 116440756,
       "sha256": "13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609",
       "license_source_repo": "video_depth_anything"
+    },
+    "video_depth_anything_large": {
+      "url": "https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/main/video_depth_anything_vitl.pth?download=true",
+      "bytes": 1538392012,
+      "sha256": "43df27c6b396042ba34ff7b798ab279f64d204d2e86d7a373968f8fa36d0e6fa",
+      "license_source_repo": "video_depth_anything"
     }
   },
   "python": {

@@ -23,6 +23,8 @@ class DepthCalibrationConfig:
     max_p95_abs_error_height: float = 0.06
     reciprocal_epsilon: float = 1e-6
     max_irls_iterations: int = 24
+    qa_anchor_radius_fraction: float = 0.025
+    min_qa_region_pixels: int = 100
 
     def validate(self) -> None:
         if (
@@ -31,17 +33,30 @@ class DepthCalibrationConfig:
             or self.min_valid_pixels < 2
         ):
             raise ContractError("min_valid_pixels must be an integer of at least two")
+        if (
+            isinstance(self.min_qa_region_pixels, bool)
+            or not isinstance(self.min_qa_region_pixels, int)
+            or self.min_qa_region_pixels < 2
+        ):
+            raise ContractError(
+                "min_qa_region_pixels must be an integer of at least two"
+            )
         for name in (
             "min_foreground_coverage",
             "min_abs_spearman",
             "max_median_abs_error_height",
             "max_p95_abs_error_height",
+            "qa_anchor_radius_fraction",
         ):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0.0:
                 raise ContractError(f"{name} must be finite and positive")
         if self.min_foreground_coverage > 1.0 or self.min_abs_spearman > 1.0:
             raise ContractError("coverage and Spearman thresholds must not exceed one")
+        if self.qa_anchor_radius_fraction > 0.25:
+            raise ContractError(
+                "qa_anchor_radius_fraction must stay a local neighborhood (<= 0.25)"
+            )
         if self.max_p95_abs_error_height < self.max_median_abs_error_height:
             raise ContractError(
                 "p95 error threshold must be at least the median threshold"
@@ -72,10 +87,13 @@ class _CalibrationCandidate:
     offset: float
     median_abs_error: float
     p95_abs_error: float
+    global_median_abs_error: float
+    global_p95_abs_error: float
     abs_spearman: float
     valid_pixels: int
     foreground_coverage: float
     irls_iterations: int
+    error_qa_region: dict[str, Any]
 
     def to_dict(self, characteristic_height: float) -> dict[str, Any]:
         return {
@@ -89,6 +107,15 @@ class _CalibrationCandidate:
             "p95_abs_error_world": self.p95_abs_error,
             "median_abs_error_height": self.median_abs_error / characteristic_height,
             "p95_abs_error_height": self.p95_abs_error / characteristic_height,
+            "global_median_abs_error_world": self.global_median_abs_error,
+            "global_p95_abs_error_world": self.global_p95_abs_error,
+            "global_median_abs_error_height": (
+                self.global_median_abs_error / characteristic_height
+            ),
+            "global_p95_abs_error_height": (
+                self.global_p95_abs_error / characteristic_height
+            ),
+            "error_qa_region": dict(self.error_qa_region),
             "irls_iterations": self.irls_iterations,
         }
 
@@ -163,6 +190,25 @@ def _calibration_feature(values: np.ndarray, mode: str, epsilon: float) -> np.nd
     raise ContractError(f"Unsupported relative-depth calibration mode: {mode}")
 
 
+def _contact_anchor_qa_region(
+    shape: tuple[int, int],
+    anchor_points_xy: np.ndarray,
+    radius_fraction: float,
+) -> tuple[np.ndarray, float]:
+    """Union of pixel disks around priority contact-anchor projections."""
+
+    height, width = int(shape[0]), int(shape[1])
+    radius = float(radius_fraction) * math.hypot(height, width)
+    yy, xx = np.mgrid[0:height, 0:width]
+    region = np.zeros((height, width), dtype=bool)
+    radius_squared = radius * radius
+    for x, y in anchor_points_xy:
+        region |= (
+            (xx - float(x)) ** 2 + (yy - float(y)) ** 2
+        ) <= radius_squared
+    return region, radius
+
+
 def _fit_calibration_candidate(
     relative_first: np.ndarray,
     reference_camera_z: np.ndarray,
@@ -171,6 +217,8 @@ def _fit_calibration_candidate(
     mode: str,
     characteristic_height: float,
     config: DepthCalibrationConfig,
+    qa_region: np.ndarray | None = None,
+    qa_region_info: dict[str, Any] | None = None,
 ) -> _CalibrationCandidate:
     feature_image = _calibration_feature(
         relative_first, mode, config.reciprocal_epsilon
@@ -199,16 +247,43 @@ def _fit_calibration_candidate(
     )
     predicted = feature * scale + offset
     absolute_error = np.abs(predicted - target)
+    global_median = float(np.median(absolute_error))
+    global_p95 = float(np.percentile(absolute_error, 95))
+    if qa_region is None:
+        gated_median = global_median
+        gated_p95 = global_p95
+        region_info = {"mode": "global_foreground", "pixels": valid_pixels}
+    else:
+        qa_valid = valid & qa_region
+        qa_pixels = int(np.sum(qa_valid))
+        if qa_pixels < config.min_qa_region_pixels:
+            raise ContractError(
+                f"{mode} camera-Z contact-anchor QA region has {qa_pixels} valid "
+                f"pixels; requires {config.min_qa_region_pixels}"
+            )
+        qa_feature = feature_image[qa_valid].astype(np.float64, copy=False)
+        qa_target = reference_camera_z[qa_valid].astype(np.float64, copy=False)
+        qa_error = np.abs(qa_feature * scale + offset - qa_target)
+        gated_median = float(np.median(qa_error))
+        gated_p95 = float(np.percentile(qa_error, 95))
+        region_info = {
+            "mode": "contact_anchor_local",
+            "pixels": qa_pixels,
+            **(qa_region_info or {}),
+        }
     return _CalibrationCandidate(
         mode=mode,
         scale=scale,
         offset=offset,
-        median_abs_error=float(np.median(absolute_error)),
-        p95_abs_error=float(np.percentile(absolute_error, 95)),
+        median_abs_error=gated_median,
+        p95_abs_error=gated_p95,
+        global_median_abs_error=global_median,
+        global_p95_abs_error=global_p95,
         abs_spearman=_abs_spearman(feature, target),
         valid_pixels=valid_pixels,
         foreground_coverage=coverage,
         irls_iterations=iterations,
+        error_qa_region=region_info,
     )
 
 
@@ -219,11 +294,20 @@ def calibrate_relative_depth_to_camera_z(
     *,
     characteristic_height: float,
     config: DepthCalibrationConfig | None = None,
+    qa_anchor_points_xy: np.ndarray | None = None,
 ) -> DepthCalibrationResult:
     """Select and apply a fail-closed affine or reciprocal camera-Z calibration.
 
     The first relative-depth frame is aligned to the exact actionless camera-Z
     artifact. The selected transform is then applied unchanged to every frame.
+
+    When ``qa_anchor_points_xy`` provides priority contact-anchor projections
+    (pixel XY in the relative-depth frame), the gated median/p95 height-error
+    QA is evaluated only inside the union of local disks around those anchors
+    intersected with the valid foreground; the contact solver consumes depth
+    exclusively at the hooves, so accuracy is enforced where it is used. The
+    whole-body values remain reported as informational ``global_*`` metrics,
+    and coverage plus rank (Spearman) QA stay global.
     """
 
     cfg = config or DepthCalibrationConfig()
@@ -247,6 +331,31 @@ def calibrate_relative_depth_to_camera_z(
     if not np.any(foreground):
         raise ContractError("Canonical calibration mask is empty")
 
+    qa_region: np.ndarray | None = None
+    qa_region_info: dict[str, Any] | None = None
+    if qa_anchor_points_xy is not None:
+        anchor_points = np.asarray(qa_anchor_points_xy, dtype=np.float64)
+        if anchor_points.size:
+            if (
+                anchor_points.ndim != 2
+                or anchor_points.shape[1] != 2
+                or not np.all(np.isfinite(anchor_points))
+            ):
+                raise ContractError(
+                    "qa_anchor_points_xy must be a finite [anchors, 2] pixel array"
+                )
+            qa_region, qa_radius_px = _contact_anchor_qa_region(
+                reference.shape,
+                anchor_points,
+                cfg.qa_anchor_radius_fraction,
+            )
+            qa_region_info = {
+                "anchor_count": int(anchor_points.shape[0]),
+                "radius_px": qa_radius_px,
+                "radius_fraction_of_diagonal": float(cfg.qa_anchor_radius_fraction),
+                "region_pixels_total": int(np.sum(qa_region)),
+            }
+
     candidates: list[_CalibrationCandidate] = []
     failures: dict[str, str] = {}
     for mode in ("affine", "reciprocal_affine"):
@@ -259,6 +368,8 @@ def calibrate_relative_depth_to_camera_z(
                     mode=mode,
                     characteristic_height=height_scale,
                     config=cfg,
+                    qa_region=qa_region,
+                    qa_region_info=qa_region_info,
                 )
             )
         except ContractError as exc:

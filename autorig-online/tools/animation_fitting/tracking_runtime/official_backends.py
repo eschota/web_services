@@ -386,21 +386,46 @@ class Sam2ImageForegroundBackend:
                 torch.cuda.empty_cache()
 
 
+# Exact per-encoder constructor arguments from the pinned official
+# Video-Depth-Anything run.py model_configs table.
+VDA_ENCODER_SPECS: dict[str, dict[str, Any]] = {
+    "vits": {
+        "features": 64,
+        "out_channels": (48, 96, 192, 384),
+        "lock_checkpoint": "video_depth_anything_small",
+        "backend_label": "depthanything-video-depth-anything-small",
+    },
+    "vitl": {
+        "features": 256,
+        "out_channels": (256, 512, 1024, 1024),
+        "lock_checkpoint": "video_depth_anything_large",
+        "backend_label": "depthanything-video-depth-anything-large",
+    },
+}
+
+
 @dataclass
-class VideoDepthAnythingSmallBackend:
+class VideoDepthAnythingBackend:
     repo: Path
     checkpoint: Path
     lock: RuntimeLock
     device: str = "cuda"
     require_cuda: bool = True
     input_size: int = 518
+    encoder: str = "vitl"
 
     def __post_init__(self) -> None:
+        if self.encoder not in VDA_ENCODER_SPECS:
+            raise ContractError(
+                "Unsupported Video Depth Anything encoder "
+                f"{self.encoder!r}; pinned encoders: {sorted(VDA_ENCODER_SPECS)}"
+            )
+        self._spec = VDA_ENCODER_SPECS[self.encoder]
         self.repo = Path(self.repo).resolve()
         self.checkpoint = Path(self.checkpoint).resolve()
         self.repo_provenance = self.lock.verify_repo("video_depth_anything", self.repo)
         self.checkpoint_provenance = self.lock.verify_checkpoint(
-            "video_depth_anything_small", self.checkpoint, license_repo=self.repo
+            self._spec["lock_checkpoint"], self.checkpoint, license_repo=self.repo
         )
 
     def infer(self, video: VideoFrames) -> DepthResult:
@@ -413,9 +438,9 @@ class VideoDepthAnythingSmallBackend:
             raise DependencyUnavailableError(f"Pinned Video Depth Anything import failed: {exc}") from exc
         device = torch.device(self.device)
         model = VideoDepthAnything(
-            encoder="vits",
-            features=64,
-            out_channels=[48, 96, 192, 384],
+            encoder=self.encoder,
+            features=self._spec["features"],
+            out_channels=list(self._spec["out_channels"]),
             metric=False,
         )
         state = torch.load(self.checkpoint, map_location="cpu", weights_only=True)
@@ -445,8 +470,8 @@ class VideoDepthAnythingSmallBackend:
         return DepthResult(
             relative_depth=np.asarray(depths, dtype=np.float32),
             provenance={
-                "backend": "depthanything-video-depth-anything-small",
-                "encoder": "vits",
+                "backend": self._spec["backend_label"],
+                "encoder": self.encoder,
                 "metric": False,
                 "repo": self.repo_provenance,
                 "checkpoint": self.checkpoint_provenance,

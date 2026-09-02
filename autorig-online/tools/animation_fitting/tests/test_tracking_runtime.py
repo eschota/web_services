@@ -811,6 +811,60 @@ def test_runtime_lock_pins_official_apache_repositories() -> None:
     assert lock.checkpoints["tapnextpp"].license_source_repo == "tapnet"
 
 
+def test_runtime_lock_pins_video_depth_anything_large() -> None:
+    lock = load_runtime_lock()
+    pin = lock.checkpoints["video_depth_anything_large"]
+    assert pin.bytes == 1538392012
+    assert pin.sha256 == (
+        "43df27c6b396042ba34ff7b798ab279f64d204d2e86d7a373968f8fa36d0e6fa"
+    )
+    assert pin.license_source_repo == "video_depth_anything"
+    assert pin.url == (
+        "https://huggingface.co/depth-anything/Video-Depth-Anything-Large/"
+        "resolve/main/video_depth_anything_vitl.pth?download=true"
+    )
+
+
+def test_vda_backend_rejects_unpinned_encoder(tmp_path: Path) -> None:
+    from animation_fitting.tracking_runtime.official_backends import (
+        VDA_ENCODER_SPECS,
+        VideoDepthAnythingBackend,
+    )
+
+    assert VDA_ENCODER_SPECS["vitl"]["features"] == 256
+    assert tuple(VDA_ENCODER_SPECS["vitl"]["out_channels"]) == (256, 512, 1024, 1024)
+    assert VDA_ENCODER_SPECS["vits"]["features"] == 64
+    with pytest.raises(ContractError, match="Unsupported Video Depth Anything"):
+        VideoDepthAnythingBackend(
+            tmp_path / "repo",
+            tmp_path / "model.pth",
+            load_runtime_lock(),
+            encoder="vitb",
+        )
+
+
+def test_vda_encoder_resolution_is_env_gated_and_fail_closed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    paths = tracking_cli._paths(tmp_path)
+    assert paths["video_depth_anything_large"].name == "video_depth_anything_vitl.pth"
+
+    monkeypatch.delenv("AUTORIG_FITTING_VDA_ENCODER", raising=False)
+    assert tracking_cli._resolve_vda_encoder(paths) == "vits"
+
+    paths["video_depth_anything_large"].parent.mkdir(parents=True, exist_ok=True)
+    paths["video_depth_anything_large"].write_bytes(b"placeholder")
+    assert tracking_cli._resolve_vda_encoder(paths) == "vitl"
+
+    monkeypatch.setenv("AUTORIG_FITTING_VDA_ENCODER", "vits")
+    assert tracking_cli._resolve_vda_encoder(paths) == "vits"
+    monkeypatch.setenv("AUTORIG_FITTING_VDA_ENCODER", "vitl")
+    assert tracking_cli._resolve_vda_encoder(paths) == "vitl"
+    monkeypatch.setenv("AUTORIG_FITTING_VDA_ENCODER", "vitb")
+    with pytest.raises(FittingError, match="AUTORIG_FITTING_VDA_ENCODER"):
+        tracking_cli._resolve_vda_encoder(paths)
+
+
 def test_runtime_lock_rejects_dirty_license_source_repo(tmp_path: Path) -> None:
     repo = tmp_path / "official"
     repo.mkdir()

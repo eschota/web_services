@@ -56,6 +56,7 @@ def calibrate_bundle_camera_z(
     canonical_mask: np.ndarray,
     *,
     config: DepthCalibrationConfig | None = None,
+    qa_anchor_points_xy: np.ndarray | None = None,
 ) -> DepthCalibrationResult:
     reference_path = rig.artifacts.get("camera_z")
     if reference_path is None:
@@ -114,6 +115,7 @@ def calibrate_bundle_camera_z(
         canonical_mask,
         characteristic_height=characteristic_height(rig),
         config=config,
+        qa_anchor_points_xy=qa_anchor_points_xy,
     )
 
 

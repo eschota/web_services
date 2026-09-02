@@ -26,7 +26,8 @@ from .official_backends import (
     Sam2ImageForegroundBackend,
     Sam2VideoMaskBackend,
     TapNextPPBackend,
-    VideoDepthAnythingSmallBackend,
+    VDA_ENCODER_SPECS,
+    VideoDepthAnythingBackend,
 )
 from .runtime_lock import load_runtime_lock
 
@@ -167,7 +168,31 @@ def _paths(runtime_root: Path) -> dict[str, Path]:
         "video_depth_anything_small": runtime_root
         / "checkpoints"
         / "video_depth_anything_vits.pth",
+        "video_depth_anything_large": runtime_root
+        / "checkpoints"
+        / "video_depth_anything_vitl.pth",
     }
+
+
+def _resolve_vda_encoder(paths: dict[str, Path]) -> str:
+    """Pick the pinned Video Depth Anything encoder, fail-closed.
+
+    An explicit AUTORIG_FITTING_VDA_ENCODER wins and must name a pinned
+    encoder; the checkpoint hash for that encoder is then verified by the
+    backend itself. Without an explicit request, vitl is preferred whenever
+    the large checkpoint file is present, otherwise vits.
+    """
+
+    requested = os.environ.get("AUTORIG_FITTING_VDA_ENCODER")
+    if requested is not None:
+        requested = requested.strip()
+        if requested not in VDA_ENCODER_SPECS:
+            raise FittingError(
+                "AUTORIG_FITTING_VDA_ENCODER must be one of "
+                f"{sorted(VDA_ENCODER_SPECS)}; got {requested!r}"
+            )
+        return requested
+    return "vitl" if paths["video_depth_anything_large"].is_file() else "vits"
 
 
 def _module_version(name: str) -> str | None:
@@ -204,7 +229,11 @@ def _doctor(
             ok = False
     checkpoint_names = ["tapnextpp", "sam2_hiera_tiny"]
     if with_depth:
-        checkpoint_names.append("video_depth_anything_small")
+        checkpoint_names.extend(
+            name
+            for name in sorted(lock.checkpoints)
+            if name.startswith("video_depth_anything")
+        )
     for name in checkpoint_names:
         try:
             pin = lock.checkpoints[name]
@@ -336,17 +365,20 @@ def main(argv: list[str] | None = None) -> int:
                 device=args.device,
                 require_cuda=require_cuda,
             )
-            depth = (
-                VideoDepthAnythingSmallBackend(
+            depth = None
+            if args.with_depth:
+                encoder = _resolve_vda_encoder(paths)
+                checkpoint_key = str(
+                    VDA_ENCODER_SPECS[encoder]["lock_checkpoint"]
+                )
+                depth = VideoDepthAnythingBackend(
                     paths["video_depth_anything"],
-                    paths["video_depth_anything_small"],
+                    paths[checkpoint_key],
                     lock,
                     device=args.device,
                     require_cuda=require_cuda,
+                    encoder=encoder,
                 )
-                if args.with_depth
-                else None
-            )
             config = ObservationRuntimeConfig(
                 loop=bool(args.loop),
                 reference_geometry_mode=args.reference_geometry_mode,
