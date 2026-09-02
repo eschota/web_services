@@ -35,9 +35,52 @@ ACTION_OVERRIDES = {
         "through the air. All four legs step continuously, both near-side "
         "legs and both far-side legs, in the natural four-beat lateral "
         "walking sequence: left hind, left fore, right hind, right fore, "
-        "evenly spaced in time, with a gentle head nod on every stride."
+        "evenly spaced in time, with a gentle head nod on every stride. "
+        "Brisk natural real-time pace, about one full stride per second, "
+        "not slow motion."
     ),
 }
+
+# Game-controller frame budgets at 30 fps (all 8n+1). The taxonomy's legacy
+# {33,49,65,97} profile is wrong for locomotion: a horse walk cycle is ~1.1 s
+# (33 frames), trot ~0.8 s (25), run ~0.7 s (21), sprint ~0.55 s (17). Gaits
+# are therefore generated long and free-running (gen_frames) and ONE period is
+# extracted and retimed to target_frames by the gait analyzer; static loops
+# and one-shots are generated at their final length directly.
+FRAME_BUDGET = {
+    # action:            (gen_frames, target_frames, kind)
+    "walk_forward":      (97, 33, "gait"),
+    "walk_backward":     (97, 33, "gait"),
+    "trot_jog":          (97, 25, "gait"),
+    "run":               (97, 21, "gait"),
+    "sprint":            (97, 17, "gait"),
+    "jump_air":          (49, 25, "static_loop"),
+    "idle_neutral":      (97, 97, "static_loop"),
+    "idle_alert":        (97, 97, "static_loop"),
+    "idle_relaxed":      (97, 97, "static_loop"),
+    "idle_look_around":  (97, 97, "static_loop"),
+    "idle_fidget":       (97, 97, "static_loop"),
+    "eat_interact":      (129, 129, "static_loop"),
+    "sleep_rest":        (97, 97, "static_loop"),
+    "turn_left_90":      (33, 33, "one_shot"),
+    "turn_right_90":     (33, 33, "one_shot"),
+    "turn_around_180":   (49, 49, "one_shot"),
+    "stop_brake":        (33, 33, "one_shot"),
+    "jump_start":        (17, 17, "one_shot"),
+    "jump_land":         (25, 25, "one_shot"),
+    "jump_full":         (49, 49, "one_shot"),
+    "fall":              (49, 49, "one_shot"),
+    "attack_primary":    (49, 49, "one_shot"),
+    "attack_secondary":  (65, 65, "one_shot"),
+    "attack_heavy":      (49, 49, "one_shot"),
+    "hit_front":         (25, 25, "one_shot"),
+    "hit_left":          (25, 25, "one_shot"),
+    "hit_right":         (25, 25, "one_shot"),
+    "death":             (81, 81, "one_shot"),
+    "get_up":            (65, 65, "one_shot"),
+    "vocalize_emote":    (33, 33, "one_shot"),
+}
+GAME_FPS = 30
 
 # Gaits are periodic: the seamless loop comes from extracting one cycle out of
 # the steady-state walk, not from forcing the clip back to the rest pose.
@@ -92,20 +135,26 @@ def main():
                          "loop is extracted later from the steady state")
     args = ap.parse_args()
 
-    prompt, negative, frames, mode = compose_prompt(args.action, free_cycle=args.free_cycle)
-    if args.free_cycle:
-        args.loop_strength = 0.0
+    gen_frames, target_frames, kind = FRAME_BUDGET.get(args.action, (None, None, None))
+    # Gaits are always free-running (no end guide); the loop is cut later.
+    free_cycle = args.free_cycle or kind == "gait"
+    prompt, negative, frames, mode = compose_prompt(args.action, free_cycle=free_cycle)
+    if gen_frames:
+        frames = gen_frames
     if args.frames:
         frames = args.frames
-    loop_strength = args.loop_strength if mode == "loop" else 0.0
+    loop_strength = 0.0 if free_cycle else (args.loop_strength if mode == "loop" else 0.0)
     # LTXVAddGuide on the last frame appends one latent block (8 frames) to
-    # the video, so ask for taxonomy_frames - 8 to get exactly the taxonomy
-    # count back, with the final frame pinned to the canonical pose.
+    # the video, so ask for frames - 8 to get exactly the budgeted count back,
+    # with the final frame pinned to the canonical pose.
     latent_frames = frames - 8 if loop_strength > 0 else frames
     image_name = upload_image(args.image)
     graph = build(prompt, image_name, args.out_name, latent_frames,
+                  frame_rate=GAME_FPS, fps=float(GAME_FPS),
                   seed=args.seed, loop_guide_strength=loop_strength,
                   spatial_tiles=args.tiles)
+    print(json.dumps({"budget": {"gen_frames": frames, "target_frames": target_frames,
+                                 "kind": kind, "fps": GAME_FPS}}))
     graph["negative_prompt"]["inputs"]["text"] = negative
     payload = json.dumps({"prompt": graph, "client_id": "horse-pilot"}).encode()
     req = urllib.request.Request(f"{BASE}/prompt", data=payload,
