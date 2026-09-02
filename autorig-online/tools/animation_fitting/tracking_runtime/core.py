@@ -1232,6 +1232,37 @@ def select_anchor_seeds(
         x0, x1 = max(0, x - radius), min(mask.shape[1], x + radius + 1)
         return bool(mask[y0:y1, x0:x1].any())
 
+    def _nearest_mask_pixel(
+        mask: np.ndarray, x: float, y: float, cap: float
+    ) -> tuple[float, float, float] | None:
+        """Deterministic nearest foreground pixel center within ``cap`` px."""
+
+        reach = int(math.ceil(cap))
+        cx, cy = int(round(x)), int(round(y))
+        y0, y1 = max(0, cy - reach), min(mask.shape[0], cy + reach + 1)
+        x0, x1 = max(0, cx - reach), min(mask.shape[1], cx + reach + 1)
+        window = mask[y0:y1, x0:x1]
+        if not np.any(window):
+            return None
+        ys, xs = np.nonzero(window)
+        distances = np.hypot(xs + x0 - x, ys + y0 - y)
+        index = int(np.argmin(distances))
+        if float(distances[index]) > cap:
+            return None
+        return float(xs[index] + x0), float(ys[index] + y0), float(distances[index])
+
+    # Contact anchors are authored as hoof-boundary mesh vertices; with binary
+    # single-sample (no-AA) rasterization a near-edge-on hoof sliver can leave
+    # such a vertex projecting several pixels outside the rendered silhouette.
+    # Snap priority anchors onto the nearest canonical foreground pixel within
+    # a bounded, diagonal-proportional cap so their tracks and depth samples
+    # start on the visible surface; anything beyond the cap stays fail-closed.
+    priority_set = set(priority_anchor_ids)
+    priority_snap_cap = max(
+        2.0, 0.01 * math.hypot(rig.camera.width, rig.camera.height)
+    )
+    priority_snaps: dict[str, dict[str, Any]] = {}
+
     grouped: dict[str, list[tuple[str, np.ndarray, float, int]]] = {}
     visible_by_anchor: dict[str, tuple[str, str, np.ndarray]] = {}
     for anchor_id, anchor in rig.anchors.items():
@@ -1241,9 +1272,29 @@ def select_anchor_seeds(
         x, y = int(round(float(xy[0]))), int(round(float(xy[1])))
         if x < 0 or x >= rig.camera.width or y < 0 or y >= rig.camera.height:
             continue
-        if not _mask_hit_near(reference_mask, x, y):
-            continue
-        point = np.asarray(xy, dtype=np.float32)
+        if anchor_id in priority_set:
+            if reference_mask[y, x]:
+                point = np.asarray(xy, dtype=np.float32)
+            else:
+                snapped = _nearest_mask_pixel(
+                    reference_mask,
+                    float(xy[0]),
+                    float(xy[1]),
+                    priority_snap_cap,
+                )
+                if snapped is None:
+                    continue
+                snap_x, snap_y, snap_distance = snapped
+                point = np.asarray((snap_x, snap_y), dtype=np.float32)
+                priority_snaps[anchor_id] = {
+                    "projected_xy": [float(xy[0]), float(xy[1])],
+                    "snapped_xy": [snap_x, snap_y],
+                    "distance_px": snap_distance,
+                }
+        else:
+            if not _mask_hit_near(reference_mask, x, y):
+                continue
+            point = np.asarray(xy, dtype=np.float32)
         grouped.setdefault(anchor.bone, []).append(
             (anchor_id, point, float(anchor.skin_weight), anchor.vertex_id)
         )
@@ -1254,6 +1305,15 @@ def select_anchor_seeds(
             "Priority contact anchors are not visible in the canonical mask: "
             + ", ".join(missing_priority)
         )
+    if priority_snaps:
+        reference_provenance = {
+            **reference_provenance,
+            "priority_anchor_mask_snap": {
+                "policy": "nearest_canonical_foreground_pixel_bounded",
+                "cap_px": priority_snap_cap,
+                "anchors": priority_snaps,
+            },
+        }
     selected: list[tuple[str, str, np.ndarray]] = [
         visible_by_anchor[anchor_id] for anchor_id in priority_anchor_ids
     ]

@@ -960,6 +960,67 @@ def test_priority_seed_selection_never_exceeds_max_tracks(tmp_path: Path) -> Non
     assert len(seeds.track_ids) == len(priority)
 
 
+def _erase_mask_disk(bundle: Path, center_xy: np.ndarray, radius: float) -> None:
+    mask_path = bundle / "reference_mask.png"
+    mask = np.asarray(Image.open(mask_path).convert("L"), dtype=np.uint8).copy()
+    yy, xx = np.mgrid[0 : mask.shape[0], 0 : mask.shape[1]]
+    erased = np.hypot(xx - float(center_xy[0]), yy - float(center_xy[1])) <= radius
+    mask[erased] = 0
+    Image.fromarray(mask).save(mask_path)
+    metadata_path = bundle / "fitting_bundle.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["artifacts"]["mask"] = _artifact_record(mask_path)
+    _write_json(metadata_path, metadata)
+    _write_immutable_manifest(
+        bundle,
+        [
+            bundle / "skeleton.json",
+            bundle / "skin_weights.json.gz",
+            bundle / "surface_anchors.json",
+            bundle / "reference_rgb.png",
+            bundle / "reference_mask.png",
+        ],
+    )
+
+
+def test_priority_contact_anchor_snaps_into_binary_mask(tmp_path: Path) -> None:
+    bundle, _ = _bundle(tmp_path)
+    baseline = select_anchor_seeds(bundle)
+    target = baseline.anchor_ids[0]
+    anchor_xy = np.asarray(baseline.points_xy[0], dtype=np.float64)
+    # Push the anchor a few pixels outside the binary silhouette, as a
+    # near-edge-on hoof sliver does under no-AA rasterization: erase a disk
+    # biased to one side so the nearest surviving foreground pixel sits
+    # ~3.4 px away, past the 2 px neighborhood but inside the snap cap.
+    _erase_mask_disk(bundle, anchor_xy - np.asarray((1.5, 0.0)), radius=4.5)
+
+    without_priority = select_anchor_seeds(bundle)
+    assert target not in without_priority.anchor_ids
+
+    seeds = select_anchor_seeds(bundle, priority_anchor_ids=(target,))
+    assert seeds.anchor_ids[0] == target
+    snapped = seeds.points_xy[0]
+    assert seeds.canonical_mask[int(round(snapped[1])), int(round(snapped[0]))]
+    snap_info = seeds.reference_provenance["priority_anchor_mask_snap"]
+    assert snap_info["policy"] == "nearest_canonical_foreground_pixel_bounded"
+    record = snap_info["anchors"][target]
+    assert 2.0 < record["distance_px"] <= snap_info["cap_px"]
+    assert record["projected_xy"] == pytest.approx(list(anchor_xy), abs=1e-5)
+
+
+def test_priority_contact_anchor_snap_is_bounded_fail_closed(tmp_path: Path) -> None:
+    bundle, _ = _bundle(tmp_path)
+    baseline = select_anchor_seeds(bundle)
+    target = baseline.anchor_ids[0]
+    anchor_xy = np.asarray(baseline.points_xy[0], dtype=np.float64)
+    # Beyond the bounded snap cap (1% of the canonical diagonal) the gate
+    # must stay fail-closed rather than hunting for far-away foreground.
+    _erase_mask_disk(bundle, anchor_xy, radius=7.0)
+
+    with pytest.raises(ContractError, match="not visible in the canonical mask"):
+        select_anchor_seeds(bundle, priority_anchor_ids=(target,))
+
+
 def test_priority_seed_selection_places_requested_anchor_first(tmp_path: Path) -> None:
     bundle, _ = _bundle(tmp_path)
     baseline = select_anchor_seeds(bundle)
