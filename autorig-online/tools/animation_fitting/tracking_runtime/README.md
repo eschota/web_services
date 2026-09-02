@@ -5,7 +5,11 @@ bundle into optimizer-compatible observations. Production inference uses
 commit-pinned official checkouts of Google DeepMind TAPNext++, Meta SAM 2, and
 optional Video Depth Anything (Large `vitl` by default when its pinned
 checkpoint is present, Small `vits` otherwise; override with
-`AUTORIG_FITTING_VDA_ENCODER`, fail-closed against the runtime lock).
+`AUTORIG_FITTING_VDA_ENCODER`, fail-closed against the runtime lock). The
+large encoder pass is chunked per frame (`encoder_frame_chunk`, default 4,
+override with `AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK=<n>|none`) because the
+pinned DINOv2 attention without xformers needs ~36 GB for a whole 32-frame
+window; the shared 24 GB GPU otherwise pages through WDDM memory and stalls.
 Model weights and the isolated Python venv
 live outside this repository under `R:\ComfyUI-data\autorig-fitting\runtimes`.
 Each checkpoint is hash/size pinned and linked to the pinned source repository
