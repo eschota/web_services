@@ -843,6 +843,71 @@ def test_vda_backend_rejects_unpinned_encoder(tmp_path: Path) -> None:
         )
 
 
+def test_vda_encoder_frame_chunking_matches_whole_batch() -> None:
+    import torch
+
+    from animation_fitting.tracking_runtime.official_backends import (
+        chunk_encoder_intermediate_layers,
+    )
+
+    calls: list[int] = []
+
+    def original(x: torch.Tensor, layers: list[int], return_class_token: bool):
+        # Per-sample computation exactly like the DINOv2 encoder contract:
+        # tuple over layers of (patch tokens [B, N, C], class token [B, C]).
+        calls.append(int(x.shape[0]))
+        return tuple(
+            (x * float(layer + 1), x[:, 0] - float(layer))
+            for layer in layers
+        )
+
+    tokens = torch.arange(11 * 5 * 3, dtype=torch.float32).reshape(11, 5, 3)
+    expected = original(tokens, [1, 3], return_class_token=True)
+    chunked = chunk_encoder_intermediate_layers(original, 4)
+    calls.clear()
+    actual = chunked(tokens, [1, 3], return_class_token=True)
+
+    assert calls == [4, 4, 3]
+    assert len(actual) == len(expected) == 2
+    for (patch, cls), (want_patch, want_cls) in zip(actual, expected):
+        assert torch.equal(patch, want_patch)
+        assert torch.equal(cls, want_cls)
+    # Small batches pass straight through without splitting.
+    calls.clear()
+    chunked(tokens[:3], [1], return_class_token=True)
+    assert calls == [3]
+    with pytest.raises(ContractError, match="encoder_frame_chunk"):
+        chunk_encoder_intermediate_layers(original, 0)
+
+
+def test_vda_backend_rejects_invalid_encoder_frame_chunk(tmp_path: Path) -> None:
+    from animation_fitting.tracking_runtime.official_backends import (
+        VideoDepthAnythingBackend,
+    )
+
+    with pytest.raises(ContractError, match="encoder_frame_chunk"):
+        VideoDepthAnythingBackend(
+            tmp_path / "repo",
+            tmp_path / "model.pth",
+            load_runtime_lock(),
+            encoder="vitl",
+            encoder_frame_chunk=0,
+        )
+
+
+def test_vda_encoder_frame_chunk_resolution_is_env_gated(monkeypatch) -> None:
+    monkeypatch.delenv("AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK", raising=False)
+    assert tracking_cli._resolve_vda_encoder_frame_chunk("vitl") == 4
+    assert tracking_cli._resolve_vda_encoder_frame_chunk("vits") is None
+    monkeypatch.setenv("AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK", "8")
+    assert tracking_cli._resolve_vda_encoder_frame_chunk("vits") == 8
+    monkeypatch.setenv("AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK", "none")
+    assert tracking_cli._resolve_vda_encoder_frame_chunk("vitl") is None
+    monkeypatch.setenv("AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK", "0")
+    with pytest.raises(FittingError, match="ENCODER_FRAME_CHUNK"):
+        tracking_cli._resolve_vda_encoder_frame_chunk("vitl")
+
+
 def test_vda_encoder_resolution_is_env_gated_and_fail_closed(
     tmp_path: Path, monkeypatch
 ) -> None:

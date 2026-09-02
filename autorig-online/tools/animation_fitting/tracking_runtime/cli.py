@@ -195,6 +195,29 @@ def _resolve_vda_encoder(paths: dict[str, Path]) -> str:
     return "vitl" if paths["video_depth_anything_large"].is_file() else "vits"
 
 
+def _resolve_vda_encoder_frame_chunk(encoder: str) -> int | None:
+    """Frame-chunk size for the VDA encoder pass, fail-closed on bad input.
+
+    AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK accepts a positive integer or
+    ``none`` (whole 32-frame window at once); unset falls back to the pinned
+    per-encoder default.
+    """
+
+    raw = os.environ.get("AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK")
+    if raw is None:
+        default = VDA_ENCODER_SPECS[encoder]["default_encoder_frame_chunk"]
+        return None if default is None else int(default)
+    value = raw.strip().lower()
+    if value == "none":
+        return None
+    if not value.isdigit() or int(value) < 1:
+        raise FittingError(
+            "AUTORIG_FITTING_VDA_ENCODER_FRAME_CHUNK must be a positive integer "
+            f"or 'none'; got {raw!r}"
+        )
+    return int(value)
+
+
 def _module_version(name: str) -> str | None:
     try:
         module = importlib.import_module(name)
@@ -378,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
                     device=args.device,
                     require_cuda=require_cuda,
                     encoder=encoder,
+                    encoder_frame_chunk=_resolve_vda_encoder_frame_chunk(encoder),
                 )
             config = ObservationRuntimeConfig(
                 loop=bool(args.loop),

@@ -387,21 +387,69 @@ class Sam2ImageForegroundBackend:
 
 
 # Exact per-encoder constructor arguments from the pinned official
-# Video-Depth-Anything run.py model_configs table.
+# Video-Depth-Anything run.py model_configs table. ``default_encoder_frame_chunk``
+# is this runtime's own memory policy (see ``chunk_encoder_intermediate_layers``):
+# the pinned DINOv2 attention materializes a fp32 [frames, heads, tokens, tokens]
+# score matrix per block, which for ViT-L on a 32-frame window exceeds a 24 GB
+# GPU, so the large encoder is run in per-frame chunks by default.
 VDA_ENCODER_SPECS: dict[str, dict[str, Any]] = {
     "vits": {
         "features": 64,
         "out_channels": (48, 96, 192, 384),
         "lock_checkpoint": "video_depth_anything_small",
         "backend_label": "depthanything-video-depth-anything-small",
+        "default_encoder_frame_chunk": None,
     },
     "vitl": {
         "features": 256,
         "out_channels": (256, 512, 1024, 1024),
         "lock_checkpoint": "video_depth_anything_large",
         "backend_label": "depthanything-video-depth-anything-large",
+        "default_encoder_frame_chunk": 4,
     },
 }
+
+
+def chunk_encoder_intermediate_layers(original: Any, chunk: int) -> Any:
+    """Run a per-frame DINOv2 ``get_intermediate_layers`` in frame chunks.
+
+    Video Depth Anything flattens a temporal window into the encoder batch
+    dimension and applies temporal attention only afterwards in its DPT
+    head, so every frame passes through the encoder independently. Splitting
+    that batch and concatenating the per-layer outputs (and class tokens)
+    along the batch axis is therefore the same computation with a bounded
+    attention working set; the only difference is GEMM tiling for a smaller
+    batch, which stays deterministic under the runtime's strict Torch flags.
+    """
+
+    if isinstance(chunk, bool) or not isinstance(chunk, int) or chunk < 1:
+        raise ContractError("encoder_frame_chunk must be a positive integer")
+
+    def chunked(x: Any, *args: Any, **kwargs: Any) -> Any:
+        import torch
+
+        count = int(x.shape[0])
+        if count <= chunk:
+            return original(x, *args, **kwargs)
+        pieces = [
+            original(x[start : start + chunk], *args, **kwargs)
+            for start in range(0, count, chunk)
+        ]
+        merged: list[Any] = []
+        for layer_index in range(len(pieces[0])):
+            entries = [piece[layer_index] for piece in pieces]
+            if isinstance(entries[0], tuple):
+                merged.append(
+                    tuple(
+                        torch.cat([entry[part] for entry in entries], dim=0)
+                        for part in range(len(entries[0]))
+                    )
+                )
+            else:
+                merged.append(torch.cat(entries, dim=0))
+        return tuple(merged)
+
+    return chunked
 
 
 @dataclass
@@ -413,6 +461,7 @@ class VideoDepthAnythingBackend:
     require_cuda: bool = True
     input_size: int = 518
     encoder: str = "vitl"
+    encoder_frame_chunk: int | None = None
 
     def __post_init__(self) -> None:
         if self.encoder not in VDA_ENCODER_SPECS:
@@ -420,6 +469,12 @@ class VideoDepthAnythingBackend:
                 "Unsupported Video Depth Anything encoder "
                 f"{self.encoder!r}; pinned encoders: {sorted(VDA_ENCODER_SPECS)}"
             )
+        if self.encoder_frame_chunk is not None and (
+            isinstance(self.encoder_frame_chunk, bool)
+            or not isinstance(self.encoder_frame_chunk, int)
+            or self.encoder_frame_chunk < 1
+        ):
+            raise ContractError("encoder_frame_chunk must be None or a positive integer")
         self._spec = VDA_ENCODER_SPECS[self.encoder]
         self.repo = Path(self.repo).resolve()
         self.checkpoint = Path(self.checkpoint).resolve()
@@ -446,6 +501,10 @@ class VideoDepthAnythingBackend:
         state = torch.load(self.checkpoint, map_location="cpu", weights_only=True)
         model.load_state_dict(state, strict=True)
         model = model.to(device).eval()
+        if self.encoder_frame_chunk is not None:
+            model.pretrained.get_intermediate_layers = chunk_encoder_intermediate_layers(
+                model.pretrained.get_intermediate_layers, self.encoder_frame_chunk
+            )
         frames_rgb = np.stack(
             [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in video.frames_bgr]
         )
@@ -472,6 +531,7 @@ class VideoDepthAnythingBackend:
             provenance={
                 "backend": self._spec["backend_label"],
                 "encoder": self.encoder,
+                "encoder_frame_chunk": self.encoder_frame_chunk,
                 "metric": False,
                 "repo": self.repo_provenance,
                 "checkpoint": self.checkpoint_provenance,
