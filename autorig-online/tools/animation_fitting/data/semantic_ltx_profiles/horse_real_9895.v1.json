@@ -3,8 +3,8 @@
   "profile_id": "horse_real_9895.semantic_limbs.v1",
   "source": {
     "rig_type": "HORSE_2",
-    "filename": "9895a5e2-d017-48e3-b300-b8269fb1ae0b_model_prepared_rigged.blend",
-    "sha256": "79cd23b2814be23493f5a8749bbba6ef05a00083243accbeb4e7c1f3683ed66f",
+    "filename": "horse_real_9895_rigged_w4.blend",
+    "sha256": "8120d22e05a02eae818ff0a44a6e6df209dd378af96facd33cbd01a1cc403e88",
     "armature_name": "Horse_rig",
     "mesh_names": [
       "tripo_node_a1f6fecc-93db-4d32-8f7b-be566cba37ea"
