@@ -94,13 +94,13 @@
     ]
   },
   "gates": {
-    "minimum_face_limb_weight": 0.6,
-    "minimum_face_dominance": 0.95,
+    "minimum_face_limb_weight": 0.5,
+    "minimum_face_dominance": 0.5,
     "minimum_faces_per_source_group": 24,
     "minimum_group_weight_mass": 30.0,
     "minimum_near_far_depth_separation": 0.05,
     "minimum_pixels_per_output_label": 900,
-    "minimum_pixel_fraction_of_mask": 0.03,
+    "minimum_pixel_fraction_of_mask": 0.015,
     "maximum_mask_mismatch_pixels": 0,
     "mask_threshold": 0.5,
     "pixel_color_tolerance": 0.08,

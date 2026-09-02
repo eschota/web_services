@@ -11,6 +11,10 @@ hooves_overlay_frame12.png, hoof_tracks.npz, metrics.json)
      + retimed cycle export (<basename>_cycle<N>.mp4, h264 yuv420p 25 fps 768x448)
        and seam_check.png (start | end | difference)
      + accept / rework verdict.
+v3.1 = amount-of-motion metrics + static-render guard:
+     motion_metrics() (frame difference globally / on the dilated horse silhouette /
+     per leg), ffprobe_motion() (P-frame vs I-frame packet size cross-check),
+     hard verdict rule "motion_present", motion_profile.png, metrics.json["motion"].
 
 CLI (argv-compatible with v2: positional <video> <out_dir>):
     python analyze_gait.py <video> <out_dir> [--target-frames 49] [--period-min 12]
@@ -86,6 +90,14 @@ PARAMS = {
     "vel_mismatch_weight": 1.0,   # cost weight of hoof velocity mismatch at the seam
     "missing_leg_penalty": 40.0,  # cost per leg that does not swing inside the window
     "order_penalty": 25.0,        # cost if the 4-beat lateral order is broken
+    # --- amount of motion / static-render guard (v3.1)
+    "sil_dilate_px": 2,           # dilation radius of the body+legs silhouette for the fg difference
+    "fg_pix_thr": 8.0,            # grey levels: silhouette pixel with |diff| above = "moving" pixel
+    "static_fg_frac_thr": 0.02,   # frame pair is static when its silhouette moving-pixel fraction is below
+    "leg_move_px": 0.5,           # px/frame: leg mask centroid or hoof shift above = leg moves
+    "static_frame_ratio_max": 0.2,  # hard rule: at most this fraction of frame pairs may be static
+    "leg_moving_ratio_min": 0.3,    # hard rule: every leg must move in >= this fraction of frame pairs
+    "ffprobe_static_ratio": 0.05,   # cross-check: mean P-frame bytes / I-frame bytes below = static hint
 }
 
 
@@ -127,19 +139,22 @@ def estimate_background(frame0):
     return np.percentile(border, 85, axis=0), np.percentile(border, 10, axis=0)
 
 
-def segment_video(frames, params=PARAMS):
+def segment_video(frames, params=PARAMS, return_masks=False):
     """Per-frame colour classification -> raw hoof positions, leg areas, body centroid.
 
     Returns hoof (4,T,2) float (NaN where a leg is not found), areas (4,T), body (T,2).
     Hoof = bottom-most pixels (ymax-4 .. ymax) of the leg mask: x = median, y = mean.
+    With return_masks=True a 4th value is returned: cleaned label map (T,H,W) uint8,
+    0..3 = legs in LEGS order, 4 = body (components >= min_comp_area), 255 = background.
     """
-    T = frames.shape[0]
+    T, H, W = frames.shape[:3]
     bg_light, bg_dark = estimate_background(frames[0])
     class_colors = np.stack([PALETTE_SRGB[k] for k in LEGS]
                             + [PALETTE_SRGB["body"], bg_light, bg_dark]).astype(np.float32)
     hoof = np.full((len(LEGS), T, 2), np.nan)
     areas = np.zeros((len(LEGS), T))
     body = np.full((T, 2), np.nan)
+    masks = np.full((T, H, W), 255, np.uint8) if return_masks else None
     for t in range(T):
         img = frames[t].astype(np.float32)
         d = np.linalg.norm(img[None] - class_colors[:, None, None, :], axis=-1)
@@ -160,12 +175,22 @@ def segment_video(frames, params=PARAMS):
                 ymax = ys.max()
                 sel = ys >= ymax - 4
                 hoof[li, t] = (float(np.median(xs[sel])), float(np.mean(ys[sel])))
+                if return_masks:
+                    masks[t][keep == 1] = li
         mb = ((lbl == len(LEGS)) & (dmin < params["body_dist_max"])).astype(np.uint8)
         mb = cv2.morphologyEx(mb, cv2.MORPH_OPEN, KERNEL)
         n, cc, stats, cents = cv2.connectedComponentsWithStats(mb, 8)
         if n > 1:
             ci = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
             body[t] = cents[ci]
+            if return_masks:
+                big = np.zeros_like(mb)
+                for bi in range(1, n):
+                    if stats[bi, cv2.CC_STAT_AREA] >= params["min_comp_area"]:
+                        big[cc == bi] = 1
+                masks[t][(big == 1) & (masks[t] == 255)] = len(LEGS)
+    if return_masks:
+        return hoof, areas, body, masks
     return hoof, areas, body
 
 
@@ -303,14 +328,14 @@ def compute_contacts(hoof_s, params=PARAMS):
 
 def analyze_tracks(frames, params=PARAMS):
     """Full track pipeline: segmentation -> filled/smoothed hoof tracks -> contacts."""
-    hoof_raw, areas, body = segment_video(frames, params)
+    hoof_raw, areas, body, masks = segment_video(frames, params, return_masks=True)
     hoof, valid, med_area, interp_frames = fill_invalid(hoof_raw, areas, params)
     hoof_s = smooth_tracks(hoof)
     body_f = np.stack([fill_nan_series(body[:, 0]), fill_nan_series(body[:, 1])], axis=1)
     kin = compute_contacts(hoof_s, params)
     return {"hoof_raw": hoof_raw, "hoof": hoof, "hoof_s": hoof_s, "areas": areas,
             "valid": valid, "med_area": med_area, "interp_frames": interp_frames,
-            "body": body, "body_f": body_f, **kin}
+            "body": body, "body_f": body_f, "masks": masks, **kin}
 
 
 def cyc_eq(a, b):
@@ -404,6 +429,162 @@ def clip_level_metrics(tr, T):
                             "body_centroid": (round(cb, 2) if np.isfinite(cb) else None)},
         "body_oscillation": {k: (round(v, 2) if np.isfinite(v) else None) for k, v in body_osc.items()},
     }
+
+
+# ======================================================================
+#  1b. amount of motion / static-render guard (v3.1)
+# ======================================================================
+def _r(v, nd=4):
+    return None if v is None or not np.isfinite(v) else round(float(v), nd)
+
+
+def motion_metrics(frames, masks, hoof_raw=None, params=PARAMS):
+    """Amount-of-motion metrics of the clip (guards against static / frozen renders).
+
+    frames (T,H,W,3) uint8 RGB; masks (T,H,W) uint8 label map from
+    segment_video(..., return_masks=True): 0..3 legs (LEGS order), 4 body, 255 bg.
+    All per-frame series have T-1 entries (frame pair t -> t+1).
+
+    (a) global: mean |gray[t+1]-gray[t]| over the whole frame;
+    (b) silhouette: union of body+legs of frames t and t+1, dilated by sil_dilate_px;
+        fraction of silhouette pixels with |diff| > fg_pix_thr ("moving pixels") and
+        mean |diff| on the silhouette (= sum |diff| / silhouette area, grey levels);
+    (c) per leg: the leg "moves" between t and t+1 when its mask centroid or its raw
+        hoof point shifts by more than leg_move_px;
+    (d) motion_score = median over frame pairs of (b) mean |diff|;
+        static_frame_ratio = fraction of frame pairs whose silhouette moving-pixel
+        fraction is below static_fg_frac_thr;
+        per_leg_moving_ratio = fraction of frame pairs in which the leg moves.
+    """
+    T = frames.shape[0]
+    nP = max(T - 1, 0)
+    out = {
+        "params": {k: params[k] for k in ("sil_dilate_px", "fg_pix_thr", "static_fg_frac_thr", "leg_move_px")},
+        "frame_pairs": int(nP),
+        "definitions": {
+            "motion_score": "median over frame pairs of mean |gray diff| on the dilated body+legs silhouette (grey levels 0..255)",
+            "static_frame_ratio": "fraction of frame pairs with silhouette moving-pixel fraction < static_fg_frac_thr",
+            "per_leg_moving_ratio": "fraction of frame pairs where the leg mask centroid or hoof shifts > leg_move_px",
+        },
+    }
+    if nP == 0:
+        out.update({"motion_score": None, "static_frame_ratio": None,
+                    "per_leg_moving_ratio": {l: None for l in LEGS}, "note": "single frame"})
+        return out
+    gray = np.stack([cv2.cvtColor(f, cv2.COLOR_RGB2GRAY) for f in frames]).astype(np.float32)
+    r = int(params["sil_dilate_px"])
+    kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    sil = np.stack([cv2.dilate((m != 255).astype(np.uint8), kern) for m in masks]).astype(bool)
+    g_mean = np.zeros(nP); fg_frac = np.zeros(nP); fg_mean = np.zeros(nP); sil_area = np.zeros(nP)
+    for t in range(nP):
+        d = np.abs(gray[t + 1] - gray[t])
+        g_mean[t] = float(d.mean())
+        s = sil[t] | sil[t + 1]
+        a = int(s.sum()); sil_area[t] = a
+        if a > 0:
+            ds = d[s]
+            fg_frac[t] = float((ds > params["fg_pix_thr"]).mean())
+            fg_mean[t] = float(ds.mean())
+    # per-leg displacement: mask centroid and raw hoof point (NaN-aware max)
+    cent = np.full((len(LEGS), T, 2), np.nan)
+    for t in range(T):
+        for li in range(len(LEGS)):
+            ys, xs = np.nonzero(masks[t] == li)
+            if len(xs):
+                cent[li, t] = (xs.mean(), ys.mean())
+    leg_disp = np.full((len(LEGS), nP), np.nan)
+    leg_moving = np.zeros((len(LEGS), nP), dtype=bool)
+    for li in range(len(LEGS)):
+        disp = np.linalg.norm(np.diff(cent[li], axis=0), axis=1)
+        if hoof_raw is not None:
+            disp = np.fmax(disp, np.linalg.norm(np.diff(hoof_raw[li], axis=0), axis=1))
+        leg_disp[li] = disp
+        leg_moving[li] = np.nan_to_num(disp, nan=0.0) > params["leg_move_px"]
+    static = fg_frac < params["static_fg_frac_thr"]
+    out.update({
+        "motion_score": _r(np.median(fg_mean), 3),
+        "static_frame_ratio": _r(static.mean(), 4),
+        "static_frame_pairs": [int(i) for i in np.nonzero(static)[0]],
+        "per_leg_moving_ratio": {leg: _r(leg_moving[li].mean(), 4) for li, leg in enumerate(LEGS)},
+        "per_leg_moving_pairs": {leg: int(leg_moving[li].sum()) for li, leg in enumerate(LEGS)},
+        "global": {
+            "mean_abs_diff_mean": _r(g_mean.mean(), 3), "mean_abs_diff_median": _r(np.median(g_mean), 3),
+            "mean_abs_diff_min": _r(g_mean.min(), 3),
+            "per_frame_mean_abs_diff": [round(float(v), 3) for v in g_mean],
+        },
+        "silhouette": {
+            "area_mean_px": _r(sil_area.mean(), 1), "area_min_px": _r(sil_area.min(), 1),
+            "moving_frac_mean": _r(fg_frac.mean()), "moving_frac_median": _r(np.median(fg_frac)),
+            "moving_frac_min": _r(fg_frac.min()),
+            "mean_abs_diff_mean": _r(fg_mean.mean(), 3), "mean_abs_diff_median": _r(np.median(fg_mean), 3),
+            "mean_abs_diff_min": _r(fg_mean.min(), 3),
+            "per_frame_moving_frac": [round(float(v), 4) for v in fg_frac],
+            "per_frame_mean_abs_diff": [round(float(v), 3) for v in fg_mean],
+        },
+        "per_leg_displacement_px": {leg: [_r(v, 2) for v in leg_disp[li]] for li, leg in enumerate(LEGS)},
+        "per_leg_moving": {leg: [bool(v) for v in leg_moving[li]] for li, leg in enumerate(LEGS)},
+    })
+    return out
+
+
+def ffprobe_motion(path, params=PARAMS):
+    """Cheap encoder-side cross-check: packet size of inter frames vs the I frame(s).
+    Repeated / frozen content is coded as skip blocks -> tiny P/B packets."""
+    fp = shutil.which("ffprobe")
+    if fp is None:
+        return {"error": "ffprobe not found in PATH"}
+    try:
+        r = subprocess.run([fp, "-v", "error", "-select_streams", "v:0",
+                            "-show_entries", "frame=pkt_size,pict_type", "-of", "json", path],
+                           capture_output=True, text=True, timeout=120)
+        fr = json.loads(r.stdout or "{}").get("frames", [])
+    except Exception as ex:  # noqa
+        return {"error": str(ex)}
+    sizes = {}
+    for f in fr:
+        try:
+            sizes.setdefault(str(f.get("pict_type", "?")), []).append(int(f.get("pkt_size")))
+        except (TypeError, ValueError):
+            continue
+    i_fr, p_fr, b_fr = sizes.get("I", []), sizes.get("P", []), sizes.get("B", [])
+    inter = p_fr + b_fr
+    i_bytes = float(np.mean(i_fr)) if i_fr else None
+    mean_p = float(np.mean(p_fr)) if p_fr else None
+    mean_inter = float(np.mean(inter)) if inter else None
+    ratio = (mean_p / i_bytes) if (mean_p is not None and i_bytes) else None
+    note = None
+    if not p_fr:
+        note = "no P frames (intra-only or single-frame stream): ratio undefined"
+    return {"n_frames": len(fr), "n_i": len(i_fr), "n_p": len(p_fr), "n_b": len(b_fr),
+            "i_frame_bytes": _r(i_bytes, 1), "mean_p_frame_bytes": _r(mean_p, 1),
+            "mean_b_frame_bytes": _r(float(np.mean(b_fr)) if b_fr else None, 1),
+            "mean_inter_frame_bytes": _r(mean_inter, 1),
+            "ratio": _r(ratio), "ratio_definition": "mean_p_frame_bytes / i_frame_bytes",
+            "static_ratio_thr": params["ffprobe_static_ratio"],
+            "static_hint": (bool(ratio < params["ffprobe_static_ratio"]) if ratio is not None else None),
+            "note": note}
+
+
+def motion_rule(motion, params=PARAMS):
+    """Hard rule motion_present: static_frame_ratio <= static_frame_ratio_max AND every leg
+    moves in >= leg_moving_ratio_min of the frame pairs.  Returns (ok, reasons)."""
+    reasons = []
+    sfr = motion.get("static_frame_ratio")
+    ms = motion.get("motion_score")
+    if sfr is None:
+        return False, ["static render: motion undefined (%s)" % motion.get("note")]
+    ok_static = sfr <= params["static_frame_ratio_max"]
+    if not ok_static:
+        reasons.append("static render: %.0f%% of frame pairs without silhouette motion "
+                       "(static_frame_ratio %.2f > %.2f, motion_score %.2f)"
+                       % (100.0 * sfr, sfr, params["static_frame_ratio_max"], ms if ms is not None else float("nan")))
+    plr = motion.get("per_leg_moving_ratio") or {}
+    frozen = [l for l in LEGS if (plr.get(l) is None) or plr[l] < params["leg_moving_ratio_min"]]
+    if frozen:
+        reasons.append("legs %s never move (moving ratio %s < %.2f)"
+                       % (", ".join(frozen), ", ".join("%.2f" % (plr.get(l) or 0.0) for l in frozen),
+                          params["leg_moving_ratio_min"]))
+    return bool(ok_static and not frozen), reasons
 
 
 # ======================================================================
@@ -797,8 +978,13 @@ def write_cycle_sheet(cycle_frames, times, path, cols=7, thumb_w=192):
 # ======================================================================
 #  5. verdict
 # ======================================================================
-def make_verdict(best, period_info, steady, closure_thr, params=PARAMS):
+def make_verdict(best, period_info, steady, closure_thr, params=PARAMS, motion=None):
+    """motion = metrics["motion"] block (motion_metrics output); when given, the hard
+    rule motion_present (static-render guard) is evaluated first."""
     rules, reasons = {}, []
+    if motion is not None:
+        rules["motion_present"], motion_reasons = motion_rule(motion, params)
+        reasons.extend(motion_reasons)
     if best is None:
         rules["window_found"] = False
         reasons.append("no valid cycle window (period=%s)" % period_info.get("period_frames"))
@@ -848,6 +1034,8 @@ def make_verdict(best, period_info, steady, closure_thr, params=PARAMS):
     if hoof_closure and not rules["hoof_closure_le_thr"]:
         reasons.append("per-hoof closure %.2f px > %.1f px" % (max(hoof_closure), closure_thr))
     hard_keys = ("window_found", "four_legs_stepping", "duty_in_range", "lateral_order", "hoof_closure_le_thr")
+    if motion is not None:
+        hard_keys = ("motion_present",) + hard_keys
     soft_keys = ("closure_le_thr", "stance_drift_unidirectional", "stance_drift_uniform")
     hard_ok = all(rules.get(k, False) for k in hard_keys)
     soft_ok = all(rules.get(k, False) for k in soft_keys)
@@ -1027,6 +1215,107 @@ def draw_period_plot(period_info, err, steady, best, thr, path):
     cv2.imwrite(path, img)
 
 
+def draw_motion_profile(motion, title, path, params=PARAMS):
+    """Per-frame-pair motion: silhouette / global mean |diff|, silhouette moving-pixel
+    fraction (static pairs shaded red) and per-leg moving ticks."""
+    W, H = 980, 800
+    img = np.full((H, W, 3), 255, np.uint8)
+    cv2.putText(img, title, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (30, 30, 30), 2, cv2.LINE_AA)
+    sil, glob = motion.get("silhouette") or {}, motion.get("global") or {}
+    fg_mean = np.asarray(sil.get("per_frame_mean_abs_diff") or [], float)
+    fg_frac = np.asarray(sil.get("per_frame_moving_frac") or [], float)
+    g_mean = np.asarray(glob.get("per_frame_mean_abs_diff") or [], float)
+    n = len(fg_mean)
+    if n == 0:
+        cv2.putText(img, "no frame pairs (%s)" % motion.get("note"), (80, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 200), 1, cv2.LINE_AA)
+        cv2.imwrite(path, img)
+        return
+    px, pw = 70, 860
+    static = fg_frac < params["static_fg_frac_thr"]
+
+    def sx(t):
+        return int(px + t / max(n - 1, 1) * pw)
+
+    def shade_static(py, ph):
+        for t in np.nonzero(static)[0]:
+            xa = sx(max(t - 0.5, 0)); xb = sx(min(t + 0.5, n - 1))
+            cv2.rectangle(img, (xa, py + 1), (max(xb, xa + 2), py + ph - 1), (225, 225, 250), -1)
+
+    def axis_x(py, ph):
+        for t in range(0, n, 5):
+            cv2.putText(img, str(t), (sx(t) - 6, py + ph + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (90, 90, 90), 1, cv2.LINE_AA)
+
+    # --- panel 1: mean |diff| (silhouette = blue, global = grey)
+    py, ph = 70, 210
+    cv2.putText(img, "mean |gray diff| per frame pair, grey levels  (blue = horse silhouette, grey = whole frame; "
+                "red shade = static pair)", (px, py - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30, 30, 30), 1, cv2.LINE_AA)
+    cv2.rectangle(img, (px, py), (px + pw, py + ph), (180, 180, 180), 1)
+    vmax = max(float(fg_mean.max()), float(g_mean.max()) if len(g_mean) else 0.0, params["fg_pix_thr"] * 1.5, 1.0)
+
+    def sy1(v):
+        return int(py + ph - v / vmax * ph)
+
+    shade_static(py, ph)
+    cv2.line(img, (px, sy1(params["fg_pix_thr"])), (px + pw, sy1(params["fg_pix_thr"])), (0, 0, 220), 1)
+    if len(g_mean) == n:
+        cv2.polylines(img, [np.array([[sx(t), sy1(g_mean[t])] for t in range(n)], np.int32)], False,
+                      (150, 150, 150), 2, cv2.LINE_AA)
+    cv2.polylines(img, [np.array([[sx(t), sy1(fg_mean[t])] for t in range(n)], np.int32)], False,
+                  (200, 80, 40), 2, cv2.LINE_AA)
+    for v in np.linspace(0, vmax, 4):
+        cv2.putText(img, "%.0f" % v, (px - 40, sy1(v) + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (90, 90, 90), 1, cv2.LINE_AA)
+    axis_x(py, ph)
+
+    # --- panel 2: moving-pixel fraction of the silhouette
+    py, ph = 340, 170
+    cv2.putText(img, "silhouette moving-pixel fraction (|diff| > %.0f)  (red line = static threshold %.3f)"
+                % (params["fg_pix_thr"], params["static_fg_frac_thr"]), (px, py - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30, 30, 30), 1, cv2.LINE_AA)
+    cv2.rectangle(img, (px, py), (px + pw, py + ph), (180, 180, 180), 1)
+    vmax2 = max(float(fg_frac.max()), params["static_fg_frac_thr"] * 3, 0.05)
+
+    def sy2(v):
+        return int(py + ph - v / vmax2 * ph)
+
+    shade_static(py, ph)
+    cv2.line(img, (px, sy2(params["static_fg_frac_thr"])), (px + pw, sy2(params["static_fg_frac_thr"])), (0, 0, 220), 1)
+    cv2.polylines(img, [np.array([[sx(t), sy2(fg_frac[t])] for t in range(n)], np.int32)], False,
+                  (200, 80, 40), 2, cv2.LINE_AA)
+    for v in np.linspace(0, vmax2, 4):
+        cv2.putText(img, "%.2f" % v, (px - 48, sy2(v) + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (90, 90, 90), 1, cv2.LINE_AA)
+    axis_x(py, ph)
+
+    # --- panel 3: per-leg moving ticks
+    py, lh = 560, 34
+    cv2.putText(img, "leg moves between t and t+1 (centroid or hoof shift > %.1f px)" % params["leg_move_px"],
+                (px, py - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30, 30, 30), 1, cv2.LINE_AA)
+    plm = motion.get("per_leg_moving") or {}
+    plr = motion.get("per_leg_moving_ratio") or {}
+    cw = max(2, int(pw / max(n, 1)) - 1)
+    for li, leg in enumerate(LEGS):
+        yy = py + li * lh
+        cv2.putText(img, "%s %.2f" % (leg, plr.get(leg) or 0.0), (px - 66, yy + 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (30, 30, 30), 1, cv2.LINE_AA)
+        mv = plm.get(leg) or []
+        for t in range(n):
+            xx = sx(t) - cw // 2
+            if t < len(mv) and mv[t]:
+                cv2.rectangle(img, (xx, yy + 6), (xx + cw, yy + lh - 8), LEG_BGR[leg], -1)
+            else:
+                cv2.rectangle(img, (xx, yy + lh // 2 - 2), (xx + cw, yy + lh // 2 + 2), (225, 225, 225), -1)
+    fp = motion.get("ffprobe") or {}
+    foot = ("motion_score %.2f   static_frame_ratio %.2f (max %.2f)   ffprobe P/I ratio %s"
+            % (motion.get("motion_score") or 0.0, motion.get("static_frame_ratio") or 0.0,
+               params["static_frame_ratio_max"],
+               ("%.3f" % fp["ratio"]) if fp.get("ratio") is not None else "n/a"))
+    cv2.putText(img, foot, (px, H - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (60, 60, 60), 1, cv2.LINE_AA)
+    cv2.putText(img, "hard rule motion_present: static_frame_ratio <= %.2f and every leg moving ratio >= %.2f"
+                % (params["static_frame_ratio_max"], params["leg_moving_ratio_min"]),
+                (px, H - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (60, 60, 60), 1, cv2.LINE_AA)
+    cv2.imwrite(path, img)
+
+
 # ======================================================================
 #  7. main
 # ======================================================================
@@ -1081,6 +1370,11 @@ def main(argv=None):
     }
     metrics.update(clip_level_metrics(tr, T))
 
+    # ---- amount of motion / static-render guard
+    motion = motion_metrics(frames, tr["masks"], tr["hoof_raw"])
+    motion["ffprobe"] = ffprobe_motion(video)
+    metrics["motion"] = motion
+
     # ---- period / steady state
     period_info = detect_period(hoof_s, args.period_min, args.period_max)
     period = period_info["period_frames"]
@@ -1126,7 +1420,7 @@ def main(argv=None):
     metrics["cycle_export"] = export
 
     # ---- verdict
-    metrics["verdict"] = make_verdict(best, period_info, steady, args.closure_thr)
+    metrics["verdict"] = make_verdict(best, period_info, steady, args.closure_thr, motion=motion)
 
     # ---- plots & dumps
     draw_gait_chart(tr, T, "Footfall diagram %s (%d frames, %d fps)" % (base, T, args.fps),
@@ -1135,6 +1429,8 @@ def main(argv=None):
                       os.path.join(out_dir, "hoof_trajectories.png"))
     draw_overlay(frames, tr, 12, os.path.join(out_dir, "hooves_overlay_frame12.png"))
     draw_period_plot(period_info, err, steady, best, args.steady_thr, os.path.join(out_dir, "period_analysis.png"))
+    draw_motion_profile(motion, "Motion profile %s (%d frame pairs)" % (base, motion["frame_pairs"]),
+                        os.path.join(out_dir, "motion_profile.png"))
     np.savez(os.path.join(out_dir, "hoof_tracks.npz"), hoof=hoof, hoof_smooth=hoof_s,
              contact=contact, vx=tr["vx"], vy=tr["vy"], speed=tr["speed"], areas=tr["areas"],
              body_centroid=tr["body"])
@@ -1142,6 +1438,12 @@ def main(argv=None):
         json.dump(metrics, fh, indent=2, ensure_ascii=False)
 
     summary = {
+        "motion": {"motion_score": motion.get("motion_score"),
+                   "static_frame_ratio": motion.get("static_frame_ratio"),
+                   "per_leg_moving_ratio": motion.get("per_leg_moving_ratio"),
+                   "silhouette_moving_frac_median": (motion.get("silhouette") or {}).get("moving_frac_median"),
+                   "ffprobe": {k: motion["ffprobe"].get(k) for k in
+                               ("i_frame_bytes", "mean_p_frame_bytes", "ratio", "static_hint", "error")}},
         "period": {k: period_info.get(k) for k in ("period_frames", "confidence", "prominence", "n_signals", "note")},
         "steady_state_start": steady,
         "best_window": ({k: best[k] for k in ("start_frame", "end_time", "periods", "time_scale", "closure_px",
