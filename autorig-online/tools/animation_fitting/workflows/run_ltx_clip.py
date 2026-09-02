@@ -49,11 +49,15 @@ ACTION_OVERRIDES = {
 # and one-shots are generated at their final length directly.
 FRAME_BUDGET = {
     # action:            (gen_frames, target_frames, kind)
-    "walk_forward":      (97, 33, "gait"),
-    "walk_backward":     (97, 33, "gait"),
-    "trot_jog":          (97, 25, "gait"),
-    "run":               (97, 21, "gait"),
-    "sprint":            (97, 17, "gait"),
+    # Gaits keep the end-frame guide: without it LTX drifts away from the
+    # canonical appearance within ~1.5 s (walk v4: low-poly horse morphed
+    # into a realistic one and the leg colors collapsed). Two strides per
+    # clip; the analyzer extracts one period and retimes to target_frames.
+    "walk_forward":      (65, 33, "gait"),
+    "walk_backward":     (65, 33, "gait"),
+    "trot_jog":          (49, 25, "gait"),
+    "run":               (41, 21, "gait"),
+    "sprint":            (33, 17, "gait"),
     "jump_air":          (49, 25, "static_loop"),
     "idle_neutral":      (97, 97, "static_loop"),
     "idle_alert":        (97, 97, "static_loop"),
@@ -136,8 +140,9 @@ def main():
     args = ap.parse_args()
 
     gen_frames, target_frames, kind = FRAME_BUDGET.get(args.action, (None, None, None))
-    # Gaits are always free-running (no end guide); the loop is cut later.
-    free_cycle = args.free_cycle or kind == "gait"
+    # Free-running (no end guide) only on explicit request: the end guide is
+    # what keeps the canonical identity stable across the whole clip.
+    free_cycle = args.free_cycle
     prompt, negative, frames, mode = compose_prompt(args.action, free_cycle=free_cycle)
     if gen_frames:
         frames = gen_frames

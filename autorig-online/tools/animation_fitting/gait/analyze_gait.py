@@ -839,8 +839,21 @@ def make_verdict(best, period_info, steady, closure_thr, params=PARAMS):
         reasons.append("stance drift not uniform (cv > %.2f or undefined): %s" % (params["drift_cv_max"], cvs))
     if not steady.get("found", False):
         reasons.append("warning: steady state not confirmed (%s)" % steady.get("note"))
-    verdict = "accept" if all(rules.values()) else "rework"
-    return {"verdict": verdict, "rules": rules, "reasons": reasons}
+    # Hard rules decide the kinematics; soft rules flag defects the fitter
+    # repairs itself (root detrend for body drift, hoof-contact pinning for
+    # stance slide). A clip failing only soft rules is usable for fitting.
+    per_point = best.get("closure_per_point_px") or {}
+    hoof_closure = [per_point[l] for l in LEGS if l in per_point]
+    rules["hoof_closure_le_thr"] = bool(hoof_closure) and max(hoof_closure) <= closure_thr
+    if hoof_closure and not rules["hoof_closure_le_thr"]:
+        reasons.append("per-hoof closure %.2f px > %.1f px" % (max(hoof_closure), closure_thr))
+    hard_keys = ("window_found", "four_legs_stepping", "duty_in_range", "lateral_order", "hoof_closure_le_thr")
+    soft_keys = ("closure_le_thr", "stance_drift_unidirectional", "stance_drift_uniform")
+    hard_ok = all(rules.get(k, False) for k in hard_keys)
+    soft_ok = all(rules.get(k, False) for k in soft_keys)
+    verdict = "accept" if (hard_ok and soft_ok) else ("accept_with_fit_fixes" if hard_ok else "rework")
+    return {"verdict": verdict, "rules": rules, "reasons": reasons,
+            "hard_rules_ok": hard_ok, "soft_rules_ok": soft_ok}
 
 
 # ======================================================================
