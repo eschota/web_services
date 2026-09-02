@@ -396,6 +396,7 @@ def normalize_local_meshopt(input_url: str) -> NormalizedInput:
 
 MIRROR_TIMEOUT_SECONDS = float(os.getenv("INPUT_MIRROR_TIMEOUT_SECONDS", "300"))
 _GLB_MAGIC = b"glTF"
+_NON_GLB_INPUT_SUFFIXES = (".fbx", ".obj", ".zip", ".gltf", ".glb.zip")
 
 
 def _mirror_remote_glb(input_url: str) -> NormalizedInput | None:
@@ -407,8 +408,17 @@ def _mirror_remote_glb(input_url: str) -> NormalizedInput | None:
     if parsed.netloc.lower() == app.netloc.lower():
         return None
     filename = Path(unquote(parsed.path)).name
-    if not filename.lower().endswith(".glb"):
+    lowered = filename.lower()
+    if lowered.endswith(_NON_GLB_INPUT_SUFFIXES):
+        # FBX/OBJ/ZIP/glTF sources are fetched by the worker directly; only
+        # binary GLB (declared or undeclared, e.g. free3d ``.../glb100k``)
+        # goes through the local mirror so meshopt/KTX2 normalization applies.
         return None
+    if not lowered.endswith(".glb"):
+        # Extension-less asset links: the worker's URL-format check rejects
+        # them outright, so mirror under a .glb name if the payload really is
+        # a binary glTF (verified by magic during download; else fail-open).
+        filename = "model.glb"
     if any(sep in filename for sep in ("/", "\\")) or filename.startswith("."):
         filename = "model.glb"
 
