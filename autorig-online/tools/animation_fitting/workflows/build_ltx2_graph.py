@@ -11,7 +11,16 @@ GEMMA = "gemma_3_12B_it_fp4_mixed.safetensors"
 
 
 def build(prompt, image, output_prefix, num_frames, width=768, height=448,
-          frame_rate=25, fps=25.0, seed=42):
+          frame_rate=25, fps=25.0, seed=42, loop_guide_strength=0.0,
+          spatial_tiles=4):
+    """Build the LTX-2 19B image-to-video graph.
+
+    loop_guide_strength > 0 additionally conditions the LAST frame on the same
+    reference image (frame-to-frame loop): the generated cycle must start and
+    end in the canonical pose, which is what makes a clip seamlessly loopable.
+    spatial_tiles controls the tiled VAE decode (fewer tiles = faster decode,
+    more VRAM per tile).
+    """
     g = {
         "checkpoint": {
             "class_type": "CheckpointLoaderSimple",
@@ -140,7 +149,7 @@ def build(prompt, image, output_prefix, num_frames, width=768, height=448,
             "inputs": {
                 "vae": ["checkpoint", 2],
                 "latents": ["separate_av_latent", 0],
-                "spatial_tiles": 4,
+                "spatial_tiles": int(spatial_tiles),
                 "spatial_overlap": 4,
                 "temporal_tile_length": 16,
                 "temporal_overlap": 4,
@@ -163,6 +172,25 @@ def build(prompt, image, output_prefix, num_frames, width=768, height=448,
             },
         },
     }
+    if loop_guide_strength and float(loop_guide_strength) > 0.0:
+        # Frame-to-frame loop: the same reference image conditions the last
+        # frame. LTXVAddGuide returns (positive, negative, latent), so the
+        # guider and the AV concat are rewired through it.
+        g["loop_guide"] = {
+            "class_type": "LTXVAddGuide",
+            "inputs": {
+                "positive": ["conditioning", 0],
+                "negative": ["conditioning", 1],
+                "vae": ["checkpoint", 2],
+                "latent": ["img_to_video", 0],
+                "image": ["preprocess", 0],
+                "frame_idx": -1,
+                "strength": float(loop_guide_strength),
+            },
+        }
+        g["guider"]["inputs"]["positive"] = ["loop_guide", 0]
+        g["guider"]["inputs"]["negative"] = ["loop_guide", 1]
+        g["concat_av_latent"]["inputs"]["video_latent"] = ["loop_guide", 2]
     return g
 
 

@@ -68,6 +68,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=448)
     parser.add_argument("--samples", type=int, default=32)
     parser.add_argument(
+        "--camera-preset",
+        choices=sorted(CAMERA_PRESETS),
+        default="three_quarter",
+        help=(
+            "Camera placement relative to the animal's forward axis. "
+            "three_quarter (default) is the legacy front-side view; side keeps "
+            "all four legs unoccluded for gait generation and hoof tracking."
+        ),
+    )
+    parser.add_argument(
         "--semantic-profile",
         type=Path,
         help=(
@@ -451,6 +461,17 @@ def look_at(obj: bpy.types.Object, target: Vector) -> None:
     obj.rotation_euler = (target - obj.location).to_track_quat("-Z", "Y").to_euler()
 
 
+# Camera direction = forward * f + side * s + up * u (normalized), relative to
+# the animal's detected forward axis. "three_quarter" is the legacy front-side
+# view; "side" looks almost perpendicular to the body so the far-side legs are
+# never occluded by the near-side legs — required for 4-beat gait generation
+# and per-hoof tracking.
+CAMERA_PRESETS: dict[str, tuple[float, float, float]] = {
+    "three_quarter": (1.45, 1.0, 0.68),
+    "side": (0.28, 1.0, 0.30),
+}
+
+
 def create_camera(
     minimum: Vector,
     maximum: Vector,
@@ -458,13 +479,15 @@ def create_camera(
     width: int,
     height: int,
     fit_points: list[Vector],
+    preset: str = "three_quarter",
 ) -> bpy.types.Object:
     center = (minimum + maximum) * 0.5
     extent = maximum - minimum
     target = Vector((center.x, center.y, minimum.z + extent.z * 0.47))
     side = Vector((-forward.y, forward.x, 0.0)).normalized()
     span = max(extent.length, extent.z, extent.x, extent.y, 0.1)
-    direction = (forward * 1.45 + side * 1.0 + Vector((0.0, 0.0, 0.68))).normalized()
+    f_w, s_w, u_w = CAMERA_PRESETS[preset]
+    direction = (forward * f_w + side * s_w + Vector((0.0, 0.0, u_w))).normalized()
 
     camera_data = bpy.data.cameras.new("AutoRig_Fitting_Camera")
     camera_data.lens = 58.0
@@ -1490,7 +1513,10 @@ def main() -> int:
     # the camera.  Apply the requested dimensions first so arbitrary source
     # .blend render settings cannot change (or invalidate) canonical framing.
     configure_render(bpy.context.scene, args.width, args.height, args.samples)
-    camera = create_camera(minimum, maximum, forward, args.width, args.height, fit_points)
+    camera = create_camera(
+        minimum, maximum, forward, args.width, args.height, fit_points,
+        preset=args.camera_preset,
+    )
     ground = create_ground(minimum, maximum)
     configure_lighting(minimum, maximum, camera)
     camera_contract = camera_metadata(camera, args.width, args.height)
@@ -1590,6 +1616,7 @@ def main() -> int:
             "samples": args.samples,
             "geometry_contract": geometry_contract,
         },
+        "camera_preset": args.camera_preset,
         "camera": {
             **camera_contract,
             "mask_framing": mask_framing,
