@@ -129,11 +129,22 @@ def select_preemption_victims(tasks: Iterable[Any], count: int) -> List[Any]:
     return sorted(candidates, key=victim_sort_key)[: max(0, int(count or 0))]
 
 
+BACKGROUND_DISPATCH_RESERVE = int(
+    os.getenv("AUTORIG_BACKGROUND_DISPATCH_RESERVE", "2")
+)
+
+
 def background_dispatch_budget(free_workers: Sequence[Any], interactive_waiting: int) -> int:
-    """Keep two healthy full-converter slots unused by background work."""
+    """Keep ``BACKGROUND_DISPATCH_RESERVE`` free slots unused by background work.
+
+    This stacks with the cross-pipeline N-1 reserve in
+    ``hunyuan_client.shared_full_background_capacity``; with a 4-5 box fleet
+    and both reserves at 2, one interactive task in flight already zeroes the
+    background budget, so the collection lane crawls while the farm idles.
+    """
     if int(interactive_waiting or 0) > 0:
         return 0
-    return max(0, len(free_workers) - 2)
+    return max(0, len(free_workers) - max(0, BACKGROUND_DISPATCH_RESERVE))
 
 
 async def dispatch_fifo_candidate(candidates: List[Any], attempt) -> bool:
