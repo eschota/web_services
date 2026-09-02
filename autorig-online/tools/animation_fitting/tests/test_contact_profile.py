@@ -49,6 +49,27 @@ def test_horse_walk_contact_profile_has_exact_ground_hoof_anchors() -> None:
     assert "toes_01_dupli_001.r:168" in profile.priority_anchor_ids
 
 
+def test_horse_walk_loop64_profile_is_the_v1_anatomy_at_64_unique_frames() -> None:
+    loop64_path = PROFILE.with_name("horse_2.walk_forward.loop64.v1.json")
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(
+        json.loads(loop64_path.read_text(encoding="utf-8"))
+    )
+    base = load_contact_profile(PROFILE)
+    loop64 = load_contact_profile(loop64_path)
+
+    assert loop64.profile_id == "horse_2.walk_forward.contacts.loop64.v1"
+    assert loop64.loop_unique_frames == 64
+    assert base.loop_unique_frames == 48
+    assert loop64.rig_type == base.rig_type
+    assert loop64.action_id == base.action_id
+    assert loop64.gait == base.gait
+    assert loop64.foot_order == base.foot_order
+    assert loop64.root_motion_policy == base.root_motion_policy
+    assert loop64.priority_anchor_ids == base.priority_anchor_ids
+    assert loop64.sha256 != base.sha256
+
+
 def test_contact_profile_schema_and_loader_reject_extra_or_duplicate_anchors(
     tmp_path: Path,
 ) -> None:
