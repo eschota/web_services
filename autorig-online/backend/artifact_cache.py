@@ -23,6 +23,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from config import (
     ARTIFACT_CACHE_CONCURRENCY,
@@ -772,17 +773,29 @@ async def enqueue_artifact_cache(
     )
     job = result.scalar_one_or_none()
     if job is None:
-        job = ArtifactCacheJob(
-            task_id=task.id,
-            worker_key=_worker_key(task),
-            status="pending",
-            attempt_count=0,
-            next_attempt_at=moment,
-            deadline_at=full_until,
-            created_at=moment,
-            updated_at=moment,
+        # Completion can be observed concurrently by the public task endpoint
+        # and the background synchronizer.  A select-then-add sequence races on
+        # the unique task_id constraint and turns a successful task page into a
+        # 500.  SQLite's conflict-safe insert serializes that race without
+        # rolling back the caller's task-completion transaction.
+        await db.execute(
+            sqlite_insert(ArtifactCacheJob)
+            .values(
+                task_id=task.id,
+                worker_key=_worker_key(task),
+                status="pending",
+                attempt_count=0,
+                next_attempt_at=moment,
+                deadline_at=full_until,
+                created_at=moment,
+                updated_at=moment,
+            )
+            .on_conflict_do_nothing(index_elements=[ArtifactCacheJob.task_id])
         )
-        db.add(job)
+        result = await db.execute(
+            select(ArtifactCacheJob).where(ArtifactCacheJob.task_id == task.id)
+        )
+        job = result.scalar_one()
         task.artifact_cache_status = "pending"
         task.artifact_cache_error = None
     elif job.status == "failed" and moment < job.deadline_at:

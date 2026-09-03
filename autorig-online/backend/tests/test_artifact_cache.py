@@ -556,6 +556,36 @@ class DurableQueueTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row.status, "pending")
             self.assertEqual(row.worker_key, "f1")
 
+    async def test_concurrent_completion_observers_create_one_queue_row(self):
+        task_id = "00000000-0000-0000-0000-000000000904"
+        async with self.sessions() as db:
+            db.add(Task(
+                id=task_id,
+                owner_type="anon",
+                owner_id="cache-race-test",
+                input_url="https://example.test/model.glb",
+                input_type="t_pose",
+                worker_api=WORKER,
+                status="done",
+            ))
+            await db.commit()
+
+        async def observe_completion():
+            async with self.sessions() as db:
+                task = await db.get(Task, task_id)
+                await artifact_cache.enqueue_artifact_cache(db, task)
+                await db.commit()
+
+        await asyncio.gather(observe_completion(), observe_completion())
+
+        async with self.sessions() as verifier:
+            rows = (
+                await verifier.execute(
+                    select(ArtifactCacheJob).where(ArtifactCacheJob.task_id == task_id)
+                )
+            ).scalars().all()
+            self.assertEqual(len(rows), 1)
+
     async def test_expired_failure_is_not_silently_cleared(self):
         now = datetime.utcnow()
         async with self.sessions() as db:
