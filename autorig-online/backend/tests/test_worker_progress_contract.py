@@ -253,7 +253,11 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "done")
 
     async def test_worker_finalization_failure_sets_central_error(self):
-        task = self.task()
+        task = self.task(
+            preemption_state="requested",
+            preemption_request_id="recall-1",
+            preemption_worker_boot_id="boot-1",
+        )
         result, db = await self._run(
             task,
             {
@@ -265,6 +269,9 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.status, "error")
         self.assertIn("100k:max missing", result.error_message)
+        self.assertEqual(result.preemption_state, "none")
+        self.assertIsNone(result.preemption_request_id)
+        self.assertIsNone(result.preemption_worker_boot_id)
         db.commit.assert_awaited_once()
 
     async def test_post_timeout_recovery_persists_worker_v2_declaration(self):

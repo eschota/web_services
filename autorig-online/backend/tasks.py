@@ -1511,12 +1511,20 @@ def _schedule_task_error_notification(task_id: str) -> None:
         print(f"[Telegram] Failed to schedule error notification for task {task_id}: {e}")
 
 
+def _clear_terminal_preemption_state(task: Task) -> None:
+    """A terminal worker result owns the race and closes any pending recall."""
+    task.preemption_state = "none"
+    task.preemption_request_id = None
+    task.preemption_worker_boot_id = None
+
+
 async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> bool:
     failure = await _fetch_worker_failure_message(task)
     if not failure:
         return False
     task.status = "error"
     task.error_message = f"Worker failed: {failure}"
+    _clear_terminal_preemption_state(task)
     task.updated_at = datetime.utcnow()
     await db.commit()
     print(f"[Tasks] Worker reported terminal failure for {task.id}: {failure}")
@@ -1600,6 +1608,7 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     if contract_v2 and finalization_failure:
         task.status = "error"
         task.error_message = f"Worker failed: {finalization_failure}"
+        _clear_terminal_preemption_state(task)
         task.updated_at = datetime.utcnow()
         await release_task_workload_lease(db, task, outcome="released")
         await db.commit()
@@ -1716,6 +1725,9 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
                         task.video_ready = True
                         task.video_url = video_url
                         task.updated_at = datetime.utcnow()
+
+    if task.status in ("done", "error"):
+        _clear_terminal_preemption_state(task)
 
     if task.status == "done":
         from artifact_cache import enqueue_artifact_cache
