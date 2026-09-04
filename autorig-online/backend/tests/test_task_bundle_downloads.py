@@ -1,4 +1,5 @@
 import json
+import io
 import tempfile
 import unittest
 import zipfile
@@ -374,6 +375,75 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
             ]
         self.assertEqual(b"".join(chunks), payload)
         self.assertEqual([len(chunk) for chunk in chunks], [5, 5, 5, 1])
+
+    @staticmethod
+    def _finished_zip():
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("model.bin", b"x" * 100000)
+            archive.comment = b"worker bundle"
+        return stream.getvalue()
+
+    async def test_bundle_probe_requires_final_zip_footer_and_preserves_etag(self):
+        payload = self._finished_zip()
+        seen_headers = []
+
+        class Client(_BufferedRangeClient):
+            def stream(self, *args, headers):
+                seen_headers.append(dict(headers))
+                response = super().stream(*args, headers=headers)
+                response.headers["ETag"] = '"final-zip"'
+                return response
+
+        Client.payload = payload
+        with patch.object(main.httpx, "AsyncClient", Client):
+            probe = await main._probe_worker_file_range("https://worker.invalid/bundle.zip")
+        self.assertEqual(probe["total_size"], len(payload))
+        self.assertEqual(probe["etag"], '"final-zip"')
+        self.assertEqual(seen_headers[0]["Range"], "bytes=0-0")
+        self.assertEqual(seen_headers[1]["If-Match"], '"final-zip"')
+        self.assertTrue(all(h["Accept-Encoding"] == "identity" for h in seen_headers))
+
+    async def test_unfinished_zip_is_rejected_before_response_headers(self):
+        _BufferedRangeClient.payload = self._finished_zip()[:-40]
+        with patch.object(main.httpx, "AsyncClient", _BufferedRangeClient):
+            with self.assertRaises(HTTPException) as caught:
+                await main._probe_worker_file_range("https://worker.invalid/bundle.zip")
+        self.assertEqual(caught.exception.status_code, 503)
+
+    async def test_growing_zip_is_rejected_even_if_range_endpoint_answers(self):
+        payload = self._finished_zip()
+
+        class GrowingClient(_BufferedRangeClient):
+            calls = 0
+
+            def stream(self, *args, headers):
+                self.calls += 1
+                self.payload = payload if self.calls == 1 else payload + b"growing"
+                return super().stream(*args, headers=headers)
+
+        with patch.object(main.httpx, "AsyncClient", GrowingClient):
+            with self.assertRaises(HTTPException) as caught:
+                await main._probe_worker_file_range("https://worker.invalid/bundle.zip")
+        self.assertEqual(caught.exception.status_code, 503)
+
+    async def test_stream_pins_the_probed_representation(self):
+        seen_headers = []
+
+        class Client(_BufferedRangeClient):
+            payload = b"1234567890"
+
+            def stream(self, *args, headers):
+                seen_headers.append(dict(headers))
+                return super().stream(*args, headers=headers)
+
+        with patch.object(main.httpx, "AsyncClient", Client):
+            chunks = [chunk async for chunk in main._iter_worker_file_ranges(
+                "https://worker.invalid/bundle.zip", 0, 9,
+                total_size=10, chunk_bytes=4, etag='"final-zip"',
+            )]
+        self.assertEqual(b"".join(chunks), b"1234567890")
+        self.assertTrue(all(h["If-Match"] == '"final-zip"' for h in seen_headers))
 
     async def test_bundle_proxy_exposes_resume_headers_without_full_upstream_get(self):
         request = Request({

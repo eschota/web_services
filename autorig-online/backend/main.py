@@ -18,6 +18,7 @@ import json
 import base64
 import tempfile
 import zipfile
+import io
 import re
 import html
 from pathlib import Path
@@ -10941,11 +10942,20 @@ def _parse_single_http_byte_range(range_header: Optional[str], total_size: int) 
 
 
 async def _probe_worker_file_range(url: str) -> Dict[str, Any]:
-    """Get worker artifact size without asking the relay to buffer the full body."""
+    """Probe a finalized ZIP before publishing its size to the download client.
+
+    Some workers write directly to the public ZIP path.  A successful one-byte
+    probe can therefore describe a growing archive, not a downloadable bundle.
+    Check the bounded ZIP footer and the same representation before sending any
+    response headers, so the caller can use its normal cached-file fallback.
+    """
     timeout = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            async with client.stream("GET", url, headers={"Range": "bytes=0-0"}) as response:
+            async with client.stream(
+                "GET", url,
+                headers={"Range": "bytes=0-0", "Accept-Encoding": "identity"},
+            ) as response:
                 if response.status_code != 206:
                     raise HTTPException(
                         status_code=404 if response.status_code == 404 else 502,
@@ -10955,12 +10965,37 @@ async def _probe_worker_file_range(url: str) -> Dict[str, Any]:
                 match = re.fullmatch(r"bytes\s+0-0/(\d+)", content_range, flags=re.IGNORECASE)
                 if not match or int(match.group(1)) <= 0:
                     raise HTTPException(status_code=502, detail="Worker bundle returned invalid Content-Range")
-                return {
+                probe = {
                     "total_size": int(match.group(1)),
                     "content_type": response.headers.get("Content-Type") or "application/zip",
                     "etag": response.headers.get("ETag"),
                     "last_modified": response.headers.get("Last-Modified"),
                 }
+            total_size = int(probe["total_size"])
+            if total_size < 22:
+                raise HTTPException(status_code=503, detail="Worker bundle is not finalized yet")
+            # EOCD (22 bytes) plus the maximum 16-bit ZIP comment.  Zip64 end
+            # records immediately precede EOCD and are handled by zipfile.
+            tail_start = max(0, total_size - (65535 + 22))
+            headers = {
+                "Range": f"bytes={tail_start}-{total_size - 1}",
+                "Accept-Encoding": "identity",
+            }
+            etag = str(probe.get("etag") or "")
+            if etag and not etag.startswith("W/"):
+                headers["If-Match"] = etag
+            async with client.stream("GET", url, headers=headers) as response:
+                expected_range = f"bytes {tail_start}-{total_size - 1}/{total_size}"
+                if (
+                    response.status_code != 206
+                    or str(response.headers.get("Content-Range") or "").lower()
+                    != expected_range.lower()
+                ):
+                    raise HTTPException(status_code=503, detail="Worker bundle changed during finalization")
+                tail = await response.aread()
+                if len(tail) != total_size - tail_start or not zipfile.is_zipfile(io.BytesIO(tail)):
+                    raise HTTPException(status_code=503, detail="Worker bundle is not finalized yet")
+            return probe
     except HTTPException:
         raise
     except Exception as exc:
@@ -10974,6 +11009,7 @@ async def _iter_worker_file_ranges(
     *,
     total_size: int,
     chunk_bytes: int = _WORKER_BUNDLE_RANGE_CHUNK_BYTES,
+    etag: Optional[str] = None,
 ):
     """Yield verified relay-friendly ranges, buffering one chunk before publishing it."""
     timeout = httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0)
@@ -10986,17 +11022,25 @@ async def _iter_worker_file_ranges(
             last_error: Optional[Exception] = None
             for _attempt in range(_WORKER_BUNDLE_RANGE_ATTEMPTS):
                 try:
+                    headers = {
+                        "Range": f"bytes={position}-{range_end}",
+                        "Accept-Encoding": "identity",
+                    }
+                    if etag and not etag.startswith("W/"):
+                        headers["If-Match"] = etag
                     async with client.stream(
                         "GET",
                         url,
-                        headers={"Range": f"bytes={position}-{range_end}"},
+                        headers=headers,
                     ) as response:
                         if response.status_code != 206:
                             raise RuntimeError(f"range request returned HTTP {response.status_code}")
                         content_range = str(response.headers.get("Content-Range") or "")
                         expected_range = f"bytes {position}-{range_end}/{total_size}"
                         if content_range.lower() != expected_range.lower():
-                            raise RuntimeError(f"unexpected Content-Range {content_range!r}")
+                            raise RuntimeError(
+                                f"unexpected Content-Range {content_range!r}; expected {expected_range!r}"
+                            )
                         candidate = await response.aread()
                         if len(candidate) != expected_length:
                             raise RuntimeError(
@@ -11047,7 +11091,7 @@ async def _proxy_worker_bundle_by_ranges(url: str, filename: str, request: Reque
     if probe.get("last_modified"):
         headers["Last-Modified"] = str(probe["last_modified"])
     return StreamingResponse(
-        _iter_worker_file_ranges(url, start, end, total_size=total_size),
+        _iter_worker_file_ranges(url, start, end, total_size=total_size, etag=probe.get("etag")),
         status_code=206 if is_partial else 200,
         media_type=str(probe.get("content_type") or "application/zip"),
         headers=headers,
