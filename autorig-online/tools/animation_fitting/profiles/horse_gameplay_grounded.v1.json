@@ -1,0 +1,194 @@
+{
+  "schema": "autorig-quadruped-gameplay-profile.v1",
+  "profile_id": "horse_arp_grounded_v1",
+  "species": "horse",
+  "scope": "grounded locomotion authoring candidate; not full animal library approval",
+  "root": "__animal_export_root",
+  "body": {
+    "neck": "neck.x",
+    "head": "head.x",
+    "tail": [
+      "c_tail_00.x",
+      "c_tail_01.x",
+      "c_tail_02.x",
+      "c_tail_03.x",
+      "c_tail_04.x",
+      "c_tail_05.x",
+      "c_tail_06.x"
+    ],
+    "ears": [
+      "c_ear_01.l",
+      "c_ear_01.r"
+    ]
+  },
+  "limbs": {
+    "hind_left": {
+      "chain": [
+        "c_thigh_b.l",
+        "thigh_twist.l",
+        "leg_stretch.l",
+        "foot.l",
+        "toes_01.l"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch.l",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist.l",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        3,
+        -145
+      ],
+      "joint_upper_degrees": [
+        55,
+        145,
+        -3
+      ]
+    },
+    "fore_left": {
+      "chain": [
+        "c_thigh_b_dupli_001.l",
+        "thigh_twist_dupli_001.l",
+        "leg_stretch_dupli_001.l",
+        "foot_dupli_001.l",
+        "toes_01_dupli_001.l"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch_dupli_001.l",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist_dupli_001.l",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        -130,
+        0
+      ],
+      "joint_upper_degrees": [
+        55,
+        -1,
+        145
+      ],
+      "scapula": "clavicle.l",
+      "scapula_radians_per_height": 1.28
+    },
+    "hind_right": {
+      "chain": [
+        "c_thigh_b.r",
+        "thigh_twist.r",
+        "leg_stretch.r",
+        "foot.r",
+        "toes_01.r"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch.r",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist.r",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        3,
+        -145
+      ],
+      "joint_upper_degrees": [
+        55,
+        145,
+        -3
+      ]
+    },
+    "fore_right": {
+      "chain": [
+        "c_thigh_b_dupli_001.r",
+        "thigh_twist_dupli_001.r",
+        "leg_stretch_dupli_001.r",
+        "foot_dupli_001.r",
+        "toes_01_dupli_001.r"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch_dupli_001.r",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist_dupli_001.r",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        -130,
+        0
+      ],
+      "joint_upper_degrees": [
+        55,
+        -1,
+        145
+      ],
+      "scapula": "clavicle.r",
+      "scapula_radians_per_height": 1.28
+    }
+  },
+  "gaits": {
+    "walk_forward": {
+      "phases": [
+        0,
+        0.25,
+        0.5,
+        0.75
+      ],
+      "duty": 0.625,
+      "stride_height": 0.5,
+      "lift_height": 0.11,
+      "body_drop": 0.045,
+      "bob": 0.006,
+      "direction": 1
+    },
+    "walk_backward": {
+      "phases": [
+        0,
+        0.5,
+        0.5,
+        0
+      ],
+      "duty": 0.67,
+      "stride_height": 0.3,
+      "lift_height": 0.075,
+      "body_drop": 0.04,
+      "bob": 0.004,
+      "direction": -1
+    },
+    "trot_jog": {
+      "phases": [
+        0,
+        0.5,
+        0.5,
+        0
+      ],
+      "duty": 0.48,
+      "stride_height": 0.6,
+      "lift_height": 0.16,
+      "body_drop": 0.065,
+      "bob": 0.014,
+      "direction": 1
+    }
+  },
+  "references": {
+    "walk_backward": "https://www.fei.org/stories/lifestyle/teach-me/why-and-how-you-should-teach-rein-back-horses"
+  },
+  "limit_basis": "finite engineering authoring bounds around explicit anatomical chains; not veterinary range claims"
+}

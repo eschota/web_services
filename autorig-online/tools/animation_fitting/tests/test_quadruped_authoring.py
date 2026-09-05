@@ -1,0 +1,113 @@
+import copy
+import json
+import math
+import numpy as np
+import pytest
+from animation_fitting.author_quadruped_motion import AuthoringRig, author_clip, hoof_trajectory, DEFAULT_PROFILE
+
+
+def synthetic_rig(scale=1.0):
+    """Original test geometry; contains no ARP mesh or extracted source data."""
+    rows={}
+    def add(name,parent,head,tail):
+        head=np.array(head,float)*scale;tail=np.array(tail,float)*scale
+        y=tail-head;y/=np.linalg.norm(y);x=np.array([1.,0,0]);x-=y*(x@y);x/=np.linalg.norm(x);z=np.cross(x,y)
+        m=np.eye(4);m[:3,:3]=np.column_stack([x,y,z]);m[:3,3]=head
+        rows[name]={'name':name,'parent':parent,'deform':parent is not None,
+                    'rest_world':m.ravel().tolist(),'head':head.tolist(),'tail':tail.tolist()}
+    root='__animal_export_root'
+    add(root,None,(0,0,0),(0,0,.3))
+    add('root.x',root,(0,0,1.5),(0,.5,1.5))
+    add('spine_01.x',root,(0,0,1.5),(0,-.4,1.5))
+    add('spine_02.x','spine_01.x',(0,-.4,1.5),(0,-.8,1.65))
+    add('spine_03.x','spine_02.x',(0,-.8,1.65),(0,-1.1,1.8))
+    add('neck.x','spine_03.x',(0,-1.1,1.8),(0,-1.4,2.1))
+    add('head.x','neck.x',(0,-1.4,2.1),(0,-1.8,1.9))
+    for i in range(7):
+        add(f'c_tail_{i:02}.x','root.x' if i==0 else f'c_tail_{i-1:02}.x',
+            (0,.5+i*.15,1.5-i*.05),(0,.65+i*.15,1.45-i*.05))
+    for side,x in [('l',.2),('r',-.2)]:
+        add(f'c_ear_01.{side}','head.x',(x*.3,-1.4,2.1),(x*.3,-1.4,2.22))
+        for fore in (True,False):
+            suffix='_dupli_001' if fore else ''
+            names=[f'{base}{suffix}.{side}' for base in ('c_thigh_b','thigh_twist','thigh_stretch','leg_stretch','leg_twist','foot','toes_01')]
+            primary=[(x,-.8,1.5),(x,-.6,1.1),(x,-.58,.65),(x,-.51,.19),(x,-.56,.09),(x,-.65,0)] if fore else [
+                (x,.6,1.55),(x,.45,.95),(x,.74,.63),(x,.72,.19),(x,.68,.09),(x,.59,0)]
+            a,b,c,d,e,f=map(np.array,primary)
+            if fore:
+                add(f'clavicle.{side}','spine_03.x',(x*.4,-.65,1.82),a)
+            nodes=[a,b,(b+c)/2,c,(c+d)/2,d,e,f]
+            for i,n in enumerate(names):
+                add(n,(f'clavicle.{side}' if fore else 'root.x') if i==0 else names[i-1],nodes[i],nodes[i+1])
+    for row in rows.values():
+        world=np.array(row['rest_world']).reshape(4,4)
+        parent=np.array(rows[row['parent']]['rest_world']).reshape(4,4) if row['parent'] else np.eye(4)
+        row['rest_local']=(np.linalg.inv(parent) @ world).ravel().tolist()
+    vertices=[]
+    for side,x in [('l',.2),('r',-.2)]:
+        for fore in (True,False):
+            bone=f"foot{'_dupli_001' if fore else ''}.{side}"
+            y=-.6 if fore else .65
+            for dx,dy in [(-.05,-.08),(.05,-.08),(0,.08)]:
+                vertices.append({'point':((np.array([x+dx,y+dy,0]))*scale).tolist(),
+                                 'weights':[{'bone':bone,'weight':1.0}]})
+    vertices.append({'point':[0,0,1.5*scale],'weights':[{'bone':'root.x','weight':1.0}]})
+    return {'schema':'autorig-quadruped-authoring-rig.v1','source_sha256':'a'*64,
+             'bones':list(rows.values()),'meshes':[{'name':'Synthetic','vertices':vertices,'faces':[]}]}
+
+
+def test_trajectory_has_continuous_stance_velocity_at_both_joins():
+    duty=.625;stride=.8;center=np.zeros(3);eps=1e-6
+    for direction in (-1,1):
+        for p in (duty,1.0):
+            a=hoof_trajectory(p-eps,duty,stride,.2,center,direction)[0]
+            b=hoof_trajectory(p,duty,stride,.2,center,direction)[0]
+            c=hoof_trajectory(p+eps,duty,stride,.2,center,direction)[0]
+            np.testing.assert_allclose((b-a)/eps,(c-b)/eps,atol=2e-4)
+            assert (c-b)[1]/eps==pytest.approx(direction*stride/duty,abs=2e-4)
+
+
+@pytest.mark.parametrize('action',['idle_neutral','walk_forward','walk_backward','trot_jog'])
+def test_real_skin_equations_plant_all_stance_feet_and_close_the_loop(action):
+    result=author_clip(AuthoringRig(synthetic_rig()),action)
+    assert result['qa']['mesh_pose_seam']<1e-6
+    for leg in result['qa']['feet'].values():
+        assert leg['max_stance_slide_per_frame']<1e-6
+        assert leg['max_stance_height']<1e-6
+        assert leg['min_foot_surface_height']>=-1e-6
+        assert np.all(np.array(leg['joint_min'])>=np.array(leg['joint_bounds'][0])-1e-6)
+        assert np.all(np.array(leg['joint_max'])<=np.array(leg['joint_bounds'][1])+1e-6)
+
+
+def test_root_motion_uses_world_forward_even_when_root_rest_axes_are_rotated():
+    result=author_clip(AuthoringRig(synthetic_rig()),'walk_forward',root_motion=True)
+    root='__animal_export_root'
+    delta=np.array(result['frames'][-1]['bones'][root]['translation'])-result['frames'][0]['bones'][root]['translation']
+    np.testing.assert_allclose(delta,result['root_delta'],atol=1e-8)
+    assert delta[1]<0 and abs(delta[2])<1e-8
+    assert max(v['max_stance_slide_per_frame'] for v in result['qa']['feet'].values())<1e-6
+
+
+def test_geometry_scale_changes_travel_speed_without_changing_joint_motion():
+    a=author_clip(AuthoringRig(synthetic_rig()),'walk_forward')
+    b=author_clip(AuthoringRig(synthetic_rig(1.7)),'walk_forward')
+    assert b['reference_speed']==pytest.approx(a['reference_speed']*1.7)
+    for f,g in zip(a['frames'],b['frames']):
+        for name in f['bones']:
+            qa=np.array(f['bones'][name]['rotation']);qb=np.array(g['bones'][name]['rotation'])
+            assert abs(qa@qb)==pytest.approx(1,abs=1e-7)
+
+
+def test_backward_uses_diagonal_pairs_without_an_aerial_phase():
+    result=author_clip(AuthoringRig(synthetic_rig()),'walk_backward')
+    c=result['contacts']
+    assert c['hind_left']==c['fore_right']
+    assert c['fore_left']==c['hind_right']
+    assert min(sum(c[n][i] for n in c) for i in range(len(c['hind_left'])))>=2
+
+
+def test_profile_must_name_existing_limbs_and_finite_bounds():
+    p=json.loads(DEFAULT_PROFILE.read_text());p['limbs']['hind_left']['chain'][0]='missing'
+    with pytest.raises(ValueError,match='Missing explicit'):AuthoringRig(synthetic_rig(),p)
+    p=json.loads(DEFAULT_PROFILE.read_text());p['limbs']['hind_left']['joint_lower_degrees'][0]=float('-inf')
+    with pytest.raises(ValueError,match='finite joint bounds'):AuthoringRig(synthetic_rig(),p)
