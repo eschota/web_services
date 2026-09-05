@@ -138,6 +138,100 @@ before any weight-only repair. The audit is
 The anatomical diagnosis, rather than compression fidelity, is the acceptance
 gate.
 
+The original semantic graph retains the complete 55-point neck curve: `seg_17`
+from node 390 to 413, then reversed `seg_10` from 413 to 88, total arc
+0.422678 m. Node 88 is a cranial junction with separate branches to upper
+cranial node 97 and muzzle node 106. Node 413's side branch leads directly to
+torso `center_core` node `mj_1`. The final fork scan ignores nodes that are
+themselves core, but currently treats this core-directed side branch as a
+cranial fork and discards the continuation. Stage 3 then applies usage 0.8
+even to a neck-only fork guide, shortening the already bounded path again.
+
+The earlier accepted shoulder-layout P1 also has this contamination. Its
+local forelimb experiment removed all old weights and rebound the entire
+mesh while head/neck bones remained misplaced. The primary F11 task
+independently reproduced the same failure. Do not attribute first occurrence
+solely to the F11 rollout. The diagnostic overlay was published in DEV as
+`eb168ea5aa86` and delivered as
+`outputs/horse-head-placement-diagnostic.png`.
+
+A first P4 trial distributed the neck chain along the restored curve and
+placed the head base at node 88. The neck endpoints passed containment, but
+the preserved head vector put its tail outside the cranial mesh. The
+pre-bind gate rejected it: no candidate Blend, new weights or bind attempt
+was produced. An isolated follow-up tests rotation toward measured muzzle
+node 106 while preserving the head-bone length.
+
+### P4b geometry and head-motion result
+
+P4b passed the independent saved-Blend geometry checks. Exactly ten declared
+head/neck/ear bones changed; all other bones and every checked mesh attribute
+remain identical to P3. The head bone retains its 171.456 mm length and ends
+9.98 mm before the measured muzzle point. All neck/head endpoints and sampled
+shafts lie inside the mesh, with exact chain continuity. Source SHA-256:
+`8fef6c6af9e51902b070a345c964a55b0051bcba4d4569914b7179916a9d789d`.
+The old/new skeleton overlay is in DEV `27018fbd03a0` and
+`outputs/horse-head-neck-correction.png`.
+
+After a fresh full bind, both independent head-side regions have zero clavicle
+influence and complete head/neck/ear ownership. All four hoof weight regions
+are unchanged. Ten draft actions were rebuilt and applied in Blender. Actual
+run evaluation over 21 keys shows maximum head-region rigid-motion residual
+of 1.407 mm RMSE against the head bone, versus P3's 121.874 mm. Against the
+clavicle it is now 125.527 mm: the region follows the head instead of the
+shoulder. This is independent anatomical deformation evidence, separate from
+compression fidelity.
+
+The initial blanket upper-neck clavicle threshold proved too restrictive.
+Most residual clavicle mass (83.69%) lies in a shoulder/neck-base transition
+where the affected vertices are closer to clavicle shafts. The remaining
+16.31% and side asymmetry need localized assessment, rather than zeroing every
+clavicle weight in a broad quantile mask.
+
+Ear placement remains unfinished. One right ear shaft leaves the mesh. An
+initial cranial slice excluded the highest ear vertices and incorrectly
+suggested inseparable ears; a full-model height sweep disproved that result.
+At Z >= 0.86, two distinct caps contain 53 and 39 welded vertices, with tips
+near [0.09053, -0.40768, 0.87489] and [0.02696, -0.43531, 0.87348]. They merge
+between Z=0.84 and 0.85. Use component descent to identify separate stems;
+do not mirror or adopt the earlier cropped-region extrema. Isolated 0.1-radian
+ear rotations move the muzzle by at most 0.531 mm and the body by 0.919 mm, so
+the broad head-region ear fraction alone does not prove wholesale face drag.
+
+Diagnostic rendering uses P4b's full native weights (up to nine influences),
+from `fullskin-review.blend`, SHA-256
+`ea94eb099a199c37f036500b68e5e4bddb84bbbeed559c30a4f898be9826e20e`.
+It is not a validated four-influence game export. Recompute weight reduction
+and final format/deformation QA after the remaining anatomy changes.
+
+The side run diagnostic is published in DEV `7c231b443a2b` and delivered as
+`outputs/horse-run-corrected-head-neck.mp4`: 120 decoded frames, six cycles,
+30 FPS, 4.0 seconds, 960x540. All 20 unique phases were inspected. The preview
+camera now reserves space above the restored head/ears so the caption does
+not obscure anatomy. The first overlapping-caption render was stopped and
+retained as diagnostic frames; the completed second render is the delivered
+video. This is a draft gait/deformation review, not gameplay approval.
+
+### Reusable neck truncation correction
+
+Converter main `03a13a2c7aed91cad73e45d2ba4eac79391a4bfe` is pushed and clean.
+Stage 2 ignores an off-path fork only when every side neighbor belongs to
+torso core. Mixed core/non-core forks retain the existing stop behavior.
+New diagnostics cap detail at 16 rows and eight neighbors, retaining total
+and truncated counts. Stage 3 uses full length for a fork guide; terminal-tip
+guides retain configured usage and the virtual head slot. Finite explicit
+stop points must match the raw endpoint before mutation; older guides without
+that optional point use a recorded compatibility path.
+
+Six graph regressions pass, including the core-side/cranial-fork combination
+and long-path truncation counts. Eleven actual Blender cases verify full
+fork usage, terminal 0/0.8/1, legacy metadata, boolean fork override and
+malformed/nonfinite/mismatched inputs with unchanged bone geometry, hierarchy
+and rolls on failure. Related forelimb and bind regressions pass, including
+four actual Blender proxy cases. The source correction is not deployed.
+It deliberately does not add P4b's head rotation or complete ear fitting to
+runtime; those still require a reusable geometry contract and verification.
+
 Consequently, previous coverage, compression and export PASS results establish
 finite data and fidelity to their baseline only. They do not establish correct
 anatomical skin assignment. Whole-skeleton placement, independent body-region

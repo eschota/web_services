@@ -90,7 +90,9 @@ def configure_scene(arm,profile_path,material_mode='semantic',view_mode='three-q
     view=[cam.matrix_world.inverted() @ point for point in corners]
     width=max(point.x for point in view)-min(point.x for point in view)
     height=max(point.y for point in view)-min(point.y for point in view)
-    data.ortho_scale=max(width,height*scene.render.resolution_x/scene.render.resolution_y)*1.35
+    # Reserve a separate top band for the caption, including modest head/ear
+    # motion above the first pose. A restored tall neck must stay visible.
+    data.ortho_scale=max(width,height*scene.render.resolution_x/scene.render.resolution_y)*1.5
     font=bpy.data.curves.new('Review label','FONT');font.size=data.ortho_scale*.022; font.body=''
     text=bpy.data.objects.new('Review label',font);scene.collection.objects.link(text)
     text.parent=cam;text.location=(-.46*data.ortho_scale,.245*data.ortho_scale,-1)
@@ -99,7 +101,7 @@ def configure_scene(arm,profile_path,material_mode='semantic',view_mode='three-q
     out=nodes.new('ShaderNodeOutputMaterial');white.node_tree.links.new(e.outputs[0],out.inputs['Surface']);font.materials.append(white)
     plate_mesh=bpy.data.meshes.new('Review label backing')
     scale=data.ortho_scale
-    plate_mesh.from_pydata([(-.48*scale,.19*scale,-1.02),(.48*scale,.19*scale,-1.02),
+    plate_mesh.from_pydata([(-.48*scale,.215*scale,-1.02),(.48*scale,.215*scale,-1.02),
                            (.48*scale,.28*scale,-1.02),(-.48*scale,.28*scale,-1.02)],[],[(0,1,2,3)])
     plate=bpy.data.objects.new('Review label backing',plate_mesh);scene.collection.objects.link(plate);plate.parent=cam
     backing=bpy.data.materials.new('Label backing');backing.use_nodes=True
