@@ -81,6 +81,11 @@ class User(Base):
     nickname = Column(String(100), nullable=True)  # Public display name (preferred over email)
     picture = Column(String(512), nullable=True)
     gumroad_email = Column(String(255), nullable=True)
+    autorig_subscription_status = Column(String(24), nullable=False, default="none")
+    autorig_subscription_id = Column(String(255), nullable=True, index=True)
+    autorig_subscription_started_at = Column(DateTime, nullable=True)
+    autorig_subscription_period_end = Column(DateTime, nullable=True, index=True)
+    autorig_subscription_updated_at = Column(DateTime, nullable=True)
     # New accounts start with a usable balance; existing rows are untouched,
     # because a default only applies to inserts.
     balance_credits = Column(Integer, default=lambda: _signup_bonus_credits())
@@ -258,6 +263,9 @@ class Task(Base):
     id = Column(String(36), primary_key=True)  # UUID
     owner_type = Column(String(10), nullable=False)  # 'anon' or 'user'
     owner_id = Column(String(255), nullable=False)  # anon_id or user email
+    # Public by default.  Active monthly members may make individual models
+    # unlisted without deleting the task or any user artifact.
+    is_public = Column(Boolean, nullable=False, default=True, index=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1277,6 +1285,11 @@ async def init_db():
                     # Column likely already exists, or DB doesn't support the statement.
                     pass
             await _try_add_column("ALTER TABLE users ADD COLUMN gumroad_email VARCHAR(255)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN autorig_subscription_status VARCHAR(24) NOT NULL DEFAULT 'none'")
+            await _try_add_column("ALTER TABLE users ADD COLUMN autorig_subscription_id VARCHAR(255)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN autorig_subscription_started_at DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN autorig_subscription_period_end DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN autorig_subscription_updated_at DATETIME")
             await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
@@ -1365,6 +1378,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN registered_as_agent BOOLEAN DEFAULT 0")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT 1")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
@@ -1424,6 +1438,17 @@ async def init_db():
             try:
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_collection_guid ON tasks (collection_guid)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_is_public ON tasks (is_public)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_users_autorig_subscription_id "
+                    "ON users (autorig_subscription_id)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_users_autorig_subscription_period_end "
+                    "ON users (autorig_subscription_period_end)"
                 )
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_queue_class ON tasks (queue_class)"
@@ -1786,6 +1811,21 @@ async def init_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_task_completed BOOLEAN DEFAULT TRUE NOT NULL"
             )
             await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS autorig_subscription_status VARCHAR(24) NOT NULL DEFAULT 'none'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS autorig_subscription_id VARCHAR(255)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS autorig_subscription_started_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS autorig_subscription_period_end TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS autorig_subscription_updated_at TIMESTAMP"
+            )
+            await _try_add_column_any(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_marketing_unsubscribed_at TIMESTAMP"
             )
             await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_invalid_at TIMESTAMP")
@@ -1864,6 +1904,9 @@ async def init_db():
                 pass
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS viewer_prepared_glb_url VARCHAR(1024)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE"
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS viewer_animations_glb_url VARCHAR(1024)"
@@ -2058,6 +2101,17 @@ async def init_db():
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_worker_endpoints_physical_resource_id "
                     "ON worker_endpoints (physical_resource_id)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_is_public ON tasks (is_public)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_users_autorig_subscription_id "
+                    "ON users (autorig_subscription_id)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_users_autorig_subscription_period_end "
+                    "ON users (autorig_subscription_period_end)"
                 )
             except Exception:
                 pass

@@ -260,10 +260,18 @@ async function initSiteHeader() {
                     if (avatar && data.user.picture) avatar.src = data.user.picture;
                     if (name) name.textContent = data.user.name || data.user.email;
                 }
-                if (creditsCount) creditsCount.textContent = data.user.balance_credits || 0;
-                if (creditsLabel) {
-                    creditsLabel.textContent = 'Credits';
-                    creditsLabel.setAttribute('data-i18n', 'credits_balance');
+                if (data.user.subscription_active) {
+                    if (creditsCount) creditsCount.textContent = '∞';
+                    if (creditsLabel) {
+                        creditsLabel.textContent = 'Unlimited Monthly';
+                        creditsLabel.removeAttribute('data-i18n');
+                    }
+                } else {
+                    if (creditsCount) creditsCount.textContent = data.user.balance_credits || 0;
+                    if (creditsLabel) {
+                        creditsLabel.textContent = 'Credits';
+                        creditsLabel.setAttribute('data-i18n', 'credits_balance');
+                    }
                 }
             } else if (data.anon && data.anon.free_remaining !== undefined) {
                 // Anonymous user

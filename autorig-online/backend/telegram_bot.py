@@ -1490,13 +1490,22 @@ async def broadcast_credits_purchased(
         f"🆔 Sale: {html.escape(sale_id)}"
     )
 
-    if (product_kind or "").strip().lower() == "plugin":
+    normalized_kind = (product_kind or "").strip().lower()
+    if normalized_kind == "plugin":
         package_label = package or "Blender Plugin"
         text = (
             f"<b>Plugin purchased!</b>{test_label}\n"
             f"Package: {html.escape(package_label)} | Price: {html.escape(price)}\n"
             f"User: {html.escape(user_email)} | Product: {html.escape(product)}\n"
             f"Sale: {html.escape(sale_id)}"
+        )
+    elif normalized_kind == "subscription":
+        package_label = package or "AutoRig Unlimited Monthly"
+        text = (
+            f"✅ <b>Subscription purchased!</b>{test_label}\n"
+            f"📦 {html.escape(package_label)} | 💵 {html.escape(price)}\n"
+            f"👤 User: {html.escape(user_email)} | Product: {html.escape(product)}\n"
+            f"🆔 Sale: {html.escape(sale_id)}"
         )
 
     chat_ids = await get_broadcast_chat_ids()

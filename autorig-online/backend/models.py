@@ -46,6 +46,9 @@ class TaskCreateResponse(BaseModel):
 class TaskStatusResponse(BaseModel):
     """Task status and progress"""
     task_id: str
+    is_public: bool = True
+    is_owner: bool = False
+    can_manage_visibility: bool = False
     status: str
     progress: int
     ready_count: int
@@ -201,6 +204,22 @@ class UserInfo(BaseModel):
     youtube_bonus_received: bool
     is_admin: bool
     email_task_completed: bool = True  # receive task-ready emails
+    subscription_active: bool = False
+    subscription_status: str = "none"
+    subscription_plan: Optional[str] = None
+    subscription_current_period_end: Optional[datetime] = None
+    subscription_cancel_at_period_end: bool = False
+
+
+class TaskVisibilityUpdate(BaseModel):
+    """Owner-controlled public gallery visibility."""
+    is_public: bool
+
+
+class TaskVisibilityResponse(BaseModel):
+    task_id: str
+    is_public: bool
+    can_manage_visibility: bool
 
 
 class UserNotificationSettingsUpdate(BaseModel):

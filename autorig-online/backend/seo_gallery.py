@@ -297,6 +297,7 @@ def gallery_seo_task_conditions() -> List:
     return [
         Task.status == "done",
         Task.video_ready == True,
+        Task.is_public.is_(True),
         _gallery_poster_sql(),
         Task.content_rating != "adult",
     ]

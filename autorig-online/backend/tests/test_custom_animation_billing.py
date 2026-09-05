@@ -383,6 +383,8 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.main._is_autorig_credit_product("autorig-100"))
         self.assertFalse(self.main._is_autorig_credit_product("free3d-10credits"))
         self.assertFalse(self.main._is_autorig_credit_product("blender-plugin"))
+        self.assertTrue(self.main._is_autorig_subscription_product("autorig-unlimited-monthly"))
+        self.assertFalse(self.main._is_autorig_credit_product("autorig-unlimited-monthly"))
         self.assertEqual(
             self.main._gumroad_product_key_from_payload("", "Autorig - 100 Credits"),
             "autorig-100",
@@ -456,7 +458,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(bonus["disabled"])
             self.assertEqual(buyer.balance_credits, before_bonus)
 
-    async def test_credit_checkout_route_records_intent_and_redirects(self):
+    async def test_legacy_credit_checkout_redirects_to_subscription_and_records_intent(self):
         async with self.database.AsyncSessionLocal() as db:
             buyer = (
                 await db.execute(
@@ -485,7 +487,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resp.status_code, 303)
             self.assertEqual(
                 resp.headers["location"],
-                "https://u3d.gumroad.com/l/autorig-100?userid=buyer%40example.com",
+                "https://u3d.gumroad.com/l/autorig-unlimited-monthly?userid=buyer%40example.com",
             )
             tg.assert_called_once()
 
@@ -497,7 +499,8 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 )
             ).scalars().all()
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0].product_permalink, "autorig-100")
+            self.assertEqual(rows[0].product_permalink, "autorig-unlimited-monthly")
+            self.assertEqual(rows[0].product_kind, "subscription")
             self.assertEqual(rows[0].source, "task_paywall_modal")
             self.assertEqual(rows[0].task_id, self.task_id)
             self.assertEqual(rows[0].required_credits, 10)
@@ -754,6 +757,136 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(intent.gumroad_sale_id, "checkout-auto-unlock-sale")
             self.assertEqual(intent.auto_unlock_status, "unlocked")
             self.assertIsNotNone(intent.used_at)
+
+    async def test_subscription_webhook_activates_month_without_adding_credits(self):
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, *args, **kwargs):
+                return type("Resp", (), {"status_code": 200})()
+
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = await db.scalar(
+                self.main.select(self.database.User).where(
+                    self.database.User.email == "buyer@example.com"
+                )
+            )
+            starting_balance = int(buyer.balance_credits or 0)
+
+        body = urlencode(
+            {
+                "sale_id": "subscription-sale-1",
+                "email": "checkout@example.com",
+                "url_params[userid]": "buyer@example.com",
+                "product_permalink": "autorig-unlimited-monthly",
+                "product_name": "AutoRig Unlimited Monthly",
+                "price": "2000",
+                "subscription_id": "subscription-123",
+                "recurrence": "monthly",
+                "sale_timestamp": "2026-09-05T08:00:00Z",
+            }
+        ).encode()
+        req = self._fake_request(
+            method="POST",
+            path="/api-gumroad",
+            query_string=b"token=test-secret",
+            headers=[(b"content-type", b"application/x-www-form-urlencoded")],
+            body=body,
+        )
+
+        with (
+            patch.object(self.main, "GUMROAD_WEBHOOK_SECRET", "test-secret"),
+            patch.object(self.main.httpx, "AsyncClient", return_value=DummyClient()),
+            patch("telegram_bot.broadcast_credits_purchased", new=AsyncMock()) as tg,
+        ):
+            response = await self.main.api_gumroad_ping(req)
+            await asyncio.sleep(0)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(tg.call_args.kwargs["product_kind"], "subscription")
+        self.assertEqual(tg.call_args.kwargs["credits"], 0)
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = await db.scalar(
+                self.main.select(self.database.User).where(
+                    self.database.User.email == "buyer@example.com"
+                )
+            )
+            self.assertEqual(buyer.balance_credits, starting_balance)
+            self.assertEqual(buyer.autorig_subscription_status, "active")
+            self.assertEqual(buyer.autorig_subscription_id, "subscription-123")
+            self.assertEqual(
+                buyer.autorig_subscription_period_end,
+                datetime(2026, 10, 5, 8, 0),
+            )
+
+    async def test_subscription_webhook_rejects_wrong_token(self):
+        body = urlencode(
+            {
+                "sale_id": "subscription-sale-invalid",
+                "email": "buyer@example.com",
+                "product_permalink": "autorig-unlimited-monthly",
+                "product_name": "AutoRig Unlimited Monthly",
+                "price": "2000",
+                "subscription_id": "subscription-invalid",
+            }
+        ).encode()
+        req = self._fake_request(
+            method="POST",
+            path="/api-gumroad",
+            query_string=b"token=wrong",
+            body=body,
+        )
+        with patch.object(self.main, "GUMROAD_WEBHOOK_SECRET", "test-secret"):
+            with self.assertRaises(self.main.HTTPException) as denied:
+                await self.main.api_gumroad_ping(req)
+        self.assertEqual(denied.exception.status_code, 403)
+
+    async def test_private_gallery_visibility_requires_subscription_but_restore_does_not(self):
+        async with self.database.AsyncSessionLocal() as db:
+            owner = await db.scalar(
+                self.main.select(self.database.User).where(
+                    self.database.User.email == "owner@example.com"
+                )
+            )
+            task = await db.scalar(
+                self.main.select(self.database.Task).where(
+                    self.database.Task.id == self.task_id
+                )
+            )
+            self.assertTrue(task.is_public)
+
+            with self.assertRaises(self.main.HTTPException) as denied:
+                await self.main.api_update_task_visibility(
+                    self.task_id,
+                    self.models.TaskVisibilityUpdate(is_public=False),
+                    user=owner,
+                    db=db,
+                )
+            self.assertEqual(denied.exception.status_code, 402)
+
+            owner.autorig_subscription_status = "active"
+            owner.autorig_subscription_period_end = datetime.utcnow() + self.main.timedelta(days=30)
+            hidden = await self.main.api_update_task_visibility(
+                self.task_id,
+                self.models.TaskVisibilityUpdate(is_public=False),
+                user=owner,
+                db=db,
+            )
+            self.assertFalse(hidden.is_public)
+
+            owner.autorig_subscription_status = "expired"
+            owner.autorig_subscription_period_end = datetime.utcnow() - self.main.timedelta(seconds=1)
+            restored = await self.main.api_update_task_visibility(
+                self.task_id,
+                self.models.TaskVisibilityUpdate(is_public=True),
+                user=owner,
+                db=db,
+            )
+            self.assertTrue(restored.is_public)
 
     async def test_animal_animation_catalog_pack_purchase_and_download(self):
         task_id = "33333333-4444-5555-6666-777777777777"

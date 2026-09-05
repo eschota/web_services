@@ -216,6 +216,27 @@ GUMROAD_PRODUCT_CREDITS = {
     "autorig-1000": 1000,
 }
 
+# AutoRig's public paid offer is a recurring monthly membership, not a credit
+# pack.  Legacy credit products remain in ``GUMROAD_PRODUCT_CREDITS`` so old
+# purchases and refunds can still be reconciled, but new checkout traffic is
+# allowed to use only this product.
+AUTORIG_SUBSCRIPTION_PRODUCT_KEY = os.getenv(
+    "AUTORIG_SUBSCRIPTION_PRODUCT_KEY", "autorig-unlimited-monthly"
+).strip().lower()
+AUTORIG_SUBSCRIPTION_PRODUCT_KEYS = frozenset(
+    key.strip().lower()
+    for key in os.getenv(
+        "AUTORIG_SUBSCRIPTION_PRODUCT_KEYS",
+        f"{AUTORIG_SUBSCRIPTION_PRODUCT_KEY},autorig-unlimited",
+    ).split(",")
+    if key.strip()
+)
+AUTORIG_SUBSCRIPTION_PRICE_USD = float(os.getenv("AUTORIG_SUBSCRIPTION_PRICE_USD", "20"))
+GUMROAD_WEBHOOK_SECRET = os.getenv("GUMROAD_WEBHOOK_SECRET", "").strip()
+
+# Public checkout allowlist.  Do not add the legacy credit-pack keys here.
+AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS = frozenset({AUTORIG_SUBSCRIPTION_PRODUCT_KEY})
+
 # Gumroad product_permalink -> USD minimum price for the Blender plugin ABCD test.
 BLENDER_PLUGIN_AB_VARIANTS = {
     "blender-plugin-10": 10,
@@ -225,12 +246,18 @@ BLENDER_PLUGIN_AB_VARIANTS = {
     "blender-plugin": 100,
 }
 
-# Gumroad product_permalinks (lowercase) that count toward /buy-credits donation progress
-AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
+# Legacy AutoRig credit products remain recognizable for old receipts and
+# delayed webhooks, but are no longer accepted by the public checkout route.
+AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS = frozenset(
     k.strip().lower()
     for k in GUMROAD_PRODUCT_CREDITS
     if str(k).strip().lower().startswith("autorig-")
     or str(k).strip().lower() == "oneclick-30-credits"
+)
+
+# Products included in the historical revenue/progress aggregate.
+AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
+    set(AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS) | set(AUTORIG_SUBSCRIPTION_PRODUCT_KEYS)
 )
 
 # Public donation thermometer on buy-credits (USD)

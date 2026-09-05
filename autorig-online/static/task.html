@@ -3910,6 +3910,11 @@
                         </svg>
                         <span data-i18n="btn_owner_tasks">All tasks</span>
                     </button>
+                    <button type="button" class="task-header-btn hidden" id="task-visibility-btn"
+                            title="Remove from public gallery">
+                        <span aria-hidden="true" id="task-visibility-icon">◉</span>
+                        <span id="task-visibility-label">Remove from gallery</span>
+                    </button>
                     <div id="status-container">
                         <span class="task-status-pill task-status-pill--processing" id="status-badge">
                             <span id="status-text">Processing...</span>
@@ -6393,6 +6398,7 @@
                     }
                 }
                 await this.updateUI();
+                this.updateVisibilityUI();
                 window.__taskPageBoot?.markTaskReady('Task data loaded');
 
                 if (taskState.status === 'done' || taskState.status === 'error') {
@@ -6433,6 +6439,65 @@
                     window.__taskPerf?.log('TaskPage', 'fetchTask failed', { message: error?.message || String(error) });
                 } finally {
                     this.fetchInFlight = false;
+                }
+            },
+
+            updateVisibilityUI() {
+                const button = document.getElementById('task-visibility-btn');
+                const label = document.getElementById('task-visibility-label');
+                const icon = document.getElementById('task-visibility-icon');
+                if (!button || !label || !icon) return;
+                const task = this.task;
+                if (!task?.is_owner) {
+                    button.classList.add('hidden');
+                    return;
+                }
+                button.classList.remove('hidden');
+                if (task.is_public === false) {
+                    icon.textContent = '◌';
+                    label.textContent = 'Restore in gallery';
+                    button.title = 'Publish this model in the public gallery again';
+                } else if (task.can_manage_visibility) {
+                    icon.textContent = '◉';
+                    label.textContent = 'Remove from gallery';
+                    button.title = 'Make this model private and remove it from the public gallery';
+                } else {
+                    icon.textContent = '🔒';
+                    label.textContent = 'Private models — $20/mo';
+                    button.title = 'Unlimited Monthly is required to make models private';
+                }
+            },
+
+            async toggleTaskVisibility() {
+                const task = this.task;
+                if (!task?.is_owner) return;
+                const makePublic = task.is_public === false;
+                if (!makePublic && !task.can_manage_visibility) {
+                    window.location.href = '/buy-credits';
+                    return;
+                }
+                const button = document.getElementById('task-visibility-btn');
+                if (button) button.disabled = true;
+                try {
+                    const response = await fetch(`/api/task/${this.taskId}/visibility`, {
+                        method: 'PATCH',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ is_public: makePublic })
+                    });
+                    if (response.status === 402) {
+                        window.location.href = '/buy-credits';
+                        return;
+                    }
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(data.detail || 'Could not update gallery visibility');
+                    this.task.is_public = Boolean(data.is_public);
+                    this.task.can_manage_visibility = Boolean(data.can_manage_visibility);
+                    this.updateVisibilityUI();
+                } catch (error) {
+                    alert(error?.message || 'Could not update gallery visibility');
+                } finally {
+                    if (button) button.disabled = false;
                 }
             },
             
@@ -7164,37 +7229,12 @@
             authUser: null,
             paywallProducts: [
                 {
-                    kind: 'credits',
-                    permalink: 'oneclick-30-credits',
-                    title: '30 credits',
-                    price: '$3',
-                    credits: 30,
-                    note: '3 task unlocks. Each task unlock costs 10 credits.'
-                },
-                {
-                    kind: 'credits',
-                    permalink: 'autorig-100',
-                    title: '100 credits',
-                    price: '$10',
-                    credits: 100,
-                    note: '10 task unlocks. Recommended for repeat downloads.',
+                    kind: 'subscription',
+                    permalink: 'autorig-unlimited-monthly',
+                    title: 'Unlimited Monthly',
+                    price: '$20 / month',
+                    note: 'Unlimited models for one month, private models, and public gallery controls.',
                     featured: true
-                },
-                {
-                    kind: 'credits',
-                    permalink: 'autorig-500',
-                    title: '500 credits',
-                    price: '$50',
-                    credits: 500,
-                    note: '50 task unlocks at the same per-credit price.'
-                },
-                {
-                    kind: 'credits',
-                    permalink: 'autorig-1000',
-                    title: '1000 credits',
-                    price: '$100',
-                    credits: 1000,
-                    note: '100 task unlocks for heavier one-time batches.'
                 },
                 {
                     kind: 'plugin',
@@ -7348,7 +7388,7 @@
                     params.set('page_url', window.location.href);
                     return `/blender-plugin/checkout?${params.toString()}`;
                 }
-                if (product.kind !== 'credits') {
+                if (product.kind !== 'credits' && product.kind !== 'subscription') {
                     return this.gumroadPaywallUrl(product.permalink || '');
                 }
                 const params = new URLSearchParams();
@@ -7375,10 +7415,10 @@
                 const requiredCredits = Number(context.requiredCredits || 0);
                 const balance = Number(this.purchaseState?.user_credits || 0);
                 if (this.purchaseState?.login_required) {
-                    return 'Sign in before buying credits so your Gumroad payment is credited to your AutoRig.online account.';
+                    return 'Sign in before subscribing so Gumroad can activate Unlimited Monthly on your AutoRig.online account.';
                 }
                 if (requiredCredits > 0) {
-                    return `Unlock this task for ${requiredCredits} credits. Your current balance is ${balance} credits.`;
+                    return `Subscribe for $20/month to create unlimited models and manage private gallery visibility. Your existing ${balance} credits remain available.`;
                 }
                 return this.tSafe('download_archive_desc', 'The archive includes the rig in multiple formats, 50+ character animations, 10 animal rig animations, a Unity package, a video preview, and a poster.');
             },
@@ -7417,7 +7457,7 @@
                         body: JSON.stringify({
                             product_kind: product.kind || 'unknown',
                             permalink: product.permalink || '',
-                            package: product.kind === 'credits' ? `${product.credits} credits` : product.title,
+                            package: product.title,
                             price: String(product.price || ''),
                             source: 'task_paywall_modal',
                             page_url: window.location.href
@@ -7442,7 +7482,7 @@
                 grid.innerHTML = this.paywallProducts.map((product, idx) => {
                     const btnText = needsLogin
                         ? 'Sign in to buy'
-                        : (product.kind === 'plugin' ? 'Buy plugin' : 'Buy credits');
+                        : (product.kind === 'plugin' ? 'Buy plugin' : 'Subscribe');
                     const href = this.paywallCheckoutUrl(product, context);
                     return `
                         <article class="task-paywall-card" data-featured="${product.featured ? 'true' : 'false'}">
@@ -7461,7 +7501,7 @@
                         const idx = Number(btn.getAttribute('data-paywall-product'));
                         const product = this.paywallProducts[idx];
                         if (!product) return;
-                        if (product.kind === 'credits') {
+                        if (product.kind === 'credits' || product.kind === 'subscription') {
                             this.savePendingDownloadUnlock(context);
                         }
                     });
@@ -9112,6 +9152,7 @@
 
                 // Owner tasks modal
                 document.getElementById('owner-tasks-btn')?.addEventListener('click', () => this.openOwnerTasksModal());
+                document.getElementById('task-visibility-btn')?.addEventListener('click', () => this.toggleTaskVisibility());
                 document.getElementById('owner-tasks-close')?.addEventListener('click', () => this.closeOwnerTasksModal());
                 document.getElementById('owner-tasks-modal')?.addEventListener('click', (e) => {
                     if (e.target.id === 'owner-tasks-modal') this.closeOwnerTasksModal();

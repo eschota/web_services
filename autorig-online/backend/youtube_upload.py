@@ -510,6 +510,12 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task or task.status != "done":
             return
+        if not bool(getattr(task, "is_public", True)):
+            task.youtube_upload_status = "skipped"
+            task.youtube_upload_error = "private_task"
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            return
         if not _youtube_task_is_in_current_window(task.created_at):
             task.youtube_upload_status = "skipped"
             task.youtube_upload_error = "quota_window_expired"
@@ -808,6 +814,7 @@ async def youtube_retry_worker() -> None:
                             select(Task.id)
                             .where(
                                 Task.status == "done",
+                                Task.is_public.is_(True),
                                 Task.youtube_video_id.is_(None),
                                 Task.youtube_upload_status == "deferred",
                                 Task.youtube_upload_error == "video_source_pending",

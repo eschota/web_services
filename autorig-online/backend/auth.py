@@ -5,7 +5,7 @@ import asyncio
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 import httpx
 from sqlalchemy import func, select
@@ -19,8 +19,14 @@ from config import (
     ANON_FREE_LIMIT,
     USER_FREE_LIMIT,
     GUMROAD_PRODUCT_CREDITS,
+    AUTORIG_SUBSCRIPTION_PRODUCT_KEYS,
 )
 from database import User, AnonSession, Session, GumroadPurchase
+from subscription_access import (
+    apply_subscription_event,
+    parse_gumroad_datetime,
+    user_has_active_subscription,
+)
 
 
 # =============================================================================
@@ -179,6 +185,39 @@ async def apply_pending_gumroad_credits(db: AsyncSession, user: User) -> int:
         user.balance_credits = max(0, int(user.balance_credits or 0) + total)
         user.gumroad_email = user.gumroad_email or user.email
         print(f"[Auth] Applied pending Gumroad credits: user={user.email} credits={total}")
+
+    # Membership webhooks can arrive before the buyer's first AutoRig login.
+    # Replay the small immutable Gumroad ledger in timestamp order so the same
+    # event logic handles both immediate and delayed account linking.
+    subscription_rows = await db.execute(
+        select(GumroadPurchase)
+        .where(
+            func.lower(GumroadPurchase.email) == email,
+            GumroadPurchase.test.is_(False),
+            func.lower(GumroadPurchase.product_permalink).in_(
+                [key.lower() for key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS]
+            ),
+        )
+        .order_by(GumroadPurchase.created_at.asc(), GumroadPurchase.id.asc())
+    )
+    for purchase in subscription_rows.scalars().all():
+        payload = dict(parse_qsl(purchase.raw_payload or "", keep_blank_values=True))
+        event_time = (
+            purchase.created_at
+            if purchase.is_recurring_charge
+            else parse_gumroad_datetime(payload.get("sale_timestamp") or payload.get("created_at"))
+        )
+        apply_subscription_event(
+            user,
+            subscription_id=purchase.subscription_id or payload.get("subscription_id"),
+            sale_at=event_time or purchase.created_at,
+            cancelled_at=parse_gumroad_datetime(payload.get("subscription_cancelled_at")),
+            failed_at=parse_gumroad_datetime(payload.get("subscription_failed_at")),
+            ended_at=parse_gumroad_datetime(payload.get("subscription_ended_at")),
+            refunded=bool(purchase.refunded),
+        )
+        purchase.credited = True
+        purchase.credits_added = 0
     return total
 
 
@@ -284,7 +323,7 @@ def can_create_task_anon(anon_session: AnonSession) -> bool:
 
 def can_create_task_user(user: User) -> bool:
     """Check if authenticated user can create a task"""
-    return user.balance_credits > 0
+    return user_has_active_subscription(user) or user.balance_credits > 0
 
 
 def get_remaining_credits_anon(anon_session: AnonSession) -> int:
@@ -294,7 +333,10 @@ def get_remaining_credits_anon(anon_session: AnonSession) -> int:
 
 async def decrement_user_credits(db: AsyncSession, user: User) -> int:
     """Decrement user credits, return new balance"""
-    if user.balance_credits > 0:
+    if user_has_active_subscription(user):
+        user.total_tasks += 1
+        await db.commit()
+    elif user.balance_credits > 0:
         user.balance_credits -= 1
         user.total_tasks += 1
         await db.commit()

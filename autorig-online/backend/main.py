@@ -57,8 +57,14 @@ from config import (
     TASK_CACHE_MAX_GB,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
+    AUTORIG_SUBSCRIPTION_PRODUCT_KEY,
+    AUTORIG_SUBSCRIPTION_PRODUCT_KEYS,
+    AUTORIG_SUBSCRIPTION_PRICE_USD,
+    AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS,
+    GUMROAD_WEBHOOK_SECRET,
     BLENDER_PLUGIN_AB_VARIANTS,
     AUTORIG_DONATION_PRODUCT_KEYS,
+    AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
     AUTORIG_CRYPTO_TIERS,
@@ -115,7 +121,8 @@ from database import (
 from models import (
     TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
-    UserInfo, UserNotificationSettingsUpdate, AnonInfo, AuthStatusResponse,
+    UserInfo, UserNotificationSettingsUpdate, TaskVisibilityUpdate, TaskVisibilityResponse,
+    AnonInfo, AuthStatusResponse,
     ApiKeyItem, ApiKeyListResponse, ApiKeyCreateResponse,
     AdminUserListItem, AdminUserListResponse,
     AdminBalanceUpdate, AdminBalanceResponse,
@@ -179,6 +186,12 @@ from auth import (
     get_or_create_user, get_or_create_anon_session,
     increment_anon_usage, can_create_task_anon, can_create_task_user,
     get_remaining_credits_anon, decrement_user_credits
+)
+from subscription_access import (
+    apply_subscription_event,
+    parse_gumroad_datetime,
+    subscription_summary,
+    user_has_active_subscription,
 )
 from tasks import (
     create_conversion_task, update_task_progress, start_task_on_worker,
@@ -1818,6 +1831,8 @@ def _safe_checkout_task_id(value: Any) -> Optional[str]:
 
 def _checkout_pack_price_label(product_key: str) -> str:
     key = _normalize_gumroad_product_key(product_key)
+    if key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
+        return f"{_format_usd_price(AUTORIG_SUBSCRIPTION_PRICE_USD)}/month"
     for tier_key, _credits, usd in AUTORIG_CRYPTO_TIERS:
         if _normalize_gumroad_product_key(tier_key) == key:
             if float(usd).is_integer():
@@ -1827,6 +1842,8 @@ def _checkout_pack_price_label(product_key: str) -> str:
 
 
 def _checkout_pack_label(product_key: str) -> str:
+    if _normalize_gumroad_product_key(product_key) in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
+        return "AutoRig Unlimited Monthly"
     credits = int(GUMROAD_PRODUCT_CREDITS.get(_normalize_gumroad_product_key(product_key), 0) or 0)
     return f"{credits} credits" if credits > 0 else "credits"
 
@@ -2990,6 +3007,7 @@ async def auth_me(
 ):
     """Get current auth status"""
     if user:
+        plan = subscription_summary(user)
         return AuthStatusResponse(
             authenticated=True,
             user=UserInfo(
@@ -3002,6 +3020,11 @@ async def auth_me(
                 youtube_bonus_received=user.youtube_bonus_received,
                 is_admin=user.is_admin,
                 email_task_completed=user.email_task_completed,
+                subscription_active=plan["active"],
+                subscription_status=plan["status"],
+                subscription_plan=plan["plan"],
+                subscription_current_period_end=plan["current_period_end"],
+                subscription_cancel_at_period_end=plan["cancel_at_period_end"],
             ),
             credits_remaining=user.balance_credits,
             login_required=False
@@ -3035,6 +3058,7 @@ async def api_user_notification_settings(
     user.email_task_completed = body.email_task_completed
     await db.commit()
     await db.refresh(user)
+    plan = subscription_summary(user)
     return UserInfo(
         id=user.id,
         email=user.email,
@@ -3045,6 +3069,11 @@ async def api_user_notification_settings(
         youtube_bonus_received=user.youtube_bonus_received,
         is_admin=user.is_admin,
         email_task_completed=user.email_task_completed,
+        subscription_active=plan["active"],
+        subscription_status=plan["status"],
+        subscription_plan=plan["plan"],
+        subscription_current_period_end=plan["current_period_end"],
+        subscription_cancel_at_period_end=plan["cancel_at_period_end"],
     )
 
 
@@ -3575,9 +3604,15 @@ async def buy_credits_checkout(
     db: AsyncSession = Depends(get_db),
 ):
     """Server-owned checkout redirect so payment clicks do not depend on JS fetches."""
-    product_key = _normalize_gumroad_product_key(permalink)
-    if product_key not in AUTORIG_DONATION_PRODUCT_KEYS:
-        raise HTTPException(status_code=404, detail="Unknown AutoRig credit product")
+    requested_key = _normalize_gumroad_product_key(permalink)
+    # Old task-page caches and bookmarks should land on the replacement offer,
+    # never on a retired credit pack.
+    if requested_key in AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS:
+        product_key = AUTORIG_SUBSCRIPTION_PRODUCT_KEY
+    else:
+        product_key = requested_key
+    if product_key not in AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown AutoRig subscription product")
 
     if not user:
         next_path = request.url.path
@@ -3599,7 +3634,7 @@ async def buy_credits_checkout(
         intent = PurchaseCheckoutIntent(
             user_email=user.email,
             product_permalink=product_key,
-            product_kind="credits",
+            product_kind="subscription",
             source=source_clean,
             task_id=task_id_clean,
             required_credits=required_credits,
@@ -3627,7 +3662,7 @@ async def buy_credits_checkout(
                 price=price_label,
                 user_email=user.email,
                 anon_id=None,
-                product_kind="credits",
+                product_kind="subscription",
                 permalink=product_key,
                 source=source_clean,
                 page_url=page_url_clean,
@@ -5461,10 +5496,12 @@ def _normalize_gumroad_product_key(raw_value: str | None) -> str:
 
 def _gumroad_product_key_from_payload(product: str | None, product_name: str | None) -> str:
     product_key = _normalize_gumroad_product_key(product)
-    if product_key in GUMROAD_PRODUCT_CREDITS:
+    if product_key in GUMROAD_PRODUCT_CREDITS or product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
         return product_key
 
     name = (product_name or "").strip().lower()
+    if "autorig" in name and ("unlimited" in name or "subscription" in name):
+        return AUTORIG_SUBSCRIPTION_PRODUCT_KEY
     if "autorig" not in name or "credit" not in name:
         return product_key
     if re.search(r"\b1000\b", name):
@@ -5500,7 +5537,11 @@ def _gumroad_credit_target_email(parsed_form: Dict[str, Any]) -> str:
 
 
 def _is_autorig_credit_product(product_key: str) -> bool:
-    return (product_key or "").strip().lower() in AUTORIG_DONATION_PRODUCT_KEYS
+    return (product_key or "").strip().lower() in AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS
+
+
+def _is_autorig_subscription_product(product_key: str) -> bool:
+    return (product_key or "").strip().lower() in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
 
 
 @app.post("/api-gumroad")
@@ -5541,61 +5582,112 @@ async def api_gumroad_ping(
     product_key = _gumroad_product_key_from_payload(product, product_name)
     local_credits_added = 0
     is_plugin_product = _is_blender_plugin_product(product_key, product_name)
+    is_subscription_product = _is_autorig_subscription_product(product_key)
+    if is_subscription_product:
+        supplied_secret = str(request.query_params.get("token") or "")
+        if not GUMROAD_WEBHOOK_SECRET:
+            print("[Gumroad] Subscription webhook rejected: server secret is not configured", flush=True)
+            raise HTTPException(status_code=503, detail="Subscription webhook is not configured")
+        if not hmac.compare_digest(supplied_secret, GUMROAD_WEBHOOK_SECRET):
+            print(f"[Gumroad] Subscription webhook rejected: invalid token sale={sale_id}", flush=True)
+            raise HTTPException(status_code=403, detail="Invalid webhook token")
     known_product = (
         product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
+        or is_subscription_product
         or is_plugin_product
     )
     should_notify_purchase = False
 
-    if _is_autorig_credit_product(product_key) and email and email != "unknown":
+    if (_is_autorig_credit_product(product_key) or is_subscription_product) and email and email != "unknown":
         try:
             async with AsyncSessionLocal() as db:
-                purchase = GumroadPurchase(
-                    sale_id=sale_id,
-                    email=email,
-                    product_permalink=product_key,
-                    product_name=product_name,
-                    price=price_cents,
-                    refunded=refunded,
-                    is_recurring_charge=is_recurring_charge,
-                    subscription_id=subscription_id,
-                    license_key=license_key,
-                    test=is_test,
-                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
-                    credited=False,
-                    credits_added=0,
+                purchase = await db.scalar(
+                    select(GumroadPurchase).where(GumroadPurchase.sale_id == sale_id)
                 )
-                db.add(purchase)
-                try:
-                    await db.flush()
-                except IntegrityError:
-                    await db.rollback()
-                    purchase = None
-
-                if purchase is not None:
-                    credits_to_add = 0 if refunded else int(GUMROAD_PRODUCT_CREDITS.get(product_key, max(price_cents, 0)))
-                    user_result = await db.execute(
-                        select(User).where(func.lower(User.email) == email.lower())
+                is_new_purchase = purchase is None
+                if purchase is None:
+                    purchase = GumroadPurchase(
+                        sale_id=sale_id,
+                        email=email,
+                        product_permalink=product_key,
+                        product_name=product_name,
+                        price=price_cents,
+                        refunded=refunded,
+                        is_recurring_charge=is_recurring_charge,
+                        subscription_id=subscription_id,
+                        license_key=license_key,
+                        test=is_test,
+                        raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                        credited=False,
+                        credits_added=0,
                     )
-                    user = user_result.scalar_one_or_none()
-                    if user and credits_to_add > 0:
-                        user.balance_credits = max(0, int(user.balance_credits or 0) + credits_to_add)
-                        user.gumroad_email = checkout_email if checkout_email != "unknown" else email
-                        purchase.credited = True
-                        purchase.credits_added = credits_to_add
-                        local_credits_added = credits_to_add
-                        auto_unlock = await _try_auto_unlock_pending_checkout(db, user, sale_id)
-                        if auto_unlock:
-                            print(
-                                f"[Gumroad] Checkout auto-unlock result sale={sale_id} "
-                                f"status={auto_unlock.get('status')} task={auto_unlock.get('task_id')} "
-                                f"credits_spent={auto_unlock.get('credits_spent')}",
-                                flush=True,
-                            )
-                    await db.commit()
-                    should_notify_purchase = True
+                    db.add(purchase)
+                    await db.flush()
+                else:
+                    purchase.email = email
+                    purchase.product_permalink = product_key
+                    purchase.product_name = product_name
+                    purchase.price = price_cents
+                    purchase.refunded = refunded
+                    purchase.is_recurring_charge = is_recurring_charge
+                    purchase.subscription_id = subscription_id or purchase.subscription_id
+                    purchase.license_key = license_key or purchase.license_key
+                    purchase.test = is_test
+                    purchase.raw_payload = raw_body.decode("utf-8", errors="ignore")
+
+                credits_to_add = 0
+                if _is_autorig_credit_product(product_key) and is_new_purchase and not refunded and not is_test:
+                    credits_to_add = int(GUMROAD_PRODUCT_CREDITS.get(product_key, 0) or 0)
+                user_result = await db.execute(
+                    select(User).where(func.lower(User.email) == email.lower())
+                )
+                user = user_result.scalar_one_or_none()
+                if user and is_subscription_product and not is_test:
+                    cancelled_at = parse_gumroad_datetime(parsed_form.get("subscription_cancelled_at"))
+                    failed_at = parse_gumroad_datetime(parsed_form.get("subscription_failed_at"))
+                    ended_at = parse_gumroad_datetime(parsed_form.get("subscription_ended_at"))
+                    subscription_event_at = (
+                        datetime.utcnow()
+                        if is_recurring_charge
+                        else parse_gumroad_datetime(
+                            parsed_form.get("sale_timestamp") or parsed_form.get("created_at")
+                        )
+                    )
+                    state = apply_subscription_event(
+                        user,
+                        subscription_id=subscription_id,
+                        sale_at=subscription_event_at,
+                        cancelled_at=cancelled_at,
+                        failed_at=failed_at,
+                        ended_at=ended_at,
+                        refunded=refunded,
+                    )
+                    user.gumroad_email = checkout_email if checkout_email != "unknown" else email
+                    purchase.credited = True
+                    purchase.credits_added = 0
+                    print(
+                        f"[Gumroad] Subscription entitlement sale={sale_id} state={state} "
+                        f"period_end={user.autorig_subscription_period_end}",
+                        flush=True,
+                    )
+                elif user and credits_to_add > 0:
+                    user.balance_credits = max(0, int(user.balance_credits or 0) + credits_to_add)
+                    user.gumroad_email = checkout_email if checkout_email != "unknown" else email
+                    purchase.credited = True
+                    purchase.credits_added = credits_to_add
+                    local_credits_added = credits_to_add
+                    auto_unlock = await _try_auto_unlock_pending_checkout(db, user, sale_id)
+                    if auto_unlock:
+                        print(
+                            f"[Gumroad] Checkout auto-unlock result sale={sale_id} "
+                            f"status={auto_unlock.get('status')} task={auto_unlock.get('task_id')} "
+                            f"credits_spent={auto_unlock.get('credits_spent')}",
+                            flush=True,
+                        )
+                await db.commit()
+                should_notify_purchase = is_new_purchase or refunded
         except Exception as e:
-            print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
+            print(f"[Gumroad] Local AutoRig entitlement update failed for {sale_id}: {e}", flush=True)
 
     if is_plugin_product:
         try:
@@ -5636,14 +5728,22 @@ async def api_gumroad_ping(
 
     from telegram_bot import broadcast_credits_purchased
     if should_notify_purchase:
-        notice_kind = "plugin" if is_plugin_product else "credits"
-        notice_price = _blender_plugin_price_label(product_key, price_cents) if is_plugin_product else str(price_raw)
+        notice_kind = "plugin" if is_plugin_product else ("subscription" if is_subscription_product else "credits")
+        notice_price = (
+            _blender_plugin_price_label(product_key, price_cents)
+            if is_plugin_product
+            else (
+                f"{_format_usd_price(AUTORIG_SUBSCRIPTION_PRICE_USD)}/month"
+                if is_subscription_product
+                else str(price_raw)
+            )
+        )
         notice_package = (
             f"Blender Plugin ABCD {notice_price}" if is_plugin_product else _checkout_pack_label(product_key)
         )
         asyncio.create_task(
             broadcast_credits_purchased(
-                credits=0 if is_plugin_product else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
+                credits=0 if (is_plugin_product or is_subscription_product) else local_credits_added,
                 price=notice_price,
                 user_email=email,
                 product=product_key or product,
@@ -5850,6 +5950,12 @@ async def api_get_task(
 
     can_download_task = _can_download_task(task=task, user=user, request=request)
     is_admin_viewer = bool(user and is_admin_email(user.email))
+    is_user_owner = bool(user and task.owner_type == "user" and task.owner_id == user.email)
+    task_is_public = bool(getattr(task, "is_public", True))
+    can_manage_visibility = bool(
+        is_admin_viewer
+        or (is_user_owner and (user_has_active_subscription(user) or not task_is_public))
+    )
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
     blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
     response_video_ready = bool(task.video_ready or blueprint_rig_preview_url)
@@ -5906,6 +6012,9 @@ async def api_get_task(
     )
     return TaskStatusResponse(
         task_id=task.id,
+        is_public=task_is_public,
+        is_owner=is_user_owner,
+        can_manage_visibility=can_manage_visibility,
         status=task.status,
         progress=task.progress,
         ready_count=downloadable_ready_count,
@@ -5966,6 +6075,46 @@ async def api_get_task(
         pipeline=getattr(task, "pipeline_kind", None) or "rig",
         youtube_video_id=getattr(task, "youtube_video_id", None),
         youtube_upload_status=getattr(task, "youtube_upload_status", None),
+    )
+
+
+@app.patch("/api/task/{task_id}/visibility", response_model=TaskVisibilityResponse)
+async def api_update_task_visibility(
+    task_id: str,
+    body: TaskVisibilityUpdate,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hide or republish a model without deleting its task or artifacts."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    is_admin = is_admin_email(user.email)
+    is_owner = task.owner_type == "user" and task.owner_id == user.email
+    if not (is_admin or is_owner):
+        raise HTTPException(status_code=403, detail="Only the task owner can change gallery visibility")
+    if not body.is_public and not (is_admin or user_has_active_subscription(user)):
+        raise HTTPException(
+            status_code=402,
+            detail="An active Unlimited Monthly subscription is required for private models",
+        )
+
+    task.is_public = bool(body.is_public)
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    try:
+        from seo_gallery import invalidate_sitemap_indexable_cache, invalidate_sitemap_public_cache
+        invalidate_sitemap_indexable_cache()
+        invalidate_sitemap_public_cache()
+    except Exception as exc:
+        print(f"[Visibility] sitemap cache invalidation failed task={task.id}: {exc}", flush=True)
+    return TaskVisibilityResponse(
+        task_id=task.id,
+        is_public=bool(task.is_public),
+        can_manage_visibility=bool(is_admin or user_has_active_subscription(user) or not task.is_public),
     )
 
 
@@ -8400,6 +8549,7 @@ async def api_get_gallery(
     base_conditions = [
         Task.status == "done",
         Task.video_ready == True,
+        Task.is_public.is_(True),
         _gallery_task_has_poster_sql(),
     ]
     if author:
@@ -12053,6 +12203,7 @@ async def _rig_article_examples(db: AsyncSession, rig_key: str, limit: int = 6) 
     base_conditions = [
         Task.status == "done",
         Task.video_ready == True,
+        Task.is_public.is_(True),
         _gallery_task_has_poster_sql(),
         or_(Task.content_rating.is_(None), Task.content_rating != "adult"),
     ]
@@ -13524,6 +13675,7 @@ async def purge_gallery_upstream_dead_tasks(
         .where(
             Task.status == "done",
             Task.video_ready.is_(True),
+            Task.is_public.is_(True),
             _gallery_task_has_poster_sql(),
         )
         .order_by(Task.created_at.asc())
@@ -17081,6 +17233,23 @@ async def task_page(
             f'<link rel="canonical" href="{base_url}/task">',
         )
         return HTMLResponse(content=_inject_static_layout(html_content))
+
+    # Unlisted member models keep the functional task page for the owner, but
+    # never emit public SEO, social preview, poster or video metadata.
+    if not bool(getattr(task, "is_public", True)):
+        html_content = html_content.replace(
+            "<!-- TASK_SEO_PLACEHOLDER -->",
+            f'<link rel="canonical" href="{task_url}">',
+        )
+        html_content = html_content.replace(
+            '<title>Task Progress | AutoRig.online</title>',
+            '<title>Private AutoRig model | AutoRig.online</title>',
+        )
+        html_content = html_content.replace(
+            '<h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>',
+            '<h1 class="task-status-header-title" id="task-seo-heading">Private AutoRig model</h1>',
+        )
+        return _task_html_response(html_content)
     
     title_suffix = f" | AutoRig task {task_id[:8]}"
     compact_task_title = re.sub(r"\s+", " ", task_title).strip() or "Rigged 3D model"
