@@ -212,6 +212,127 @@ not obscure anatomy. The first overlapping-caption render was stopped and
 retained as diagnostic frames; the completed second render is the delivered
 video. This is a draft gait/deformation review, not gameplay approval.
 
+### P4c ear placement experiments
+
+Following each top cap down to the first *mutual* component merge was not a
+valid ear-base detector. The left cap had already merged with a cranial crest,
+inflating its inferred centerline to 64 mm versus 34 mm on the right. The
+first P4c trial was rejected before binding: the left proximal ear shaft
+crossed outside the mesh even though its endpoints were inside. Front and
+three-quarter views confirmed the erroneous crest attachment. Preserve
+`ear-fit-v1` and `p4c-rig` as rejected evidence; do not encode this spurious
+twofold asymmetry into a rig profile.
+
+V2 instead tracks separate closed cross-section loops from each cap. At
+Z=0.842, both ear loops are stable and a third crest loop remains separate.
+At Z=0.840 they join a skull loop, with 4.22/5.06-fold area increases and
+39.5/45.7 mm centroid jumps. The last clean loops therefore supply separate
+stems. The interior tips come from a high closed section, rather than a
+surface extremum. All 44 samples along the four straight bone shafts pass
+three-ray containment, and the revised overlays keep both chains within their
+visible ear protrusions. No symmetry or manual vertex painting is used.
+
+The resulting `p4c-v2-rig` source is
+`649b56c2af117789262b16dae6d2b18e59d5c096458e45c162620dcb6aad1570`.
+Only four ear bones change from P4b. Full native skin SHA-256:
+`76be1020f932dbf13547a38cea25e2a624125514aa7a048271e379718bf2125d`.
+The mesh attributes and all head/neck/limb bones remain unchanged. Initial
+near-axis ear regions have complete same-side ownership without opposite-ear,
+head or clavicle weights. This is candidate-builder evidence; independent
+region selection, isolated deformation and the new exact clip/export checks
+must still pass before acceptance.
+
+### P4d local ear-weight correction
+
+P4c-v2's bones passed, but its fresh native Heat Map weights still coupled
+proximal ear rotation to the skull and muzzle. Independent 0.1-radian tests
+found skull motion up to 2.368 mm and muzzle motion up to 1.634 mm, while
+neck/body and hoof preservation passed. The candidate therefore failed the
+unchanged 1 mm remote-motion gate. Moving the bones alone did not close this
+binding defect.
+
+An initial geodesic collar also failed: it reached 80 original vertices on
+the separately identified cranial crest, with support up to 0.834. The
+accepted mask uses competing geodesic distances to clean ear seeds versus
+crest/opposite-ear seeds, multiplied by a smooth C2 radial taper. The collar
+radius is half the measured ear centerline length. Ear seeds retain support
+one; crest/opposite-ear seeds, remote head controls and positions outside the
+collar have support zero. The discarded ear weight is transferred to the
+verified closest deform ancestor outside the ear chain, `head.x` here.
+
+The mask metadata initially confused geometry and weight-file hashes. That
+record is retained as rejected evidence. Use only
+`ear-locality-v2/metadata-weights-bound.json`: the actual P4c-v2 weight hash
+is verified, and its position array matches the geometry used for geodesics
+exactly (`array_equal`, maximum difference zero). Geometry source and weight
+source identities are recorded separately.
+
+P4d full-native source SHA-256:
+`9392288af2206090ba9e4b2ed02e7215cdca454fa6e4f40eec76f55ee124cb57`.
+Full weights:
+`ce9c73f3aa1d9ac80aa265b0347b7d155bce607775ad76a9900a835cbadcfa2c`.
+Independent saved-Blender validation confirms zero skeleton/mesh changes from
+P4c-v2, exact preservation of all 86 unrelated weight columns and every hoof
+region, and changes only in four ear groups plus the head group. All remote
+regions, including opposite ear, skull, muzzle, neck and body, remain exactly
+stationary under each isolated 0.1-radian ear rotation. Own ears move as
+expected. This closes the full-native locality correction.
+
+The provisional naive top-four approximation does **not** inherit that exact
+column-preservation result: truncation and renormalization change 4,706
+unrelated values, including neck/subneck weights by up to 0.119392. Keep its
+exactness failure and pending deformation fidelity visible. The full-native
+Blend intentionally retains up to nine weights; `authoring-input4.blend`
+is a separate provisional input for the four-weight authoring interface.
+Its SHA-256 is
+`4c9c15ab690267331287914829f745e5aa8a5598f6f1dd1c9a3ebb03b09b4075`.
+It is not the final game asset. New optimized weights must be checked against
+the corrected full-native baseline over the exact new ten-action manifest,
+followed by independent locality checks and actual format reimports.
+
+The reusable DEV helper is merged into converter main
+`f4a7aaecb0ea0bbaa52e5cd386e8b70910be00d4`. Seven behavioral tests cover
+competitive support, padded bone-index zero, source row-mass residuals,
+shuffled palettes, generic ancestry, duplicate names, overlapping seeds and
+malformed provenance. An independent recomputation with the final helper
+matches P4d's saved full weights exactly. It has no runtime import or deploy
+effect. Full-native correction status was published in DEV `4c0ec4eaed7f`.
+
+P4d's new exact ten-action reduction passes the fixed holdout gate with
+maximum error 2.234661 mm over 144,955,168 sample/vertex pairs and no sample
+above 3 mm. The reusable Blender verifier then passed 2,426 actual quarter
+frames with maximum error 2.249555 mm, unchanged mesh/material fingerprints
+and at most four influences. Contact errors remain visible: run 1.770 mm,
+sprint 4.741 mm, forward walk 0.704 mm, trot 0.761 mm. Sprint still needs gait
+and contact refinement despite passing the existing 6 mm engineering gate.
+
+Independent validation of the optimized Blend and NPZ also passes: no mesh
+or skeleton changes, all hoof weight arrays exact, finite normalized weights,
+own-ear motion present, and zero motion in opposite ear, skull, muzzle, neck
+and body during the supported ear-base isolation tests. `ear_02.r` has merged
+with a parent equivalence class valid for this exact ten-clip set, so separate
+control of that distal ear bone is not promised. Adding new actions requires
+recomputing reduction and its checks.
+
+The full-native ear comparison is published in DEV `180653d5e793` and saved as
+`outputs/horse-ear-binding-comparison.mp4`: 90 frames, 30 FPS, three seconds,
+1280x690. Both versions use identical 0.1-radian motion and a temporary matte
+diagnostic display; original asset materials are preserved. Cropped or
+overexposed earlier review renders remain internal and are not delivered.
+
+All twenty P4d GLB/FBX reimports now pass at every key and half-frame.
+Maximum source/import surface difference is 9.61 microns for GLB and
+1.32 microns for FBX. Reference arrays used 584,698,464 bytes. The optimized
+Blend is 12,301,438 bytes, SHA-256
+`4fca6799ffc70b5d3b2bba14f7bdce85aa1ca158a84b4f94b08b2d784be77b5c`.
+The self-contained GLB is 12,268,372 bytes, SHA-256
+`918d5ca7a30fa71a6a46f5d78e53f63a5afe32616792ca26dda4cf6f691d85cd`.
+It contains exactly ten named animations and only first-set joint/weight
+attributes. The review copy is `outputs/horse-gameplay-p4d.glb`, with a compact
+validation record beside it. This closes the current candidate's binding,
+four-weight fidelity and format checks; it does not establish complete gait,
+controller or cross-model readiness.
+
 ### Reusable neck truncation correction
 
 Converter main `03a13a2c7aed91cad73e45d2ba4eac79391a4bfe` is pushed and clean.

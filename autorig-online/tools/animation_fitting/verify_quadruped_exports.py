@@ -91,7 +91,7 @@ def main():
                    'bones':len(arm.data.bones),'max_surface_error':worst,'worst_frame':worst_frame,
                    'passed':worst<=.003}
             checks.append(check)
-            print('EXPORT_CHECK='+json.dumps(check))
+            print('EXPORT_CHECK='+json.dumps(check),flush=True)
     result={'schema':'autorig-quadruped-reimport-qa.v1','checks':checks,'passed':all(c['passed'] for c in checks),
             'reference_storage':'numerical arrays; exact duplicate surface points removed without tolerance',
             'reference_storage_bytes':sum(frame.nbytes for frames in references.values() for frame in frames),

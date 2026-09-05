@@ -450,3 +450,40 @@ see the proportion review. The ten-action candidate is not ready for visual
 acceptance or publication as a game-ready library. Correct the anatomical
 baseline and regenerate weights and relevant evidence before continuing to
 controller acceptance. No runtime animation library has been enabled.
+
+### Repeatable Blender skin verification
+
+`validate_quadruped_skin_blender.py` promotes the previously exercised local
+verification procedure into a reusable single-mesh authoring tool. It takes
+an authored Blend (beside its `export-report.json`), the exact reduction report,
+and a fresh output directory. It derives the rig, full weights, optimized
+weights and clips from hash-checked report inputs; there are no horse filename,
+vertex-count or ten-action assumptions. Gameplay action identifiers must be
+unique and safe for use as export filenames.
+
+```powershell
+blender.exe --background --factory-startup --python-exit-code 1 `
+  --python tools/animation_fitting/validate_quadruped_skin_blender.py -- `
+  --source work/candidate/exports/authored-candidates.blend `
+  --reduction work/candidate/weights/animal-skin-weights-report.json `
+  --output work/candidate/verified-exports
+```
+
+Use `--preflight-only` to check asset/manifest consistency without creating
+the output directory. Full verification compares actual Blender surface
+positions at every key and quarter frame against the full native weights,
+checks every declared stance key including its last key, and requires the
+unchanged 3 mm compression and 6 mm contact/ground gates. Mesh attributes and
+packed material images must remain unchanged. Blend, GLB and per-action FBXs
+are saved only after all checks pass. Format reimports remain a separate step.
+This tool measures fidelity and contacts; independent anatomy and regional
+binding checks must establish the correctness of its source baseline.
+
+The promoted tool passed preflight on the preserved source fixture and actual
+Blender rejection cases for unsafe and duplicate action identifiers before
+creating an output directory. It then completed P4d's exact ten-action run:
+2,426 quarter-frame samples, maximum deviation 2.249555 mm, unchanged geometry
+and material fingerprints, and four influences. Independent ear-locality
+validation and all twenty subsequent GLB/FBX reimports passed. The detailed
+anatomical limits and delivered candidate identity are in the proportion
+review; successful compression does not approve future actions automatically.

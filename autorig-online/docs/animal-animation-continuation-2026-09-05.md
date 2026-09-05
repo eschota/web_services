@@ -140,13 +140,17 @@ Current checkpoint: see `quadruped-grounded-authoring.md`, especially the
 forelimb placement and centered support stance section. Claude context recovery
 is complete. The production bind repair passed the owned real-model task;
 an offline shoulder/elbow prototype has a user-accepted full-mesh video.
-P3 separates the previously collapsed hind hips and tests new stifle placement.
-Ten draft actions (including run and sprint) pass compression and format
-fidelity checks. An independent spatial audit then found head geometry bound
-to a clavicle and head/neck bones positioned below the actual head. The active
-gate is whole-skeleton anatomical placement and independent regional binding
-validation; passing fidelity against the same bad baseline cannot close it.
-Then rebuild affected clips and proceed to gameplay actions/transitions.
+P3 separated the previously collapsed hind hips and tested new stifle placement.
+P4b then restored the neck/head path, and P4c/P4d corrected ear placement and
+limited its weights to the actual ears with a smooth transition. P4d is now
+the full-native reference; keep earlier failed geometry and mask experiments
+as rejected evidence. Its ten draft actions (including run and sprint) pass
+numerical reduction, actual Blender four-weight fidelity and independent
+ear-locality checks, and all twenty actual GLB/FBX reimports are complete.
+Remaining anatomy/gait approval, contact polish and gameplay actions/transitions
+remain explicit gates. Passing fidelity alone must not substitute for
+anatomical validation.
+Do not restart completed ear-mask searches or reuse earlier P3 weight results.
 Older LTX notes below are historical evidence, not the next task to restart.
 
 * Blender 5.2.1 built `anatomical-reference/anatomical_rig.blend`: 52 bones
