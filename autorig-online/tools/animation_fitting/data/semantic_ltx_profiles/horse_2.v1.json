@@ -67,14 +67,34 @@
     }
   },
   "palette_linear": {
-    "body": [0.46, 0.50, 0.56],
-    "fore_near": [0.00, 0.85, 1.00],
-    "fore_far": [0.12, 0.22, 1.00],
-    "hind_near": [1.00, 0.72, 0.02],
-    "hind_far": [1.00, 0.08, 0.55]
+    "body": [
+      0.46,
+      0.5,
+      0.56
+    ],
+    "fore_near": [
+      0.0,
+      0.85,
+      1.0
+    ],
+    "fore_far": [
+      0.12,
+      0.22,
+      1.0
+    ],
+    "hind_near": [
+      1.0,
+      0.72,
+      0.02
+    ],
+    "hind_far": [
+      1.0,
+      0.08,
+      0.55
+    ]
   },
   "gates": {
-    "minimum_face_limb_weight": 0.60,
+    "minimum_face_limb_weight": 0.6,
     "minimum_face_dominance": 0.95,
     "minimum_faces_per_source_group": 24,
     "minimum_group_weight_mass": 30.0,
@@ -82,8 +102,31 @@
     "minimum_pixels_per_output_label": 900,
     "minimum_pixel_fraction_of_mask": 0.03,
     "maximum_mask_mismatch_pixels": 0,
-    "mask_threshold": 0.50,
+    "mask_threshold": 0.5,
     "pixel_color_tolerance": 0.08,
     "minimum_palette_distance": 0.55
-  }
+  },
+  "body_bones": [
+    "c_ear_01.l",
+    "c_ear_01.r",
+    "c_ear_02.l",
+    "c_ear_02.r",
+    "c_subneck_1.x",
+    "c_subneck_2.x",
+    "c_subneck_3.x",
+    "c_subneck_4.x",
+    "c_tail_00.x",
+    "c_tail_01.x",
+    "c_tail_02.x",
+    "c_tail_03.x",
+    "c_tail_04.x",
+    "c_tail_05.x",
+    "c_tail_06.x",
+    "head.x",
+    "neck.x",
+    "root.x",
+    "spine_01.x",
+    "spine_02.x",
+    "spine_03.x"
+  ]
 }

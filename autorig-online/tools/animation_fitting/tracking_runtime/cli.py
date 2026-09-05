@@ -47,6 +47,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--runtime-root", default=str(DEFAULT_RUNTIME_ROOT))
     parser.add_argument("--runtime-lock")
+    parser.add_argument("--gpu-lock", help="shared with the LTX runner; defaults to this checkout's work directory")
     commands = parser.add_subparsers(dest="command", required=True)
 
     doctor = commands.add_parser(
@@ -316,6 +317,20 @@ def _doctor(
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    from contextlib import nullcontext
+    from ..gpu_lease import gpu_lease, DEFAULT_GPU_LOCK, require_free_cuda_memory
+    cuda_stage = args.command in ('observe', 'admit-foreground') and str(args.device).startswith('cuda')
+    try:
+        with gpu_lease(args.gpu_lock or DEFAULT_GPU_LOCK, args.command) if cuda_stage else nullcontext():
+            if cuda_stage:
+                require_free_cuda_memory()
+            return _execute(args)
+    except (OSError, RuntimeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+
+def _execute(args) -> int:
     runtime_root = Path(args.runtime_root).resolve()
     try:
         if args.command == "doctor":

@@ -53,6 +53,7 @@ class SemanticLtxProfile:
     limb_groups: dict[str, tuple[str, ...]]
     palette: dict[str, tuple[float, float, float]]
     gates: dict[str, float | int]
+    body_bones: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -240,6 +241,13 @@ def load_semantic_ltx_profile(path: str | Path) -> SemanticLtxProfile:
 
     normalized_source = dict(source)
     normalized_source["mesh_names"] = tuple(mesh_names)
+    body_bones = root.get("body_bones")
+    if body_bones is not None:
+        if (not isinstance(body_bones, list) or not body_bones
+                or any(not isinstance(bone, str) or not bone for bone in body_bones)
+                or len(set(body_bones)) != len(body_bones)
+                or claimed_bones.intersection(body_bones)):
+            raise SemanticLtxContractError("body_bones must be unique names disjoint from limb bones")
     return SemanticLtxProfile(
         path=source_path,
         sha256=_sha256(source_path),
@@ -248,6 +256,7 @@ def load_semantic_ltx_profile(path: str | Path) -> SemanticLtxProfile:
         limb_groups=limb_groups,
         palette=palette,
         gates=gates,
+        body_bones=tuple(body_bones) if body_bones is not None else None,
     )
 
 
@@ -310,6 +319,14 @@ def build_semantic_ltx_plan(
         raise SemanticLtxContractError(
             "Semantic profile references missing deform bones: " + ", ".join(missing)
         )
+    if profile.body_bones is not None:
+        classified = required | set(profile.body_bones)
+        if available != classified:
+            raise SemanticLtxContractError(
+                "Semantic deform-bone coverage mismatch: "
+                f"unclassified={sorted(available - classified)}, "
+                f"missing={sorted(classified - available)}"
+            )
     matrix = np.asarray(world_to_camera, dtype=np.float64)
     if matrix.size != 16:
         raise SemanticLtxContractError("world_to_camera must contain 16 values")
@@ -341,6 +358,10 @@ def build_semantic_ltx_plan(
             if not isinstance(item, dict):
                 raise SemanticLtxContractError(f"Skin vertex {vertex_id} has an invalid weight")
             bone = item.get("bone")
+            if bone not in available:
+                raise SemanticLtxContractError(
+                    f"Skin vertex {vertex_id} references unavailable deform bone {bone}"
+                )
             weight = _finite_number(item.get("weight"), f"vertex {vertex_id} weight")
             if weight < 0.0:
                 raise SemanticLtxContractError(f"Skin vertex {vertex_id} has a negative weight")
@@ -480,6 +501,7 @@ def build_semantic_ltx_plan(
         face_labels=face_labels,
         source_groups=source_groups,
         contract={
+            "deform_bone_coverage_checked": profile.body_bones is not None,
             "depth_space": "positive_camera_z",
             "near_far_assignment": assignments,
             "source_group_camera_z": group_depths,

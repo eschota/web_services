@@ -54,6 +54,7 @@
         "hind_right": {"$ref": "#/$defs/hindRight"}
       }
     },
+    "body_bones": {"$ref": "#/$defs/bones"},
     "palette_linear": {
       "type": "object",
       "additionalProperties": false,

@@ -205,6 +205,31 @@ def test_profile_source_identity_is_exact(tmp_path: Path) -> None:
         )
 
 
+def test_complete_profile_rejects_unclassified_segment_bones(tmp_path):
+    payload = _profile_payload()
+    payload['body_bones'] = ['body']
+    profile = _write_profile(tmp_path, payload)
+    skin, faces = _synthetic_rows()
+    with pytest.raises(SemanticLtxContractError, match='unclassified'):
+        build_semantic_ltx_plan(profile, skin_rows=skin, topology_rows=faces,
+            available_bones=['FL','FR','HL','HR','body','FL_twist_2'], world_to_camera=np.eye(4))
+    payload['limb_groups']['fore_left']['bones'].append('FL_twist_2')
+    profile = _write_profile(tmp_path, payload)
+    for vertex in skin[:3]:
+        vertex['weights'] = [{'bone':'FL_twist_2','weight':1.0}]
+    plan = build_semantic_ltx_plan(profile, skin_rows=skin, topology_rows=faces,
+        available_bones=['FL','FR','HL','HR','body','FL_twist_2'], world_to_camera=np.eye(4))
+    assert plan.face_labels[1] == 'fore_near'
+    assert plan.contract['deform_bone_coverage_checked']
+
+
+def test_body_and_leg_declarations_cannot_overlap(tmp_path):
+    payload = _profile_payload()
+    payload['body_bones'] = ['FL']
+    with pytest.raises(SemanticLtxContractError, match='disjoint'):
+        _write_profile(tmp_path, payload)
+
+
 def test_pixel_contract_requires_four_sufficient_exact_mask_regions(tmp_path: Path) -> None:
     profile = _write_profile(tmp_path)
     height, width = 20, 20

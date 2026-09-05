@@ -1,6 +1,6 @@
 {
   "schema": "autorig-semantic-ltx-profile.v1",
-  "profile_id": "horse_real_9895.semantic_limbs.v1",
+  "profile_id": "horse_real_9895.semantic_limbs.v2",
   "source": {
     "rig_type": "HORSE_2",
     "filename": "horse_real_9895_rigged_w4.blend",
@@ -22,7 +22,17 @@
         "leg_stretch_dupli_001.l",
         "leg_twist_dupli_001.l",
         "foot_dupli_001.l",
-        "toes_01_dupli_001.l"
+        "toes_01_dupli_001.l",
+        "thigh_twist_2_dupli_001.l",
+        "thigh_twist_3_dupli_001.l",
+        "thigh_twist_4_dupli_001.l",
+        "thigh_twist_5_dupli_001.l",
+        "thigh_twist_6_dupli_001.l",
+        "leg_twist_2_dupli_001.l",
+        "leg_twist_3_dupli_001.l",
+        "leg_twist_4_dupli_001.l",
+        "leg_twist_5_dupli_001.l",
+        "leg_twist_6_dupli_001.l"
       ]
     },
     "fore_right": {
@@ -36,7 +46,17 @@
         "leg_stretch_dupli_001.r",
         "leg_twist_dupli_001.r",
         "foot_dupli_001.r",
-        "toes_01_dupli_001.r"
+        "toes_01_dupli_001.r",
+        "thigh_twist_2_dupli_001.r",
+        "thigh_twist_3_dupli_001.r",
+        "thigh_twist_4_dupli_001.r",
+        "thigh_twist_5_dupli_001.r",
+        "thigh_twist_6_dupli_001.r",
+        "leg_twist_2_dupli_001.r",
+        "leg_twist_3_dupli_001.r",
+        "leg_twist_4_dupli_001.r",
+        "leg_twist_5_dupli_001.r",
+        "leg_twist_6_dupli_001.r"
       ]
     },
     "hind_left": {
@@ -49,7 +69,17 @@
         "leg_stretch.l",
         "leg_twist.l",
         "foot.l",
-        "toes_01.l"
+        "toes_01.l",
+        "thigh_twist_2.l",
+        "thigh_twist_3.l",
+        "thigh_twist_4.l",
+        "thigh_twist_5.l",
+        "thigh_twist_6.l",
+        "leg_twist_2.l",
+        "leg_twist_3.l",
+        "leg_twist_4.l",
+        "leg_twist_5.l",
+        "leg_twist_6.l"
       ]
     },
     "hind_right": {
@@ -62,7 +92,17 @@
         "leg_stretch.r",
         "leg_twist.r",
         "foot.r",
-        "toes_01.r"
+        "toes_01.r",
+        "thigh_twist_2.r",
+        "thigh_twist_3.r",
+        "thigh_twist_4.r",
+        "thigh_twist_5.r",
+        "thigh_twist_6.r",
+        "leg_twist_2.r",
+        "leg_twist_3.r",
+        "leg_twist_4.r",
+        "leg_twist_5.r",
+        "leg_twist_6.r"
       ]
     }
   },
@@ -105,5 +145,28 @@
     "mask_threshold": 0.5,
     "pixel_color_tolerance": 0.08,
     "minimum_palette_distance": 0.55
-  }
+  },
+  "body_bones": [
+    "c_ear_01.l",
+    "c_ear_01.r",
+    "c_ear_02.l",
+    "c_ear_02.r",
+    "c_subneck_1.x",
+    "c_subneck_2.x",
+    "c_subneck_3.x",
+    "c_subneck_4.x",
+    "c_tail_00.x",
+    "c_tail_01.x",
+    "c_tail_02.x",
+    "c_tail_03.x",
+    "c_tail_04.x",
+    "c_tail_05.x",
+    "c_tail_06.x",
+    "head.x",
+    "neck.x",
+    "root.x",
+    "spine_01.x",
+    "spine_02.x",
+    "spine_03.x"
+  ]
 }
