@@ -198,7 +198,7 @@ async def apply_pending_gumroad_credits(db: AsyncSession, user: User) -> int:
                 [key.lower() for key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS]
             ),
         )
-        .order_by(GumroadPurchase.created_at.asc(), GumroadPurchase.id.asc())
+        .order_by(GumroadPurchase.created_at.asc(), GumroadPurchase.sale_id.asc())
     )
     for purchase in subscription_rows.scalars().all():
         payload = dict(parse_qsl(purchase.raw_payload or "", keep_blank_values=True))

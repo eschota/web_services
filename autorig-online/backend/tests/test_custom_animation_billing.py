@@ -33,6 +33,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
 
         cls.database = importlib.import_module("database")
         cls.models = importlib.import_module("models")
+        cls.auth = importlib.import_module("auth")
         cls.main = importlib.import_module("main")
 
     @classmethod
@@ -844,6 +845,49 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(self.main.HTTPException) as denied:
                 await self.main.api_gumroad_ping(req)
         self.assertEqual(denied.exception.status_code, 403)
+
+    async def test_pending_subscription_is_applied_on_login(self):
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = await db.scalar(
+                self.main.select(self.database.User).where(
+                    self.database.User.email == "buyer@example.com"
+                )
+            )
+            buyer.autorig_subscription_status = "none"
+            buyer.autorig_subscription_id = None
+            buyer.autorig_subscription_period_end = None
+            db.add(
+                self.database.GumroadPurchase(
+                    sale_id="pending-subscription-sale",
+                    email="buyer@example.com",
+                    product_permalink="autorig-unlimited-monthly",
+                    product_name="AutoRig Unlimited Monthly",
+                    price=2000,
+                    refunded=False,
+                    is_recurring_charge=False,
+                    subscription_id="pending-subscription-123",
+                    test=False,
+                    raw_payload=urlencode(
+                        {
+                            "sale_timestamp": "2026-09-05T08:00:00Z",
+                            "subscription_id": "pending-subscription-123",
+                        }
+                    ),
+                    credited=False,
+                    credits_added=0,
+                )
+            )
+            await db.commit()
+
+            added = await self.auth.apply_pending_gumroad_credits(db, buyer)
+            await db.commit()
+            self.assertEqual(added, 0)
+            self.assertEqual(buyer.autorig_subscription_status, "active")
+            self.assertEqual(buyer.autorig_subscription_id, "pending-subscription-123")
+            self.assertEqual(
+                buyer.autorig_subscription_period_end,
+                datetime(2026, 10, 5, 8, 0),
+            )
 
     async def test_private_gallery_visibility_requires_subscription_but_restore_does_not(self):
         async with self.database.AsyncSessionLocal() as db:
