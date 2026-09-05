@@ -100,6 +100,57 @@ placement, `arp.match_to_rig`, and `_run_arp_bind` entry) with retained process
 stacks/phase evidence. The full mesh has not received these authored clips yet.
 No duplicate retry of the failed public task has been submitted.
 
+### Queued replay and confirmed bind hotspot
+
+The converter diagnostic work was independently reviewed and merged into
+`eschota/autorig.online` main at `acf2c33dacefb977626452c0fcdb43169774707e`.
+Before deployment, five drifted files on F1/F2/F13 and the distinct F11 webserver
+were collected read-only. Six already committed Auto-Rig Go repairs were merged
+with current main; the actual three-way merge preserved newer maintenance and
+status/control protections. The combined relevant suite passed 77 tests and
+12 subtests. No licensed ARP source was changed.
+
+The standard artifact rollout confirmed the exact boot commit on F1, F11, F13
+and F2; F7 was unavailable and unchanged. No task IDs were interrupted and no
+rollback was needed. Stage/apply durations were F1 2.841/18.736 s, F11
+3.647/15.174 s, F13 3.105/18.397 s, and F2 3.156/17.242 s. Artifact SHA-256:
+`3ebca1057ed90823b3a66e3f05078d0f6e569dcc9bc6e777d7e919fe789e2c6d`
+for F1/F13/F2 and
+`fbc7dd6bb182d29932968e63c8453c289a208024ccdbdc25cfa3a25066d2a58f`
+for F11. Full reports remain in the converter diagnostic worktree's
+`work/farm-rollout` folder.
+
+One owned replay was submitted through the normal F1 queue after preparing a
+new isolated service task folder and verifying the source SHA-256:
+`f11d76873942371c7c5bd2a94693fc3327f11e830a5e71dc3380514d0662995a`.
+Converter GUID `2c139ec9-bb52-474c-8054-f5b86e6bf2e3`, worker task
+`83416bca-50b6-46bb-9ca5-cc0a093ae6aa`; submission identity and exact payload
+are retained in `gameplay/real-bay/probe-replay.json`. Do not duplicate it.
+
+The internal probe's global tracing distorted timing (Remesh 197 seconds),
+and its Python 3.13.9 periodic stack file stopped after a malformed 191-byte
+dump. The Blender 5.2 smoke therefore did not establish compatibility with the
+actual Blender 5.1 runtime. Do not use that probe on further F1 tasks. External
+`py-spy 0.4.2`, installed only under runtime `work/animal-bind-probe`, provided
+the useful stacks without changing the target process's Python code.
+
+A first sample in `match_to_rig` was normal progress: retained markers show it
+finished in about two seconds. Repeated later external samples instead stayed
+at licensed ARP `auto_rig.py:20834`, `bpy.ops.mesh.separate(type='LOOSE')`, inside
+the HEAT_MAP binding branch with `arp_bind_split` enabled. Our bind launcher
+does not explicitly disable that inherited split option.
+
+Independent read-only connectivity audit of the exact input found **119,996
+vertices, 40,000 triangles, and 39,998 indexed components**. Exact coincident
+position welding yields **20,002 vertices and one component**. Thus loose-part
+separation attempts to create almost 40,000 objects. This is the confirmed
+hotspot; limb alignment and the deferred bind timer are not supported causes.
+
+The fix in development is an exact-weld skinning proxy with split disabled,
+followed by validated weight transfer to the untouched render mesh. Original
+vertex identity, UV loops, normals, materials and object identity must remain.
+Binding success and visual quality still require a fresh normal-queue replay.
+
 After that blocker is fixed: validate the corrected foreleg movement on the
 full mesh; add run/sprint, jump phases, eating/rest and their entry/exit actions,
 turns/braking, reactions/attacks/death/get-up; validate controller transitions,
