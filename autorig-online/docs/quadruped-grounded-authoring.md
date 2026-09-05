@@ -400,3 +400,12 @@ do not bypass it with direct source copies or network-setting changes. Reports
 are in project workspace `work/viewer-short-path-rollout` and
 `work/horse2-runtime-canary/viewer-diagnostic`. The actual viewer pair produced
 locally is under `work/vq`; it has not been published to the worker.
+
+### User-requested proportion review
+
+The user rejected the native-gallop video as a flying horse and requested
+comparison against multiple anatomical references and photographs. See
+[the proportion review](horse-leg-proportions-review-2026-09-06.md) for the
+corrected anatomical/control-point audit, original references, and the offline
+carpus-ratio experiment. Target-coordinate agreement is not anatomical
+acceptance. Do not expand the forelimb rollout while this review is in progress.
