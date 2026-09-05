@@ -162,6 +162,15 @@ def apply_clips(source, clips_dir, blueprint_path, output):
     arm.select_set(True)
     for name in mesh_names:bpy.data.objects[name].select_set(True)
     bpy.context.view_layer.objects.active=arm
+    # This file is a game asset. Keep its mesh materials and clip actions,
+    # and omit the source scene's unrelated preview environment/orphan data.
+    scene=bpy.context.scene
+    packed_before=sum(image.packed_file.size for image in bpy.data.images if image.packed_file)
+    scene.world=None
+    removed_orphans=bpy.data.orphans_purge(do_local_ids=True,do_linked_ids=False,do_recursive=True)
+    if any(bpy.data.actions.get(name)!=action for name,action in actions.items()):
+        raise ValueError('Asset cleanup removed a required action')
+    packed_after=sum(image.packed_file.size for image in bpy.data.images if image.packed_file)
     bpy.ops.wm.save_as_mainfile(filepath=str(output/'authored-candidates.blend'))
     bpy.ops.export_scene.gltf(filepath=str(output/'authored-candidates.glb'),export_format='GLB',
         use_selection=True,export_animations=True,export_def_bones=False,
@@ -176,6 +185,8 @@ def apply_clips(source, clips_dir, blueprint_path, output):
             bake_anim=True,bake_anim_use_all_actions=False,bake_anim_use_nla_strips=False,
             bake_anim_step=1,bake_anim_simplify_factor=0,axis_forward='-Z',axis_up='Y')
     report={'schema':'autorig-quadruped-export-candidate.v1','source_sha256':blueprint['source_sha256'],
+        'asset_cleanup':{'removed_orphan_datablocks':removed_orphans,
+                         'packed_image_bytes_before':packed_before,'packed_image_bytes_after':packed_after},
         'blender_version':list(bpy.app.version),'evaluated_surface_qa':validation,
         'clips':[{'action':c['action'],'timing':c['timing'],'reference_speed':c['reference_speed'],
                   'root_motion':c['root_motion'],'root_delta':c['root_delta'],

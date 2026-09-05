@@ -23,7 +23,7 @@ def aim(obj,target):
     obj.rotation_euler=(Vector(target)-obj.location).to_track_quat('-Z','Y').to_euler()
 
 
-def configure_scene(arm,profile_path,material_mode='semantic'):
+def configure_scene(arm,profile_path,material_mode='semantic',view_mode='three-quarter'):
     scene=bpy.context.scene
     scene.render.engine='CYCLES'
     scene.cycles.device='CPU';scene.cycles.samples=12;scene.cycles.use_denoising=True
@@ -80,7 +80,8 @@ def configure_scene(arm,profile_path,material_mode='semantic'):
         obj.location=position;aim(obj,target);lights.append((obj,Vector(position)))
     data=bpy.data.cameras.new('Review camera');data.type='ORTHO';data.ortho_scale=6
     cam=bpy.data.objects.new('Review camera',data);scene.collection.objects.link(cam)
-    cam.location=target+Vector((6,-3.3,3.2)).normalized()*radius*4
+    direction={'three-quarter':(6,-3.3,3.2),'side':(1,0,.12),'front':(0,-1,.12)}[view_mode]
+    cam.location=target+Vector(direction).normalized()*radius*4
     aim(cam,target);scene.camera=cam
     bpy.context.view_layer.update()
     view=[cam.matrix_world.inverted() @ point for point in corners]
@@ -93,6 +94,18 @@ def configure_scene(arm,profile_path,material_mode='semantic'):
     white=bpy.data.materials.new('Label');white.use_nodes=True
     nodes=white.node_tree.nodes;nodes.clear();e=nodes.new('ShaderNodeEmission');e.inputs[0].default_value=(.85,.95,1,1)
     out=nodes.new('ShaderNodeOutputMaterial');white.node_tree.links.new(e.outputs[0],out.inputs['Surface']);font.materials.append(white)
+    plate_mesh=bpy.data.meshes.new('Review label backing')
+    scale=data.ortho_scale
+    plate_mesh.from_pydata([(-.48*scale,.19*scale,-1.02),(.48*scale,.19*scale,-1.02),
+                           (.48*scale,.28*scale,-1.02),(-.48*scale,.28*scale,-1.02)],[],[(0,1,2,3)])
+    plate=bpy.data.objects.new('Review label backing',plate_mesh);scene.collection.objects.link(plate);plate.parent=cam
+    backing=bpy.data.materials.new('Label backing');backing.use_nodes=True
+    nodes=backing.node_tree.nodes;nodes.clear();emission=nodes.new('ShaderNodeEmission')
+    emission.inputs[0].default_value=(.008,.012,.02,1)
+    output=nodes.new('ShaderNodeOutputMaterial');backing.node_tree.links.new(emission.outputs[0],output.inputs['Surface'])
+    plate.data.materials.append(backing)
+    for visibility in ('visible_diffuse','visible_glossy','visible_transmission','visible_volume_scatter','visible_shadow'):
+        if hasattr(plate,visibility):setattr(plate,visibility,False)
     return cam,lights,font,cam.location.copy(),target
 
 
@@ -104,6 +117,7 @@ def main():
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--repetitions',type=int,default=4)
     p.add_argument('--materials',choices=('semantic','original'),default='semantic')
+    p.add_argument('--view',choices=('three-quarter','side','front'),default='three-quarter')
     p.add_argument('--profile',type=Path,default=Path(__file__).parent/'data/semantic_ltx_profiles/horse_2.v1.json')
     p.add_argument('--ffmpeg',default='ffmpeg')
     args=p.parse_args(sys.argv[sys.argv.index('--')+1:])
@@ -118,9 +132,9 @@ def main():
     arm.animation_data.action_slot=arm.animation_data.action.slots[0]
     bpy.context.view_layer.objects.active=arm
     if arm.mode!='OBJECT':bpy.ops.object.mode_set(mode='OBJECT')
-    cam,lights,font,camera_start,camera_target=configure_scene(arm,args.profile,args.materials)
+    cam,lights,font,camera_start,camera_target=configure_scene(arm,args.profile,args.materials,args.view)
     interval=clip['timing']['interval_count'];total=interval*args.repetitions
-    font.body=f"{args.action.upper()}   {clip['reference_speed']:.2f} m/s   30 FPS\nAUTHORED CANDIDATE / 0.5 m FLOOR GRID"
+    font.body=f"{args.action.upper()}   {clip['reference_speed']:.2f} m/s   30 FPS\n{args.view.upper()} / AUTHORED CANDIDATE / 0.5 m GRID"
     for i in range(total):
         sample=i%interval;cycle=i//interval
         bpy.context.scene.frame_set(sample)

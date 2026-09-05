@@ -136,6 +136,15 @@ controller or a complete animation library.
 
 ## Executed pilot and continuation state
 
+Current checkpoint: see `quadruped-grounded-authoring.md`, especially the
+forelimb placement and centered support stance section. Claude context recovery
+is complete. The production bind repair passed the owned real-model task;
+an offline shoulder/elbow prototype has a user-accepted full-mesh video.
+Eight centered basic actions now pass Blender ground-contact checks. The
+active gate is four-influence skin fidelity over that exact eight-clip set,
+followed by format reimports and further gameplay actions/transitions.
+Older LTX notes below are historical evidence, not the next task to restart.
+
 * Blender 5.2.1 built `anatomical-reference/anatomical_rig.blend`: 52 bones
   including the master root, 51 deform bones, 344 vertices, at most 4 weights,
   zero actions/constraints/drivers. The build is explicitly reference-only.

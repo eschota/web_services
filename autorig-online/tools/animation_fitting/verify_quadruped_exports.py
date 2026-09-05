@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import numpy as np
 
 import bpy
 from mathutils import Vector
@@ -17,9 +18,17 @@ def points():
         # It is UI state, not an exported/skinned animal surface.
         if not any(m.type=='ARMATURE' for m in obj.modifiers):continue
         evaluated=obj.evaluated_get(graph);mesh=evaluated.to_mesh()
-        result.extend(tuple(obj.matrix_world @ v.co) for v in mesh.vertices)
-        evaluated.to_mesh_clear()
-    return result
+        try:
+            values=np.empty(len(mesh.vertices)*3,dtype=np.float32)
+            mesh.vertices.foreach_get('co',values)
+            world=np.asarray(obj.matrix_world,dtype=np.float64)
+            result.append(values.reshape(-1,3) @ world[:3,:3].T+world[:3,3])
+        finally:evaluated.to_mesh_clear()
+    if not result:raise ValueError('Missing exported surface')
+    # Bidirectional nearest-point distance is unchanged by exact duplicates.
+    # Keep numerical arrays instead of millions of Python coordinate tuples;
+    # never round, weld by a tolerance, or average distinct surface positions.
+    return np.unique(np.concatenate(result),axis=0)
 
 
 def select_action(semantic, single_file=False):
@@ -35,7 +44,7 @@ def select_action(semantic, single_file=False):
 
 
 def distance(a,b):
-    if not a or not b:raise ValueError('Missing exported surface')
+    if len(a)==0 or len(b)==0:raise ValueError('Missing exported surface')
     tree=KDTree(len(b))
     for i,p in enumerate(b):tree.insert(Vector(p),i)
     tree.balance()
@@ -84,6 +93,8 @@ def main():
             checks.append(check)
             print('EXPORT_CHECK='+json.dumps(check))
     result={'schema':'autorig-quadruped-reimport-qa.v1','checks':checks,'passed':all(c['passed'] for c in checks),
+            'reference_storage':'numerical arrays; exact duplicate surface points removed without tolerance',
+            'reference_storage_bytes':sum(frame.nbytes for frames in references.values() for frame in frames),
             'maximum_surface_error_gate':.003,'quality_approved':False,
             'scope':'source versus reimport, every key and half-frame; not gait aesthetics or controller transitions'}
     with args.output.open('x',encoding='utf-8') as f:json.dump(result,f,indent=2)

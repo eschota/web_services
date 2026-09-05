@@ -138,3 +138,26 @@ def test_rest_projection_rejects_large_correction_and_nonfinite_cap():
         AuthoringRig(synthetic_rig(near_straight_fore=True),profile)
     profile['max_rest_projection_degrees']=float('nan')
     with pytest.raises(ValueError,match='projection cap'):AuthoringRig(synthetic_rig(),profile)
+
+
+@pytest.mark.parametrize('action',['idle_neutral','walk_forward'])
+def test_explicit_anatomical_support_stance_keeps_contacts_and_limits(action):
+    profile=json.loads(DEFAULT_PROFILE.read_text())
+    for name,row in profile['limbs'].items():row['stance_center_joint']=1 if name.startswith('fore_') else 0
+    rig=AuthoringRig(synthetic_rig(),profile)
+    result=author_clip(rig,action)
+    for name,leg in result['qa']['feet'].items():
+        assert np.linalg.norm(leg['stance_center_offset'])>0
+        assert leg['max_stance_slide_per_frame']<1e-6
+        assert leg['max_stance_height']<1e-6
+        assert np.all(np.array(leg['joint_min'])>=np.array(leg['joint_bounds'][0])-1e-8)
+        assert np.all(np.array(leg['joint_max'])<=np.array(leg['joint_bounds'][1])+1e-8)
+
+
+def test_stance_projection_requires_bounded_adjustment_and_valid_joint():
+    profile=json.loads(DEFAULT_PROFILE.read_text());profile['limbs']['hind_left']['stance_center_joint']=0
+    profile['max_stance_center_adjustment_height_fraction']=.001
+    with pytest.raises(ValueError,match='Stance center exceeds'):AuthoringRig(synthetic_rig(),profile)
+    profile['max_stance_center_adjustment_height_fraction']=.35
+    profile['limbs']['hind_left']['stance_center_joint']=True
+    with pytest.raises(ValueError,match='Stance center joint'):AuthoringRig(synthetic_rig(),profile)

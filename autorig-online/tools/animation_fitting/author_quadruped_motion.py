@@ -138,6 +138,23 @@ class AuthoringRig:
                 'bend_sign':-1 if name in ('fore_left','fore_right') else 1,
                 'posture_prior':posture_prior,'rest_projection_degrees':projection.tolist()}
         self.height=float(np.mean([self.rest[l['bones'][0]][2,3] for l in self.limbs.values()]))
+        stance_cap=self.profile.get('max_stance_center_adjustment_height_fraction',.35)
+        if not math.isfinite(stance_cap) or not 0<=stance_cap<=.5:
+            raise ValueError('Invalid stance center adjustment cap')
+        for name,limb in self.limbs.items():
+            anchor=self.profile['limbs'][name].get('stance_center_joint')
+            if anchor is not None and (type(anchor) is not int or anchor not in (0,1)):
+                raise ValueError('Stance center joint must be hip (0) or elbow (1)')
+            center=limb['sole'].copy()
+            if anchor is not None:
+                foot_offset=limb['sole']-self.rest[limb['bones'][3]][:3,3]
+                center[1]=self.rest[limb['bones'][anchor]][1,3]+foot_offset[1]
+                center[2]=0
+            offset=center-limb['sole']
+            if np.linalg.norm(offset)>self.height*stance_cap:
+                raise ValueError(f'Stance center exceeds bounded adjustment: {name}')
+            limb['stance_center']=center
+            limb['stance_center_offset']=offset.tolist()
 
     def fk(self,basis=None,world_rotations=None):
         basis=basis or {};world_rotations=world_rotations or {}
@@ -226,7 +243,7 @@ def body_basis(rig,action,phase,root_position):
         for li,name in enumerate(LEGS):
             declaration=rig.profile['limbs'][name]
             if declaration.get('scapula'):
-                center=rig.limbs[name]['sole']
+                center=rig.limbs[name]['stance_center']
                 target,_,_=hoof_trajectory(phase-gait['phases'][li],gait['duty'],stride,
                     gait['lift_height']*rig.height,center,gait['direction'])
                 angle=declaration['scapula_radians_per_height']*(target[1]-center[1])/rig.height
@@ -268,10 +285,10 @@ def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
             parent=rig.rows[names[0]]['parent']
             base_rotation=torso[parent][:3,:3] @ rig.rest[parent][:3,:3].T
             limb['fetlock_rest']=rig.rest[names[3]][:3,3]
-            center=limb['sole'].copy()
+            center=limb['stance_center'].copy()
             if gait:
-                # Retain the anatomical neutral stance. A mobile scapula
-                # supplies forelimb reach instead of shifting every hoof forward.
+                # Use the declared support stance; source-pose foot offsets are
+                # retained unless a bounded anatomical anchor is explicit.
                 target,stance,bump=hoof_trajectory(phase-gait['phases'][li],gait['duty'],stride,
                     gait['lift_height']*rig.height,center,gait['direction'])
             else:target,stance,bump=center.copy(),True,0.
@@ -311,6 +328,8 @@ def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
         deltas=np.linalg.norm(np.diff(virtual,axis=0),axis=1)
         both=stance[:-1]&stance[1:]
         report[name]={'stance_frames':np.flatnonzero(stance).tolist(),
+            'stance_center':rig.limbs[name]['stance_center'].tolist(),
+            'stance_center_offset':rig.limbs[name]['stance_center_offset'],
             'rest_projection_degrees':rig.limbs[name]['rest_projection_degrees'],
             'max_stance_slide_per_frame':float(deltas[both].max()) if both.any() else 0,
             'max_stance_height':float(np.abs(soles[stance,2]).max()),

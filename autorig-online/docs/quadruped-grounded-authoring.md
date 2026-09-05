@@ -217,3 +217,107 @@ full mesh; add run/sprint, jump phases, eating/rest and their entry/exit actions
 turns/braking, reactions/attacks/death/get-up; validate controller transitions,
 different horse morphologies and additional animal families. The full goal
 remains active.
+
+### Forelimb placement and centered support stance
+
+The first full-mesh rejection is now superseded by an offline anatomical
+prototype. The primary semantic skeleton is pinned by SHA-256
+`03b1bc4f8f1d13bb44fa38b74da47f75fc241dcb46e7eb00ce4be21ca8928837`.
+Do not use the later `external_arp_fit_summary.full.json` for primary joint
+coordinates: its timestamp belongs to a subsequent variant after the primary
+Blend was saved. The original primary Blend remains unchanged.
+
+The prototype locates the elbow from the stable lateral bank of the foreleg
+guide and uses the canonical humerus/clavicle vectors to place shoulder and
+scapula inside the torso. It preserves the fitted fetlock/toes and all hind
+joint endpoints. Fresh Heat Map weights are transferred through the exact-weld
+proxy to the original 119,996 render vertices. Saved-source validation confirms
+the six proximal forelimb points are inside the mesh, the guide replay matches,
+and positions, topology, normals, UVs and materials are preserved. This is an
+offline prototype, not yet a converter runtime placement change.
+
+`real-bay/shoulder-layout-probe-v1/anatomical_rig.blend` is pinned by
+`703e3eabf54f376daf23408a0e342a00f6be41ac08aee5a751b0bbc395362691`.
+The complete three-cycle full-mesh video `6d5fff7fc207` received a user
+"Accept" verdict through the addressed DEV inbox. That accepts the shown
+forelimb prototype; it does not approve unseen actions or the whole pipeline.
+
+Authoring now supports an explicit per-limb `stance_center_joint`: `0` anchors
+the support center beneath the proximal joint and `1` beneath the elbow.
+The sole-to-fetlock offset is preserved; horizontal adjustment is bounded by
+`max_stance_center_adjustment_height_fraction` (default 0.35, maximum 0.5).
+Omitting the anchor preserves the prior source-foot center. Actual joint limits
+and contact tolerances are unchanged. The horse experiment uses fore anchor 1
+and hind anchor 0 to correct its stretched source stance. Walk stride 0.7 of
+hip height becomes reachable at 0.519 model metres/second, versus 0.222 for the
+previous short stride. These speeds refer to the normalized source scale.
+
+The centered set contains five idles, forward/backward walk and trot. All eight
+pass Blender key/half-frame ground-contact checks. Forward walk's maximum hoof
+target error is 0.381 mm and ground penetration 0.365 mm. All eight Actions
+survive export cleanup; removing the unused source world and orphan image data
+reduces packed images from 101,022,098 to 3,946,811 bytes, and the complete Blend
+is 12,186,562 bytes. Required mesh materials remain in the asset.
+
+Evidence is in the project workspace `work/centered-stance-v1`: `all-actions`,
+`clip-manifest.json`, `exports-all8`, and full-cycle walk/trot preview folders.
+DEV videos `df1046762779` and `abac5605ef3e` show the longer walk in three-quarter
+and side views. The renderer now accepts `--view three-quarter|side|front`.
+The complete 32-frame walk and 24-frame trot sequences were visually inspected.
+Twenty-nine authoring/timing tests pass. Further motion polish and transitions
+remain required; generated clips retain `quality_approved=false`.
+
+Game-weight fidelity is evaluated separately. Naively retaining the strongest
+four of the prototype's nine influences produced 15.85 mm maximum error on the
+short walk. Pose-aware reduction over that one clip reduced actual Blender
+quarter-frame error to 1.552 mm, with GLB/FBX reimport errors 11.450/0.672
+microns. That candidate is valid only for the exact short-walk clip hash and
+must not be reused for this longer walk or other actions. The new DEV reducer
+in the converter repository consumes safe numerical NPZ, an exact multi-clip
+hash manifest and immutable input snapshots. It uses keys/halves for training
+and disjoint quarter/three-quarter timestamps of the same declared clips for
+holdout. The fixed 3 mm gate stays in force; this is not unseen-action testing.
+
+The first eight-clip weight candidate correctly failed at 3.035 mm on six
+vertices during `idle_look_around`. Training-only minimax refinement, including
+alternate sparse supports where the initial selection still exceeds 3 mm,
+reduced maximum holdout error to **2.677 mm**, with no sample above 3 mm.
+It changes neither the clips nor the gate. The candidate NPZ SHA-256 is
+`e01d1f7ef262e13758a2d3d56eb278fdc8b500dbc09b48628926ba988afdccf0`.
+The reusable DEV tool is merged and pushed as converter main
+`f3fb5d4368f1574f6b93d01cbd5aae34a5e2cc60`; nine independently executed Python
+3.10 tests pass. This developer-only change requires no farm deployment.
+
+Independent actual Blender comparison subsequently passed all **2,280**
+quarter-frame samples across the eight clips. Maximum full-weight versus
+four-weight surface deviation is **2.678 mm**, with no sample-vertex pair above
+3 mm. The highest contact error is **0.727 mm** on trot, with ground penetration
+0.725 mm; forward walk remains at 0.381 mm. Preconditions prove the active
+armature modifier, exact vertex order/topology, clip hashes/times and nonzero
+motion/contact coverage. Mesh/UV/normal/material/texture fingerprints remain
+unchanged. `optimized-all8/weight-validation.json` records every action.
+
+The new all-action Blend is 12,092,693 bytes, SHA-256
+`5e1aabc8999bac962731632f311b0e204f46e05a28d92e7d31d8151cbfde2029`;
+GLB is 12,139,508 bytes, SHA-256
+`7e48ac282bcd4b15621c1a30efb6679de5e8230dd8169dbcc4d995e7641a6021`.
+All eight FBX clips were also exported. Reimport verification now stores
+numerical arrays and removes only exactly duplicate surface points. This
+preserves bidirectional nearest-point distance while avoiding the prior
+22.6-GB Python-tuple allocation on the full eight-action mesh. A Blender
+comparison verifies exact equality of the distance with/without duplicates,
+retains distinct points only 1e-10 apart, and rejects empty surfaces. The
+original owned read-only verifier was stopped before restarting the bounded
+version. All **16** actual reimports then passed: eight GLB actions and eight
+FBX files, at every key and half-frame. Maximum surface deviation was
+**13.374 microns for GLB** and **0.720 microns for FBX**. Numerical reference
+storage was 549,174,912 bytes; the process was observed at 958,693,376 bytes
+working set. The new side-view video is complete: 96 frames, 30 FPS, three
+cycles. All 32 phases were inspected on the optimized full mesh. These checks
+close the current eight-action skin/export candidate; they do not establish
+controller transitions, the remaining action library or cross-model quality.
+
+Two obsolete intermediate Blends were copied into the project workspace
+`work/autorig-intermediate-archive-20260905`, hash-verified and removed from their
+old R-drive paths when that drive filled. `manifest.json` records both original
+paths and archive hashes. The primary source and active prototype are intact.
