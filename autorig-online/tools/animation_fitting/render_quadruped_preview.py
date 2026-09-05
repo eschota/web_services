@@ -57,7 +57,10 @@ def configure_scene(arm,profile_path,material_mode='semantic',view_mode='three-q
                 poly.material_index=labels.index(dominant)+1 if scores[dominant]>=.35 else 0
     scene.frame_set(0)
     graph=bpy.context.evaluated_depsgraph_get()
-    corners=[obj.matrix_world @ Vector(corner) for obj in bpy.data.objects if obj.type=='MESH'
+    render_meshes=[obj for obj in bpy.data.objects if obj.type=='MESH' and not obj.hide_render
+                   and any(mod.type=='ARMATURE' and mod.object==arm for mod in obj.modifiers)]
+    if not render_meshes:raise ValueError('No render mesh bound to the review armature')
+    corners=[obj.matrix_world @ Vector(corner) for obj in render_meshes
              for corner in obj.evaluated_get(graph).bound_box]
     minimum=Vector(tuple(min(point[i] for point in corners) for i in range(3)))
     maximum=Vector(tuple(max(point[i] for point in corners) for i in range(3)))

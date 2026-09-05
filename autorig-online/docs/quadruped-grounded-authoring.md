@@ -360,7 +360,43 @@ identity was incomplete. Read-only log/ledger inspection confirmed that it
 created no task. A fresh submission through the supported ordinary manual
 queue was accepted as task `fc7ce0d6-9a71-481f-ac52-d8d4fed1bd81`, model
 `3c12bf4f-05d0-4af1-874b-405fd3611548`. It uses the unchanged owned horse source
-and is currently processing on Blender 5.1 with ARP. Track this exact task;
-do not submit a duplicate. Primary Stage 3 provenance, final binding and visible
-mesh results still need verification before declaring the runtime correction
-fully validated. DEV update `24ad1d437bb9` records admission.
+and reached **Completed** with no task error. Do not submit a duplicate.
+Primary Stage 3 evidence was copied before later variants: summary SHA-256
+`ca44fb48ce7f669b2f63fd4c24231c6158db118b0c17bc037e39a35bb0e2be0d`, timestamp
+2026-09-05 16:43:00 UTC. Correction was applied and revalidated after followers;
+Match to Rig and final-rig usability passed. All 119,996 vertices received
+finite weights with zero uncovered/invalid vertices, and the exact-weld proxy
+was removed. The complete primary Blender pipeline stage took 292.487 seconds
+(including preprocessing; this is not the isolated Stage 3 fitting duration).
+
+The saved primary Blend is 104,299,396 bytes, SHA-256
+`3fb1d046fabac6e99d01e646199113b19bc5627a01dfd88a863b2e325acd299a`.
+Direct inspection of its actual bound rig confirms 344 bones, 91 deform bones,
+up to nine influences and maximum weight-sum residual 9.68e-7. Actual deform
+shoulder/elbow/carpus/fetlock heads match the primary reference targets within
+7.35e-8 metres. The exported GLB is 12,241,008 bytes, SHA-256
+`92d00df47136d412ab5196f3861c2673c2cc3dd07b7041fd5181b1e5eaeea56c`; both files
+were checked against remote hashes. Its native Horse_gallop spans 0.75 seconds.
+The six-cycle side-view video (135 frames, 30 FPS) is published in DEV as
+`a36e47458958`. This is a native preset deformation check, not approval of a
+new authored gameplay gait. Preview framing now uses meshes bound to the
+selected armature, excluding importer bone-widget geometry.
+
+The task exposed a separate pre-existing optional-viewer failure: a
+274-character Windows staging path prevented the first derivative from being
+created after its geometry scan passed. The canonical GLB, Unity package and
+preview completed. Converter main `869f7d5189ef1ece70a81462a9d986145138775e`
+shortens only temporary basenames inside the existing unique stage directory.
+Public filenames, geometry gates and paired installation/rollback remain
+unchanged. Fifty relevant tests and actual Blender export of both derivatives
+passed; temporary paths were 212 characters, with 114 weighted bones/ancestors,
+restored bone flags and complete staging cleanup.
+
+The subsequent deployment attempt could not reach any SSH endpoint and applied
+no artifact: `ssh farm-f11` returned socket `Permission denied`. HTTP still
+confirms F11 is healthy on `493e6bf`. Do not claim `869f7d5` deployed. Retry only
+through the normal artifact controller after SSH connectivity is restored;
+do not bypass it with direct source copies or network-setting changes. Reports
+are in project workspace `work/viewer-short-path-rollout` and
+`work/horse2-runtime-canary/viewer-diagnostic`. The actual viewer pair produced
+locally is under `work/vq`; it has not been published to the worker.
