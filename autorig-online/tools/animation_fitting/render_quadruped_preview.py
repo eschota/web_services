@@ -23,7 +23,7 @@ def aim(obj,target):
     obj.rotation_euler=(Vector(target)-obj.location).to_track_quat('-Z','Y').to_euler()
 
 
-def configure_scene(arm,profile_path):
+def configure_scene(arm,profile_path,material_mode='semantic'):
     scene=bpy.context.scene
     scene.render.engine='CYCLES'
     scene.cycles.device='CPU';scene.cycles.samples=12;scene.cycles.use_denoising=True
@@ -35,25 +35,34 @@ def configure_scene(arm,profile_path):
     scene.world=bpy.data.worlds.new('Review world');scene.world.use_nodes=True
     scene.world.node_tree.nodes['Background'].inputs[0].default_value=(.12,.16,.20,1)
     scene.world.node_tree.nodes['Background'].inputs[1].default_value=.6
-    profile=json.loads(profile_path.read_text())
-    labels=list(profile['limb_groups'])
-    colours={'fore_left':(.015,.68,.82),'fore_right':(.08,.17,.8),
-             'hind_left':(.95,.63,.015),'hind_right':(.82,.04,.35)}
-    mats=[material('Body',(.62,.68,.72))]+[material(n,colours[n]) for n in labels]
-    bone_groups={bone:label for label,row in profile['limb_groups'].items() for bone in row['bones']}
-    for obj in list(bpy.data.objects):
-        if obj.type!='MESH':continue
-        obj.data.materials.clear()
-        for mat in mats:obj.data.materials.append(mat)
-        groups={g.index:g.name for g in obj.vertex_groups}
-        for poly in obj.data.polygons:
-            scores={label:0. for label in labels}
-            for idx in poly.vertices:
-                for w in obj.data.vertices[idx].groups:
-                    label=bone_groups.get(groups[w.group])
-                    if label:scores[label]+=w.weight/len(poly.vertices)
-            dominant=max(scores,key=scores.get)
-            poly.material_index=labels.index(dominant)+1 if scores[dominant]>=.35 else 0
+    if material_mode=='semantic':
+        profile=json.loads(profile_path.read_text())
+        labels=list(profile['limb_groups'])
+        colours={'fore_left':(.015,.68,.82),'fore_right':(.08,.17,.8),
+                 'hind_left':(.95,.63,.015),'hind_right':(.82,.04,.35)}
+        mats=[material('Body',(.62,.68,.72))]+[material(n,colours[n]) for n in labels]
+        bone_groups={bone:label for label,row in profile['limb_groups'].items() for bone in row['bones']}
+        for obj in list(bpy.data.objects):
+            if obj.type!='MESH':continue
+            obj.data.materials.clear()
+            for mat in mats:obj.data.materials.append(mat)
+            groups={g.index:g.name for g in obj.vertex_groups}
+            for poly in obj.data.polygons:
+                scores={label:0. for label in labels}
+                for idx in poly.vertices:
+                    for w in obj.data.vertices[idx].groups:
+                        label=bone_groups.get(groups[w.group])
+                        if label:scores[label]+=w.weight/len(poly.vertices)
+                dominant=max(scores,key=scores.get)
+                poly.material_index=labels.index(dominant)+1 if scores[dominant]>=.35 else 0
+    scene.frame_set(0)
+    graph=bpy.context.evaluated_depsgraph_get()
+    corners=[obj.matrix_world @ Vector(corner) for obj in bpy.data.objects if obj.type=='MESH'
+             for corner in obj.evaluated_get(graph).bound_box]
+    minimum=Vector(tuple(min(point[i] for point in corners) for i in range(3)))
+    maximum=Vector(tuple(max(point[i] for point in corners) for i in range(3)))
+    target=(minimum+maximum)*.5
+    radius=max((maximum-minimum).length*.5,.1)
     bpy.ops.mesh.primitive_plane_add(size=100,location=(0,0,0))
     floor=bpy.context.object;floor.name='Half metre floor'
     mat=material('Ground',(.10,.14,.16));floor.data.materials.append(mat)
@@ -68,17 +77,23 @@ def configure_scene(arm,profile_path):
     for name,position,power,size in [('Key',(3,-4,6),1300,5),('Fill',(-4,-1,4),700,4),('Rim',(2,4,6),1500,3)]:
         data=bpy.data.lights.new(name,'AREA');data.energy=power;data.shape='DISK';data.size=size
         obj=bpy.data.objects.new(name,data);scene.collection.objects.link(obj)
-        obj.location=position;aim(obj,(0,-.5,1.2));lights.append((obj,Vector(position)))
+        obj.location=position;aim(obj,target);lights.append((obj,Vector(position)))
     data=bpy.data.cameras.new('Review camera');data.type='ORTHO';data.ortho_scale=6
     cam=bpy.data.objects.new('Review camera',data);scene.collection.objects.link(cam)
-    cam.location=(6,-3.3,3.2);aim(cam,(0,-.5,1.2));scene.camera=cam
-    font=bpy.data.curves.new('Review label','FONT');font.size=.13; font.body=''
+    cam.location=target+Vector((6,-3.3,3.2)).normalized()*radius*4
+    aim(cam,target);scene.camera=cam
+    bpy.context.view_layer.update()
+    view=[cam.matrix_world.inverted() @ point for point in corners]
+    width=max(point.x for point in view)-min(point.x for point in view)
+    height=max(point.y for point in view)-min(point.y for point in view)
+    data.ortho_scale=max(width,height*scene.render.resolution_x/scene.render.resolution_y)*1.35
+    font=bpy.data.curves.new('Review label','FONT');font.size=data.ortho_scale*.022; font.body=''
     text=bpy.data.objects.new('Review label',font);scene.collection.objects.link(text)
-    text.parent=cam;text.location=(-2.78,1.45,-4)
+    text.parent=cam;text.location=(-.46*data.ortho_scale,.245*data.ortho_scale,-1)
     white=bpy.data.materials.new('Label');white.use_nodes=True
     nodes=white.node_tree.nodes;nodes.clear();e=nodes.new('ShaderNodeEmission');e.inputs[0].default_value=(.85,.95,1,1)
     out=nodes.new('ShaderNodeOutputMaterial');white.node_tree.links.new(e.outputs[0],out.inputs['Surface']);font.materials.append(white)
-    return cam,lights,font
+    return cam,lights,font,cam.location.copy(),target
 
 
 def main():
@@ -88,6 +103,7 @@ def main():
     p.add_argument('--action',required=True)
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--repetitions',type=int,default=4)
+    p.add_argument('--materials',choices=('semantic','original'),default='semantic')
     p.add_argument('--profile',type=Path,default=Path(__file__).parent/'data/semantic_ltx_profiles/horse_2.v1.json')
     p.add_argument('--ffmpeg',default='ffmpeg')
     args=p.parse_args(sys.argv[sys.argv.index('--')+1:])
@@ -102,7 +118,7 @@ def main():
     arm.animation_data.action_slot=arm.animation_data.action.slots[0]
     bpy.context.view_layer.objects.active=arm
     if arm.mode!='OBJECT':bpy.ops.object.mode_set(mode='OBJECT')
-    cam,lights,font=configure_scene(arm,args.profile)
+    cam,lights,font,camera_start,camera_target=configure_scene(arm,args.profile,args.materials)
     interval=clip['timing']['interval_count'];total=interval*args.repetitions
     font.body=f"{args.action.upper()}   {clip['reference_speed']:.2f} m/s   30 FPS\nAUTHORED CANDIDATE / 0.5 m FLOOR GRID"
     for i in range(total):
@@ -111,8 +127,8 @@ def main():
         travel=Vector((0,-clip['reference_speed']*(cycle*interval/30 if clip['root_motion'] else i/30),0))
         arm.location=travel
         camera_travel=Vector((0,-clip['reference_speed']*i/30,0))
-        cam.location=Vector((6,-3.3,3.2))+camera_travel
-        aim(cam,Vector((0,-.5,1.2))+camera_travel)
+        cam.location=camera_start+camera_travel
+        aim(cam,camera_target+camera_travel)
         for obj,position in lights:obj.location=position+camera_travel
         bpy.context.scene.render.filepath=str(args.output/f'frame_{i:05d}.png')
         bpy.ops.render.render(write_still=True)

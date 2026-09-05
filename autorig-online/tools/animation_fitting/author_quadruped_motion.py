@@ -72,6 +72,12 @@ class AuthoringRig:
         if self.profile.get('schema')!='autorig-quadruped-gameplay-profile.v1':raise ValueError('Unsupported gameplay profile')
         if set(self.profile['limbs'])!=set(LEGS):raise ValueError('Profile must explicitly identify all four legs')
         self.gaits=self.profile['gaits']
+        rest_policy=self.profile.get('rest_pose_policy','require_within_limits')
+        if rest_policy not in ('require_within_limits','project_within_limits'):
+            raise ValueError('Invalid rest pose policy')
+        projection_cap=self.profile.get('max_rest_projection_degrees',0.)
+        if not math.isfinite(projection_cap) or not 0<=projection_cap<=15:
+            raise ValueError('Invalid bounded rest projection cap')
         for name,gait in self.gaits.items():
             if len(gait['phases'])!=4 or any(not 0<=p<1 for p in gait['phases']):raise ValueError('Invalid gait phases')
             if not 0<gait['duty']<1 or gait['direction'] not in (-1,1):raise ValueError('Invalid stance policy')
@@ -118,14 +124,19 @@ class AuthoringRig:
             lower=np.radians(declaration['joint_lower_degrees']);upper=np.radians(declaration['joint_upper_degrees'])
             if lower.shape!=(3,) or upper.shape!=(3,) or not np.isfinite(lower).all() or not np.isfinite(upper).all() or np.any(lower>=upper):
                 raise ValueError('Invalid finite joint bounds')
-            if np.any(neutral<lower) or np.any(neutral>upper):raise ValueError(f'Rest chain outside authoring limits: {name}')
+            posture_prior=np.clip(neutral,lower,upper)
+            projection=np.abs(np.degrees(posture_prior-neutral))
+            if np.any(projection>1e-9) and (rest_policy!='project_within_limits' or projection.max()>projection_cap):
+                raise ValueError(f'Rest chain outside authoring limits: {name}; projection={projection.tolist()}')
             foot_indices=[i for i,v in enumerate(self.vertices) if sum(w['weight'] for w in v['weights'] if w['bone'] in names[3:])>.9]
             if not foot_indices:raise ValueError(f'Missing foot surface: {name}')
             sole_z=float(self.points[foot_indices,2].min())
             sole_indices=[i for i in foot_indices if self.points[i,2]<=sole_z+1e-5]
             sole=self.points[sole_indices].mean(axis=0)
             self.limbs[name]={'bones':names,'extra':extra,'vectors':vectors,'neutral':neutral,
-                'bounds':(lower,upper),'sole':sole,'sole_indices':sole_indices,'foot_indices':foot_indices}
+                'bounds':(lower,upper),'sole':sole,'sole_indices':sole_indices,'foot_indices':foot_indices,
+                'bend_sign':-1 if name in ('fore_left','fore_right') else 1,
+                'posture_prior':posture_prior,'rest_projection_degrees':projection.tolist()}
         self.height=float(np.mean([self.rest[l['bones'][0]][2,3] for l in self.limbs.values()]))
 
     def fk(self,basis=None,world_rotations=None):
@@ -159,8 +170,8 @@ def solve_leg(limb,hip,base_rotation,target,pitch,height):
     d=base_rotation.T @ (fetlock_target-hip)
     length=np.linalg.norm(vectors[:,1:],axis=1);distance=float(np.linalg.norm(d[1:]))
     theta0=math.atan2(vectors[0,1],-vectors[0,2])
-    lower,upper=limb['bounds'];is_fore=neutral[1]<0
-    prior=neutral.copy();bump=min(1,abs(pitch)/.22)
+    lower,upper=limb['bounds'];is_fore=limb['bend_sign']<0
+    prior=limb['posture_prior'].copy();bump=min(1,abs(pitch)/.22)
     prior[1]+=(-.2 if is_fore else .3)*bump
     prior[2]+=(.8 if is_fore else -.5)*bump
     def configuration(distal):
@@ -300,6 +311,7 @@ def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
         deltas=np.linalg.norm(np.diff(virtual,axis=0),axis=1)
         both=stance[:-1]&stance[1:]
         report[name]={'stance_frames':np.flatnonzero(stance).tolist(),
+            'rest_projection_degrees':rig.limbs[name]['rest_projection_degrees'],
             'max_stance_slide_per_frame':float(deltas[both].max()) if both.any() else 0,
             'max_stance_height':float(np.abs(soles[stance,2]).max()),
             'min_foot_surface_height':float(skins[:,foot_ids,2].min()),

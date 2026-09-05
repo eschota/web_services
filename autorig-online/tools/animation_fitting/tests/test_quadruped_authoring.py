@@ -6,7 +6,7 @@ import pytest
 from animation_fitting.author_quadruped_motion import AuthoringRig, author_clip, hoof_trajectory, DEFAULT_PROFILE
 
 
-def synthetic_rig(scale=1.0):
+def synthetic_rig(scale=1.0,near_straight_fore=False):
     """Original test geometry; contains no ARP mesh or extracted source data."""
     rows={}
     def add(name,parent,head,tail):
@@ -33,6 +33,7 @@ def synthetic_rig(scale=1.0):
             names=[f'{base}{suffix}.{side}' for base in ('c_thigh_b','thigh_twist','thigh_stretch','leg_stretch','leg_twist','foot','toes_01')]
             primary=[(x,-.8,1.5),(x,-.6,1.1),(x,-.58,.65),(x,-.51,.19),(x,-.56,.09),(x,-.65,0)] if fore else [
                 (x,.6,1.55),(x,.45,.95),(x,.74,.63),(x,.72,.19),(x,.68,.09),(x,.59,0)]
+            if fore and near_straight_fore:primary[1]=(x,-.7,1.1)
             a,b,c,d,e,f=map(np.array,primary)
             if fore:
                 add(f'clavicle.{side}','spine_03.x',(x*.4,-.65,1.82),a)
@@ -111,3 +112,29 @@ def test_profile_must_name_existing_limbs_and_finite_bounds():
     with pytest.raises(ValueError,match='Missing explicit'):AuthoringRig(synthetic_rig(),p)
     p=json.loads(DEFAULT_PROFILE.read_text());p['limbs']['hind_left']['joint_lower_degrees'][0]=float('-inf')
     with pytest.raises(ValueError,match='finite joint bounds'):AuthoringRig(synthetic_rig(),p)
+
+
+def test_bounded_rest_projection_uses_declared_forelimb_role_and_keeps_pose_limits():
+    source=synthetic_rig(near_straight_fore=True)
+    with pytest.raises(ValueError,match='Rest chain outside'):AuthoringRig(source)
+    profile=json.loads(DEFAULT_PROFILE.read_text())
+    profile.update(rest_pose_policy='project_within_limits',max_rest_projection_degrees=10.)
+    rig=AuthoringRig(source,profile)
+    assert rig.limbs['fore_left']['neutral'][1]>0
+    assert rig.limbs['fore_left']['bend_sign']==-1
+    result=author_clip(rig,'walk_forward')
+    for name in ('fore_left','fore_right'):
+        qa=result['qa']['feet'][name]
+        assert max(qa['rest_projection_degrees'])<=10
+        assert np.all(np.array(qa['joint_min'])>=np.array(qa['joint_bounds'][0])-1e-8)
+        assert np.all(np.array(qa['joint_max'])<=np.array(qa['joint_bounds'][1])+1e-8)
+        assert qa['max_stance_slide_per_frame']<1e-6
+
+
+def test_rest_projection_rejects_large_correction_and_nonfinite_cap():
+    profile=json.loads(DEFAULT_PROFILE.read_text())
+    profile.update(rest_pose_policy='project_within_limits',max_rest_projection_degrees=5.)
+    with pytest.raises(ValueError,match='Rest chain outside'):
+        AuthoringRig(synthetic_rig(near_straight_fore=True),profile)
+    profile['max_rest_projection_degrees']=float('nan')
+    with pytest.raises(ValueError,match='projection cap'):AuthoringRig(synthetic_rig(),profile)

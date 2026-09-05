@@ -151,6 +151,67 @@ followed by validated weight transfer to the untouched render mesh. Original
 vertex identity, UV loops, normals, materials and object identity must remain.
 Binding success and visual quality still require a fresh normal-queue replay.
 
+### Fix deployed and real-mesh motion reviewed
+
+Converter main `2c66008169fcedc363b5d5cb884c08133eb15fb4` contains the
+exact-weld bind fix and removes the intrusive embedded probe. The normal
+artifact rollout verified F1/F11/F13/F2; F7 stayed unavailable. Artifact:
+`00716089639adb52ae0104b263b2d4c179f8b0837e5318db96ef7d731cd19441`.
+No tasks were interrupted and no rollback occurred. Stage/apply times: F1
+2.396/9.959 s, F11 3.072/10.949 s, F13 2.741/11.689 s, F2 2.754/11.937 s.
+Four real Blender synthetic tests and 47 relevant pipeline/GLB tests passed.
+
+The fresh owned F1 task `5c8ebd10-2c01-4494-ba08-8fb8c047b553`, GUID
+`d03b7019-a6f6-4053-a7b0-864546f0e9a2`, reached **Completed** with no error.
+Primary Stage 3 completed in **26.60 seconds**, returning
+`FINISHED,EXACT_WELD_PROXY_TRANSFER_DONE`. All 119,996 original vertices received
+finite normalized deform weights in 91 groups; zero vertices were uncovered,
+and the proxy was removed. The bounded Stage-3 report and exact source snapshots
+are in `gameplay/real-bay/d03b7019-stage3`. This proves the bind repair, not the
+quality of every fitted joint or animation.
+
+Primary Blend and GLB were downloaded and SHA-256 checked against F1:
+
+* `artifacts-2c66008/rigged.blend`: 104,327,994 bytes,
+  `6f00c5cb5cb87e2a26178d12ea8e4dcee225c6b61254d8e31fe8439d9784cc41`.
+* `artifacts-2c66008/all_animations.glb`: 12,243,120 bytes,
+  `7138c216497346c346e85dd763c3e475915c17066a0100bbb5d8f69d69035b50`.
+
+The bound source contains 344 total bones, 91 deform bones, and up to seven
+influences per vertex. Offline authoring preparation creates a separate
+four-influence linearized reference. Native gallop comparisons record maximum
+surface deviations of 22.23 mm for influence reduction and 29.34 mm after
+combined B-Bone linearization. These are limitations, not acceptance evidence;
+the original bound source remains unchanged. The compact reference is 92 bones
+including the motion root and keeps fitting/quality approval false.
+
+The generated forelimb rest angles also exposed an authoring bug: bend direction
+was inferred from the rest angle's sign. It now follows the explicit fore/hind
+role. An opt-in bounded rest-posture projection records corrections and keeps
+the original joint limits enforced for every authored pose; default profiles
+still reject out-of-limit rest chains. Eleven authoring tests, and 26 including
+the timing contract, pass. The real candidate uses a 10-degree projection cap
+and a shorter walk stride of 0.3 hip-height after the original 0.5 and 0.4
+recipes proved unreachable. No joint limits or contact gates were widened.
+
+`real-bay/authored-v3` and `exports-v3` contain the first full-mesh walk candidate.
+Blender key/half-frame evaluation measured maximum hoof error **0.491 mm** and
+worst ground penetration **0.442 mm**. Actual GLB and FBX reimports passed all
+65 sampled times each, with maximum surface deviations 2.216 and 0.731 microns.
+The preview renderer now preserves original materials on request and frames the
+actual model automatically.
+
+**Visual result: REWORK.** The three-cycle, 96-frame, 30-FPS full-mesh video was
+sent to DEV as `ebed7e501952`. Upper forelimbs bend too low and form unnatural
+bulky folds; the pose appears crouched. Contact and export metrics do not
+override that failure. See `visual-review-v3.json`, `preview-v3`, and the
+side-projection `rest-joint-audit.png`. A working hypothesis is that the external
+forelimb guide attachment is being used as a shoulder even where it lies near
+the elbow/belly line; this is not yet a confirmed fitting diagnosis. Inspect
+shoulder/elbow placement and support stance, then validate any change with new
+weights and actual mesh footage. Do not approve or publish these clips as a
+finished animation library.
+
 After that blocker is fixed: validate the corrected foreleg movement on the
 full mesh; add run/sprint, jump phases, eating/rest and their entry/exit actions,
 turns/braking, reactions/attacks/death/get-up; validate controller transitions,
