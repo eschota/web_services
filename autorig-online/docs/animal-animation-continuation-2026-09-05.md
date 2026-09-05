@@ -133,3 +133,45 @@ through that route. No production library was activated by this change.
 Full gameplay readiness is still unproven. This continuation repairs source
 semantics and the authoring toolchain; it does not claim a finished animal
 controller or a complete animation library.
+
+## Executed pilot and continuation state
+
+* Blender 5.2.1 built `anatomical-reference/anatomical_rig.blend`: 52 bones
+  including the master root, 51 deform bones, 344 vertices, at most 4 weights,
+  zero actions/constraints/drivers. The build is explicitly reference-only.
+* Native preset inspection found `Horse_default` at frame 0 and
+  `Horse_gallop` at frames 0–18. An inspection export produced a 127,840-byte
+  GLB with 51 joints and one baked animation spanning 0.6 seconds at 30 FPS.
+  That is a baseline export, not a newly authored complete library.
+* The initial LTX run on the existing 8188 worker was cooperatively interrupted
+  using only its prompt ID after Windows reported about 3.8 GB shared GPU
+  memory and progress became very slow. Restarting that pre-existing worker
+  was denied by automatic approval review; no alternative method was used to
+  restart it. Instead, a separate worker was created on 8189, with private
+  user/input/output/temp directories **and an explicit private database URL**
+  inside `work/animal-pilot/comfy-private`. `--user-directory` alone did not
+  isolate Comfy's default database. Launch arguments are saved in `launch.json`.
+* The private worker uses `--reserve-vram 6 --lowvram --disable-smart-memory`.
+  Observed shared GPU memory was about 0.48 GB during sampling. Candidate
+  `horse_walk_v11_reserved`, prompt `183b3b92-6797-450a-acf8-bccba8afbaca`,
+  finished in **10 minutes 16 seconds**: 65 decoded frames, 768×448, 30/1 FPS,
+  SHA-256 `6747bea4769475b0c2fe15c18f0951546a0dfc92cc23371f999708e05d4de3d1`.
+* The candidate is **REWORK**. The automatic period estimator selected source
+  frames 12–55.773 and introduced a 41.38 px hoof seam. Checking the entire
+  guided source span independently showed that this large seam is a slicing
+  problem: raw full-span hoof closure is at most 2.15 px, and at most 1.683 px
+  in the explicit 33-sample retime. Even that complete span fails the gait
+  checks: irregular detected footfall sequence, low contact duty factors,
+  nonuniform/contradictory contact drift, and body endpoint mismatch 12.157 px.
+  Do not confuse the slicing defect with the motion defects, or reduce gates
+  merely to obtain an accepted result.
+* Evidence is in `gait-v11/metrics.json`, `full-span-metrics.json`, phase sheets
+  and `horse-walk-rejected-review.mp4` (six repeats, 32 unique frames per loop).
+  The record state is `rejected_by_gait_qa`. No tracking, fitting, approval or
+  production library activation followed this rejection. Private model caches
+  were released after the queue became idle.
+* A thread heartbeat named **Animal Rig — разработка и DEV**, ID
+  `animal-rig-dev`, continues every 15 minutes. Notify only on meaningful
+  changes through DEV. The next technical work is guided-cycle selection and
+  reliable gait/contact control, plus anatomical joint-limit/deformation
+  validation. Do not generate random variants of a rejected motion endlessly.

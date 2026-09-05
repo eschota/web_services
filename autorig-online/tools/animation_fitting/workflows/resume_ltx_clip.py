@@ -21,6 +21,9 @@ def resume_run(directory, *, base=None, timeout_seconds=1800,
     directory=Path(directory)
     with gpu_lease(lock_path, 'collect-existing-ltx'):
         record=json.loads((directory/'run.json').read_text(encoding='utf-8'))
+        if record.get('state') == 'rejected_by_gait_qa':
+            # Collecting the render again must not reset a downstream verdict.
+            return record
         base=(base or record.get('comfy_url') or 'http://127.0.0.1:8188').rstrip('/')
         graph=json.loads((directory/'workflow.json').read_text(encoding='utf-8'))
         response=record.get('submission_response',{})
