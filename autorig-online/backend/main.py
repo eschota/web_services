@@ -11248,25 +11248,55 @@ async def _proxy_worker_bundle_by_ranges(url: str, filename: str, request: Reque
     )
 
 
+def _durable_primary_task_files(task: Task) -> Dict[str, Path]:
+    """Return every primary deliverable from the verified durable cache.
+
+    Artifact-cache rows are checksum-verified before publication.  When all
+    primary files are already present there, a flaky worker ZIP must not remain
+    on the owner download path.
+    """
+    resolved: Dict[str, Path] = {}
+    expected_names = _task_primary_download_names(task)
+    if not expected_names:
+        return {}
+    for source_url in _task_primary_download_urls(task):
+        filename = _clean_filename_for_cache(source_url, task.guid)
+        entry = lookup_cached_artifact(task.id, source_url=source_url)
+        path = Path(entry.get("path")) if entry and entry.get("path") else None
+        if not path or not path.is_file():
+            return {}
+        resolved[filename] = path
+    return resolved if set(resolved) == expected_names else {}
+
+
+_TASK_BUNDLE_BUILD_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
 async def _build_task_bundle_zip_from_cache(task: Task) -> Response:
     urls_to_cache = _task_primary_download_urls(task)
     expected_names = _task_primary_download_names(task)
     cache_dir = TASK_CACHE_DIR / task.id
     recovery_files = _materialize_task_recovery_files(task)
     bundle_names = expected_names | set(recovery_files)
-    if urls_to_cache and not recovery_files:
+    durable_files = _durable_primary_task_files(task)
+    if urls_to_cache and not recovery_files and not durable_files:
         await cache_task_files(task.id, urls_to_cache, task.guid)
 
-    files = [
-        p for p in sorted(cache_dir.iterdir())
-        if (
-            p.is_file()
-            and p.name in bundle_names
-            and not p.name.endswith(".tmp")
-            and not p.name.startswith(".")
-        )
-    ] if cache_dir.exists() else []
-    if not files:
+    bundle_sources: Dict[str, Path] = dict(durable_files)
+    if not bundle_sources:
+        bundle_sources.update({
+            p.name: p
+            for p in sorted(cache_dir.iterdir())
+            if (
+                p.is_file()
+                and p.name in bundle_names
+                and not p.name.endswith(".tmp")
+                and not p.name.startswith(".")
+            )
+        } if cache_dir.exists() else {})
+    for name, path in recovery_files.items():
+        bundle_sources.setdefault(name, path)
+    if not bundle_sources:
         recovery = await task_download_recovery_state(task)
         raise HTTPException(
             status_code=404,
@@ -11283,16 +11313,37 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> Response:
     bundle_dir = cache_dir / ".meta"
     bundle_dir.mkdir(parents=True, exist_ok=True)
     zip_path = bundle_dir / "primary-bundle.zip"
-    temp_zip_path = bundle_dir / f".primary-bundle.{uuid.uuid4().hex}.tmp"
-    with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for file_path in files:
-            zf.write(file_path, arcname=file_path.name)
-    os.replace(temp_zip_path, zip_path)
+    lock = _TASK_BUNDLE_BUILD_LOCKS.setdefault(str(task.id), asyncio.Lock())
+    async with lock:
+        expected_archive_names = set(bundle_sources)
+        archive_ready = False
+        if zip_path.is_file():
+            try:
+                with zipfile.ZipFile(zip_path, "r") as existing_zip:
+                    archive_ready = (
+                        set(existing_zip.namelist()) == expected_archive_names
+                        and existing_zip.testzip() is None
+                    )
+            except (OSError, zipfile.BadZipFile):
+                archive_ready = False
+        if not archive_ready:
+            temp_zip_path = bundle_dir / f".primary-bundle.{uuid.uuid4().hex}.tmp"
+
+            def _write_bundle() -> None:
+                try:
+                    with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                        for archive_name, file_path in sorted(bundle_sources.items()):
+                            zf.write(file_path, arcname=archive_name)
+                    os.replace(temp_zip_path, zip_path)
+                finally:
+                    temp_zip_path.unlink(missing_ok=True)
+
+            await asyncio.to_thread(_write_bundle)
 
     fallback_meta = _bundle_meta_response(
         ready=True,
-        source="fallback_cache",
-        file_count=len(files),
+        source="durable_artifact_cache" if durable_files else "fallback_cache",
+        file_count=len(bundle_sources),
         total_size=zip_path.stat().st_size if zip_path.exists() else None,
         generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
     )
@@ -11371,6 +11422,8 @@ async def _stream_purchased_task_bundle_zip(
             media_type="application/zip",
             as_attachment=True,
         )
+    if _durable_primary_task_files(task):
+        return await _build_task_bundle_zip_from_cache(task)
     if _has_complete_primary_task_cache(task):
         return await _build_task_bundle_zip_from_cache(task)
     if zip_url:

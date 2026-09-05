@@ -615,6 +615,56 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     archive_path.unlink(missing_ok=True)
 
+    async def test_durable_primary_files_bypass_flaky_worker_bundle(self):
+        task = _task()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            durable_root = root / "durable"
+            durable_root.mkdir()
+            source_paths = {}
+            for source_url in main._task_primary_download_urls(task):
+                filename = main._clean_filename_for_cache(source_url, task.guid)
+                path = durable_root / filename
+                path.write_bytes((filename + "\n").encode("utf-8"))
+                source_paths[source_url] = path
+
+            def cache_lookup(_task_id, *, source_url=None, role=None, **_kwargs):
+                if role == "full_bundle":
+                    return None
+                path = source_paths.get(source_url)
+                return {"path": path, "size": path.stat().st_size} if path else None
+
+            with (
+                patch.object(main, "TASK_CACHE_DIR", root / "tasks"),
+                patch.object(main, "GLB_CACHE_DIR", root / "glb"),
+                patch.object(main, "_RECOVERY_DELIVERABLES_DIR", root / "recovery"),
+                patch.object(main, "lookup_cached_artifact", side_effect=cache_lookup),
+                patch.object(main, "cache_task_files", AsyncMock()) as legacy_cache,
+                patch.object(main, "_proxy_worker_bundle_by_ranges", AsyncMock()) as worker_proxy,
+                patch.object(
+                    main,
+                    "_ensure_purchased_worker_bundle_zip_url",
+                    AsyncMock(return_value=(task, "https://worker.invalid/bundle.zip")),
+                ),
+                patch.object(main, "_schedule_task_bundle_download_notification"),
+            ):
+                task.owner_type = "user"
+                task.owner_id = "owner@example.com"
+                response = await main._stream_purchased_task_bundle_zip(
+                    task.id,
+                    SimpleNamespace(email="owner@example.com"),
+                    _request(),
+                    db=object(),
+                )
+                archive_path = root / "tasks" / task.id / ".meta" / "primary-bundle.zip"
+                with zipfile.ZipFile(archive_path) as archive:
+                    names = set(archive.namelist())
+
+            self.assertEqual(names, main._task_primary_download_names(task))
+            self.assertIn("primary-bundle.zip", response.headers["x-accel-redirect"])
+            legacy_cache.assert_not_awaited()
+            worker_proxy.assert_not_awaited()
+
     def test_complete_primary_cache_is_detected_without_preview_files(self):
         task = _task()
         with tempfile.TemporaryDirectory() as tmp, patch.object(main, "TASK_CACHE_DIR", Path(tmp)):
