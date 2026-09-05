@@ -321,3 +321,46 @@ Two obsolete intermediate Blends were copied into the project workspace
 `work/autorig-intermediate-archive-20260905`, hash-verified and removed from their
 old R-drive paths when that drive filled. `manifest.json` records both original
 paths and archive hashes. The primary source and active prototype are intact.
+
+### Automatic Stage 3 integration
+
+The accepted placement algorithm is now integrated into converter main
+`493e6bf76b12b66fcbbae03e7ed24b1ea291b235`. Its narrow gate requires both preset
+keys to identify HORSE_2 and both exact six-bone forelimb registry chains.
+Canonical vectors are captured before semantic fitting; shoulder, elbow,
+carpus and fetlock use the corresponding bone heads, and the canonical center
+is the midpoint of both elbows. Both sides are computed before mutation.
+
+Correction-time failure restores all 304 edit bones, including hierarchy,
+connection flags and rolls, plus pending change rows and metrics. Every
+non-target bone must remain unchanged during correction. After the normal
+follower/autofix passes, any unexpected change to corrected joints or protected
+feet/hind bones is a terminal error before publication. Geometry metrics are
+recomputed from all seven joints of each six-bone chain; quality approval is
+never inferred from the geometric gate.
+
+The reusable actual-Blender fixture passed 14 success, rollback and drift
+cases, including isolated interior-head, tail, roll, parent and connection
+changes. An independent Python 3.10 regression run passed 59 relevant tests.
+The fixture and evidence live in project workspace `work/forelimb-runtime-fixture`.
+Local Blender has no licensed ARP installation, so these results deliberately
+do not claim Match to Rig or final binding compatibility.
+
+Normal artifact rollout installed the new commit on F11, F13 and F2. Artifact
+SHA-256 is `8225253e5b430b423e93bf66cd1bfeee03d558e8800dd936a4eb8b859508db7c`
+(444,188 bytes). Transfer/stage and apply durations were F11 3.273/12.743 s,
+F13 2.794/13.481 s, F2 3.061/12.173 s. Exact boot commit/artifact, PID and cwd
+matched on all three. F1's deployment guard aborted because the converter was
+busy; it remains on `2c66008` with its active task intact. F7 was unavailable.
+No tasks were interrupted and no rollback occurred. The complete report is in
+`work/horse2-farm-rollout` in the project workspace.
+
+An initial F11 submission was rejected before task creation because its central
+identity was incomplete. Read-only log/ledger inspection confirmed that it
+created no task. A fresh submission through the supported ordinary manual
+queue was accepted as task `fc7ce0d6-9a71-481f-ac52-d8d4fed1bd81`, model
+`3c12bf4f-05d0-4af1-874b-405fd3611548`. It uses the unchanged owned horse source
+and is currently processing on Blender 5.1 with ARP. Track this exact task;
+do not submit a duplicate. Primary Stage 3 provenance, final binding and visible
+mesh results still need verification before declaring the runtime correction
+fully validated. DEV update `24ad1d437bb9` records admission.
