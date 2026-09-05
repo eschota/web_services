@@ -92,7 +92,55 @@ proportion change. The DEV-only reproducible ratio helper is preserved in
 converter main `23232fb57706063852194de2a3ccd60aac94df07`; it has no runtime
 import or setting effect.
 
-Remaining work includes anatomical identification of hind hip/stifle controls,
-shoulder/scapula placement and usable reach, contact-aware gallop authoring,
-then remaining gameplay actions and controller transitions. This ratio
-experiment is not complete anatomical or gameplay approval.
+## P3 separated hip and stifle experiment
+
+Canonical Horse_2 inspection establishes that `c_thigh_b` is the femur and
+starts from a separate hip on each side. The fitted model instead places both
+roots at the same pelvis point. The generic fitter's shared back-guide point
+explains this collapse; it is not the canonical skeleton's intended topology.
+The canonical lengths, scaled by the original bbox factor, match the source
+lengths captured in Stage 3. Although reading mutable edit-bone lengths is a
+potential ordering concern, it did not cause this case's proportions.
+
+An isolated P3 candidate separates the hips by 122.94 mm using the canonical
+femur directions, then solves anterior stifles at trial femur/tibia 0.85 and
+metatarsus/tibia 0.65. These are explicit hypotheses informed by the external
+marker studies above, not universal internal-joint ratios. Hocks, fetlocks,
+toes and all forelimb joints remain fixed. New hip/stifle points are inside
+the mesh with 14.6–23.8 mm two-sided surface clearance. Sixteen proximal hind
+and twist bones change; mesh positions, topology, normals, both UV layers,
+materials and hierarchy remain unchanged.
+
+Candidate source SHA-256:
+`a2de1c8d84fd9038a90d5013c253a7d0271f3d9d5b80ac4dc1394ced6ee62fbc`.
+Evidence is under project `work/horse2-anatomy-audit/hind-experiment-v1`.
+The REST side/rear comparison is published in DEV as `fac5826fd3f0` and
+delivered as `outputs/horse-hind-joints-comparison.png`. This is an anatomy
+candidate, without user approval of the resulting gait.
+
+## Binding and whole-skeleton acceptance gap
+
+P3's ten draft actions pass representation fidelity checks, but an independent
+spatial audit finds an unacceptable anatomical problem. In the intersection
+of Y at/below the 5th vertex percentile and Z at/above the 75th vertex
+percentile in REST, all 4,883 vertices are dominated by
+`clavicle.r`. The full native weights have the same contamination before
+four-influence reduction. Head motion relative to the root is only 1.91° over
+the run cycle and the head has no clavicle ancestor. The head-region motion
+differs from rigid head-bone motion by up to 121.9 mm RMSE.
+
+The blueprint also places `head.x` from approximately Y=-0.153, Z=0.488 to
+Y=-0.285, Z=0.378, below the actual high/front head surface. The subneck chain
+spans only Z=0.440–0.481. This requires investigation of neck/head fitting
+before any weight-only repair. The audit is
+`head-neck-binding-audit.json`, SHA-256
+`6afe76621f0fc8337e7e5f410473ed0cf06c6094b78ade8ba4d9e7f9bc57582c`.
+The anatomical diagnosis, rather than compression fidelity, is the acceptance
+gate.
+
+Consequently, previous coverage, compression and export PASS results establish
+finite data and fidelity to their baseline only. They do not establish correct
+anatomical skin assignment. Whole-skeleton placement, independent body-region
+influence checks and visible mesh deformation must pass before the gait is
+accepted. Remaining work includes this correction, gallop polish, other
+gameplay actions, transitions and validation on distinct models/species.

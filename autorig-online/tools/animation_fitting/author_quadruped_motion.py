@@ -21,7 +21,7 @@ from .game_timing import timing
 LEGS = ('hind_left', 'fore_left', 'hind_right', 'fore_right')
 DEFAULT_PROFILE=Path(__file__).parent/'profiles/horse_gameplay_grounded.v1.json'
 IDLES = ('idle_neutral','idle_alert','idle_relaxed','idle_look_around','idle_fidget')
-SUPPORTED_ACTIONS = (*IDLES,'walk_forward','walk_backward','trot_jog')
+SUPPORTED_ACTIONS = (*IDLES,'walk_forward','walk_backward','trot_jog','run','sprint')
 
 
 class ReachError(ValueError):
@@ -46,15 +46,31 @@ def swing_bump(t):
     return 64*t**3*(1-t)**3
 
 
-def hoof_trajectory(phase, duty, stride, lift, center, direction=1):
+def hoof_trajectory(phase, duty, stride, lift, center, direction=1, *, swing_profile='quintic', swing_ease_fraction=.1):
     """C2 horizontal path and C1 lift; stance velocity matches both joins."""
+    if swing_profile not in ('quintic','bounded_c2'):raise ValueError('Invalid swing profile')
+    if not math.isfinite(swing_ease_fraction) or not 0<swing_ease_fraction<=.25:
+        raise ValueError('Invalid swing ease fraction')
     u=phase%1.0
     if u<duty:
         return np.array([center[0],center[1]+direction*stride*(u/duty-.5),0.]), True, 0.
     t=(u-duty)/(1-duty)
     # Quintic Hermite with endpoint tangent matching the linear stance path.
     tangent=(1-duty)/duty
-    y=.5+tangent*t + (-10-10*tangent)*t**3 + (15+15*tangent)*t**4 + (-6-6*tangent)*t**5
+    if swing_profile=='bounded_c2':
+        # Smoothly stop the stance velocity, transfer the foot, then recover
+        # that velocity before touchdown. Position, velocity and acceleration
+        # join continuously; short stance duty cannot create an unbounded
+        # overshoot through the middle of the swing.
+        ease=swing_ease_fraction;peak=.5+tangent*ease/2
+        if t<ease:
+            v=t/ease;y=.5+tangent*ease*(v-v**3+.5*v**4)
+        elif t>1-ease:
+            v=(t-(1-ease))/ease;y=-peak+tangent*ease*(v**3-.5*v**4)
+        else:
+            v=(t-ease)/(1-2*ease);s=10*v**3-15*v**4+6*v**5;y=peak*(1-2*s)
+    else:
+        y=.5+tangent*t + (-10-10*tangent)*t**3 + (15+15*tangent)*t**4 + (-6-6*tangent)*t**5
     bump=swing_bump(t)
     # Earlier clearance prevents the interpolated skeletal arc from clipping
     # the floor immediately after takeoff. Vertical speed is still zero at
@@ -79,6 +95,10 @@ class AuthoringRig:
         if not math.isfinite(projection_cap) or not 0<=projection_cap<=15:
             raise ValueError('Invalid bounded rest projection cap')
         for name,gait in self.gaits.items():
+            if gait.get('swing_profile','quintic') not in ('quintic','bounded_c2'):
+                raise ValueError('Invalid swing profile')
+            ease=gait.get('swing_ease_fraction',.1)
+            if not math.isfinite(ease) or not 0<ease<=.25:raise ValueError('Invalid swing ease fraction')
             if len(gait['phases'])!=4 or any(not 0<=p<1 for p in gait['phases']):raise ValueError('Invalid gait phases')
             if not 0<gait['duty']<1 or gait['direction'] not in (-1,1):raise ValueError('Invalid stance policy')
             if any(not math.isfinite(gait[k]) or gait[k]<0 for k in ('stride_height','lift_height','body_drop','bob')):
@@ -245,7 +265,8 @@ def body_basis(rig,action,phase,root_position):
             if declaration.get('scapula'):
                 center=rig.limbs[name]['stance_center']
                 target,_,_=hoof_trajectory(phase-gait['phases'][li],gait['duty'],stride,
-                    gait['lift_height']*rig.height,center,gait['direction'])
+                    gait['lift_height']*rig.height,center,gait['direction'],
+                    swing_profile=gait.get('swing_profile','quintic'),swing_ease_fraction=gait.get('swing_ease_fraction',.1))
                 angle=declaration['scapula_radians_per_height']*(target[1]-center[1])/rig.height
                 rotate(declaration['scapula'],(1,0,0),angle)
     return basis
@@ -266,6 +287,7 @@ def author_clip(rig,action,root_motion=False):
 
 def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
     if action not in SUPPORTED_ACTIONS:raise ValueError(f'Unsupported authored action: {action}')
+    if action not in IDLES and action not in rig.gaits:raise ValueError(f'No gait recipe in profile: {action}')
     contract=timing(action);count=contract['sample_count'];duration=contract['duration_seconds']
     gait=rig.gaits.get(action)
     stride=gait['stride_height']*rig.height if gait else 0.
@@ -290,7 +312,8 @@ def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
                 # Use the declared support stance; source-pose foot offsets are
                 # retained unless a bounded anatomical anchor is explicit.
                 target,stance,bump=hoof_trajectory(phase-gait['phases'][li],gait['duty'],stride,
-                    gait['lift_height']*rig.height,center,gait['direction'])
+                    gait['lift_height']*rig.height,center,gait['direction'],
+                    swing_profile=gait.get('swing_profile','quintic'),swing_ease_fraction=gait.get('swing_ease_fraction',.1))
             else:target,stance,bump=center.copy(),True,0.
             target[1]+=-speed*time if root_motion else 0
             pitch=-.22*bump*(gait['direction'] if gait else 1)

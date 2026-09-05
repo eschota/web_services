@@ -140,9 +140,13 @@ Current checkpoint: see `quadruped-grounded-authoring.md`, especially the
 forelimb placement and centered support stance section. Claude context recovery
 is complete. The production bind repair passed the owned real-model task;
 an offline shoulder/elbow prototype has a user-accepted full-mesh video.
-Eight centered basic actions now pass Blender ground-contact checks. The
-active gate is four-influence skin fidelity over that exact eight-clip set,
-followed by format reimports and further gameplay actions/transitions.
+P3 separates the previously collapsed hind hips and tests new stifle placement.
+Ten draft actions (including run and sprint) pass compression and format
+fidelity checks. An independent spatial audit then found head geometry bound
+to a clavicle and head/neck bones positioned below the actual head. The active
+gate is whole-skeleton anatomical placement and independent regional binding
+validation; passing fidelity against the same bad baseline cannot close it.
+Then rebuild affected clips and proceed to gameplay actions/transitions.
 Older LTX notes below are historical evidence, not the next task to restart.
 
 * Blender 5.2.1 built `anatomical-reference/anatomical_rig.blend`: 52 bones

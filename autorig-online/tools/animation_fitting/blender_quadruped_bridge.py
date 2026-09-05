@@ -149,7 +149,9 @@ def apply_clips(source, clips_dir, blueprint_path, output):
             next_frame=min(frame+1,len(clip['frames'])-1)
             for leg,anchor in clip['surface_anchors'].items():
                 ids=anchor['sole_vertices'];sole=sum((points[i] for i in ids),Vector())/len(ids)
-                if clip['contacts'][leg][frame] and clip['contacts'][leg][next_frame]:
+                # The final stance key is still a contact even when the next
+                # key starts swing. Only in-between samples require both keys.
+                if clip['contacts'][leg][frame] and (fraction==0 or clip['contacts'][leg][next_frame]):
                     a=Vector(clip['hoof_targets'][leg][frame]);b=Vector(clip['hoof_targets'][leg][next_frame])
                     target=a.lerp(b,fraction)
                     maxima['max_hoof_target_error']=max(maxima['max_hoof_target_error'],(sole-target).length)

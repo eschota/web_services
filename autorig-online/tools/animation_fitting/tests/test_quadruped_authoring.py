@@ -68,6 +68,51 @@ def test_trajectory_has_continuous_stance_velocity_at_both_joins():
             assert (c-b)[1]/eps==pytest.approx(direction*stride/duty,abs=2e-4)
 
 
+@pytest.mark.parametrize('duty,ease',[(.25,.1),(.2,.075)])
+def test_bounded_swing_preserves_contact_velocity_and_horizontal_c2_joins(duty,ease):
+    eps=1e-5;stride=.7;center=np.zeros(3)
+    for direction in (-1,1):
+        def y(phase):return hoof_trajectory(phase,duty,stride,.2,center,direction,
+            swing_profile='bounded_c2',swing_ease_fraction=ease)[0][1]
+        limit=stride*(.5+(1-duty)/duty*ease/2)
+        assert max(abs(y(p)) for p in np.linspace(0,1,2001))<=limit+1e-12
+        for phase in (duty,duty+(1-duty)*ease,1-(1-duty)*ease,1.):
+            left_velocity=(y(phase)-y(phase-eps))/eps
+            right_velocity=(y(phase+eps)-y(phase))/eps
+            assert left_velocity==pytest.approx(right_velocity,abs=2e-3)
+            left_acc=(y(phase)-2*y(phase-eps)+y(phase-2*eps))/eps**2
+            right_acc=(y(phase+2*eps)-2*y(phase+eps)+y(phase))/eps**2
+            assert left_acc==pytest.approx(right_acc,abs=.15)
+        for phase in (duty,1.):
+            assert (y(phase+eps)-y(phase-eps))/(2*eps)==pytest.approx(direction*stride/duty,abs=2e-3)
+
+
+def test_fast_action_requires_explicit_recipe_and_valid_swing_contract():
+    with pytest.raises(ValueError,match='No gait recipe'):
+        author_clip(AuthoringRig(synthetic_rig()),'run')
+    for kwargs in ({'swing_profile':'unknown'},{'swing_ease_fraction':0},{'swing_ease_fraction':float('nan')}):
+        with pytest.raises(ValueError):hoof_trajectory(.5,.25,.5,.1,np.zeros(3),**kwargs)
+
+
+@pytest.mark.parametrize('action,count,duty,ease',[('run',21,.25,.1),('sprint',17,.2,.075)])
+def test_four_beat_gait_has_all_limb_contacts_flight_and_closed_mesh_loop(action,count,duty,ease):
+    profile=json.loads(DEFAULT_PROFILE.read_text())
+    profile['gaits'][action]={'phases':[.15,.50,0.,.35],'duty':duty,'direction':1,
+        'stride_height':.2,'lift_height':.1,'body_drop':.05,'bob':.004,
+        'swing_profile':'bounded_c2','swing_ease_fraction':ease}
+    result=author_clip(AuthoringRig(synthetic_rig(),profile),action)
+    assert result['timing']['sample_count']==count
+    assert result['qa']['mesh_pose_seam']<1e-6
+    order=sorted(result['contacts'],key=lambda leg:result['contacts'][leg][:-1].index(True))
+    assert order==['hind_right','hind_left','fore_right','fore_left']
+    assert any(not any(result['contacts'][leg][i] for leg in result['contacts']) for i in range(count-1))
+    for leg in result['qa']['feet'].values():
+        assert leg['max_hoof_target_error']<1e-5
+        assert leg['max_stance_slide_per_frame']<1e-6
+        assert np.all(np.array(leg['joint_min'])>=np.array(leg['joint_bounds'][0])-1e-6)
+        assert np.all(np.array(leg['joint_max'])<=np.array(leg['joint_bounds'][1])+1e-6)
+
+
 @pytest.mark.parametrize('action',['idle_neutral','walk_forward','walk_backward','trot_jog'])
 def test_real_skin_equations_plant_all_stance_feet_and_close_the_loop(action):
     result=author_clip(AuthoringRig(synthetic_rig()),action)

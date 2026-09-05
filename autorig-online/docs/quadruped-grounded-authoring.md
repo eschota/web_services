@@ -409,3 +409,44 @@ comparison against multiple anatomical references and photographs. See
 corrected anatomical/control-point audit, original references, and the offline
 carpus-ratio experiment. Target-coordinate agreement is not anatomical
 acceptance. Do not expand the forelimb rollout while this review is in progress.
+
+### Ten-action P3 tooling checkpoint
+
+The authoring tool now supports explicit `run` and `sprint` profile recipes.
+An absent non-idle recipe raises an error instead of silently authoring an
+idle under a locomotion label. Existing profiles retain their previous
+quintic trajectory. An optional `bounded_c2` swing decelerates stance velocity,
+transfers the hoof, and restores touchdown velocity with continuous horizontal
+position, velocity and acceleration. Its overshoot is explicitly bounded by
+the chosen short easing interval. The same path drives the scapula.
+
+P3's draft left-lead recipes use hind-right, hind-left, fore-right, fore-left
+contact order, consistent with the [University of Kentucky gallop
+description](https://horses.extension.org/horse-gallop/). Phase offsets, stance
+duties and amplitudes are engineered pilot values, not measured mocap. Run has
+21 keys over 20 intervals (0.667 s); sprint has 17 over 16 (0.533 s), both at
+30 FPS. Normalized-model speeds are 1.669 and 2.704 m/s respectively. Do not
+interpret these scale-dependent values as validated real-horse sprint speeds.
+
+The exact ten-clip manifest under
+`work/horse2-anatomy-audit/hind-experiment-v1/balanced-rig` was rebuilt and its
+four-influence weights optimized. Actual Blender verification sampled 2,426
+quarter frames; maximum skin deviation was 2.808 mm (run), below the unchanged
+3 mm compression gate. Maximum contact target errors were 1.770 mm for run
+and 4.741 mm for sprint; the latter still needs contact polish. All twenty
+GLB/FBX reimports passed; maximum surface error was 12.19 microns for GLB and
+0.732 microns for FBX.
+
+The bridge now checks the final stance key even when the next key starts
+swing. Interpolated contact checks still require both endpoint flags. An
+independent audit checked every declared stance key for all ten clips. A
+20 mm corruption of run's final left-fore stance key (frame 14) caused the
+actual Blender bridge to fail before saving any Blend or GLB. Authoring and
+timing regression suites pass 34 tests.
+
+These results validate tooling and export fidelity only. Independent head
+region inspection found wrong native weights and misplaced head/neck bones;
+see the proportion review. The ten-action candidate is not ready for visual
+acceptance or publication as a game-ready library. Correct the anatomical
+baseline and regenerate weights and relevant evidence before continuing to
+controller acceptance. No runtime animation library has been enabled.
