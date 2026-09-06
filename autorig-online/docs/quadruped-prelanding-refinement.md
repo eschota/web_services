@@ -1,5 +1,7 @@
 # Prelanding refinement, P8
 
+The next implemented layer is [nominal contact IK](quadruped-contact-ik.md).
+
 An explicit optional `landing_preload_height_fraction` bends the legs before
 first touchdown. Default zero retains P7 behavior. The selected diagnostic
 profile, `horse_jump_prelanding.experimental.v1.json`, uses 0.04 times the
