@@ -69,7 +69,11 @@ def _array(value, shape, label):
         def contains_bool(item):
             if isinstance(item, (bool, np.bool_)):
                 return True
-            return isinstance(item, (list, tuple, np.ndarray)) and any(contains_bool(x) for x in item)
+            if isinstance(item, np.ndarray):
+                if item.dtype.kind == 'b': return True
+                if item.dtype.kind != 'O': return False
+                return any(contains_bool(x) for x in item.flat)
+            return isinstance(item, (list, tuple)) and any(contains_bool(x) for x in item)
         if contains_bool(value):
             raise ValueError
         raw = np.asarray(value)

@@ -1,9 +1,10 @@
 # Jump authoring and controller contract
 
-Status: step 1 is implemented as an opt-in semantics validator and a tested
-landing playback clock. Jump posture authoring, v2 consumer support, actual
-mesh validation and engine integration remain pending. P6v2 and its completed
-checks are unchanged. The call-site audit is retained in the project at
+Status: step 1 is implemented, and the first standing-jump authorer, dedicated
+v2 Blender consumer and native diagnostic are now available. See
+[the standing-jump checkpoint](quadruped-standing-jump.md). Mixed-bank weight
+reduction, format reimport checks and engine integration remain pending.
+P6v2 and its completed checks are unchanged. The call-site audit is retained in the project at
 `work/horse-jump-contract-audit.md`.
 
 ## One owner for world movement
@@ -65,6 +66,17 @@ plane. Airborne samples still require finite targets, bounded
 joints, mesh-ground clearance and accurate skin deformation. A zero-contact
 interval is not a reason to omit all geometry checks or report an empty
 measurement as a successful contact measurement.
+
+Keep the semantic target-plane tolerance distinct from realization error of
+the animated skinned surface. `ground.tolerance` validates the declared target
+tracks. The dedicated Blender v2 bridge uses the existing P6 fixed 0.006 m
+evaluated-surface/contact gate and reports it explicitly as
+`actual_surface_tolerance_m`. It also reports whether the actual surface meets
+the stricter target band. This distinction matters at interpolated poses:
+linear bone TRS interpolation does not preserve the exact nonlinear IK
+constraint solved at each 30 Hz key. A pass against 6 mm must never be reported
+as submillimetre contact accuracy. Achieving the stricter surface band requires
+better interpolation or runtime contact IK, not a relabelled measurement.
 
 Define events at sampled contact-state changes: liftoff is the first sample
 with false contact after true; touchdown is the first true after false.
