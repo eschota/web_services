@@ -7,6 +7,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quadruped_clip_semantics import require_v1_export_report
+
 import bpy
 from mathutils import Vector
 
@@ -129,8 +132,9 @@ def main():
     # Blender's render path resolver is not pathlib's cwd resolver. Pin all
     # paths before opening a .blend so frames cannot escape the chosen folder.
     args.output=args.output.resolve();args.report=args.report.resolve();args.source=args.source.resolve()
+    report=json.loads(args.report.read_text());require_v1_export_report(report)
+    clip=next(c for c in report['clips'] if c['action']==args.action)
     args.output.mkdir(parents=True,exist_ok=False)
-    report=json.loads(args.report.read_text());clip=next(c for c in report['clips'] if c['action']==args.action)
     bpy.ops.wm.open_mainfile(filepath=str(args.source.resolve()))
     arm=next(o for o in bpy.data.objects if o.type=='ARMATURE')
     arm.data.pose_position='POSE';arm.animation_data.action=bpy.data.actions[args.action]

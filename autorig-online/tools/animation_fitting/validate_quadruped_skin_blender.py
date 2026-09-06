@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from spine_surface_retention import dorsal_landmarks, dorsal_angles_degrees, compare_dorsal_curves
+from quadruped_clip_semantics import require_v1_clip, require_v1_export_report
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source',type=Path,required=True,help='Authored Blend beside export-report.json')
@@ -40,6 +41,7 @@ for row in reduction['inputs']['clips']:
     path = Path(row['path'])
     assert sha(path) == row['sha256']
     clip = json.loads(path.read_text())
+    require_v1_clip(clip)
     name = clip['action']
     if not isinstance(name,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}',name):
         raise ValueError('Clip action must be a safe gameplay identifier')
@@ -47,6 +49,7 @@ for row in reduction['inputs']['clips']:
     clips[name] = clip
 assert clips, 'Reduction manifest must contain clips'
 source_report = json.loads((source.parent / 'export-report.json').read_text())
+require_v1_export_report(source_report)
 assert sha(source) == source_report['files'][source.name]['sha256']
 bpy.ops.wm.open_mainfile(filepath=str(source))
 arm = bpy.data.objects[blueprint['armature']]

@@ -5,6 +5,9 @@ from pathlib import Path
 import sys
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quadruped_clip_semantics import require_v1_export_report
+
 import bpy
 from mathutils import Vector
 from mathutils.kdtree import KDTree
@@ -57,6 +60,7 @@ def main():
     p.add_argument('--output',type=Path,required=True)
     args=p.parse_args(sys.argv[sys.argv.index('--')+1:])
     root=args.directory.resolve();report=json.loads((root/'export-report.json').read_text())
+    require_v1_export_report(report)
     bpy.ops.wm.open_mainfile(filepath=str(root/'authored-candidates.blend'))
     references={}
     for clip in report['clips']:

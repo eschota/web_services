@@ -1,8 +1,9 @@
 # Jump authoring and controller contract
 
-Status: implementation contract for the next offline milestone. No jump has
-yet been authored, exported or activated. P6v2 and its completed checks are
-unchanged. The call-site audit is retained in the project at
+Status: step 1 is implemented as an opt-in semantics validator and a tested
+landing playback clock. Jump posture authoring, v2 consumer support, actual
+mesh validation and engine integration remain pending. P6v2 and its completed
+checks are unchanged. The call-site audit is retained in the project at
 `work/horse-jump-contract-audit.md`.
 
 ## One owner for world movement
@@ -151,3 +152,58 @@ one continuous takeoff-flight-landing sequence.
 Do not emit a v2 candidate through a consumer that silently ignores its new
 motion/contact fields. Until all consumers understand the contract, the
 existing authoring CLI continues to reject unsupported jump actions.
+
+## Implemented step 1
+
+`quadruped_clip_semantics.validate_v2_clip` accepts the explicit v2 schema and
+the existing authoring-rig blueprint. It returns copied, read-only arrays and
+immutable metadata without modifying its inputs. Serialization currently uses:
+
+- `timing`: exactly `fps`, `sample_count`, `interval_count`; 30 Hz, 2–3601
+  samples. Duration is derived from the interval count.
+- `playback`: `loop/match`, `one_shot/end_pose` or `hold/end_pose`.
+- `motion`: the fields above plus `pose_root_offsets`, which must equal the
+  sampled root translations minus its actual blueprint rest translation.
+- `reference_actor_motion`: `mode=one_shot` and `translations`, with one
+  actor-local-to-reference-world translation per sample; no scale/rotation
+  fields are accepted in this initial actor path.
+- `frames`: complete bone TRS with normalized quaternions and unit scale.
+- `hoof_targets` and `surface_anchors`: existing field names are retained.
+  Anchors contain integer `sole_vertices` and `foot_vertices`; indices refer
+  to exactly one blueprint mesh and the sole must be a subset of the foot.
+- `phases`: rows with `kind`, `start`, `end`. Events use `foot`, `kind` and
+  integer `sample`, ordered by sample then the declared four-foot order.
+
+The root must be an unparented, zero-origin, rigid affine blueprint root.
+Frame-zero events use the incoming contact state, not the first sample as a
+substitute. Loop seams compare quaternion orientation irrespective of sign.
+World-space targets must remain above the reference ground, with planted
+height and sliding within the externally capped tolerance (default 0.006
+normalized model metres). Joint-limit, provenance, actual-skin and aesthetic
+checks remain separate authoring/export responsibilities.
+
+`apply_reference_actor_translation` returns a `reference_world` space tag
+and rejects applying actor translation to that tagged result again. Pose
+offset declarations and tags make the ownership explicit; their correctness
+must also be demonstrated by the upcoming authoring and consumer integration.
+
+Current v1 bridge, skin validation, preview and reimport readers fail early on
+unsupported schema versions. They also reject v2-exclusive motion/playback
+fields disguised under a v1 schema, preventing a silent semantic downgrade.
+Four actual Blender CLI probes verify rejection before an asset is opened,
+rendered or exported. The existing P6v1-schema asset passes the real Blender
+preflight; its heavy deformation/reimport checks were not rerun.
+
+`landing_playback.LandingPlayback` emits pose and blend instructions. It holds
+precontact indefinitely without collision. Early or late stable grounding
+captures the current evaluated pose and starts recovery at blend weight zero.
+Proximity or ground loss starts an explicit `air_blend`, also at weight zero,
+before returning to air. The caller snapshots the current pose before applying
+the returned canonical target and supplies filtered, stable collision results.
+The clock leaves actor movement, collision detection and contact-constrained
+foot solving to the eventual controller integration.
+
+The combined focused suites pass 81 tests plus 22 subtests: existing
+authoring/body/spine/timing coverage, new v2 semantics, early/late/absent
+collision behavior and four Blender reader guards. No jump artifact or
+production runtime was activated by this step.

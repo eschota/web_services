@@ -9,6 +9,9 @@ import math
 import os
 import subprocess
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quadruped_clip_semantics import require_v1_clip
+
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
@@ -99,6 +102,7 @@ def apply_clips(source, clips_dir, blueprint_path, output):
     clips=[json.loads(p.read_text(encoding='utf-8')) for p in sorted(clips_dir.glob('*.json'))]
     if not clips:raise ValueError('No authored clips')
     for clip in clips:
+        require_v1_clip(clip)
         if clip.get('rig_blueprint_sha256')!=blueprint_hash or clip['rig_source_sha256']!=blueprint['source_sha256']:
             raise ValueError('Clip and skeleton source pins disagree')
     output.mkdir(parents=True,exist_ok=False)
