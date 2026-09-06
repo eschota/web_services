@@ -14,8 +14,9 @@ from mathutils import Matrix, Quaternion, Vector
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from blender_quadruped_bridge import object_mode, evaluated_points, action_curves
-from quadruped_clip_semantics import validate_v2_clip, apply_reference_actor_translation
+from blender_quadruped_bridge import object_mode, action_curves
+from quadruped_surface_blender import actor_local_points
+from quadruped_clip_semantics import validate_v2_clip, apply_reference_actor_translation, verify_profile_sources
 
 # Existing P6 evaluated-surface/contact policy, distinct from the much
 # tighter semantic target-plane declaration validated above.
@@ -45,6 +46,7 @@ def main():
         raise ValueError('Unique nonempty v2 clip set required')
     contexts = {}
     for clip in clips:
+        verify_profile_sources(clip)
         context = validate_v2_clip(clip, blueprint)
         if (clip.get('source_sha256') != source_hash or clip.get('rig_source_sha256') != source_hash or
                 clip.get('rig_blueprint_sha256') != rig_hash):
@@ -104,7 +106,7 @@ def main():
             scene.frame_set(index, subframe=fraction)
             actor = context.actor_translation[index]*(1-fraction) + context.actor_translation[nxt]*fraction
             points, _ = apply_reference_actor_translation(
-                np.asarray([list(p) for p in evaluated_points(arm, mesh_names)], dtype=float), actor, sample_space='actor_local')
+                actor_local_points(arm, mesh_names), actor, sample_space='actor_local')
             clearance = float(points[:,2].min()-context.ground_height)
             if clearance < qa['minimum_ground_clearance_m']:
                 qa['minimum_ground_clearance_m'] = clearance

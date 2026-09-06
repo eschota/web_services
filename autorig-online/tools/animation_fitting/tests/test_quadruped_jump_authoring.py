@@ -148,3 +148,31 @@ def test_wrong_spine_hierarchy_and_source_provenance_are_rejected():
     rig,_=authored()
     with pytest.raises(ValueError,match="source_sha256"):author_jump_clips(rig,profile,source_sha256="f"*64,rig_blueprint_sha256="b"*64,
         gameplay_profile_sha256="c"*64,jump_profile_sha256="d"*64)
+
+
+def test_default_zero_preload_preserves_baseline_and_nonzero_preload_is_c1_at_landing():
+    profile=json.loads(PROFILE_PATH.read_text());crouch=.1;v0=1.2
+    explicit=[_root_offset(i,crouch,v0,0.) for i in range(65)]
+    implicit=[_root_offset(i,crouch,v0) for i in range(65)]
+    np.testing.assert_array_equal(explicit,implicit)
+    preload=.02;epsilon=1e-5
+    assert _root_offset(32,crouch,v0,preload)==0
+    assert _root_offset(40,crouch,v0,preload)==pytest.approx(-preload)
+    assert _root_offset(44,crouch,v0,preload)==pytest.approx(-(crouch+preload))
+    assert _root_offset(64,crouch,v0,preload)==0
+    before=(_root_offset(40,crouch,v0,preload)-_root_offset(40-epsilon,crouch,v0,preload))/(epsilon/30)
+    after=(_root_offset(40+epsilon,crouch,v0,preload)-_root_offset(40,crouch,v0,preload))/(epsilon/30)
+    assert before==pytest.approx(0,abs=1e-7)
+    assert after==pytest.approx(-v0,rel=2e-5)
+    del profile["landing_preload_height_fraction"]
+    rig,_=authored()
+    clips=author_jump_clips(rig,profile,source_sha256="a"*64,rig_blueprint_sha256="b"*64,
+        gameplay_profile_sha256="c"*64,jump_profile_sha256="d"*64)
+    assert clips["jump_full"]["frames"][40]["bones"][rig.root]["translation"][2]==pytest.approx(0)
+
+
+def test_placeholder_profile_hash_cannot_be_used_for_real_authoring():
+    rig,_=authored();profile=json.loads(PROFILE_PATH.read_text())
+    with pytest.raises(ValueError,match='SHA-256'):
+        author_jump_clips(rig,profile,source_sha256='a'*64,rig_blueprint_sha256='b'*64,
+                          gameplay_profile_sha256='c'*64,jump_profile_sha256='1')

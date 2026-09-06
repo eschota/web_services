@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import numbers
+import re
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,8 @@ def _read_json(path):
     data=Path(path).read_bytes();return json.loads(data),_hash_bytes(data)
 
 def _validated_profile(profile):
+    if not isinstance(profile, dict):raise ValueError("experimental jump profile must be an object")
+    profile.setdefault("landing_preload_height_fraction",0.)
     required={"sample_count":65,"fps":30,"flight_start_sample":16,"flight_end_sample":40,
               "fore_liftoff_sample":12,"hind_liftoff_sample":16,"fore_touchdown_sample":40,"hind_touchdown_sample":42}
     if profile.get("schema")!="autorig-quadruped-jump-profile.experimental.v1" or profile.get("quality_approved") is not False:
@@ -33,11 +36,15 @@ def _validated_profile(profile):
         if isinstance(profile.get(key),bool) or not isinstance(profile.get(key),numbers.Integral) or profile.get(key)!=value:
             raise ValueError(f"fixed first-milestone contract mismatch: {key}")
     numeric=("gravity_height_per_second_squared","crouch_height_fraction","fore_lift_height_fraction",
-             "fore_lift_y_fraction","hind_lift_height_fraction","hind_lift_y_fraction","tuck_pitch_radians")
+             "fore_lift_y_fraction","hind_lift_height_fraction","hind_lift_y_fraction","tuck_pitch_radians",
+             "landing_preload_height_fraction")
     if any(isinstance(profile.get(k),bool) or not isinstance(profile.get(k),numbers.Real) or not math.isfinite(profile[k]) for k in numeric):
         raise ValueError("jump dimensions must be finite numbers")
     if not .04<=profile["crouch_height_fraction"]<=.14 or not 4<=profile["gravity_height_per_second_squared"]<=9:
         raise ValueError("jump dimensions exceed experimental caps")
+    preload=profile["landing_preload_height_fraction"]
+    if not 0<=preload<=.04 or profile["crouch_height_fraction"]+preload>.14:
+        raise ValueError("landing preload exceeds bounded crouch budget")
     if not .05<=profile["fore_lift_height_fraction"]<=.35 or not .05<=profile["hind_lift_height_fraction"]<=.30 or abs(profile["fore_lift_y_fraction"])>.12 or abs(profile["hind_lift_y_fraction"])>.12 or not -.5<=profile["tuck_pitch_radians"]<=0:
         raise ValueError("limb jump dimensions exceed experimental caps")
     bones=profile.get("spine_bones");amps=profile.get("spine_amplitudes_degrees")
@@ -55,16 +62,17 @@ def _actor_z(profile,height):
         z.append(.5*g*t*(duration-t) if 16<=sample<=40 else 0.)
     return np.asarray(z),g,duration,v0
 
-def _root_offset(sample,crouch,v0):
+def _root_offset(sample,crouch,v0,preload=0.):
     exponent=v0*(4/30)/crouch
     if sample<=8:return -crouch*_smooth(sample/8)
     if sample<=12:return -crouch
     if sample<=16:
         u=(sample-12)/4;return -crouch*(1-u**exponent)
-    if sample<40:return 0.
+    if sample<32:return 0.
+    if sample<40:return -preload*_smooth((sample-32)/8)
     if sample<=44:
-        u=(sample-40)/4;return -crouch*(1-(1-u)**exponent)
-    return -crouch*(1-_smooth((sample-44)/20))
+        u=(sample-40)/4;return -preload-crouch*(1-(1-u)**exponent)
+    return -(crouch+preload)*(1-_smooth((sample-44)/20))
 
 def _tuck(sample):
     if sample<=12:return 0.
@@ -99,6 +107,9 @@ def _rotate_basis(rig,basis,bone,angle):
     basis[bone]=transform(Rotation.from_rotvec(axis*angle).as_matrix())
 
 def author_jump_clips(rig,profile,*,source_sha256,rig_blueprint_sha256,gameplay_profile_sha256,jump_profile_sha256):
+    for pin in (source_sha256,rig_blueprint_sha256,gameplay_profile_sha256,jump_profile_sha256):
+        if not isinstance(pin,str) or re.fullmatch(r'[0-9a-f]{64}',pin) is None:
+            raise ValueError('Authoring provenance pins must be SHA-256 hex digests')
     profile=_validated_profile(copy.deepcopy(profile))
     if source_sha256!=rig.payload.get("source_sha256"):
         raise ValueError("source_sha256 must exactly match the rig blueprint source")
@@ -107,9 +118,10 @@ def author_jump_clips(rig,profile,*,source_sha256,rig_blueprint_sha256,gameplay_
     if rig.rows[pelvis]["parent"]!=rig.root or rig.rows[spine1]["parent"]!=rig.root or rig.rows[spine2]["parent"]!=spine1 or rig.rows[spine3]["parent"]!=spine2:
         raise ValueError("jump spine declaration does not match pelvis/spine hierarchy")
     actor_z,g,duration,v0=_actor_z(profile,rig.height);crouch=profile["crouch_height_fraction"]*rig.height
+    preload=profile["landing_preload_height_fraction"]*rig.height
     frames=[];skins=[];contacts={n:[] for n in LEGS};targets={n:[] for n in LEGS};joint={n:[] for n in LEGS};errors=[]
     for sample in range(65):
-        tuck=_tuck(sample);root_z=_root_offset(sample,crouch,v0)
+        tuck=_tuck(sample);root_z=_root_offset(sample,crouch,v0,preload)
         basis=body_basis(rig,"idle_neutral",0,np.array([0.,0.,root_z]))
         for bone,degrees in zip(profile["spine_bones"],profile["spine_amplitudes_degrees"]):
             _rotate_basis(rig,basis,bone,math.radians(degrees)*tuck)
@@ -187,7 +199,9 @@ def author_jump_clips(rig,profile,*,source_sha256,rig_blueprint_sha256,gameplay_
           "contacts":contacts,"hoof_targets":targets,"surface_anchors":anchors,"entry_contacts":{name:True for name in LEGS},
           "phases":phase_rows,"events":events,"root_motion":False,"root_delta":[0.,0.,0.],"reference_speed":0.,
           "rig_source_sha256":rig.payload["source_sha256"],"rig_blueprint_sha256":rig_blueprint_sha256,
-          "source_sha256":source_sha256,"gameplay_profile_sha256":gameplay_profile_sha256,"jump_profile_sha256":jump_profile_sha256}
+          "source_sha256":source_sha256,"gameplay_profile_sha256":gameplay_profile_sha256,"jump_profile_sha256":jump_profile_sha256,
+          "gameplay_profile_contract_sha256":_hash_bytes(json.dumps(rig.profile,sort_keys=True,separators=(",",":"),allow_nan=False).encode()),
+          "jump_profile_contract_sha256":_hash_bytes(json.dumps(profile,sort_keys=True,separators=(",",":"),allow_nan=False).encode())}
     ranges={"jump_start":(0,25),"jump_air":(24,33),"jump_land":(32,65),"jump_full":(0,65)};result={}
     for action,(start,end) in ranges.items():
         clip=copy.deepcopy(base);clip["action"]=action
@@ -220,7 +234,16 @@ def main():
     source=a.source.read_bytes();rig_payload,rig_sha=_read_json(a.rig);gameplay,gp_sha=_read_json(a.gameplay_profile);profile,jp_sha=_read_json(a.profile)
     clips=author_jump_clips(AuthoringRig(rig_payload,gameplay),profile,source_sha256=_hash_bytes(source),rig_blueprint_sha256=rig_sha,gameplay_profile_sha256=gp_sha,jump_profile_sha256=jp_sha)
     a.output_dir.mkdir(parents=True,exist_ok=False)
-    for name,clip in clips.items():(a.output_dir/f"{name}.json").write_text(json.dumps(clip,separators=(",",":"),allow_nan=False)+"\n",encoding="utf-8")
+    recipe_dir=a.output_dir/'_recipe_inputs';recipe_dir.mkdir()
+    recipe_sources={}
+    for name,path,pin in (('gameplay_profile',a.gameplay_profile,gp_sha),('jump_profile',a.profile,jp_sha)):
+        data=path.read_bytes()
+        if _hash_bytes(data)!=pin:raise ValueError('Recipe changed during authoring: '+name)
+        snapshot=recipe_dir/(name+'.json');snapshot.write_bytes(data)
+        recipe_sources[name]=str(snapshot.resolve())
+    for name,clip in clips.items():
+        clip['profile_sources']=dict(recipe_sources)
+        (a.output_dir/f"{name}.json").write_text(json.dumps(clip,separators=(",",":"),allow_nan=False)+"\n",encoding="utf-8")
     print(json.dumps({"clips":list(clips),"qa":clips["jump_full"]["qa"]},separators=(",",":")))
 
 if __name__=="__main__":main()

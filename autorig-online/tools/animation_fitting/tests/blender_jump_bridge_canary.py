@@ -5,10 +5,13 @@ import json
 from pathlib import Path
 import sys
 import bpy
+import numpy as np
 from mathutils import Quaternion
 
 TOOLS=Path(__file__).resolve().parents[1];sys.path.insert(0,str(TOOLS))
 from blender_quadruped_bridge import export_blueprint
+from blender_quadruped_bridge import evaluated_points
+from quadruped_surface_blender import actor_local_points
 from quadruped_clip_semantics import FEET
 
 p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True)
@@ -22,6 +25,8 @@ if a.verify:
     rows=[]
     for i in range(3):
         bpy.context.scene.frame_set(i);bpy.context.view_layer.update()
+        np.testing.assert_allclose(actor_local_points(arm,['CanaryMesh']),
+            np.asarray([list(v) for v in evaluated_points(arm,['CanaryMesh'])]),rtol=0,atol=2e-7)
         rows.append({'frame':i,'actor_location':list(arm.location),
                      'diagnostic_only':bool(arm['diagnostic_only']),
                      'surface_qa_passed':bool(arm['surface_qa_passed']),
@@ -60,4 +65,12 @@ else:
         'hoof_targets':{f:[[coords[i][0]+a.target_offset_x,coords[i][1],0.]]*3 for i,f in enumerate(FEET)},
         'surface_anchors':{f:{'sole_vertices':[i],'foot_vertices':[i]} for i,f in enumerate(FEET)},
         'source_sha256':sha(source),'rig_source_sha256':sha(source),'rig_blueprint_sha256':sha(blueprint_path)}
+    clip['profile_sources']={}
+    for name in ('gameplay_profile','jump_profile'):
+        recipe={'fixture':'original-v2-canary','mesh_z':a.mesh_z,'target_offset_x':a.target_offset_x}
+        if name=='jump_profile':recipe['landing_preload_height_fraction']=0.
+        path=root/(name+'.json');path.write_text(json.dumps(recipe))
+        clip['profile_sources'][name]=str(path)
+        clip[name+'_sha256']=sha(path)
+        clip[name+'_contract_sha256']=hashlib.sha256(json.dumps(recipe,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     clips=root/'clips';clips.mkdir();(clips/'jump_full.json').write_text(json.dumps(clip))

@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 import re
 import numbers
+import hashlib
+import json
+from pathlib import Path
 import numpy as np
 
 V1_CLIP_SCHEMA = "autorig-authored-quadruped-clip.v1"
@@ -41,6 +44,33 @@ def require_v1_clip(clip):
     if V2_SEMANTIC_FIELDS.intersection(clip):
         raise ValueError("v2 semantic fields cannot be interpreted by a v1 clip consumer")
     return clip
+
+
+def validate_profile_pin_formats(clip):
+    """Require all recipe pins; this check alone does not authenticate file contents."""
+    for name in ('gameplay_profile_sha256', 'jump_profile_sha256',
+                 'gameplay_profile_contract_sha256', 'jump_profile_contract_sha256'):
+        if not isinstance(clip.get(name),str) or re.fullmatch(r'[0-9a-f]{64}',clip[name]) is None:
+            raise ValueError('Invalid profile SHA-256 pin: '+name)
+
+
+def verify_profile_sources(clip):
+    """Bind file pins and canonical recipe hashes to the exact authoring inputs."""
+    validate_profile_pin_formats(clip)
+    sources=clip.get('profile_sources')
+    if not isinstance(sources,dict) or set(sources)!={'gameplay_profile','jump_profile'}:
+        raise ValueError('Both pinned recipe source paths are required')
+    for name in ('gameplay_profile','jump_profile'):
+        if not isinstance(sources[name],str):raise ValueError('Recipe source path must be a string')
+        data=Path(sources[name]).read_bytes()
+        if hashlib.sha256(data).hexdigest()!=clip[name+'_sha256']:
+            raise ValueError('Recipe source file changed: '+name)
+        profile=json.loads(data)
+        if not isinstance(profile,dict):raise ValueError('Recipe must be a JSON object')
+        if name=='jump_profile':profile.setdefault('landing_preload_height_fraction',0.)
+        canonical=json.dumps(profile,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
+        if hashlib.sha256(canonical).hexdigest()!=clip[name+'_contract_sha256']:
+            raise ValueError('Recipe content contract changed: '+name)
 
 def require_v1_export_report(report):
     if not isinstance(report, dict) or report.get("schema") != V1_EXPORT_REPORT_SCHEMA:

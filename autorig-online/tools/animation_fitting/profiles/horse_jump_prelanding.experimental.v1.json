@@ -1,14 +1,14 @@
 {
   "schema": "autorig-quadruped-jump-profile.experimental.v1",
-  "profile_id": "horse-standing-jump-engineering-v1",
+  "profile_id": "horse-standing-jump-prelanding-v1",
   "quality_approved": false,
   "sample_count": 65,
   "fps": 30,
   "gravity_height_per_second_squared": 6.0,
   "flight_start_sample": 16,
   "flight_end_sample": 40,
-  "crouch_height_fraction": 0.10,
-  "landing_preload_height_fraction": 0.0,
+  "crouch_height_fraction": 0.1,
+  "landing_preload_height_fraction": 0.04,
   "fore_liftoff_sample": 12,
   "hind_liftoff_sample": 16,
   "fore_touchdown_sample": 40,
@@ -18,6 +18,16 @@
   "hind_lift_height_fraction": 0.17,
   "hind_lift_y_fraction": -0.04,
   "tuck_pitch_radians": -0.22,
-  "spine_bones": ["root.x", "spine_01.x", "spine_02.x", "spine_03.x"],
-  "spine_amplitudes_degrees": [-2.5, 1.5, 1.5, -2.5]
+  "spine_bones": [
+    "root.x",
+    "spine_01.x",
+    "spine_02.x",
+    "spine_03.x"
+  ],
+  "spine_amplitudes_degrees": [
+    -2.5,
+    1.5,
+    1.5,
+    -2.5
+  ]
 }

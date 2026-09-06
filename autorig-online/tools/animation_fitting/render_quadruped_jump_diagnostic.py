@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 
 import bpy
@@ -15,8 +16,8 @@ import numpy as np
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from quadruped_clip_semantics import validate_v2_clip, apply_reference_actor_translation
-from blender_quadruped_bridge import evaluated_points
+from quadruped_clip_semantics import validate_v2_clip, apply_reference_actor_translation, verify_profile_sources
+from quadruped_surface_blender import actor_local_points
 from render_quadruped_preview import configure_scene, aim
 
 
@@ -32,6 +33,7 @@ def main():
     p.add_argument('--action', default='jump_full')
     p.add_argument('--qa-only', action='store_true', help='Check native geometry and actor placement without rerendering media')
     p.add_argument('--preflight-only', action='store_true', help='Verify input provenance without opening or rendering the Blend')
+    p.add_argument('--framing-bounds', type=Path, help='Existing native QA JSON whose world bounds define a shared camera')
     args = p.parse_args(sys.argv[sys.argv.index('--')+1:])
     source, report_path, proof_path, out = (v.resolve() for v in (args.source, args.report, args.skin_proof, args.output))
     report = json.loads(report_path.read_text()); proof = json.loads(proof_path.read_text())
@@ -50,6 +52,7 @@ def main():
     matching = [c for c in report['clips'] if c['action'] == args.action]
     if len(matching) != 1: raise ValueError('Expected exactly one requested action')
     clip = matching[0]; context = validate_v2_clip(clip, blueprint)
+    verify_profile_sources(clip)
     if (clip.get('source_sha256') != report['source_sha256'] or
             clip.get('rig_source_sha256') != report['source_sha256'] or
             clip.get('rig_blueprint_sha256') != rig_pin['sha256']):
@@ -77,7 +80,7 @@ def main():
         t=step/4; i=int(t); f=t-i; nxt=min(i+1, context.sample_count-1)
         scene.frame_set(i, subframe=f)
         actor = context.actor_translation[i]*(1-f)+context.actor_translation[nxt]*f
-        points, _ = apply_reference_actor_translation(np.asarray([list(v) for v in evaluated_points(arm,names)],dtype=float), actor, sample_space='actor_local')
+        points, _ = apply_reference_actor_translation(actor_local_points(arm,names), actor, sample_space='actor_local')
         minimum=np.minimum(minimum, points.min(axis=0)); maximum=np.maximum(maximum,points.max(axis=0))
         clearance=float(points[:,2].min()-context.ground_height)
         if clearance < qa['minimum_ground_clearance_m']:
@@ -93,7 +96,7 @@ def main():
     actor_errors = []
     for sample in (0, int(context.actor_translation[:,2].argmax()), context.sample_count-1):
         arm.location = (0,0,0); scene.frame_set(sample); bpy.context.view_layer.update()
-        expected = np.asarray([list(v) for v in evaluated_points(arm,names)]) + context.actor_translation[sample]
+        expected = actor_local_points(arm,names) + context.actor_translation[sample]
         arm.location = Vector(context.actor_translation[sample]); bpy.context.view_layer.update()
         actual = []
         graph = bpy.context.evaluated_depsgraph_get()
@@ -107,6 +110,7 @@ def main():
         actor_errors.append({'sample':sample,'max_world_position_error_m':error})
     arm.location=(0,0,0); bpy.context.view_layer.update()
     qa['actor_application_checks'] = actor_errors
+    qa['world_bounds'] = {'minimum':minimum.tolist(), 'maximum':maximum.tolist()}
     (out/'native-surface-qa.json').write_text(json.dumps(qa,indent=2))
     if args.qa_only:
         print('JUMP_NATIVE_QA_COMPLETE',json.dumps(qa),flush=True)
@@ -116,6 +120,15 @@ def main():
     scene.frame_set(0); arm.location=(0,0,0)
     cam, lights, font, _, _ = configure_scene(arm, Path(__file__).parent/'data/semantic_ltx_profiles/horse_2.v1.json', 'original', 'three-quarter')
     old_scale=cam.data.ortho_scale
+    framing_source = None
+    if args.framing_bounds:
+        framing_path=args.framing_bounds.resolve()
+        bounds=json.loads(framing_path.read_text())['world_bounds']
+        minimum=np.asarray(bounds['minimum'],dtype=float);maximum=np.asarray(bounds['maximum'],dtype=float)
+        if minimum.shape!=(3,) or maximum.shape!=(3,) or not np.isfinite([minimum,maximum]).all() or np.any(maximum<=minimum):
+            raise ValueError('Invalid shared framing bounds')
+        framing_source={'path':str(framing_path),'sha256':sha(framing_path),
+                        'minimum':minimum.tolist(),'maximum':maximum.tolist()}
     target=Vector((minimum+maximum)/2); radius=float(np.linalg.norm(maximum-minimum)/2)
     cam.location=target+Vector((6,-3.3,3.2)).normalized()*radius*4; aim(cam,target)
     bpy.context.view_layer.update()
@@ -132,16 +145,24 @@ def main():
     # Two complete attempts with explicit neutral pauses, not modulo playback
     # of each takeoff/air/landing phase.
     samples=samples*2
-    for frame,sample in enumerate(samples):
+    # Rendering repeated holds/cycles does not change this deterministic
+    # reference scene. Cache each actual pose once and assemble exact copies.
+    for sample in sorted(set(samples)):
         scene.frame_set(sample); arm.location=Vector(context.actor_translation[sample])
-        scene.render.filepath=str(out/f'frame_{frame:05d}.png')
+        scene.render.filepath=str(out/f'pose_{sample:05d}.png')
         bpy.ops.render.render(write_still=True)
+    for frame,sample in enumerate(samples):
+        shutil.copyfile(out/f'pose_{sample:05d}.png',out/f'frame_{frame:05d}.png')
     video=out/'jump-full-native-diagnostic.mp4'
     subprocess.run(['ffmpeg','-hide_banner','-loglevel','warning','-n','-framerate','30','-i',str(out/'frame_%05d.png'),
         '-c:v','libx264','-crf','18','-pix_fmt','yuv420p','-movflags','+faststart',str(video)],check=True)
     if sha(source)!=source_hash: raise ValueError('Renderer changed source Blend')
     (out/'capture.json').write_text(json.dumps({'video':str(video),'video_sha256':sha(video),'source_sha256':source_hash,
         'native_weights_sha256':proof['full_weights_sha256'],'action':args.action,'frames':len(samples),'fps':30,
+        'framing_bounds_source':framing_source,
+        'camera':{'matrix_world':[list(row) for row in cam.matrix_world],'ortho_scale':cam.data.ortho_scale},
+        'unique_pose_count':len(set(samples)),'repeated_frames_copied':True,
+        'pose_image_sha256':{str(sample):sha(out/f'pose_{sample:05d}.png') for sample in sorted(set(samples))},
         'complete_attempts':2,'actor_applied_once':True,'native_qa':qa,'quality_approved':False},indent=2))
     print('JUMP_NATIVE_DIAGNOSTIC_COMPLETE',json.dumps({'video':str(video),'frames':len(samples),'qa':qa}),flush=True)
 

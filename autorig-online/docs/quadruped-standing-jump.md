@@ -1,5 +1,9 @@
 # First standing-jump candidate
 
+The current landing iteration is documented in
+[P8 prelanding refinement](quadruped-prelanding-refinement.md). This file
+retains the P7 baseline and its evidence.
+
 The current candidate is a vertical jump from idle, with a controller-owned
 reference actor trajectory and separate local skeletal posture. It introduces
 four v2 clips and a dedicated Blender consumer; legacy v1 readers still reject

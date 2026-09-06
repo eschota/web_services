@@ -1,7 +1,10 @@
 import copy
 import unittest
+import hashlib
+import json
 
 import numpy as np
+import pytest
 
 from animation_fitting.quadruped_clip_semantics import (
     FEET,
@@ -10,6 +13,8 @@ from animation_fitting.quadruped_clip_semantics import (
     require_v1_export_report,
     validate_v2_clip,
     V2_SEMANTIC_FIELDS,
+    validate_profile_pin_formats,
+    verify_profile_sources,
 )
 
 
@@ -52,6 +57,17 @@ def fixture(mode="one_shot", seam="end_pose", action="jump"):
 
 
 class ClipSemanticsTests(unittest.TestCase):
+    def test_placeholder_recipe_pins_are_rejected(self):
+        names=('gameplay_profile_sha256','jump_profile_sha256','gameplay_profile_contract_sha256','jump_profile_contract_sha256')
+        valid={name:'a'*64 for name in names}
+        for value in ('1', True, None, 'g'*64):
+            with self.assertRaises(ValueError):
+                validate_profile_pin_formats({**valid,'jump_profile_sha256':value})
+        for name in names:
+            missing=dict(valid);missing.pop(name)
+            with self.assertRaises(ValueError):validate_profile_pin_formats(missing)
+        validate_profile_pin_formats(valid)
+
     def test_valid_one_shot_returns_readonly_context_without_mutation(self):
         clip, blueprint = fixture()
         original = copy.deepcopy(clip)
@@ -201,6 +217,22 @@ class ClipSemanticsTests(unittest.TestCase):
         clip, blueprint = fixture()
         clip["surface_anchors"][FEET[0]]["foot_vertices"] = [999]
         with self.assertRaises(ValueError): validate_v2_clip(clip, blueprint)
+
+
+def test_recipe_files_and_canonical_content_are_authenticated(tmp_path):
+    clip={'profile_sources':{}}
+    for name in ('gameplay_profile','jump_profile'):
+        recipe={'fixture':True}
+        if name=='jump_profile':recipe['landing_preload_height_fraction']=0.
+        path=tmp_path/(name+'.json');path.write_text(json.dumps(recipe))
+        clip['profile_sources'][name]=str(path)
+        clip[name+'_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+        clip[name+'_contract_sha256']=hashlib.sha256(json.dumps(recipe,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    verify_profile_sources(clip)
+    path=tmp_path/'jump_profile.json';path.write_text('{"different": true}')
+    with pytest.raises(ValueError,match='file changed'):verify_profile_sources(clip)
+    clip['jump_profile_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError,match='content contract'):verify_profile_sources(clip)
 
 
 if __name__ == "__main__":
