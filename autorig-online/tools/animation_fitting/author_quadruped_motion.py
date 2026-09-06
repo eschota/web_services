@@ -17,6 +17,7 @@ from scipy.optimize import minimize_scalar
 from scipy.spatial.transform import Rotation
 
 from .game_timing import timing
+from .contact_body_motion import ContactBodyMotion
 
 LEGS = ('hind_left', 'fore_left', 'hind_right', 'fore_right')
 DEFAULT_PROFILE=Path(__file__).parent/'profiles/horse_gameplay_grounded.v1.json'
@@ -103,12 +104,17 @@ class AuthoringRig:
             if not 0<gait['duty']<1 or gait['direction'] not in (-1,1):raise ValueError('Invalid stance policy')
             if any(not math.isfinite(gait[k]) or gait[k]<0 for k in ('stride_height','lift_height','body_drop','bob')):
                 raise ValueError('Invalid gait dimensions')
+        self.body_motions={name:ContactBodyMotion(gait,timing(name)['duration_seconds'])
+                           for name,gait in self.gaits.items() if 'body_dynamics' in gait}
         self.rows={b['name']:b for b in payload['bones']}
         if len(self.rows)!=len(payload['bones']):raise ValueError('Duplicate bones')
         self.rest={n:np.array(b['rest_world'],float).reshape(4,4) for n,b in self.rows.items()}
         self.local={n:np.array(b['rest_local'],float).reshape(4,4) for n,b in self.rows.items()}
         self.root=self.profile['root']
         if self.root not in self.rows:raise ValueError('Missing motion root')
+        if self.body_motions and (self.rows[self.root]['parent'] is not None or
+                                  np.linalg.norm(self.local[self.root][:3,3])>1e-9):
+            raise ValueError('Contact body motion requires an unparented zero-origin export root')
         self.order=[];pending=set(self.rows)
         while pending:
             ready=sorted(n for n in pending if self.rows[n]['parent'] is None or self.rows[n]['parent'] in self.order)
@@ -158,6 +164,7 @@ class AuthoringRig:
                 'bend_sign':-1 if name in ('fore_left','fore_right') else 1,
                 'posture_prior':posture_prior,'rest_projection_degrees':projection.tolist()}
         self.height=float(np.mean([self.rest[l['bones'][0]][2,3] for l in self.limbs.values()]))
+        self.body_pivot=np.mean([self.rest[l['bones'][0]][:3,3] for l in self.limbs.values()],axis=0)
         stance_cap=self.profile.get('max_stance_center_adjustment_height_fraction',.35)
         if not math.isfinite(stance_cap) or not 0<=stance_cap<=.5:
             raise ValueError('Invalid stance center adjustment cap')
@@ -243,7 +250,14 @@ def solve_leg(limb,hip,base_rotation,target,pitch,height):
 
 def body_basis(rig,action,phase,root_position):
     root_rest=rig.local[rig.root][:3,:3]
-    world_rotation=rx(.008*math.sin(2*math.pi*phase) if action in rig.gaits else 0)
+    if action in rig.body_motions:
+        pitch=float(rig.body_motions[action].sample(phase)['pitch_radians'])
+        world_rotation=rx(pitch)
+        # Rotate about a torso anchor, not the export origin at ground level.
+        # The mean limb-root point is an authoring pivot, not a measured CoM.
+        root_position=root_position+rig.body_pivot-world_rotation@rig.body_pivot
+    else:
+        world_rotation=rx(.008*math.sin(2*math.pi*phase) if action in rig.gaits else 0)
     basis={rig.root:transform(root_rest.T @ world_rotation @ root_rest,root_rest.T @ root_position)}
     def rotate(name,axis,angle):
         local_axis=rig.rest[name][:3,:3].T @ np.array(axis,float)
@@ -296,7 +310,10 @@ def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
     joint_samples={name:[] for name in LEGS};max_solve_error=0.
     for i in range(count):
         phase=i/(count-1);time=i/30
-        bob=(gait['bob']*math.cos(4*math.pi*phase)-gait['body_drop']-body_drop_adjustment) if gait else .0015*math.sin(2*math.pi*phase)
+        if action in rig.body_motions:
+            bob=float(rig.body_motions[action].sample(phase)['height_fraction'])-gait['body_drop']-body_drop_adjustment
+        else:
+            bob=(gait['bob']*math.cos(4*math.pi*phase)-gait['body_drop']-body_drop_adjustment) if gait else .0015*math.sin(2*math.pi*phase)
         root_position=np.array([0,-speed*time if root_motion else 0,bob*rig.height])
         basis=body_basis(rig,action,phase,root_position)
         torso,_=rig.fk(basis)
@@ -370,6 +387,16 @@ def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
         'mesh_min_height':float(skins[:,:,2].min()),'feet':report,
         'quality_approved':False,'measurement_space':'deformed_mesh_armature_space',
         'contact_policy':'in-place contacts measured after virtual actor translation' if not root_motion else 'world planted contacts'}
+    if action in rig.body_motions:
+        samples=rig.body_motions[action].sample(np.linspace(0,1,count))
+        flight=~np.any(np.array(list(contacts.values())),axis=0)
+        qa['body_dynamics']={'model':'contact_impulses','pivot':'mean_limb_roots_not_measured_com',
+            'pivot_vertical_range_m':float(np.ptp(samples['height_fraction'])*rig.height),
+            'root_pitch_range_radians':float(np.ptp(samples['pitch_radians'])),
+            'gravity_m_per_second_squared':rig.body_motions[action].gravity*rig.height,
+            'flight_frames':np.flatnonzero(flight).tolist(),
+            'flight_max_load_body_weights':float(samples['vertical_load_body_weights'][flight].max()) if flight.any() else 0.,
+            'periodic_height_velocity_closed':True}
     if max_seam>rig.height*.001 or any(r['max_stance_slide_per_frame']>rig.height*.001 for r in report.values()):
         raise ValueError('Authored clip failed deformed-mesh contact or seam check: '+json.dumps(qa))
     return {'schema':'autorig-authored-quadruped-clip.v1','action':action,'timing':contract,

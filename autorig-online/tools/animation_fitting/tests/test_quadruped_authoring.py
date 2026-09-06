@@ -94,6 +94,47 @@ def test_fast_action_requires_explicit_recipe_and_valid_swing_contract():
         with pytest.raises(ValueError):hoof_trajectory(.5,.25,.5,.1,np.zeros(3),**kwargs)
 
 
+@pytest.mark.parametrize('root_motion',[False,True])
+def test_contact_body_pitch_preserves_torso_pivot_and_planted_feet(root_motion):
+    from scipy.spatial.transform import Rotation
+    profile=json.loads(DEFAULT_PROFILE.read_text())
+    profile['gaits']['run']={'phases':[.15,.5,0,.35],'duty':.25,'direction':1,
+        'stride_height':.2,'lift_height':.1,'body_drop':.05,'bob':.004,
+        'swing_profile':'bounded_c2','swing_ease_fraction':.075,
+        'body_dynamics':{'model':'contact_impulses','gravity_height_per_second_squared':1.,
+            'vertical_impulse_fractions':[.25]*4,'pitch_load_gain_radians':.02}}
+    rig=AuthoringRig(synthetic_rig(),profile);clip=author_clip(rig,'run',root_motion)
+    pivots=[]
+    for frame in clip['frames']:
+        root=frame['bones'][rig.root];matrix=np.eye(4)
+        matrix[:3,:3]=Rotation.from_quat(root['rotation']).as_matrix()
+        matrix[:3,3]=root['translation']
+        pivots.append((matrix@rig.inverse[rig.root]@np.r_[rig.body_pivot,1])[:3])
+    pivots=np.asarray(pivots)
+    np.testing.assert_allclose(pivots[:,0],rig.body_pivot[0],atol=1e-12)
+    expected_y=rig.body_pivot[1]-(clip['reference_speed']*np.arange(len(pivots))/30 if root_motion else 0)
+    np.testing.assert_allclose(pivots[:,1],expected_y,atol=1e-12)
+    assert np.ptp(pivots[:,2])>0.001
+    assert clip['qa']['body_dynamics']['flight_max_load_body_weights']==0
+    assert clip['qa']['mesh_pose_seam']<1e-6
+    for foot in clip['qa']['feet'].values():
+        assert foot['max_hoof_target_error']<1e-5
+        assert foot['max_stance_slide_per_frame']<1e-6
+
+
+@pytest.mark.parametrize('invalid_root',['parented','translated'])
+def test_contact_body_motion_requires_supported_export_root(invalid_root):
+    profile=json.loads(DEFAULT_PROFILE.read_text())
+    profile['gaits']['walk_forward']['body_dynamics']={'model':'contact_impulses',
+        'gravity_height_per_second_squared':1.,'vertical_impulse_fractions':[.25]*4}
+    payload=synthetic_rig()
+    if invalid_root=='parented':profile['root']='root.x'
+    else:
+        root=next(b for b in payload['bones'] if b['name']==profile['root'])
+        root['rest_local'][3]=.1
+    with pytest.raises(ValueError,match='zero-origin export root'):AuthoringRig(payload,profile)
+
+
 @pytest.mark.parametrize('action,count,duty,ease',[('run',21,.25,.1),('sprint',17,.2,.075)])
 def test_four_beat_gait_has_all_limb_contacts_flight_and_closed_mesh_loop(action,count,duty,ease):
     profile=json.loads(DEFAULT_PROFILE.read_text())

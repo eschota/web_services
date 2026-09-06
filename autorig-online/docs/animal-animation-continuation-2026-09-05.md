@@ -151,6 +151,12 @@ Remaining anatomy/gait approval, contact polish and gameplay actions/transitions
 remain explicit gates. Passing fidelity alone must not substitute for
 anatomical validation.
 Do not restart completed ear-mask searches or reuse earlier P3 weight results.
+The subsequent P5 contact-body candidate replaces only run/sprint and retains
+eight other P4d clips byte-identically. It has passed fresh four-weight,
+actual Blender, independent locality and twenty reimport checks. See
+`quadruped-contact-body-motion.md`. Its comparison and self-contained GLB have
+been delivered. Continue with missing jump/landing/action transitions rather
+than repeating completed P4d/P5 validation without a new change.
 Older LTX notes below are historical evidence, not the next task to restart.
 
 * Blender 5.2.1 built `anatomical-reference/anatomical_rig.blend`: 52 bones

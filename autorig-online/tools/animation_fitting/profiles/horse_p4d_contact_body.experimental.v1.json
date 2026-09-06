@@ -1,0 +1,270 @@
+{
+  "schema": "autorig-quadruped-gameplay-profile.v1",
+  "profile_id": "horse_P4d_contact_body_candidate_v1",
+  "species": "horse",
+  "scope": "grounded locomotion authoring candidate; not full animal library approval",
+  "root": "__animal_export_root",
+  "body": {
+    "neck": "neck.x",
+    "head": "head.x",
+    "tail": [
+      "c_tail_00.x",
+      "c_tail_01.x",
+      "c_tail_02.x",
+      "c_tail_03.x",
+      "c_tail_04.x",
+      "c_tail_05.x",
+      "c_tail_06.x"
+    ],
+    "ears": [
+      "c_ear_01.l",
+      "c_ear_01.r"
+    ]
+  },
+  "limbs": {
+    "hind_left": {
+      "chain": [
+        "c_thigh_b.l",
+        "thigh_twist.l",
+        "leg_stretch.l",
+        "foot.l",
+        "toes_01.l"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch.l",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist.l",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        3,
+        -145
+      ],
+      "joint_upper_degrees": [
+        55,
+        145,
+        -3
+      ],
+      "stance_center_joint": 0
+    },
+    "fore_left": {
+      "chain": [
+        "c_thigh_b_dupli_001.l",
+        "thigh_twist_dupli_001.l",
+        "leg_stretch_dupli_001.l",
+        "foot_dupli_001.l",
+        "toes_01_dupli_001.l"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch_dupli_001.l",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist_dupli_001.l",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        -130,
+        0
+      ],
+      "joint_upper_degrees": [
+        55,
+        -1,
+        145
+      ],
+      "scapula": "clavicle.l",
+      "scapula_radians_per_height": 1.3336791875387266,
+      "stance_center_joint": 1
+    },
+    "hind_right": {
+      "chain": [
+        "c_thigh_b.r",
+        "thigh_twist.r",
+        "leg_stretch.r",
+        "foot.r",
+        "toes_01.r"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch.r",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist.r",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        3,
+        -145
+      ],
+      "joint_upper_degrees": [
+        55,
+        145,
+        -3
+      ],
+      "stance_center_joint": 0
+    },
+    "fore_right": {
+      "chain": [
+        "c_thigh_b_dupli_001.r",
+        "thigh_twist_dupli_001.r",
+        "leg_stretch_dupli_001.r",
+        "foot_dupli_001.r",
+        "toes_01_dupli_001.r"
+      ],
+      "intermediate": [
+        {
+          "bone": "thigh_stretch_dupli_001.r",
+          "segment": 1
+        },
+        {
+          "bone": "leg_twist_dupli_001.r",
+          "segment": 2
+        }
+      ],
+      "joint_lower_degrees": [
+        -55,
+        -130,
+        0
+      ],
+      "joint_upper_degrees": [
+        55,
+        -1,
+        145
+      ],
+      "scapula": "clavicle.r",
+      "scapula_radians_per_height": 1.3336791875387266,
+      "stance_center_joint": 1
+    }
+  },
+  "gaits": {
+    "walk_forward": {
+      "phases": [
+        0,
+        0.25,
+        0.5,
+        0.75
+      ],
+      "duty": 0.625,
+      "stride_height": 0.6718257346832762,
+      "lift_height": 0.10557261545022913,
+      "body_drop": 0.04318879722963919,
+      "bob": 0.005758506297285225,
+      "direction": 1
+    },
+    "walk_backward": {
+      "phases": [
+        0,
+        0.5,
+        0.5,
+        0
+      ],
+      "duty": 0.67,
+      "stride_height": 0.28792531486426126,
+      "lift_height": 0.07198132871606532,
+      "body_drop": 0.038390041981901504,
+      "bob": 0.00383900419819015,
+      "direction": -1
+    },
+    "trot_jog": {
+      "phases": [
+        0,
+        0.5,
+        0.5,
+        0
+      ],
+      "duty": 0.48,
+      "stride_height": 0.5758506297285225,
+      "lift_height": 0.15356016792760602,
+      "body_drop": 0.06238381822058994,
+      "bob": 0.013436514693665526,
+      "direction": 1
+    },
+    "run": {
+      "phases": [
+        0.15,
+        0.5,
+        0.0,
+        0.35
+      ],
+      "direction": 1,
+      "body_drop": 0.03,
+      "bob": 0.006,
+      "swing_profile": "bounded_c2",
+      "footfall_reference": "https://horses.extension.org/horse-gallop/",
+      "lead": "left",
+      "scope": "engineered contact/timing pilot; phases/duty are not measured mocap",
+      "duty": 0.25,
+      "stride_height": 0.54,
+      "lift_height": 0.12,
+      "swing_ease_fraction": 0.075,
+      "body_dynamics": {
+        "model": "contact_impulses",
+        "gravity_height_per_second_squared": 7.5,
+        "vertical_impulse_fractions": [
+          0.25,
+          0.25,
+          0.25,
+          0.25
+        ],
+        "pitch_load_gain_radians": 0.02,
+        "scope": "Engineered body-root trajectory from stance impulses, not measured CoM or solved rigid-body dynamics"
+      }
+    },
+    "sprint": {
+      "phases": [
+        0.15,
+        0.5,
+        0.0,
+        0.35
+      ],
+      "direction": 1,
+      "body_drop": 0.03,
+      "bob": 0.006,
+      "swing_profile": "bounded_c2",
+      "footfall_reference": "https://horses.extension.org/horse-gallop/",
+      "lead": "left",
+      "scope": "engineered contact/timing pilot; phases/duty are not measured mocap",
+      "duty": 0.2,
+      "stride_height": 0.56,
+      "lift_height": 0.16,
+      "swing_ease_fraction": 0.05,
+      "body_dynamics": {
+        "model": "contact_impulses",
+        "gravity_height_per_second_squared": 7.5,
+        "vertical_impulse_fractions": [
+          0.25,
+          0.25,
+          0.25,
+          0.25
+        ],
+        "pitch_load_gain_radians": 0.02,
+        "scope": "Engineered body-root trajectory from stance impulses, not measured CoM or solved rigid-body dynamics"
+      }
+    }
+  },
+  "references": {
+    "walk_backward": "https://www.fei.org/stories/lifestyle/teach-me/why-and-how-you-should-teach-rein-back-horses"
+  },
+  "limit_basis": "finite engineering authoring bounds around explicit anatomical chains; not veterinary range claims",
+  "rest_pose_policy": "project_within_limits",
+  "max_rest_projection_degrees": 10.0,
+  "max_stance_center_adjustment_height_fraction": 0.35,
+  "dimension_calibration": {
+    "source_profile_sha256": "044e7864975f2dc68c25243eae2e3a7bf3f9431b6dbb85b86fa85695d6561647",
+    "old_root_height": 0.49430782347917557,
+    "new_root_height": 0.5150375440716743,
+    "height_factor": 0.9597510495475375,
+    "scope": "preserve world gait stride/lift/drop/bob and scapula rotation amplitude; new hip support centers remain geometry-dependent"
+  }
+}
