@@ -13,11 +13,15 @@ from pathlib import Path
 import re
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from spine_surface_retention import dorsal_landmarks, dorsal_angles_degrees, compare_dorsal_curves
+
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source',type=Path,required=True,help='Authored Blend beside export-report.json')
 parser.add_argument('--reduction',type=Path,required=True,help='animal-skin-weights-report.json')
 parser.add_argument('--output',type=Path,required=True,help='Fresh directory for scratch and verified exports')
 parser.add_argument('--preflight-only',action='store_true')
+parser.add_argument('--validation-only',action='store_true',help='Write QA without creating duplicate exports')
 args=parser.parse_args(sys.argv[sys.argv.index('--')+1:])
 source=args.source.resolve()
 out=args.output.resolve()
@@ -149,6 +153,17 @@ def points(frame):
     finally: evaluated.to_mesh_clear()
 
 sample_times = {name: np.arange((len(clip['frames'])-1)*4+1)/4 for name, clip in clips.items()}
+# Declared spinal articulation gets a separate regional surface check. A
+# global 3 mm skin-error threshold alone can hide a small, useful back bend.
+spine_landmarks = {}
+rest_points = np.asarray([v['point'] for v in rig_mesh['vertices']], dtype=float)
+for name, clip in clips.items():
+    spine = clip.get('qa', {}).get('spinal_articulation')
+    if spine:
+        bones = list(spine['local_rotation_ranges_degrees'])
+        assert len(bones) >= 3 and len(set(bones)) == len(bones)
+        assert all(b in arm.data.bones for b in bones)
+        spine_landmarks[name] = dorsal_landmarks(rest_points, [arm.data.bones[b].tail_local for b in bones])
 replace_weights(full)
 baseline_motion_max = 0.
 for name, times in sample_times.items():
@@ -171,8 +186,12 @@ for name, times in sample_times.items():
     maximum = 0.; squared = 0.; over3 = 0; worst = None
     hoof = {'max_hoof_target_error':0., 'max_stance_height':0., 'minimum_mesh_height':float('inf')}
     contact_counts = {leg:0 for leg in clip['contacts']}
+    full_curves = []; candidate_curves = []
     for i, frame in enumerate(times):
         current = points(frame)
+        if name in spine_landmarks:
+            full_curves.append(dorsal_angles_degrees(cache[i], spine_landmarks[name]))
+            candidate_curves.append(dorsal_angles_degrees(current, spine_landmarks[name]))
         errors = np.linalg.norm(current - cache[i], axis=1)
         error = float(errors.max())
         if error > maximum: maximum = error; worst = {'frame':float(frame),'vertex':int(errors.argmax())}
@@ -192,6 +211,11 @@ for name, times in sample_times.items():
     per_clip[name] = {'sample_count':len(times),'max_surface_error_m':maximum,'rmse_m':(squared/(len(times)*vertex_count))**.5,
                       'sample_vertex_pairs_over_3mm':over3,'worst':worst,'contacts':hoof,'contact_sample_counts':contact_counts,
                       'passed':maximum <= .003 and hoof['max_hoof_target_error'] <= .006 and hoof['max_stance_height'] <= .006 and hoof['minimum_mesh_height'] >= -.006}
+    if name in spine_landmarks:
+        retention = compare_dorsal_curves(full_curves, candidate_curves)
+        retention['landmark_vertex_counts'] = [len(ids) for ids in spine_landmarks[name]]
+        per_clip[name]['spine_surface_retention'] = retention
+        per_clip[name]['passed'] = per_clip[name]['passed'] and retention['passed']
     print('ACTUAL_BLENDER_QA', name, json.dumps(per_clip[name]), flush=True)
 assert geometry_hash() == original_geometry and textures() == original_textures
 maximum_influences = max(sum(g.weight>0 for g in v.groups) for v in obj.data.vertices)
@@ -204,6 +228,9 @@ validation = {'schema':'autorig-blender-multiclip-weight-validation.v1','source_
               'quality_approved':False,'passed':all(row['passed'] for row in per_clip.values())}
 (out/'weight-validation.json').write_text(json.dumps(validation,indent=2),encoding='utf-8')
 assert validation['passed'], 'Actual Blender multi-clip QA failed; diagnostic report saved'
+if args.validation_only:
+    print('QUADRUPED_SKIN_VALIDATION_COMPLETE', flush=True)
+    raise SystemExit(0)
 arm['weight_optimization_status'] = 'validated_exact_manifest_candidate'
 arm['weight_optimization_clip_hash_set'] = json.dumps(reduction['clip_hash_set'])
 arm['autorig_quality_approved'] = False

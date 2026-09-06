@@ -115,6 +115,26 @@ class AuthoringRig:
         if self.body_motions and (self.rows[self.root]['parent'] is not None or
                                   np.linalg.norm(self.local[self.root][:3,3])>1e-9):
             raise ValueError('Contact body motion requires an unparented zero-origin export root')
+        self.spinal_configs={}
+        for name,gait in self.gaits.items():
+            config=gait.get('spine_motion')
+            if config is None:continue
+            if config.get('model')!='hind_protraction_sagittal' or gait.get('swing_profile')!='bounded_c2':
+                raise ValueError('Spine motion requires the explicit bounded hind-protraction model')
+            pelvis=config['pelvis_bone'];chain=list(config['spine_bones'])
+            bones=[pelvis]+chain
+            amplitudes=np.asarray([config['pelvis_amplitude_degrees']]+list(config['spine_amplitudes_degrees']),float)
+            delays=np.asarray([config['pelvis_phase_delay']]+list(config['spine_phase_delays']),float)
+            if not 2<=len(chain)<=6 or len(set(bones))!=len(bones) or any(b not in self.rows for b in bones):
+                raise ValueError('Invalid explicit spine chain')
+            if self.rows[pelvis]['parent']!=self.root or self.rows[chain[0]]['parent']!=self.root or any(
+                    self.rows[b]['parent']!=a for a,b in zip(chain,chain[1:])):
+                raise ValueError('Spine/pelvis hierarchy differs from the articulated profile')
+            if amplitudes.shape!=(len(bones),) or not np.isfinite(amplitudes).all() or np.any(np.abs(amplitudes)>12):
+                raise ValueError('Invalid bounded spine amplitudes')
+            if delays.shape!=(len(bones),) or not np.isfinite(delays).all() or np.any((delays<0)|(delays>=1)):
+                raise ValueError('Invalid spine phase delays')
+            self.spinal_configs[name]={'bones':bones,'amplitudes':np.radians(amplitudes),'delays':delays}
         self.order=[];pending=set(self.rows)
         while pending:
             ready=sorted(n for n in pending if self.rows[n]['parent'] is None or self.rows[n]['parent'] in self.order)
@@ -248,6 +268,24 @@ def solve_leg(limb,hip,base_rotation,target,pitch,height):
     return deltas(q),q,error
 
 
+def spinal_angles(rig,action,phase):
+    """Coarse sagittal articulation driven by the existing hind hoof paths.
+
+    These controls represent regions, not individual measured vertebrae.
+    The bounded path excursion normalizes the signal without clipping it.
+    """
+    config=rig.spinal_configs.get(action)
+    if config is None:return {}
+    gait=rig.gaits[action];duty=gait['duty'];ease=gait.get('swing_ease_fraction',.1)
+    excursion=.5+(1-duty)/duty*ease/2
+    result={}
+    for bone,amplitude,delay in zip(config['bones'],config['amplitudes'],config['delays']):
+        hind=[hoof_trajectory(phase-delay-gait['phases'][leg],duty,1.,0.,np.zeros(3),gait['direction'],
+                  swing_profile='bounded_c2',swing_ease_fraction=ease)[0][1] for leg in (0,2)]
+        result[bone]=float(amplitude*(-np.mean(hind)/excursion))
+    return result
+
+
 def body_basis(rig,action,phase,root_position):
     root_rest=rig.local[rig.root][:3,:3]
     if action in rig.body_motions:
@@ -262,6 +300,7 @@ def body_basis(rig,action,phase,root_position):
     def rotate(name,axis,angle):
         local_axis=rig.rest[name][:3,:3].T @ np.array(axis,float)
         basis[name]=transform(Rotation.from_rotvec(local_axis*angle).as_matrix())
+    for bone,angle in spinal_angles(rig,action,phase).items():rotate(bone,(1,0,0),angle)
     body=rig.profile['body']
     nod=.025*math.sin(4*math.pi*phase) if action in rig.gaits else .012*math.sin(2*math.pi*phase)
     nod+= -.10 if action=='idle_alert' else .10 if action=='idle_relaxed' else 0
@@ -397,6 +436,12 @@ def _author_clip(rig,action,root_motion=False,body_drop_adjustment=0):
             'flight_frames':np.flatnonzero(flight).tolist(),
             'flight_max_load_body_weights':float(samples['vertical_load_body_weights'][flight].max()) if flight.any() else 0.,
             'periodic_height_velocity_closed':True}
+    if action in rig.spinal_configs:
+        spine_samples=[spinal_angles(rig,action,p) for p in np.linspace(0,1,count)]
+        qa['spinal_articulation']={'model':'hind_protraction_sagittal',
+            'local_rotation_ranges_degrees':{bone:float(np.degrees(np.ptp([row[bone] for row in spine_samples])))
+                for bone in rig.spinal_configs[action]['bones']},
+            'rest_geometry_changed':False,'anatomical_approval':False}
     if max_seam>rig.height*.001 or any(r['max_stance_slide_per_frame']>rig.height*.001 for r in report.values()):
         raise ValueError('Authored clip failed deformed-mesh contact or seam check: '+json.dumps(qa))
     return {'schema':'autorig-authored-quadruped-clip.v1','action':action,'timing':contract,

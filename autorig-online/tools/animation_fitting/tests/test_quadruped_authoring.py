@@ -3,7 +3,7 @@ import json
 import math
 import numpy as np
 import pytest
-from animation_fitting.author_quadruped_motion import AuthoringRig, author_clip, hoof_trajectory, DEFAULT_PROFILE
+from animation_fitting.author_quadruped_motion import AuthoringRig, author_clip, hoof_trajectory, spinal_angles, DEFAULT_PROFILE
 
 
 def synthetic_rig(scale=1.0,near_straight_fore=False):
@@ -133,6 +133,46 @@ def test_contact_body_motion_requires_supported_export_root(invalid_root):
         root=next(b for b in payload['bones'] if b['name']==profile['root'])
         root['rest_local'][3]=.1
     with pytest.raises(ValueError,match='zero-origin export root'):AuthoringRig(payload,profile)
+
+
+def spine_profile():
+    profile=json.loads(DEFAULT_PROFILE.read_text())
+    profile['gaits']['run']={'phases':[.15,.5,0,.35],'duty':.25,'direction':1,
+        'stride_height':.2,'lift_height':.1,'body_drop':.05,'bob':.004,
+        'swing_profile':'bounded_c2','swing_ease_fraction':.075,
+        'spine_motion':{'model':'hind_protraction_sagittal','pelvis_bone':'root.x',
+            'pelvis_amplitude_degrees':-2.5,'pelvis_phase_delay':0.,
+            'spine_bones':['spine_01.x','spine_02.x','spine_03.x'],
+            'spine_amplitudes_degrees':[1.5,1.5,.5],'spine_phase_delays':[.015,.03,.045]}}
+    return profile
+
+
+def test_articulated_spine_moves_locally_while_feet_and_limits_are_preserved():
+    payload=synthetic_rig();original=copy.deepcopy(payload);profile=spine_profile()
+    rig=AuthoringRig(payload,profile);clip=author_clip(rig,'run')
+    baseline=copy.deepcopy(profile);del baseline['gaits']['run']['spine_motion']
+    old=author_clip(AuthoringRig(payload,baseline),'run')
+    assert payload==original
+    assert clip['hoof_targets']==old['hoof_targets'] and clip['contacts']==old['contacts']
+    assert spinal_angles(rig,'run',0)==pytest.approx(spinal_angles(rig,'run',1),abs=1e-12)
+    for bone in rig.spinal_configs['run']['bones']:
+        rotations=np.array([f['bones'][bone]['rotation'] for f in clip['frames']])
+        assert np.max(np.abs(rotations-rotations[0]))>.001
+        assert clip['qa']['spinal_articulation']['local_rotation_ranges_degrees'][bone]>.1
+    for leg,foot in clip['qa']['feet'].items():
+        assert foot['joint_bounds']==old['qa']['feet'][leg]['joint_bounds']
+        assert foot['max_hoof_target_error']<1e-5 and foot['max_stance_slide_per_frame']<1e-6
+    assert clip['qa']['mesh_pose_seam']<1e-6
+
+
+@pytest.mark.parametrize('bad',['duplicate','amplitude','phase','hierarchy'])
+def test_invalid_spine_profile_rejected(bad):
+    payload=synthetic_rig();profile=spine_profile();config=profile['gaits']['run']['spine_motion']
+    if bad=='duplicate':config['spine_bones'][1]=config['spine_bones'][0]
+    elif bad=='amplitude':config['spine_amplitudes_degrees'][1]=20
+    elif bad=='phase':config['spine_phase_delays'][1]=float('nan')
+    else:next(b for b in payload['bones'] if b['name']=='spine_02.x')['parent']='root.x'
+    with pytest.raises(ValueError):AuthoringRig(payload,profile)
 
 
 @pytest.mark.parametrize('action,count,duty,ease',[('run',21,.25,.1),('sprint',17,.2,.075)])
