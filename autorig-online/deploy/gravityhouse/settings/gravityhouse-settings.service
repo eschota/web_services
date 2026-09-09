@@ -1,0 +1,22 @@
+[Unit]
+Description=Gravity House shared control settings
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/autorig/webgl-assets/gravityhouse/settings-service
+ExecStart=/usr/bin/python3 /srv/autorig/webgl-assets/gravityhouse/settings-service/server.py
+Environment=SETTINGS_DIRECTORY=/srv/autorig/webgl-assets/gravityhouse/data
+Environment=PORT=8263
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/autorig/webgl-assets/gravityhouse/data
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

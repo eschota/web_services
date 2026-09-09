@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "fields": [
+    {"key":"maxDegreesPerSecond","label":"Максимальная скорость","unit":"°/с","type":"number","min":10,"max":360,"step":5,"default":70,"help":"Как быстро дом может догонять жест."},
+    {"key":"maxAngularAcceleration","label":"Ускорение","unit":"°/с²","type":"number","min":10,"max":2000,"step":10,"default":80,"help":"Меньше — мягче разгон и меньше резких толчков."},
+    {"key":"maxAngularDeceleration","label":"Торможение","unit":"°/с²","type":"number","min":10,"max":2000,"step":10,"default":80,"help":"Как быстро дом замедляется и меняет направление."},
+    {"key":"followTime","label":"Сглаживание при движении","unit":"с","type":"number","min":0.02,"max":1.5,"step":0.01,"default":0.18,"help":"Меньше — быстрее следует за пальцем. Больше — плавнее."},
+    {"key":"releaseFollowTime","label":"Инерционность после отпускания","unit":"с","type":"number","min":0.02,"max":2,"step":0.01,"default":0.18,"help":"Плавность доводки до заданного угла. Дополнительный оборот не добавляется."},
+    {"key":"invertHorizontal","label":"Инвертировать горизонтальный жест","type":"boolean","default":false},
+    {"key":"invertVertical","label":"Инвертировать вертикальный жест","type":"boolean","default":false}
+  ]
+}
