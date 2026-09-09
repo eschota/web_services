@@ -50,13 +50,14 @@ if ! /usr/sbin/nginx -t; then
     if [ -f "$backup/snippet.before" ]; then cp "$backup/snippet.before" "$snippet"; fi
     exit 1
 fi
-previous=$(readlink -f "$base/current" 2>/dev/null || true)
+previous=''
+if [ -L "$base/current" ]; then previous=$(readlink -f "$base/current"); fi
 if [ -e "$base/current" ] && [ ! -L "$base/current" ]; then echo 'current must be a symlink' >&2; exit 1; fi
 ln -s "$destination" "$base/.current-$release"
 mv -Tf "$base/.current-$release" "$base/current"
 systemctl reload nginx
 printf '%s\n' "$previous" > "$backup/previous-release.txt"
-curl --fail --silent --show-error --compressed --resolve autorig.online:443:127.0.0.1 https://autorig.online/gravityhouse/release.json > "$backup/live-release.json"
+curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 1 --compressed --resolve autorig.online:443:127.0.0.1 https://autorig.online/gravityhouse/release.json > "$backup/live-release.json"
 python3 - "$backup/live-release.json" "$release" <<'PY'
 import json,sys
 assert json.load(open(sys.argv[1]))['release']==sys.argv[2]
