@@ -7,6 +7,7 @@ install -d -m 0755 "$code"
 install -d -m 0755 -o www-data -g www-data "$base/data"
 install -m 0644 "$incoming/server.py" "$code/server.py"
 install -m 0644 "$incoming/schema.json" "$code/schema.json"
+install -m 0644 "$incoming/graphics-schema.json" "$code/graphics-schema.json"
 install -m 0644 "$incoming/test_store.py" "$code/test_store.py"
 python3 "$code/test_store.py"
 install -m 0644 "$incoming/gravityhouse-settings.service" /etc/systemd/system/gravityhouse-settings.service
