@@ -93,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Content-Type','').split(';')[0]!='application/json':self.reply(415,{'error':'Нужен application/json.'});return
         try:
             size=int(self.headers.get('Content-Length','0'))
-            if size<=0 or size>(32768 if self.is_graphics() else 8192):raise ValueError('Недопустимый размер запроса.')
+            if size<=0 or size>(131072 if self.is_graphics() else 8192):raise ValueError('Недопустимый размер запроса.')
             ip=self.headers.get('X-Real-IP',self.client_address[0]);now=time.monotonic()
             with self.rate_lock:
                 recent=[t for t in self.rate.get(ip,[]) if now-t<60]

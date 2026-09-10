@@ -17,6 +17,30 @@ class StoreTests(unittest.TestCase):
         self.store.save(self.store.defaults,1)
         with self.assertRaises(module.Conflict):self.store.save(self.store.defaults,1)
         self.assertEqual(self.store.read()['revision'],2)
+    def test_scene_workshop_roundtrip_preserves_controls(self):
+        schema=json.loads((base/'graphics-schema.json').read_text(encoding='utf-8'))
+        graphics=module.Store(self.temp.name,schema,'graphics-settings.json')
+        values=dict(graphics.defaults)
+        values['Environment.exposure']=-.5
+        values['Environment.zenith.r']=.23
+        values['Wind.speed']=7.5
+        ior=next(k for k in values if k.startswith('Material.') and k.endswith('.ior'))
+        values[ior]=1.52
+        controls=self.store.read()
+        graphics.save(values,graphics.read()['revision'])
+        restarted=module.Store(self.temp.name,schema,'graphics-settings.json')
+        self.assertEqual(restarted.read()['settings'],values)
+        self.assertEqual(self.store.read(),controls)
+    def test_workshop_migration_preserves_every_existing_field(self):
+        schema=json.loads((base/'graphics-schema.json').read_text(encoding='utf-8'))
+        old_schema=dict(schema,fields=[f for f in schema['fields'] if not f['key'].startswith(('Environment.','Wind.','Material.'))])
+        old=module.Store(self.temp.name,old_schema,'graphics-settings.json')
+        old_values=dict(old.defaults);old_values['Bloom.intensity']=1.81;old_values['Sun.rotation.x']=72.5
+        saved=old.save(old_values,old.read()['revision'])
+        migrated=module.Store(self.temp.name,schema,'graphics-settings.json').read()
+        for key,value in old_values.items():self.assertEqual(migrated['settings'][key],value,key)
+        self.assertEqual(migrated['revision'],saved['revision']+1)
+        self.assertIn('Wind.speed',migrated['settings'])
     def test_invalid_values_do_not_write(self):
         for value in [float('nan'),float('inf'),False,-1,9999,'80']:
             values=dict(self.store.defaults);values['maxDegreesPerSecond']=value
