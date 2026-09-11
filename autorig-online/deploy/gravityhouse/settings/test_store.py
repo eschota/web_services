@@ -24,6 +24,8 @@ class StoreTests(unittest.TestCase):
         values['Environment.exposure']=-.5
         values['Environment.zenith.r']=.23
         values['Wind.speed']=7.5
+        values['Ball.mass']=2.3
+        values['Cloth.damping']=3.2
         ior=next(k for k in values if k.startswith('Material.') and k.endswith('.ior'))
         values[ior]=1.52
         controls=self.store.read()
