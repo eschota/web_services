@@ -35,6 +35,12 @@ Configuration is fail-closed. `SANDFLOW_VOICE_ENABLED=true` is required together
 
 This repository does not yet contain the Unity adapters, microphone UI, persistence, moderation endpoints, or end-to-end media QA. Those require integration with the canonical game and parent backend.
 
+## Backend control plane
+
+`LiveKitAdminClient` provides a narrow, injected-`HttpClient` wrapper for room-scoped `UpdateParticipant`, `MutePublishedTrack`, and `RemoveParticipant` Twirp calls. `LiveKitWebhookVerifier` validates the signed authorization JWT, expiry, exact raw-body SHA-256 claim, and bounded replay state. See [the control-plane integration contract](docs/CONTROL_PLANE_INTEGRATION.md) before wiring either class into the parent backend.
+
+Self-hosted LiveKit does not permanently invalidate an already-issued join JWT when a participant is removed or permissions change. Token issuance and every join/reconnect/track event must consult authoritative SandFlow state; administrative event enforcement has a non-zero window.
+
 ## Deployment template (not applied)
 
 The image is pinned to LiveKit `v1.13.6` and its multi-platform manifest digest. Copy `livekit.example.yaml` to the ignored `livekit.yaml`, replace the key and secret, install TLS files in the ignored `certs/`, then validate the config and firewall before enabling the example unit.
@@ -58,4 +64,4 @@ $env:NUGET_PACKAGES = 'R:\autorig\sandflow-online\voice\.work\nuget'
 dotnet run --project R:\autorig\sandflow-online\voice\tests\SandFlow.Voice.Tests\SandFlow.Voice.Tests.csproj
 ```
 
-The console harness covers team-room isolation, admission denial, microphone-only grants, listener grants, deterministic expiry/signature verification, invalid configuration, and invalid membership.
+The console harness covers team-room isolation, admission denial, microphone-only grants, listener grants, deterministic expiry/signature verification, invalid configuration and membership, exact admin Twirp requests, trusted-target validation, webhook signature/body verification, expiry, tampering, and replay rejection.

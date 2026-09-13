@@ -109,9 +109,16 @@ public sealed class WorldStore
     public SnapshotRecord Save(string world, SnapshotUpload request, byte[] data, DateTimeOffset now)
     {
         if (data.Length is < 16 or > Protocol.MaxSnapshotBytes) throw new ApiFailure(413, "snapshot_size");
-        // Opaque payload is not decompressed by the relay; client format validation is a separate gate.
         var hash = Convert.ToHexString(SHA256.HashData(data));
         if (!hash.Equals(request.Sha256, StringComparison.OrdinalIgnoreCase)) throw new ApiFailure(400, "snapshot_hash");
+        SandFlow.Protocol.WorldSnapshot physical;
+        try { physical = SandFlow.Protocol.SnapshotCodec.Decode(data); }
+        catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or ArgumentException)
+        { throw new ApiFailure(400, "snapshot_format"); }
+        if (physical.WorldId != world || physical.Epoch != request.Epoch || physical.Tick != request.Tick || physical.Sequence != request.Sequence)
+            throw new ApiFailure(400, "snapshot_identity");
+        try { using var metadata = JsonDocument.Parse(physical.MetadataJson, new() { MaxDepth = 32 }); }
+        catch (JsonException) { throw new ApiFailure(400, "snapshot_metadata"); }
         lock (_gate)
         {
             var previous = Versions(world).FirstOrDefault();

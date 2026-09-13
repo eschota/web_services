@@ -10,11 +10,11 @@ Implemented and exercised by direct .NET tests:
 
 - hashed guest bearer sessions, public/private metadata, PBKDF2 passwords, demo admission limits;
 - ordered bounded input queues, client host leases, epoch fencing, stale/replayed input rejection;
-- SQLite WAL metadata, checksum-verified atomic opaque snapshot storage and 10-version history;
+- SQLite WAL metadata, checksum-verified atomic versioned physical-field snapshots and 10-version history;
 - dormant empty rooms, member kick/block, separate WSS control/state routing;
 - delegated LiveKit token library with microphone-only grants and team-room isolation.
 
-Not complete: Unity online adapter/gateway, coherent physical snapshot codec/repair/replay, full settings validation, world reset/rollback, Steam authentication/entitlement, all full-game maps, actual voice media integration, UFO/PvP, physical menus, capacity/browser/crossplay QA. Opaque snapshots currently validate size/hash, NOT decoded physical fields. Do not enable public admission before format validation and client integration. No 100-player capacity claim.
+Not complete: Unity online adapter/gateway, full actor/settings snapshot coverage and tile repair/replay, full settings validation, world reset/rollback, Steam authentication/entitlement, all full-game maps, actual voice media integration, UFO/PvP, physical menus, capacity/browser/crossplay QA. The portable snapshot codec now bounds decompression, validates physical field shape/finiteness and binds world/epoch/tick/sequence; the Unity capture currently covers physical fields only. Public admission stays disabled until integration/QA. No 100-player capacity claim.
 
 Moderation analysis: `voice/docs/MODERATION_ANALYSIS.md`. Owner selected reactive RU/EN recognition with a 60-second communication mute; first offending speech may already be audible. Runtime ASR/moderation is not implemented.
 

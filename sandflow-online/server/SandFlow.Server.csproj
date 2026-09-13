@@ -8,5 +8,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <ProjectReference Include="../voice/src/SandFlow.Voice/SandFlow.Voice.csproj" />
+    <ProjectReference Include="../contracts/SandFlow.Protocol/SandFlow.Protocol.csproj" />
   </ItemGroup>
 </Project>

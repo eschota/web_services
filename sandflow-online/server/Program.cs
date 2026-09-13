@@ -30,6 +30,8 @@ builder.Services.AddRateLimiter(options =>
             AutoReplenishment = true, QueueLimit = 0 }));
 });
 var app = builder.Build();
+var revisionFile = Path.Combine(AppContext.BaseDirectory, "REVISION");
+var buildRevision = File.Exists(revisionFile) ? File.ReadAllText(revisionFile).Trim() : "local";
 app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
@@ -53,7 +55,7 @@ app.Use(async (context, next) =>
 app.UseRateLimiter();
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15) });
 app.MapGet("/health", () => Results.Ok(new { service = "sandflow", protocol = Protocol.Version, physics = "client-only",
-    admissionEnabled = builder.Configuration["SANDFLOW_ADMISSION_ENABLED"] == "true", stage = "foundation-not-gameplay-validated" }));
+    admissionEnabled = builder.Configuration["SANDFLOW_ADMISSION_ENABLED"] == "true", stage = "foundation-not-gameplay-validated", revision = buildRevision }));
 var api = app.MapGroup("/api/v1");
 Identity Auth(HttpContext context, WorldStore store)
 {

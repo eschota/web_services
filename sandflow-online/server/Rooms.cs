@@ -10,6 +10,7 @@ public sealed class RoomPeer(Identity identity, int team, DateTimeOffset admitte
     public DateTimeOffset Admitted { get; } = admitted;
     public bool Ready { get; set; }
     public long AcknowledgedSequence { get; set; }
+    public long AcknowledgedTick { get; set; }
     public Channel<ServerEvent> Events { get; } = Channel.CreateBounded<ServerEvent>(new BoundedChannelOptions(512)
     { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
     public Channel<byte[]> Bulk { get; } = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8)
@@ -25,6 +26,7 @@ public sealed class RoomState(WorldRecord world, SnapshotRecord? snapshot)
     public WorldRecord World { get; } = world;
     public Dictionary<string, RoomPeer> Peers { get; } = [];
     public List<OrderedCommand> Tail { get; } = [];
+    public SortedDictionary<long, CommitRecord> Commits { get; } = [];
     public long Epoch { get; set; } = (snapshot?.Epoch ?? 0) + 1;
     public long Tick { get; set; } = snapshot?.Tick ?? 0;
     public long Sequence { get; set; } = snapshot?.Sequence ?? 0;
@@ -36,7 +38,10 @@ public sealed class RoomState(WorldRecord world, SnapshotRecord? snapshot)
     public DateTimeOffset LastSnapshot { get; set; } = snapshot == null ? DateTimeOffset.MinValue : DateTimeOffset.FromUnixTimeSeconds(snapshot.CreatedUnix);
     public DateTimeOffset LastSaveRequest { get; set; }
     public DateTimeOffset LastStructuralChange { get; set; }
+    public DateTimeOffset? RecoveryUntil { get; set; }
 }
+
+public sealed record CommitRecord(long Tick, long Sequence, int Substeps);
 
 /// <summary>Server ordering/lease authority only. This class contains no physical simulation.</summary>
 public sealed class Rooms(WorldStore store, TimeProvider time)
@@ -114,7 +119,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 peer.ConnectionId = connection;
                 var room = Get(id); var snapshot = store.Versions(id).FirstOrDefault();
                 Send(room, peer, "welcome", new { version = Protocol.Version, tileSize = Protocol.TileSize, participantId = identity.Id,
-                    team = peer.Team, hostId = room.HostId, snapshot, commands = room.Tail.ToArray(), sequence = room.ConfirmedSequence });
+                    team = peer.Team, hostId = room.HostId, snapshot, commands = room.Tail.ToArray(), commits = room.Commits.Values.ToArray(), sequence = room.ConfirmedSequence });
             }
             return (peer, connection);
         }
@@ -133,14 +138,16 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 case "ready":
                     if (message.Sequence != room.ConfirmedSequence || message.Tick != room.Tick)
                         throw new ApiFailure(409, "baseline_mismatch");
-                    peer.Ready = true; peer.AcknowledgedSequence = message.Sequence;
+                    peer.Ready = true; peer.AcknowledgedSequence = message.Sequence; peer.AcknowledgedTick = message.Tick;
                     Elect(room); Broadcast(room, "presence", ViewOf(room)); break;
                 case "heartbeat":
                     if (room.HostId == identity.Id) RequireHost(room, peer, message.Epoch);
                     if (room.HostId == identity.Id) room.LeaseUntil = now.AddSeconds(8);
-                    if (message.Sequence > room.ConfirmedSequence || message.Sequence < 0)
+                    if (message.Sequence > room.ConfirmedSequence || message.Sequence < 0 || message.Tick > room.Tick || message.Tick < 0)
                         throw new ApiFailure(400, "invalid_ack");
-                    peer.AcknowledgedSequence = message.Sequence; break;
+                    peer.AcknowledgedSequence = message.Sequence; peer.AcknowledgedTick = message.Tick;
+                    if (room.RecoveryUntil != null) Elect(room);
+                    break;
                 case "input":
                     if (!peer.Ready || room.HostId == null) throw new ApiFailure(409, "world_synchronizing");
                     if (message.Sequence <= peer.LastClientSequence) throw new ApiFailure(409, "duplicate_input");
@@ -164,7 +171,9 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                         message.Sequence - room.ConfirmedSequence > 256 || message.Substeps is < 1 or > 16)
                         throw new ApiFailure(400, "invalid_commit");
                     room.Tick = message.Tick; room.ConfirmedSequence = message.Sequence;
-                    room.LeaseUntil = now.AddSeconds(8); peer.AcknowledgedSequence = message.Sequence; room.DirtySince ??= now;
+                    room.Commits[message.Tick] = new(message.Tick, message.Sequence, message.Substeps);
+                    while (room.Commits.Count > 4096) room.Commits.Remove(room.Commits.First().Key);
+                    room.LeaseUntil = now.AddSeconds(8); peer.AcknowledgedSequence = message.Sequence; peer.AcknowledgedTick = message.Tick; room.DirtySince ??= now;
                     Broadcast(room, "committed", new { substeps = message.Substeps }); break;
                 case "resync": Send(room, peer, "checkpoint_required", store.Versions(id).FirstOrDefault()); break;
                 default: throw new ApiFailure(400, "unknown_message");
@@ -197,12 +206,16 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
         lock (_gate)
         {
             var room = Get(id); var peer = Member(identity, id); RequireHost(room, peer, request.Epoch);
-            if (request.Tick != room.Tick || request.Sequence != room.ConfirmedSequence) throw new ApiFailure(409, "snapshot_tick");
+            var atCurrent = request.Tick == room.Tick && request.Sequence == room.ConfirmedSequence;
+            var atRetained = room.Commits.TryGetValue(request.Tick, out var commit) && commit.Sequence == request.Sequence;
+            if (!atCurrent && !atRetained) throw new ApiFailure(409, "snapshot_tick");
             if (finalSave && room.Peers.Count != 1) throw new ApiFailure(409, "not_last_player");
             if (!finalSave && time.GetUtcNow() - room.LastSnapshot < TimeSpan.FromSeconds(60)) throw new ApiFailure(429, "autosave_interval");
             var result = store.Save(id, request, payload, time.GetUtcNow());
-            room.Revision = result.Revision; room.LastSnapshot = time.GetUtcNow(); room.DirtySince = null;
+            room.Revision = result.Revision; room.LastSnapshot = time.GetUtcNow();
+            room.DirtySince = result.Tick == room.Tick && result.Sequence == room.ConfirmedSequence ? null : time.GetUtcNow();
             room.Tail.RemoveAll(x => x.Sequence <= result.Sequence);
+            foreach (var tick in room.Commits.Keys.Where(x => x <= result.Tick).ToArray()) room.Commits.Remove(tick);
             Broadcast(room, "saved", result); return result;
         }
     }
@@ -244,6 +257,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
             foreach (var peer in room.Peers.Values.Where(x => x.ConnectionId == null && now - x.Admitted > TimeSpan.FromSeconds(30)).ToArray())
                 room.Peers.Remove(peer.Identity.Id);
             if (room.HostId != null && room.LeaseUntil <= now) LoseHost(room);
+            if (room.RecoveryUntil != null && now >= room.RecoveryUntil) RecoverDurable(room);
             if (room.DirtySince != null && room.HostId != null && now - room.LastSnapshot >= TimeSpan.FromSeconds(60) &&
                 now - room.LastSaveRequest >= TimeSpan.FromSeconds(5))
             { room.LastSaveRequest = now; Send(room, room.Peers[room.HostId], "save_due"); }
@@ -254,13 +268,17 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
         var old = room.HostId; room.HostId = null; room.Epoch++;
         if (old != null && room.Peers.TryGetValue(old, out var oldPeer)) oldPeer.Ready = false;
         Broadcast(room, "paused", new { reason = "host_lost" });
+        room.RecoveryUntil = time.GetUtcNow().AddSeconds(2);
         Elect(room);
-        if (room.HostId == null)
-        {
+        if (room.HostId == null && room.Peers.Count == 0) RecoverDurable(room);
+    }
+    private void RecoverDurable(RoomState room)
+    {
+        if (room.HostId == null) {
             var durable = store.Versions(room.World.Id).FirstOrDefault();
             var lostTick = room.Tick;
             room.Tick = durable?.Tick ?? 0; room.Sequence = room.ConfirmedSequence = durable?.Sequence ?? 0;
-            room.Tail.Clear();
+            room.Tail.Clear(); room.Commits.Clear(); room.RecoveryUntil = null;
             foreach (var peer in room.Peers.Values) peer.Ready = false;
             Broadcast(room, "restore_required", new { snapshot = durable, lostThroughTick = lostTick });
         }
@@ -268,10 +286,10 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
     private void Elect(RoomState room)
     {
         if (room.HostId != null) return;
-        var candidate = room.Peers.Values.Where(x => x.ConnectionId != null && x.Ready && x.AcknowledgedSequence == room.ConfirmedSequence)
+        var candidate = room.Peers.Values.Where(x => x.ConnectionId != null && x.Ready && x.AcknowledgedSequence == room.ConfirmedSequence && x.AcknowledgedTick == room.Tick)
             .OrderBy(x => x.Admitted).ThenBy(x => x.Identity.Id).FirstOrDefault();
         if (candidate == null) return;
-        room.HostId = candidate.Identity.Id; room.LeaseUntil = time.GetUtcNow().AddSeconds(8);
+        room.HostId = candidate.Identity.Id; room.LeaseUntil = time.GetUtcNow().AddSeconds(8); room.RecoveryUntil = null;
         Broadcast(room, "host", new { participantId = room.HostId, leaseUntil = room.LeaseUntil });
     }
     private static void Send(RoomState room, RoomPeer peer, string type, object? data = null, long? sequence = null)
