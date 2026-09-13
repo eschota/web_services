@@ -8,15 +8,16 @@ This directory is an isolated integration candidate. It is not deployed and does
 
 ## Parent integration contract
 
-1. Copy `template/` to `Game/Assets/WebGLTemplates/SandFlowOnline/` and set `PlayerSettings.WebGL.template = "PROJECT:SandFlowOnline"` inside the Web branch of `OnlineClientBuild` before building.
+1. Copy `template/` to `Game/Assets/WebGLTemplates/SandFlowOnlinePreview/` and set `PlayerSettings.WebGL.template = "PROJECT:SandFlowOnlinePreview"` inside the normal Web branch before building. For the separate `WebQa` build profile, create `Game/Assets/WebGLTemplates/SandFlowOnlineQa/` from `template-qa/index.html` plus the exact shared `template/TemplateData/` directory, then select `PROJECT:SandFlowOnlineQa`. This keeps one guarded JS/CSS source while giving QA its own index/base/mode. Output names such as `online-web-qa.*` satisfy the strict filename contract.
 2. Keep `decompressionFallback=true` unless a separate browser-tested build disables it. With the current setting, do not add `Content-Encoding` to `.unityweb`; the Unity loader performs Brotli fallback decompression. Consequently the fallback container can remain `application/octet-stream` rather than pretending the compressed bytes are directly stream-compilable wasm. Use the revalidation rules in `delivery-rules.nginx.conf` and replace its release-root placeholder with the verified new release path.
 3. The template passes only these Unity arguments:
    - `-sandflowWorldId <32-hex-guid>` for `/sandflow/s/{id}`.
    - `-sandflowPreview` when `mode: "preview"`.
 4. `SandFlowRoomClient` must parse `-sandflowWorldId` using `Guid.TryParseExact(value, "N", ...)` into `requestedWorld`. It must treat `-sandflowPreview` as non-networked preview and must not create a session, join a room, or open sockets. Unknown/missing/duplicate argument values must fail closed.
 5. Never pass room passwords, bearer tokens, Steam IDs, or auth data through the URL or Unity arguments. Passwords remain POST bodies entered in the in-game UI. The bootstrap refuses URLs containing password/token/auth-like query or fragment keys and does not log the URL.
-6. Default candidate mode is `preview`, visibly labelled “Preview — not connected to a live room”. Change to `live` only after the new client/backend admission and browser flow are independently validated.
-7. `/sandflow/s/{id}` must serve this same index with HTTP 200. The page has `<base href="/sandflow/">`, so Build/TemplateData assets remain rooted correctly.
+6. The normal candidate remains `preview`, visibly labelled “Preview — not connected to a live room”. The separate QA template is `live` but always displays “Online QA / not public release”. Do not convert the normal template to live during QA.
+7. The parser accepts exactly `/sandflow/`, `/sandflow/s/{32hex}`, `/sandflow/qa/`, and `/sandflow/qa/s/{32hex}`. It rejects missing-slash roots, trailing slashes on world routes, nested/arbitrary paths and a template whose configured `routeBase` does not match the actual surface.
+8. Parent deploys only `delivery-rules-qa.nginx.conf` for the QA release, replacing `__SANDFLOW_QA_RELEASE_ROOT__` with its verified immutable release path. That fragment defines only `/sandflow/qa...`, uses `no-store` and `X-Robots-Tag`, and must coexist with—not replace or redefine—the old public root, API, WS and health locations.
 
 Unity's official documentation describes `.unityweb` as the decompression-fallback naming/delivery path and warns that fallback is less efficient than native browser decompression. A future native-Brotli candidate must be a separately built/browser-tested change; do not add `Content-Encoding: br` opportunistically to this fallback contract: https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-deploying.html
 

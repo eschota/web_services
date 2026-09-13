@@ -3,29 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
-  <base href="/sandflow/">
-  <title>{{{ PRODUCT_NAME }}}</title>
+  <meta name="referrer" content="no-referrer">
+  <base href="/sandflow/qa/">
+  <title>{{{ PRODUCT_NAME }}} — Online QA</title>
   <link rel="stylesheet" href="TemplateData/style.css">
 </head>
 <body>
   <main id="shell" aria-busy="true">
-    <canvas id="unity-canvas" tabindex="-1" aria-label="SandFlow"></canvas>
+    <canvas id="unity-canvas" tabindex="-1" aria-label="SandFlow Online QA"></canvas>
     <section id="loading" role="status" aria-live="polite">
-      <h1>SandFlow</h1>
+      <h1>SandFlow Online QA</h1>
       <p id="status">Checking browser capabilities…</p>
       <progress id="progress" max="1" value="0"></progress>
       <p id="detail">0%</p>
     </section>
-    <div id="mode-badge" hidden></div>
+    <div id="mode-badge">Online QA / not public release</div>
     <div id="error" role="alert" hidden></div>
   </main>
   <script>
     window.SandFlowBootstrapConfig = Object.freeze({
       schemaVersion: 1,
-      mode: "preview",
-      surface: "public-preview",
-      routeBase: "/sandflow/",
+      mode: "live",
+      surface: "online-qa",
+      routeBase: "/sandflow/qa/",
       loaderUrl: "Build/{{{ LOADER_FILENAME }}}",
       unityConfig: {
         arguments: [],

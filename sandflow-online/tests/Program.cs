@@ -243,6 +243,24 @@ rooms.Save(b.Identity,savedWorld.Id,new(1,1,0,0,Convert.ToHexString(SHA256.HashD
 rooms.Receive(b.Identity,savedWorld.Id,savedHost,new("commit",Epoch:1,Tick:2));
 rooms.Receive(c.Identity,savedWorld.Id,savedClient,new("ready",Epoch:1,Tick:1));
 Check(savedFollower.Ready&&savedFollower.AcknowledgedTick==1,"late ready accepts saved baseline after host advanced and its commit was trimmed");
+var qaClock=new ManualClock();var qaAccess=new QaBrowserAccess(qaClock);
+var challenge=qaAccess.Begin(null);
+Check(Protocol.ValidId(challenge.Code)&&challenge.CookieValue.Length==97,"QA browser receives public code and separate nonce proof");
+Check(qaAccess.Begin(challenge.CookieValue).Code==challenge.Code,"QA page reload reuses its bounded challenge");
+var grants=0;
+SessionGrant GrantQa(){grants++;return store.NewGuest(qaClock.GetUtcNow(),true,TimeSpan.FromHours(2));}
+Denied(()=>qaAccess.Claim(challenge.CookieValue,GrantQa),"qa_approval_pending");
+Denied(()=>qaAccess.Approve(challenge.Code,routeWorld.Id,false),"qa_authority_required");
+qaAccess.Approve(challenge.Code,routeWorld.Id,true);
+Denied(()=>qaAccess.Claim(challenge.Code+"."+new string('0',64),GrantQa),"qa_browser_proof_required");
+var qaClaim=qaAccess.Claim(challenge.CookieValue,GrantQa);
+Check(qaClaim.Session.Identity.PreviewApproved&&!qaClaim.Session.Identity.FullAccess&&qaClaim.WorldId==routeWorld.Id,"QA claim grants demo preview only for the approved browser");
+Check(qaAccess.Claim(challenge.CookieValue,GrantQa).Session.Token==qaClaim.Session.Token&&grants==1,"QA claim retry does not issue a second identity");
+Denied(()=>qaAccess.Approve(challenge.Code,privateWorld.Id,true),"qa_challenge_already_bound");
+Check(store.Authenticate(qaClaim.Session.Token,qaClock.GetUtcNow().AddHours(2))==null,"browser QA session expires after two hours on the server");
+qaClock.Advance(TimeSpan.FromMinutes(6));
+Denied(()=>qaAccess.Claim(challenge.CookieValue,GrantQa),"qa_browser_proof_required");
+Denied(()=>qaAccess.Approve(challenge.Code,routeWorld.Id,true),"qa_challenge_expired");
 Console.WriteLine($"RESULT {testCount} assertions passed. No HTTP server or physical simulation launched.");
 
 sealed class ManualClock : TimeProvider

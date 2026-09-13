@@ -40,6 +40,12 @@ The next candidate adds portable 32x32 digest/repair codecs and a bounded checkp
 
 An offline repair of the actual divergent native capture pair passed field tolerances and exact module state: digest 17,277 bytes + repair 1,598,802 bytes versus full snapshot 2,505,269 bytes. This one capture-pair size comparison is not a runtime bandwidth/FPS optimization claim. The Unity GPU fixture also passed historical repair followed by 30 steps/two recorded commands. The live periodic client integration still needs validation. In particular, seamless authority changes during rewind, full settings/actor coverage and high-player command-tail retention remain open acceptance work.
 
+## Closed browser QA entry
+
+`GET /sandflow/api/v1/qa` issues an unprivileged, five-minute HttpOnly challenge cookie and displays only its public code. Existing QA authority approves that code with `POST /sandflow/api/v1/qa/approve` and a public demo world ID. `POST /sandflow/api/v1/qa/claim` requires the original cookie proof, issues an idempotent two-hour demo-only preview session, and redirects to `/sandflow/qa/s/{id}`. No QA key, session token or private-world password appears in a URL or the page. This is the existing closed QA permission exposed to one verified browser, not public admission or Steam entitlement.
+
+The separate QA WebGPU template/deployment lives only under `/sandflow/qa/`; the public root and AutoRig routes are preserved. `deploy/install-web-qa.sh` checks archive/config hashes, uses immutable web releases, adds only a SandFlow QA include and restores the prior snippets if nginx validation/reload fails. Browser rendering and mixed-client gameplay still require real QA. Current server tests: 99 assertions plus 10 voice-service checks.
+
 ## Runtime contract
 
 - `SANDFLOW_DATA`: dedicated persistent directory, never an AutoRig data path.

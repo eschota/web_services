@@ -25,15 +25,17 @@ public sealed class WorldStore
     private SqliteConnection Open() { var db = new SqliteConnection(_connection); db.Open(); return db; }
     private static void Execute(SqliteConnection db, string sql)
     { using var cmd = db.CreateCommand(); cmd.CommandText = sql; cmd.ExecuteNonQuery(); }
-    public SessionGrant NewGuest(DateTimeOffset now, bool previewApproved = false)
+    public SessionGrant NewGuest(DateTimeOffset now, bool previewApproved = false, TimeSpan? lifetime = null)
     {
+        var duration = lifetime ?? TimeSpan.FromDays(30);
+        if (duration < TimeSpan.FromMinutes(1) || duration > TimeSpan.FromDays(30)) throw new ArgumentOutOfRangeException(nameof(lifetime));
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var identity = new Identity(Protocol.RandomId(), false, null, previewApproved);
         using var db = Open(); using var cmd = db.CreateCommand();
         cmd.CommandText = "INSERT INTO sessions VALUES($hash,$json,$expires)";
         cmd.Parameters.AddWithValue("$hash", Protocol.Hash(token));
         cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(identity));
-        cmd.Parameters.AddWithValue("$expires", now.AddDays(30).ToUnixTimeSeconds()); cmd.ExecuteNonQuery();
+        cmd.Parameters.AddWithValue("$expires", now.Add(duration).ToUnixTimeSeconds()); cmd.ExecuteNonQuery();
         return new(token, identity);
     }
     public Identity? Authenticate(string? token, DateTimeOffset now)

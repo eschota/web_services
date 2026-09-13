@@ -4,17 +4,22 @@
   else root.SandFlowBootstrap = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
-  var WORLD_PATH = /^\/sandflow\/s\/([0-9a-fA-F]{32})\/?$/;
-  var ROOT_PATH = /^\/sandflow\/?$/;
+  var PUBLIC_WORLD_PATH = /^\/sandflow\/s\/([0-9a-fA-F]{32})$/;
+  var QA_WORLD_PATH = /^\/sandflow\/qa\/s\/([0-9a-fA-F]{32})$/;
+  var PUBLIC_ROOT_PATH = /^\/sandflow\/$/;
+  var QA_ROOT_PATH = /^\/sandflow\/qa\/$/;
   var SENSITIVE_KEY = /^(?:pass(?:word)?|pwd|token|auth(?:orization)?|bearer|steam(?:id)?)$/i;
 
   function parseLocation(pathname, search, hash) {
     pathname = pathname || ""; search = search || ""; hash = hash || "";
     if (hasSensitiveKeys(search) || hasSensitiveKeys(hash.replace(/^#/, "?")))
       return { ok: false, error: "Sensitive credentials are not allowed in SandFlow URLs." };
-    var match = WORLD_PATH.exec(pathname);
-    if (match) return { ok: true, worldId: match[1].toLowerCase() };
-    if (ROOT_PATH.test(pathname)) return { ok: true, worldId: null };
+    var match = QA_WORLD_PATH.exec(pathname);
+    if (match) return { ok: true, worldId: match[1].toLowerCase(), routeBase: "/sandflow/qa/", qa: true };
+    match = PUBLIC_WORLD_PATH.exec(pathname);
+    if (match) return { ok: true, worldId: match[1].toLowerCase(), routeBase: "/sandflow/", qa: false };
+    if (QA_ROOT_PATH.test(pathname)) return { ok: true, worldId: null, routeBase: "/sandflow/qa/", qa: true };
+    if (PUBLIC_ROOT_PATH.test(pathname)) return { ok: true, worldId: null, routeBase: "/sandflow/", qa: false };
     return { ok: false, error: "Invalid SandFlow path." };
   }
 
@@ -31,6 +36,12 @@
   function validateConfig(config) {
     if (!config || config.schemaVersion !== 1) return { ok: false, error: "Unsupported bootstrap configuration." };
     if (config.mode !== "preview" && config.mode !== "live") return { ok: false, error: "Invalid client mode." };
+    if (config.routeBase !== "/sandflow/" && config.routeBase !== "/sandflow/qa/")
+      return { ok: false, error: "Invalid route base." };
+    if ((config.surface !== "public-preview" && config.surface !== "online-qa")
+        || (config.surface === "public-preview" && (config.routeBase !== "/sandflow/" || config.mode !== "preview"))
+        || (config.surface === "online-qa" && (config.routeBase !== "/sandflow/qa/" || config.mode !== "live")))
+      return { ok: false, error: "Invalid deployment surface." };
     if (!config.loaderUrl || !config.unityConfig) return { ok: false, error: "Unity build configuration is incomplete." };
     if (!/^Build\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.loader\.js$/.test(config.loaderUrl)
         || !/^Build\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.data\.unityweb$/.test(config.unityConfig.dataUrl)
@@ -117,9 +128,13 @@
     var valid = validateConfig(config); if (!valid.ok) { fail(elements, valid.error); return; }
     var route = parseLocation(location.pathname, location.search, location.hash);
     if (!route.ok) { fail(elements, route.error); return; }
+    if (route.routeBase !== config.routeBase) { fail(elements, "This client template cannot run on this route."); return; }
     var capability = await capabilityError(window, config.capabilityTimeoutSeconds * 1000);
     if (capability) { fail(elements, capability); return; }
-    if (config.mode === "preview") {
+    if (config.surface === "online-qa") {
+      elements.badge.hidden = false;
+      elements.badge.textContent = "Online QA / not public release";
+    } else if (config.mode === "preview") {
       elements.badge.hidden = false;
       elements.badge.textContent = "Preview — not connected to a live room";
     }

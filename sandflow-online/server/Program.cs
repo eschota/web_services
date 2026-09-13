@@ -20,6 +20,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new WorldStore(builder.Configuration["SANDFLOW_DATA"] ?? Path.Combine(AppContext.BaseDirectory, "data")));
 builder.Services.AddSingleton(new DeviceTelemetryStore(builder.Configuration["SANDFLOW_DATA"] ?? Path.Combine(AppContext.BaseDirectory, "data"), TimeProvider.System));
 builder.Services.AddSingleton<Rooms>();
+builder.Services.AddSingleton<QaBrowserAccess>();
 builder.Services.AddSingleton(new VoiceTokenService(VoiceTokenOptions.FromEnvironment()));
 builder.Services.AddHostedService<RoomHousekeeping>();
 builder.Services.AddRateLimiter(options =>
@@ -36,6 +37,11 @@ var buildRevision = File.Exists(revisionFile) ? File.ReadAllText(revisionFile).T
 app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path == "/api/v1/qa/approve")
+    {
+        var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+        if (limit != null && !limit.IsReadOnly) limit.MaxRequestBodySize = 1024;
+    }
     context.Response.Headers.CacheControl = "no-store";
     context.Response.Headers.XContentTypeOptions = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
@@ -58,6 +64,37 @@ app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSecond
 app.MapGet("/health", () => Results.Ok(new { service = "sandflow", protocol = Protocol.Version, physics = "client-only",
     admissionEnabled = builder.Configuration["SANDFLOW_ADMISSION_ENABLED"] == "true", stage = "foundation-not-gameplay-validated", revision = buildRevision }));
 var api = app.MapGroup("/api/v1");
+api.MapGet("/qa", (HttpContext context, QaBrowserAccess access) =>
+{
+    if (string.IsNullOrEmpty(builder.Configuration["SANDFLOW_QA_TOKEN"])) throw new ApiFailure(404, "qa_disabled");
+    var challenge = access.Begin(context.Request.Cookies["sf_qa_challenge"]);
+    context.Response.Cookies.Append("sf_qa_challenge", challenge.CookieValue, new CookieOptions
+    { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/sandflow/api/v1/qa", Expires = challenge.Expires });
+    context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+    context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow, noarchive";
+    var status = challenge.Approved ? "Approved. Continue to the assigned test sandbox." : "Waiting for QA authorization. This code alone grants no access.";
+    return Results.Content("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>SandFlow browser QA access</title>" +
+        "<style>body{font:18px system-ui;background:#15202a;color:#e5f4fa;max-width:640px;margin:10vh auto;padding:24px}code{display:block;padding:18px;background:#263947;overflow-wrap:anywhere}button{padding:14px;margin-top:24px}</style>" +
+        "<h1>SandFlow browser QA access</h1><p>Private validation session — not a public release.</p><p>Browser challenge:</p><code id=\"qa-code\">" + challenge.Code +
+        "</code><p>" + status + "</p><p>Expires: " + challenge.Expires.ToString("u") + ". No access key belongs in the URL.</p><form method=\"post\" action=\"/sandflow/api/v1/qa/claim\"><button type=\"submit\">Continue to sandbox</button></form></html>", "text/html; charset=utf-8");
+});
+api.MapPost("/qa/approve", (HttpContext context, QaApproval request, QaBrowserAccess access, WorldStore store) =>
+{
+    var authorized = AdmissionPolicy.Allows(false, false, builder.Configuration["SANDFLOW_QA_TOKEN"] ?? "", context.Request.Headers["X-SF-QA-Token"].ToString());
+    if (!authorized) throw new ApiFailure(403, "qa_authority_required");
+    if (request.WorldId == null || !Protocol.ValidId(request.WorldId)) throw new ApiFailure(400, "qa_world");
+    var world = store.Find(request.WorldId);
+    if (!world.Demo || world.IsPrivate) throw new ApiFailure(403, "qa_public_demo_required");
+    access.Approve(request.Code, world.Id, true); return Results.Ok(new { approved = true });
+});
+api.MapPost("/qa/claim", (HttpContext context, QaBrowserAccess access, WorldStore store) =>
+{
+    if (string.IsNullOrEmpty(builder.Configuration["SANDFLOW_QA_TOKEN"])) throw new ApiFailure(404, "qa_disabled");
+    var claim = access.Claim(context.Request.Cookies["sf_qa_challenge"], () => store.NewGuest(DateTimeOffset.UtcNow, true, TimeSpan.FromHours(2)));
+    context.Response.Cookies.Append("sf_session", claim.Session.Token, new CookieOptions
+    { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/sandflow/", MaxAge = TimeSpan.FromHours(2) });
+    return Results.Redirect("/sandflow/qa/s/" + claim.WorldId);
+});
 api.MapPost("/telemetry", async (HttpContext context, DeviceTelemetryStore store) =>
 {
     // Explicit bounded body read before deserialization; no arbitrary diagnostic strings or IP/Steam identifiers.
@@ -195,6 +232,7 @@ static async Task ReceiveLoop(WebSocket socket, Identity identity, string id, st
     }
 }
 public sealed record JoinRequest(string? Password = null);
+public sealed record QaApproval(string? Code, string? WorldId);
 public static class Wire
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)

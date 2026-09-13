@@ -2,21 +2,44 @@
 const assert = require("assert");
 const core = require("../template/TemplateData/sandflow-bootstrap.js");
 
-assert.deepStrictEqual(core.parseLocation("/sandflow/", "", ""), { ok: true, worldId: null });
+assert.deepStrictEqual(core.parseLocation("/sandflow/", "", ""),
+  { ok: true, worldId: null, routeBase: "/sandflow/", qa: false });
 assert.deepStrictEqual(core.parseLocation("/sandflow/s/0123456789abcdef0123456789ABCDEF", "", ""),
-  { ok: true, worldId: "0123456789abcdef0123456789abcdef" });
+  { ok: true, worldId: "0123456789abcdef0123456789abcdef", routeBase: "/sandflow/", qa: false });
+assert.deepStrictEqual(core.parseLocation("/sandflow/qa/", "", ""),
+  { ok: true, worldId: null, routeBase: "/sandflow/qa/", qa: true });
+assert.deepStrictEqual(core.parseLocation("/sandflow/qa/s/0123456789ABCDEF0123456789abcdef", "", ""),
+  { ok: true, worldId: "0123456789abcdef0123456789abcdef", routeBase: "/sandflow/qa/", qa: true });
+assert.strictEqual(core.parseLocation("/sandflow", "", "").ok, false);
+assert.strictEqual(core.parseLocation("/sandflow/qa", "", "").ok, false);
+assert.strictEqual(core.parseLocation("/sandflow/s/0123456789abcdef0123456789abcdef/", "", "").ok, false);
+assert.strictEqual(core.parseLocation("/sandflow/qa/s/0123456789abcdef0123456789abcdef/", "", "").ok, false);
 assert.strictEqual(core.parseLocation("/sandflow/s/not-a-guid", "", "").ok, false);
 assert.strictEqual(core.parseLocation("/sandflow/s/0123456789abcdef0123456789abcdef/extra", "", "").ok, false);
+for (const invalid of ["/sandflow/qa/extra", "/sandflow/qa/s/not-a-guid", "/sandflow/qa/s/0123456789abcdef0123456789abcdef/extra",
+  "/sandflow/qa/qa/", "/sandflow/s/s/0123456789abcdef0123456789abcdef"])
+  assert.strictEqual(core.parseLocation(invalid, "", "").ok, false, invalid);
 for (const key of ["password", "pass", "pwd", "token", "auth", "authorization", "bearer", "steamId"])
   assert.strictEqual(core.parseLocation("/sandflow/", `?${key}=secret`, "").ok, false, key);
+for (const suffix of ["?password=secret", "?token=secret", "#auth=secret", "#steamId=secret"])
+  assert.strictEqual(core.parseLocation("/sandflow/qa/", suffix[0] === "?" ? suffix : "", suffix[0] === "#" ? suffix : "").ok, false, suffix);
 assert.strictEqual(core.parseLocation("/sandflow/", "?lang=en", "").ok, true);
 
 const config = { schemaVersion: 1, mode: "preview", loaderUrl: "Build/x.loader.js",
+  surface: "public-preview", routeBase: "/sandflow/",
   unityConfig: { dataUrl: "Build/x.data.unityweb", frameworkUrl: "Build/x.framework.js.unityweb",
     codeUrl: "Build/x.wasm.unityweb", streamingAssetsUrl: "StreamingAssets" },
   stallWarningSeconds: 30, capabilityTimeoutSeconds: 10, loadTimeoutSeconds: 180 };
 assert.deepStrictEqual(core.validateConfig(config), { ok: true });
 assert.strictEqual(core.validateConfig({ ...config, mode: "public-multiplayer" }).ok, false);
+assert.strictEqual(core.validateConfig({ ...config, mode: "live" }).ok, false);
+assert.strictEqual(core.validateConfig({ ...config, routeBase: "/sandflow/arbitrary/" }).ok, false);
+assert.strictEqual(core.validateConfig({ ...config, surface: "online-qa" }).ok, false);
+const qaConfig = { ...config, mode: "live", surface: "online-qa", routeBase: "/sandflow/qa/",
+  loaderUrl: "Build/online-web-qa.loader.js",
+  unityConfig: { ...config.unityConfig, dataUrl: "Build/online-web-qa.data.unityweb",
+    frameworkUrl: "Build/online-web-qa.framework.js.unityweb", codeUrl: "Build/online-web-qa.wasm.unityweb" } };
+assert.deepStrictEqual(core.validateConfig(qaConfig), { ok: true });
 assert.strictEqual(core.validateConfig({ ...config, loadTimeoutSeconds: 20 }).ok, false);
 assert.strictEqual(core.validateConfig({ ...config, loaderUrl: "https://cdn.example/x.js" }).ok, false);
 assert.strictEqual(core.validateConfig({ ...config, unityConfig: { ...config.unityConfig, dataUrl: "../private.data" } }).ok, false);
