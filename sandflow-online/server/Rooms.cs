@@ -19,6 +19,8 @@ public sealed class RoomPeer(Identity identity, int team, DateTimeOffset admitte
     public long LastClientSequence { get; set; }
     public DateTimeOffset CommandWindow { get; set; }
     public int CommandCount { get; set; }
+    public DateTimeOffset BulkWindow { get; set; }
+    public int BulkBytes { get; set; }
 }
 
 public sealed class RoomState(WorldRecord world, SnapshotRecord? snapshot)
@@ -27,6 +29,7 @@ public sealed class RoomState(WorldRecord world, SnapshotRecord? snapshot)
     public Dictionary<string, RoomPeer> Peers { get; } = [];
     public List<OrderedCommand> Tail { get; } = [];
     public SortedDictionary<long, CommitRecord> Commits { get; } = [];
+    public SortedSet<long> Checkpoints { get; } = [];
     public long Epoch { get; set; } = (snapshot?.Epoch ?? 0) + 1;
     public long Tick { get; set; } = snapshot?.Tick ?? 0;
     public long Sequence { get; set; } = snapshot?.Sequence ?? 0;
@@ -41,7 +44,7 @@ public sealed class RoomState(WorldRecord world, SnapshotRecord? snapshot)
     public DateTimeOffset? RecoveryUntil { get; set; }
 }
 
-public sealed record CommitRecord(long Tick, long Sequence, int Substeps);
+public sealed record CommitRecord(long Tick, long Sequence, int Substeps, bool Checkpoint = false);
 
 /// <summary>Server ordering/lease authority only. This class contains no physical simulation.</summary>
 public sealed class Rooms(WorldStore store, TimeProvider time)
@@ -184,13 +187,18 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     RequireHost(room, peer, message.Epoch);
                     if (message.Commits == null || message.Commits.Length is < 1 or > 32) throw new ApiFailure(400, "commit_batch_size");
                     var cursorTick = room.Tick; var cursorSequence = room.ConfirmedSequence;
+                    var checkpointTick = room.Checkpoints.Count == 0 ? -240 : room.Checkpoints.Max;
                     foreach (var frame in message.Commits)
                     {
                         if (frame.Tick != ++cursorTick || frame.Sequence < cursorSequence || frame.Sequence > room.Sequence ||
                             frame.Sequence - cursorSequence > 256 || frame.Substeps is < 1 or > 16) throw new ApiFailure(400, "invalid_commit");
                         cursorSequence = frame.Sequence;
+                        if (frame.Checkpoint)
+                        { if (frame.Tick - checkpointTick < 240) throw new ApiFailure(429, "checkpoint_rate"); checkpointTick = frame.Tick; }
                     }
-                    foreach (var frame in message.Commits) room.Commits[frame.Tick] = frame;
+                    foreach (var frame in message.Commits)
+                    { room.Commits[frame.Tick] = frame; if (frame.Checkpoint) room.Checkpoints.Add(frame.Tick); }
+                    while (room.Checkpoints.Count > 8) room.Checkpoints.Remove(room.Checkpoints.Min);
                     while (room.Commits.Count > 4096) room.Commits.Remove(room.Commits.First().Key);
                     room.Tick = cursorTick; room.ConfirmedSequence = cursorSequence; room.LeaseUntil = now.AddSeconds(8);
                     peer.AcknowledgedSequence = cursorSequence; peer.AcknowledgedTick = cursorTick; room.DirtySince ??= now;
@@ -199,6 +207,14 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     if (room.HostId != null) Send(room, room.Peers[room.HostId], "snapshot_requested", new { participantId = identity.Id });
                     else Send(room, peer, "restore_required", new { snapshot = store.Versions(id).FirstOrDefault() });
                     break;
+                case "repairing":
+                    if (room.HostId == identity.Id) throw new ApiFailure(409, "host_cannot_rewind");
+                    peer.Ready = false; break;
+                case "peer_resync":
+                    RequireHost(room, peer, message.Epoch);
+                    if (message.ParticipantId == null || !room.Peers.TryGetValue(message.ParticipantId, out var resyncPeer))
+                        throw new ApiFailure(400, "repair_recipient");
+                    Send(room, resyncPeer, "checkpoint_required"); break;
                 default: throw new ApiFailure(400, "unknown_message");
             }
         }
@@ -218,6 +234,38 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 throw new ApiFailure(400, "bulk_header");
             var epoch = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(8));
             var tick = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(16));
+            var kind = data[4];
+            if (epoch != room.Epoch) throw new ApiFailure(409, "stale_epoch");
+            if (kind is < 1 or > 3 || data.Length > 48 * 1024 + (kind == 1 ? 32 : 48)) throw new ApiFailure(400, "bulk_kind");
+            var transferId = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(24));
+            var part = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(28));
+            var parts = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(30));
+            if (transferId == 0 || parts == 0 || parts > (kind == 2 ? 11 : 1366) || part >= parts || data[5] != 0 || data[6] != 0 || data[7] != 0)
+                throw new ApiFailure(400, "bulk_chunks");
+            var now = time.GetUtcNow();
+            if (now - peer.BulkWindow >= TimeSpan.FromSeconds(1)) { peer.BulkWindow = now; peer.BulkBytes = 0; }
+            peer.BulkBytes += data.Length;
+            if (peer.BulkBytes > (room.HostId == identity.Id ? 16 : 1) * 1024 * 1024) throw new ApiFailure(429, "bulk_rate");
+            if (kind != 1)
+            {
+                if (data.Length < 49 || !room.Checkpoints.Contains(tick)) throw new ApiFailure(400, "unscheduled_checkpoint");
+                var target = new Guid(data.AsSpan(32, 16)).ToString("N");
+                RoomPeer recipient;
+                if (kind == 2)
+                {
+                    if (target != identity.Id || room.HostId == null || room.HostId == identity.Id)
+                        throw new ApiFailure(403, "digest_sender");
+                    recipient = room.Peers[room.HostId];
+                }
+                else
+                {
+                    RequireHost(room, peer, epoch);
+                    if (target == identity.Id || !room.Peers.TryGetValue(target, out recipient!)) throw new ApiFailure(403, "repair_recipient");
+                }
+                if (recipient.BulkConnectionId == null || !recipient.Bulk.Writer.TryWrite(data))
+                    throw new ApiFailure(429, "state_consumer_capacity");
+                return;
+            }
             RequireHost(room, peer, epoch);
             if (tick < 0 || tick > room.Tick) throw new ApiFailure(400, "bulk_tick");
             foreach (var other in room.Peers.Values.Where(x => x.Identity.Id != identity.Id && x.BulkConnectionId != null))
@@ -289,6 +337,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
     private void LoseHost(RoomState room)
     {
         var old = room.HostId; room.HostId = null; room.Epoch++;
+        room.Checkpoints.Clear();
         if (old != null && room.Peers.TryGetValue(old, out var oldPeer)) oldPeer.Ready = false;
         Broadcast(room, "paused", new { reason = "host_lost" });
         room.RecoveryUntil = time.GetUtcNow().AddSeconds(2);

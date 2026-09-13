@@ -36,7 +36,7 @@ public sealed record SnapshotRecord(string WorldId, long Revision, long Epoch, l
 public sealed record SnapshotUpload(long Epoch, long Tick, long Sequence, long ExpectedRevision, string Sha256);
 public sealed record Admission(WorldView World, string ParticipantId, int Team, int ProtocolVersion);
 public sealed record ControlMessage(string Type, int Version = Protocol.Version, long Epoch = 0, long Tick = 0,
-    long Sequence = 0, int Substeps = 1, WorldCommand? Command = null, CommitRecord[]? Commits = null);
+    long Sequence = 0, int Substeps = 1, WorldCommand? Command = null, CommitRecord[]? Commits = null, string? ParticipantId = null);
 public sealed record WorldCommand(string Kind, string Action, float X = 0, float Z = 0, float Radius = 0,
     float Amount = 0, string? Key = null, float Value = 0, string? ObjectId = null, uint CommandType = 0,
     uint Flags = 0, uint MaterialId = 0, float Strength = 0, float Duration = 0,

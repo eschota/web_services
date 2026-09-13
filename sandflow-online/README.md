@@ -36,6 +36,10 @@ Tests instantiate room/storage state directly. They launch no local web server a
 
 2026-09-14 continuation: snapshot v2 carries bounded non-cell module sections while decoding v1 remains supported. The Unity candidate now captures obstacle and draggable state and orders validated actor pose/carry/release/settle actions alongside brush input. Server suite passes 56 assertions. Native same-tick revalidation is pending; previous comparable captures FAILED physical agreement. SnapshotCompare now checks captured section bytes and metadata as well as fields; it still cannot certify missing schema coverage or rendering. Public admission stays closed.
 
+The next candidate adds portable 32x32 digest/repair codecs and a bounded checkpoint ring, plus scheduled checkpoint flags in commit batches. State kind 2 routes a participant's digest only to authority; kind 3 routes an authority repair only to the addressed same-room participant. Peer identity, epoch, scheduled tick, chunk bounds, byte rate and authority rights are checked. `repairing` excludes a rewinding follower from host election. `peer_resync` is authority-only. Suite passes 85 assertions plus 10 voice-service checks; voice/client-web separately passes 13 mocked lifecycle/media-gate tests. None establishes live voice or 100-player gameplay.
+
+An offline repair of the actual divergent native capture pair passed field tolerances and exact module state: digest 17,277 bytes + repair 1,598,802 bytes versus full snapshot 2,505,269 bytes. This one capture-pair size comparison is not a runtime bandwidth/FPS optimization claim. The Unity GPU fixture also passed historical repair followed by 30 steps/two recorded commands. The live periodic client integration still needs validation. In particular, seamless authority changes during rewind, full settings/actor coverage and high-player command-tail retention remain open acceptance work.
+
 ## Runtime contract
 
 - `SANDFLOW_DATA`: dedicated persistent directory, never an AutoRig data path.

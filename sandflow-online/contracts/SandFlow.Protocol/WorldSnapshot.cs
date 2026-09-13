@@ -206,7 +206,7 @@ namespace SandFlow.Protocol
                 if (total > MaximumDecodedBytes) throw new InvalidDataException("Snapshot decoded size limit.");
             }
         }
-        private static void ValidateHeader(WorldSnapshot s)
+        internal static void ValidateHeader(WorldSnapshot s)
         {
             if (s.WorldId == null || s.WorldId.Length != 32) throw new InvalidDataException("Snapshot world id.");
             foreach (var c in s.WorldId) if (!Uri.IsHexDigit(c)) throw new InvalidDataException("Snapshot world id.");
