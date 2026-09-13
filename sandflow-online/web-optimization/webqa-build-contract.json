@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "profile": "WebQa",
+  "outputDirectory": "Builds/online-web-qa",
+  "template": "PROJECT:SandFlowOnlineQa",
+  "graphicsApi": "WebGPU",
+  "compressionFormat": "Brotli",
+  "decompressionFallback": true,
+  "threadsSupport": false,
+  "dataCaching": true,
+  "nameFilesAsHashes": true,
+  "routeBase": "/sandflow/qa/",
+  "cachePolicy": "no-store"
+}

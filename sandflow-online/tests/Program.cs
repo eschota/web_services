@@ -261,6 +261,37 @@ Check(store.Authenticate(qaClaim.Session.Token,qaClock.GetUtcNow().AddHours(2))=
 qaClock.Advance(TimeSpan.FromMinutes(6));
 Denied(()=>qaAccess.Claim(challenge.CookieValue,GrantQa),"qa_browser_proof_required");
 Denied(()=>qaAccess.Approve(challenge.Code,routeWorld.Id,true),"qa_challenge_expired");
+var inputBudget=new InputCommandBudget(qaClock.GetUtcNow());
+Check(Enumerable.Range(0,120).All(_=>inputBudget.Take(qaClock.GetUtcNow()))&&!inputBudget.Take(qaClock.GetUtcNow()),"input budget allows bounded burst then rejects excess");
+qaClock.Advance(TimeSpan.FromMilliseconds(10));
+Check(inputBudget.Take(qaClock.GetUtcNow())&&!inputBudget.Take(qaClock.GetUtcNow()),"input tokens replenish continuously without a fixed-window edge");
+Check(!inputBudget.Take(qaClock.GetUtcNow().AddSeconds(-1)),"clock reversal cannot replenish input budget");
+var streamOwner=store.NewGuest(clock.GetUtcNow()).Identity;
+var streamWorld=store.Create(streamOwner,new(),clock.GetUtcNow());
+rooms.Join(streamOwner,streamWorld.Id,null);
+var (streamPeer,streamConnection)=rooms.Connect(streamOwner,streamWorld.Id,false);
+rooms.Receive(streamOwner,streamWorld.Id,streamConnection,new("ready",Epoch:1));
+for(var sequence=1;sequence<=6000;sequence++)
+{
+    clock.Advance(TimeSpan.FromSeconds(1d/60));
+    rooms.Receive(streamOwner,streamWorld.Id,streamConnection,new("input",Epoch:1,Sequence:sequence,Command:new("simulation","enqueue",CommandType:1)));
+    if(sequence%2==0)rooms.Receive(streamOwner,streamWorld.Id,streamConnection,new("commitBatch",Epoch:1,Commits:[new(sequence,sequence,1)]));
+    else rooms.Receive(streamOwner,streamWorld.Id,streamConnection,new("commit",Epoch:1,Tick:sequence,Sequence:sequence));
+    var observedOrder=false;
+    while(streamPeer.Events.Reader.TryRead(out var streamed))
+    {
+        if(streamed.Type=="ordered")observedOrder=true;
+        if(streamed.Type is "committed" or "committedBatch" && !observedOrder)throw new Exception("Commit delivered before input.");
+    }
+}
+Check(streamPeer.Ready&&store.Versions(streamWorld.Id).Count==0,"6000 continuous inputs stay bounded without a cloud save and preserve FIFO order");
+rooms.Receive(streamOwner,streamWorld.Id,streamConnection,new("input",Epoch:1,Sequence:6001,Command:new("simulation","enqueue",CommandType:1)));
+rooms.Join(b.Identity,streamWorld.Id,null);
+var (streamLate,_)=rooms.Connect(b.Identity,streamWorld.Id,false);
+streamLate.Events.Reader.TryRead(out var streamWelcome);
+var welcomeData=System.Text.Json.JsonSerializer.SerializeToElement(streamWelcome!.Data);
+var pendingCommands=welcomeData.GetProperty("commands");
+Check(welcomeData.GetProperty("hostId").GetString()==streamOwner.Id&&pendingCommands.GetArrayLength()==1&&pendingCommands[0].GetProperty("Sequence").GetInt64()==6001,"live welcome retains only uncommitted input and identifies snapshot host");
 Console.WriteLine($"RESULT {testCount} assertions passed. No HTTP server or physical simulation launched.");
 
 sealed class ManualClock : TimeProvider

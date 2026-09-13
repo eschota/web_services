@@ -14,7 +14,7 @@ Implemented and exercised by direct .NET tests:
 - dormant empty rooms, member kick/block, separate WSS control/state routing;
 - delegated LiveKit token library with microphone-only grants and team-room isolation.
 
-Not complete: Unity online adapter/gateway, full actor/settings snapshot coverage and tile repair/replay, full settings validation, world reset/rollback, Steam authentication/entitlement, all full-game maps, actual voice media integration, UFO/PvP, physical menus, capacity/browser/crossplay QA. The portable snapshot codec now bounds decompression, validates physical field shape/finiteness and binds world/epoch/tick/sequence; the Unity capture currently covers physical fields only. Public admission stays disabled until integration/QA. No 100-player capacity claim.
+The Unity adapter and live historical tile repair/replay pass finite native-pair tests, including a late join. Captured state includes physical fields, obstacles and draggables. Still incomplete: full actor/settings reconstruction, seamless migration and graceful exit, world reset/rollback, Steam authentication/entitlement, all full-game maps, actual voice media integration, UFO/PvP, physical menus, capacity and mixed-client acceptance. Public admission stays disabled. No 100-player capacity claim.
 
 Moderation analysis: `voice/docs/MODERATION_ANALYSIS.md`. Owner selected reactive RU/EN recognition with a 60-second communication mute; first offending speech may already be audible. Runtime ASR/moderation is not implemented.
 
@@ -47,6 +47,12 @@ An offline repair of the actual divergent native capture pair passed field toler
 The separate QA WebGPU template/deployment lives only under `/sandflow/qa/`; the public root and AutoRig routes are preserved. `deploy/install-web-qa.sh` checks archive/config hashes, uses immutable web releases, adds only a SandFlow QA include and restores the prior snippets if nginx validation/reload fails. Browser rendering and mixed-client gameplay still require real QA. Current server tests: 99 assertions plus 10 voice-service checks.
 
 ## Runtime contract
+
+### Continuous-input and browser QA checkpoint — 2026-09-14
+
+The new QA browser actually rendered, joined a Windows client and performed minute-spaced cloud saves. A real Windows brush stroke disconnected with `input_rate`: the prototype generated input at the simulation frequency. The candidate now samples tool input at 30 Hz while retaining accumulated tool time; physics steps are unchanged. Server allowance is a bounded 120-command burst/refill token budget. Confirmed commands are trimmed after commit, retaining all pending commands: live late entrants must use a fresh host snapshot rather than replaying from an old cloud save. Tests exercise 6,000 continuous inputs without a cloud save, FIFO delivery and pending-tail retention (104 server assertions plus 10 voice-service tests pass). This is not a 16-player load or mixed-physics acceptance result.
+
+QA root nginx alias/index and overlay positioning were corrected. Hash-named Unity outputs prevent reusing a previous release's data-cache keys; the installer verifies all four referenced hashed outputs before switching the QA snippet. Public `/sandflow/` remains the old single-player release. Browser revalidation of these fixes is required after deployment.
 
 - `SANDFLOW_DATA`: dedicated persistent directory, never an AutoRig data path.
 - `SANDFLOW_ADMISSION_ENABLED`: false by default; explicit true only after client QA.

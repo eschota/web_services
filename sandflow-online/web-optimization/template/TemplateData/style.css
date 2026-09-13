@@ -9,3 +9,4 @@ body { overflow: hidden; }
 #detail { font-variant-numeric: tabular-nums; color: #b9c7d1; }
 #error { padding: 1rem; border: 1px solid #e78383; border-radius: .5rem; background: #321c20; color: #ffd9dc; }
 #mode-badge { position: absolute; z-index: 3; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); padding: .45rem .7rem; border-radius: .35rem; background: #5a4314; color: #fff0bd; font-weight: 650; }
+#mode-badge.qa-badge { left: auto; right: max(84px, calc(72px + env(safe-area-inset-right))); pointer-events: none; text-align: right; }

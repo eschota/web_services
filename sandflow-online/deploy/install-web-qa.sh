@@ -25,7 +25,13 @@ if [[ ! -d "$target" ]]; then
 else
     [[ -f "$target/.archive-sha256" && "$(cat "$target/.archive-sha256")" == "$archive_sha" ]] || exit 4
 fi
-[[ -f "$target/index.html" && -f "$target/Build/online-web-qa.wasm.unityweb" && -f "$target/Build/online-web-qa.data.unityweb" ]] || exit 5
+[[ -f "$target/index.html" ]] || exit 5
+# Hash-named Unity outputs avoid stale data-cache objects across alias switches.
+for suffix in 'loader.js' 'framework.js.unityweb' 'wasm.unityweb' 'data.unityweb'; do
+    escaped_suffix="${suffix//./\\.}"
+    mapfile -t files < <(grep -oE "[a-f0-9]{32}\\.$escaped_suffix" "$target/index.html" | sort -u)
+    [[ "${#files[@]}" == 1 && -f "$target/Build/${files[0]}" ]] || exit 5
+done
 grep -Fq 'routeBase: "/sandflow/qa/"' "$target/index.html" || exit 5
 grep -Fq 'mode: "live"' "$target/index.html" || exit 5
 preflight="$work/web-qa-$release.preflight.conf"

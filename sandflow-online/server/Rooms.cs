@@ -17,8 +17,7 @@ public sealed class RoomPeer(Identity identity, int team, DateTimeOffset admitte
     { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
     public string? BulkConnectionId { get; set; }
     public long LastClientSequence { get; set; }
-    public DateTimeOffset CommandWindow { get; set; }
-    public int CommandCount { get; set; }
+    public InputCommandBudget InputBudget { get; } = new(admitted);
     public DateTimeOffset BulkWindow { get; set; }
     public int BulkBytes { get; set; }
 }
@@ -163,8 +162,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     if (message.Sequence <= peer.LastClientSequence) throw new ApiFailure(409, "duplicate_input");
                     if (room.Tail.Count >= 4096) throw new ApiFailure(429, "checkpoint_required");
                     if (message.Command == null) throw new ApiFailure(400, "missing_command");
-                    if (now - peer.CommandWindow >= TimeSpan.FromSeconds(1)) { peer.CommandWindow = now; peer.CommandCount = 0; }
-                    if (++peer.CommandCount > 60) throw new ApiFailure(429, "input_rate");
+                    if (!peer.InputBudget.Take(now)) throw new ApiFailure(429, "input_rate");
                     CommandValidation.Validate(message.Command);
                     if (message.Command.Kind is "map" or "reset")
                     {
@@ -181,6 +179,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                         message.Sequence - room.ConfirmedSequence > 256 || message.Substeps is < 1 or > 16)
                         throw new ApiFailure(400, "invalid_commit");
                     room.Tick = message.Tick; room.ConfirmedSequence = message.Sequence;
+                    TrimConfirmedInputs(room);
                     room.Commits[message.Tick] = new(message.Tick, message.Sequence, message.Substeps);
                     while (room.Commits.Count > 4096) room.Commits.Remove(room.Commits.First().Key);
                     room.LeaseUntil = now.AddSeconds(8); peer.AcknowledgedSequence = message.Sequence; peer.AcknowledgedTick = message.Tick; room.DirtySince ??= now;
@@ -203,6 +202,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     while (room.Checkpoints.Count > 8) room.Checkpoints.Remove(room.Checkpoints.Min);
                     while (room.Commits.Count > 4096) room.Commits.Remove(room.Commits.First().Key);
                     room.Tick = cursorTick; room.ConfirmedSequence = cursorSequence; room.LeaseUntil = now.AddSeconds(8);
+                    TrimConfirmedInputs(room);
                     peer.AcknowledgedSequence = cursorSequence; peer.AcknowledgedTick = cursorTick; room.DirtySince ??= now;
                     Broadcast(room, "committedBatch", new { commits = message.Commits }); break;
                 case "resync":
@@ -221,6 +221,13 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 default: throw new ApiFailure(400, "unknown_message");
             }
         }
+    }
+    private static void TrimConfirmedInputs(RoomState room)
+    {
+        // Existing peers already received these commands through their ordered FIFO.
+        // A live newcomer MUST start from a fresh host snapshot; the cloud save alone
+        // cannot reconstruct this interval. Keep every not-yet-committed command.
+        room.Tail.RemoveAll(command => command.Sequence <= room.ConfirmedSequence);
     }
     private void RequireHost(RoomState room, RoomPeer peer, long epoch)
     {
