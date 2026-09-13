@@ -4,7 +4,7 @@ Approved plan/live log: https://github.com/eschota/Sand-Keeper/tree/main/docs . 
 
 ## Current status (2026-09-13)
 
-Foundation candidate, not a launched multiplayer game. Public admission and voice are OFF by default.
+Foundation candidate, not a launched multiplayer game. Public admission and voice are OFF by default. The nginx root route `/sandflow/` now maps to the existing public single-player prototype release `sandflow-v0135-f957395` (already served at `/realflow/`). This compatibility route does not enable new multiplayer or change `map.autorig.online`.
 
 Implemented and exercised by direct .NET tests:
 
@@ -40,3 +40,5 @@ Tests instantiate room/storage state directly. They launch no local web server a
 - Unavailable Steam/reset/voice operations return explicit errors, not simulated success.
 
 Deploy SandFlow-only immutable release directories, not the repository root. Existing AutoRig route/process health must remain unchanged across any scoped nginx reload.
+
+`deploy/update-nginx-snippet.sh` updates only the existing SandFlow snippet after checking its prior hash, candidate hash and pinned WebGPU payload presence. It backs up the old snippet inside the service project, runs `nginx -t`, reloads nginx and restores the exact prior snippet if validation fails. The existing HTML uses relative `Build/` and `TemplateData/` paths, so all client resources are served under the new prefix. [nginx alias](https://nginx.org/en/docs/http/ngx_http_core_module.html#alias), [configuration reload](https://nginx.org/en/docs/control.html).
