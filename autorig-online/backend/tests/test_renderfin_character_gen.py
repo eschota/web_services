@@ -1354,6 +1354,83 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_structural_low_lod_limit_is_terminal_without_retry_or_attempt(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    message = (
+                        "generation failed on f13: "
+                        "MODEL_INPUT_UNSUPPORTED[LOW_LOD_STRUCTURAL_FLOOR]: "
+                        "minimum=1973 target=1000 components=1973"
+                    )
+                    for queue_class in ("interactive", "collection_background"):
+                        job = await _idle_job(
+                            manager,
+                            stage=CHARGEN_STAGE_HUNYUAN,
+                            queue_class=queue_class,
+                            collection_guid=(
+                                "collection-1"
+                                if queue_class == "collection_background"
+                                else ""
+                            ),
+                            hunyuan_task_id="https://converter-f13/status/task-1",
+                            hunyuan_worker="f13",
+                        )
+                        job.stage_started_at = time.time() - 120
+                        job.timed_stage = CHARGEN_STAGE_HUNYUAN
+                        await manager._handle_stage_error(job, RuntimeError(message))
+                        self.assertEqual(job.stage, CHARGEN_STAGE_FAILED)
+                        self.assertEqual(job.error, message)
+                        self.assertEqual(job.last_error, message)
+                        self.assertEqual(job.attempts, {})
+                        self.assertEqual(job.retry_at, 0)
+                        self.assertEqual(job.stage_started_at, 0)
+                        self.assertEqual(job.timed_stage, "")
+                        self.assertEqual(
+                            job.hunyuan_task_id,
+                            "https://converter-f13/status/task-1",
+                        )
+                        self.assertEqual(job.hunyuan_worker, "f13")
+                        self.assertFalse(
+                            character_gen._failed_on_recoverable_infrastructure(job)
+                        )
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_structural_low_lod_code_requires_exact_consistent_payload(self):
+        valid = (
+            "generation failed on f13: "
+            "MODEL_INPUT_UNSUPPORTED[LOW_LOD_STRUCTURAL_FLOOR]: "
+            "minimum=1973 target=1000 components=1973"
+        )
+        self.assertTrue(character_gen._is_model_terminal_failure(valid))
+        self.assertFalse(character_gen._is_farm_breakage(valid))
+        for invalid in (
+            valid + " forged",
+            valid.replace("minimum=1973", "minimum=999"),
+            valid.replace("target=1000", "target=0"),
+            valid.replace("components=1973", "components=0"),
+            valid.replace("minimum=1973", "minimum=1001").replace(
+                "components=1973", "components=5000"
+            ),
+            valid.replace("MODEL_INPUT_UNSUPPORTED", "model_input_unsupported"),
+            valid.replace("minimum=1973", "minimum=1973  "),
+            valid.replace("target=1000", "target=1000\n"),
+            " " + valid,
+            valid + " ",
+            valid + "\n",
+            "Low-LOD structural floor 1973 exceeds triangle target 1000",
+            "Vertex-PBR manifest is missing",
+        ):
+            with self.subTest(message=invalid):
+                self.assertFalse(character_gen._is_model_terminal_failure(invalid))
+
     def test_collection_comfy_5xx_parks_and_releases_failed_render(self):
         async def scenario():
             with _Env():

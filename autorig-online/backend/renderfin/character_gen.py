@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -223,10 +224,25 @@ _FARM_BREAKAGE_MARKERS = (
     "blender vertex-pbr pipeline failed",
 )
 
+_MODEL_TERMINAL_ERROR_RE = re.compile(
+    r"(?:generation failed on [A-Za-z0-9._-]+: )?"
+    r"MODEL_INPUT_UNSUPPORTED\[LOW_LOD_STRUCTURAL_FLOOR\]: "
+    r"minimum=([0-9]{1,9}) target=([0-9]{1,9}) components=([0-9]{1,9})"
+)
+
 
 def _is_farm_breakage(text: str) -> bool:
     low = (text or "").lower()
     return any(marker in low for marker in _FARM_BREAKAGE_MARKERS)
+
+
+def _is_model_terminal_failure(text: str) -> bool:
+    """Match only stable worker codes that prove an input-specific limit."""
+    match = _MODEL_TERMINAL_ERROR_RE.fullmatch(str(text or ""))
+    if match is None:
+        return False
+    minimum, target, components = (int(value) for value in match.groups())
+    return minimum >= components > 0 and minimum > target > 0
 
 
 def _is_hunyuan_capacity_wait(text: str) -> bool:
@@ -1165,6 +1181,25 @@ class CharacterGenManager:
                     job.error = ""
                     await self._persist(job)
                     return
+
+        if stage == CHARGEN_STAGE_HUNYUAN and _is_model_terminal_failure(str(exc)):
+            # The worker proved that preserving every disconnected component
+            # cannot satisfy the strict low-LOD triangle contract. Another GPU
+            # cannot change that topology, and a generic missing-manifest label
+            # would otherwise revive the same expensive generation forever.
+            # The terminal worker binding is retained for diagnostics, matching
+            # the ordinary exhausted-attempt path below.
+            job.error = job.last_error
+            job.stage = CHARGEN_STAGE_FAILED
+            job.retry_at = 0
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} terminal model contract "
+                f"failure at {stage}: {exc}"
+            )
+            return
 
         if (
             stage == CHARGEN_STAGE_FLUX
