@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "checkedUtc": "2026-09-13T12:17:51.0182851Z",
+  "status": "PASS",
+  "scope": "HTTP routing and exact resource delivery, NOT browser execution or multiplayer",
+  "clientRelease": "sandflow-v0135-f957395",
+  "backendRevision": "268c47f03610c79d468384a12f036f7af9b0d878",
+  "admissionEnabled": false,
+  "redirect": 301,
+  "root": 200,
+  "missingResource": 404,
+  "hiddenResource": 403,
+  "assets": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 8095,
+      "sha256": "3604DD892D4B7AC812E63BFB774DD947D38DB992AAEB9C6613AFE6D73CE9F2E6"
+    },
+    {
+      "path": "TemplateData/style.css",
+      "status": 200,
+      "bytes": 1448,
+      "sha256": "8E3625E108A61DCD1D31303376D9E02D7BDC08921D254E8F4359B892B3825CAA"
+    },
+    {
+      "path": "Build/web.loader.js",
+      "status": 200,
+      "bytes": 118031,
+      "sha256": "605A9916E7A5B90DFC290A431876378D156592A99684356E6625915C17B0955D"
+    },
+    {
+      "path": "Build/web.framework.js.unityweb",
+      "status": 200,
+      "bytes": 72921,
+      "sha256": "08E87FE35FD8833C2F2498F93691D4F02717F3A022E437B74F0AF4017980BB1E"
+    },
+    {
+      "path": "Build/web.wasm.unityweb",
+      "status": 200,
+      "bytes": 7853661,
+      "sha256": "472C5B6B34DB88FD60CE69B55256F67738ABD9E4E1F44D62E81D0D2FD4A344A9"
+    },
+    {
+      "path": "Build/web.data.unityweb",
+      "status": 200,
+      "bytes": 28146600,
+      "sha256": "D01A2BD92A8681011A2C7BD08ADA040318E10403C4A18887049A3CBBE28538CC"
+    }
+  ],
+  "regressions": {
+    "https://autorig.online/realflow/": 200,
+    "https://autorig.online/gallery": 200,
+    "https://map.autorig.online/": 200
+  },
+  "sourceHashesVerified": true,
+  "sourceRoot": "/srv/autorig/webgl-assets/realflow/releases/sandflow-v0135-f957395",
+  "browserExecutionVerified": false
+}
