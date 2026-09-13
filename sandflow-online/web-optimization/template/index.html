@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <base href="/sandflow/">
+  <title>{{{ PRODUCT_NAME }}}</title>
+  <link rel="stylesheet" href="TemplateData/style.css">
+</head>
+<body>
+  <main id="shell" aria-busy="true">
+    <canvas id="unity-canvas" tabindex="-1" aria-label="SandFlow"></canvas>
+    <section id="loading" role="status" aria-live="polite">
+      <h1>SandFlow</h1>
+      <p id="status">Checking browser capabilities…</p>
+      <progress id="progress" max="1" value="0"></progress>
+      <p id="detail">0%</p>
+    </section>
+    <div id="mode-badge" hidden></div>
+    <div id="error" role="alert" hidden></div>
+  </main>
+  <script>
+    window.SandFlowBootstrapConfig = Object.freeze({
+      schemaVersion: 1,
+      mode: "preview",
+      loaderUrl: "Build/{{{ LOADER_FILENAME }}}",
+      unityConfig: {
+        arguments: [],
+        dataUrl: "Build/{{{ DATA_FILENAME }}}",
+        frameworkUrl: "Build/{{{ FRAMEWORK_FILENAME }}}",
+        codeUrl: "Build/{{{ CODE_FILENAME }}}",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "{{{ COMPANY_NAME }}}",
+        productName: "{{{ PRODUCT_NAME }}}",
+        productVersion: "{{{ PRODUCT_VERSION }}}",
+        devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2)
+      },
+      stallWarningSeconds: 30,
+      capabilityTimeoutSeconds: 10,
+      loadTimeoutSeconds: 180
+    });
+  </script>
+  <script src="TemplateData/sandflow-bootstrap.js"></script>
+  <script>window.SandFlowBootstrap.start(window.SandFlowBootstrapConfig);</script>
+</body>
+</html>

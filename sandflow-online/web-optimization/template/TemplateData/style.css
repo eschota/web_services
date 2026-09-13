@@ -1,0 +1,11 @@
+:root { color-scheme: dark; font: 16px/1.4 system-ui, sans-serif; background: #101317; color: #f3f5f7; }
+html, body, #shell, #unity-canvas { width: 100%; height: 100%; margin: 0; }
+body { overflow: hidden; }
+#shell { position: relative; background: radial-gradient(circle at 50% 35%, #263846, #101317 68%); }
+#unity-canvas { display: block; outline: 0; }
+#loading, #error { position: absolute; left: 50%; top: 50%; width: min(34rem, calc(100% - 3rem)); transform: translate(-50%,-50%); text-align: center; }
+#loading h1 { margin: 0 0 .5rem; font-size: 1.6rem; }
+#progress { width: 100%; height: .8rem; accent-color: #66c7b4; }
+#detail { font-variant-numeric: tabular-nums; color: #b9c7d1; }
+#error { padding: 1rem; border: 1px solid #e78383; border-radius: .5rem; background: #321c20; color: #ffd9dc; }
+#mode-badge { position: absolute; z-index: 3; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); padding: .45rem .7rem; border-radius: .35rem; background: #5a4314; color: #fff0bd; font-weight: 650; }
