@@ -144,7 +144,9 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 case "ready":
                     var current = message.Sequence == room.ConfirmedSequence && message.Tick == room.Tick;
                     var retained = room.Commits.TryGetValue(message.Tick, out var readyAt) && readyAt.Sequence == message.Sequence;
-                    if (!current && !retained)
+                    var saved = !current && !retained ? store.Versions(id).FirstOrDefault() : null;
+                    var atSaved = saved != null && saved.Tick == message.Tick && saved.Sequence == message.Sequence;
+                    if (!current && !retained && !atSaved)
                         throw new ApiFailure(409, "baseline_mismatch");
                     peer.Ready = true; peer.AcknowledgedSequence = message.Sequence; peer.AcknowledgedTick = message.Tick;
                     Elect(room); Broadcast(room, "presence", ViewOf(room)); break;
@@ -204,6 +206,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     peer.AcknowledgedSequence = cursorSequence; peer.AcknowledgedTick = cursorTick; room.DirtySince ??= now;
                     Broadcast(room, "committedBatch", new { commits = message.Commits }); break;
                 case "resync":
+                    if (room.HostId != identity.Id) peer.Ready = false;
                     if (room.HostId != null) Send(room, room.Peers[room.HostId], "snapshot_requested", new { participantId = identity.Id });
                     else Send(room, peer, "restore_required", new { snapshot = store.Versions(id).FirstOrDefault() });
                     break;
