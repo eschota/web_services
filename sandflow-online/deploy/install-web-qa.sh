@@ -28,6 +28,9 @@ fi
 [[ -f "$target/index.html" && -f "$target/Build/online-web-qa.wasm.unityweb" && -f "$target/Build/online-web-qa.data.unityweb" ]] || exit 5
 grep -Fq 'routeBase: "/sandflow/qa/"' "$target/index.html" || exit 5
 grep -Fq 'mode: "live"' "$target/index.html" || exit 5
+preflight="$work/web-qa-$release.preflight.conf"
+printf 'pid %s/nginx-qa-preflight.pid;\nerror_log %s/nginx-qa-preflight.log warn;\nevents { worker_connections 16; }\nhttp { include /etc/nginx/mime.types; access_log off; server { listen 127.0.0.1:18270; include %s; } }\n' "$work" "$work" "$candidate" > "$preflight"
+/usr/sbin/nginx -t -c "$preflight"
 backup="$work/web-qa-$release.main.backup.conf"
 cp -p "$main" "$backup"
 had_qa=false

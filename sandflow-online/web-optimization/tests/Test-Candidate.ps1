@@ -31,6 +31,9 @@ if($nginx -notmatch 'default_type application/octet-stream' -or $nginx -notmatch
 if($qaNginx -notmatch '__SANDFLOW_QA_RELEASE_ROOT__' -or $qaNginx -notmatch 'X-Robots-Tag "noindex, nofollow, noarchive"'){
     throw 'QA release-root or search-index exclusion is missing.'
 }
+if(-not $qaNginx.Contains('location ~ "^/sandflow/qa/s/[0-9a-fA-F]{32}$" {')){
+    throw 'Nginx regex quantifier braces require a quoted location expression.'
+}
 if(($qaNginx -match '(?m)^location\s+(?:\^~\s+)?/sandflow/(?:\s|\{)') -or ($qaNginx -match '(?m)^location[^\r\n]*/sandflow/(?:api|ws|health)')){
     throw 'QA static layout must not redefine public root, API, WS or health routes.'
 }
