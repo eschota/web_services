@@ -25,10 +25,10 @@ public sealed class WorldStore
     private SqliteConnection Open() { var db = new SqliteConnection(_connection); db.Open(); return db; }
     private static void Execute(SqliteConnection db, string sql)
     { using var cmd = db.CreateCommand(); cmd.CommandText = sql; cmd.ExecuteNonQuery(); }
-    public SessionGrant NewGuest(DateTimeOffset now)
+    public SessionGrant NewGuest(DateTimeOffset now, bool previewApproved = false)
     {
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        var identity = new Identity(Protocol.RandomId(), false, null);
+        var identity = new Identity(Protocol.RandomId(), false, null, previewApproved);
         using var db = Open(); using var cmd = db.CreateCommand();
         cmd.CommandText = "INSERT INTO sessions VALUES($hash,$json,$expires)";
         cmd.Parameters.AddWithValue("$hash", Protocol.Hash(token));

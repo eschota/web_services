@@ -18,6 +18,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = Protocol.MaxSnapshotBytes);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new WorldStore(builder.Configuration["SANDFLOW_DATA"] ?? Path.Combine(AppContext.BaseDirectory, "data")));
+builder.Services.AddSingleton(new DeviceTelemetryStore(builder.Configuration["SANDFLOW_DATA"] ?? Path.Combine(AppContext.BaseDirectory, "data"), TimeProvider.System));
 builder.Services.AddSingleton<Rooms>();
 builder.Services.AddSingleton(new VoiceTokenService(VoiceTokenOptions.FromEnvironment()));
 builder.Services.AddHostedService<RoomHousekeeping>();
@@ -57,23 +58,40 @@ app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSecond
 app.MapGet("/health", () => Results.Ok(new { service = "sandflow", protocol = Protocol.Version, physics = "client-only",
     admissionEnabled = builder.Configuration["SANDFLOW_ADMISSION_ENABLED"] == "true", stage = "foundation-not-gameplay-validated", revision = buildRevision }));
 var api = app.MapGroup("/api/v1");
+api.MapPost("/telemetry", async (HttpContext context, DeviceTelemetryStore store) =>
+{
+    // Explicit bounded body read before deserialization; no arbitrary diagnostic strings or IP/Steam identifiers.
+    if (context.Request.ContentLength > 8192) throw new ApiFailure(413, "telemetry_size");
+    var buffer = new byte[8193]; var length = 0;
+    while (length < buffer.Length)
+    {
+        var count = await context.Request.Body.ReadAsync(buffer.AsMemory(length), context.RequestAborted);
+        if (count == 0) break;
+        length += count;
+    }
+    if (length > 8192) throw new ApiFailure(413, "telemetry_size");
+    var report = JsonSerializer.Deserialize<DeviceTelemetry>(buffer.AsSpan(0, length), Wire.Json) ?? throw new ApiFailure(400, "telemetry_empty");
+    store.Accept(report); return Results.Accepted();
+});
 Identity Auth(HttpContext context, WorldStore store)
 {
     var authorization = context.Request.Headers.Authorization.ToString();
     var token = authorization.StartsWith("Bearer ", StringComparison.Ordinal) ? authorization[7..] : context.Request.Cookies["sf_session"];
     return store.Authenticate(token, DateTimeOffset.UtcNow) ?? throw new ApiFailure(401, "authentication_required");
 }
-void AdmissionGate()
+void AdmissionGate(HttpContext context, Identity? identity = null)
 {
-    if (builder.Configuration["SANDFLOW_ADMISSION_ENABLED"] != "true") throw new ApiFailure(503, "online_preview_not_ready");
+    if (!AdmissionPolicy.Allows(builder.Configuration["SANDFLOW_ADMISSION_ENABLED"] == "true", identity?.PreviewApproved == true,
+        builder.Configuration["SANDFLOW_QA_TOKEN"] ?? "", context.Request.Headers["X-SF-QA-Token"].ToString()))
+        throw new ApiFailure(503, "online_preview_not_ready");
 }
 api.MapPost("/sessions/guest", (HttpContext context, WorldStore store) =>
 {
-    AdmissionGate();
     var existing = context.Request.Cookies["sf_session"];
     var identity = store.Authenticate(existing, DateTimeOffset.UtcNow);
+    AdmissionGate(context, identity);
     if (identity != null) return Results.Ok(new { token = existing, identity });
-    var grant = store.NewGuest(DateTimeOffset.UtcNow);
+    var grant = store.NewGuest(DateTimeOffset.UtcNow, builder.Configuration["SANDFLOW_ADMISSION_ENABLED"] != "true");
     context.Response.Cookies.Append("sf_session", grant.Token, new CookieOptions
     { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/sandflow/", MaxAge = TimeSpan.FromDays(30) });
     return Results.Ok(new { token = grant.Token, identity = grant.Identity });
@@ -81,13 +99,13 @@ api.MapPost("/sessions/guest", (HttpContext context, WorldStore store) =>
 api.MapGet("/worlds", (WorldStore store, Rooms rooms) => Results.Ok(store.PublicWorlds().Select(w => rooms.View(w.Id))));
 api.MapPost("/worlds", (HttpContext context, CreateWorld request, WorldStore store, Rooms rooms) =>
 {
-    AdmissionGate(); var owner = Auth(context, store); var world = store.Create(owner, request, DateTimeOffset.UtcNow);
+    var owner = Auth(context, store); AdmissionGate(context, owner); var world = store.Create(owner, request, DateTimeOffset.UtcNow);
     return Results.Ok(rooms.Join(owner, world.Id, null));
 });
 api.MapPost("/worlds/autojoin", (HttpContext context, WorldStore store, Rooms rooms) =>
-{ AdmissionGate(); return Results.Ok(rooms.AutoJoin(Auth(context, store))); });
+{ var identity = Auth(context, store); AdmissionGate(context, identity); return Results.Ok(rooms.AutoJoin(identity)); });
 api.MapPost("/worlds/{id}/join", (HttpContext context, string id, JoinRequest request, WorldStore store, Rooms rooms) =>
-{ AdmissionGate(); return Results.Ok(rooms.Join(Auth(context, store), id, request.Password)); });
+{ var identity = Auth(context, store); AdmissionGate(context, identity); return Results.Ok(rooms.Join(identity, id, request.Password)); });
 api.MapGet("/worlds/{id}/snapshots", (HttpContext context, string id, WorldStore store, Rooms rooms) =>
 { rooms.Member(Auth(context, store), id); return Results.Ok(store.Versions(id)); });
 api.MapGet("/worlds/{id}/snapshots/latest", (HttpContext context, string id, WorldStore store, Rooms rooms) =>
@@ -120,7 +138,7 @@ api.MapPost("/worlds/{id}/voice-token", (HttpContext context, string id, WorldSt
 api.MapPost("/sessions/steam", () => Results.Json(new { error = "steam_auth_not_enabled" }, statusCode: 503));
 app.Map("/ws/{id}/{channel}", async (HttpContext context, string id, string channel, WorldStore store, Rooms rooms) =>
 {
-    AdmissionGate(); var identity = Auth(context, store);
+    var identity = Auth(context, store); AdmissionGate(context, identity);
     if (!context.WebSockets.IsWebSocketRequest || channel is not ("control" or "state")) throw new ApiFailure(400, "websocket_required");
     var bulk = channel == "state";
     var (peer, connection) = rooms.Connect(identity, id, bulk);

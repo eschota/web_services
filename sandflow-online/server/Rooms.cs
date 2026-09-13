@@ -112,6 +112,9 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 if (peer.ConnectionId == null) throw new ApiFailure(409, "control_required");
                 if (peer.BulkConnectionId != null) throw new ApiFailure(409, "already_connected");
                 peer.BulkConnectionId = connection;
+                var room = Get(id);
+                if (room.HostId != null && room.HostId != identity.Id)
+                    Send(room, room.Peers[room.HostId], "snapshot_requested", new { participantId = identity.Id });
             }
             else
             {
@@ -136,7 +139,9 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
             switch (message.Type)
             {
                 case "ready":
-                    if (message.Sequence != room.ConfirmedSequence || message.Tick != room.Tick)
+                    var current = message.Sequence == room.ConfirmedSequence && message.Tick == room.Tick;
+                    var retained = room.Commits.TryGetValue(message.Tick, out var readyAt) && readyAt.Sequence == message.Sequence;
+                    if (!current && !retained)
                         throw new ApiFailure(409, "baseline_mismatch");
                     peer.Ready = true; peer.AcknowledgedSequence = message.Sequence; peer.AcknowledgedTick = message.Tick;
                     Elect(room); Broadcast(room, "presence", ViewOf(room)); break;
@@ -175,7 +180,25 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     while (room.Commits.Count > 4096) room.Commits.Remove(room.Commits.First().Key);
                     room.LeaseUntil = now.AddSeconds(8); peer.AcknowledgedSequence = message.Sequence; peer.AcknowledgedTick = message.Tick; room.DirtySince ??= now;
                     Broadcast(room, "committed", new { substeps = message.Substeps }); break;
-                case "resync": Send(room, peer, "checkpoint_required", store.Versions(id).FirstOrDefault()); break;
+                case "commitBatch":
+                    RequireHost(room, peer, message.Epoch);
+                    if (message.Commits == null || message.Commits.Length is < 1 or > 32) throw new ApiFailure(400, "commit_batch_size");
+                    var cursorTick = room.Tick; var cursorSequence = room.ConfirmedSequence;
+                    foreach (var frame in message.Commits)
+                    {
+                        if (frame.Tick != ++cursorTick || frame.Sequence < cursorSequence || frame.Sequence > room.Sequence ||
+                            frame.Sequence - cursorSequence > 256 || frame.Substeps is < 1 or > 16) throw new ApiFailure(400, "invalid_commit");
+                        cursorSequence = frame.Sequence;
+                    }
+                    foreach (var frame in message.Commits) room.Commits[frame.Tick] = frame;
+                    while (room.Commits.Count > 4096) room.Commits.Remove(room.Commits.First().Key);
+                    room.Tick = cursorTick; room.ConfirmedSequence = cursorSequence; room.LeaseUntil = now.AddSeconds(8);
+                    peer.AcknowledgedSequence = cursorSequence; peer.AcknowledgedTick = cursorTick; room.DirtySince ??= now;
+                    Broadcast(room, "committedBatch", new { commits = message.Commits }); break;
+                case "resync":
+                    if (room.HostId != null) Send(room, room.Peers[room.HostId], "snapshot_requested", new { participantId = identity.Id });
+                    else Send(room, peer, "restore_required", new { snapshot = store.Versions(id).FirstOrDefault() });
+                    break;
                 default: throw new ApiFailure(400, "unknown_message");
             }
         }
