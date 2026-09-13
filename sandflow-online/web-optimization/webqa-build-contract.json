@@ -9,6 +9,7 @@
   "threadsSupport": false,
   "dataCaching": true,
   "nameFilesAsHashes": true,
+  "unityWebContentEncoding": "br",
   "routeBase": "/sandflow/qa/",
   "cachePolicy": "no-store"
 }

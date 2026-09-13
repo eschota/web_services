@@ -35,8 +35,11 @@ if($nginx -notmatch 'default_type application/octet-stream' -or $nginx -notmatch
 if($qaNginx -notmatch '__SANDFLOW_QA_RELEASE_ROOT__' -or $qaNginx -notmatch 'X-Robots-Tag "noindex, nofollow, noarchive"'){
     throw 'QA release-root or search-index exclusion is missing.'
 }
-if(([regex]::Matches($qaNginx,'add_header Cache-Control "no-store" always;').Count -ne 3) -or ($qaNginx -match '(?im)^\s*add_header\s+Cache-Control[^\r\n]*(?:immutable|max-age)') -or ($qaNginx -match '(?im)^\s*add_header\s+Content-Encoding')){
-    throw 'Every QA HTML/asset response must remain no-store and fallback payloads unencoded.'
+if(([regex]::Matches($qaNginx,'add_header Cache-Control "no-store" always;').Count -ne 6) -or ($qaNginx -match '(?im)^\s*add_header\s+Cache-Control[^\r\n]*(?:immutable|max-age)')){
+    throw 'Every QA HTML/asset response must remain no-store.'
+}
+if(([regex]::Matches($qaNginx,'add_header Content-Encoding "br" always;').Count -ne 3) -or ($qaNginx -notmatch 'default_type application/wasm') -or ($qaNginx -notmatch 'default_type application/javascript')){
+    throw 'Exactly the three hash-named Unity payload types require native Brotli and correct MIME.'
 }
 if(-not $qaNginx.Contains('location ~ "^/sandflow/qa/s/[0-9a-fA-F]{32}$" {')){
     throw 'Nginx regex quantifier braces require a quoted location expression.'
@@ -51,7 +54,7 @@ $css=Get-Content -LiteralPath (Join-Path $root 'template\TemplateData\style.css'
 if(($css -notmatch '#mode-badge\.qa-badge[^\{]*\{[^\}]*right:\s*max\(84px,') -or ($css -notmatch '#mode-badge\.qa-badge[^\{]*\{[^\}]*pointer-events:\s*none')){
     throw 'QA badge must reserve 84px at top-right and not intercept input.'
 }
-if(($buildContract.schemaVersion -ne 1) -or ($buildContract.profile -ne 'WebQa') -or ($buildContract.template -ne 'PROJECT:SandFlowOnlineQa') -or (-not $buildContract.nameFilesAsHashes) -or (-not $buildContract.dataCaching) -or ($buildContract.routeBase -ne '/sandflow/qa/') -or ($buildContract.cachePolicy -ne 'no-store')){
+if(($buildContract.schemaVersion -ne 1) -or ($buildContract.profile -ne 'WebQa') -or ($buildContract.template -ne 'PROJECT:SandFlowOnlineQa') -or (-not $buildContract.nameFilesAsHashes) -or (-not $buildContract.dataCaching) -or ($buildContract.routeBase -ne '/sandflow/qa/') -or ($buildContract.cachePolicy -ne 'no-store') -or ($buildContract.unityWebContentEncoding -ne 'br')){
     throw 'WebQA hashed-file/cache integration contract is invalid.'
 }
 
