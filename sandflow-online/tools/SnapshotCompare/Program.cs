@@ -31,7 +31,10 @@ foreach(var section in left.Sections)
 {
     var other=right.Sections.SingleOrDefault(x=>x.Name==section.Name);
     var equal=other!=null&&section.Data.SequenceEqual(other.Data);sectionsEqual&=equal;
-    sectionRows.Add(new{section=section.Name,leftBytes=section.Data.Length,rightBytes=other?.Data.Length??0,equal});
+    var differences=new List<int>();var count=0;
+    if(other!=null)for(var i=0;i<Math.Min(section.Data.Length,other.Data.Length);i++)
+        if(section.Data[i]!=other.Data[i]){count++;if(differences.Count<16)differences.Add(i);}
+    sectionRows.Add(new{section=section.Name,leftBytes=section.Data.Length,rightBytes=other?.Data.Length??0,equal,differingBytes=count,firstDifferenceOffsets=differences});
 }
 var capturedStateWithinTolerance=comparable&&within&&sectionsEqual&&left.MetadataJson==right.MetadataJson;
 var report=new{schemaVersion=2,scope="Captured physical fields and optional module bytes; full schema completeness and visual equivalence are not established",comparable,capturedStateWithinTolerance,

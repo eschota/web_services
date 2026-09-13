@@ -1,0 +1,19 @@
+{
+  "name": "@sandflow/voice-client-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "livekit-client": "2.21.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
