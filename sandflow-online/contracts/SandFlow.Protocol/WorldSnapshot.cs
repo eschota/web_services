@@ -24,6 +24,7 @@ namespace SandFlow.Protocol
         public float OriginZ;
         public string MetadataJson = "{}";
         public List<SnapshotField> Fields = new List<SnapshotField>();
+        public List<SnapshotSection> Sections = new List<SnapshotSection>();
     }
     [Serializable]
     public sealed class SnapshotField
@@ -33,11 +34,18 @@ namespace SandFlow.Protocol
         public bool Unsigned;
         public byte[] Data = Array.Empty<byte>();
     }
+    [Serializable]
+    public sealed class SnapshotSection
+    {
+        public string Name = "";
+        public byte[] Data = Array.Empty<byte>();
+    }
 
     /// <summary>Portable lossless physical-field container; no Unity or server dependencies.</summary>
     public static class SnapshotCodec
     {
-        public const int Version = 1;
+        public const int Version = 2;
+        public const int MaximumSectionBytes = 8 * 1024 * 1024;
         public const int MaximumDecodedBytes = 64 * 1024 * 1024;
         public const int MaximumEncodedBytes = MaximumDecodedBytes + 1024 * 1024;
         public const int MaximumCells = 640 * 512;
@@ -45,9 +53,11 @@ namespace SandFlow.Protocol
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("SFSNAP01");
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
 
-        public static byte[] Encode(WorldSnapshot snapshot)
+        public static byte[] Encode(WorldSnapshot snapshot, int formatVersion = Version)
         {
             Validate(snapshot);
+            if (formatVersion < 1 || formatVersion > Version || (formatVersion == 1 && snapshot.Sections.Count != 0))
+                throw new InvalidDataException("Snapshot version cannot represent sections.");
             byte[] raw;
             using (var output = new MemoryStream())
             using (var writer = new BinaryWriter(output, Utf8, true))
@@ -64,6 +74,12 @@ namespace SandFlow.Protocol
                     WriteText(writer, field.Name, 64); writer.Write(field.Stride); writer.Write(field.Unsigned);
                     writer.Write(field.Data.Length); writer.Write(field.Data);
                 }
+                if (formatVersion >= 2)
+                {
+                    writer.Write(snapshot.Sections.Count);
+                    foreach (var section in snapshot.Sections)
+                    { WriteText(writer, section.Name, 64); writer.Write(section.Data.Length); writer.Write(section.Data); }
+                }
                 writer.Flush();
                 if (output.Length > MaximumDecodedBytes) throw new InvalidDataException("Snapshot decoded size limit.");
                 raw = output.ToArray();
@@ -78,7 +94,7 @@ namespace SandFlow.Protocol
             using (var writer = new BinaryWriter(output, Utf8, true))
             using (var sha = SHA256.Create())
             {
-                writer.Write(Magic); writer.Write(Version); writer.Write(raw.Length); writer.Write(compressed.Length);
+                writer.Write(Magic); writer.Write(formatVersion); writer.Write(raw.Length); writer.Write(compressed.Length);
                 writer.Write(sha.ComputeHash(raw)); writer.Write(compressed); writer.Flush();
                 if (output.Length > MaximumEncodedBytes) throw new InvalidDataException("Snapshot encoded size limit.");
                 return output.ToArray();
@@ -93,7 +109,8 @@ namespace SandFlow.Protocol
             {
                 var magic = Exact(reader, 8);
                 for (var i = 0; i < magic.Length; i++) if (magic[i] != Magic[i]) throw new InvalidDataException("Snapshot magic.");
-                if (reader.ReadInt32() != Version) throw new InvalidDataException("Snapshot version.");
+                var formatVersion = reader.ReadInt32();
+                if (formatVersion < 1 || formatVersion > Version) throw new InvalidDataException("Snapshot version.");
                 var decodedLength = reader.ReadInt32(); var compressedLength = reader.ReadInt32();
                 if (decodedLength < 1 || decodedLength > MaximumDecodedBytes || compressedLength < 1 || compressedLength != bytes.Length - 52)
                     throw new InvalidDataException("Snapshot declared size.");
@@ -111,10 +128,10 @@ namespace SandFlow.Protocol
                     for (var i = 0; i < digest.Length; i++) difference |= actual[i] ^ digest[i];
                     if (difference != 0) throw new InvalidDataException("Snapshot checksum.");
                 }
-                return Parse(raw);
+                return Parse(raw, formatVersion);
             }
         }
-        private static WorldSnapshot Parse(byte[] bytes)
+        private static WorldSnapshot Parse(byte[] bytes, int formatVersion)
         {
             using (var input = new MemoryStream(bytes, false))
             using (var reader = new BinaryReader(input, Utf8, true))
@@ -137,6 +154,19 @@ namespace SandFlow.Protocol
                         count != (long)snapshot.ResX * snapshot.ResZ * field.Stride || count > input.Length - input.Position)
                         throw new InvalidDataException("Snapshot field shape.");
                     field.Data = Exact(reader, count); snapshot.Fields.Add(field);
+                }
+                if (formatVersion >= 2)
+                {
+                    var sections = reader.ReadInt32();
+                    if (sections < 0 || sections > 32) throw new InvalidDataException("Snapshot section count.");
+                    for (var i = 0; i < sections; i++)
+                    {
+                        var section = new SnapshotSection { Name = ReadText(reader, 64) };
+                        var length = reader.ReadInt32();
+                        if (length < 1 || length > MaximumSectionBytes || length > input.Length - input.Position)
+                            throw new InvalidDataException("Snapshot section size.");
+                        section.Data = Exact(reader, length); snapshot.Sections.Add(section);
+                    }
                 }
                 if (input.Position != input.Length) throw new InvalidDataException("Snapshot trailing payload.");
                 Validate(snapshot); return snapshot;
@@ -164,6 +194,16 @@ namespace SandFlow.Protocol
                         if ((field.Data[offset + 3] & 0x7f) == 0x7f && (field.Data[offset + 2] & 0x80) != 0)
                             throw new InvalidDataException("Non-finite snapshot field.");
                     }
+            }
+            if (snapshot.Sections == null || snapshot.Sections.Count > 32) throw new InvalidDataException("Snapshot section count.");
+            foreach (var section in snapshot.Sections)
+            {
+                if (section == null || string.IsNullOrWhiteSpace(section.Name) || Utf8.GetByteCount(section.Name) > 64 || !names.Add(section.Name))
+                    throw new InvalidDataException("Snapshot section name.");
+                if (section.Data == null || section.Data.Length < 1 || section.Data.Length > MaximumSectionBytes)
+                    throw new InvalidDataException("Snapshot section size.");
+                total += section.Data.LongLength + 128;
+                if (total > MaximumDecodedBytes) throw new InvalidDataException("Snapshot decoded size limit.");
             }
         }
         private static void ValidateHeader(WorldSnapshot s)

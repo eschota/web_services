@@ -34,6 +34,8 @@ Tests instantiate room/storage state directly. They launch no local web server a
 
 2026-09-13 continuation: the client fixed asynchronous GPU readback lifetime and passed a delayed-consumer 21-field restore check. The next private native pair saved successfully but disconnected early; same-tick agreement remains unverified. The service now logs only fixed WebSocket rejection codes or exception type (not raw messages, credentials or passwords) before sibling-task cancellation can obscure the actual cause. Unit suite: 43 server assertions and 10 voice tests pass. Public admission stays closed.
 
+2026-09-14 continuation: snapshot v2 carries bounded non-cell module sections while decoding v1 remains supported. The Unity candidate now captures obstacle and draggable state and orders validated actor pose/carry/release/settle actions alongside brush input. Server suite passes 56 assertions. Native same-tick revalidation is pending; previous comparable captures FAILED physical agreement. SnapshotCompare now checks captured section bytes and metadata as well as fields; it still cannot certify missing schema coverage or rendering. Public admission stays closed.
+
 ## Runtime contract
 
 - `SANDFLOW_DATA`: dedicated persistent directory, never an AutoRig data path.

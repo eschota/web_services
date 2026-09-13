@@ -39,23 +39,32 @@ public sealed record ControlMessage(string Type, int Version = Protocol.Version,
     long Sequence = 0, int Substeps = 1, WorldCommand? Command = null, CommitRecord[]? Commits = null);
 public sealed record WorldCommand(string Kind, string Action, float X = 0, float Z = 0, float Radius = 0,
     float Amount = 0, string? Key = null, float Value = 0, string? ObjectId = null, uint CommandType = 0,
-    uint Flags = 0, uint MaterialId = 0, float Strength = 0, float Duration = 0);
+    uint Flags = 0, uint MaterialId = 0, float Strength = 0, float Duration = 0,
+    float Y = 0, float Qx = 0, float Qy = 0, float Qz = 0, float Qw = 1);
 public sealed record OrderedCommand(long Sequence, string ParticipantId, WorldCommand Command);
 public sealed record ServerEvent(string Type, string WorldId, long Epoch, long Tick, long Sequence,
     object? Data = null);
 
 public static class CommandValidation
 {
-    private static readonly HashSet<string> Kinds = ["simulation", "brush", "stamp", "object", "cannon", "ufo", "setting", "map", "reset", "undo"];
+    private static readonly HashSet<string> Kinds = ["simulation", "draggable", "brush", "stamp", "object", "cannon", "ufo", "setting", "map", "reset", "undo"];
     public static void Validate(WorldCommand value)
     {
         if (!Kinds.Contains(value.Kind) || string.IsNullOrWhiteSpace(value.Action) || value.Action.Length > 40)
             throw new ApiFailure(400, "invalid_command");
-        foreach (var number in new[] { value.X, value.Z, value.Radius, value.Amount, value.Value, value.Strength, value.Duration })
+        foreach (var number in new[] { value.X, value.Y, value.Z, value.Radius, value.Amount, value.Value, value.Strength, value.Duration, value.Qx, value.Qy, value.Qz, value.Qw })
             if (!float.IsFinite(number)) throw new ApiFailure(400, "non_finite_command");
-        if (Math.Abs(value.X) > 120 || Math.Abs(value.Z) > 120 || value.Radius < 0 || value.Radius > 120 ||
+        if (Math.Abs(value.X) > 120 || Math.Abs(value.Y) > 120 || Math.Abs(value.Z) > 120 || value.Radius < 0 || value.Radius > 120 ||
             Math.Abs(value.Amount) > 10000 || Math.Abs(value.Value) > 100000 || Math.Abs(value.Strength) > 10000 || value.Duration is < 0 or > 60 || value.CommandType >= 32 || value.Key?.Length > 80 ||
             value.ObjectId?.Length > 64) throw new ApiFailure(400, "command_out_of_range");
+        if (value.Kind == "draggable")
+        {
+            if (value.ObjectId == null || !Protocol.ValidId(value.ObjectId) ||
+                value.Action is not ("pose" or "begin" or "end" or "release" or "settle") || value.Flags > 3 || Math.Abs(value.Amount) > 120)
+                throw new ApiFailure(400, "invalid_actor_action");
+            var norm = (double)value.Qx * value.Qx + (double)value.Qy * value.Qy + (double)value.Qz * value.Qz + (double)value.Qw * value.Qw;
+            if (norm < .99 || norm > 1.01) throw new ApiFailure(400, "invalid_actor_rotation");
+        }
     }
 }
 

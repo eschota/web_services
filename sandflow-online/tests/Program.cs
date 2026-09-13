@@ -54,6 +54,17 @@ var state = State(1, 1, 1);
 var hash = Convert.ToHexString(SHA256.HashData(state));
 var decoded = SnapshotCodec.Decode(state);
 Check(decoded.WorldId == privateWorld.Id && decoded.Fields[0].Data.Length == 1024 && decoded.Tick == 1, "portable physical codec roundtrip");
+Check(SnapshotCodec.Decode(SnapshotCodec.Encode(decoded, 1)).Sections.Count == 0, "legacy v1 physical snapshot remains readable");
+decoded.Sections.Add(new SnapshotSection { Name = "obstacles-v1", Data = new byte[] { 1, 2, 3, 4 } });
+Check(SnapshotCodec.Decode(SnapshotCodec.Encode(decoded)).Sections[0].Data.SequenceEqual(new byte[] { 1, 2, 3, 4 }), "versioned non-cell state section roundtrip");
+void BadSnapshot(Action action, string label)
+{ var denied = false; try { action(); } catch (InvalidDataException) { denied = true; } Check(denied, label); }
+BadSnapshot(() => SnapshotCodec.Encode(decoded, 1), "sections cannot silently downgrade to legacy v1");
+decoded.Sections.Add(new SnapshotSection { Name = "obstacles-v1", Data = new byte[] { 0 } });
+BadSnapshot(() => SnapshotCodec.Encode(decoded), "duplicate section rejected");
+decoded.Sections.RemoveAt(1);
+decoded.Sections[0].Data = new byte[SnapshotCodec.MaximumSectionBytes + 1];
+BadSnapshot(() => SnapshotCodec.Encode(decoded), "oversized section rejected before compression");
 var snapshot = rooms.Save(a.Identity, privateWorld.Id, new(1, 1, 1, 0, hash), state, false);
 Check(snapshot.Revision == 1 && store.Read(snapshot).SequenceEqual(state), "snapshot roundtrip");
 Denied(() => rooms.Save(a.Identity, privateWorld.Id, new(1, 1, 1, 1, hash), state, false), "autosave_interval");
@@ -112,6 +123,18 @@ var late = store.NewGuest(clock.GetUtcNow()); rooms.Join(late.Identity, batchWor
 var (_, lateConnection) = rooms.Connect(late.Identity, batchWorld.Id, false);
 rooms.Receive(late.Identity, batchWorld.Id, lateConnection, new("ready", Epoch: 1, Tick: 2, Sequence: 1));
 Check(true, "late join can acknowledge a retained checkpoint while host keeps advancing");
+CommandValidation.Validate(new("draggable", "pose", ObjectId: a.Identity.Id, Y: .5f, Flags: 1));
+Check(true, "bounded actor pose accepted");
+Denied(() => CommandValidation.Validate(new("draggable", "pose", ObjectId: "not-an-id")), "invalid_actor_action");
+Denied(() => CommandValidation.Validate(new("draggable", "run-script", ObjectId: a.Identity.Id)), "invalid_actor_action");
+Denied(() => CommandValidation.Validate(new("draggable", "pose", ObjectId: a.Identity.Id, Qw: 0)), "invalid_actor_rotation");
+Denied(() => CommandValidation.Validate(new("draggable", "pose", ObjectId: a.Identity.Id, Qx: float.NaN)), "non_finite_command");
+Denied(() => CommandValidation.Validate(new("draggable", "settle", ObjectId: a.Identity.Id, Amount: 121)), "invalid_actor_action");
+Denied(() => CommandValidation.Validate(new("draggable", "settle", ObjectId: a.Identity.Id, Flags: 4)), "invalid_actor_action");
+rooms.Receive(late.Identity, batchWorld.Id, lateConnection, new("input", Epoch: 1, Sequence: 1,
+    Command: new("draggable", "release", ObjectId: a.Identity.Id, Amount: .25f)));
+rooms.Receive(b.Identity, batchWorld.Id, batchConnection, new("commit", Epoch: 1, Tick: 4, Sequence: 2));
+Check(true, "actor commands share the same confirmed sequence as brush commands");
 Console.WriteLine($"RESULT {testCount} assertions passed. No HTTP server or physical simulation launched.");
 
 sealed class ManualClock : TimeProvider

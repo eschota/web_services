@@ -26,11 +26,19 @@ foreach(var field in left.Fields)
     rows.Add(new{field=field.Name,elements=count,differingBits=differing,outsideTolerance=outside,maxAbs=max,meanAbs=sum/Math.Max(1,count),rms=Math.Sqrt(squares/Math.Max(1,count))});
 }
 comparable&=left.Fields.Count==right.Fields.Count;
-var report=new{schemaVersion=1,scope="Physical checkpoint fields only; excludes actor/settings coverage and visual equivalence",comparable,
+var sectionRows=new List<object>();var sectionsEqual=left.Sections.Count==right.Sections.Count;
+foreach(var section in left.Sections)
+{
+    var other=right.Sections.SingleOrDefault(x=>x.Name==section.Name);
+    var equal=other!=null&&section.Data.SequenceEqual(other.Data);sectionsEqual&=equal;
+    sectionRows.Add(new{section=section.Name,leftBytes=section.Data.Length,rightBytes=other?.Data.Length??0,equal});
+}
+var capturedStateWithinTolerance=comparable&&within&&sectionsEqual&&left.MetadataJson==right.MetadataJson;
+var report=new{schemaVersion=2,scope="Captured physical fields and optional module bytes; full schema completeness and visual equivalence are not established",comparable,capturedStateWithinTolerance,
     exactPhysicalFields=comparable&&exact,withinPhysicalTolerance=comparable&&within,absoluteTolerance=1e-4,relativeTolerance=1e-6,
     world=left.WorldId,leftEpoch=left.Epoch,rightEpoch=right.Epoch,leftTick=left.Tick,rightTick=right.Tick,leftSequence=left.Sequence,rightSequence=right.Sequence,
-    metadataEqual=left.MetadataJson==right.MetadataJson,fields=rows};
+    metadataEqual=left.MetadataJson==right.MetadataJson,sectionsEqual,sections=sectionRows,fields=rows};
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(args[2]))!);
 File.WriteAllText(args[2],JsonSerializer.Serialize(report,new JsonSerializerOptions{WriteIndented=true}));
-Console.WriteLine(JsonSerializer.Serialize(new{comparable,exactPhysicalFields=comparable&&exact,withinPhysicalTolerance=comparable&&within,leftTick=left.Tick,rightTick=right.Tick}));
-return !comparable?2:within?0:1;
+Console.WriteLine(JsonSerializer.Serialize(new{comparable,exactPhysicalFields=comparable&&exact,withinPhysicalTolerance=comparable&&within,sectionsEqual,capturedStateWithinTolerance,leftTick=left.Tick,rightTick=right.Tick}));
+return !comparable?2:capturedStateWithinTolerance?0:1;
