@@ -1,0 +1,23 @@
+port: 7880
+bind_addresses:
+  - 127.0.0.1
+
+rtc:
+  use_external_ip: true
+  tcp_port: 7881
+  udp_port: 7882
+
+turn:
+  enabled: true
+  domain: turn.sandflow.autorig.online
+  tls_port: 5349
+  cert_file: /etc/livekit/certs/fullchain.pem
+  key_file: /etc/livekit/certs/privkey.pem
+
+# Replace both placeholders only in the ignored deploy/livekit.yaml file.
+# Never commit the real key or secret.
+keys:
+  REPLACE_WITH_API_KEY: REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS
+
+logging:
+  level: info

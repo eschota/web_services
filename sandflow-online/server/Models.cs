@@ -1,0 +1,84 @@
+using System.Security.Cryptography;
+using System.Text;
+
+namespace SandFlow.Server;
+
+public static class Protocol
+{
+    public const int Version = 1;
+    public const int TileSize = 32;
+    public const int MaximumMembers = 100;
+    public const int MaxCommandBytes = 16 * 1024;
+    public const int MaxSnapshotBytes = 64 * 1024 * 1024;
+    public const int MaxBulkBytes = 1024 * 1024;
+    public static readonly string[] DemoMaps = ["gentle-beach", "twin-shore-river", "sandbox-flat"];
+    public static string RandomId() => Guid.NewGuid().ToString("N");
+    public static bool ValidId(string id) => id.Length == 32 && id.All(Uri.IsHexDigit);
+    public static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+}
+
+public sealed class ApiFailure(int status, string code) : Exception(code)
+{
+    public int Status { get; } = status;
+    public string Code { get; } = code;
+}
+
+public sealed record Identity(string Id, bool FullAccess, string? SteamId);
+public sealed record SessionGrant(string Token, Identity Identity);
+public sealed record CreateWorld(string Mode = "coop", string Map = "twin-shore-river", bool IsPrivate = false,
+    string? Password = null, bool Demo = true, int TeamSize = 1);
+public sealed record WorldRecord(string Id, string OwnerId, string Mode, string Map, bool IsPrivate,
+    string? PasswordHash, bool Demo, int Capacity, int TeamSize, long CreatedUnix);
+public sealed record WorldView(string Id, string Mode, string Map, bool IsPrivate, bool Demo, int Capacity,
+    int Occupancy, string State, long Revision);
+public sealed record SnapshotRecord(string WorldId, long Revision, long Epoch, long Tick, long Sequence,
+    string Sha256, int Bytes, long CreatedUnix);
+public sealed record SnapshotUpload(long Epoch, long Tick, long Sequence, long ExpectedRevision, string Sha256);
+public sealed record Admission(WorldView World, string ParticipantId, int Team, int ProtocolVersion);
+public sealed record ControlMessage(string Type, int Version = Protocol.Version, long Epoch = 0, long Tick = 0,
+    long Sequence = 0, int Substeps = 1, WorldCommand? Command = null);
+public sealed record WorldCommand(string Kind, string Action, float X = 0, float Z = 0, float Radius = 0,
+    float Amount = 0, string? Key = null, float Value = 0, string? ObjectId = null);
+public sealed record OrderedCommand(long Sequence, string ParticipantId, WorldCommand Command);
+public sealed record ServerEvent(string Type, string WorldId, long Epoch, long Tick, long Sequence,
+    object? Data = null);
+
+public static class CommandValidation
+{
+    private static readonly HashSet<string> Kinds = ["brush", "stamp", "object", "cannon", "ufo", "setting", "map", "reset", "undo"];
+    public static void Validate(WorldCommand value)
+    {
+        if (!Kinds.Contains(value.Kind) || string.IsNullOrWhiteSpace(value.Action) || value.Action.Length > 40)
+            throw new ApiFailure(400, "invalid_command");
+        foreach (var number in new[] { value.X, value.Z, value.Radius, value.Amount, value.Value })
+            if (!float.IsFinite(number)) throw new ApiFailure(400, "non_finite_command");
+        if (Math.Abs(value.X) > 120 || Math.Abs(value.Z) > 120 || value.Radius < 0 || value.Radius > 120 ||
+            Math.Abs(value.Amount) > 10000 || Math.Abs(value.Value) > 100000 || value.Key?.Length > 80 ||
+            value.ObjectId?.Length > 64) throw new ApiFailure(400, "command_out_of_range");
+    }
+}
+
+public static class Passwords
+{
+    private const int Iterations = 600000;
+    public static string Create(string password)
+    {
+        if (password.Length is < 8 or > 128) throw new ApiFailure(400, "password_length");
+        var salt = RandomNumberGenerator.GetBytes(16);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, 32);
+        return $"pbkdf2-sha256${Iterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
+    }
+    public static bool Verify(string password, string? encoded)
+    {
+        if (password.Length > 128 || encoded == null) return false;
+        var parts = encoded.Split('$');
+        if (parts.Length != 4 || parts[0] != "pbkdf2-sha256" || !int.TryParse(parts[1], out var rounds) || rounds != Iterations)
+            return false;
+        try
+        {
+            var actual = Rfc2898DeriveBytes.Pbkdf2(password, Convert.FromBase64String(parts[2]), rounds, HashAlgorithmName.SHA256, 32);
+            return CryptographicOperations.FixedTimeEquals(actual, Convert.FromBase64String(parts[3]));
+        }
+        catch (FormatException) { return false; }
+    }
+}

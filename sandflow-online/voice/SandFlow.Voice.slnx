@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/SandFlow.Voice/SandFlow.Voice.csproj" />
+  <Project Path="tests/SandFlow.Voice.Tests/SandFlow.Voice.Tests.csproj" />
+</Solution>

@@ -1,0 +1,12 @@
+.work/
+**/bin/
+**/obj/
+**/data/
+*.db
+*.db-shm
+*.db-wal
+*.env
+!*.env.example
+!*.csproj
+!*.slnx
+*.log

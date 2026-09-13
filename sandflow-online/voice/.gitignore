@@ -1,0 +1,6 @@
+.work/
+**/bin/
+**/obj/
+deploy/livekit.yaml
+deploy/certs/
+.env
