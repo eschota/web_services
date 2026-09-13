@@ -148,7 +148,14 @@ app.Map("/ws/{id}/{channel}", async (HttpContext context, string id, string chan
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         var send = SendLoop(socket, peer, bulk, cancellation.Token);
         var receive = ReceiveLoop(socket, identity, id, connection, bulk, rooms, cancellation.Token);
-        await Task.WhenAny(send, receive);
+        var finished = await Task.WhenAny(send, receive);
+        if (finished.IsFaulted)
+        {
+            var failure = finished.Exception?.GetBaseException();
+            // Log only our fixed rejection code/type, never message bodies, tokens or passwords.
+            var code = failure is ApiFailure rejected ? rejected.Code : failure?.GetType().Name;
+            app.Logger.LogWarning("SandFlow socket ended: channel={Channel} code={Code}", channel, code);
+        }
         await cancellation.CancelAsync();
         try { await Task.WhenAll(send, receive); } catch (OperationCanceledException) { }
         if (socket.State == WebSocketState.Open) await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "reconnect", CancellationToken.None);

@@ -30,6 +30,10 @@ dotnet publish server/SandFlow.Server.csproj -c Release -r linux-x64 --self-cont
 
 Tests instantiate room/storage state directly. They launch no local web server and do not establish GPU/network gameplay quality.
 
+`tools/SnapshotCompare` decodes two real native checkpoint files and rejects different worlds, epochs, ticks, command cursors or grids before comparing physical fields. Float limits are fixed at absolute 1e-4 plus relative 1e-6; integer flags compare exactly. A passing physical-only result is not complete actor/settings or visual acceptance. Self-comparison passes and the earlier different-tick native captures correctly fail comparability.
+
+2026-09-13 continuation: the client fixed asynchronous GPU readback lifetime and passed a delayed-consumer 21-field restore check. The next private native pair saved successfully but disconnected early; same-tick agreement remains unverified. The service now logs only fixed WebSocket rejection codes or exception type (not raw messages, credentials or passwords) before sibling-task cancellation can obscure the actual cause. Unit suite: 43 server assertions and 10 voice tests pass. Public admission stays closed.
+
 ## Runtime contract
 
 - `SANDFLOW_DATA`: dedicated persistent directory, never an AutoRig data path.
