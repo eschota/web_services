@@ -1,0 +1,1 @@
+Dynamic Ivy WebGL demo: https://autorig.online/ivy/ (www redirects). Static isolated release, no server-side scene storage. Deploy follows gravityhouse atomic release workflow on way-fr; original game and backend are unchanged.
