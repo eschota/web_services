@@ -2,7 +2,7 @@
 
 Approved plan/live log: https://github.com/eschota/Sand-Keeper/tree/main/docs . Delivery: `eschota/web_services:main`. Physics runs **only on clients**.
 
-## Current status (2026-09-13)
+## Current status (2026-09-14)
 
 Foundation candidate, not a launched multiplayer game. Public admission and voice are OFF by default. The nginx root route `/sandflow/` now maps to the existing public single-player prototype release `sandflow-v0135-f957395` (already served at `/realflow/`). This compatibility route does not enable new multiplayer or change `map.autorig.online`.
 
@@ -14,7 +14,9 @@ Implemented and exercised by direct .NET tests:
 - dormant empty rooms, member kick/block, separate WSS control/state routing;
 - delegated LiveKit token library with microphone-only grants and team-room isolation.
 
-The Unity adapter and live historical tile repair/replay pass finite native-pair tests, including a late join. Captured state includes physical fields, obstacles and draggables. Still incomplete: full actor/settings reconstruction, seamless migration and graceful exit, world reset/rollback, Steam authentication/entitlement, all full-game maps, actual voice media integration, UFO/PvP, physical menus, capacity and mixed-client acceptance. Public admission stays disabled. No 100-player capacity claim.
+The Unity adapter and live historical tile repair/replay pass finite native-pair tests, including a late join. A real two-browser graceful departure/successor autosave/last-exit path also passes. Captured state includes physical fields, obstacles and draggables. Still incomplete: full actor/settings reconstruction, mixed abrupt recovery/native OS-close acceptance, world reset/rollback, Steam authentication/entitlement, all full-game maps, actual voice media integration, UFO/PvP, physical menus, capacity and mixed-client acceptance. Public admission stays disabled. No 100-player capacity claim.
+
+Typed tuning foundation: `contracts/SandFlow.Protocol/TuningSettings.cs` defines100 active numeric dials (99 shared, local PixelDensity), finite/range/scope validation and bounded deterministic tuning snapshots. Suite144 assertions and10 voice checks pass. Unity has a tested deferrable/coalescing model adapter, but room command dispatch and legacy-snapshot migration are not connected yet. This source-only foundation is not a live shared-settings feature; discrete prototype controls and full UI coverage remain required.
 
 Moderation analysis: `voice/docs/MODERATION_ANALYSIS.md`. Owner selected reactive RU/EN recognition with a 60-second communication mute; first offending speech may already be audible. Runtime ASR/moderation is not implemented.
 

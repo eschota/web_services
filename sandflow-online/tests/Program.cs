@@ -397,6 +397,27 @@ backlogRooms.Receive(backlogOwner,backlogWorld.Id,backlogConnection,new("commitB
 var backlogSnapshot=SnapshotCodec.Decode(State(1,3,600));backlogSnapshot.WorldId=backlogWorld.Id;var backlogPayload=SnapshotCodec.Encode(backlogSnapshot);
 var backlogReceipt=backlogRooms.CompleteDeparture(backlogOwner,backlogWorld.Id,backlogOperation,new(1,3,600,0,Convert.ToHexString(SHA256.HashData(backlogPayload))),backlogPayload);
 Check(backlogReceipt.Snapshot.Tick==3&&backlogReceipt.Snapshot.Sequence==600&&backlogRooms.View(backlogWorld.Id).State=="sleeping","departure drains more than 256 pending inputs across a bounded final step range");
+var tuning = TuningSettings.All.Where(value => value.Scope == SettingScope.Shared)
+    .ToDictionary(value => value.Key, value => (value.Min + value.Max) * .5f, StringComparer.Ordinal);
+Check(TuningSettings.All.Count == 100 && TuningSettings.SharedCount == 99, "reviewed tuning registry has 99 shared dials and one local quality dial");
+var tuningBytes = TuningSettings.Encode(tuning);
+var tuningCopy = TuningSettings.Decode(tuningBytes);
+Check(tuningCopy.Count == 99 && tuning.All(pair => tuningCopy[pair.Key] == pair.Value), "all shared tuning values roundtrip losslessly");
+var reversedTuning = tuning.Reverse().ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+Check(TuningSettings.Encode(reversedTuning).SequenceEqual(tuningBytes), "tuning encoding independent of insertion order");
+BadSnapshot(() => TuningSettings.ValidateShared("PixelDensity", 1), "local rendering preference cannot enter shared tuning");
+BadSnapshot(() => TuningSettings.ValidateShared("unknown-key", 1), "unknown tuning key denied");
+BadSnapshot(() => TuningSettings.ValidateShared("ErosionStrength", float.NaN), "NaN tuning denied");
+BadSnapshot(() => TuningSettings.ValidateShared("ErosionStrength", float.PositiveInfinity), "infinite tuning denied");
+BadSnapshot(() => TuningSettings.ValidateShared("ErosionStrength", 3), "out-of-range tuning denied");
+var incompleteTuning = new Dictionary<string, float>(tuning); incompleteTuning.Remove("ErosionStrength");
+BadSnapshot(() => TuningSettings.Encode(incompleteTuning), "incomplete tuning checkpoint denied");
+BadSnapshot(() => TuningSettings.Decode(tuningBytes[..^1]), "truncated tuning checkpoint denied");
+BadSnapshot(() => TuningSettings.Decode([..tuningBytes,0]), "trailing tuning data denied");
+var maliciousTuning = (byte[])tuningBytes.Clone(); maliciousTuning[12] = 255;
+BadSnapshot(() => TuningSettings.Decode(maliciousTuning), "forged tuning string length rejected before allocation");
+var badTuningVersion = (byte[])tuningBytes.Clone(); badTuningVersion[4] = 99;
+BadSnapshot(() => TuningSettings.Decode(badTuningVersion), "unknown tuning snapshot version denied");
 Console.WriteLine($"RESULT {testCount} assertions passed. No HTTP server or physical simulation launched.");
 
 sealed class ManualClock : TimeProvider
