@@ -18,14 +18,18 @@ try {
     Invoke-WebRequest -Uri ($api+'/worlds/'+$WorldId+'/snapshots/latest') -Headers $headers -OutFile $file
     [Reflection.Assembly]::LoadFrom((Join-Path $serviceRoot '.work/publish/SandFlow.Protocol.dll')) | Out-Null
     $state=[SandFlow.Protocol.SnapshotCodec]::Decode([IO.File]::ReadAllBytes($file))
-    $tuning=$null
-    foreach($section in $state.Sections){if($section.Name -eq 'tuning-v1'){$tuning=[SandFlow.Protocol.TuningSettings]::Decode($section.Data)}}
+    $tuning=$null;$options=$null
+    foreach($section in $state.Sections){
+        if($section.Name -eq 'tuning-v1'){$tuning=[SandFlow.Protocol.TuningSettings]::Decode($section.Data)}
+        if($section.Name -eq 'world-options-v1'){$options=[SandFlow.Protocol.WorldOptions]::Decode($section.Data)}
+    }
     if($null -eq $tuning){throw 'Saved state has no tuning section'}
     $defaults=[SandFlow.Protocol.CanonicalTuningDefaults]::Create()
     [ordered]@{
         worldId=$state.WorldId;epoch=$state.Epoch;tick=$state.Tick;sequence=$state.Sequence
         metadata=$state.MetadataJson;tuningCount=$tuning.Count;TintFloor=$tuning['TintFloor']
         canonicalTintFloor=$defaults['TintFloor'];ErosionStrength=$tuning['ErosionStrength']
+        worldOptions=$options
         containsLocalPixelDensity=$tuning.ContainsKey('PixelDensity');fileSha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash
         localFile=$file
     } | ConvertTo-Json -Depth 4
