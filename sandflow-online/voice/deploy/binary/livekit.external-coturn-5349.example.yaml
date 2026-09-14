@@ -1,0 +1,25 @@
+# Complete v1.13.6 candidate config using an external coturn listener on TLS 5349.
+# Embedded TURN remains disabled, avoiding its hard-coded :443 advertisement.
+port: 7880
+
+rtc:
+  use_external_ip: false
+  node_ip: 37.187.57.177
+  tcp_port: 7881
+  udp_port: 7882
+  turn_servers:
+    - host: autorig.online
+      port: 5349
+      protocol: tls
+      secret_file: /srv/sandflow/voice/secrets/turn-shared-secret
+      # v1.13.6 external-TURN default is 14400 seconds. Keep explicit and test
+      # long-session allocation refresh before reducing it.
+      ttl: 14400
+
+key_file: /srv/sandflow/voice/secrets/keys.yaml
+
+logging:
+  level: info
+
+turn:
+  enabled: false

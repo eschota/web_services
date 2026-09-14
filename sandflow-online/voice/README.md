@@ -41,16 +41,16 @@ This repository does not yet contain the Unity adapters, microphone UI, persiste
 
 Self-hosted LiveKit does not permanently invalidate an already-issued join JWT when a participant is removed or permissions change. Token issuance and every join/reconnect/track event must consult authoritative SandFlow state; administrative event enforcement has a non-zero window.
 
-## Deployment template (not applied)
+## Deployment templates (not applied)
 
-The image is pinned to LiveKit `v1.13.6` and its multi-platform manifest digest. Copy `livekit.example.yaml` to the ignored `livekit.yaml`, replace the key and secret, install TLS files in the ignored `certs/`, then validate the config and firewall before enabling the example unit.
+The recommended `way-fr` source template is the [pinned official binary deployment](deploy/binary/README.md) under `/srv/sandflow/voice`; it does not depend on Docker or its currently broken systemd unit. A legacy Docker example remains for reference but is not the deployment candidate. Neither path has been installed or started.
 
 Required dedicated endpoints:
 
-- API/signaling `127.0.0.1:7880`, reverse-proxied as WSS under `/sandflow/voice`.
+- API/signaling `7880`, reachable locally as `127.0.0.1:7880` and denied on every public interface by firewall, reverse-proxied as WSS under `/sandflow/voice`.
 - ICE/TCP `7881/tcp`.
 - ICE/UDP mux `7882/udp`.
-- TURN/TLS `5349/tcp` on `turn.sandflow.autorig.online`.
+- Embedded TURN remains disabled for pinned `v1.13.6` because it advertises443. The source-verified [external coturn5349 candidate](deploy/binary/EXTERNAL_COTURN_5349.md) uses `rtc.turn_servers` with the exact5349 advertisement and temporary HMAC credentials. It does not require a future LiveKit release or a new hostname, but is still gated on runtime, firewall, certificate, security and media tests.
 
 Port 443 remains owned by the existing web proxy. No nginx, firewall, DNS, certificate, systemd, Docker, or production service change is performed by this module.
 

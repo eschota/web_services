@@ -1,0 +1,24 @@
+# Base config for the official LiveKit v1.13.6 linux-amd64 binary.
+# Runtime copy: /srv/sandflow/voice/config/livekit/livekit.yaml (never commit secrets).
+
+port: 7880
+
+# Do not set global bind_addresses to loopback. In LiveKit it also constrains public RTC listeners.
+# Host firewall rules must deny public access to 7880 while allowing nginx via loopback.
+rtc:
+  use_external_ip: false
+  node_ip: 37.187.57.177
+  tcp_port: 7881
+  udp_port: 7882
+
+# Read API credentials from a root-owned file with no group/other permissions.
+key_file: /srv/sandflow/voice/secrets/keys.yaml
+
+logging:
+  level: info
+
+# TURN/TLS is intentionally disabled in this pinned base config.
+# v1.13.6 can listen on tls_port 5349, but its JoinResponse advertises embedded TURN as port 443.
+# Enabling 5349 here would therefore create a listener that normal clients do not use.
+turn:
+  enabled: false

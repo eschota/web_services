@@ -1,0 +1,9 @@
+# Candidate /etc/systemd/journald@sandflow-voice.conf for the LogNamespace used
+# by both SandFlow voice units. Source-only: not installed.
+[Journal]
+Storage=volatile
+RuntimeMaxUse=64M
+RuntimeKeepFree=128M
+RateLimitIntervalSec=30s
+RateLimitBurst=1500
+MaxRetentionSec=7day

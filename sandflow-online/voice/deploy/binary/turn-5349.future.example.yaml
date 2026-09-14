@@ -1,0 +1,10 @@
+# Do not merge this fragment into v1.13.6.
+# It is ready only after an exact official binary is source-verified and integration-tested to
+# advertise the configured tls_port (5349) rather than hard-coded 443 in JoinResponse ICE URLs.
+turn:
+  enabled: true
+  domain: autorig.online
+  tls_port: 5349
+  cert_file: /srv/sandflow/voice/certs/livekit/fullchain.pem
+  key_file: /srv/sandflow/voice/certs/livekit/privkey.pem
+  ttl_seconds: 300

@@ -1,0 +1,46 @@
+[Unit]
+Description=SandFlow dedicated external coturn TLS relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sandflow-turn
+Group=sandflow-turn
+WorkingDirectory=/srv/sandflow/voice
+Environment=TMPDIR=/srv/sandflow/voice/.work/tmp/coturn
+PIDFile=/srv/sandflow/voice/.work/run/coturn/coturn.pid
+ExecStart=/usr/bin/turnserver -c /srv/sandflow/voice/config/coturn/coturn.conf
+ExecStopPost=/usr/bin/rm -f /srv/sandflow/voice/.work/run/coturn/coturn.pid
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+LimitNOFILE=65535
+# Conservative candidate containment, not a capacity claim. Tune only from load evidence.
+CPUQuota=100%
+MemoryMax=512M
+TasksMax=256
+OOMPolicy=stop
+StandardOutput=journal
+StandardError=journal
+LogNamespace=sandflow-voice
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=500
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/srv/sandflow/voice/.work
+
+[Install]
+WantedBy=multi-user.target

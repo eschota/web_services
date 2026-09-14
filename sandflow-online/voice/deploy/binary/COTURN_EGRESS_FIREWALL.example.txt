@@ -1,0 +1,20 @@
+# Design-only iptables/ip6tables fragments. Do not apply blindly.
+# Resolve sandflow-turn to its dedicated numeric UID in the authoritative host
+# firewall source, preserve established/loopback rules, and validate ordering.
+
+# IPv4: only relay datagrams (source ports 40000-40127) owned by coturn are scoped.
+# TLS responses from source port 5349 are established traffic and do not enter this chain.
+iptables -N SANDFLOW_TURN_RELAY_OUT
+iptables -A SANDFLOW_TURN_RELAY_OUT -d 37.187.57.177/32 -p udp --dport 7882 -j ACCEPT
+iptables -A SANDFLOW_TURN_RELAY_OUT -j REJECT --reject-with icmp-port-unreachable
+iptables -I OUTPUT 1 -m owner --uid-owner sandflow-turn -p udp --sport 40000:40127 -j SANDFLOW_TURN_RELAY_OUT
+
+# IPv6: coturn has no permitted IPv6 SFU peer in this candidate.
+ip6tables -I OUTPUT 1 -m owner --uid-owner sandflow-turn -p udp --sport 40000:40127 -j REJECT --reject-with icmp6-port-unreachable
+
+# Validation must prove:
+# - coturn UID can send relay UDP only to 37.187.57.177:7882;
+# - attempts to the same VPS on any other UDP port are rejected;
+# - every IPv6 relay attempt is rejected;
+# - the different sandflow-voice UID retains required SFU egress;
+# - repeated application is handled idempotently by the real firewall manager.

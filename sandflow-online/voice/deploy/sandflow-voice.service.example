@@ -1,4 +1,6 @@
 [Unit]
+# Legacy Docker example only. Prefer deploy/binary/sandflow-voice.service.example
+# on way-fr so SandFlow does not depend on the existing broken docker.service unit.
 Description=SandFlow self-hosted voice SFU
 After=docker.service network-online.target
 Wants=network-online.target

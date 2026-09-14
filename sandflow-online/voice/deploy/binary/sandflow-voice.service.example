@@ -1,0 +1,47 @@
+[Unit]
+Description=SandFlow dedicated LiveKit SFU
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sandflow-voice
+Group=sandflow-voice
+WorkingDirectory=/srv/sandflow/voice
+Environment=TMPDIR=/srv/sandflow/voice/.work/tmp/livekit
+PIDFile=/srv/sandflow/voice/.work/run/livekit/livekit.pid
+ExecStart=/srv/sandflow/voice/bin/run-livekit
+ExecStopPost=/usr/bin/rm -f /srv/sandflow/voice/.work/run/livekit/livekit.pid
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+LimitNOFILE=65535
+# Conservative candidate containment, not a capacity claim. Tune only from load evidence.
+CPUQuota=200%
+MemoryMax=2G
+TasksMax=512
+OOMPolicy=stop
+StandardOutput=journal
+StandardError=journal
+LogNamespace=sandflow-voice
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/srv/sandflow/voice/.work
+
+[Install]
+WantedBy=multi-user.target
