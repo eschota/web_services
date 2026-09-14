@@ -18,6 +18,8 @@ The Unity adapter and live historical tile repair/replay pass finite native-pair
 
 Session protocol2 adds bounded numeric tuning batches, sender input receipts and canonical-default compatibility checks. `TuningSettings` defines100 active dials (99 shared, local PixelDensity); `CanonicalTuningDefaults` pins version1 independently of local preset files. Shared tuning snapshots are validated before promotion; corrupt/missing tuning in the new scope cannot replace a good save. Suite165 assertions and10 voice checks pass. Unity integrates coalesced commands, batch application/rollback, legacy-v2 migration and new-room numeric reset. Actual two-browser tuning and save/reload validation is still pending; discrete prototype controls and full UI coverage remain required. Old protocol1 clients must update.
 
+Autosave follow-up: revision-tagged demands are coalesced and reissued at most every60 seconds, including slow-capture/retry cases. Client-side ordering tests cover delayed HTTP/WSS acknowledgements. HTTP-only admissions can cancel without waiting for a simulation host; connected-host final-save protection remains. Suite171 server assertions +10 voice checks pass. `tools/Inspect-WorldTuning.ps1` reads a public QA world's real saved tuning through ordinary admission and snapshot APIs, printing no credentials.
+
 Moderation analysis: `voice/docs/MODERATION_ANALYSIS.md`. Owner selected reactive RU/EN recognition with a 60-second communication mute; first offending speech may already be audible. Runtime ASR/moderation is not implemented.
 
 ## Build and tests

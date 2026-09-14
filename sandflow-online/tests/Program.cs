@@ -458,6 +458,37 @@ var maliciousTuning = (byte[])tuningBytes.Clone(); maliciousTuning[12] = 255;
 BadSnapshot(() => TuningSettings.Decode(maliciousTuning), "forged tuning string length rejected before allocation");
 var badTuningVersion = (byte[])tuningBytes.Clone(); badTuningVersion[4] = 99;
 BadSnapshot(() => TuningSettings.Decode(badTuningVersion), "unknown tuning snapshot version denied");
+var saveClock=new ManualClock();var saveStore=new WorldStore(Path.Combine(root,Guid.NewGuid().ToString("N")));var saveRooms=new Rooms(saveStore,saveClock);
+var saveOwner=saveStore.NewGuest(saveClock.GetUtcNow()).Identity;var saveWorld=saveStore.Create(saveOwner,new(),saveClock.GetUtcNow());
+saveRooms.Join(saveOwner,saveWorld.Id,null);saveRooms.LeaveParticipant(saveOwner,saveWorld.Id);
+Check(saveRooms.View(saveWorld.Id).Occupancy==0,"HTTP-only admission can leave without a simulation authority");
+saveRooms.Join(saveOwner,saveWorld.Id,null);var(savePeer,saveConnection)=saveRooms.Connect(saveOwner,saveWorld.Id,false);
+saveRooms.Receive(saveOwner,saveWorld.Id,saveConnection,new("ready",Epoch:1,TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint));
+saveRooms.Receive(saveOwner,saveWorld.Id,saveConnection,new("commit",Epoch:1,Tick:1));
+System.Text.Json.JsonElement[] SaveNotices()
+{
+    var notices=new List<System.Text.Json.JsonElement>();
+    while(savePeer.Events.Reader.TryRead(out var value))if(value.Type=="save_due")notices.Add(System.Text.Json.JsonSerializer.SerializeToElement(value.Data));
+    return notices.ToArray();
+}
+void SavePulse(long tick)
+{
+    saveClock.Advance(TimeSpan.FromSeconds(5));
+    saveRooms.Receive(saveOwner,saveWorld.Id,saveConnection,new("heartbeat",Epoch:1,Tick:tick));saveRooms.Sweep();
+}
+saveRooms.Sweep();var firstSaveNotices=SaveNotices();
+Check(firstSaveNotices.Length==1&&firstSaveNotices[0].GetProperty("revisionKnown").GetBoolean()
+    &&firstSaveNotices[0].GetProperty("revision").GetInt64()==0,"save demand carries the durable revision it is based on");
+for(int pulse=0;pulse<11;pulse++)SavePulse(1);
+Check(SaveNotices().Length==0,"pending save demand is not repeated every five seconds during slow capture");
+SavePulse(1);Check(SaveNotices().Length==1,"unanswered save request retries at sixty seconds without starving");
+var saveState=SnapshotCodec.Decode(State(1,1,0));saveState.WorldId=saveWorld.Id;var saveBytes=SnapshotCodec.Encode(saveState);
+saveRooms.Save(saveOwner,saveWorld.Id,new(1,1,0,0,Convert.ToHexString(SHA256.HashData(saveBytes))),saveBytes,false);
+saveRooms.Receive(saveOwner,saveWorld.Id,saveConnection,new("commit",Epoch:1,Tick:2));
+SaveNotices();for(int pulse=0;pulse<11;pulse++)SavePulse(2);
+Check(SaveNotices().Length==0,"new dirty state respects the successful-save interval");
+SavePulse(2);var secondSaveNotices=SaveNotices();
+Check(secondSaveNotices.Length==1&&secondSaveNotices[0].GetProperty("revision").GetInt64()==1,"continuous activity receives the next revision-scoped minute save demand");
 Console.WriteLine($"RESULT {testCount} assertions passed. No HTTP server or physical simulation launched.");
 
 sealed class ManualClock : TimeProvider

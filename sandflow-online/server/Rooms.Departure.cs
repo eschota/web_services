@@ -91,6 +91,10 @@ public sealed partial class Rooms
         {
             var room=Get(world);
             if(!room.Peers.TryGetValue(identity.Id,out var peer))return;
+            // An HTTP-only admission has never owned simulated state. It must be able
+            // to cancel without waiting for an authority or occupying a slot for30 seconds.
+            if(peer.ConnectionId==null)
+            {peer.Events.Writer.TryComplete();peer.Bulk.Writer.TryComplete();room.Peers.Remove(identity.Id);return;}
             if(room.HostId==identity.Id)throw new ApiFailure(409,"host_departure_required");
             if(room.HostId==null&&room.Peers.Count==1)throw new ApiFailure(409,"world_synchronizing");
             if(peer.ConnectionId!=null)Disconnect(identity,world,peer.ConnectionId,false);

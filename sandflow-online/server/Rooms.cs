@@ -366,13 +366,14 @@ public sealed partial class Rooms(WorldStore store, TimeProvider time)
             if (room.RecoveryUntil != null && now >= room.RecoveryUntil) RecoverDurable(room);
             if(room.Departure!=null&&now>=room.Departure.Deadline)AbortDeparture(room,"timeout");
             if (room.Departure==null&&room.DirtySince != null && room.HostId != null && now - room.LastSnapshot >= TimeSpan.FromSeconds(60) &&
-                now - room.LastSaveRequest >= TimeSpan.FromSeconds(5))
-            { room.LastSaveRequest = now; Send(room, room.Peers[room.HostId], "save_due"); }
+                now - room.LastSaveRequest >= TimeSpan.FromSeconds(60))
+            { room.LastSaveRequest = now; Send(room, room.Peers[room.HostId], "save_due", new { revision=room.Revision, revisionKnown=true }); }
         }
     }
     private void LoseHost(RoomState room)
     {
         var old = room.HostId; room.HostId = null; room.Epoch++;
+        room.LastSaveRequest=DateTimeOffset.MinValue; // A new authority must not inherit an unfulfilled old-host request lease.
         room.Departure=null;
         room.Checkpoints.Clear();
         if (old != null && room.Peers.TryGetValue(old, out var oldPeer)) oldPeer.Ready = false;
