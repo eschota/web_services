@@ -20,6 +20,7 @@ public sealed class WorldStore
             "CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, identity_json TEXT NOT NULL, expires INTEGER NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS worlds(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, private INTEGER NOT NULL, json TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS snapshots(world_id TEXT NOT NULL, revision INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(world_id,revision));" +
+            "CREATE TABLE IF NOT EXISTS departures(world_id TEXT NOT NULL, operation_id TEXT NOT NULL, created INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(world_id,operation_id));" +
             "CREATE TABLE IF NOT EXISTS blocks(world_id TEXT NOT NULL, player_id TEXT NOT NULL, PRIMARY KEY(world_id,player_id));");
     }
     private SqliteConnection Open() { var db = new SqliteConnection(_connection); db.Open(); return db; }
@@ -108,8 +109,17 @@ public sealed class WorldStore
             throw new ApiFailure(503, "snapshot_integrity_failure");
         return bytes;
     }
-    public SnapshotRecord Save(string world, SnapshotUpload request, byte[] data, DateTimeOffset now)
+    public DepartureReceipt? FindDeparture(string world, string operationId, DateTimeOffset now)
     {
+        if (!Protocol.ValidId(world) || !Protocol.ValidId(operationId)) throw new ApiFailure(404, "departure_not_found");
+        using var db=Open(); using var cmd=db.CreateCommand();
+        cmd.CommandText="SELECT json FROM departures WHERE world_id=$world AND operation_id=$op AND created>$cutoff";
+        cmd.Parameters.AddWithValue("$world",world);cmd.Parameters.AddWithValue("$op",operationId);cmd.Parameters.AddWithValue("$cutoff",now.AddDays(-1).ToUnixTimeSeconds());
+        return cmd.ExecuteScalar() is string json ? JsonSerializer.Deserialize<DepartureReceipt>(json) : null;
+    }
+    public SnapshotRecord Save(string world, SnapshotUpload request, byte[] data, DateTimeOffset now, DepartureMarker? departure = null)
+    {
+        if(departure!=null&&(!Protocol.ValidId(departure.OperationId)||!Protocol.ValidId(departure.ParticipantId)))throw new ApiFailure(400,"departure_identity");
         if (data.Length is < 16 or > Protocol.MaxSnapshotBytes) throw new ApiFailure(413, "snapshot_size");
         var hash = Convert.ToHexString(SHA256.HashData(data));
         if (!hash.Equals(request.Sha256, StringComparison.OrdinalIgnoreCase)) throw new ApiFailure(400, "snapshot_hash");
@@ -137,7 +147,17 @@ public sealed class WorldStore
             using var db = Open(); using var tx = db.BeginTransaction(); using var cmd = db.CreateCommand();
             cmd.Transaction = tx; cmd.CommandText = "INSERT INTO snapshots VALUES($w,$rev,$json); DELETE FROM snapshots WHERE world_id=$w AND revision <= $rev-10;";
             cmd.Parameters.AddWithValue("$w", world); cmd.Parameters.AddWithValue("$rev", record.Revision);
-            cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(record)); cmd.ExecuteNonQuery(); tx.Commit();
+            cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(record)); cmd.ExecuteNonQuery();
+            if(departure!=null)
+            {
+                using var receipt=db.CreateCommand();receipt.Transaction=tx;
+                receipt.CommandText="INSERT INTO departures VALUES($world,$op,$created,$json); DELETE FROM departures WHERE created<$cutoff; DELETE FROM departures WHERE world_id=$world AND rowid NOT IN (SELECT rowid FROM departures WHERE world_id=$world ORDER BY created DESC,rowid DESC LIMIT 8);";
+                receipt.Parameters.AddWithValue("$world",world);receipt.Parameters.AddWithValue("$op",departure.OperationId);
+                receipt.Parameters.AddWithValue("$created",now.ToUnixTimeSeconds());receipt.Parameters.AddWithValue("$cutoff",now.AddDays(-1).ToUnixTimeSeconds());
+                receipt.Parameters.AddWithValue("$json",JsonSerializer.Serialize(new DepartureReceipt(departure.OperationId,departure.ParticipantId,request.ExpectedRevision,record)));
+                receipt.ExecuteNonQuery();
+            }
+            tx.Commit();
             return record;
         }
     }

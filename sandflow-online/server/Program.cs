@@ -149,15 +149,22 @@ api.MapGet("/worlds/{id}/snapshots/latest", (HttpContext context, string id, Wor
 { var record = rooms.Latest(Auth(context, store), id); return Results.Bytes(store.Read(record), "application/octet-stream"); });
 api.MapPost("/worlds/{id}/snapshots", async (HttpContext context, string id, WorldStore store, Rooms rooms) =>
 {
-    var identity = Auth(context, store); rooms.Member(identity, id);
-    long Header(string key) => long.TryParse(context.Request.Headers[key], out var n) && n >= 0 ? n : throw new ApiFailure(400, "snapshot_header");
-    var upload = new SnapshotUpload(Header("X-SF-Epoch"), Header("X-SF-Tick"), Header("X-SF-Sequence"),
-        Header("X-SF-Revision"), context.Request.Headers["X-SF-SHA256"].ToString());
-    if (context.Request.ContentLength is null or > Protocol.MaxSnapshotBytes or < 16) throw new ApiFailure(413, "snapshot_size");
-    using var body = new MemoryStream((int)context.Request.ContentLength.Value);
-    await context.Request.Body.CopyToAsync(body, context.RequestAborted);
-    return Results.Ok(rooms.Save(identity, id, upload, body.ToArray(), context.Request.Headers["X-SF-Final"] == "true"));
+    var identity = Auth(context, store); rooms.RequireSnapshotWriter(identity,id);
+    using var body=await SnapshotHttp.Read(context);
+    return Results.Ok(rooms.Save(identity,id,body.Upload,body.Payload,context.Request.Headers["X-SF-Final"]=="true"));
 });
+api.MapPost("/worlds/{id}/departures/{operationId}",async (HttpContext context,string id,string operationId,WorldStore store,Rooms rooms)=>
+{
+    var identity=Auth(context,store);if(!Protocol.ValidId(operationId))throw new ApiFailure(400,"departure_identity");
+    // Completion retries remain authorized after the member has already left.
+    if(rooms.DepartureStatus(identity,id,operationId)==null)rooms.RequireSnapshotWriter(identity,id);
+    using var body=await SnapshotHttp.Read(context);
+    return Results.Ok(rooms.CompleteDeparture(identity,id,operationId,body.Upload,body.Payload));
+});
+api.MapGet("/worlds/{id}/departures/{operationId}",(HttpContext context,string id,string operationId,WorldStore store,Rooms rooms)=>
+    Results.Ok(rooms.DepartureStatus(Auth(context,store),id,operationId)??throw new ApiFailure(404,"departure_not_found")));
+api.MapPost("/worlds/{id}/leave",(HttpContext context,string id,WorldStore store,Rooms rooms)=>
+{rooms.LeaveParticipant(Auth(context,store),id);return Results.NoContent();});
 api.MapPost("/worlds/{id}/kick/{player}", (HttpContext context, string id, string player, WorldStore store, Rooms rooms) =>
 { rooms.Kick(Auth(context, store), id, player); return Results.NoContent(); });
 api.MapPost("/worlds/{id}/voice-token", (HttpContext context, string id, WorldStore store, Rooms rooms, VoiceTokenService voice) =>
@@ -165,8 +172,7 @@ api.MapPost("/worlds/{id}/voice-token", (HttpContext context, string id, WorldSt
     var identity = Auth(context, store);
     lock (rooms.Gate)
     {
-        var peer = rooms.Member(identity, id); var view = rooms.View(id);
-        if (peer.ConnectionId == null || !peer.Ready) throw new ApiFailure(409, "active_membership_required");
+        var peer = rooms.VoiceMember(identity, id); var view = rooms.View(id);
         return Results.Ok(voice.IssueToken(new(id, identity.Id, view.Mode == "pvp" ? VoiceMode.Pvp : VoiceMode.Coop,
             view.Mode == "pvp" ? peer.Team : null, true, true)));
     }

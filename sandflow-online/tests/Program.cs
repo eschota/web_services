@@ -77,8 +77,11 @@ Check(rooms.View(privateWorld.Id).State == "active", "synchronized host migratio
 Denied(() => rooms.Receive(b.Identity, privateWorld.Id, secondConnection, new("commit", Epoch: 1, Tick: 2, Sequence: 1)), "stale_epoch");
 rooms.Receive(b.Identity, privateWorld.Id, secondConnection, new("commit", Epoch: 2, Tick: 2, Sequence: 1));
 state = State(2, 2, 1); hash = Convert.ToHexString(SHA256.HashData(state));
-var final = rooms.Save(b.Identity, privateWorld.Id, new(2, 2, 1, 1, hash), state, true);
-Check(final.Revision == 2, "last-player final save bypasses minute interval");
+Denied(()=>rooms.Save(b.Identity,privateWorld.Id,new(2,2,1,1,hash),state,true),"departure_required");
+var finalOperation=Protocol.RandomId();
+rooms.Receive(b.Identity,privateWorld.Id,secondConnection,new("depart_begin",Epoch:2,Tick:2,Sequence:1,OperationId:finalOperation));
+var final = rooms.CompleteDeparture(b.Identity,privateWorld.Id,finalOperation,new(2,2,1,1,hash),state);
+Check(final.Snapshot.Revision == 2, "fenced last-player departure saves before leaving and bypasses minute interval");
 rooms.Disconnect(b.Identity, privateWorld.Id, secondConnection, false);
 Check(rooms.View(privateWorld.Id).State == "sleeping", "empty room sleeps");
 var reloaded = new Rooms(store, clock);
@@ -292,6 +295,101 @@ streamLate.Events.Reader.TryRead(out var streamWelcome);
 var welcomeData=System.Text.Json.JsonSerializer.SerializeToElement(streamWelcome!.Data);
 var pendingCommands=welcomeData.GetProperty("commands");
 Check(welcomeData.GetProperty("hostId").GetString()==streamOwner.Id&&pendingCommands.GetArrayLength()==1&&pendingCommands[0].GetProperty("Sequence").GetInt64()==6001,"live welcome retains only uncommitted input and identifies snapshot host");
+var departureRoot=Path.Combine(root,Guid.NewGuid().ToString("N"));
+var departureStore=new WorldStore(departureRoot);var departureClock=new ManualClock();var departureRooms=new Rooms(departureStore,departureClock);
+var departing=departureStore.NewGuest(departureClock.GetUtcNow()).Identity;var staying=departureStore.NewGuest(departureClock.GetUtcNow()).Identity;
+var arriving=departureStore.NewGuest(departureClock.GetUtcNow()).Identity;
+var departureWorld=departureStore.Create(departing,new(),departureClock.GetUtcNow());
+departureRooms.Join(departing,departureWorld.Id,null);departureRooms.Join(staying,departureWorld.Id,null);
+var (leaver,leaverConnection)=departureRooms.Connect(departing,departureWorld.Id,false);
+var (stayer,stayerConnection)=departureRooms.Connect(staying,departureWorld.Id,false);
+departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("ready",Epoch:1));
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("ready",Epoch:1));
+byte[] DepartureBytes(long tick,long sequence)
+{
+    var checkpoint=SnapshotCodec.Decode(State(1,tick,sequence));checkpoint.WorldId=departureWorld.Id;return SnapshotCodec.Encode(checkpoint);
+}
+SnapshotUpload DepartureUpload(byte[] payload,long tick,long sequence,long expected)=>new(1,tick,sequence,expected,Convert.ToHexString(SHA256.HashData(payload)));
+departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("input",Epoch:1,Sequence:1,Command:new("simulation","enqueue",CommandType:1)));
+departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("commit",Epoch:1,Tick:1,Sequence:1));
+var beforeDeparture=DepartureBytes(1,1);departureRooms.Save(departing,departureWorld.Id,DepartureUpload(beforeDeparture,1,1,0),beforeDeparture,false);
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("input",Epoch:1,Sequence:1,Command:new("simulation","enqueue",CommandType:1)));
+var departureOperation=Protocol.RandomId();
+departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("depart_begin",Epoch:1,Tick:1,Sequence:1,OperationId:departureOperation));
+departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("depart_begin",Epoch:1,Tick:1,Sequence:1,OperationId:departureOperation));
+Check(departureRooms.View(departureWorld.Id).State=="handoff"&&!stayer.Ready,"departure freezes admission and removes unsettled follower from authority election");
+Check(departureRooms.VoiceMember(staying,departureWorld.Id)==stayer,"admitted voice access is independent of temporary physics readiness");
+Denied(()=>departureRooms.Join(arriving,departureWorld.Id,null),"world_handoff");
+while(stayer.Events.Reader.TryRead(out _)){}
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("input",Epoch:1,Sequence:2,Command:new("simulation","enqueue",CommandType:1)));
+Check(stayer.Events.Reader.TryRead(out var rejectedInput)&&rejectedInput.Type=="input_rejected"&&stayer.ConnectionId==stayerConnection,"in-flight input gets explicit handoff rejection without dropping the peer");
+Denied(()=>departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("commit",Epoch:1,Tick:3,Sequence:2)),"departure_fence");
+departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("commit",Epoch:1,Tick:2,Sequence:2));
+var departurePayload=DepartureBytes(2,2);var departureUpload=DepartureUpload(departurePayload,2,2,1);
+Denied(()=>departureRooms.Save(departing,departureWorld.Id,departureUpload,departurePayload,false),"departure_in_progress");
+var damagedDeparture=(byte[])departurePayload.Clone();damagedDeparture[^1]^=1;
+Denied(()=>departureRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,damagedDeparture),"snapshot_hash");
+Check(departureStore.Versions(departureWorld.Id).First().Revision==1&&departureRooms.Member(departing,departureWorld.Id)==leaver,"bad departure upload preserves old version and current authority");
+var departureReceipt=departureRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,departurePayload);
+Check(departureReceipt.Snapshot.Revision==2&&departureStore.Versions(departureWorld.Id).Count==2,"departure saves final pending input before host removal");
+Denied(()=>departureRooms.Member(departing,departureWorld.Id),"not_admitted");
+Check(departureRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,departurePayload)==departureReceipt&&departureStore.Versions(departureWorld.Id).Count==2,"identical completion retry is idempotent after disconnect");
+Denied(()=>departureRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,damagedDeparture),"departure_retry_mismatch");
+Denied(()=>departureRooms.DepartureStatus(staying,departureWorld.Id,departureOperation),"departure_owner_required");
+var restartedStore=new WorldStore(departureRoot);var restartedRooms=new Rooms(restartedStore,departureClock);
+Check(restartedRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,departurePayload)==departureReceipt,"completion receipt survives service restart and lost HTTP response");
+departureClock.Advance(TimeSpan.FromSeconds(3));departureRooms.Sweep();
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("ready",Epoch:2,Tick:2,Sequence:2));
+Check(departureRooms.View(departureWorld.Id).State=="active"&&departureRooms.Member(staying,departureWorld.Id).Ready,"remaining peer resumes from latest departure snapshot without lost interval");
+Denied(()=>departureRooms.LeaveParticipant(staying,departureWorld.Id),"host_departure_required");
+var nextDeparture=Protocol.RandomId();
+departureClock.Advance(TimeSpan.FromSeconds(7));
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("depart_begin",Epoch:2,Tick:2,Sequence:2,OperationId:nextDeparture));
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("depart_abort",Epoch:2,OperationId:nextDeparture));
+Check(departureRooms.View(departureWorld.Id).State=="active","cancelled departure resumes room without creating another save");
+departureClock.Advance(TimeSpan.FromSeconds(2));departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("heartbeat",Epoch:2,Tick:2,Sequence:2));
+departureClock.Advance(TimeSpan.FromSeconds(7));departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("heartbeat",Epoch:2,Tick:2,Sequence:2));
+departureClock.Advance(TimeSpan.FromSeconds(1));
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("depart_begin",Epoch:2,Tick:2,Sequence:2,OperationId:Protocol.RandomId()));
+for(var interval=0;interval<9;interval++){departureClock.Advance(TimeSpan.FromSeconds(7));departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("heartbeat",Epoch:2,Tick:2,Sequence:2));}
+departureRooms.Sweep();Check(departureRooms.View(departureWorld.Id).State=="active","departure timeout clears freeze while valid host lease continues");
+async Task BadUploadBody(int announced,int actual,string code)
+{
+    var context=new Microsoft.AspNetCore.Http.DefaultHttpContext();context.Request.ContentLength=announced;context.Request.Body=new MemoryStream(new byte[actual]);
+    foreach(var header in new[]{"X-SF-Epoch","X-SF-Tick","X-SF-Sequence","X-SF-Revision"})context.Request.Headers[header]="1";
+    try{await SnapshotHttp.Read(context);throw new Exception("Expected "+code);}catch(ApiFailure error)when(error.Code==code){Check(true,code);}
+}
+await BadUploadBody(20,16,"snapshot_truncated");await BadUploadBody(16,20,"snapshot_size");
+Microsoft.AspNetCore.Http.DefaultHttpContext UploadContext()
+{
+    var context=new Microsoft.AspNetCore.Http.DefaultHttpContext();context.Request.ContentLength=16;context.Request.Body=new MemoryStream(new byte[16]);
+    foreach(var header in new[]{"X-SF-Epoch","X-SF-Tick","X-SF-Sequence","X-SF-Revision"})context.Request.Headers[header]="1";
+    return context;
+}
+using(var uploadSlotA=await SnapshotHttp.Read(UploadContext()))
+using(var uploadSlotB=await SnapshotHttp.Read(UploadContext()))
+{
+    try{using var deniedSlot=await SnapshotHttp.Read(UploadContext());throw new Exception("Expected snapshot_capacity");}
+    catch(ApiFailure error)when(error.Code=="snapshot_capacity"){Check(true,"snapshot capacity stays held through storage processing");}
+    uploadSlotA.Dispose();uploadSlotA.Dispose();
+    using var releasedSlot=await SnapshotHttp.Read(UploadContext());
+    Check(releasedSlot.Payload.Length==16,"upload lease releases exactly once and admits a later bounded body");
+}
+var backlogClock=new ManualClock();var backlogStore=new WorldStore(Path.Combine(root,Guid.NewGuid().ToString("N")));var backlogRooms=new Rooms(backlogStore,backlogClock);
+var backlogOwner=backlogStore.NewGuest(backlogClock.GetUtcNow()).Identity;var backlogWorld=backlogStore.Create(backlogOwner,new(),backlogClock.GetUtcNow());
+backlogRooms.Join(backlogOwner,backlogWorld.Id,null);var (backlogPeer,backlogConnection)=backlogRooms.Connect(backlogOwner,backlogWorld.Id,false);
+backlogRooms.Receive(backlogOwner,backlogWorld.Id,backlogConnection,new("ready",Epoch:1));
+for(var input=1;input<=600;input++)
+{
+    backlogClock.Advance(TimeSpan.FromMilliseconds(10));
+    backlogRooms.Receive(backlogOwner,backlogWorld.Id,backlogConnection,new("input",Epoch:1,Sequence:input,Command:new("simulation","enqueue",CommandType:1)));
+    while(backlogPeer.Events.Reader.TryRead(out _)){}
+}
+var backlogOperation=Protocol.RandomId();backlogRooms.Receive(backlogOwner,backlogWorld.Id,backlogConnection,new("depart_begin",Epoch:1,OperationId:backlogOperation));
+backlogRooms.Receive(backlogOwner,backlogWorld.Id,backlogConnection,new("commitBatch",Epoch:1,Commits:[new(1,256,1),new(2,512,1),new(3,600,1)]));
+var backlogSnapshot=SnapshotCodec.Decode(State(1,3,600));backlogSnapshot.WorldId=backlogWorld.Id;var backlogPayload=SnapshotCodec.Encode(backlogSnapshot);
+var backlogReceipt=backlogRooms.CompleteDeparture(backlogOwner,backlogWorld.Id,backlogOperation,new(1,3,600,0,Convert.ToHexString(SHA256.HashData(backlogPayload))),backlogPayload);
+Check(backlogReceipt.Snapshot.Tick==3&&backlogReceipt.Snapshot.Sequence==600&&backlogRooms.View(backlogWorld.Id).State=="sleeping","departure drains more than 256 pending inputs across a bounded final step range");
 Console.WriteLine($"RESULT {testCount} assertions passed. No HTTP server or physical simulation launched.");
 
 sealed class ManualClock : TimeProvider

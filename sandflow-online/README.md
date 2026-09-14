@@ -48,6 +48,8 @@ The separate QA WebGPU template/deployment lives only under `/sandflow/qa/`; the
 
 ## Runtime contract
 
+Transactional departure capability 1 is implemented: ordered final-input fence, validated snapshot + restart-persistent receipt, then authority release. In-game/Windows client integration is a candidate pending live Unity exit/retry acceptance. Normal autosaves remain minute-limited; old `X-SF-Final` bypass now requires the departure flow. Snapshot body capacity/size/read-time limits protect the service. See `docs/DEPARTURE_PROTOCOL.md` and the private CPU-only `tools/DepartureLiveProbe`; protocol checks are not physics or voice acceptance. Admitted voice access no longer depends on temporary physics readiness during handoff.
+
 The portable tile-hash candidate now reuses bounded per-thread scratch/SHA resources while preserving digest bytes. `tools/TileDigestBench` checks original-algorithm equivalence on quantization/partial-edge/max-stride and 400x256 fixtures, plus concurrent calls. Corrected steady-state allocation is 19,006,266 to 5,685 bytes/digest on the representative .NET fixture, with roughly 37 KiB retained workspace per active thread. Unity managed-runtime golden-byte checks pass separately. This is not a browser FPS claim; the QA cost probe's browser execution is pending controller recovery. The service continues client-only physics and closed public admission.
 
 ### Continuous-input and browser QA checkpoint — 2026-09-14

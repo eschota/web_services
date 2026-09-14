@@ -41,12 +41,14 @@ public sealed class RoomState(WorldRecord world, SnapshotRecord? snapshot)
     public DateTimeOffset LastSaveRequest { get; set; }
     public DateTimeOffset LastStructuralChange { get; set; }
     public DateTimeOffset? RecoveryUntil { get; set; }
+    public DepartureState? Departure { get; set; }
+    public DateTimeOffset LastDepartureAttempt { get; set; }
 }
 
 public sealed record CommitRecord(long Tick, long Sequence, int Substeps, bool Checkpoint = false);
 
 /// <summary>Server ordering/lease authority only. This class contains no physical simulation.</summary>
-public sealed class Rooms(WorldStore store, TimeProvider time)
+public sealed partial class Rooms(WorldStore store, TimeProvider time)
 {
     private readonly Dictionary<string, RoomState> _rooms = [];
     private readonly object _gate = new();
@@ -60,7 +62,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
     public WorldView View(string id) { lock (_gate) return ViewOf(Get(id)); }
     private static WorldView ViewOf(RoomState room) => new(room.World.Id, room.World.Mode, room.World.Map,
         room.World.IsPrivate, room.World.Demo, room.World.Capacity, room.Peers.Count,
-        room.Peers.Count == 0 ? "sleeping" : room.HostId == null ? "synchronizing" : "active", room.Revision);
+        room.Peers.Count == 0 ? "sleeping" : room.Departure != null ? "handoff" : room.HostId == null ? "synchronizing" : "active", room.Revision);
     public Admission Join(Identity identity, string worldId, string? password)
     {
         lock (_gate)
@@ -71,6 +73,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
             if (store.IsBlocked(worldId, identity.Id)) throw new ApiFailure(403, "world_access_denied");
             if (room.Peers.TryGetValue(identity.Id, out var existing))
                 return new(ViewOf(room), identity.Id, existing.Team, Protocol.Version);
+            if(room.Departure!=null)throw new ApiFailure(409,"world_handoff");
             if (room.World.IsPrivate && room.World.OwnerId != identity.Id && !Passwords.Verify(password ?? "", room.World.PasswordHash))
                 throw new ApiFailure(403, "world_password_required");
             if (room.Peers.Count >= room.World.Capacity) throw new ApiFailure(409, "world_full");
@@ -87,7 +90,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
             foreach (var world in store.PublicWorlds().Where(x => x.Demo && x.Mode == "coop"))
             {
                 var room = Get(world.Id);
-                if (room.Peers.Count < world.Capacity && !store.IsBlocked(world.Id, identity.Id))
+                if (room.Departure==null&&room.Peers.Count < world.Capacity && !store.IsBlocked(world.Id, identity.Id))
                     return Join(identity, world.Id, null);
             }
             var created = store.Create(identity, new(), time.GetUtcNow());
@@ -124,7 +127,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 peer.ConnectionId = connection;
                 var room = Get(id); var snapshot = store.Versions(id).FirstOrDefault();
                 Send(room, peer, "welcome", new { version = Protocol.Version, tileSize = Protocol.TileSize, participantId = identity.Id,
-                    team = peer.Team, hostId = room.HostId, snapshot, commands = room.Tail.ToArray(), commits = room.Commits.Values.ToArray(), sequence = room.ConfirmedSequence });
+                    team = peer.Team, hostId = room.HostId, snapshot, commands = room.Tail.ToArray(), commits = room.Commits.Values.ToArray(), sequence = room.ConfirmedSequence, departureProtocol = 1 });
             }
             return (peer, connection);
         }
@@ -158,11 +161,12 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     if (room.RecoveryUntil != null) Elect(room);
                     break;
                 case "input":
+                    if (!peer.InputBudget.Take(now)) throw new ApiFailure(429, "input_rate");
+                    if(room.Departure!=null){Send(room,peer,"input_rejected",new { reason="world_handoff",clientSequence=message.Sequence });break;}
                     if (!peer.Ready || room.HostId == null) throw new ApiFailure(409, "world_synchronizing");
                     if (message.Sequence <= peer.LastClientSequence) throw new ApiFailure(409, "duplicate_input");
                     if (room.Tail.Count >= 4096) throw new ApiFailure(429, "checkpoint_required");
                     if (message.Command == null) throw new ApiFailure(400, "missing_command");
-                    if (!peer.InputBudget.Take(now)) throw new ApiFailure(429, "input_rate");
                     CommandValidation.Validate(message.Command);
                     if (message.Command.Kind is "map" or "reset")
                     {
@@ -175,6 +179,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     Broadcast(room, "ordered", command, command.Sequence); break;
                 case "commit":
                     RequireHost(room, peer, message.Epoch);
+                    ValidateDepartureCommit(room,message.Tick,message.Sequence);
                     if (message.Tick != room.Tick + 1 || message.Sequence < room.ConfirmedSequence || message.Sequence > room.Sequence ||
                         message.Sequence - room.ConfirmedSequence > 256 || message.Substeps is < 1 or > 16)
                         throw new ApiFailure(400, "invalid_commit");
@@ -191,6 +196,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     var checkpointTick = room.Checkpoints.Count == 0 ? -240 : room.Checkpoints.Max;
                     foreach (var frame in message.Commits)
                     {
+                        ValidateDepartureCommit(room,frame.Tick,frame.Sequence);
                         if (frame.Tick != ++cursorTick || frame.Sequence < cursorSequence || frame.Sequence > room.Sequence ||
                             frame.Sequence - cursorSequence > 256 || frame.Substeps is < 1 or > 16) throw new ApiFailure(400, "invalid_commit");
                         cursorSequence = frame.Sequence;
@@ -218,6 +224,15 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                     if (message.ParticipantId == null || !room.Peers.TryGetValue(message.ParticipantId, out var resyncPeer))
                         throw new ApiFailure(400, "repair_recipient");
                     Send(room, resyncPeer, "checkpoint_required"); break;
+                case "depart_begin":
+                    try { BeginDeparture(room,peer,message); }
+                    catch(ApiFailure ex) when(ex.Status is 409 or 429)
+                    {Send(room,peer,"depart_failed",new {operationId=message.OperationId,reason=ex.Code});}
+                    break;
+                case "depart_abort":
+                    RequireHost(room,peer,message.Epoch);
+                    if(room.Departure?.OperationId==message.OperationId)AbortDeparture(room,"cancelled");
+                    break;
                 default: throw new ApiFailure(400, "unknown_message");
             }
         }
@@ -290,7 +305,8 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
             var atCurrent = request.Tick == room.Tick && request.Sequence == room.ConfirmedSequence;
             var atRetained = room.Commits.TryGetValue(request.Tick, out var commit) && commit.Sequence == request.Sequence;
             if (!atCurrent && !atRetained) throw new ApiFailure(409, "snapshot_tick");
-            if (finalSave && room.Peers.Count != 1) throw new ApiFailure(409, "not_last_player");
+            if (finalSave) throw new ApiFailure(409, "departure_required");
+            if(room.Departure!=null)throw new ApiFailure(409,"departure_in_progress");
             if (!finalSave && time.GetUtcNow() - room.LastSnapshot < TimeSpan.FromSeconds(60)) throw new ApiFailure(429, "autosave_interval");
             var result = store.Save(id, request, payload, time.GetUtcNow());
             room.Revision = result.Revision; room.LastSnapshot = time.GetUtcNow();
@@ -339,7 +355,8 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
                 room.Peers.Remove(peer.Identity.Id);
             if (room.HostId != null && room.LeaseUntil <= now) LoseHost(room);
             if (room.RecoveryUntil != null && now >= room.RecoveryUntil) RecoverDurable(room);
-            if (room.DirtySince != null && room.HostId != null && now - room.LastSnapshot >= TimeSpan.FromSeconds(60) &&
+            if(room.Departure!=null&&now>=room.Departure.Deadline)AbortDeparture(room,"timeout");
+            if (room.Departure==null&&room.DirtySince != null && room.HostId != null && now - room.LastSnapshot >= TimeSpan.FromSeconds(60) &&
                 now - room.LastSaveRequest >= TimeSpan.FromSeconds(5))
             { room.LastSaveRequest = now; Send(room, room.Peers[room.HostId], "save_due"); }
         }
@@ -347,6 +364,7 @@ public sealed class Rooms(WorldStore store, TimeProvider time)
     private void LoseHost(RoomState room)
     {
         var old = room.HostId; room.HostId = null; room.Epoch++;
+        room.Departure=null;
         room.Checkpoints.Clear();
         if (old != null && room.Peers.TryGetValue(old, out var oldPeer)) oldPeer.Ready = false;
         Broadcast(room, "paused", new { reason = "host_lost" });
