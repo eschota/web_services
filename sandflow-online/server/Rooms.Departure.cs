@@ -39,7 +39,7 @@ public sealed partial class Rooms
     private static void SendDeparturePrepared(RoomState room,RoomPeer peer)
     {
         var departure=room.Departure!;
-        Send(room,peer,"depart_prepared",new {operationId=departure.OperationId,tick=departure.Tick,sequence=departure.Sequence,deadlineUnix=departure.Deadline.ToUnixTimeSeconds()});
+        Send(room,peer,"depart_prepared",new {operationId=departure.OperationId,tick=departure.Tick,sequence=departure.Sequence,deadlineUnix=departure.Deadline.ToUnixTimeSeconds(),revision=room.Revision,revisionKnown=true});
     }
     private static void ValidateDepartureCommit(RoomState room,long tick,long sequence)
     {
@@ -77,6 +77,7 @@ public sealed partial class Rooms
                 throw new ApiFailure(409,"departure_fence");
             var savedRecord=store.Save(world,upload,payload,time.GetUtcNow(),new(operation,identity.Id));
             room.Revision=savedRecord.Revision;room.LastSnapshot=time.GetUtcNow();room.DirtySince=null;
+            Broadcast(room,"saved",savedRecord);
             var result=new DepartureReceipt(operation,identity.Id,upload.ExpectedRevision,savedRecord);
             // Save+receipt are durable BEFORE losing authority. An uncertain response
             // can be resolved after disconnect or process restart without another save.

@@ -10,7 +10,7 @@ var project=FindProject();
 string Local(string path){var value=Path.GetFullPath(path);if(!value.StartsWith(project+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Project-local paths required");return value;}
 var secret=File.ReadAllText(Local(args[0])).Trim().Split('=',2)[1];
 var output=Local(args[1]);Directory.CreateDirectory(Path.GetDirectoryName(output)!);
-using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(60));var token=timeout.Token;
+using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(90));var token=timeout.Token;
 using var http=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false,UseCookies=false}){BaseAddress=new Uri("https://autorig.online/sandflow/api/v1/"),Timeout=TimeSpan.FromSeconds(15)};
 var checks=new List<string>();
 async Task<JsonElement> Request(string path,object? body,string? bearer=null,bool qa=false,byte[]? bytes=null,Dictionary<string,string>? headers=null)
@@ -48,12 +48,12 @@ async Task<JsonElement> Event(ClientWebSocket socket,string type)
     throw new InvalidOperationException("event_window_exhausted");
 }
 void Check(bool condition,string label){if(!condition)throw new InvalidOperationException(label);checks.Add(label);}
-byte[] Snapshot(string world,long epoch)
+byte[] Snapshot(string world,long epoch,long tick=1)
 {
-    var state=new WorldSnapshot{WorldId=world,Epoch=epoch,Tick=1,Sequence=1,FixedDt=1f/240f,SimTime=1d/240,ResX=16,ResZ=16,CellSize=.125f,MetadataJson="{\"scope\":\"protocol-only-private-departure-canary\"}"};
+    var state=new WorldSnapshot{WorldId=world,Epoch=epoch,Tick=tick,Sequence=1,FixedDt=1f/240f,SimTime=tick/240d,ResX=16,ResZ=16,CellSize=.125f,MetadataJson="{\"scope\":\"protocol-only-private-departure-canary\"}"};
     state.Fields.Add(new SnapshotField{Name="WaterDepth",Stride=4,Data=new byte[1024]});return SnapshotCodec.Encode(state);
 }
-Dictionary<string,string> UploadHeaders(byte[] data,long epoch,long revision)=>new(){["X-SF-Epoch"]=epoch.ToString(),["X-SF-Tick"]="1",["X-SF-Sequence"]="1",["X-SF-Revision"]=revision.ToString(),["X-SF-SHA256"]=Convert.ToHexString(SHA256.HashData(data))};
+Dictionary<string,string> UploadHeaders(byte[] data,long epoch,long revision,long tick=1)=>new(){["X-SF-Epoch"]=epoch.ToString(),["X-SF-Tick"]=tick.ToString(),["X-SF-Sequence"]="1",["X-SF-Revision"]=revision.ToString(),["X-SF-SHA256"]=Convert.ToHexString(SHA256.HashData(data))};
 var owner=await Request("sessions/guest",new{},qa:true);var ownerToken=owner.GetProperty("token").GetString()!;
 var password=Guid.NewGuid().ToString("N");
 var admission=await Request("worlds",new{isPrivate=true,password,mode="coop",map="twin-shore-river",demo=true,teamSize=1},ownerToken);
@@ -80,20 +80,32 @@ Check((await Read(peerState)).AsSpan().SequenceEqual(frame),"fresh snapshot cros
 var receipt=await Request("worlds/"+world+"/departures/"+operation,null,ownerToken,bytes:payload,headers:UploadHeaders(payload,1,0));
 var retry=await Request("worlds/"+world+"/departures/"+operation,null,ownerToken,bytes:payload,headers:UploadHeaders(payload,1,0));
 Check(receipt.GetProperty("snapshot").GetProperty("revision").GetInt64()==1&&retry.GetProperty("snapshot").GetProperty("revision").GetInt64()==1,"HTTP completion retry keeps one durable version");
+var notice=await Event(peer,"saved");var currentRevision=notice.GetProperty("data").GetProperty("revision").GetInt64();
+Check(currentRevision==1,"remaining participant receives departure revision");
 var restored=await Event(peer,"restore_required");
 Check(restored.GetProperty("epoch").GetInt64()==2&&restored.GetProperty("tick").GetInt64()==1&&restored.GetProperty("data").GetProperty("lostThroughTick").GetInt64()==1,"remaining socket receives zero-loss cloud recovery");
 await Send(peer,new{type="ready",version=1,epoch=2,tick=1,sequence=1});var elected=await Event(peer,"host");
 Check(elected.GetProperty("data").GetProperty("participantId").GetString()==guest.GetProperty("identity").GetProperty("id").GetString(),"remaining participant becomes authority on same control socket");
-// Last participant also uses the transactional path, leaving no running canary.
-for(var second=0;second<10;second++)
+Check(elected.GetProperty("data").GetProperty("revision").GetInt64()==currentRevision,"new authority announcement carries confirmed revision");
+await Send(peer,new{type="commit",version=1,epoch=2,tick=2,sequence=1,substeps=1});await Event(peer,"committed");
+using(var heartbeats=CancellationTokenSource.CreateLinkedTokenSource(token))
 {
-    await Send(peer,new{type="heartbeat",version=1,epoch=2,tick=1,sequence=1});
-    await Task.Delay(TimeSpan.FromSeconds(1),token);
+    async Task Pulse()
+    {
+        while(!heartbeats.IsCancellationRequested)
+        {await Send(peer,new{type="heartbeat",version=1,epoch=2,tick=2,sequence=1});await Task.Delay(1000,heartbeats.Token);}
+    }
+    var pulse=Pulse();Console.WriteLine("Waiting for the ordinary autosave interval with a live authority lease.");
+    try{await Event(peer,"save_due");}finally{heartbeats.Cancel();try{await pulse;}catch(OperationCanceledException){}}
 }
+var finalPayload=Snapshot(world,2,2);
+var autoSaved=await Request("worlds/"+world+"/snapshots",null,guestToken,bytes:finalPayload,headers:UploadHeaders(finalPayload,2,currentRevision,2));
+currentRevision=autoSaved.GetProperty("revision").GetInt64();Check(currentRevision==2,"new authority completes ordinary autosave after handoff");
+// Last participant also uses the transactional path, leaving no running canary.
 var lastOperation=Guid.NewGuid().ToString("N");
-await Send(peer,new{type="depart_begin",version=1,epoch=2,tick=1,sequence=1,operationId=lastOperation});await Event(peer,"depart_prepared");
-var finalPayload=Snapshot(world,2);var final=await Request("worlds/"+world+"/departures/"+lastOperation,null,guestToken,bytes:finalPayload,headers:UploadHeaders(finalPayload,2,1));
-Check(final.GetProperty("snapshot").GetProperty("revision").GetInt64()==2,"last participant saves and leaves");
+await Send(peer,new{type="depart_begin",version=1,epoch=2,tick=2,sequence=1,operationId=lastOperation});await Event(peer,"depart_prepared");
+var final=await Request("worlds/"+world+"/departures/"+lastOperation,null,guestToken,bytes:finalPayload,headers:UploadHeaders(finalPayload,2,currentRevision,2));
+Check(final.GetProperty("snapshot").GetProperty("revision").GetInt64()==3,"last participant saves and leaves");
 var status=await Request("worlds/"+world+"/departures/"+lastOperation,null,guestToken);
 Check(status.GetProperty("snapshot").GetProperty("sha256").GetString()==Convert.ToHexString(SHA256.HashData(finalPayload)),"durable receipt remains readable after departure");
 var result=new{success=true,worldId=world,isPrivate=true,checks,scope="Production HTTP and dual-WSS protocol canary with CPU fixture; no Unity gameplay or voice proof",completedUtc=DateTimeOffset.UtcNow};

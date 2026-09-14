@@ -302,6 +302,12 @@ public sealed partial class Rooms(WorldStore store, TimeProvider time)
         lock (_gate)
         {
             var room = Get(id); var peer = Member(identity, id); RequireHost(room, peer, request.Epoch);
+            if(request.ExpectedRevision!=room.Revision)
+            {
+                var latest=store.Versions(id).FirstOrDefault();
+                if(latest!=null)Send(room,peer,"saved",latest); // Latest durable revision, not a new save.
+                throw new ApiFailure(409,"snapshot_revision_conflict");
+            }
             var atCurrent = request.Tick == room.Tick && request.Sequence == room.ConfirmedSequence;
             var atRetained = room.Commits.TryGetValue(request.Tick, out var commit) && commit.Sequence == request.Sequence;
             if (!atCurrent && !atRetained) throw new ApiFailure(409, "snapshot_tick");
@@ -390,7 +396,7 @@ public sealed partial class Rooms(WorldStore store, TimeProvider time)
             .OrderBy(x => x.Admitted).ThenBy(x => x.Identity.Id).FirstOrDefault();
         if (candidate == null) return;
         room.HostId = candidate.Identity.Id; room.LeaseUntil = time.GetUtcNow().AddSeconds(8); room.RecoveryUntil = null;
-        Broadcast(room, "host", new { participantId = room.HostId, leaseUntil = room.LeaseUntil });
+        Broadcast(room, "host", new { participantId = room.HostId, leaseUntil = room.LeaseUntil, revision=room.Revision, revisionKnown=true });
     }
     private static void Send(RoomState room, RoomPeer peer, string type, object? data = null, long? sequence = null)
     {

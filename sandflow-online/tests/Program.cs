@@ -332,6 +332,9 @@ Denied(()=>departureRooms.CompleteDeparture(departing,departureWorld.Id,departur
 Check(departureStore.Versions(departureWorld.Id).First().Revision==1&&departureRooms.Member(departing,departureWorld.Id)==leaver,"bad departure upload preserves old version and current authority");
 var departureReceipt=departureRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,departurePayload);
 Check(departureReceipt.Snapshot.Revision==2&&departureStore.Versions(departureWorld.Id).Count==2,"departure saves final pending input before host removal");
+var departureEvents=new List<ServerEvent>();while(stayer.Events.Reader.TryRead(out var departureEvent))departureEvents.Add(departureEvent);
+Check(departureEvents.FindIndex(x=>x.Type=="saved"&&x.Data is SnapshotRecord {Revision:2})>=0&&
+    departureEvents.FindIndex(x=>x.Type=="saved")<departureEvents.FindIndex(x=>x.Type=="paused"),"new durable revision is announced before authority changes");
 Denied(()=>departureRooms.Member(departing,departureWorld.Id),"not_admitted");
 Check(departureRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,departurePayload)==departureReceipt&&departureStore.Versions(departureWorld.Id).Count==2,"identical completion retry is idempotent after disconnect");
 Denied(()=>departureRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,damagedDeparture),"departure_retry_mismatch");
@@ -341,6 +344,10 @@ Check(restartedRooms.CompleteDeparture(departing,departureWorld.Id,departureOper
 departureClock.Advance(TimeSpan.FromSeconds(3));departureRooms.Sweep();
 departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("ready",Epoch:2,Tick:2,Sequence:2));
 Check(departureRooms.View(departureWorld.Id).State=="active"&&departureRooms.Member(staying,departureWorld.Id).Ready,"remaining peer resumes from latest departure snapshot without lost interval");
+var staleEpochBytes=SnapshotCodec.Decode(departurePayload);staleEpochBytes.Epoch=2;var staleBytes=SnapshotCodec.Encode(staleEpochBytes);
+Denied(()=>departureRooms.Save(staying,departureWorld.Id,new(2,2,2,1,Convert.ToHexString(SHA256.HashData(staleBytes))),staleBytes,false),"snapshot_revision_conflict");
+var revisionNotice=false;while(stayer.Events.Reader.TryRead(out var latestEvent))if(latestEvent.Type=="saved"&&latestEvent.Data is SnapshotRecord {Revision:2})revisionNotice=true;
+Check(revisionNotice&&departureStore.Versions(departureWorld.Id).Count==2,"stale writer learns current confirmed revision without overwriting a snapshot");
 Denied(()=>departureRooms.LeaveParticipant(staying,departureWorld.Id),"host_departure_required");
 var nextDeparture=Protocol.RandomId();
 departureClock.Advance(TimeSpan.FromSeconds(7));

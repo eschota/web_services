@@ -8,4 +8,4 @@ Pass the existing project-local QA authority env-file and project-local output p
 dotnet run --project tools/DepartureLiveProbe -c Release -- .work/qa-session/server.env .work/departure-live.json
 ```
 
-Set DOTNET_CLI_HOME/NUGET_PACKAGES/TEMP/TMP inside this project before invoking, as in tools/Run-Checks.ps1. The harness has a 60-second overall deadline, 15-second HTTP deadlines, and maintains the elected peer's heartbeat during the per-world departure cooldown.
+Set DOTNET_CLI_HOME/NUGET_PACKAGES/TEMP/TMP inside this project before invoking, as in tools/Run-Checks.ps1. The harness has a 90-second overall deadline and 15-second HTTP deadlines. It maintains the elected peer's heartbeat while waiting for the ordinary minute-spaced autosave, verifies that save with the announced revision, then saves/leaves again. A short handoff test alone missed this revision-transfer regression previously.
