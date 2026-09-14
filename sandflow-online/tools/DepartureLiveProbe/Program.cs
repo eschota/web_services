@@ -50,13 +50,15 @@ async Task<JsonElement> Event(ClientWebSocket socket,string type)
 void Check(bool condition,string label){if(!condition)throw new InvalidOperationException(label);checks.Add(label);}
 byte[] Snapshot(string world,long epoch,long tick=1)
 {
-    var state=new WorldSnapshot{WorldId=world,Epoch=epoch,Tick=tick,Sequence=1,FixedDt=1f/240f,SimTime=tick/240d,ResX=16,ResZ=16,CellSize=.125f,MetadataJson="{\"scope\":\"protocol-only-private-departure-canary\"}"};
+    var state=new WorldSnapshot{WorldId=world,Epoch=epoch,Tick=tick,Sequence=2,FixedDt=1f/240f,SimTime=tick/240d,ResX=16,ResZ=16,CellSize=.125f,MetadataJson="{\"scope\":\"protocol-only-private-departure-canary\"}"};
     state.Fields.Add(new SnapshotField{Name="WaterDepth",Stride=4,Data=new byte[1024]});
     var values=TuningSettings.All.Where(value=>value.Scope==SettingScope.Shared).ToDictionary(value=>value.Key,value=>(value.Min+value.Max)*.5f);
     values["ErosionStrength"]=.37f;state.Sections.Add(new SnapshotSection{Name=TuningSettings.SectionName,Data=TuningSettings.Encode(values)});
+    var options=WorldOptions.Defaults();options["Foam"]=0;options["Tonemap"]=1;
+    state.Sections.Add(new SnapshotSection{Name=WorldOptions.SectionName,Data=WorldOptions.Encode(options)});
     return SnapshotCodec.Encode(state);
 }
-Dictionary<string,string> UploadHeaders(byte[] data,long epoch,long revision,long tick=1)=>new(){["X-SF-Epoch"]=epoch.ToString(),["X-SF-Tick"]=tick.ToString(),["X-SF-Sequence"]="1",["X-SF-Revision"]=revision.ToString(),["X-SF-SHA256"]=Convert.ToHexString(SHA256.HashData(data))};
+Dictionary<string,string> UploadHeaders(byte[] data,long epoch,long revision,long tick=1)=>new(){["X-SF-Epoch"]=epoch.ToString(),["X-SF-Tick"]=tick.ToString(),["X-SF-Sequence"]="2",["X-SF-Revision"]=revision.ToString(),["X-SF-SHA256"]=Convert.ToHexString(SHA256.HashData(data))};
 var owner=await Request("sessions/guest",new{},qa:true);var ownerToken=owner.GetProperty("token").GetString()!;
 var password=Guid.NewGuid().ToString("N");
 var admission=await Request("worlds",new{isPrivate=true,password,mode="coop",map="twin-shore-river",demo=true,teamSize=1},ownerToken);
@@ -75,11 +77,16 @@ var settingOrder=await Event(host,"ordered");
 Check(settingOrder.GetProperty("data").GetProperty("clientSequence").GetInt64()==1
     &&settingOrder.GetProperty("data").GetProperty("command").GetProperty("settings")[0].GetProperty("value").GetSingle()==.37f,
     "live ordered setting batch confirms sender cursor and exact value");
+await Send(host,new{type="input",version=SessionProtocol.Version,epoch=1,sequence=2,command=new{kind="world-option",action="set",settings=new[]{new{key="Foam",value=0},new{key="Tonemap",value=1}}}});
+var optionOrder=await Event(host,"ordered");
+Check(optionOrder.GetProperty("data").GetProperty("clientSequence").GetInt64()==2
+    &&optionOrder.GetProperty("data").GetProperty("command").GetProperty("kind").GetString()=="world-option",
+    "discrete switches share ordered sender receipts with numeric tuning");
 var operation=Guid.NewGuid().ToString("N");
 await Send(host,new{type="depart_begin",version=SessionProtocol.Version,epoch=1,tick=0,sequence=0,operationId=operation});
 var prepared=await Event(host,"depart_prepared");
-Check(prepared.GetProperty("data").GetProperty("tick").GetInt64()==1&&prepared.GetProperty("data").GetProperty("sequence").GetInt64()==1,"live fence includes pending ordered input");
-await Send(host,new{type="commit",version=SessionProtocol.Version,epoch=1,tick=1,sequence=1,substeps=1});await Event(host,"committed");
+Check(prepared.GetProperty("data").GetProperty("tick").GetInt64()==1&&prepared.GetProperty("data").GetProperty("sequence").GetInt64()==2,"live fence includes pending ordered input");
+await Send(host,new{type="commit",version=SessionProtocol.Version,epoch=1,tick=1,sequence=2,substeps=1});await Event(host,"committed");
 var payload=Snapshot(world,1);var frame=new byte[32+payload.Length];
 frame[0]=(byte)'S';frame[1]=(byte)'F';frame[2]=(byte)'O';frame[3]=SessionProtocol.Version;frame[4]=1;
 BitConverter.GetBytes(1L).CopyTo(frame,8);BitConverter.GetBytes(1L).CopyTo(frame,16);BitConverter.GetBytes(1u).CopyTo(frame,24);BitConverter.GetBytes((ushort)1).CopyTo(frame,30);payload.CopyTo(frame,32);
@@ -98,21 +105,23 @@ using(var storedRequest=new HttpRequestMessage(HttpMethod.Get,"worlds/"+world+"/
     var restoredState=SnapshotCodec.Decode(memory.ToArray());
     var restoredValues=TuningSettings.Decode(restoredState.Sections.Single(value=>value.Name==TuningSettings.SectionName).Data);
     Check(memory.ToArray().AsSpan().SequenceEqual(payload)&&restoredValues["ErosionStrength"]==.37f,"durable HTTP checkpoint roundtrip preserves the shared tuning section");
+    var restoredOptions=WorldOptions.Decode(restoredState.Sections.Single(value=>value.Name==WorldOptions.SectionName).Data);
+    Check(restoredOptions.Count==11&&restoredOptions["Foam"]==0&&restoredOptions["Tonemap"]==1,"durable HTTP checkpoint retains discrete world switches");
 }
 var notice=await Event(peer,"saved");var currentRevision=notice.GetProperty("data").GetProperty("revision").GetInt64();
 Check(currentRevision==1,"remaining participant receives departure revision");
 var restored=await Event(peer,"restore_required");
 Check(restored.GetProperty("epoch").GetInt64()==2&&restored.GetProperty("tick").GetInt64()==1&&restored.GetProperty("data").GetProperty("lostThroughTick").GetInt64()==1,"remaining socket receives zero-loss cloud recovery");
-await Send(peer,new{type="ready",tuningDefaultsHash=CanonicalTuningDefaults.Fingerprint,version=SessionProtocol.Version,epoch=2,tick=1,sequence=1});var elected=await Event(peer,"host");
+await Send(peer,new{type="ready",tuningDefaultsHash=CanonicalTuningDefaults.Fingerprint,version=SessionProtocol.Version,epoch=2,tick=1,sequence=2});var elected=await Event(peer,"host");
 Check(elected.GetProperty("data").GetProperty("participantId").GetString()==guest.GetProperty("identity").GetProperty("id").GetString(),"remaining participant becomes authority on same control socket");
 Check(elected.GetProperty("data").GetProperty("revision").GetInt64()==currentRevision,"new authority announcement carries confirmed revision");
-await Send(peer,new{type="commit",version=SessionProtocol.Version,epoch=2,tick=2,sequence=1,substeps=1});await Event(peer,"committed");
+await Send(peer,new{type="commit",version=SessionProtocol.Version,epoch=2,tick=2,sequence=2,substeps=1});await Event(peer,"committed");
 using(var heartbeats=CancellationTokenSource.CreateLinkedTokenSource(token))
 {
     async Task Pulse()
     {
         while(!heartbeats.IsCancellationRequested)
-        {await Send(peer,new{type="heartbeat",version=SessionProtocol.Version,epoch=2,tick=2,sequence=1});await Task.Delay(1000,heartbeats.Token);}
+        {await Send(peer,new{type="heartbeat",version=SessionProtocol.Version,epoch=2,tick=2,sequence=2});await Task.Delay(1000,heartbeats.Token);}
     }
     var pulse=Pulse();Console.WriteLine("Waiting for the ordinary autosave interval with a live authority lease.");
     try
@@ -129,7 +138,7 @@ var autoSaved=await Request("worlds/"+world+"/snapshots",null,guestToken,bytes:f
 currentRevision=autoSaved.GetProperty("revision").GetInt64();Check(currentRevision==2,"new authority completes ordinary autosave after handoff");
 // Last participant also uses the transactional path, leaving no running canary.
 var lastOperation=Guid.NewGuid().ToString("N");
-await Send(peer,new{type="depart_begin",version=SessionProtocol.Version,epoch=2,tick=2,sequence=1,operationId=lastOperation});await Event(peer,"depart_prepared");
+await Send(peer,new{type="depart_begin",version=SessionProtocol.Version,epoch=2,tick=2,sequence=2,operationId=lastOperation});await Event(peer,"depart_prepared");
 var final=await Request("worlds/"+world+"/departures/"+lastOperation,null,guestToken,bytes:finalPayload,headers:UploadHeaders(finalPayload,2,currentRevision,2));
 Check(final.GetProperty("snapshot").GetProperty("revision").GetInt64()==3,"last participant saves and leaves");
 var status=await Request("worlds/"+world+"/departures/"+lastOperation,null,guestToken);

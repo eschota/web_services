@@ -53,7 +53,7 @@ public static class CommandValidation
 {
     // Only command families the current client can replay. Planned families must not
     // be broadcast as apparently-valid input that pauses every client on receipt.
-    private static readonly HashSet<string> Kinds = ["simulation", "draggable", "setting", "map", "reset"];
+    private static readonly HashSet<string> Kinds = ["simulation", "draggable", "setting", "world-option", "map", "reset"];
     public static void Validate(WorldCommand value)
     {
         if (!Kinds.Contains(value.Kind) || string.IsNullOrWhiteSpace(value.Action) || value.Action.Length > 40)
@@ -72,16 +72,16 @@ public static class CommandValidation
             var norm = (double)value.Qx * value.Qx + (double)value.Qy * value.Qy + (double)value.Qz * value.Qz + (double)value.Qw * value.Qw;
             if (norm < .99 || norm > 1.01) throw new ApiFailure(400, "invalid_actor_rotation");
         }
-        if (value.Kind == "setting")
+        if (value.Kind is "setting" or "world-option")
         {
             if (value.Action != "set" || value.Settings == null || value.Settings.Length < 1
-                || value.Settings.Length > SandFlow.Protocol.TuningSettings.SharedCount)
+                || value.Settings.Length > (value.Kind=="setting"?SandFlow.Protocol.TuningSettings.SharedCount:SandFlow.Protocol.WorldOptions.All.Count))
                 throw new ApiFailure(400, "invalid_tuning_batch");
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var change in value.Settings)
             {
                 if (change == null || change.Key == null || !seen.Add(change.Key)) throw new ApiFailure(400, "invalid_tuning_batch");
-                try { SandFlow.Protocol.TuningSettings.ValidateShared(change.Key, change.Value); }
+                try { if(value.Kind=="setting")SandFlow.Protocol.TuningSettings.ValidateShared(change.Key, change.Value);else SandFlow.Protocol.WorldOptions.Validate(change.Key,change.Value); }
                 catch (InvalidDataException) { throw new ApiFailure(400, "invalid_tuning_value"); }
             }
         }

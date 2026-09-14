@@ -101,3 +101,15 @@ The tests use a deterministic mocked room SDK and cover lifecycle, PTT consent, 
 They do **not** prove real browser permission prompts, audio capture/playback, TURN fallback, Windows/WebGPU crossplay, real reconnection timing, or end-to-end sound quality. No browser or local HTTP server was launched. Public admission and voice flags remain disabled until authenticated production-like browser QA.
 
 The planned Russian/English profanity detector and shared 60-second voice/chat mute remain analysis only. No ASR model, transcript capture, or moderation runtime is included here. The approved reactive design may allow the triggering phrase to be heard before server enforcement.
+
+## Unity WebGL bridge
+
+`npm run build:unity` requires the explicit environment variable `SANDFLOW_GAME_PROJECT`. It validates the Unity version, `Assets/SandFlowOnline`, and the canonical parent `AGENTS.md`, and rejects every AssetStore/ASStore26 target before creating an output directory. For this repository set it to `R:\Sand Keeper\Game`. The Unity-facing API is `SandFlowWebVoiceAdapter`; its assembly is not auto-referenced, no component is placed in a scene/prefab, and `serviceEnabled` defaults false.
+
+The current generated source artifact lives below `Assets/SandFlowOnline/Voice/StreamingAssets/SandFlowVoice`, which is **not** Unity's reserved root `Assets/StreamingAssets`. It will not automatically be copied to `Module.streamingAssetsUrl`. The `.jslib` requests the exact runtime URL expression:
+
+```text
+Module.streamingAssetsUrl + "/SandFlowVoice/sandflow-voice.bundle.js"
+```
+
+Before claiming runtime loadability, the parent-owned WebGL packaging hook must verify `bundle-manifest.json` against the lock and bundle, then copy both files into `Game/Assets/StreamingAssets/SandFlowVoice` before the Unity build (or provide an equivalently verified WebGL-template asset route). The hook must preserve the URL above, remove stale outputs, and verify the deployed MIME type/hash. That packaging hook is not implemented by this slice.

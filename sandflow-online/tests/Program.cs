@@ -489,6 +489,24 @@ SaveNotices();for(int pulse=0;pulse<11;pulse++)SavePulse(2);
 Check(SaveNotices().Length==0,"new dirty state respects the successful-save interval");
 SavePulse(2);var secondSaveNotices=SaveNotices();
 Check(secondSaveNotices.Length==1&&secondSaveNotices[0].GetProperty("revision").GetInt64()==1,"continuous activity receives the next revision-scoped minute save demand");
+var optionDefaults=WorldOptions.Defaults();var optionBytes=WorldOptions.Encode(optionDefaults);
+Check(optionBytes.Length==17&&WorldOptions.Decode(optionBytes).SequenceEqual(optionDefaults),"all11 world switches have bounded lossless checkpoint representation");
+CommandValidation.Validate(new("world-option","set",Settings:[new("Foam",0),new("Tonemap",2)]));
+Check(true,"ordered world-option command accepts valid toggles and enum");
+foreach(var bad in new[]{new TuningChange("Foam",.5f),new("Foam",2),new("Tonemap",3),new("Fullscreen",1),new("Spray",float.NaN)})
+    Denied(()=>CommandValidation.Validate(new("world-option","set",Settings:[bad])),"invalid_tuning_value");
+Denied(()=>CommandValidation.Validate(new("world-option","set",Settings:[new("Foam",0),new("Foam",1)])),"invalid_tuning_batch");
+Denied(()=>CommandValidation.Validate(new("simulation","enqueue",Settings:[new("Foam",0)])),"unexpected_tuning_batch");
+var optionStore=new WorldStore(Path.Combine(root,Guid.NewGuid().ToString("N")));var optionOwner=optionStore.NewGuest(clock.GetUtcNow()).Identity;
+var optionWorld=optionStore.Create(optionOwner,new(),clock.GetUtcNow());var optionState=SnapshotCodec.Decode(State(1,1,0));optionState.WorldId=optionWorld.Id;
+optionState.MetadataJson="{\"scope\":\""+WorldOptions.WorldScope+"\"}";
+optionState.Sections.Add(new SnapshotSection{Name=TuningSettings.SectionName,Data=canonical});
+void SaveOptionState(){var bytes=SnapshotCodec.Encode(optionState);optionStore.Save(optionWorld.Id,new(1,1,0,0,Convert.ToHexString(SHA256.HashData(bytes))),bytes,clock.GetUtcNow());}
+Denied(SaveOptionState,"snapshot_world_options");
+var optionSection=new SnapshotSection{Name=WorldOptions.SectionName,Data=(byte[])optionBytes.Clone()};optionState.Sections.Add(optionSection);optionSection.Data[6]=2;
+Denied(SaveOptionState,"snapshot_world_options");optionSection.Data=optionBytes;
+SaveOptionState();Check(optionStore.Versions(optionWorld.Id).Count==1,"verified switch snapshot promotes after invalid attempts without replacing a previous version");
+Check(Protocol.Version==3,"old discrete-incompatible sessions are fenced by protocol3");
 Console.WriteLine($"RESULT {testCount} assertions passed. No HTTP server or physical simulation launched.");
 
 sealed class ManualClock : TimeProvider

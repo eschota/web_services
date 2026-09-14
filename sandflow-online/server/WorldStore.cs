@@ -139,9 +139,17 @@ public sealed class WorldStore
                 try{SandFlow.Protocol.TuningSettings.Decode(tuning.Data);}
                 catch(InvalidDataException){throw new ApiFailure(400,"snapshot_tuning");}
             }
+            var options=physical.Sections.Find(section=>section.Name==SandFlow.Protocol.WorldOptions.SectionName);
+            if(options!=null)
+            {
+                try{SandFlow.Protocol.WorldOptions.Decode(options.Data);}
+                catch(InvalidDataException){throw new ApiFailure(400,"snapshot_world_options");}
+            }
             if(metadata.RootElement.TryGetProperty("scope",out var scope)&&scope.ValueKind==JsonValueKind.String
-                &&scope.GetString()==SandFlow.Protocol.TuningSettings.WorldScope&&tuning==null)
+                &&(scope.GetString()==SandFlow.Protocol.TuningSettings.WorldScope||scope.GetString()==SandFlow.Protocol.WorldOptions.WorldScope)&&tuning==null)
                 throw new ApiFailure(400,"snapshot_tuning");
+            if(scope.ValueKind==JsonValueKind.String&&scope.GetString()==SandFlow.Protocol.WorldOptions.WorldScope&&options==null)
+                throw new ApiFailure(400,"snapshot_world_options");
         }
         catch (JsonException) { throw new ApiFailure(400, "snapshot_metadata"); }
         lock (_gate)
