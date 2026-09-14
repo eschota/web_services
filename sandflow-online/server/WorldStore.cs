@@ -129,7 +129,20 @@ public sealed class WorldStore
         { throw new ApiFailure(400, "snapshot_format"); }
         if (physical.WorldId != world || physical.Epoch != request.Epoch || physical.Tick != request.Tick || physical.Sequence != request.Sequence)
             throw new ApiFailure(400, "snapshot_identity");
-        try { using var metadata = JsonDocument.Parse(physical.MetadataJson, new() { MaxDepth = 32 }); }
+        try
+        {
+            using var metadata = JsonDocument.Parse(physical.MetadataJson, new() { MaxDepth = 32 });
+            if(metadata.RootElement.ValueKind!=JsonValueKind.Object)throw new ApiFailure(400,"snapshot_metadata");
+            var tuning=physical.Sections.Find(section=>section.Name==SandFlow.Protocol.TuningSettings.SectionName);
+            if(tuning!=null)
+            {
+                try{SandFlow.Protocol.TuningSettings.Decode(tuning.Data);}
+                catch(InvalidDataException){throw new ApiFailure(400,"snapshot_tuning");}
+            }
+            if(metadata.RootElement.TryGetProperty("scope",out var scope)&&scope.ValueKind==JsonValueKind.String
+                &&scope.GetString()==SandFlow.Protocol.TuningSettings.WorldScope&&tuning==null)
+                throw new ApiFailure(400,"snapshot_tuning");
+        }
         catch (JsonException) { throw new ApiFailure(400, "snapshot_metadata"); }
         lock (_gate)
         {

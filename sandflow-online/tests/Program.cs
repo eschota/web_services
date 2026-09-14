@@ -31,18 +31,18 @@ var admission = rooms.Join(a.Identity, privateWorld.Id, null);
 rooms.Join(b.Identity, privateWorld.Id, "test-only-password");
 var (first, firstConnection) = rooms.Connect(a.Identity, privateWorld.Id, false);
 var (second, secondConnection) = rooms.Connect(b.Identity, privateWorld.Id, false);
-rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("ready", Epoch: 1));
-rooms.Receive(b.Identity, privateWorld.Id, secondConnection, new("ready", Epoch: 1));
+rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint, Epoch: 1));
+rooms.Receive(b.Identity, privateWorld.Id, secondConnection, new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint, Epoch: 1));
 Check(rooms.View(privateWorld.Id).State == "active", "host elected after readiness");
 Denied(() => rooms.Receive(b.Identity, privateWorld.Id, secondConnection, new("commit", Epoch: 1, Tick: 1)), "host_lease_required");
-rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("input", Epoch: 1, Sequence: 1, Command: new("brush", "addSand", Amount: .1f)));
-Denied(() => rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("input", Epoch: 1, Sequence: 1, Command: new("brush", "addSand"))), "duplicate_input");
+rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("input", Epoch: 1, Sequence: 1, Command: new("simulation", "enqueue", Amount: .1f)));
+Denied(() => rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("input", Epoch: 1, Sequence: 1, Command: new("simulation", "enqueue"))), "duplicate_input");
 rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("commit", Epoch: 1, Tick: 1, Sequence: 1));
 ServerEvent? committed = null;
 while (second.Events.Reader.TryRead(out var received)) if (received.Type == "committed") committed = received;
 Check(committed?.Sequence == 1 && committed.Tick == 1, "committed cursor is confirmed state");
 rooms.Receive(b.Identity, privateWorld.Id, secondConnection, new("heartbeat", Epoch: 1, Tick: 1, Sequence: 1));
-Denied(() => rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("input", Epoch: 1, Sequence: 2, Command: new("brush", "addSand", Amount: float.NaN))), "non_finite_command");
+Denied(() => rooms.Receive(a.Identity, privateWorld.Id, firstConnection, new("input", Epoch: 1, Sequence: 2, Command: new("simulation", "enqueue", Amount: float.NaN))), "non_finite_command");
 byte[] State(long epoch, long tick, long sequence)
 {
     var snapshot = new WorldSnapshot { WorldId = privateWorld.Id, Epoch = epoch, Tick = tick, Sequence = sequence,
@@ -69,7 +69,7 @@ var snapshot = rooms.Save(a.Identity, privateWorld.Id, new(1, 1, 1, 0, hash), st
 Check(snapshot.Revision == 1 && store.Read(snapshot).SequenceEqual(state), "snapshot roundtrip");
 rooms.Receive(b.Identity,privateWorld.Id,secondConnection,new("resync",Epoch:1));
 Check(!second.Ready,"full resync removes follower from authority eligibility");
-rooms.Receive(b.Identity,privateWorld.Id,secondConnection,new("ready",Epoch:1,Tick:1,Sequence:1));
+rooms.Receive(b.Identity,privateWorld.Id,secondConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1,Tick:1,Sequence:1));
 Check(second.Ready,"current saved checkpoint can restore follower readiness");
 Denied(() => rooms.Save(a.Identity, privateWorld.Id, new(1, 1, 1, 1, hash), state, false), "autosave_interval");
 rooms.Disconnect(a.Identity, privateWorld.Id, firstConnection, false);
@@ -87,7 +87,7 @@ Check(rooms.View(privateWorld.Id).State == "sleeping", "empty room sleeps");
 var reloaded = new Rooms(store, clock);
 reloaded.Join(b.Identity, privateWorld.Id, "test-only-password");
 var (_, thirdConnection) = reloaded.Connect(b.Identity, privateWorld.Id, false);
-reloaded.Receive(b.Identity, privateWorld.Id, thirdConnection, new("ready", Epoch: 3, Tick: 2, Sequence: 1));
+reloaded.Receive(b.Identity, privateWorld.Id, thirdConnection, new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint, Epoch: 3, Tick: 2, Sequence: 1));
 clock.Advance(TimeSpan.FromSeconds(9)); reloaded.Sweep();
 Denied(() => reloaded.Receive(b.Identity, privateWorld.Id, thirdConnection, new("commit", Epoch: 3, Tick: 3, Sequence: 1)), "stale_epoch");
 reloaded.Kick(a.Identity, privateWorld.Id, b.Identity.Id);
@@ -117,7 +117,7 @@ Check(telemetry.Count() == 1, "telemetry retention bounded to seven days");
 var batchWorld = store.Create(b.Identity, new(), clock.GetUtcNow());
 rooms.Join(b.Identity, batchWorld.Id, null);
 var (batchPeer, batchConnection) = rooms.Connect(b.Identity, batchWorld.Id, false);
-rooms.Receive(b.Identity, batchWorld.Id, batchConnection, new("ready", Epoch: 1));
+rooms.Receive(b.Identity, batchWorld.Id, batchConnection, new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint, Epoch: 1));
 rooms.Receive(b.Identity, batchWorld.Id, batchConnection, new("input", Epoch: 1, Sequence: 1, Command: new("simulation", "enqueue", CommandType: 1)));
 rooms.Receive(b.Identity, batchWorld.Id, batchConnection, new("commitBatch", Epoch: 1, Commits: [new(1, 0, 1), new(2, 1, 2)]));
 ServerEvent? batchEvent = null;
@@ -128,7 +128,7 @@ rooms.Receive(b.Identity, batchWorld.Id, batchConnection, new("commit", Epoch: 1
 Check(true, "invalid commit batch is atomic");
 var late = store.NewGuest(clock.GetUtcNow()); rooms.Join(late.Identity, batchWorld.Id, null);
 var (_, lateConnection) = rooms.Connect(late.Identity, batchWorld.Id, false);
-rooms.Receive(late.Identity, batchWorld.Id, lateConnection, new("ready", Epoch: 1, Tick: 2, Sequence: 1));
+rooms.Receive(late.Identity, batchWorld.Id, lateConnection, new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint, Epoch: 1, Tick: 2, Sequence: 1));
 Check(true, "late join can acknowledge a retained checkpoint while host keeps advancing");
 CommandValidation.Validate(new("draggable", "pose", ObjectId: a.Identity.Id, Y: .5f, Flags: 1));
 Check(true, "bounded actor pose accepted");
@@ -199,16 +199,16 @@ foreach(var identity in new[]{a.Identity,b.Identity,c.Identity})rooms.Join(ident
 var (routeA,routeAc)=rooms.Connect(a.Identity,routeWorld.Id,false);
 var (routeB,routeBc)=rooms.Connect(b.Identity,routeWorld.Id,false);
 var (routeC,routeCc)=rooms.Connect(c.Identity,routeWorld.Id,false);
-rooms.Receive(a.Identity,routeWorld.Id,routeAc,new("ready",Epoch:1));
-rooms.Receive(b.Identity,routeWorld.Id,routeBc,new("ready",Epoch:1));
-rooms.Receive(c.Identity,routeWorld.Id,routeCc,new("ready",Epoch:1));
+rooms.Receive(a.Identity,routeWorld.Id,routeAc,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
+rooms.Receive(b.Identity,routeWorld.Id,routeBc,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
+rooms.Receive(c.Identity,routeWorld.Id,routeCc,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
 var (_,routeAb)=rooms.Connect(a.Identity,routeWorld.Id,true);
 var (_,routeBb)=rooms.Connect(b.Identity,routeWorld.Id,true);
 rooms.Connect(c.Identity,routeWorld.Id,true);
 rooms.Receive(a.Identity,routeWorld.Id,routeAc,new("commitBatch",Epoch:1,Commits:[new(1,0,1,true)]));
 byte[] RoutedFrame(byte kind,string target,long tick=1)
 {
-    var frame=new byte[49];frame[0]=(byte)'S';frame[1]=(byte)'F';frame[2]=(byte)'O';frame[3]=1;frame[4]=kind;
+    var frame=new byte[49];frame[0]=(byte)'S';frame[1]=(byte)'F';frame[2]=(byte)'O';frame[3]=Protocol.Version;frame[4]=kind;
     BitConverter.GetBytes(1L).CopyTo(frame,8);BitConverter.GetBytes(tick).CopyTo(frame,16);
     BitConverter.GetBytes(1u).CopyTo(frame,24);BitConverter.GetBytes((ushort)1).CopyTo(frame,30);
     Guid.ParseExact(target,"N").ToByteArray().CopyTo(frame,32);frame[48]=10;return frame;
@@ -237,14 +237,14 @@ var savedWorld=store.Create(b.Identity,new(),clock.GetUtcNow());
 rooms.Join(b.Identity,savedWorld.Id,null);rooms.Join(c.Identity,savedWorld.Id,null);
 var (_,savedHost)=rooms.Connect(b.Identity,savedWorld.Id,false);
 var (savedFollower,savedClient)=rooms.Connect(c.Identity,savedWorld.Id,false);
-rooms.Receive(b.Identity,savedWorld.Id,savedHost,new("ready",Epoch:1));
+rooms.Receive(b.Identity,savedWorld.Id,savedHost,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
 rooms.Receive(b.Identity,savedWorld.Id,savedHost,new("commit",Epoch:1,Tick:1));
 var savedState=new WorldSnapshot { WorldId=savedWorld.Id,Epoch=1,Tick=1,FixedDt=.02f,SimTime=.02,ResX=16,ResZ=16,CellSize=.125f };
 savedState.Fields.Add(new SnapshotField { Name="WaterDepth",Data=new byte[1024] });
 var savedBytes=SnapshotCodec.Encode(savedState);
 rooms.Save(b.Identity,savedWorld.Id,new(1,1,0,0,Convert.ToHexString(SHA256.HashData(savedBytes))),savedBytes,false);
 rooms.Receive(b.Identity,savedWorld.Id,savedHost,new("commit",Epoch:1,Tick:2));
-rooms.Receive(c.Identity,savedWorld.Id,savedClient,new("ready",Epoch:1,Tick:1));
+rooms.Receive(c.Identity,savedWorld.Id,savedClient,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1,Tick:1));
 Check(savedFollower.Ready&&savedFollower.AcknowledgedTick==1,"late ready accepts saved baseline after host advanced and its commit was trimmed");
 var qaClock=new ManualClock();var qaAccess=new QaBrowserAccess(qaClock);
 var challenge=qaAccess.Begin(null);
@@ -273,7 +273,7 @@ var streamOwner=store.NewGuest(clock.GetUtcNow()).Identity;
 var streamWorld=store.Create(streamOwner,new(),clock.GetUtcNow());
 rooms.Join(streamOwner,streamWorld.Id,null);
 var (streamPeer,streamConnection)=rooms.Connect(streamOwner,streamWorld.Id,false);
-rooms.Receive(streamOwner,streamWorld.Id,streamConnection,new("ready",Epoch:1));
+rooms.Receive(streamOwner,streamWorld.Id,streamConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
 for(var sequence=1;sequence<=6000;sequence++)
 {
     clock.Advance(TimeSpan.FromSeconds(1d/60));
@@ -303,8 +303,8 @@ var departureWorld=departureStore.Create(departing,new(),departureClock.GetUtcNo
 departureRooms.Join(departing,departureWorld.Id,null);departureRooms.Join(staying,departureWorld.Id,null);
 var (leaver,leaverConnection)=departureRooms.Connect(departing,departureWorld.Id,false);
 var (stayer,stayerConnection)=departureRooms.Connect(staying,departureWorld.Id,false);
-departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("ready",Epoch:1));
-departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("ready",Epoch:1));
+departureRooms.Receive(departing,departureWorld.Id,leaverConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
 byte[] DepartureBytes(long tick,long sequence)
 {
     var checkpoint=SnapshotCodec.Decode(State(1,tick,sequence));checkpoint.WorldId=departureWorld.Id;return SnapshotCodec.Encode(checkpoint);
@@ -342,7 +342,7 @@ Denied(()=>departureRooms.DepartureStatus(staying,departureWorld.Id,departureOpe
 var restartedStore=new WorldStore(departureRoot);var restartedRooms=new Rooms(restartedStore,departureClock);
 Check(restartedRooms.CompleteDeparture(departing,departureWorld.Id,departureOperation,departureUpload,departurePayload)==departureReceipt,"completion receipt survives service restart and lost HTTP response");
 departureClock.Advance(TimeSpan.FromSeconds(3));departureRooms.Sweep();
-departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("ready",Epoch:2,Tick:2,Sequence:2));
+departureRooms.Receive(staying,departureWorld.Id,stayerConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:2,Tick:2,Sequence:2));
 Check(departureRooms.View(departureWorld.Id).State=="active"&&departureRooms.Member(staying,departureWorld.Id).Ready,"remaining peer resumes from latest departure snapshot without lost interval");
 var staleEpochBytes=SnapshotCodec.Decode(departurePayload);staleEpochBytes.Epoch=2;var staleBytes=SnapshotCodec.Encode(staleEpochBytes);
 Denied(()=>departureRooms.Save(staying,departureWorld.Id,new(2,2,2,1,Convert.ToHexString(SHA256.HashData(staleBytes))),staleBytes,false),"snapshot_revision_conflict");
@@ -385,7 +385,7 @@ using(var uploadSlotB=await SnapshotHttp.Read(UploadContext()))
 var backlogClock=new ManualClock();var backlogStore=new WorldStore(Path.Combine(root,Guid.NewGuid().ToString("N")));var backlogRooms=new Rooms(backlogStore,backlogClock);
 var backlogOwner=backlogStore.NewGuest(backlogClock.GetUtcNow()).Identity;var backlogWorld=backlogStore.Create(backlogOwner,new(),backlogClock.GetUtcNow());
 backlogRooms.Join(backlogOwner,backlogWorld.Id,null);var (backlogPeer,backlogConnection)=backlogRooms.Connect(backlogOwner,backlogWorld.Id,false);
-backlogRooms.Receive(backlogOwner,backlogWorld.Id,backlogConnection,new("ready",Epoch:1));
+backlogRooms.Receive(backlogOwner,backlogWorld.Id,backlogConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
 for(var input=1;input<=600;input++)
 {
     backlogClock.Advance(TimeSpan.FromMilliseconds(10));
@@ -401,7 +401,47 @@ var tuning = TuningSettings.All.Where(value => value.Scope == SettingScope.Share
     .ToDictionary(value => value.Key, value => (value.Min + value.Max) * .5f, StringComparer.Ordinal);
 Check(TuningSettings.All.Count == 100 && TuningSettings.SharedCount == 99, "reviewed tuning registry has 99 shared dials and one local quality dial");
 var tuningBytes = TuningSettings.Encode(tuning);
+var canonical=TuningSettings.Encode(CanonicalTuningDefaults.Create());
+Check(CanonicalTuningDefaults.Fingerprint==Convert.ToHexString(SHA256.HashData(canonical)).ToLowerInvariant(),"canonical tuning fingerprint matches complete bounded values");
+var modifiedDefaults=CanonicalTuningDefaults.Create();modifiedDefaults["ErosionStrength"]=.3f;
+Check(CanonicalTuningDefaults.Create()["ErosionStrength"]!=.3f,"canonical defaults do not depend on caller mutations or local resources");
+Denied(()=>CommandValidation.Validate(new("ufo","unimplemented")),"invalid_command");
+Denied(()=>CommandValidation.Validate(new("simulation","run-script")),"invalid_command");
+CommandValidation.Validate(new("setting","set",Settings:[new("ErosionStrength",.4f),new("SunIntensity",1.2f)]));
+Check(true,"bounded shared tuning batch accepted");
+CommandValidation.Validate(new("simulation","enqueue",Settings:[]));
+Check(true,"Unity empty default tuning array does not reject simulation commands");
+Denied(()=>CommandValidation.Validate(new("setting","set",Settings:[new("PixelDensity",1)])),"invalid_tuning_value");
+Denied(()=>CommandValidation.Validate(new("setting","set",Settings:[new("ErosionStrength",float.NaN)])),"invalid_tuning_value");
+Denied(()=>CommandValidation.Validate(new("setting","set",Settings:[new("ErosionStrength",.1f),new("ErosionStrength",.2f)])),"invalid_tuning_batch");
+Denied(()=>CommandValidation.Validate(new("setting","set",Settings:[])),"invalid_tuning_batch");
+Denied(()=>CommandValidation.Validate(new("setting","reset",Settings:[new("ErosionStrength",.1f)])),"invalid_tuning_batch");
+Denied(()=>CommandValidation.Validate(new("simulation","enqueue",Settings:[new("ErosionStrength",.1f)])),"unexpected_tuning_batch");
+var tuningClock=new ManualClock();var tuningStore=new WorldStore(Path.Combine(root,Guid.NewGuid().ToString("N")));var tuningRooms=new Rooms(tuningStore,tuningClock);
+var tuningOwner=tuningStore.NewGuest(tuningClock.GetUtcNow()).Identity;var tuningWorld=tuningStore.Create(tuningOwner,new(),tuningClock.GetUtcNow());
+tuningRooms.Join(tuningOwner,tuningWorld.Id,null);var(tuningPeer,tuningConnection)=tuningRooms.Connect(tuningOwner,tuningWorld.Id,false);
+Denied(()=>tuningRooms.Receive(tuningOwner,tuningWorld.Id,tuningConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Version:1,Epoch:1)),"protocol_version");
+Denied(()=>tuningRooms.Receive(tuningOwner,tuningWorld.Id,tuningConnection,new("ready",Epoch:1)),"tuning_defaults_version");
+Denied(()=>tuningRooms.Receive(tuningOwner,tuningWorld.Id,tuningConnection,new("ready",Epoch:1,TuningDefaultsHash:new string('0',64))),"tuning_defaults_version");
+tuningRooms.Receive(tuningOwner,tuningWorld.Id,tuningConnection,new("ready", TuningDefaultsHash:CanonicalTuningDefaults.Fingerprint,Epoch:1));
+tuningRooms.Receive(tuningOwner,tuningWorld.Id,tuningConnection,new("input",Epoch:1,Sequence:7,Command:new("setting","set",Settings:[new("ErosionStrength",.4f)])));
+OrderedCommand? tuningOrdered=null;while(tuningPeer.Events.Reader.TryRead(out var tuningEvent))if(tuningEvent.Type=="ordered")tuningOrdered=tuningEvent.Data as OrderedCommand;
+Check(tuningOrdered?.ClientSequence==7&&tuningOrdered.Sequence==1&&tuningOrdered.Command.Settings?[0].Value==.4f,"setting shares global order and confirms the sender input cursor");
+tuningRooms.Receive(tuningOwner,tuningWorld.Id,tuningConnection,new("commit",Epoch:1,Tick:1,Sequence:1));
+Check(tuningRooms.View(tuningWorld.Id).State=="active","setting batch commits through normal step ordering");
 var tuningCopy = TuningSettings.Decode(tuningBytes);
+var tunedPhysical=SnapshotCodec.Decode(State(1,1,1));tunedPhysical.WorldId=tuningWorld.Id;
+tunedPhysical.MetadataJson="{\"scope\":\""+TuningSettings.WorldScope+"\"}";
+tunedPhysical.Sections.Add(new SnapshotSection{Name=TuningSettings.SectionName,Data=tuningBytes});
+SnapshotRecord SaveTuned(long revision)
+{
+    var bytes=SnapshotCodec.Encode(tunedPhysical);
+    return tuningStore.Save(tuningWorld.Id,new(1,1,1,revision,Convert.ToHexString(SHA256.HashData(bytes))),bytes,tuningClock.GetUtcNow());
+}
+Check(SaveTuned(0).Revision==1,"validated tuning is stored with physical state");
+tunedPhysical.Sections[0].Data=[1,2,3];Denied(()=>SaveTuned(1),"snapshot_tuning");
+tunedPhysical.Sections.Clear();Denied(()=>SaveTuned(1),"snapshot_tuning");
+Check(tuningStore.Versions(tuningWorld.Id).First().Revision==1,"corrupt or missing tuning cannot replace prior valid save");
 Check(tuningCopy.Count == 99 && tuning.All(pair => tuningCopy[pair.Key] == pair.Value), "all shared tuning values roundtrip losslessly");
 var reversedTuning = tuning.Reverse().ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
 Check(TuningSettings.Encode(reversedTuning).SequenceEqual(tuningBytes), "tuning encoding independent of insertion order");

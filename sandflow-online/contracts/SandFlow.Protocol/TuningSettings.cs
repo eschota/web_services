@@ -21,6 +21,7 @@ namespace SandFlow.Protocol
     {
         public const int Version = 1;
         public const string SectionName = "tuning-v1";
+        public const string WorldScope = "physical-fields-obstacles-tuning-v3";
         public const int MaximumBytes = 16 * 1024;
         private static readonly TuningSetting[] Definitions = {
             new TuningSetting("AbsorptionR", 0.02f, 0.60f, SettingScope.Shared),

@@ -127,6 +127,7 @@ public sealed partial class Rooms(WorldStore store, TimeProvider time)
                 peer.ConnectionId = connection;
                 var room = Get(id); var snapshot = store.Versions(id).FirstOrDefault();
                 Send(room, peer, "welcome", new { version = Protocol.Version, tileSize = Protocol.TileSize, participantId = identity.Id,
+                    tuningDefaultsHash=SandFlow.Protocol.CanonicalTuningDefaults.Fingerprint,
                     team = peer.Team, hostId = room.HostId, snapshot, commands = room.Tail.ToArray(), commits = room.Commits.Values.ToArray(), sequence = room.ConfirmedSequence, departureProtocol = 1 });
             }
             return (peer, connection);
@@ -139,6 +140,8 @@ public sealed partial class Rooms(WorldStore store, TimeProvider time)
             var room = Get(id); var peer = Member(identity, id);
             if (peer.ConnectionId != connection) throw new ApiFailure(409, "stale_connection");
             if (message.Version != Protocol.Version) throw new ApiFailure(409, "protocol_version");
+            if(message.Type=="ready"&&message.TuningDefaultsHash!=SandFlow.Protocol.CanonicalTuningDefaults.Fingerprint)
+                throw new ApiFailure(409,"tuning_defaults_version");
             if (message.Epoch != room.Epoch) throw new ApiFailure(409, "stale_epoch");
             var now = time.GetUtcNow();
             switch (message.Type)
@@ -174,7 +177,7 @@ public sealed partial class Rooms(WorldStore store, TimeProvider time)
                         // The real client must supply a pre-reset checkpoint; do not let incomplete adapters destroy state.
                         throw new ApiFailure(409, "structural_checkpoint_required");
                     }
-                    var command = new OrderedCommand(++room.Sequence, identity.Id, message.Command);
+                    var command = new OrderedCommand(++room.Sequence, identity.Id, message.Command, message.Sequence);
                     peer.LastClientSequence = message.Sequence; room.Tail.Add(command); room.DirtySince ??= now;
                     Broadcast(room, "ordered", command, command.Sequence); break;
                 case "commit":

@@ -36,18 +36,18 @@ try{
     $b=Connect-Socket $second.token 'control';$other=Receive-Message $b
     if($other.type -ne 'welcome'){throw 'No second welcome'}
     $aState=Connect-Socket $first.token 'state';$bState=Connect-Socket $second.token 'state'
-    Send-Message $a @{type='ready';version=1;epoch=$welcome.epoch;tick=0;sequence=0}
+    Send-Message $a @{type='ready';tuningDefaultsHash=$welcome.data.tuningDefaultsHash;version=2;epoch=$welcome.epoch;tick=0;sequence=0}
     do{$hostEvent=Receive-Message $a}while($hostEvent.type -ne 'host')
-    Send-Message $b @{type='ready';version=1;epoch=$welcome.epoch;tick=0;sequence=0}
-    Send-Message $a @{type='heartbeat';version=1;epoch=$welcome.epoch;tick=0;sequence=0}
-    Send-Message $b @{type='input';version=1;epoch=$welcome.epoch;sequence=1;command=@{kind='simulation';action='enqueue';commandType=3;amount=.01;x=2;z=2;radius=.25}}
+    Send-Message $b @{type='ready';tuningDefaultsHash=$welcome.data.tuningDefaultsHash;version=2;epoch=$welcome.epoch;tick=0;sequence=0}
+    Send-Message $a @{type='heartbeat';version=2;epoch=$welcome.epoch;tick=0;sequence=0}
+    Send-Message $b @{type='input';version=2;epoch=$welcome.epoch;sequence=1;command=@{kind='simulation';action='enqueue';commandType=3;amount=.01;x=2;z=2;radius=.25}}
     do{$order=Receive-Message $a}while($order.type -ne 'ordered')
     if($order.data.participantId -ne $created.participantId -and $order.data.participantId -ne $second.identity.id){throw 'Unknown sender'}
-    Send-Message $a @{type='heartbeat';version=1;epoch=$welcome.epoch;tick=0;sequence=0}
-    Send-Message $a @{type='commitBatch';version=1;epoch=$welcome.epoch;commits=@(@{tick=1;sequence=$order.sequence;substeps=1},@{tick=2;sequence=$order.sequence;substeps=2})}
+    Send-Message $a @{type='heartbeat';version=2;epoch=$welcome.epoch;tick=0;sequence=0}
+    Send-Message $a @{type='commitBatch';version=2;epoch=$welcome.epoch;commits=@(@{tick=1;sequence=$order.sequence;substeps=1},@{tick=2;sequence=$order.sequence;substeps=2})}
     do{$commit=Receive-Message $b}while($commit.type -ne 'committedBatch')
     if($commit.tick -ne 2 -or $commit.sequence -ne $order.sequence){throw 'Commit cursor mismatch'}
-    $frame=[byte[]]::new(48);$frame[0]=83;$frame[1]=70;$frame[2]=79;$frame[3]=1;$frame[4]=1
+    $frame=[byte[]]::new(48);$frame[0]=83;$frame[1]=70;$frame[2]=79;$frame[3]=2;$frame[4]=1
     [Buffer]::BlockCopy([BitConverter]::GetBytes([long]$welcome.epoch),0,$frame,8,8)
     [Buffer]::BlockCopy([BitConverter]::GetBytes([long]2),0,$frame,16,8);$frame[24]=1;$frame[30]=1
     $null=$aState.SendAsync([ArraySegment[byte]]::new($frame),[Net.WebSockets.WebSocketMessageType]::Binary,$true,$deadline.Token).GetAwaiter().GetResult()

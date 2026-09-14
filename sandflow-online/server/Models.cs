@@ -5,7 +5,7 @@ namespace SandFlow.Server;
 
 public static class Protocol
 {
-    public const int Version = 1;
+    public const int Version = SandFlow.Protocol.SessionProtocol.Version;
     public const int TileSize = 32;
     public const int MaximumMembers = 100;
     public const int MaxCommandBytes = 16 * 1024;
@@ -36,25 +36,29 @@ public sealed record SnapshotRecord(string WorldId, long Revision, long Epoch, l
 public sealed record SnapshotUpload(long Epoch, long Tick, long Sequence, long ExpectedRevision, string Sha256);
 public sealed record Admission(WorldView World, string ParticipantId, int Team, int ProtocolVersion);
 public sealed record ControlMessage(string Type, int Version = Protocol.Version, long Epoch = 0, long Tick = 0,
-    long Sequence = 0, int Substeps = 1, WorldCommand? Command = null, CommitRecord[]? Commits = null, string? ParticipantId = null, string? OperationId = null);
+    long Sequence = 0, int Substeps = 1, WorldCommand? Command = null, CommitRecord[]? Commits = null, string? ParticipantId = null, string? OperationId = null, string? TuningDefaultsHash = null);
 public sealed record DepartureMarker(string OperationId, string ParticipantId);
 public sealed record DepartureReceipt(string OperationId, string ParticipantId, long ExpectedRevision, SnapshotRecord Snapshot);
 public sealed record DepartureState(string OperationId, string ParticipantId, long Epoch, long Tick, long Sequence, DateTimeOffset Deadline);
+public sealed record TuningChange(string Key, float Value);
 public sealed record WorldCommand(string Kind, string Action, float X = 0, float Z = 0, float Radius = 0,
     float Amount = 0, string? Key = null, float Value = 0, string? ObjectId = null, uint CommandType = 0,
     uint Flags = 0, uint MaterialId = 0, float Strength = 0, float Duration = 0,
-    float Y = 0, float Qx = 0, float Qy = 0, float Qz = 0, float Qw = 1);
-public sealed record OrderedCommand(long Sequence, string ParticipantId, WorldCommand Command);
+    float Y = 0, float Qx = 0, float Qy = 0, float Qz = 0, float Qw = 1, TuningChange[]? Settings = null);
+public sealed record OrderedCommand(long Sequence, string ParticipantId, WorldCommand Command, long ClientSequence = 0);
 public sealed record ServerEvent(string Type, string WorldId, long Epoch, long Tick, long Sequence,
     object? Data = null);
 
 public static class CommandValidation
 {
-    private static readonly HashSet<string> Kinds = ["simulation", "draggable", "brush", "stamp", "object", "cannon", "ufo", "setting", "map", "reset", "undo"];
+    // Only command families the current client can replay. Planned families must not
+    // be broadcast as apparently-valid input that pauses every client on receipt.
+    private static readonly HashSet<string> Kinds = ["simulation", "draggable", "setting", "map", "reset"];
     public static void Validate(WorldCommand value)
     {
         if (!Kinds.Contains(value.Kind) || string.IsNullOrWhiteSpace(value.Action) || value.Action.Length > 40)
             throw new ApiFailure(400, "invalid_command");
+        if (value.Kind == "simulation" && value.Action != "enqueue") throw new ApiFailure(400,"invalid_command");
         foreach (var number in new[] { value.X, value.Y, value.Z, value.Radius, value.Amount, value.Value, value.Strength, value.Duration, value.Qx, value.Qy, value.Qz, value.Qw })
             if (!float.IsFinite(number)) throw new ApiFailure(400, "non_finite_command");
         if (Math.Abs(value.X) > 120 || Math.Abs(value.Y) > 120 || Math.Abs(value.Z) > 120 || value.Radius < 0 || value.Radius > 120 ||
@@ -68,6 +72,20 @@ public static class CommandValidation
             var norm = (double)value.Qx * value.Qx + (double)value.Qy * value.Qy + (double)value.Qz * value.Qz + (double)value.Qw * value.Qw;
             if (norm < .99 || norm > 1.01) throw new ApiFailure(400, "invalid_actor_rotation");
         }
+        if (value.Kind == "setting")
+        {
+            if (value.Action != "set" || value.Settings == null || value.Settings.Length < 1
+                || value.Settings.Length > SandFlow.Protocol.TuningSettings.SharedCount)
+                throw new ApiFailure(400, "invalid_tuning_batch");
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var change in value.Settings)
+            {
+                if (change == null || change.Key == null || !seen.Add(change.Key)) throw new ApiFailure(400, "invalid_tuning_batch");
+                try { SandFlow.Protocol.TuningSettings.ValidateShared(change.Key, change.Value); }
+                catch (InvalidDataException) { throw new ApiFailure(400, "invalid_tuning_value"); }
+            }
+        }
+        else if (value.Settings is { Length: > 0 }) throw new ApiFailure(400, "unexpected_tuning_batch");
     }
 }
 
