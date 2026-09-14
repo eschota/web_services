@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -32,6 +33,14 @@ namespace SandFlow.Protocol
         private static readonly UTF8Encoding Utf8=new UTF8Encoding(false,true);
         private static readonly byte[] DigestMagic=Encoding.ASCII.GetBytes("SFDIG001");
         private static readonly byte[] RepairMagic=Encoding.ASCII.GetBytes("SFREPR01");
+        [ThreadStatic] private static TileHashWorkspace tileHashWorkspace;
+        private sealed class TileHashWorkspace
+        {
+            // 32*32 cells * maximum four 32-bit components * nine encoded bytes per float.
+            public readonly byte[] Encoded=new byte[TileSize*TileSize*4*9];
+            public readonly byte[] Digest=new byte[32];
+            public readonly SHA256 Sha=SHA256.Create();
+        }
         public static TileDigest CreateDigest(WorldSnapshot snapshot)
         {
             SnapshotCodec.Validate(snapshot);
@@ -193,25 +202,46 @@ namespace SandFlow.Protocol
         }
         private static ulong HashTile(WorldSnapshot snapshot,SnapshotField field,int tile)
         {
-            var raw=ReadTile(snapshot,field,tile);
-            using(var stream=new MemoryStream(raw.Length*3))using(var writer=new BinaryWriter(stream,Utf8,true))
+            TileBounds(snapshot,tile,out var x,out var z,out var width,out var height);
+            var workspace=tileHashWorkspace??(tileHashWorkspace=new TileHashWorkspace());
+            var encoded=workspace.Encoded;var encodedOffset=0;
+            for(var row=0;row<height;row++)
             {
-                for(var i=0;i<raw.Length;i+=4)
+                var sourceOffset=((z+row)*snapshot.ResX+x)*field.Stride;
+                var sourceEnd=sourceOffset+width*field.Stride;
+                for(var i=sourceOffset;i<sourceEnd;i+=4)
                 {
-                    var bits=BitConverter.ToUInt32(raw,i);
-                    if(field.Unsigned)writer.Write(bits);
+                    var bits=BinaryPrimitives.ReadUInt32LittleEndian(field.Data.AsSpan(i,4));
+                    if(field.Unsigned)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(encoded.AsSpan(encodedOffset,4),bits);
+                        encodedOffset+=4;
+                    }
                     else
                     {
-                        var value=BitConverter.ToSingle(raw,i);
+                        var value=BitConverter.Int32BitsToSingle(unchecked((int)bits));
                         // Conservative quantization: same bucket differs by <=1e-4
                         // below 128, or <1e-6 relative above it. Boundary false positives
                         // request extra data, never loosen the reconstruction tolerance.
-                        if(Math.Abs(value)<128){writer.Write((byte)0);writer.Write((long)Math.Round(value/AbsolutePrecision,MidpointRounding.ToEven));}
-                        else{writer.Write((byte)1);writer.Write(bits&~7u);}
+                        if(Math.Abs(value)<128)
+                        {
+                            encoded[encodedOffset++]=0;
+                            BinaryPrimitives.WriteInt64LittleEndian(encoded.AsSpan(encodedOffset,8),
+                                (long)Math.Round(value/AbsolutePrecision,MidpointRounding.ToEven));
+                            encodedOffset+=8;
+                        }
+                        else
+                        {
+                            encoded[encodedOffset++]=1;
+                            BinaryPrimitives.WriteUInt32LittleEndian(encoded.AsSpan(encodedOffset,4),bits&~7u);
+                            encodedOffset+=4;
+                        }
                     }
                 }
-                writer.Flush();return BitConverter.ToUInt64(Hash(stream.ToArray()),0);
             }
+            if(!workspace.Sha.TryComputeHash(encoded.AsSpan(0,encodedOffset),workspace.Digest,out var written)||written!=32)
+                throw new CryptographicException("Tile SHA-256 failed.");
+            return BinaryPrimitives.ReadUInt64LittleEndian(workspace.Digest.AsSpan(0,8));
         }
         private static byte[] ModuleHash(WorldSnapshot snapshot)
         {

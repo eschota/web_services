@@ -48,6 +48,8 @@ The separate QA WebGPU template/deployment lives only under `/sandflow/qa/`; the
 
 ## Runtime contract
 
+The portable tile-hash candidate now reuses bounded per-thread scratch/SHA resources while preserving digest bytes. `tools/TileDigestBench` checks original-algorithm equivalence on quantization/partial-edge/max-stride and 400x256 fixtures, plus concurrent calls. Corrected steady-state allocation is 19,006,266 to 5,685 bytes/digest on the representative .NET fixture, with roughly 37 KiB retained workspace per active thread. Unity managed-runtime golden-byte checks pass separately. This is not a browser FPS claim; the QA cost probe's browser execution is pending controller recovery. The service continues client-only physics and closed public admission.
+
 ### Continuous-input and browser QA checkpoint — 2026-09-14
 
 The new QA browser actually rendered, joined a Windows client and performed minute-spaced cloud saves. A real Windows brush stroke disconnected with `input_rate`: the prototype generated input at the simulation frequency. The candidate now samples tool input at 30 Hz while retaining accumulated tool time; physics steps are unchanged. Server allowance is a bounded 120-command burst/refill token budget. Confirmed commands are trimmed after commit, retaining all pending commands: live late entrants must use a fresh host snapshot rather than replaying from an old cloud save. Tests exercise 6,000 continuous inputs without a cloud save, FIFO delivery and pending-tail retention (104 server assertions plus 10 voice-service tests pass). This is not a 16-player load or mixed-physics acceptance result.
