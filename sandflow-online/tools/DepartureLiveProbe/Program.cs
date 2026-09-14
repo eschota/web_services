@@ -115,7 +115,14 @@ using(var heartbeats=CancellationTokenSource.CreateLinkedTokenSource(token))
         {await Send(peer,new{type="heartbeat",version=SessionProtocol.Version,epoch=2,tick=2,sequence=1});await Task.Delay(1000,heartbeats.Token);}
     }
     var pulse=Pulse();Console.WriteLine("Waiting for the ordinary autosave interval with a live authority lease.");
-    try{await Event(peer,"save_due");}finally{heartbeats.Cancel();try{await pulse;}catch(OperationCanceledException){}}
+    try
+    {
+        var demand=await Event(peer,"save_due");
+        Check(demand.GetProperty("data").GetProperty("revisionKnown").GetBoolean()
+            &&demand.GetProperty("data").GetProperty("revision").GetInt64()==currentRevision,
+            "ordinary autosave demand is bound to the current durable revision");
+    }
+    finally{heartbeats.Cancel();try{await pulse;}catch(OperationCanceledException){}}
 }
 var finalPayload=Snapshot(world,2,2);
 var autoSaved=await Request("worlds/"+world+"/snapshots",null,guestToken,bytes:finalPayload,headers:UploadHeaders(finalPayload,2,currentRevision,2));
