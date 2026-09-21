@@ -18,17 +18,32 @@ The production VPS checkout uses the same repository over SSH:
 git@github.com:eschota/web_services.git
 ```
 
-Production VPS SSH access is configured in the user's `~/.ssh/config` as:
+Production SSH access is configured in the user's `~/.ssh/config` as:
 
 ```bash
 ssh autorig-vps
 ```
 
-The production git root on the VPS is:
+That alias reaches `autorig.online` itself (37.187.57.177, `way.qwertystock.com`,
+SSH on port 22744, user `debian`, passwordless `sudo`). It used to point at
+185.171.83.65; that box is still up but serves no web traffic, and is now
+`autorig-vps-legacy`.
+
+`autorig.online` is deployed as immutable releases, not as a checkout that is
+pulled in place:
 
 ```text
-/root
+/srv/autorig/current -> /srv/autorig/releases/<commit sha>
 ```
+
+* backend: `autorig-storage.service`, uvicorn on `127.0.0.1:8200`, working
+  directory `/srv/autorig/current/autorig-online/backend`
+* static: nginx serves `/srv/autorig/current/autorig-online/static`
+* secrets: `/srv/autorig/secrets/` (not in Git)
+
+Deploy by staging a new directory under `/srv/autorig/releases`, verifying it,
+then repointing `current` and restarting the service. Never `git pull` inside a
+release. `/root` is the old VPS layout and does not apply to this host.
 
 Use this `AGENTS.md` as the project rule source. Do not create or rely on
 Cursor `.cursor/rules` instructions for this project.
@@ -56,17 +71,22 @@ git status --short
 6. Fix production-visible issues in the same deploy loop. If a direct production
    edit is needed to unblock the site, mirror the exact change back into
    `R:\autorig`, commit it, and push it.
-7. On the VPS, deploy by pulling in `/root` only when it is safe:
+7. Deploy `autorig.online` as a new release, never by pulling in place:
 
 ```bash
 ssh autorig-vps
-cd /root
-git pull
+CUR=$(readlink -f /srv/autorig/current)
+sudo cp -a "$CUR" "$CUR-<change>"          # stage beside the live release
+# copy in the exact changed files, run the relevant tests inside the staging dir
+sudo ln -sfn "$CUR-<change>" /srv/autorig/current.new
+sudo mv -Tf /srv/autorig/current.new /srv/autorig/current
+sudo systemctl restart autorig-storage.service
 ```
 
-If `/root` has server-side drift from GitHub, do not run a blind `git pull`.
-Deploy the exact changed files with a targeted patch/copy, or first resolve the
-repository divergence as a separate task.
+The deployed tree can be ahead of a local branch, so never ship a branch
+wholesale to fix one thing: carry only the changed files, and patch a shared
+file such as `main.py` at exact anchors. Rolling back is repointing `current`
+at the previous release and restarting.
 
 Avoid SSH-only code edits. If an emergency production edit is unavoidable, copy
 the exact change back to `R:\autorig`, commit it, and push it so local git
@@ -112,10 +132,10 @@ VPS.
 
 ## AutoRig.online
 
-Production application path:
+Production application path (through the release symlink):
 
 ```text
-/root/autorig-online
+/srv/autorig/current/autorig-online
 ```
 
 Do not use `/opt/autorig-online` as production. Do not deploy from `/opt`.
@@ -124,19 +144,23 @@ not the current backend checkout.
 
 Active production wiring:
 
-- `autorig.service`: AutoRig backend.
-- Backend working directory: `/root/autorig-online/backend`.
+- `autorig-storage.service`: AutoRig backend. There is no `autorig.service` on
+  this host; that name belongs to the retired VPS.
+- Backend working directory: `/srv/autorig/current/autorig-online/backend`,
+  which follows the release symlink.
 - Backend command:
 
 ```bash
-/root/autorig-online/venv/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+/srv/autorig/venv/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8200 --workers 1 --no-access-log
 ```
 
-- Backend listens on `127.0.0.1:8000`.
-- `autorig-telegram.service`: AutoRig Telegram bot.
-- nginx active site: `/etc/nginx/sites-enabled/autorig.online`.
-- nginx static root: `/root/autorig-online/static`.
-- nginx proxies API/backend traffic to `http://127.0.0.1:8000`.
+- Backend listens on `127.0.0.1:8200`; Renderfin listens on `127.0.0.1:8210`.
+- `autorig-storage-telegram.service`: AutoRig Telegram bot.
+- nginx active site: `/etc/nginx/sites-enabled/autorig.online-storage`.
+- nginx static root: `/srv/autorig/current/autorig-online/static`.
+- nginx proxies API/backend traffic to `http://127.0.0.1:8200`.
+- Converter nodes are reached through local SSH tunnels on `127.0.0.1:15xxx`,
+  listed with a per-node token in `/srv/autorig/secrets/renderfin-hunyuan.json`.
 
 For AutoRig changes, touch only `autorig-online/...` unless the user asks for
 cross-service work.
@@ -146,8 +170,12 @@ cross-service work.
 AutoRig intentionally keeps generated task assets on disk so the public site
 stays populated:
 
-- `/root/autorig-online/static/tasks`: cached public task downloads.
-- `/root/autorig-online/static/glb_cache`: cached model files for fast viewing.
+- `/srv/autorig/data/static/tasks`: cached public task downloads.
+- `/srv/autorig/data/static/glb_cache`: cached model files for fast viewing.
+
+Generated assets live under `/srv/autorig/data`, outside the release tree, and
+nginx aliases them in; that is why a deploy can replace `current` without
+losing them.
 - `/var/autorig/videos`: cached task preview videos.
 - `/var/autorig/uploads`: original uploaded source files.
 - `/var/autorig/preflight-renders`: preflight poster/render files.
@@ -163,24 +191,29 @@ Static-only changes:
 
 ```bash
 ssh autorig-vps
-cd /root
-git pull
+CUR=$(readlink -f /srv/autorig/current)
+sudo cp -a "$CUR" "$CUR-<change>"
+sudo cp /tmp/<file> "$CUR-<change>/autorig-online/static/<file>"
+sudo chown autorig:autorig "$CUR-<change>/autorig-online/static/<file>"
+sudo ln -sfn "$CUR-<change>" /srv/autorig/current.new
+sudo mv -Tf /srv/autorig/current.new /srv/autorig/current
 curl -fsS https://autorig.online/gallery >/dev/null
 ```
 
-Use the `git pull` deploy path only when `/root` is clean and aligned with the
-remote repository. If it is not aligned, apply a targeted patch/copy to
-`/root/autorig-online` and then copy the same change back into `R:\autorig`,
-commit it, and push it.
+A release is staged beside the live one and `current` is repointed at it, so
+nothing is ever edited in place and a rollback is repointing the symlink back.
+The deployed tree can be ahead of a local branch: carry only the changed files
+rather than shipping a branch wholesale. Mirror whatever was deployed back into
+`R:\autorig`, commit it, and push it.
 
 Backend Python or dependency changes:
 
 ```bash
 ssh autorig-vps
-cd /root
-git pull
-systemctl restart autorig.service
-systemctl status --no-pager autorig.service
+# stage a release as above, copy the backend files in, then:
+sudo mv -Tf /srv/autorig/current.new /srv/autorig/current
+sudo systemctl restart autorig-storage.service
+systemctl status --no-pager autorig-storage.service
 ```
 
 nginx config changes:
@@ -193,8 +226,8 @@ systemctl reload nginx
 Useful health checks:
 
 ```bash
-systemctl is-active autorig.service nginx.service
-curl -fsS 'http://127.0.0.1:8000/api/gallery?per_page=1&sort=date' >/dev/null
+systemctl is-active autorig-storage.service nginx.service
+curl -fsS 'http://127.0.0.1:8200/api/gallery?per_page=1&sort=date' >/dev/null
 curl -fsS https://autorig.online/gallery >/dev/null
 ```
 
