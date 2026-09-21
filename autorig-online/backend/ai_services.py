@@ -116,11 +116,11 @@ SERVICES: List[Dict[str, object]] = [
         "title": "Video",
         "path": "/video",
         "api": "/api/video",
-        "summary": "Turn a picture and a prompt into a short clip.",
-        # LTX runs on the farm but only inside a rig task today; there is no
-        # general submit endpoint yet. Declared so a picture can already show
-        # where it is meant to go.
-        "status": "planned",
+        "summary": "Animate a picture into a short clip. Minutes, not seconds.",
+        # The farm's workers advertise the animation workflow, and Renderfin
+        # picks it from the frame alone, so a picture is all this needs.
+        "status": "live",
+        "slow": True,
         "inputs": [
             {"type": IMAGE, "field": "image", "required": True,
              "title": "First frame"},
@@ -137,9 +137,11 @@ SERVICES: List[Dict[str, object]] = [
         "path": "/3dmodel",
         "api": "/api/generate/from-image",
         "summary": "Turn a picture into a rigged 3D character.",
-        # Wired, but it spends credits and needs a signed-in account, so the
-        # page has to send the browser session rather than an anonymous POST.
-        "status": "live",
+        # The backend exists and works, but it spends credits and needs a
+        # signed-in account, so it needs a page of its own before it can be
+        # offered here. Planned until that page exists, so the nav never links
+        # somewhere that answers 404.
+        "status": "planned",
         "requires_account": True,
         "inputs": [
             {"type": IMAGE, "field": "image", "required": True,

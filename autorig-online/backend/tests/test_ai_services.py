@@ -65,9 +65,30 @@ class HandoffTests(unittest.TestCase):
             self.assertTrue(target["input_title"])
 
     def test_a_planned_destination_is_offered_but_flagged(self):
-        video = [t for t in ai_services.targets_for(ai_services.IMAGE)
-                 if t["service_id"] == "video"]
-        self.assertEqual(video[0]["status"], "planned")
+        """The mechanism, not a particular service: a page must be able to show
+        where a result could go before the destination is callable."""
+        from unittest import mock
+
+        pretend = dict(ai_services.SERVICES[0], id="later", title="Later",
+                       path="/later", status="planned",
+                       inputs=[{"type": ai_services.IMAGE, "field": "image",
+                                "title": "Frame"}])
+        with mock.patch.object(ai_services, "SERVICES",
+                               ai_services.SERVICES + [pretend]):
+            targets = {t["service_id"]: t for t in
+                       ai_services.targets_for(ai_services.IMAGE)}
+        self.assertEqual(targets["later"]["status"], "planned")
+
+    def test_video_takes_a_frame_and_is_callable(self):
+        video = ai_services.service("video")
+        self.assertEqual(video["status"], "live")
+        self.assertIn(ai_services.IMAGE, ai_services.accepted_types(video))
+        self.assertTrue(video.get("slow"), "a clip takes minutes; pages need to know")
+
+    def test_a_live_service_has_a_page_behind_its_path(self):
+        """A nav link that answers 404 is worse than a greyed-out one."""
+        live_paths = {e["path"] for e in ai_services.SERVICES if e["status"] == "live"}
+        self.assertEqual(live_paths, {"/vision", "/text", "/image", "/video"})
 
     def test_the_chain_the_owner_described_is_possible(self):
         """image → vision → text → image → video, each step by declared types."""

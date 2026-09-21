@@ -15,7 +15,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="/static/js/ai-entities.js"></script>
+    <script src="/static/js/ai-entities.js?v=20260921-fleet"></script>
     <style>
         .ai-page {
             background:
@@ -41,6 +41,7 @@
             color: #a8e3ff;
         }
 
+        .fleet-slot { display:flex; justify-content:center; margin-top:12px; }
         .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
         @media (max-width: 900px) { .ai-grid { grid-template-columns: 1fr; } }
 
@@ -122,6 +123,7 @@
             <span class="ai-badge">262K context</span>
         </div>
         <nav id="service-nav"></nav>
+        <div class="fleet-slot"><span id="fleet"></span></div>
     </div>
 
     <div id="received"></div>
@@ -152,6 +154,7 @@
                 </div>
             </div>
 
+            <div id="progress" class="task-prog"></div>
             <button class="go" id="go">Send prompt</button>
         </div>
 
@@ -229,6 +232,7 @@ modelSelect.addEventListener('change', describeModel);
 /* ---- typed entities: nav, what arrived, where the answer can go ---- */
 const SERVICE_ID = 'text';
 AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
+AIEntities.mountFleet(document.getElementById('fleet'), SERVICE_ID);
 
 const incoming = AIEntities.take(SERVICE_ID);
 if (incoming) {
@@ -246,6 +250,8 @@ goButton.addEventListener('click', async () => {
     thinkToggle.style.display = 'none';
     metaBox.textContent = '';
     setBusy(true);
+    // Feedback starts on the click, not when the farm first reports back.
+    const task = AIEntities.startTask(document.getElementById('progress'), SERVICE_ID);
 
     try {
         const response = await fetch('/api/text2text', {
@@ -273,9 +279,11 @@ goButton.addEventListener('click', async () => {
         if (result.error_string) {
             answerBox.className = 'answer err';
             answerBox.textContent = 'The model could not answer: ' + result.error_string;
+            task.finish(false);
         } else {
             answerBox.className = 'answer';
             answerBox.textContent = result.answer_string || '(empty answer)';
+            task.finish(true);
         }
         if (result.reasoning_string) {
             thinkBox.textContent = result.reasoning_string;
@@ -299,6 +307,7 @@ goButton.addEventListener('click', async () => {
     } catch (err) {
         answerBox.className = 'answer err';
         answerBox.textContent = String(err.message || err);
+        task.finish(false);
     } finally {
         setBusy(false);
     }

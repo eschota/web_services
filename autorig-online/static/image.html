@@ -13,7 +13,7 @@
     <meta property="og:site_name" content="AutoRig.online">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="/static/js/ai-entities.js"></script>
+    <script src="/static/js/ai-entities.js?v=20260921-fleet"></script>
     <style>
         .ai-page {
             background:
@@ -32,6 +32,7 @@
         .ai-head h1 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 12px; line-height: 1.15; }
         .ai-head p { color: var(--text-secondary, #9aa0b5); max-width: 640px; margin: 0 auto; font-size: 16px; }
 
+        .fleet-slot { display:flex; justify-content:center; margin-top:12px; }
         .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
         @media (max-width: 900px) { .ai-grid { grid-template-columns: 1fr; } }
 
@@ -101,6 +102,7 @@
         <p>Describe a picture and the farm renders it. The result carries on to
            Vision, Video or 3D without downloading anything.</p>
         <nav id="service-nav"></nav>
+        <div class="fleet-slot"><span id="fleet"></span></div>
     </div>
 
     <div id="received"></div>
@@ -118,6 +120,7 @@
                 <img id="ref-img" alt="">
             </div>
 
+            <div id="progress" class="task-prog"></div>
             <button class="go" id="go">Render it</button>
         </div>
 
@@ -148,6 +151,7 @@ const promptBox = document.getElementById('prompt');
 let referenceUrl = null;
 
 AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
+AIEntities.mountFleet(document.getElementById('fleet'), SERVICE_ID);
 
 const incoming = AIEntities.take(SERVICE_ID);
 if (incoming) {
@@ -174,6 +178,8 @@ goButton.addEventListener('click', async () => {
     metaBox.textContent = '';
     document.getElementById('handoff').innerHTML = '';
     setBusy(true);
+    // Feedback starts on the click, not when the farm first reports back.
+    const task = AIEntities.startTask(document.getElementById('progress'), SERVICE_ID);
 
     try {
         // No server-side wait: the farm publishes the destination URL up front,
@@ -209,6 +215,7 @@ goButton.addEventListener('click', async () => {
         img.alt = prompt;
         resultBox.innerHTML = '';
         resultBox.appendChild(img);
+        task.finish(true);
         metaBox.textContent = 'task: ' + (data.task_id_string || '—');
 
         const picture = AIEntities.entity(AIEntities.IMAGE, url, {
@@ -224,6 +231,7 @@ goButton.addEventListener('click', async () => {
         msg.className = 'err';
         msg.textContent = String(err.message || err);
         resultBox.appendChild(msg);
+        task.finish(false);
     } finally {
         setBusy(false);
     }

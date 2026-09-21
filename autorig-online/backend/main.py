@@ -223,6 +223,7 @@ from animation_correction_exports import (
 import re
 import httpx
 
+from ai_fleet import router as ai_fleet_router
 from ai_services import router as ai_services_router
 from ai_vision_api import router as ai_vision_router
 from namecheap_remote_api import router as namecheap_remote_router
@@ -1311,6 +1312,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
 
+app.include_router(ai_fleet_router)
 app.include_router(ai_services_router)
 app.include_router(ai_vision_router)
 app.include_router(namecheap_remote_router)
@@ -16851,6 +16853,12 @@ async def text_page():
 async def image_page():
     """Prompt to picture, rendered on the farm."""
     return _static_html_response("image.html")
+
+
+@app.get("/video")
+async def video_page():
+    """A frame animated into a clip on the farm."""
+    return _static_html_response("video.html")
 
 
 @app.get("/rig-animals", include_in_schema=False)

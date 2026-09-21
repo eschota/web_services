@@ -302,8 +302,8 @@ class WorkerChoiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 503)
         self.assertEqual(caught.exception.detail["error_string"], "model_not_on_any_node")
 
-    def test_a_node_with_the_model_resident_beats_an_idler(self):
-        """Swapping weights costs a full load, so a warm node wins on latency."""
+    def test_a_free_node_beats_a_warm_but_busy_one(self):
+        """A weight swap costs seconds; a queue behind a conversion costs minutes."""
         warm = dict(WORKER, physical_node="warm", name="warm")
         idle = dict(WORKER, physical_node="idle", name="idle")
 
@@ -312,7 +312,17 @@ class WorkerChoiceTests(unittest.TestCase):
                 return True, {"load": 2, "models": ["m"], "loaded": "m"}
             return True, {"load": 0, "models": ["m"], "loaded": ""}
 
-        self.assertEqual(self._pick([warm, idle], probe, model="m")["physical_node"], "warm")
+        self.assertEqual(self._pick([warm, idle], probe, model="m")["physical_node"], "idle")
+
+    def test_warmth_breaks_a_tie_between_equally_free_nodes(self):
+        warm = dict(WORKER, physical_node="warm", name="warm")
+        cold = dict(WORKER, physical_node="cold", name="cold")
+
+        async def probe(client, worker):
+            loaded = "m" if worker["physical_node"] == "warm" else ""
+            return True, {"load": 0, "models": ["m"], "loaded": loaded}
+
+        self.assertEqual(self._pick([cold, warm], probe, model="m")["physical_node"], "warm")
 
     def test_a_node_that_publishes_no_catalogue_is_still_tried(self):
         async def probe(client, worker):

@@ -19,6 +19,7 @@ import logging
 import os
 import pathlib
 import time
+from collections import deque
 from typing import Dict, List, Optional, Tuple
 
 import httpx
@@ -70,6 +71,20 @@ STATUS_TIMEOUT_SECONDS = 30.0
 # A cold node loads 7 GB of weights before the first answer, so the wait a
 # caller may ask us to hold for has to allow for that plus the inference.
 MAX_WAIT_SECONDS = 180.0
+
+# Completed durations, so the fleet view can show what these services actually
+# take instead of a constant. Kept in memory on purpose: a rolling window of
+# recent jobs is what an estimate should follow, and it costs nothing to lose.
+RECENT_DURATIONS: Dict[str, deque] = {
+    "vision": deque(maxlen=40),
+    "text": deque(maxlen=40),
+}
+
+
+def record_duration(service_id: str, seconds: float) -> None:
+    bucket = RECENT_DURATIONS.get(service_id)
+    if bucket is not None and seconds and seconds > 0:
+        bucket.append(float(seconds))
 
 
 class VisionRequest(BaseModel):
@@ -177,12 +192,18 @@ async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) ->
         payload = response.json()
     except Exception:
         return False, {}
-    queued = int(payload.get("queue_size") or 0)
-    active = payload.get("active_tasks")
-    try:
-        active_count = int(active or 0)
-    except (TypeError, ValueError):
-        active_count = 0
+    # Real occupancy lives in tasks_summary; the top level has no such fields,
+    # and reading them made every node look idle, so AI work queued behind a
+    # twenty-minute conversion instead of going to a free node.
+    summary = payload.get("tasks_summary")
+    queued = 0
+    active_count = 0
+    if isinstance(summary, dict):
+        try:
+            queued = int(summary.get("queue_size") or summary.get("pending") or 0)
+            active_count = int(summary.get("processing") or 0)
+        except (TypeError, ValueError):
+            queued, active_count = 0, 0
     catalogue = payload.get("ai_models")
     models = []
     loaded = ""
@@ -233,11 +254,11 @@ async def _pick_worker(
                 "message_string": f"No reachable node carries '{wanted}'",
                 "nodes_checked_int": len(reachable)})
         carrying = silent
-    # A node with the model already resident answers without a reload, so it
-    # wins over an idler that would have to swap weights first.
+    # Load first, warmth only as a tie-break: swapping weights costs seconds,
+    # but queueing behind a conversion costs however long that conversion runs.
     carrying.sort(key=lambda item: (
-        0 if wanted and item[1].get("loaded") == wanted else 1,
         int(item[1].get("load") or 0),
+        0 if wanted and item[1].get("loaded") == wanted else 1,
     ))
     return carrying[0][0]
 
@@ -368,9 +389,12 @@ async def _fetch_status(
     return response.json() or {}
 
 
-def _public_status(task_id: str, model_id: str, raw: Dict[str, object]) -> Dict[str, object]:
+def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
+                   service_id: str = "") -> Dict[str, object]:
     status = str(raw.get("status") or "")
     finished = status in ("Completed", "Failed")
+    if status == "Completed" and service_id:
+        record_duration(service_id, float(raw.get("elapsed_seconds") or 0))
     return {
         "success_bool": status != "Failed",
         "task_id_string": task_id,
@@ -392,6 +416,7 @@ async def _run(
     path: str,
     payload: Dict[str, object],
     wait_seconds: Optional[float],
+    service_id: str = "",
 ) -> Dict[str, object]:
     model_id = str(request_model["id"])
     async with httpx.AsyncClient() as client:
@@ -406,7 +431,7 @@ async def _run(
                 raw = await _fetch_status(client, worker, worker_task_id)
                 if str(raw.get("status")) in ("Completed", "Failed"):
                     break
-        result = _public_status(task_id, model_id, raw)
+        result = _public_status(task_id, model_id, raw, service_id)
         result["status_url_string"] = f"/api/ai/status/{task_id}"
         result["node_string"] = _node_key(worker)
         return result
@@ -466,7 +491,7 @@ async def api_vision(request: Request, body: VisionRequest):
     payload: Dict[str, object] = {"prompt": prompt, "image_url": image_url}
     if body.max_output_tokens:
         payload["max_output_tokens"] = int(body.max_output_tokens)
-    return await _run(model, "/ai-vision", payload, body.wait_seconds)
+    return await _run(model, "/ai-vision", payload, body.wait_seconds, "vision")
 
 
 @router.get("/api/text2text")
@@ -490,7 +515,7 @@ async def api_text2text(request: Request, body: TextRequest):
     payload: Dict[str, object] = {"prompt": _validate_prompt(body.prompt)}
     if body.max_output_tokens:
         payload["max_output_tokens"] = int(body.max_output_tokens)
-    return await _run(model, "/text2text", payload, body.wait_seconds)
+    return await _run(model, "/text2text", payload, body.wait_seconds, "text")
 
 
 @router.get("/api/ai/status/{task_id}")
@@ -507,7 +532,9 @@ async def api_ai_status(task_id: str):
             "message_string": "The node that owns this task is not configured"})
     async with httpx.AsyncClient() as client:
         raw = await _fetch_status(client, worker, worker_task_id)
-    result = _public_status(task_id, DEFAULT_MODEL_ID, raw)
+    mode = str(raw.get("mode") or "")
+    result = _public_status(task_id, DEFAULT_MODEL_ID, raw,
+                            "vision" if mode == "vision" else "text")
     result["node_string"] = node_key
     return result
 
@@ -592,5 +619,80 @@ async def api_image(body: ImageRequest):
             "finished_bool": ready,
             "image_url_string": output_url,
             "poll_url_string": output_url,
+            "server_time_unix_int": int(time.time()),
+        }
+
+class VideoRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="First frame, public URL")
+    image_base64: Optional[str] = Field(None, description="First frame, inline")
+    prompt: Optional[str] = Field(None, description="What should happen in the clip")
+    frame_count: Optional[int] = Field(None, ge=8, le=480)
+
+
+@router.get("/api/video")
+async def api_video_docs():
+    """GET mirror documenting the POST video endpoint."""
+    return {
+        "status_string": "ok",
+        "method_string": "POST",
+        "url_string": "/api/video",
+        "required_fields_array": ["image_url or image_base64"],
+        "optional_fields_array": ["prompt", "frame_count"],
+        "produces_string": "video",
+        "note_string": "A clip is animated from the frame you give it; expect minutes, not seconds.",
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/video")
+async def api_video(body: VideoRequest):
+    """Animate a frame into a short clip on the render farm.
+
+    Renderfin treats a request with an image and no `type` as an animation, so
+    the frame is what selects the workflow; the caller never names one.
+    """
+    if not body.image_url and not body.image_base64:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "image_required",
+            "message_string": "A video is animated from a frame; provide image_url or image_base64"})
+    async with httpx.AsyncClient() as client:
+        frame = str(body.image_url or "").strip()
+        if not frame:
+            frame = await _publish_inline_image(
+                client, _decode_inline_image(body.image_base64 or "")
+            )
+        payload: Dict[str, object] = {"image_url": frame}
+        if body.prompt and str(body.prompt).strip():
+            payload["prompt"] = _validate_prompt(body.prompt)
+        if body.frame_count:
+            payload["frame_count"] = int(body.frame_count)
+        try:
+            response = await client.post(
+                RENDERFIN_BASE + "/api-render", json=payload,
+                timeout=SUBMIT_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.exception("Renderfin did not accept a video request")
+            raise HTTPException(status_code=502, detail={
+                "error_string": "video_service_unreachable",
+                "message_string": "The render farm did not answer"}) from None
+        if response.status_code not in (200, 202):
+            raise HTTPException(status_code=502, detail={
+                "error_string": "video_service_rejected",
+                "message_string": f"Render farm answered HTTP {response.status_code}"})
+        accepted = response.json() or {}
+        output_url = str(accepted.get("output_url") or "").strip()
+        if not output_url:
+            raise HTTPException(status_code=502, detail={
+                "error_string": "video_service_no_output",
+                "message_string": "Render farm accepted the request without an output URL"})
+        return {
+            "success_bool": True,
+            "task_id_string": str(accepted.get("task_id") or ""),
+            "status_string": "pending",
+            "finished_bool": False,
+            "video_url_string": output_url,
+            "poll_url_string": output_url,
+            "source_image_url_string": frame,
             "server_time_unix_int": int(time.time()),
         }
