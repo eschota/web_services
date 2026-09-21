@@ -32,6 +32,12 @@ def _app() -> TestClient:
 
 
 class ModelCatalogueTests(unittest.TestCase):
+    def test_an_uncensored_model_is_offered_and_flagged(self):
+        body = _app().get("/api/ai/models").json()
+        wild = [m for m in body["models_array"] if m.get("uncensored")]
+        self.assertTrue(wild, "no uncensored model in the catalogue")
+        self.assertNotEqual(wild[0]["id"], body["default_model_string"])
+
     def test_models_endpoint_lists_a_default(self):
         response = _app().get("/api/ai/models")
         self.assertEqual(response.status_code, 200)
@@ -162,7 +168,7 @@ class DispatchTests(unittest.TestCase):
         )
 
     def test_a_submitted_task_id_carries_its_node(self):
-        async def fake_pick(client):
+        async def fake_pick(client, model_id=None):
             return WORKER
 
         async def fake_submit(client, worker, path, payload):
@@ -180,7 +186,7 @@ class DispatchTests(unittest.TestCase):
         self.assertFalse(body["finished_bool"])
 
     def test_wait_returns_the_finished_answer(self):
-        async def fake_pick(client):
+        async def fake_pick(client, model_id=None):
             return WORKER
 
         async def fake_submit(client, worker, path, payload):
@@ -207,7 +213,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(body["elapsed_seconds_float"], 6.2)
 
     def test_a_failed_task_is_reported_as_unsuccessful(self):
-        async def fake_pick(client):
+        async def fake_pick(client, model_id=None):
             return WORKER
 
         async def fake_submit(client, worker, path, payload):
@@ -246,40 +252,74 @@ class InlineImageTests(unittest.TestCase):
 
 
 class WorkerChoiceTests(unittest.TestCase):
+    def _pick(self, workers, probe, model=None):
+        import asyncio
+
+        async def run():
+            with mock.patch.object(ai_vision_api, "_load_ai_workers", return_value=workers), \
+                 mock.patch.object(ai_vision_api, "_node_is_free", probe):
+                return await ai_vision_api._pick_worker(None, model)
+
+        return asyncio.run(run())
+
     def test_the_least_loaded_reachable_node_wins(self):
         busy = dict(WORKER, physical_node="busy", name="busy")
         idle = dict(WORKER, physical_node="idle", name="idle")
 
-        async def fake_probe(client, worker):
-            if worker["physical_node"] == "busy":
-                return True, 5
-            return True, 0
+        async def probe(client, worker):
+            load = 5 if worker["physical_node"] == "busy" else 0
+            return True, {"load": load, "models": ["bonsai2-27b"], "loaded": ""}
 
-        async def run():
-            with mock.patch.object(ai_vision_api, "_load_ai_workers", return_value=[busy, idle]), \
-                 mock.patch.object(ai_vision_api, "_node_is_free", fake_probe):
-                return await ai_vision_api._pick_worker(None)
-
-        import asyncio
-
-        chosen = asyncio.run(run())
-        self.assertEqual(chosen["physical_node"], "idle")
+        self.assertEqual(self._pick([busy, idle], probe)["physical_node"], "idle")
 
     def test_all_nodes_unreachable_is_a_retryable_503(self):
-        async def fake_probe(client, worker):
-            return False, 0
-
-        async def run():
-            with mock.patch.object(ai_vision_api, "_load_ai_workers", return_value=[WORKER]), \
-                 mock.patch.object(ai_vision_api, "_node_is_free", fake_probe):
-                return await ai_vision_api._pick_worker(None)
-
-        import asyncio
+        async def probe(client, worker):
+            return False, {}
 
         with self.assertRaises(HTTPException) as caught:
-            asyncio.run(run())
+            self._pick([WORKER], probe)
         self.assertEqual(caught.exception.status_code, 503)
         self.assertEqual(caught.exception.detail["error_string"], "no_node_available")
+
+    def test_only_a_node_carrying_the_model_is_chosen(self):
+        plain = dict(WORKER, physical_node="plain", name="plain")
+        wild = dict(WORKER, physical_node="wild", name="wild")
+
+        async def probe(client, worker):
+            models = (["bonsai2-27b"] if worker["physical_node"] == "plain"
+                      else ["bonsai2-27b", "qwen35-9b-uncensored"])
+            return True, {"load": 0, "models": models, "loaded": ""}
+
+        chosen = self._pick([plain, wild], probe, model="qwen35-9b-uncensored")
+        self.assertEqual(chosen["physical_node"], "wild")
+
+    def test_a_model_no_node_carries_is_reported(self):
+        async def probe(client, worker):
+            return True, {"load": 0, "models": ["bonsai2-27b"], "loaded": ""}
+
+        with self.assertRaises(HTTPException) as caught:
+            self._pick([WORKER], probe, model="qwen35-9b-uncensored")
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.detail["error_string"], "model_not_on_any_node")
+
+    def test_a_node_with_the_model_resident_beats_an_idler(self):
+        """Swapping weights costs a full load, so a warm node wins on latency."""
+        warm = dict(WORKER, physical_node="warm", name="warm")
+        idle = dict(WORKER, physical_node="idle", name="idle")
+
+        async def probe(client, worker):
+            if worker["physical_node"] == "warm":
+                return True, {"load": 2, "models": ["m"], "loaded": "m"}
+            return True, {"load": 0, "models": ["m"], "loaded": ""}
+
+        self.assertEqual(self._pick([warm, idle], probe, model="m")["physical_node"], "warm")
+
+    def test_a_node_that_publishes_no_catalogue_is_still_tried(self):
+        async def probe(client, worker):
+            return True, {"load": 0, "models": [], "loaded": ""}
+
+        chosen = self._pick([WORKER], probe, model="qwen35-9b-uncensored")
+        self.assertEqual(chosen["physical_node"], "f1-pc")
 
 
 if __name__ == "__main__":

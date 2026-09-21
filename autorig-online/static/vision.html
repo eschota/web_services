@@ -79,6 +79,7 @@
         .field textarea:focus, .field input:focus, .field select:focus {
             outline: none; border-color: #7b5cff; box-shadow: 0 0 0 3px rgba(123, 92, 255, .18);
         }
+        .model-note { display: block; margin-top: 6px; font-size: 12px; color: var(--text-secondary, #9aa0b5); min-height: 15px; }
         .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
         .go {
@@ -147,6 +148,7 @@
                 <div class="field">
                     <label for="model">Model</label>
                     <select id="model"></select>
+                    <small class="model-note" id="model-note"></small>
                 </div>
                 <div class="field">
                     <label for="tokens">Answer length, tokens</label>
@@ -192,10 +194,11 @@ const modelSelect = document.getElementById('model');
 let imageDataUrl = null;
 
 fetch('/api/ai/models').then(r => r.json()).then(data => {
+    window.__models = data.models_array || [];
     (data.models_array || []).forEach(m => {
         const option = document.createElement('option');
         option.value = m.id;
-        option.textContent = m.title + ' — ' + (m.hosting === 'local-farm' ? 'our farm' : m.hosting);
+        option.textContent = m.title + (m.uncensored ? ' · uncensored' : '');
         if (m.id === data.default_model_string) option.selected = true;
         modelSelect.appendChild(option);
     });
@@ -205,6 +208,7 @@ fetch('/api/ai/models').then(r => r.json()).then(data => {
         option.textContent = 'Bonsai 2 27B';
         modelSelect.appendChild(option);
     }
+    describeModel();
 }).catch(() => {
     const option = document.createElement('option');
     option.value = 'bonsai2-27b';
@@ -241,6 +245,14 @@ function setBusy(busy, label) {
     goButton.disabled = busy;
     goButton.innerHTML = busy ? '<span class="spin"></span>' + label : 'Ask the model';
 }
+
+function describeModel() {
+    const chosen = (window.__models || []).find(m => m.id === modelSelect.value);
+    const note = document.getElementById('model-note');
+    if (!note) return;
+    note.textContent = chosen ? chosen.description : '';
+}
+modelSelect.addEventListener('change', describeModel);
 
 goButton.addEventListener('click', async () => {
     if (!imageDataUrl) { alert('Add an image first.'); return; }

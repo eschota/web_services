@@ -64,6 +64,7 @@
         .field textarea:focus, .field input:focus, .field select:focus {
             outline: none; border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56, 189, 248, .18);
         }
+        .model-note { display: block; margin-top: 6px; font-size: 12px; color: var(--text-secondary, #9aa0b5); min-height: 15px; }
         .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
         .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
@@ -139,6 +140,7 @@
                 <div class="field">
                     <label for="model">Model</label>
                     <select id="model"></select>
+                    <small class="model-note" id="model-note"></small>
                 </div>
                 <div class="field">
                     <label for="tokens">Answer length, tokens</label>
@@ -194,19 +196,29 @@ thinkToggle.addEventListener('click', () => {
 });
 
 fetch('/api/ai/models').then(r => r.json()).then(data => {
+    window.__models = data.models_array || [];
     (data.models_array || []).forEach(m => {
         const option = document.createElement('option');
         option.value = m.id;
-        option.textContent = m.title + ' — ' + (m.hosting === 'local-farm' ? 'our farm' : m.hosting);
+        option.textContent = m.title + (m.uncensored ? ' · uncensored' : '');
         if (m.id === data.default_model_string) option.selected = true;
         modelSelect.appendChild(option);
     });
+    describeModel();
 }).catch(() => {});
 
 function setBusy(busy) {
     goButton.disabled = busy;
     goButton.innerHTML = busy ? '<span class="spin"></span>Working…' : 'Send prompt';
 }
+
+function describeModel() {
+    const chosen = (window.__models || []).find(m => m.id === modelSelect.value);
+    const note = document.getElementById('model-note');
+    if (!note) return;
+    note.textContent = chosen ? chosen.description : '';
+}
+modelSelect.addEventListener('change', describeModel);
 
 goButton.addEventListener('click', async () => {
     const prompt = promptBox.value.trim();

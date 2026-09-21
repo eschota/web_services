@@ -46,6 +46,20 @@ AI_MODELS: List[Dict[str, object]] = [
         "hosting": "local-farm",
         "default": True,
     },
+    {
+        "id": "qwen35-9b-uncensored",
+        "title": "Qwen3.5 9B Defiant Fable",
+        "description": (
+            "Uncensored 9B vision-language model on the farm's own GPUs. "
+            "Answers without the refusals of a stock assistant model."
+        ),
+        "modes": ["vision", "text"],
+        "context_tokens": 8192,
+        "max_output_tokens": 2048,
+        "hosting": "local-farm",
+        "uncensored": True,
+        "default": False,
+    },
 ]
 DEFAULT_MODEL_ID = "bonsai2-27b"
 
@@ -149,8 +163,8 @@ def _ai_base(worker: Dict[str, object]) -> str:
     return str(worker["url"]).rstrip("/") + "/api-converter-glb"
 
 
-async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) -> Tuple[bool, int]:
-    """Return (reachable, queued+running) so the least loaded node can be picked."""
+async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) -> Tuple[bool, Dict[str, object]]:
+    """Return (reachable, {load, models, loaded}) so a node can be chosen on facts."""
     url = _ai_base(worker) + "/server-status"
     try:
         response = await client.get(
@@ -159,20 +173,31 @@ async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) ->
             timeout=10.0,
         )
         if response.status_code != 200:
-            return False, 0
+            return False, {}
         payload = response.json()
     except Exception:
-        return False, 0
+        return False, {}
     queued = int(payload.get("queue_size") or 0)
     active = payload.get("active_tasks")
     try:
         active_count = int(active or 0)
     except (TypeError, ValueError):
         active_count = 0
-    return True, queued + active_count
+    catalogue = payload.get("ai_models")
+    models = []
+    loaded = ""
+    if isinstance(catalogue, dict):
+        loaded = str(catalogue.get("loaded_model") or "")
+        for entry in catalogue.get("models") or []:
+            if isinstance(entry, dict) and entry.get("id"):
+                models.append(str(entry["id"]))
+    return True, {"load": queued + active_count, "models": models, "loaded": loaded}
 
 
-async def _pick_worker(client: httpx.AsyncClient) -> Dict[str, object]:
+async def _pick_worker(
+    client: httpx.AsyncClient, model_id: Optional[str] = None
+) -> Dict[str, object]:
+    """The least loaded reachable node that carries the requested model."""
     workers = _load_ai_workers()
     if not workers:
         raise HTTPException(
@@ -183,21 +208,38 @@ async def _pick_worker(client: httpx.AsyncClient) -> Dict[str, object]:
     probes = await asyncio.gather(
         *(_node_is_free(client, worker) for worker in workers), return_exceptions=True
     )
-    candidates = []
+    reachable = []
     for worker, probe in zip(workers, probes):
         if isinstance(probe, Exception) or not isinstance(probe, tuple):
             continue
-        reachable, load = probe
-        if reachable:
-            candidates.append((load, worker))
-    if not candidates:
+        ok, info = probe
+        if ok and isinstance(info, dict):
+            reachable.append((worker, info))
+    if not reachable:
         raise HTTPException(
             status_code=503,
             detail={"error_string": "no_node_available",
                     "message_string": "No farm node answered; try again shortly"},
         )
-    candidates.sort(key=lambda item: item[0])
-    return candidates[0][1]
+    wanted = str(model_id or "").strip()
+    carrying = [(w, i) for w, i in reachable if not wanted or wanted in (i.get("models") or [])]
+    if not carrying:
+        # Older nodes publish no catalogue at all; treat that as "unknown, try it"
+        # rather than refusing work a node may well be able to do.
+        silent = [(w, i) for w, i in reachable if not (i.get("models") or [])]
+        if not silent:
+            raise HTTPException(status_code=503, detail={
+                "error_string": "model_not_on_any_node",
+                "message_string": f"No reachable node carries '{wanted}'",
+                "nodes_checked_int": len(reachable)})
+        carrying = silent
+    # A node with the model already resident answers without a reload, so it
+    # wins over an idler that would have to swap weights first.
+    carrying.sort(key=lambda item: (
+        0 if wanted and item[1].get("loaded") == wanted else 1,
+        int(item[1].get("load") or 0),
+    ))
+    return carrying[0][0]
 
 
 def _worker_by_key(key: str) -> Optional[Dict[str, object]]:
@@ -353,8 +395,8 @@ async def _run(
 ) -> Dict[str, object]:
     model_id = str(request_model["id"])
     async with httpx.AsyncClient() as client:
-        worker = await _pick_worker(client)
-        worker_task_id = await _submit(client, worker, path, payload)
+        worker = await _pick_worker(client, model_id)
+        worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
         task_id = f"{_node_key(worker)}.{worker_task_id}"
         raw: Dict[str, object] = {"status": "Pending"}
         if wait_seconds and wait_seconds > 0:
