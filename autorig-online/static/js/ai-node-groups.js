@@ -364,7 +364,8 @@
           // The host's connectionCreated handler remains the authority on
           // entity-type compatibility and removes an invalid wire immediately.
           editor.addConnection(from, to, 'output_' + (outIndex + 1), portName);
-          const exists = port && (port.connections || []).some(item =>
+          const updatedPort = editor.getNodeFromId(to)?.inputs?.[portName];
+          const exists = updatedPort && (updatedPort.connections || []).some(item =>
             String(item.node) === from && String(item.input) === 'output_' + (outIndex + 1));
           if (exists) restored += 1; else missing += 1;
         } catch (_) { missing += 1; }
