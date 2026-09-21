@@ -1668,6 +1668,7 @@
     if (window.AINodeDisplay) nodeDisplay = window.AINodeDisplay.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, defaultMode:'medium',
       onModeChange:(id, mode) => { const value=meta(id); if(value) value.displayMode=mode; }});
+    if (window.AINodeShare) window.AINodeShare.install({canvas:document.getElementById('canvas'), getMeta:meta, toast});
     installWheelZoom();
     if (window.AINodeGroups) window.AINodeGroups.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
