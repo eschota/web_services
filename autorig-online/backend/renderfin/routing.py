@@ -134,13 +134,16 @@ def clamp_image_dims(width: int, height: int) -> Tuple[int, int]:
 
 
 def clamp_video_dims(width: int, height: int) -> Tuple[int, int]:
-    """C# pinned-workflow clamp: 64-512, /32, defaults 384x224."""
+    """Keep requested delivery size; only the encoder needs even pixels.
+
+    Model-specific /32 padding happens in runtime_settings, not here.
+    """
 
     def one(v: int, default: int) -> int:
         v = int(v or 0)
         if v <= 0:
             v = default
-        v = max(64, min(512, v))
-        return max(64, round(v / 32) * 32)
+        v = max(64, min(2048, v))
+        return v if v % 2 == 0 else min(2048, v + 1)
 
-    return one(width, 384), one(height, 224)
+    return one(width, 960), one(height, 540)

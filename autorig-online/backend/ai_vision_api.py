@@ -1104,7 +1104,7 @@ async def api_video(body: VideoRequest):
                    if entry.get("file") in selected or "video" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("video", payload,
-        lambda: _uncached_api_video(body), namespace="ai-workflows-20260922-v2")
+        lambda: _uncached_api_video(body), namespace="ai-video-delivery-20260922-v3")
 
 
 async def _uncached_api_video(body: VideoRequest):

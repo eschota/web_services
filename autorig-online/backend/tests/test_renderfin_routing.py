@@ -145,6 +145,12 @@ class RuntimeWorkflowTests(unittest.TestCase):
 
 
 class ClampTests(unittest.TestCase):
+    def test_video_preserves_half_hd_and_custom_delivery_size(self):
+        from renderfin.routing import clamp_video_dims
+        self.assertEqual(clamp_video_dims(0, 0), (960, 540))
+        self.assertEqual(clamp_video_dims(960, 540), (960, 540))
+        self.assertEqual(clamp_video_dims(1030, 1527), (1030, 1528))
+
     def test_defaults(self):
         self.assertEqual(clamp_image_dims(0, 0), (960, 540))
 
