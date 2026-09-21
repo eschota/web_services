@@ -26,12 +26,14 @@ router = APIRouter()
 TEXT = "text"
 IMAGE = "image"
 VIDEO = "video"
+AVATAR = "avatar"
 MODEL3D = "model3d"
 CONTROL_POSE = "control_pose"
 CONTROL_DEPTH = "control_depth"
 CONTROL_CANNY = "control_canny"
 
 ENTITY_TYPES: List[Dict[str, object]] = [
+    {"id": AVATAR, "title": "Avatar", "carries": "saved private Avatar id and immutable version", "icon": "👤"},
     {"id": CONTROL_POSE, "title": "Pose control", "carries": "validated OpenPose map URL", "icon": "🧍"},
     {"id": CONTROL_DEPTH, "title": "Depth control", "carries": "validated depth map URL", "icon": "▧"},
     {"id": CONTROL_CANNY, "title": "Canny control", "carries": "validated edge map URL", "icon": "▱"},
@@ -67,6 +69,18 @@ ENTITY_TYPES: List[Dict[str, object]] = [
 # handoff UI can show where a result could go, but not yet callable). A page
 # shows a planned service greyed out instead of pretending it works.
 SERVICES: List[Dict[str, object]] = [
+    {
+        "id": "avatar_image", "title": "Avatar scene", "path": "/avatars",
+        "api": "/api/ai/avatar-image", "status": "planned",
+        "summary": "Place one or two saved characters into a scene using their reference images.",
+        "inputs": [
+            {"type": AVATAR, "field": "avatar", "required": True, "title": "Main character"},
+            {"type": AVATAR, "field": "avatar_secondary", "required": False, "title": "Second character"},
+            {"type": IMAGE, "field": "image", "required": False, "title": "Scene reference"},
+            {"type": TEXT, "field": "prompt", "required": True, "title": "Scene and action"},
+        ],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Character keyframe"}],
+    },
     {
         "id": "vision",
         "title": "Vision",
@@ -199,6 +213,11 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
 
 
 PARAMS: Dict[str, List[Dict[str, object]]] = {
+    "avatar_image": [
+        {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 960},
+        {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 540},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
+    ],
     "vision": [
         {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
          "default": "bonsai2-27b"},

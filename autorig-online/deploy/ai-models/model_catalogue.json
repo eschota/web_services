@@ -67,7 +67,7 @@
   {
     "kind": "checkpoint",
     "family": "ltx23",
-    "file": "ltx10eros_v14_2989633.safetensors",
+    "file": "ltx10eros_v14_2989669.safetensors",
     "title": "LTX 10Eros",
     "version": "v1.4",
     "base": "LTXV 2.3",
@@ -76,29 +76,29 @@
     "downloads": 17367,
     "page": "https://civitai.com/models/2447875?modelVersionId=3109610",
     "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/130ab84e-6848-4e3b-914b-7754ff277f48/original=true/136150920.mp4",
-    "size_mb": 1621.1,
+    "size_mb": 27810.9,
     "services": [
       "video"
     ],
-    "usable": false,
-    "id": "ltx10eros_v14_2989633.safetensors",
+    "usable": true,
+    "id": "ltx10eros_v14_2989669.safetensors",
     "preview": "/api/ai/model-preview/ltx10eros_v14_2989633.safetensors.jpg",
     "recommended": {
       "steps": 9,
       "cfg": 1.0,
       "sampler": "Euler a"
     },
-    "recommended_from": "Author example metadata; full model workflow has not yet been validated.",
+  "recommended_from": "Author V5 DMD workflow and example metadata; full checkpoint validated on worker-4090 at exact 960x540.",
     "source_version_id": 3109610,
     "source_checked_at": "2026-09-22",
     "recommendation_sources": [
       "https://civitai.com/models/2447875?modelVersionId=3109610",
-      "https://civitai.com/api/v1/model-versions/3109610",
-      "https://civitai.com/api/v1/models/2447875"
+    "https://civitai.com/api/v1/model-versions/3109610",
+    "https://civitai.com/api/v1/models/2447875",
+    "https://huggingface.co/TenStrip/LTX2.3-10Eros_Workflows/blob/main/10Eros_10SNodes_I2V_Basic_DMD_V5.json"
     ],
     "recommendation_kind": "author_example_metadata",
-    "workflow": "gen_animation_ltx23_by_url.json",
-    "unusable_reason": "The previously installed file is Civitai Other, not the checkpoint. A verified full 10Eros model is required."
+  "workflow": "gen_animation_ltx10eros_by_url.json"
   },
   {
     "kind": "checkpoint",

@@ -247,7 +247,7 @@
         if (node.kind === 'input') {
           return { id: String(node.id), kind: 'input', entity_type: String(node.entity_type || ''),
             value: typeof node.value === 'string' && !node.value.startsWith('data:') ? node.value : '',
-            x: Number(node.x) || 0, y: Number(node.y) || 0, params: {} };
+            x: Number(node.x) || 0, y: Number(node.y) || 0, params: {_display_mode: node.params && node.params._display_mode} };
         }
         return { id: String(node.id), kind: 'service', service: String(node.service || ''),
           x: Number(node.x) || 0, y: Number(node.y) || 0,
@@ -327,7 +327,7 @@
       const mapping = new Map();
       for (const node of payload.nodes) {
         let id = null;
-        if (node.kind === 'input') id = addInputNode(node.entity_type, Number(node.x) + offsetX, Number(node.y) + offsetY, node.value);
+        if (node.kind === 'input') id = addInputNode(node.entity_type, Number(node.x) + offsetX, Number(node.y) + offsetY, node.value, node.params);
         else id = addServiceNode(node.service, Number(node.x) + offsetX, Number(node.y) + offsetY, JSON.parse(JSON.stringify(node.params)));
         if (!id) {
           mapping.forEach(newId => editor.removeNodeId('node-' + newId));

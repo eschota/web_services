@@ -15,12 +15,12 @@ from typing import Any, Dict, Optional, Tuple
 SEED_MAX = 574131870028331  # C# random seed upper bound
 _GLASS_RE = re.compile(r"\bglass(?:es)?\b", re.IGNORECASE)
 _SEED_KEYS = ("noise_seed", "seed")
-MAX_PROMPT_CHARS = 2000
+MAX_PROMPT_CHARS = 12000
 
 
 def sanitize_prompt(text: str) -> str:
-    """Strip the words glasses/glass (C# parity) and clamp length."""
-    text = _GLASS_RE.sub("", text or "")
+    """Preserve visual attributes and action instructions, with a bounded size."""
+    text = text or ""
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text[:MAX_PROMPT_CHARS].strip()
 
@@ -46,6 +46,7 @@ def render_workflow_text(
     negative_prompt: str,
     image_filename: str,
     image_end_filename: str = "",
+    control_video_filename: str = "",
     output_prefix: str,
     workflow_type: str = "",
     frames: int = 0,
@@ -69,6 +70,7 @@ def render_workflow_text(
     text = text.replace("$negative_prompt", _json_escape(sanitize_prompt(negative_prompt)))
     # $image_end must go first: "$image" is a prefix of it.
     text = text.replace("$image_end", _json_escape(image_end_filename or ""))
+    text = text.replace("$control_video", _json_escape(control_video_filename or ""))
     text = text.replace("$image", _json_escape(image_filename or ""))
     # $output_url must go last: it is a prefix of $output_url_Isolated etc.
     text = text.replace("$output_url", _json_escape(output_prefix or ""))

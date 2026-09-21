@@ -15,6 +15,12 @@ class RenderPrompt(BaseModel):
     negative_prompt: str = ""
     image_url: str = ""
     image_url_end: str = ""
+    control_video_url: str = ""
+    # Ordered FLUX.2 reference inputs. Avatar requests put the canonical
+    # identity image first, an optional detail/second identity view next, and
+    # the scene/composition reference last. The order is meaningful to the
+    # prompt ("image 1", "image 2", ...), so it must survive persistence.
+    reference_image_urls: List[str] = Field(default_factory=list)
     type: str = ""
     work_flow: str = ""
     main_size_width: int = 0
@@ -43,6 +49,23 @@ class RenderPrompt(BaseModel):
     @classmethod
     def _clamp_frame_count(cls, v: int) -> int:
         return max(0, min(400, int(v or 0)))
+
+    @field_validator("reference_image_urls", mode="before")
+    @classmethod
+    def _bounded_reference_image_urls(cls, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("reference_image_urls must be a list")
+        if len(value) > 4:
+            raise ValueError("reference_image_urls may contain at most 4 URLs")
+        urls: List[str] = []
+        for item in value:
+            url = str(item or "").strip()
+            if not url or len(url) > 4096:
+                raise ValueError("reference image URL must be 1 to 4096 characters")
+            urls.append(url)
+        return urls
 
     @field_validator("user_name")
     @classmethod

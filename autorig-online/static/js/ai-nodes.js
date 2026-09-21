@@ -20,6 +20,7 @@
   const HEADER_HEIGHT = 46;
 
   let editor = null;
+  let nodeDisplay = null;
   let catalogue = null;
   let models = [];
   // Drawflow addresses ports by index, the catalogue by field name. This holds
@@ -145,6 +146,11 @@
   }
 
   function inputNodeHtml(entityType) {
+    if (entityType === 'avatar') return '<div class="nhead"><b>Avatar</b></div>'
+      + '<div class="nports"><div class="prow pout">character 👤</div></div>'
+      + '<div class="ninput"><select data-value aria-label="Saved Avatar"><option value="">Choose an Avatar…</option></select>'
+      + '<a href="/avatars" target="_blank" rel="noopener">Manage Avatars</a><img data-preview hidden alt="Avatar reference"></div>'
+      + '<div class="nstate"></div>';
     const isText = entityType === 'text';
     const field = isText
       ? '<textarea data-value rows="3" placeholder="Type the text…"></textarea>'
@@ -173,6 +179,7 @@
     setMeta(id, {
       kind: KIND_SERVICE,
       service: serviceId,
+      displayMode: params && params._display_mode,
       label: (params && params._label) || '',
       inFields: inputs.map(i => i.field),
       outFields: outputs.map(o => o.field)
@@ -183,17 +190,20 @@
     return id;
   }
 
-  function addInputNode(entityType, x, y, value) {
+  function addInputNode(entityType, x, y, value, params) {
     if (!(catalogue.entity_types_array || []).some(item => item.id === entityType)) return null;
     const id = editor.addNode(
       'input-' + entityType, 0, 1, x, y,
       'ainode input-node', { entity_type: entityType }, inputNodeHtml(entityType)
     );
-    setMeta(id, { kind: KIND_INPUT, entityType: entityType, inFields: [], outFields: ['value'] });
+    setMeta(id, { kind: KIND_INPUT, entityType: entityType, displayMode: params && params._display_mode, inFields: [], outFields: ['value'] });
     alignPorts(id, 0, 1);
     if (value) {
       const field = nodeElement(id).querySelector('[data-value]');
-      if (field) field.value = value;
+      if (field) {
+        if (entityType === 'avatar') field.add(new Option(value, value));
+        field.value = value;
+      }
     }
     wireInputNode(id, entityType);
     return id;
@@ -307,6 +317,39 @@
 
   function wireInputNode(id, entityType) {
     const element = nodeElement(id);
+    if (element && entityType === 'avatar') {
+      const select = element.querySelector('[data-value]');
+      const state = element.querySelector('.nstate');
+      const preview = element.querySelector('[data-preview]');
+      const update = async () => {
+        if (!select.value) { preview.hidden = true; return; }
+        const [avatarId, version] = select.value.split('@');
+        try {
+          const response = await fetch('/api/ai/avatars/' + encodeURIComponent(avatarId) + (version ? '?version=' + encodeURIComponent(version) : ''));
+          const data = await response.json();
+          if (!response.ok || !data.avatar_object) throw new Error('Avatar is unavailable in this account');
+          const avatar = data.avatar_object;
+          const pinned = avatar.avatar_id + '@' + avatar.version;
+          if (!Array.from(select.options).some(item => item.value === pinned)) select.add(new Option(avatar.display_name + ' · v' + avatar.version, pinned));
+          select.value = pinned;
+          const ref = avatar.references.find(item => item.media_type === 'image' && item.role === 'face') || avatar.references.find(item => item.media_type === 'image');
+          preview.hidden = !ref;
+          if (ref) preview.src = ref.canonical_url;
+          state.textContent = 'Saved character · version ' + avatar.version;
+          state.className = 'nstate done';
+        } catch (error) { state.textContent = error.message; state.className = 'nstate failed'; }
+      };
+      select.addEventListener('change', update);
+      preview.addEventListener('click', () => { if (!preview.hidden) openPreview('image', preview.src); });
+      fetch('/api/ai/avatars').then(response => response.json()).then(data => {
+        for (const item of data.avatars_array || []) {
+          const key = item.avatar_id + '@' + item.current_version;
+          if (!Array.from(select.options).some(option => option.value === key)) select.add(new Option(item.display_name + ' · v' + item.current_version, key));
+        }
+        update();
+      }).catch(() => { state.textContent = 'Could not load Avatars'; });
+      return;
+    }
     if (!element || entityType !== 'image') return;
     const file = element.querySelector('[data-file]');
     const pick = element.querySelector('[data-pick]');
@@ -396,6 +439,7 @@
     const element = nodeElement(id);
     const values = {};
     if (meta(id)?.label) values._label = meta(id).label;
+    if (meta(id)?.displayMode) values._display_mode = meta(id).displayMode;
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
       const raw = control.value;
@@ -497,6 +541,7 @@
   // at once so the node can say it is running and the deep link can carry the
   // id; waiting on the submit would leave both blank for minutes.
   const RUNNERS = {
+    avatar_image: { api: '/api/ai/avatar-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
     vision: { api: '/api/vision', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     text: { api: '/api/text2text', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     image: { api: '/api/image', finish: pollForFile, field: 'image_url_string', type: 'image' },
@@ -823,7 +868,7 @@
           // A pasted data URL would bloat a shared link, so only an address is
           // carried; a file chosen by hand is deliberately not saved.
           value: field && !String(field.value).startsWith('data:') ? field.value : '',
-          x: raw.pos_x, y: raw.pos_y, params: {}
+          x: raw.pos_x, y: raw.pos_y, params: {_display_mode: node.displayMode || 'medium'}
         });
       } else {
         nodes.push({
@@ -1103,7 +1148,7 @@
     const mapping = new Map();
     (graph.nodes || []).forEach(node => {
       const id = node.kind === KIND_INPUT
-        ? addInputNode(node.entity_type, node.x, node.y, node.value)
+        ? addInputNode(node.entity_type, node.x, node.y, node.value, node.params)
         : addServiceNode(node.service, node.x, node.y, node.params);
       if (id) mapping.set(node.id, id);
     });
@@ -1205,7 +1250,7 @@
     heading.className = 'pgroup';
     heading.textContent = 'Sources';
     host.appendChild(heading);
-    [['image', 'Image in'], ['text', 'Text in']].forEach(([type, title]) => {
+    [['image', 'Image in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
       host.appendChild(paletteButton(title, typeIcon(type), '', () =>
         addInputNode(type, 60 + editor.canvas_x * -1, 80, '')));
     });
@@ -1237,6 +1282,9 @@
     editor = new Drawflow(document.getElementById('canvas'));
     editor.reroute = true;
     editor.start();
+    if (window.AINodeDisplay) nodeDisplay = window.AINodeDisplay.install({editor,
+      canvas:document.getElementById('canvas'), getMeta:meta, defaultMode:'medium',
+      onModeChange:(id, mode) => { const value=meta(id); if(value) value.displayMode=mode; }});
     installWheelZoom();
     if (window.AINodeGroups) window.AINodeGroups.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
@@ -1299,6 +1347,7 @@
     });
 
     const wanted = new URLSearchParams(location.search).get('g');
+    const wantedAvatar = new URLSearchParams(location.search).get('avatar');
     if (wanted) {
       const data = await fetch('/api/ai/graphs/' + encodeURIComponent(wanted))
         .then(r => r.json()).catch(() => null);
@@ -1308,6 +1357,10 @@
       } else {
         toast('That link does not open a graph any more.');
       }
+    } else if (wantedAvatar) {
+      editor.clear(); nodeMeta.clear(); runState.clear();
+      document.getElementById('graph-name').value = 'Avatar production';
+      addInputNode('avatar', 60, 100, wantedAvatar);
     } else if ((templates.templates_array || []).length) {
       loadGraph(templates.templates_array[0].graph);
     }

@@ -92,12 +92,13 @@ class SubstitutionTests(unittest.TestCase):
         node = wf["171"]
         self.assertEqual(node["inputs"]["text"], 'a "brave" knight\nwith sword')
 
-    def test_glasses_stripped(self):
-        self.assertEqual(sanitize_prompt("a man with glasses and a glass of water"), "a man with and a of water")
+    def test_identity_attributes_and_props_preserved(self):
+        self.assertEqual(sanitize_prompt("a man with glasses and a glass of water"), "a man with glasses and a glass of water")
         self.assertEqual(sanitize_prompt("stained-glassware ok"), "stained-glassware ok")
 
     def test_prompt_length_clamped(self):
-        self.assertLessEqual(len(sanitize_prompt("x" * 5000)), 2000)
+        self.assertEqual(len(sanitize_prompt("x" * 5000)), 5000)
+        self.assertLessEqual(len(sanitize_prompt("x" * 15000)), 12000)
 
     def test_gen_image_bare_width_height(self):
         wf = _render("gen_image.json", width=512, height=768)

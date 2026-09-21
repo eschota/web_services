@@ -1510,6 +1510,28 @@ async def get_anon_session(
     return await get_or_create_anon_session(db, anon_id)
 
 
+async def get_avatar_owner(
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from ai_avatars import AvatarOwner
+    if user:
+        return AvatarOwner(owner_type="user", owner_id=str(user.id))
+    anon = await get_anon_session(request, response, db)
+    return AvatarOwner(owner_type="anon", owner_id=anon.anon_id)
+
+
+from ai_avatars import build_avatar_router
+from ai_avatar_assets import build_avatar_asset_router
+from ai_avatar_render import build_avatar_render_router
+
+app.include_router(build_avatar_router(get_avatar_owner))
+app.include_router(build_avatar_asset_router(get_avatar_owner))
+app.include_router(build_avatar_render_router(get_avatar_owner))
+
+
 async def require_admin(
     user: Optional[User] = Depends(get_current_user)
 ) -> User:
@@ -16877,6 +16899,11 @@ async def model3d_page():
 async def nodes_page():
     """Wire the services together and render the whole composition at once."""
     return _static_html_response("nodes.html")
+
+
+@app.get("/avatars")
+async def avatars_page():
+    return _static_html_response("avatars.html")
 
 
 @app.get("/rig-animals", include_in_schema=False)

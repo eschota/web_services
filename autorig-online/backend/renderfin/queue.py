@@ -39,6 +39,73 @@ from .registry import ServerRegistry
 # backlog, so an unreachable box is never mistaken for an idle one - but still
 # finite, so it stays usable when every box is unreadable.
 _UNKNOWN_DEPTH = 10_000
+_AVATAR_WORKFLOW = "gen_image_flux2_avatar.json"
+
+
+def _inject_avatar_reference_images(
+    workflow: Dict[str, Any], image_filenames: List[str]
+) -> None:
+    """Chain native FLUX.2 ReferenceLatent nodes in caller-provided order.
+
+    Native ComfyUI explicitly supports chaining ReferenceLatent for multiple
+    images. Building only the branches that have real uploaded files avoids
+    placeholder LoadImage nodes and keeps one audited workflow for 1..4 refs.
+    """
+    if not 1 <= len(image_filenames) <= 4:
+        raise ValueError("Avatar workflow requires 1 to 4 reference images")
+    required = {"positive", "vae", "guider"}
+    missing = sorted(required.difference(workflow))
+    if missing:
+        raise ValueError(
+            "Avatar workflow is missing reference anchors: " + ", ".join(missing)
+        )
+    positive = workflow["positive"]
+    vae = workflow["vae"]
+    guider = workflow["guider"]
+    if (
+        not isinstance(positive, dict)
+        or positive.get("class_type") != "CLIPTextEncode"
+        or not isinstance(vae, dict)
+        or vae.get("class_type") != "VAELoader"
+        or not isinstance(guider, dict)
+        or guider.get("class_type") != "BasicGuider"
+    ):
+        raise ValueError("Avatar workflow reference anchors have unexpected node types")
+
+    conditioning: List[Any] = ["positive", 0]
+    for index, filename in enumerate(image_filenames, start=1):
+        prefix = f"avatar_reference_{index}"
+        image_node = f"{prefix}_image"
+        scale_node = f"{prefix}_scale"
+        encode_node = f"{prefix}_encode"
+        condition_node = f"{prefix}_conditioning"
+        workflow[image_node] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": filename},
+            "_meta": {"title": f"Avatar reference {index}"},
+        }
+        workflow[scale_node] = {
+            "class_type": "ImageScaleToTotalPixels",
+            "inputs": {
+                "image": [image_node, 0],
+                "upscale_method": "area",
+                "megapixels": 1.0,
+                "resolution_steps": 1,
+            },
+        }
+        workflow[encode_node] = {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": [scale_node, 0], "vae": ["vae", 0]},
+        }
+        workflow[condition_node] = {
+            "class_type": "ReferenceLatent",
+            "inputs": {
+                "conditioning": conditioning,
+                "latent": [encode_node, 0],
+            },
+        }
+        conditioning = [condition_node, 0]
+    guider.setdefault("inputs", {})["conditioning"] = conditioning
 
 
 class ManagedComfyCleanupPending(RuntimeError):
@@ -1171,13 +1238,31 @@ class RenderQueue:
         template_text = template_path.read_text(encoding="utf-8")
 
         image_filename = ""
-        if (prompt.image_url or "").strip():
+        reference_urls = list(getattr(prompt, "reference_image_urls", []) or [])
+        is_avatar_workflow = workflow_file == _AVATAR_WORKFLOW
+        if is_avatar_workflow and not reference_urls:
+            raise comfy_adapter.ComfyAdapterError(
+                "Avatar workflow requires 1 to 4 reference images"
+            )
+        if reference_urls and not is_avatar_workflow:
+            raise comfy_adapter.ComfyAdapterError(
+                "reference_image_urls require gen_image_flux2_avatar.json"
+            )
+        if not is_avatar_workflow and (prompt.image_url or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url)
             image_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         image_end_filename = ""
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
             image_end_filename = await comfy_adapter.upload_image(self._client, server, name, data)
+        reference_filenames: List[str] = []
+        for reference_url in reference_urls:
+            name, data = await comfy_adapter.download_input_image(
+                self._client, reference_url
+            )
+            reference_filenames.append(
+                await comfy_adapter.upload_image(self._client, server, name, data)
+            )
 
         if forced:
             width, height = forced
@@ -1203,6 +1288,8 @@ class RenderQueue:
             lora=getattr(prompt, "lora", "") or "",
             lora_strength=(getattr(prompt, "lora_strength", 0) or None),
         )
+        if is_avatar_workflow:
+            _inject_avatar_reference_images(workflow, reference_filenames)
         apply_runtime_settings(workflow, prompt, width, height)
         prompt_id = task.comfy_prompt_id or str(uuid.uuid4())
         task.comfy_prompt_id = prompt_id

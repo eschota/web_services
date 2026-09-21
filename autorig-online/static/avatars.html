@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatars — Reusable Characters | AutoRig</title>
+    <meta name="description" content="Save versioned character references and reuse them in AutoRig image and video node compositions.">
+    <link rel="canonical" href="https://autorig.online/avatars">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script defer src="/static/js/ai-avatars.js?v=20260922-1"></script>
+    <style>
+        :root { --av-accent:#7b5cff; --av-cyan:#38bdf8; --av-bg:#101122; --av-card:rgba(18,19,38,.78); --av-line:rgba(255,255,255,.1); --av-muted:#9aa0b5; }
+        * { box-sizing:border-box; }
+        body.avatar-page { margin:0; min-height:100vh; color:#eef; background:radial-gradient(circle at 10% 5%,rgba(56,189,248,.13),transparent 34%),radial-gradient(circle at 90% 8%,rgba(123,92,255,.2),transparent 38%),linear-gradient(180deg,#101122,#14152a 52%,#0f101c); font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+        button,input,textarea { font:inherit; }
+        .av-bar { position:sticky; top:0; z-index:8; display:flex; align-items:center; gap:16px; padding:13px 20px; border-bottom:1px solid var(--av-line); background:rgba(12,13,26,.88); backdrop-filter:blur(10px); }
+        .av-brand { color:#fff; font-weight:750; font-size:17px; text-decoration:none; }
+        .av-bar nav { margin-left:auto; display:flex; gap:17px; }
+        .av-bar nav a { color:var(--av-muted); text-decoration:none; font-size:14px; }
+        .av-bar nav a:hover,.av-bar nav a[aria-current="page"] { color:#fff; }
+        .av-wrap { width:min(1220px,calc(100% - 32px)); margin:0 auto; padding:46px 0 80px; }
+        .av-hero { display:flex; align-items:flex-end; gap:24px; justify-content:space-between; margin-bottom:28px; }
+        .av-hero h1 { margin:0 0 9px; font-size:clamp(30px,5vw,50px); letter-spacing:-.035em; }
+        .av-hero p { margin:0; max-width:710px; color:var(--av-muted); line-height:1.55; }
+        .av-primary,.av-secondary { border-radius:10px; padding:10px 15px; cursor:pointer; color:#fff; border:1px solid var(--av-line); background:rgba(255,255,255,.06); text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+        .av-primary { border:0; color:#071018; font-weight:750; background:linear-gradient(135deg,var(--av-cyan),var(--av-accent)); }
+        .av-primary:hover,.av-secondary:hover { filter:brightness(1.1); }
+        .av-primary:disabled,.av-secondary:disabled { opacity:.55; cursor:wait; }
+        .av-layout { display:grid; grid-template-columns:minmax(280px,360px) 1fr; gap:24px; align-items:start; }
+        .av-panel { padding:20px; border:1px solid var(--av-line); border-radius:16px; background:var(--av-card); backdrop-filter:blur(8px); }
+        .av-panel h2 { margin:0 0 6px; font-size:17px; }
+        .av-panel-lead { margin:0 0 18px; color:var(--av-muted); font-size:13px; line-height:1.5; }
+        .av-field { display:block; margin:14px 0 0; }
+        .av-field > span { display:block; color:var(--av-muted); font-size:12px; margin-bottom:6px; }
+        .av-field input,.av-field textarea { width:100%; border:1px solid rgba(255,255,255,.13); border-radius:9px; padding:10px 11px; color:#eef; background:rgba(8,9,18,.78); }
+        .av-field textarea { min-height:75px; resize:vertical; line-height:1.45; }
+        .av-field input:focus,.av-field textarea:focus { outline:none; border-color:var(--av-cyan); box-shadow:0 0 0 3px rgba(56,189,248,.14); }
+        .av-drop { margin-top:8px; min-height:178px; border:1px dashed rgba(56,189,248,.48); border-radius:12px; background:rgba(7,9,20,.55); display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden; cursor:pointer; position:relative; text-align:center; color:var(--av-muted); padding:14px; }
+        .av-drop.dragging { border-color:#fff; background:rgba(56,189,248,.11); }
+        .av-drop img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#090a14; }
+        .av-drop-copy { max-width:230px; font-size:13px; line-height:1.5; }
+        .av-drop-copy strong { display:block; color:#eef; font-size:14px; margin-bottom:3px; }
+        .av-reference-tools { display:flex; gap:8px; margin-top:9px; }
+        .av-reference-tools input { flex:1; min-width:0; }
+        .av-form-actions { display:flex; gap:9px; margin-top:18px; }
+        .av-form-actions button:first-child { flex:1; }
+        .av-message { min-height:20px; margin-top:12px; font-size:13px; line-height:1.45; color:var(--av-muted); }
+        .av-message.error { color:#fb7185; }
+        .av-message.success { color:#4ade80; }
+        .av-library-head { display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:15px; }
+        .av-count { color:var(--av-muted); font-size:13px; }
+        .av-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:15px; }
+        .av-card { min-width:0; border:1px solid var(--av-line); border-radius:14px; overflow:hidden; background:rgba(12,13,27,.72); transition:transform .18s,border-color .18s; }
+        .av-card:hover { transform:translateY(-2px); border-color:rgba(123,92,255,.55); }
+        .av-card-media { aspect-ratio:4/3; background:#090a13; display:flex; align-items:center; justify-content:center; color:var(--av-muted); overflow:hidden; }
+        .av-card-media img { width:100%; height:100%; object-fit:cover; display:block; }
+        .av-card-media img.broken { display:none; }
+        .av-card-body { padding:13px; }
+        .av-card-title { display:flex; gap:8px; align-items:flex-start; justify-content:space-between; }
+        .av-card-title h3 { margin:0; font-size:15px; overflow-wrap:anywhere; }
+        .av-version { flex:none; padding:3px 7px; border-radius:999px; color:#c7b9ff; background:rgba(123,92,255,.15); font-size:11px; }
+        .av-card-notes { color:var(--av-muted); font-size:12px; line-height:1.45; margin:9px 0 0; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; min-height:34px; }
+        .av-card-actions { display:flex; gap:7px; margin-top:13px; }
+        .av-card-actions a,.av-card-actions button { flex:1; padding:8px 9px; font-size:12px; }
+        .av-card-actions .av-primary { color:#071018; }
+        .av-state { min-height:260px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--av-muted); border:1px dashed var(--av-line); border-radius:14px; padding:28px; line-height:1.55; }
+        .av-state strong { display:block; color:#eef; margin-bottom:4px; }
+        .av-spinner { width:24px; height:24px; border:3px solid rgba(255,255,255,.18); border-top-color:var(--av-cyan); border-radius:50%; animation:avspin .8s linear infinite; margin:0 auto 10px; }
+        @keyframes avspin { to { transform:rotate(360deg); } }
+        .av-explain { margin-top:24px; color:var(--av-muted); font-size:12px; line-height:1.55; }
+        @media(max-width:780px){ .av-bar nav a:not([aria-current]){display:none}.av-hero{align-items:flex-start;flex-direction:column}.av-layout{grid-template-columns:1fr}.av-panel{padding:16px}.av-wrap{padding-top:30px} }
+    </style>
+</head>
+<body class="avatar-page">
+<header class="av-bar">
+    <a class="av-brand" href="/">AutoRig</a>
+    <nav aria-label="AI tools">
+        <a href="/nodes">Nodes</a>
+        <a href="/image">Image</a>
+        <a href="/video">Video</a>
+        <a href="/avatars" aria-current="page">Avatars</a>
+    </nav>
+</header>
+<main class="av-wrap">
+    <section class="av-hero">
+        <div>
+            <h1>Reusable characters</h1>
+            <p>Save a character reference as a versioned Avatar, then select that exact version in image and video compositions. A profile keeps the creative brief and source together; visual consistency still depends on the selected generation pipeline.</p>
+        </div>
+        <a class="av-secondary" href="/nodes">Open Nodes</a>
+    </section>
+    <div class="av-layout">
+        <section class="av-panel" aria-labelledby="editor-title">
+            <h2 id="editor-title">Create an Avatar</h2>
+            <p class="av-panel-lead" id="editor-lead">Start with a clear reference image. Front-facing, even light and an unobstructed face usually transfer best.</p>
+            <form id="avatar-form" novalidate>
+                <input type="hidden" id="avatar-id">
+                <label class="av-field"><span>Name</span><input id="avatar-name" maxlength="80" required placeholder="Mira — documentary host"></label>
+                <label class="av-field"><span>Reference image</span></label>
+                <div class="av-drop" id="avatar-drop" tabindex="0" role="button" aria-label="Choose or paste a reference image">
+                    <div class="av-drop-copy"><strong>Drop, paste, or choose an image</strong>PNG, JPEG or WebP, up to 12 MB</div>
+                    <img id="avatar-preview" alt="Avatar reference preview" hidden>
+                </div>
+                <input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                <div class="av-reference-tools">
+                    <input id="avatar-reference-url" type="url" placeholder="AutoRig scratch or render URL" aria-label="Reference image URL">
+                    <button class="av-secondary" id="preview-url" type="button">Import</button>
+                </div>
+                <label class="av-field"><span>Identity prompt</span><textarea id="avatar-identity" maxlength="4000" required placeholder="Stable identity traits that must remain recognizable between scenes"></textarea></label>
+                <label class="av-field"><span>Appearance</span><textarea id="avatar-appearance" maxlength="4000" placeholder="Face, hair, age range, body proportions, distinctive features"></textarea></label>
+                <label class="av-field"><span>Wardrobe</span><textarea id="avatar-wardrobe" maxlength="4000" placeholder="Signature outfit, colours and accessories"></textarea></label>
+                <label class="av-field"><span>Identity exclusions</span><textarea id="avatar-negative" maxlength="2000" placeholder="Traits that must not drift into this character"></textarea></label>
+                <label class="av-field"><span>Production notes</span><textarea id="avatar-notes" maxlength="1000" placeholder="Continuity rules, expressions, camera limitations"></textarea></label>
+                <div class="av-form-actions">
+                    <button class="av-primary" id="save-avatar" type="submit">Save Avatar</button>
+                    <button class="av-secondary" id="cancel-edit" type="button" hidden>Cancel</button>
+                </div>
+                <div class="av-message" id="form-message" role="status" aria-live="polite"></div>
+            </form>
+            <p class="av-explain">Editing a saved profile creates a new immutable version. Existing graphs can continue using the version they were built with.</p>
+        </section>
+        <section class="av-panel" aria-labelledby="library-title">
+            <div class="av-library-head"><div><h2 id="library-title">Avatar library</h2><span class="av-count" id="avatar-count"></span></div><button class="av-secondary" id="refresh-avatars" type="button">Refresh</button></div>
+            <div id="avatar-library"><div class="av-state"><div><div class="av-spinner"></div>Loading your Avatars…</div></div></div>
+        </section>
+    </div>
+</main>
+</body>
+</html>
