@@ -299,7 +299,12 @@
    * to be finished before it is.
    */
   function startTask(host, serviceId) {
-    host.className = 'task-prog running';
+    function setPhase(phase) {
+      host.classList.add('task-prog');
+      host.classList.remove('running', 'queued', 'done', 'failed');
+      if (phase) host.classList.add(phase);
+    }
+    setPhase('running');
     host.innerHTML = '<div class="task-bar"><i></i></div><div class="task-eta"></div>';
     const fill = host.querySelector('.task-bar i');
     const eta = host.querySelector('.task-eta');
@@ -342,7 +347,7 @@
         if (info.active && !active) activeSince = info.startedAt ? info.startedAt * 1000 : Date.now();
         active = !!info.active;
         worker = info.worker || '';
-        host.className = 'task-prog ' + (active ? 'running' : 'queued');
+        setPhase(active ? 'running' : 'queued');
       },
       async pollRender(taskId) {
         const response = await fetch('/api/ai/render-status/' + encodeURIComponent(taskId));
@@ -357,10 +362,10 @@
       finish(ok) {
         stopped = true;
         fill.style.width = '100%';
-        host.className = 'task-prog ' + (ok === false ? 'failed' : 'done');
+        setPhase(ok === false ? 'failed' : 'done');
         eta.textContent = human((Date.now() - started) / 1000);
       },
-      clear() { stopped = true; host.className = 'task-prog'; host.innerHTML = ''; }
+      clear() { stopped = true; setPhase(''); host.innerHTML = ''; }
     };
   }
 

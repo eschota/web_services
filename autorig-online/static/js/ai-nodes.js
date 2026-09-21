@@ -631,13 +631,14 @@
     const runner = RUNNERS[node.service];
     const element = nodeElement(id);
     const state = element.querySelector('.nstate');
-    const progress = element.querySelector('.nprog');
+    const progress = element.querySelector('.nprog, .task-prog');
     const outBox = element.querySelector('.nout');
     state.textContent = 'sending…';
     state.className = 'nstate running';
     outBox.innerHTML = '';
-    const task = window.AIEntities ? window.AIEntities.startTask(progress, node.service) : null;
+    let task = null;
     try {
+      task = window.AIEntities ? window.AIEntities.startTask(progress, node.service) : null;
       const response = await fetch(runner.api, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -703,13 +704,17 @@
     } else if (type === 'video') {
       const clip = document.createElement('video');
       clip.src = value;
-      clip.controls = true;
+        clip.controls = false;
       clip.loop = true;
       clip.muted = true;
         clip.autoplay = true;
         clip.playsInline = true;
         clip.classList.add('preview-expandable');
         clip.title = 'Click to enlarge';
+        clip.tabIndex = 0;
+        clip.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPreview('video', value); }
+        });
         clip.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); openPreview('video', value); });
         host.appendChild(clip);
         clip.play().catch(() => {});
@@ -1070,7 +1075,7 @@
     state.textContent = 'still running on the farm…';
     state.className = 'nstate running';
     const task = window.AIEntities
-      ? window.AIEntities.startTask(element.querySelector('.nprog'), node.service)
+      ? window.AIEntities.startTask(element.querySelector('.nprog, .task-prog'), node.service)
       : null;
     // The pollers only need what the submit returned, and that is exactly
     // what was stored, so the same code finishes the job.
