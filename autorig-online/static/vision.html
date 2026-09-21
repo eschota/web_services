@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Vision — Ask Anything About an Image | AutoRig</title>
+    <meta name="description" content="Upload a picture and ask about it. AutoRig AI Vision runs a 27B vision-language model on our own GPU farm — no third-party API, no per-image fee.">
+    <meta name="keywords" content="AI vision, image understanding, image captioning, visual question answering, screenshot OCR, AutoRig">
+    <link rel="canonical" href="https://autorig.online/vision">
+    <meta property="og:title" content="AI Vision — Ask Anything About an Image">
+    <meta property="og:description" content="Upload a picture and ask about it. A 27B vision-language model on AutoRig's own GPU farm.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/vision">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 12% 8%, rgba(123, 92, 255, 0.22), transparent 34%),
+                radial-gradient(circle at 88% 12%, rgba(56, 189, 248, 0.14), transparent 38%),
+                linear-gradient(180deg, #111226 0%, #15162b 48%, #10111d 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .ai-page, .ai-page input, .ai-page textarea, .ai-page select, .ai-page button {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+        .ai-wrap { max-width: 1180px; margin: 0 auto; padding: 48px 20px 80px; }
+        .ai-head { text-align: center; margin-bottom: 36px; }
+        .ai-head h1 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 12px; line-height: 1.15; }
+        .ai-head p { color: var(--text-secondary, #9aa0b5); max-width: 620px; margin: 0 auto; font-size: 16px; }
+        .ai-badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+        .ai-badge {
+            font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+            padding: 6px 12px; border-radius: 999px;
+            border: 1px solid rgba(123, 92, 255, .35); background: rgba(123, 92, 255, .12);
+            color: #c9bcff;
+        }
+
+        .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+        @media (max-width: 900px) { .ai-grid { grid-template-columns: 1fr; } }
+
+        .ai-card {
+            background: rgba(18, 19, 38, .72);
+            border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 16px;
+            padding: 22px;
+            backdrop-filter: blur(8px);
+        }
+        .ai-card h2 { font-size: 16px; margin: 0 0 16px; letter-spacing: .02em; }
+
+        .drop {
+            border: 2px dashed rgba(123, 92, 255, .45);
+            border-radius: 14px;
+            min-height: 240px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 10px; cursor: pointer; text-align: center; padding: 18px;
+            transition: border-color .15s, background .15s;
+            background: rgba(123, 92, 255, .05);
+        }
+        .drop:hover, .drop.over { border-color: #7b5cff; background: rgba(123, 92, 255, .12); }
+        .drop small { color: var(--text-secondary, #9aa0b5); }
+        .drop img { max-width: 100%; max-height: 340px; border-radius: 10px; display: block; }
+        .drop-icon { font-size: 34px; opacity: .8; }
+
+        .field { margin-top: 16px; }
+        .field label { display: block; font-size: 13px; margin-bottom: 6px; color: var(--text-secondary, #9aa0b5); }
+        .field textarea, .field input, .field select {
+            width: 100%; box-sizing: border-box;
+            background: rgba(10, 11, 22, .8);
+            border: 1px solid rgba(255, 255, 255, .12);
+            border-radius: 10px; color: var(--text-primary, #eef);
+            padding: 11px 13px; font: inherit; font-size: 14px;
+        }
+        .field textarea { min-height: 92px; resize: vertical; }
+        .field textarea:focus, .field input:focus, .field select:focus {
+            outline: none; border-color: #7b5cff; box-shadow: 0 0 0 3px rgba(123, 92, 255, .18);
+        }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+        .go {
+            width: 100%; margin-top: 18px; padding: 13px 18px;
+            border: 0; border-radius: 11px; cursor: pointer;
+            background: linear-gradient(135deg, #7b5cff, #4f8bff);
+            color: #fff; font-size: 15px; font-weight: 600;
+        }
+        .go:disabled { opacity: .55; cursor: not-allowed; }
+
+        .answer {
+            white-space: pre-wrap; line-height: 1.6; font-size: 15px;
+            min-height: 240px; color: var(--text-primary, #eef);
+        }
+        .answer.placeholder { color: var(--text-secondary, #9aa0b5); }
+        .muted { color: var(--text-secondary, #9aa0b5); }
+        .meta { margin-top: 14px; font-size: 12px; color: var(--text-secondary, #9aa0b5); display: flex; gap: 14px; flex-wrap: wrap; }
+        .err { color: #ff8a9b; }
+        .spin {
+            display: inline-block; width: 14px; height: 14px; vertical-align: -2px;
+            border: 2px solid rgba(255, 255, 255, .25); border-top-color: #fff;
+            border-radius: 50%; animation: sp .8s linear infinite; margin-right: 8px;
+        }
+        @keyframes sp { to { transform: rotate(360deg); } }
+
+        .api { margin-top: 34px; }
+        .api pre {
+            background: rgba(8, 9, 18, .9); border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 12px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5;
+        }
+        .api code { color: #9ad8ff; }
+        .api h2 { margin-bottom: 8px; }
+        .api p { color: var(--text-secondary, #9aa0b5); font-size: 14px; }
+    </style>
+</head>
+<body class="ai-page">
+<div class="ai-wrap">
+    <div class="ai-head">
+        <h1>AI Vision</h1>
+        <p>Drop in a picture and ask about it. The answer comes from a 27&nbsp;billion-parameter
+           vision-language model running on AutoRig's own GPU farm.</p>
+        <div class="ai-badges">
+            <span class="ai-badge">Runs on our hardware</span>
+            <span class="ai-badge">No third-party API</span>
+            <span class="ai-badge">Reads screenshots and text</span>
+        </div>
+    </div>
+
+    <div class="ai-grid">
+        <div class="ai-card">
+            <h2>Your image</h2>
+            <div class="drop" id="drop">
+                <div class="drop-icon">🖼️</div>
+                <div>Click, paste or drop an image</div>
+                <small>PNG, JPEG or WebP, up to 12&nbsp;MB</small>
+                <img id="preview" alt="" hidden>
+            </div>
+            <input type="file" id="file" accept="image/*" hidden>
+
+            <div class="field">
+                <label for="prompt">What do you want to know?</label>
+                <textarea id="prompt" placeholder="Describe this image in detail.">Describe this image in detail.</textarea>
+            </div>
+
+            <div class="row2">
+                <div class="field">
+                    <label for="model">Model</label>
+                    <select id="model"></select>
+                </div>
+                <div class="field">
+                    <label for="tokens">Answer length, tokens</label>
+                    <input id="tokens" type="number" min="64" max="8192" step="64" value="1024">
+                </div>
+            </div>
+
+            <button class="go" id="go">Ask the model</button>
+        </div>
+
+        <div class="ai-card">
+            <h2>Answer</h2>
+            <div class="answer placeholder muted" id="answer">The answer will appear here.</div>
+            <div class="meta" id="meta"></div>
+        </div>
+    </div>
+
+    <div class="ai-card api">
+        <h2>Use it from your own code</h2>
+        <p>The same model is available over HTTP. <code>wait_seconds</code> holds the response until
+           the answer is ready; leave it out to poll <code>/api/ai/status/&lt;task_id&gt;</code> yourself.</p>
+        <pre><code>curl -X POST https://autorig.online/api/vision \
+  -H "Content-Type: application/json" \
+  -d '{
+        "prompt": "What is in this picture?",
+        "image_url": "https://example.com/photo.png",
+        "model": "bonsai2-27b",
+        "wait_seconds": 120
+      }'</code></pre>
+        <p>Model list: <code>GET /api/ai/models</code> · Text-only sibling:
+           <a href="/text2text">/text2text</a></p>
+    </div>
+</div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const preview = document.getElementById('preview');
+const answerBox = document.getElementById('answer');
+const metaBox = document.getElementById('meta');
+const goButton = document.getElementById('go');
+const modelSelect = document.getElementById('model');
+let imageDataUrl = null;
+
+fetch('/api/ai/models').then(r => r.json()).then(data => {
+    (data.models_array || []).forEach(m => {
+        const option = document.createElement('option');
+        option.value = m.id;
+        option.textContent = m.title + ' — ' + (m.hosting === 'local-farm' ? 'our farm' : m.hosting);
+        if (m.id === data.default_model_string) option.selected = true;
+        modelSelect.appendChild(option);
+    });
+    if (!modelSelect.options.length) {
+        const option = document.createElement('option');
+        option.value = 'bonsai2-27b';
+        option.textContent = 'Bonsai 2 27B';
+        modelSelect.appendChild(option);
+    }
+}).catch(() => {
+    const option = document.createElement('option');
+    option.value = 'bonsai2-27b';
+    option.textContent = 'Bonsai 2 27B';
+    modelSelect.appendChild(option);
+});
+
+function showImage(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        imageDataUrl = reader.result;
+        preview.src = imageDataUrl;
+        preview.hidden = false;
+        drop.querySelectorAll('div, small').forEach(el => { if (el !== preview) el.style.display = 'none'; });
+    };
+    reader.readAsDataURL(file);
+}
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => showImage(e.target.files[0]));
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('over');
+    showImage(e.dataTransfer.files[0]);
+});
+window.addEventListener('paste', e => {
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+    if (item) showImage(item.getAsFile());
+});
+
+function setBusy(busy, label) {
+    goButton.disabled = busy;
+    goButton.innerHTML = busy ? '<span class="spin"></span>' + label : 'Ask the model';
+}
+
+goButton.addEventListener('click', async () => {
+    if (!imageDataUrl) { alert('Add an image first.'); return; }
+    const prompt = document.getElementById('prompt').value.trim();
+    if (!prompt) { alert('Ask a question about the image.'); return; }
+
+    answerBox.className = 'answer muted';
+    answerBox.textContent = 'Sending to the farm…';
+    metaBox.textContent = '';
+    setBusy(true, 'Working…');
+
+    try {
+        const response = await fetch('/api/vision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: prompt,
+                image_base64: imageDataUrl,
+                model: modelSelect.value,
+                max_output_tokens: parseInt(document.getElementById('tokens').value, 10) || 1024,
+                wait_seconds: 180
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data.detail || {};
+            throw new Error(detail.message_string || detail.error_string || ('HTTP ' + response.status));
+        }
+        let result = data;
+        // A cold node can still be loading when the hold expires; keep polling.
+        while (!result.finished_bool) {
+            answerBox.textContent = 'Model is working (' + (result.stage_string || result.status_string) + ')…';
+            await new Promise(r => setTimeout(r, 2500));
+            const poll = await fetch('/api/ai/status/' + encodeURIComponent(result.task_id_string));
+            result = await poll.json();
+        }
+        if (result.error_string) {
+            answerBox.className = 'answer err';
+            answerBox.textContent = 'The model could not answer: ' + result.error_string;
+        } else {
+            answerBox.className = 'answer';
+            answerBox.textContent = result.answer_string || '(empty answer)';
+        }
+        metaBox.textContent = '';
+        [['node', result.node_string], ['model', result.model_string],
+         ['took', result.elapsed_seconds_float + ' s']].forEach(([k, v]) => {
+            if (!v) return;
+            const span = document.createElement('span');
+            span.textContent = k + ': ' + v;
+            metaBox.appendChild(span);
+        });
+    } catch (err) {
+        answerBox.className = 'answer err';
+        answerBox.textContent = String(err.message || err);
+    } finally {
+        setBusy(false);
+    }
+});
+</script>
+</body>
+</html>

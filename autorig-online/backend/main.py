@@ -223,6 +223,7 @@ from animation_correction_exports import (
 import re
 import httpx
 
+from ai_vision_api import router as ai_vision_router
 from namecheap_remote_api import router as namecheap_remote_router
 from animal_animation_library import (
     ANIMAL_CLIP_IDS,
@@ -1309,6 +1310,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
 
+app.include_router(ai_vision_router)
 app.include_router(namecheap_remote_router)
 
 
@@ -16823,6 +16825,18 @@ async def blender_plugin_page():
 async def animal_rig_page():
     """AutoRig V2 animal and non-humanoid rigging landing page."""
     return _static_html_response("animal-rig.html")
+
+
+@app.get("/vision")
+async def vision_page():
+    """Image understanding playground served by the farm's own GPUs."""
+    return _static_html_response("vision.html")
+
+
+@app.get("/text2text")
+async def text2text_page():
+    """Text prompt playground served by the farm's own GPUs."""
+    return _static_html_response("text2text.html")
 
 
 @app.get("/rig-animals", include_in_schema=False)

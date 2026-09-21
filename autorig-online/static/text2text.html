@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text2Text — Prompt a 27B Model on Our Own GPUs | AutoRig</title>
+    <meta name="description" content="Send a prompt, get an answer. AutoRig Text2Text runs a 27B reasoning model on our own GPU farm — no third-party API, no per-token fee.">
+    <meta name="keywords" content="text generation, LLM API, prompt, reasoning model, self-hosted LLM, AutoRig">
+    <link rel="canonical" href="https://autorig.online/text2text">
+    <meta property="og:title" content="Text2Text — Prompt a 27B Model on Our Own GPUs">
+    <meta property="og:description" content="Send a prompt, get an answer from a 27B reasoning model on AutoRig's own GPU farm.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/text2text">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 12% 8%, rgba(56, 189, 248, 0.18), transparent 34%),
+                radial-gradient(circle at 88% 12%, rgba(123, 92, 255, 0.18), transparent 38%),
+                linear-gradient(180deg, #111226 0%, #15162b 48%, #10111d 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .ai-page, .ai-page input, .ai-page textarea, .ai-page select, .ai-page button {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+        .ai-wrap { max-width: 1180px; margin: 0 auto; padding: 48px 20px 80px; }
+        .ai-head { text-align: center; margin-bottom: 36px; }
+        .ai-head h1 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 12px; line-height: 1.15; }
+        .ai-head p { color: var(--text-secondary, #9aa0b5); max-width: 640px; margin: 0 auto; font-size: 16px; }
+        .ai-badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+        .ai-badge {
+            font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+            padding: 6px 12px; border-radius: 999px;
+            border: 1px solid rgba(56, 189, 248, .35); background: rgba(56, 189, 248, .12);
+            color: #a8e3ff;
+        }
+
+        .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+        @media (max-width: 900px) { .ai-grid { grid-template-columns: 1fr; } }
+
+        .ai-card {
+            background: rgba(18, 19, 38, .72);
+            border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 16px; padding: 22px; backdrop-filter: blur(8px);
+        }
+        .ai-card h2 { font-size: 16px; margin: 0 0 16px; letter-spacing: .02em; }
+
+        .field { margin-top: 16px; }
+        .field:first-of-type { margin-top: 0; }
+        .field label { display: block; font-size: 13px; margin-bottom: 6px; color: var(--text-secondary, #9aa0b5); }
+        .field textarea, .field input, .field select {
+            width: 100%; box-sizing: border-box;
+            background: rgba(10, 11, 22, .8);
+            border: 1px solid rgba(255, 255, 255, .12);
+            border-radius: 10px; color: var(--text-primary, #eef);
+            padding: 11px 13px; font: inherit; font-size: 14px;
+        }
+        .field textarea { min-height: 260px; resize: vertical; }
+        .field textarea:focus, .field input:focus, .field select:focus {
+            outline: none; border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56, 189, 248, .18);
+        }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+        .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+        .preset {
+            font-size: 12px; padding: 6px 11px; border-radius: 999px; cursor: pointer;
+            background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .12);
+            color: var(--text-secondary, #9aa0b5);
+        }
+        .preset:hover { border-color: #38bdf8; color: #cfefff; }
+
+        .go {
+            width: 100%; margin-top: 18px; padding: 13px 18px;
+            border: 0; border-radius: 11px; cursor: pointer;
+            background: linear-gradient(135deg, #38bdf8, #6366f1);
+            color: #fff; font-size: 15px; font-weight: 600;
+        }
+        .go:disabled { opacity: .55; cursor: not-allowed; }
+
+        .answer { white-space: pre-wrap; line-height: 1.6; font-size: 15px; min-height: 300px; }
+        .muted { color: var(--text-secondary, #9aa0b5); }
+        .err { color: #ff8a9b; }
+        .meta { margin-top: 14px; font-size: 12px; color: var(--text-secondary, #9aa0b5); display: flex; gap: 14px; flex-wrap: wrap; }
+        .think {
+            margin-top: 16px; border-top: 1px dashed rgba(255, 255, 255, .12); padding-top: 12px;
+            font-size: 13px; color: var(--text-secondary, #9aa0b5); white-space: pre-wrap; display: none;
+        }
+        .think-toggle { font-size: 12px; cursor: pointer; color: #8ab4ff; margin-top: 12px; display: none; }
+
+        .spin {
+            display: inline-block; width: 14px; height: 14px; vertical-align: -2px;
+            border: 2px solid rgba(255, 255, 255, .25); border-top-color: #fff;
+            border-radius: 50%; animation: sp .8s linear infinite; margin-right: 8px;
+        }
+        @keyframes sp { to { transform: rotate(360deg); } }
+
+        .api { margin-top: 34px; }
+        .api pre {
+            background: rgba(8, 9, 18, .9); border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 12px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5;
+        }
+        .api code { color: #9ad8ff; }
+        .api p { color: var(--text-secondary, #9aa0b5); font-size: 14px; }
+    </style>
+</head>
+<body class="ai-page">
+<div class="ai-wrap">
+    <div class="ai-head">
+        <h1>Text2Text</h1>
+        <p>Send a prompt to a 27&nbsp;billion-parameter reasoning model running on AutoRig's own
+           GPU farm. It thinks before it answers, and you can read the thinking.</p>
+        <div class="ai-badges">
+            <span class="ai-badge">Runs on our hardware</span>
+            <span class="ai-badge">Reasoning model</span>
+            <span class="ai-badge">262K context</span>
+        </div>
+    </div>
+
+    <div class="ai-grid">
+        <div class="ai-card">
+            <h2>Your prompt</h2>
+            <div class="field">
+                <label for="prompt">Prompt</label>
+                <textarea id="prompt" placeholder="Write a Python function that…"></textarea>
+            </div>
+            <div class="presets">
+                <span class="preset" data-p="Write a Python function that finds the n-th prime with a sieve. Code plus one line of explanation.">Code</span>
+                <span class="preset" data-p="Explain how a ternary neural network stores weights, in plain language, in one paragraph.">Explain</span>
+                <span class="preset" data-p="Summarise the following text in three bullet points:&#10;&#10;">Summarise</span>
+                <span class="preset" data-p="Translate to Russian, keeping the tone:&#10;&#10;">Translate</span>
+            </div>
+
+            <div class="row2">
+                <div class="field">
+                    <label for="model">Model</label>
+                    <select id="model"></select>
+                </div>
+                <div class="field">
+                    <label for="tokens">Answer length, tokens</label>
+                    <input id="tokens" type="number" min="64" max="8192" step="64" value="2048">
+                </div>
+            </div>
+
+            <button class="go" id="go">Send prompt</button>
+        </div>
+
+        <div class="ai-card">
+            <h2>Answer</h2>
+            <div class="answer muted" id="answer">The answer will appear here.</div>
+            <div class="think-toggle" id="think-toggle">Show the model's thinking ▾</div>
+            <div class="think" id="think"></div>
+            <div class="meta" id="meta"></div>
+        </div>
+    </div>
+
+    <div class="ai-card api">
+        <h2>Use it from your own code</h2>
+        <p><code>wait_seconds</code> holds the response until the answer is ready; leave it out and
+           poll <code>/api/ai/status/&lt;task_id&gt;</code> instead.</p>
+        <pre><code>curl -X POST https://autorig.online/api/text2text \
+  -H "Content-Type: application/json" \
+  -d '{
+        "prompt": "Name three colours.",
+        "model": "bonsai2-27b",
+        "max_output_tokens": 512,
+        "wait_seconds": 90
+      }'</code></pre>
+        <p>Model list: <code>GET /api/ai/models</code> · Image sibling: <a href="/vision">/vision</a></p>
+    </div>
+</div>
+
+<script>
+const answerBox = document.getElementById('answer');
+const thinkBox = document.getElementById('think');
+const thinkToggle = document.getElementById('think-toggle');
+const metaBox = document.getElementById('meta');
+const goButton = document.getElementById('go');
+const modelSelect = document.getElementById('model');
+const promptBox = document.getElementById('prompt');
+
+document.querySelectorAll('.preset').forEach(el => {
+    el.addEventListener('click', () => { promptBox.value = el.dataset.p; promptBox.focus(); });
+});
+
+thinkToggle.addEventListener('click', () => {
+    const open = thinkBox.style.display === 'block';
+    thinkBox.style.display = open ? 'none' : 'block';
+    thinkToggle.textContent = open ? "Show the model's thinking ▾" : "Hide the model's thinking ▴";
+});
+
+fetch('/api/ai/models').then(r => r.json()).then(data => {
+    (data.models_array || []).forEach(m => {
+        const option = document.createElement('option');
+        option.value = m.id;
+        option.textContent = m.title + ' — ' + (m.hosting === 'local-farm' ? 'our farm' : m.hosting);
+        if (m.id === data.default_model_string) option.selected = true;
+        modelSelect.appendChild(option);
+    });
+}).catch(() => {});
+
+function setBusy(busy) {
+    goButton.disabled = busy;
+    goButton.innerHTML = busy ? '<span class="spin"></span>Working…' : 'Send prompt';
+}
+
+goButton.addEventListener('click', async () => {
+    const prompt = promptBox.value.trim();
+    if (!prompt) { alert('Write a prompt first.'); return; }
+
+    answerBox.className = 'answer muted';
+    answerBox.textContent = 'Sending to the farm…';
+    thinkBox.textContent = ''; thinkBox.style.display = 'none';
+    thinkToggle.style.display = 'none';
+    metaBox.textContent = '';
+    setBusy(true);
+
+    try {
+        const response = await fetch('/api/text2text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: prompt,
+                model: modelSelect.value || undefined,
+                max_output_tokens: parseInt(document.getElementById('tokens').value, 10) || 2048,
+                wait_seconds: 180
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data.detail || {};
+            throw new Error(detail.message_string || detail.error_string || ('HTTP ' + response.status));
+        }
+        let result = data;
+        while (!result.finished_bool) {
+            answerBox.textContent = 'Model is working (' + (result.stage_string || result.status_string) + ')…';
+            await new Promise(r => setTimeout(r, 2500));
+            const poll = await fetch('/api/ai/status/' + encodeURIComponent(result.task_id_string));
+            result = await poll.json();
+        }
+        if (result.error_string) {
+            answerBox.className = 'answer err';
+            answerBox.textContent = 'The model could not answer: ' + result.error_string;
+        } else {
+            answerBox.className = 'answer';
+            answerBox.textContent = result.answer_string || '(empty answer)';
+        }
+        if (result.reasoning_string) {
+            thinkBox.textContent = result.reasoning_string;
+            thinkToggle.style.display = 'block';
+        }
+        [['node', result.node_string], ['model', result.model_string],
+         ['took', result.elapsed_seconds_float + ' s']].forEach(([k, v]) => {
+            if (!v) return;
+            const span = document.createElement('span');
+            span.textContent = k + ': ' + v;
+            metaBox.appendChild(span);
+        });
+    } catch (err) {
+        answerBox.className = 'answer err';
+        answerBox.textContent = String(err.message || err);
+    } finally {
+        setBusy(false);
+    }
+});
+</script>
+</body>
+</html>
