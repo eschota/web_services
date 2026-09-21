@@ -185,21 +185,29 @@
     }
 
     function onMouseDown(event) {
+      const node = event.target.closest && event.target.closest('.drawflow-node');
       if (!editableTarget(event.target)) canvas.focus({preventScroll:true});
-      if (event.button === 1 || (event.button === 0 && spaceDown && !editableTarget(event.target))) {
+      const rightPan = event.button === 2 && !node && !editableTarget(event.target);
+      if (rightPan || event.button === 1 || (event.button === 0 && spaceDown && !editableTarget(event.target))) {
         event.preventDefault(); event.stopImmediatePropagation();
+        closeMenu();
         pan = {x:event.clientX, y:event.clientY, left:editor.canvas_x, top:editor.canvas_y};
         const move = moveEvent => {
+          moveEvent.preventDefault(); moveEvent.stopImmediatePropagation();
           editor.canvas_x = pan.left + moveEvent.clientX - pan.x;
           editor.canvas_y = pan.top + moveEvent.clientY - pan.y;
           editor.precanvas.style.transform = 'translate(' + editor.canvas_x + 'px, ' + editor.canvas_y + 'px) scale(' + editor.zoom + ')';
         };
-        const up = () => { pan=null; document.removeEventListener('mousemove',move,true); document.removeEventListener('mouseup',up,true); };
+        const up = upEvent => { upEvent.preventDefault(); upEvent.stopImmediatePropagation(); pan=null; document.removeEventListener('mousemove',move,true); document.removeEventListener('mouseup',up,true); };
         document.addEventListener('mousemove',move,true); document.addEventListener('mouseup',up,true);
         return;
       }
+      // Drawflow selects connections on mousedown regardless of button.
+      // Right clicks belong exclusively to our pan or node context menu.
+      if (event.button === 2 && !editableTarget(event.target)) {
+        event.preventDefault(); event.stopImmediatePropagation(); return;
+      }
       if (event.button !== 0) return;
-      const node = event.target.closest && event.target.closest('.drawflow-node');
       if (!node) {
         if (event.target.closest && event.target.closest('.connection, .main-path')) return;
         event.preventDefault();
@@ -591,8 +599,8 @@
     function onContextMenu(event) {
       if (editableTarget(event.target)) return;
       const node = event.target.closest && event.target.closest('.drawflow-node');
-      if (!node) return;
       event.preventDefault(); event.stopImmediatePropagation();
+      if (!node) return;
       const id = numericId(node);
       if (!selected.has(id)) selectOnly(id);
       openMenu(event);
