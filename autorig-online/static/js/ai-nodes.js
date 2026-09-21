@@ -137,6 +137,7 @@
         ${outputs.map(item => `<div class="prow pout">${escapeHtml(item.title || item.field)} ${typeIcon(item.type)}</div>`).join('')}
       </div>
       ${params.length ? `<details class="nparams"><summary>Settings</summary>${params.map(paramControl).join('')}</details>` : ''}
+      <div class="nrec"></div>
       <div class="nstate"></div>
       <div class="nprog task-prog"></div>
       <div class="nout"></div>`;
@@ -204,10 +205,83 @@
       const hidden = element.querySelector('input[data-param="' + CSS.escape(name) + '"]');
       const picker = window.AIEntities.modelPicker(slot, serviceId, slot.dataset.modelSource, {
         value: hidden ? hidden.value : '',
-        onChange: value => { if (hidden) hidden.value = value; }
+        onChange: (value, entry) => {
+          if (name === 'checkpoint' && value && !modelAcceptsConnectedControls(id, entry)) {
+            picker.value = hidden ? hidden.value : '';
+            toast('This model has not been validated with the connected ControlNet channel. Use a compatible model or disconnect the control.');
+            return;
+          }
+          if (hidden) hidden.value = value;
+          applyRecommended(id, entry);
+        }
       });
       slot._picker = picker;
     });
+  }
+
+  /**
+   * Put the author's own settings on the node when their model is chosen.
+   *
+   * These come off the model's Civitai page — mostly from the metadata of the
+   * example images, which is what the author actually ran. Only values this
+   * service has a control for are applied; the rest (sampler, CFG) are shown
+   * in the picker but there is nowhere here to put them.
+   *
+   * A value the person has already changed by hand is left alone. Choosing a
+   * model should not quietly undo a decision they made.
+   */
+  const RECOMMENDED_TO_PARAM = {
+    steps: 'steps', strength: 'lora_strength'
+  };
+
+  async function applyRecommended(id, entry) {
+    const element = nodeElement(id);
+    if (!element) return;
+    const generation = (element._settingsGeneration || 0) + 1;
+    element._settingsGeneration = generation;
+    const serviceId = meta(id).service;
+    const selection = new URLSearchParams({ service: serviceId });
+    ['checkpoint', 'lora'].forEach(name => {
+      const control = element.querySelector('[data-param="' + name + '"]');
+      if (control && control.value) selection.set(name, control.value);
+    });
+    try {
+      const response = await fetch('/api/ai/model-settings?' + selection);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail?.message_string || 'Settings unavailable');
+      if (element._settingsGeneration !== generation) return;
+      const effective = data.effective_params_object || {};
+      entry = { recommended: effective };
+    } catch (error) {
+      const note = element.querySelector('.nrec');
+      if (note) note.textContent = error.message;
+      return;
+    }
+    const applied = [];
+    Object.keys(entry.recommended).forEach(key => {
+      const name = RECOMMENDED_TO_PARAM[key] || ({cfg:'cfg', sampler:'sampler', scheduler:'scheduler', lora_strength:'lora_strength'})[key];
+      if (!name) return;
+      const control = element.querySelector('[data-param="' + CSS.escape(name) + '"]');
+      if (!control || control.dataset.touched === 'yes') return;
+      const value = entry.recommended[key];
+      // A select only takes a value it actually offers.
+      if (control.tagName === 'SELECT' &&
+          ![...control.options].some(o => String(o.value) === String(value))) return;
+      control.value = value;
+      const readout = element.querySelector('[data-for="' + CSS.escape(name) + '"]');
+      if (readout) readout.textContent = rangeLabel(value);
+      applied.push(name + ' ' + value);
+    });
+    const note = element.querySelector('.nrec');
+    if (note) {
+      note.textContent = applied.length
+        ? 'Applied settings: ' + applied.join(', ')
+        : (Object.keys(entry.recommended).length
+            ? 'the model page suggests ' +
+              Object.keys(entry.recommended).sort()
+                .map(k => k + ' ' + entry.recommended[k]).join(', ')
+            : 'this model publishes no recommended settings');
+    }
   }
 
   function nodeElement(id) {
@@ -235,6 +309,13 @@
     const pick = element.querySelector('[data-pick]');
     const preview = element.querySelector('[data-preview]');
     const text = element.querySelector('[data-value]');
+    preview.classList.add('preview-expandable');
+    preview.title = 'Click to enlarge';
+    preview.addEventListener('click', event => { event.stopPropagation(); if (preview.src) openPreview('image', preview.src); });
+    if (/^(https?:\/\/|data:image\/)/.test(text.value.trim())) {
+      preview.src = text.value.trim();
+      preview.hidden = false;
+    }
     pick.addEventListener('click', () => file.click());
     file.addEventListener('change', event => {
       const chosen = event.target.files[0];
@@ -304,7 +385,25 @@
 
   function onConnectionCreated(connection) {
     const info = linkTypes(connection);
-    if (info && info.produced === info.accepted) return;
+    if (info && info.produced === info.accepted) {
+      if (info.produced.startsWith('control_')) {
+        const element = nodeElement(connection.input_id);
+        const slot = element && element.querySelector('[data-model-param="checkpoint"]');
+        const entry = slot && slot._picker && slot._picker.entry;
+        const channels = (entry && entry.control_channels) || [];
+        const node = editor.getNodeFromId(connection.input_id);
+        const targetMeta = meta(connection.input_id);
+        const controlLinks = targetMeta.inFields.reduce((count, field, index) =>
+          count + (field.startsWith('control_') ? ((node.inputs['input_' + (index + 1)] || {}).connections || []).length : 0), 0);
+        if ((entry && !channels.includes(info.produced.slice(8))) || controlLinks > 1) {
+          editor.removeSingleConnection(connection.output_id, connection.input_id, connection.output_class, connection.input_class);
+          toast(controlLinks > 1 ? 'Use a separate Image node for each ControlNet channel.' : 'Choose a model validated for this ControlNet channel first.');
+          return;
+        }
+      }
+      replaceOlderInput(connection);
+      return;
+    }
     // A wrong wire is removed rather than left to fail at render time, when
     // the person has already waited for everything upstream of it.
     editor.removeSingleConnection(connection.output_id, connection.input_id,
@@ -312,6 +411,35 @@
     toast(info
       ? `That socket carries ${info.produced || 'nothing'}, and this one takes ${info.accepted || 'nothing'}.`
       : 'Those two cannot be connected.');
+  }
+
+  /**
+   * One wire per socket: a new one replaces what was there.
+   *
+   * Every input here stands for a single field in a request — one picture to
+   * look at, one prompt to draw — so two wires into it is not a richer input,
+   * it is an ambiguity the runner would have to break arbitrarily. Drawflow
+   * allows the second wire happily, which left sockets quietly holding two
+   * and the graph doing whichever the resolver happened to read last.
+   *
+   * Dropping the older one is what dragging a new wire onto an occupied
+   * socket is understood to mean everywhere else.
+   */
+  function replaceOlderInput(connection) {
+    const target = editor.getNodeFromId(connection.input_id);
+    if (!target) return;
+    const port = (target.inputs || {})[connection.input_class];
+    if (!port || !Array.isArray(port.connections) || port.connections.length < 2) return;
+    let replaced = 0;
+    port.connections.slice().forEach(existing => {
+      const sameWire = String(existing.node) === String(connection.output_id) &&
+                       String(existing.input) === String(connection.output_class);
+      if (sameWire) return;
+      editor.removeSingleConnection(existing.node, connection.input_id,
+                                    existing.input, connection.input_class);
+      replaced += 1;
+    });
+    if (replaced) toast('Replaced what was wired into that socket.');
   }
 
   /* ------------------------------------------------------------ the runner */
@@ -334,6 +462,10 @@
     video: { api: '/api/video', finish: pollForFile, field: 'video_url_string', type: 'video' },
     '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
   };
+  ['pose', 'depth', 'canny'].forEach(channel => {
+    RUNNERS['control_' + channel] = { api: '/api/controlnet', finish: pollForFile,
+      field: 'image_url_string', type: 'control_' + channel };
+  });
 
   /**
    * Turn a rejection into something a person can act on.
@@ -405,11 +537,12 @@
 
   function bodyFor(serviceId, resolved, params) {
     const body = {};
+    if (serviceId.startsWith('control_')) body.channel = serviceId.slice('control_'.length);
     Object.keys(params || {}).forEach(name => {
       const value = params[name];
       // A zero or an empty string here means "leave the workflow's own value",
       // so it is left out rather than sent as an override.
-      if (value !== '' && value !== 0 && value !== null && value !== undefined) body[name] = value;
+      if (value !== '' && (value !== 0 || name.startsWith('control_')) && value !== null && value !== undefined) body[name] = value;
     });
     Object.keys(resolved).forEach(field => {
       const value = resolved[field];
@@ -498,9 +631,12 @@
       block.className = 'ntext';
       block.textContent = value;
       host.appendChild(block);
-    } else if (type === 'image') {
+      } else if (type === 'image' || type.startsWith('control_')) {
       const picture = document.createElement('img');
-      picture.src = value;
+        picture.src = value;
+        picture.classList.add('preview-expandable');
+        picture.title = 'Click to enlarge';
+        picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', value); });
       host.appendChild(picture);
     } else if (type === 'video') {
       const clip = document.createElement('video');
@@ -508,8 +644,13 @@
       clip.controls = true;
       clip.loop = true;
       clip.muted = true;
-      clip.autoplay = true;
-      host.appendChild(clip);
+        clip.autoplay = true;
+        clip.playsInline = true;
+        clip.classList.add('preview-expandable');
+        clip.title = 'Click to enlarge';
+        clip.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); openPreview('video', value); });
+        host.appendChild(clip);
+        clip.play().catch(() => {});
     }
     const link = document.createElement('a');
     link.href = value;
@@ -518,6 +659,59 @@
     link.className = 'nlink';
     link.textContent = type === 'text' ? '' : 'open';
     if (link.textContent) host.appendChild(link);
+  }
+
+  function modelAcceptsConnectedControls(id, entry) {
+    const node = editor.getNodeFromId(id);
+    const item = meta(id);
+    if (!node || !item) return true;
+    return item.inFields.every((field, index) => {
+      const connected = ((node.inputs['input_' + (index + 1)] || {}).connections || []).length;
+      return !field.startsWith('control_') || !connected || ((entry || {}).control_channels || []).includes(field.slice(8));
+    });
+  }
+
+  function openPreview(type, url) {
+    let dialog = document.getElementById('media-preview');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'media-preview';
+      dialog.setAttribute('aria-label', 'Expanded preview; click to close');
+      document.body.appendChild(dialog);
+      dialog.addEventListener('click', () => dialog.close());
+      dialog.addEventListener('close', () => { dialog.innerHTML = ''; });
+    }
+    dialog.innerHTML = '';
+    const media = document.createElement(type === 'video' ? 'video' : 'img');
+    media.src = url;
+    if (type === 'video') {
+      media.autoplay = true; media.loop = true; media.muted = true; media.playsInline = true;
+    }
+    dialog.appendChild(media);
+    dialog.showModal();
+    if (type === 'video') media.play().catch(() => {});
+  }
+
+  function installWheelZoom() {
+    const canvas = document.getElementById('canvas');
+    editor.zoom_min = 0.15;
+    editor.zoom_max = 2.5;
+    canvas.addEventListener('wheel', event => {
+      if (event.target.closest('input, textarea, select, .mpick-panel, .ntext')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const bounds = canvas.getBoundingClientRect();
+      const x = event.clientX - bounds.left;
+      const y = event.clientY - bounds.top;
+      const oldZoom = editor.zoom;
+      const nextZoom = Math.max(editor.zoom_min, Math.min(editor.zoom_max, oldZoom * Math.exp(-event.deltaY * 0.0015)));
+      editor.canvas_x = x - (x - editor.canvas_x) * nextZoom / oldZoom;
+      editor.canvas_y = y - (y - editor.canvas_y) * nextZoom / oldZoom;
+      editor.zoom = nextZoom;
+      editor.zoom_last_value = nextZoom;
+      editor.precanvas.style.transform = `translate(${editor.canvas_x}px, ${editor.canvas_y}px) scale(${nextZoom})`;
+      editor.dispatch('zoom', nextZoom);
+    }, { passive: false, capture: true });
   }
 
   function graphFromCanvas() {
@@ -958,9 +1152,18 @@
     editor = new Drawflow(document.getElementById('canvas'));
     editor.reroute = true;
     editor.start();
+    installWheelZoom();
     editor.on('connectionCreated', onConnectionCreated);
     // A range's number is only useful if it is shown next to the slider.
+    document.getElementById('canvas').addEventListener('change', event => {
+      if (event.target.dataset && event.target.dataset.param) {
+        event.target.dataset.touched = 'yes';
+      }
+    });
     document.getElementById('canvas').addEventListener('input', event => {
+      if (event.target.dataset && event.target.dataset.param) {
+        event.target.dataset.touched = 'yes';
+      }
       if (event.target.type !== 'range') return;
       const readout = event.target.parentElement.querySelector('output');
       if (readout) readout.textContent = rangeLabel(event.target.value);

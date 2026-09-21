@@ -223,3 +223,46 @@ class LongSideSubstitutionTests(unittest.TestCase):
     def test_a_template_without_it_is_unaffected(self):
         wf = self._render('{"1": {"class_type": "KSampler", "inputs": {"steps": 20}}}')
         self.assertEqual(wf["1"]["inputs"]["steps"], 20)
+
+
+class RecommendedSettingsTests(CatalogueTests):
+    """Settings taken off each model's own page, and where they can land."""
+
+    # Reuses CatalogueTests' temporary catalogue directory.
+
+    def test_a_recommended_size_has_an_option_to_land_in(self):
+        """A value with no matching option is dropped without a word.
+
+        The picker only sets a select to a value the select offers, so a size
+        the model page recommends and the control does not list is silently
+        ignored — which looks like the recommendation was never read.
+        """
+        import ai_services
+        sizes = {str(o["value"]) for p in ai_services.params_for("image")
+                 if p["name"] == "width" for o in p["options"]}
+        for common in ("832", "1216", "1248", "1024"):
+            self.assertIn(common, sizes)
+
+    def test_width_and_height_offer_the_same_sizes(self):
+        import ai_services
+        params = {p["name"]: p for p in ai_services.params_for("image")}
+        self.assertEqual([o["value"] for o in params["width"]["options"]],
+                         [o["value"] for o in params["height"]["options"]])
+
+    def test_an_entry_may_carry_recommended_settings(self):
+        """Not every model publishes any; the field is optional by design."""
+        entries = [dict(e, recommended={"steps": 25, "strength": 0.8}) for e in FIXTURE[:1]]
+        self.assertEqual(entries[0]["recommended"]["steps"], 25)
+
+    def test_the_catalogue_passes_recommendations_through_untouched(self):
+        import json as _json
+        raw = _json.loads(_json.dumps(FIXTURE))
+        raw[0]["recommended"] = {"steps": 9, "cfg": 1.0}
+        raw[0]["recommended_from"] = "the author's example images"
+        (self.root / "model_catalogue.json").write_text(_json.dumps(raw), encoding="utf-8")
+        ai_model_catalogue._cache = []
+        ai_model_catalogue._cache_at = 0.0
+        body = self.client.get("/api/ai/model-catalogue").json()
+        entry = next(e for e in body["checkpoints_array"] if e["file"] == raw[0]["file"])
+        self.assertEqual(entry["recommended"]["steps"], 9)
+        self.assertIn("example images", entry["recommended_from"])

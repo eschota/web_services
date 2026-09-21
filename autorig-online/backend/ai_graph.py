@@ -126,7 +126,7 @@ def _template_simple_text_to_video_by_vision() -> Dict[str, object]:
                  "params": {"model": "qwen35-9b-uncensored", "max_output_tokens": 512}},
                 {"id": "draw", "kind": NODE_SERVICE, "service": "image",
                  "x": 720, "y": 140,
-                 "params": {"width": 1024, "height": 1024, "mode": ""}},
+                 "params": {"width": 960, "height": 540, "mode": ""}},
                 {"id": "clip", "kind": NODE_SERVICE, "service": "video",
                  "x": 1080, "y": 20,
                  "params": {"quality": "standard", "frame_count": 96}},

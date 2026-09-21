@@ -27,8 +27,14 @@ TEXT = "text"
 IMAGE = "image"
 VIDEO = "video"
 MODEL3D = "model3d"
+CONTROL_POSE = "control_pose"
+CONTROL_DEPTH = "control_depth"
+CONTROL_CANNY = "control_canny"
 
 ENTITY_TYPES: List[Dict[str, object]] = [
+    {"id": CONTROL_POSE, "title": "Pose control", "carries": "validated OpenPose map URL", "icon": "🧍"},
+    {"id": CONTROL_DEPTH, "title": "Depth control", "carries": "validated depth map URL", "icon": "▧"},
+    {"id": CONTROL_CANNY, "title": "Canny control", "carries": "validated edge map URL", "icon": "▱"},
     {
         "id": TEXT,
         "title": "Text",
@@ -115,6 +121,9 @@ SERVICES: List[Dict[str, object]] = [
              "title": "What to draw"},
             {"type": IMAGE, "field": "image", "required": False,
              "title": "Reference image"},
+            {"type": CONTROL_POSE, "field": "control_pose", "required": False, "title": "Pose control"},
+            {"type": CONTROL_DEPTH, "field": "control_depth", "required": False, "title": "Depth control"},
+            {"type": CONTROL_CANNY, "field": "control_canny", "required": False, "title": "Canny control"},
         ],
         "outputs": [
             {"type": IMAGE, "field": "image_url_string", "title": "Picture"},
@@ -178,6 +187,17 @@ SERVICES: List[Dict[str, object]] = [
 # Only knobs the farm genuinely has are listed. There is no LoRA picker because
 # there are no LoRAs on these workers: the equivalent choice is the animation
 # workflow the workers advertise, which is what `quality` selects.
+for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth", CONTROL_DEPTH), ("canny", "Canny", CONTROL_CANNY)):
+    SERVICES.append({
+        "id": "control_" + _channel, "title": "ControlNet - " + _title,
+        "path": "/nodes", "api": "/api/controlnet", "status": "live",
+        "summary": "Extract a tested " + _title + " map for compatible image generation.",
+        "inputs": [{"type": IMAGE, "field": "image", "required": True, "title": "Source image"}],
+        "outputs": [{"type": _type, "field": "image_url_string", "title": _title + " map"}],
+        "compatible_image_families": ["flux"],
+    })
+
+
 PARAMS: Dict[str, List[Dict[str, object]]] = {
     "vision": [
         {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
@@ -205,6 +225,9 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "help": "0 picks a budget to suit the model"},
     ],
     "image": [
+        {"name": "control_strength", "title": "Control strength", "type": "range", "min": 0, "max": 2, "step": 0.05, "default": 0.8},
+        {"name": "control_start", "title": "Control start", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 0.0},
+        {"name": "control_end", "title": "Control end", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 1.0},
         # Drawn as a picture list, not a text dropdown: a model is recognised
         # by what it produces, and the file name says nothing.
         {"name": "checkpoint", "title": "Model", "type": "model",
@@ -225,12 +248,25 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          ],
          "help": "The reference picture is read differently in each mode"},
         {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
-        {"name": "width", "title": "Width", "type": "select", "default": 1024,
-         "options": [{"value": 768, "title": "768"}, {"value": 1024, "title": "1024"},
-                     {"value": 1280, "title": "1280"}, {"value": 1536, "title": "1536"}]},
-        {"name": "height", "title": "Height", "type": "select", "default": 1024,
-         "options": [{"value": 768, "title": "768"}, {"value": 1024, "title": "1024"},
-                     {"value": 1280, "title": "1280"}, {"value": 1536, "title": "1536"}]},
+        {"name": "cfg", "title": "CFG", "type": "number", "default": 0, "min": 0, "max": 30, "step": 0.1},
+        {"name": "sampler", "title": "Sampler", "type": "select", "default": "",
+         "options": [{"value": "", "title": "Automatic"}, {"value": "euler", "title": "Euler"},
+                     {"value": "euler_ancestral", "title": "Euler ancestral"},
+                     {"value": "euler_ancestral_cfg_pp", "title": "Euler ancestral CFG++"},
+                     {"value": "dpmpp_2m", "title": "DPM++ 2M"},
+                     {"value": "dpmpp_2m_sde", "title": "DPM++ 2M SDE"},
+                     {"value": "dpmpp_sde", "title": "DPM++ SDE"}]},
+        {"name": "scheduler", "title": "Scheduler", "type": "select", "default": "",
+         "options": [{"value": "", "title": "Automatic"}, {"value": "simple", "title": "Simple"},
+                     {"value": "normal", "title": "Normal"}, {"value": "karras", "title": "Karras"},
+                     {"value": "sgm_uniform", "title": "SGM uniform"}]},
+        # The sizes models are actually demonstrated at, not a round-number
+        # sample: a size taken off a model page needs an option to land in, or
+        # the recommendation is silently dropped.
+        {"name": "width", "title": "Width", "type": "select", "default": 960,
+         "options": [{"value": 640, "title": "640"}, {"value": 540, "title": "540"}, {"value": 960, "title": "960"}, {"value": 768, "title": "768"}, {"value": 832, "title": "832"}, {"value": 896, "title": "896"}, {"value": 1024, "title": "1024"}, {"value": 1152, "title": "1152"}, {"value": 1216, "title": "1216"}, {"value": 1248, "title": "1248"}, {"value": 1280, "title": "1280"}, {"value": 1344, "title": "1344"}, {"value": 1536, "title": "1536"}]},
+        {"name": "height", "title": "Height", "type": "select", "default": 540,
+         "options": [{"value": 640, "title": "640"}, {"value": 540, "title": "540"}, {"value": 960, "title": "960"}, {"value": 768, "title": "768"}, {"value": 832, "title": "832"}, {"value": 896, "title": "896"}, {"value": 1024, "title": "1024"}, {"value": 1152, "title": "1152"}, {"value": 1216, "title": "1216"}, {"value": 1248, "title": "1248"}, {"value": 1280, "title": "1280"}, {"value": 1344, "title": "1344"}, {"value": 1536, "title": "1536"}]},
         # The range starts at zero because zero is a real choice here: it
         # means "leave the workflow's own value alone". A minimum of 4 would
         # be silently clamped up by the browser and every render would go out
@@ -243,6 +279,8 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 gives a different picture each run"},
     ],
     "video": [
+        {"name": "width", "title": "Width", "type": "number", "default": 960, "min": 256, "max": 2048, "step": 2},
+        {"name": "height", "title": "Height", "type": "number", "default": 540, "min": 256, "max": 2048, "step": 2},
         {"name": "checkpoint", "title": "Model", "type": "model",
          "source": "checkpoints", "default": "",
          "help": "Leave empty for the workflow's own model"},
@@ -260,6 +298,18 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "frame_count", "title": "Frames", "type": "range", "min": 24, "max": 400,
          "step": 8, "default": 96, "help": "About 24 frames to the second"},
         {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
+        {"name": "cfg", "title": "CFG", "type": "number", "default": 0, "min": 0, "max": 30, "step": 0.1},
+        {"name": "sampler", "title": "Sampler", "type": "select", "default": "",
+         "options": [{"value": "", "title": "Automatic"}, {"value": "euler", "title": "Euler"},
+                     {"value": "euler_ancestral", "title": "Euler ancestral"},
+                     {"value": "euler_ancestral_cfg_pp", "title": "Euler ancestral CFG++"},
+                     {"value": "dpmpp_2m", "title": "DPM++ 2M"},
+                     {"value": "dpmpp_2m_sde", "title": "DPM++ 2M SDE"},
+                     {"value": "dpmpp_sde", "title": "DPM++ SDE"}]},
+        {"name": "scheduler", "title": "Scheduler", "type": "select", "default": "",
+         "options": [{"value": "", "title": "Automatic"}, {"value": "simple", "title": "Simple"},
+                     {"value": "normal", "title": "Normal"}, {"value": "karras", "title": "Karras"},
+                     {"value": "sgm_uniform", "title": "SGM uniform"}]},
         # The range starts at zero because zero is a real choice here: it
         # means "leave the workflow's own value alone". A minimum of 4 would
         # be silently clamped up by the browser and every render would go out

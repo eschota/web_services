@@ -15,8 +15,8 @@
     <link rel="stylesheet" href="/static/css/styles.css">
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
-    <script src="/static/js/ai-entities.js?v=20260922-models3"></script>
-    <script src="/static/js/ai-nodes.js?v=20260922-budget"></script>
+    <script src="/static/js/ai-entities.js?v=20260922-model-control"></script>
+    <script src="/static/js/ai-nodes.js?v=20260922-model-control"></script>
     <style>
         .ai-page {
             background:
@@ -162,6 +162,7 @@
         }
         .ninput img { margin-top: 7px; width: 100%; border-radius: 8px; display: block; }
 
+        .nrec { padding: 0 14px 6px; font-size: 10.5px; color: #4ade80; line-height: 1.4; }
         .nstate { padding: 0 14px 8px; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); }
         .nstate.running { color: #38bdf8; }
         .nstate.done { color: #4ade80; }
@@ -169,6 +170,10 @@
         .nprog { margin: 0 12px; }
         .nout { padding: 0 12px 12px; }
         .nout img, .nout video { width: 100%; border-radius: 9px; display: block; }
+        .preview-expandable { cursor: zoom-in; }
+        #media-preview { border:0; padding:0; background:transparent; max-width:96vw; max-height:94vh; overflow:hidden; cursor:zoom-out; }
+        #media-preview::backdrop { background:rgba(0,0,0,.9); }
+        #media-preview img, #media-preview video { display:block; max-width:94vw; max-height:92vh; object-fit:contain; }
         .ntext {
             font-size: 11.5px; line-height: 1.45; max-height: 130px; overflow-y: auto;
             background: rgba(10,11,22,.7); border-radius: 8px; padding: 8px;

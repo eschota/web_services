@@ -225,6 +225,7 @@ import httpx
 
 from ai_fleet import router as ai_fleet_router
 from ai_graph import router as ai_graph_router
+from ai_controlnet_api import router as ai_controlnet_router
 from ai_model_catalogue import router as ai_model_catalogue_router
 from ai_services import router as ai_services_router
 from ai_vision_api import router as ai_vision_router
@@ -1316,6 +1317,7 @@ app.state.limiter = limiter
 
 app.include_router(ai_fleet_router)
 app.include_router(ai_graph_router)
+app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
 app.include_router(ai_vision_router)

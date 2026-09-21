@@ -25,6 +25,14 @@ def sanitize_prompt(text: str) -> str:
     return text[:MAX_PROMPT_CHARS].strip()
 
 
+def _ltxv_frames(frames: int, default: int = 121) -> int:
+    """LTXV samplers accept 8*k+1 frames; 0 means "keep the template default"."""
+    count = int(frames or 0)
+    if count <= 0:
+        return default
+    return max(1, round((count - 1) / 8)) * 8 + 1
+
+
 def _json_escape(text: str) -> str:
     return json.dumps(text or "", ensure_ascii=False)[1:-1]
 
@@ -37,8 +45,10 @@ def render_workflow_text(
     prompt: str,
     negative_prompt: str,
     image_filename: str,
+    image_end_filename: str = "",
     output_prefix: str,
     workflow_type: str = "",
+    frames: int = 0,
     randomize_seeds: bool = True,
     seed: Optional[int] = None,
     checkpoint: str = "",
@@ -48,6 +58,7 @@ def render_workflow_text(
     """Substitute placeholders, parse, normalize. Returns the workflow dict
     ready for POST /prompt."""
     text = template_text
+    text = text.replace("$frames", str(_ltxv_frames(frames)))
     # The longer edge, for workflows that scale by it rather than by a
     # width and a height. Without this the template keeps a bare token
     # and does not parse.
@@ -56,6 +67,8 @@ def render_workflow_text(
     text = text.replace("$height", str(int(height)))
     text = text.replace("$prompt", _json_escape(sanitize_prompt(prompt)))
     text = text.replace("$negative_prompt", _json_escape(sanitize_prompt(negative_prompt)))
+    # $image_end must go first: "$image" is a prefix of it.
+    text = text.replace("$image_end", _json_escape(image_end_filename or ""))
     text = text.replace("$image", _json_escape(image_filename or ""))
     # $output_url must go last: it is a prefix of $output_url_Isolated etc.
     text = text.replace("$output_url", _json_escape(output_prefix or ""))
@@ -68,6 +81,8 @@ def render_workflow_text(
     if randomize_seeds:
         _randomize_seeds(workflow, seed)
     _normalize_workflow(workflow, width=width, height=height, workflow_type=workflow_type)
+    if not (image_end_filename or "").strip():
+        _prune_optional_guide(workflow)
     # Last, so a chosen model is not undone by normalisation or pruning.
     apply_model_choice(workflow, checkpoint=checkpoint, lora=lora,
                        lora_strength=lora_strength)
@@ -114,6 +129,59 @@ def _normalize_workflow(
                 meta["title"] = "VAE Decode"
 
 
+OPTIONAL_GUIDE = "AIGent optional end-frame guide"
+
+
+def _prune_optional_guide(workflow):
+    """Drop the end-frame branch when no second image was given.
+
+    The farm only schedules workflow names a node advertises, so the frame-to-frame guide lives
+    inside the normal template. Without an end image its LoadImage would fail, and the whole
+    chain is removed instead: consumers fall back to the guide it was chained from.
+    """
+    target = next((nid for nid, node in workflow.items()
+                   if isinstance(node, dict) and (node.get("_meta") or {}).get("title") == OPTIONAL_GUIDE), None)
+    if target is None:
+        return
+    inputs = workflow[target]["inputs"]
+    fallback = next((inputs[key] for key in ("image1", "positive", "image") if isinstance(inputs.get(key), list)), None)
+    if not fallback:
+        return
+    source = fallback[0]
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        for key, value in list((node.get("inputs") or {}).items()):
+            if isinstance(value, list) and value and value[0] == target:
+                node["inputs"][key] = [source, value[1]]
+    workflow.pop(target, None)
+    _restore_single_anchor(workflow)
+    # Remove what only fed the dropped guide, walking back until nothing orphaned is left.
+    while True:
+        referenced = {value[0] for node in workflow.values() if isinstance(node, dict)
+                      for value in (node.get("inputs") or {}).values()
+                      if isinstance(value, list) and value}
+        orphans = [nid for nid, node in workflow.items()
+                   if isinstance(node, dict) and nid not in referenced
+                   and (node.get("_meta") or {}).get("title", "").endswith("end frame")]
+        if not orphans:
+            return
+        for nid in orphans:
+            workflow.pop(nid, None)
+        _restore_single_anchor(workflow)
+
+
+def _restore_single_anchor(workflow):
+    """With the end frame gone the sampler must condition on frame 0 only."""
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        indices = (node.get("inputs") or {}).get("optional_cond_indices")
+        if isinstance(indices, str) and "-1" in indices:
+            kept = [part.strip() for part in indices.split(",") if part.strip() not in ("-1", "")]
+            node["inputs"]["optional_cond_indices"] = ",".join(kept) or "0"
+
+
 # Which input on which loader names the model file. Keyed by class_type so a
 # workflow can be re-saved with different node ids without breaking this.
 CHECKPOINT_SLOTS = {
@@ -147,7 +215,7 @@ def apply_model_choice(
     if not checkpoint and not lora and lora_strength is None:
         return changed
 
-    for node_id, node in workflow.items():
+    for node_id, node in list(workflow.items()):
         if not isinstance(node, dict):
             continue
         class_type = str(node.get("class_type") or "")
@@ -181,6 +249,33 @@ def apply_model_choice(
                     changed["lora"].append(node_id)
                 if lora_strength is not None:
                     entry["strength"] = float(lora_strength)
+    if lora and not changed["lora"]:
+        checkpoint_node = next((node_id for node_id, node in workflow.items()
+                                if isinstance(node, dict)
+                                and node.get("class_type") == "CheckpointLoaderSimple"), None)
+        if checkpoint_node is not None:
+            node_id = "autorig_selected_lora"
+            while node_id in workflow:
+                node_id += "_"
+            strength = float(lora_strength) if lora_strength is not None else 1.0
+            workflow[node_id] = {
+                "class_type": "LoraLoader",
+                "inputs": {"lora_name": lora, "strength_model": strength,
+                           "strength_clip": strength, "model": [checkpoint_node, 0],
+                           "clip": [checkpoint_node, 1]},
+            }
+            for target_id, target in workflow.items():
+                if target_id == node_id or not isinstance(target, dict):
+                    continue
+                inputs = target.get("inputs")
+                if not isinstance(inputs, dict):
+                    continue
+                for key, value in list(inputs.items()):
+                    if value == [checkpoint_node, 0]:
+                        inputs[key] = [node_id, 0]
+                    elif value == [checkpoint_node, 1]:
+                        inputs[key] = [node_id, 1]
+            changed["lora"].append(node_id)
     return changed
 
 

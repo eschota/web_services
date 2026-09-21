@@ -460,7 +460,7 @@ class RejectionMessageTests(unittest.TestCase):
 
         worker = {"name": "f13", "url": "http://x", "token": "t",
                   "physical_node": "f13"}
-        return asyncio.get_event_loop().run_until_complete(
+        return asyncio.run(
             ai_vision_api._submit(Client(), worker, "/generate-3d", {}))
 
     def test_the_nodes_own_reason_reaches_the_caller(self):

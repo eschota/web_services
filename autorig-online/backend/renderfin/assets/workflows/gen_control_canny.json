@@ -1,0 +1,5 @@
+{
+  "1": {"class_type": "LoadImage", "inputs": {"image": "$image"}},
+  "2": {"class_type": "CannyEdgePreprocessor", "inputs": {"image": ["1", 0], "low_threshold": 100, "high_threshold": 200, "resolution": 960}},
+  "3": {"class_type": "SaveImage", "inputs": {"filename_prefix": "$output_url", "images": ["2", 0]}}
+}

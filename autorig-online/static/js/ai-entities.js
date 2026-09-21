@@ -391,7 +391,8 @@
       .mpick-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
         white-space:nowrap; }
       .mpick-caret { opacity:.6; font-size:10px; }
-      .mpick-panel { position:absolute; z-index:40; top:calc(100% + 5px); left:0; right:0;
+      .mpick-panel { position:absolute; z-index:40; top:calc(100% + 5px); left:0;
+        width:max(100%, 330px); max-width:calc(100vw - 32px); box-sizing:border-box;
         max-height:330px; overflow-y:auto; background:rgba(18,19,38,.99);
         border:1px solid rgba(255,255,255,.16); border-radius:11px; padding:5px;
         box-shadow:0 16px 40px rgba(0,0,0,.55); }
@@ -402,12 +403,14 @@
       .mpick-item.chosen { background:rgba(123,92,255,.26); }
       .mpick-item.blocked { opacity:.45; cursor:not-allowed; }
       .mpick-item .mpick-thumb { width:52px; height:52px; flex:0 0 52px; }
-      .mpick-text { min-width:0; }
+      .mpick-text { min-width:0; overflow-wrap:anywhere; }
       .mpick-text b { display:block; font-size:12.5px; font-weight:600; }
       .mpick-text i, .mpick-text u, .mpick-text s {
         display:block; font-style:normal; text-decoration:none; font-size:11px;
         color:var(--text-secondary,#9aa0b5); margin-top:1px; }
       .mpick-text u { color:#c7b9ff; }
+      .mpick-rec { display:block; font-style:normal; font-size:10.5px; color:#4ade80;
+                   margin-top:2px; }
       .mpick-text s { color:#ff8a9b; }
       .fleet-pop { position:absolute; top:calc(100% + 8px); left:50%; transform:translateX(-50%);
                    min-width:210px; padding:12px 14px; border-radius:12px; z-index:40;
@@ -546,7 +549,10 @@
       state.value = value;
       paintButton();
       setOpen(false);
-      if (settings.onChange) settings.onChange(value);
+      // The entry goes with the value: the caller wants the model's own
+      // recommended settings, and it should not have to fetch them again.
+      const entry = state.entries.find(e => e.file === value) || null;
+      if (settings.onChange) settings.onChange(value, entry);
     }
 
     function row(entry) {
@@ -555,6 +561,11 @@
       item.className = 'mpick-item' + (entry.usable === false ? ' blocked' : '') +
                        (entry.file === state.value ? ' chosen' : '');
       const triggers = (entry.triggers || []).slice(0, 2).join(', ');
+      const rec = entry.recommended || {};
+      const recText = Object.keys(rec).length
+        ? Object.keys(rec).sort().map(k => k + ' ' + rec[k]).join(' · ')
+        : '';
+      item.title = entry.recommended_from || 'Workflow defaults; no author settings published';
       item.innerHTML =
         '<span class="mpick-thumb"' +
           (entry.preview ? ' style="background-image:url(' + entry.preview + ')"' : '') + '></span>' +
@@ -564,6 +575,7 @@
             (entry.size_mb ? ' · ' + Math.round(entry.size_mb) + ' MB' : '') +
             (entry.nsfw ? ' · 18+' : '') + '</i>' +
           (triggers ? '<u>' + escapeHtml(triggers) + '</u>' : '') +
+          (recText ? '<em class="mpick-rec">' + escapeHtml(recText) + '</em>' : '') +
           (entry.usable === false
             ? '<s>' + escapeHtml(entry.unusable_reason || 'not runnable here') + '</s>' : '') +
         '</span>';
@@ -599,6 +611,7 @@
 
     return {
       get value() { return state.value; },
+      get entry() { return state.entries.find(entry => entry.file === state.value) || null; },
       set value(v) { state.value = v; paintButton(); }
     };
   }

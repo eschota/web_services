@@ -394,13 +394,17 @@ def _validate_model_choice(service_id: str, checkpoint: Optional[str],
     is refused with a reason instead of failing minutes later on the card.
     """
     import ai_model_catalogue
+    import ai_model_defaults
 
     chosen: Dict[str, object] = {}
+    selected: Dict[str, Dict[str, object]] = {}
     for name, kind in ((checkpoint, "checkpoint"), (lora, "lora")):
-        wanted = str(name or "").strip()
-        if not wanted:
+        original = str(name or "").strip()
+        if not original:
             continue
-        entry = ai_model_catalogue.known_file(wanted, kind)
+        wanted = ai_model_defaults.canonical_file(original)
+        entry = (ai_model_catalogue.known_file(wanted, kind)
+                 or ai_model_catalogue.known_file(original, kind))
         if entry is None:
             raise HTTPException(status_code=400, detail={
                 "error_string": "unknown_" + kind,
@@ -416,8 +420,68 @@ def _validate_model_choice(service_id: str, checkpoint: Optional[str],
                 "message_string": (f"'{wanted}' is for "
                                    f"{', '.join(entry.get('services') or []) or 'nothing here'}, "
                                    f"not {service_id}")})
-        chosen[kind] = wanted
+        chosen[kind] = (wanted if wanted != original
+                        else str(entry.get("file") or wanted))
+        selected[kind] = entry
+    if selected:
+        if not ai_model_defaults.compatible(selected.get("checkpoint"), selected.get("lora")):
+            raise HTTPException(status_code=400, detail={
+                "error_string": "incompatible_model_pair",
+                "message_string": "The checkpoint and LoRA use different model families"})
     return chosen
+
+
+def _effective_model_settings(service_id: str, checkpoint: Optional[str],
+                              lora: Optional[str], explicit: Dict[str, object],
+                              use_default: bool = True,
+                              ) -> tuple[Dict[str, object], str]:
+    """Validate a selection and merge its attributed recommendations."""
+    import ai_model_catalogue
+    import ai_model_defaults
+
+    if use_default and not checkpoint and not lora:
+        default_entry = next((entry for entry in ai_model_catalogue.entries()
+                              if entry.get("kind") == "checkpoint"
+                              and (entry.get("default") is True
+                                   or service_id in (entry.get("default_for_services") or []))
+                              and entry.get("usable")
+                              and service_id in (entry.get("services") or [])), None)
+        checkpoint = str((default_entry or {}).get("file") or "") or None
+    chosen = _validate_model_choice(service_id, checkpoint, lora)
+    checkpoint_entry = ai_model_catalogue.known_file(chosen.get("checkpoint", ""), "checkpoint")
+    lora_entry = ai_model_catalogue.known_file(chosen.get("lora", ""), "lora")
+    try:
+        effective = ai_model_defaults.resolve(checkpoint_entry, lora_entry, explicit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "incompatible_model_pair", "message_string": str(exc)}) from None
+    payload = dict(chosen)
+    payload.update(effective)
+    return payload, ai_model_defaults.add_triggers("", (checkpoint_entry, lora_entry))
+
+
+@router.get("/api/ai/model-settings")
+async def api_ai_model_settings(service: str, checkpoint: Optional[str] = None,
+                                lora: Optional[str] = None):
+    """Resolved catalogue defaults used when a model selection changes."""
+    service_id = str(service or "").strip().lower()
+    if service_id not in ("image", "video"):
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unknown_service",
+            "message_string": "service must be image or video"})
+    effective, trigger_prefix = _effective_model_settings(
+        service_id, checkpoint, lora, {})
+    effective.setdefault("main_size_width", 960)
+    effective.setdefault("main_size_height", 540)
+    return {
+        "success_bool": True,
+        "service_string": service_id,
+        "checkpoint_string": str(effective.get("checkpoint") or ""),
+        "lora_string": str(effective.get("lora") or ""),
+        "trigger_prefix_string": trigger_prefix,
+        "effective_params_object": effective,
+        "server_time_unix_int": int(time.time()),
+    }
 
 
 def _decode_inline_image(raw: str) -> bytes:
@@ -706,11 +770,20 @@ class ImageRequest(BaseModel):
     width: Optional[int] = Field(None, ge=256, le=2048)
     height: Optional[int] = Field(None, ge=256, le=2048)
     steps: Optional[int] = Field(None, ge=1, le=100)
+    cfg: Optional[float] = Field(None, ge=0, le=30)
+    sampler: Optional[str] = None
+    scheduler: Optional[str] = None
     creativity: Optional[float] = Field(None, ge=0, le=1)
     seed: Optional[int] = Field(None, ge=0, description="0 or absent randomises")
     checkpoint: Optional[str] = Field(None, description="Model file from /api/ai/model-catalogue")
     lora: Optional[str] = Field(None, description="LoRA file from /api/ai/model-catalogue")
     lora_strength: Optional[float] = Field(None, ge=0, le=2)
+    control_pose: Optional[str] = Field(None, description="Precomputed pose control-map URL")
+    control_depth: Optional[str] = Field(None, description="Precomputed depth control-map URL")
+    control_canny: Optional[str] = Field(None, description="Precomputed canny control-map URL")
+    control_strength: float = Field(0.8, ge=0, le=2)
+    control_start: float = Field(0.0, ge=0, le=1)
+    control_end: float = Field(1.0, ge=0, le=1)
 
 
 # Renderfin runs on the same host and owns the image farm; the public service
@@ -728,7 +801,10 @@ async def api_image_docs():
         "required_fields_array": ["prompt"],
         "optional_fields_array": ["image_url", "image_base64", "wait_seconds",
                                   "mode", "negative_prompt", "width", "height",
-                                  "steps", "creativity", "seed"],
+                                  "steps", "cfg", "sampler", "scheduler",
+                                  "creativity", "seed", "checkpoint", "lora",
+                                  "lora_strength", "control_pose", "control_depth",
+                                  "control_canny"],
         "produces_string": "image",
         "example_request_object": {"prompt": "a black lamp post on magenta", "wait_seconds": 120},
         "server_time_unix_int": int(time.time()),
@@ -739,34 +815,73 @@ async def api_image_docs():
 async def api_image(body: ImageRequest):
     """Prompt (and optionally a reference picture) into a generated image."""
     prompt = _validate_prompt(body.prompt)
+    controls = [(name, str(value or "").strip()) for name, value in (
+        ("pose", body.control_pose), ("depth", body.control_depth),
+        ("canny", body.control_canny)) if str(value or "").strip()]
+    if len(controls) > 1:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "multiple_control_channels_unsupported",
+            "message_string": "Choose one of control_pose, control_depth or control_canny"})
     async with httpx.AsyncClient() as client:
         reference = str(body.image_url or "").strip()
         if not reference and body.image_base64:
             reference = await _publish_inline_image(
                 client, _decode_inline_image(body.image_base64)
             )
-        payload: Dict[str, object] = {"prompt": prompt}
+        control_checkpoint = body.checkpoint
+        if controls and not control_checkpoint and not body.lora:
+            control_checkpoint = "CyberRealisticPony_V18.0_F16.safetensors"
+        model_payload, trigger_prefix = _effective_model_settings(
+            "image", control_checkpoint, body.lora, {
+                "steps": body.steps, "cfg": body.cfg,
+                "sampler": body.sampler, "scheduler": body.scheduler,
+                "lora_strength": body.lora_strength,
+            }, use_default=not controls)
+        control_workflow = ""
+        if controls:
+            import ai_model_catalogue
+            import ai_model_defaults
+            selected = (ai_model_catalogue.known_file(
+                str(model_payload.get("checkpoint") or ""), "checkpoint")
+                or ai_model_catalogue.known_file(
+                    str(model_payload.get("lora") or ""), "lora"))
+            try:
+                control_workflow = ai_model_defaults.control_workflow(
+                    ai_model_defaults.model_family(selected), controls[0][0])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail={
+                    "error_string": "control_model_incompatible",
+                    "message_string": str(exc)}) from None
+        if trigger_prefix:
+            prompt = trigger_prefix + ", " + prompt
+        payload: Dict[str, object] = {
+            "prompt": prompt, "main_size_width": int(body.width or 960),
+            "main_size_height": int(body.height or 540),
+        }
         if reference:
             payload["image_url"] = reference
+        if controls:
+            channel, control_url = controls[0]
+            payload["image_url"] = control_url
+            payload["type"] = f"image_control_{channel}"
         mode = str(body.mode or "").strip().lower()
-        if mode and mode in IMAGE_MODES:
+        if not controls and mode and mode in IMAGE_MODES:
             # Renderfin picks the template from `type`, not from a file name.
             payload["type"] = mode
+        elif not controls and reference:
+            payload["type"] = "image"
         if body.negative_prompt and str(body.negative_prompt).strip():
             payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
-        if body.width:
-            payload["main_size_width"] = int(body.width)
-        if body.height:
-            payload["main_size_height"] = int(body.height)
-        if body.steps:
-            payload["steps"] = int(body.steps)
+        payload.update(model_payload)
+        if controls:
+            channel = controls[0][0]
+            payload["type"] = f"image_control_{channel}"
+            payload["work_flow"] = control_workflow
+            payload.update(control_strength=body.control_strength, control_start=body.control_start, control_end=body.control_end)
         if body.creativity is not None:
             payload["creativity"] = float(body.creativity)
         if body.seed:
             payload["noise_seed"] = int(body.seed)
-        payload.update(_validate_model_choice("image", body.checkpoint, body.lora))
-        if body.lora_strength is not None:
-            payload["lora_strength"] = float(body.lora_strength)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
@@ -808,6 +923,10 @@ async def api_image(body: ImageRequest):
             "finished_bool": ready,
             "image_url_string": output_url,
             "poll_url_string": output_url,
+            "effective_params_object": {k: payload[k] for k in (
+                "main_size_width", "main_size_height", "steps", "cfg", "sampler",
+                "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "work_flow")
+                if k in payload},
             "server_time_unix_int": int(time.time()),
         }
 
@@ -823,11 +942,16 @@ class VideoRequest(BaseModel):
     image_url_end: Optional[str] = Field(None, description="Last frame, public URL")
     image_base64_end: Optional[str] = Field(None, description="Last frame, inline")
     quality: Optional[str] = Field(None, description="standard or hq")
+    width: Optional[int] = Field(None, ge=256, le=2048)
+    height: Optional[int] = Field(None, ge=256, le=2048)
     checkpoint: Optional[str] = Field(None, description="Model file from /api/ai/model-catalogue")
     lora: Optional[str] = Field(None, description="LoRA file from /api/ai/model-catalogue")
     lora_strength: Optional[float] = Field(None, ge=0, le=2)
     negative_prompt: Optional[str] = Field(None, description="What to avoid")
     steps: Optional[int] = Field(None, ge=1, le=100)
+    cfg: Optional[float] = Field(None, ge=0, le=30)
+    sampler: Optional[str] = None
+    scheduler: Optional[str] = None
     creativity: Optional[float] = Field(None, ge=0, le=1)
     seed: Optional[int] = Field(None, ge=0, description="0 or absent randomises")
 
@@ -866,7 +990,16 @@ async def api_video(body: VideoRequest):
             frame = await _publish_inline_image(
                 client, _decode_inline_image(body.image_base64 or "")
             )
-        payload: Dict[str, object] = {"image_url": frame}
+        model_payload, trigger_prefix = _effective_model_settings(
+            "video", body.checkpoint, body.lora, {
+                "steps": body.steps, "cfg": body.cfg,
+                "sampler": body.sampler, "scheduler": body.scheduler,
+                "lora_strength": body.lora_strength,
+            })
+        payload: Dict[str, object] = {
+            "image_url": frame, "main_size_width": int(body.width or 960),
+            "main_size_height": int(body.height or 540),
+        }
         last_frame = str(body.image_url_end or "").strip()
         if not last_frame and body.image_base64_end:
             last_frame = await _publish_inline_image(
@@ -875,7 +1008,8 @@ async def api_video(body: VideoRequest):
         if last_frame:
             payload["image_url_end"] = last_frame
         if body.prompt and str(body.prompt).strip():
-            payload["prompt"] = _validate_prompt(body.prompt)
+            rendered_prompt = _validate_prompt(body.prompt)
+            payload["prompt"] = ((trigger_prefix + ", ") if trigger_prefix else "") + rendered_prompt
         if body.frame_count:
             payload["frame_count"] = int(body.frame_count)
         quality = str(body.quality or "").strip().lower()
@@ -883,15 +1017,11 @@ async def api_video(body: VideoRequest):
             payload["work_flow"] = VIDEO_QUALITIES[quality]
         if body.negative_prompt and str(body.negative_prompt).strip():
             payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
-        if body.steps:
-            payload["steps"] = int(body.steps)
+        payload.update(model_payload)
         if body.creativity is not None:
             payload["creativity"] = float(body.creativity)
         if body.seed:
             payload["noise_seed"] = int(body.seed)
-        payload.update(_validate_model_choice("video", body.checkpoint, body.lora))
-        if body.lora_strength is not None:
-            payload["lora_strength"] = float(body.lora_strength)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload,
@@ -921,6 +1051,10 @@ async def api_video(body: VideoRequest):
             "poll_url_string": output_url,
             "source_image_url_string": frame,
             "end_image_url_string": last_frame,
+            "effective_params_object": {k: payload[k] for k in (
+                "main_size_width", "main_size_height", "steps", "cfg", "sampler",
+                "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "work_flow")
+                if k in payload},
             "server_time_unix_int": int(time.time()),
         }
 

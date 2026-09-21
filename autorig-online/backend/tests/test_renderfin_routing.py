@@ -28,6 +28,11 @@ class RoutingImageBranchTests(unittest.TestCase):
         self.assertEqual(scheduling_token(p), WORKFLOW_GEN_IMAGE)
         self.assertEqual(resolve_workflow_file(p), (WORKFLOW_GEN_IMAGE, None))
 
+    def test_explicit_image_workflow_is_the_scheduling_token(self):
+        p = RenderPrompt(prompt="portrait", work_flow="gen_image_sdxl.json")
+        self.assertEqual(scheduling_token(p), "gen_image_sdxl.json")
+        self.assertEqual(resolve_workflow_file(p)[0], "gen_image_sdxl.json")
+
     def test_typed_request_with_image_is_image_request(self):
         p = RenderPrompt(prompt="x", type="t_pose", image_url="https://h/render/masks/t_pose.jpg")
         self.assertTrue(is_image_request(p))
@@ -38,6 +43,18 @@ class RoutingImageBranchTests(unittest.TestCase):
         wf, forced = resolve_workflow_file(p)
         self.assertEqual(wf, WORKFLOW_T_POSE)
         self.assertEqual(forced, (1024, 1024))
+
+    def test_t_pose_honours_an_explicit_api_size(self):
+        p = RenderPrompt(type="t_pose", main_size_width=960, main_size_height=540)
+        self.assertEqual(resolve_workflow_file(p), (WORKFLOW_T_POSE, None))
+
+    def test_legacy_typed_mode_keeps_gen_image_scheduling_token(self):
+        p = RenderPrompt(type="open_pose", work_flow="gen_image_sdxl.json")
+        self.assertEqual(scheduling_token(p), WORKFLOW_GEN_IMAGE)
+
+    def test_control_generation_uses_its_exact_worker_token(self):
+        p = RenderPrompt(type="image_control_pose", work_flow="gen_image_control_pose.json")
+        self.assertEqual(scheduling_token(p), "gen_image_control_pose.json")
 
     def test_t_poses_alias(self):
         p = RenderPrompt(type="t_poses", image_url="https://h/m.jpg")
@@ -129,11 +146,11 @@ class RuntimeWorkflowTests(unittest.TestCase):
 
 class ClampTests(unittest.TestCase):
     def test_defaults(self):
-        self.assertEqual(clamp_image_dims(0, 0), (1024, 1024))
+        self.assertEqual(clamp_image_dims(0, 0), (960, 540))
 
     def test_clamp_and_round(self):
-        self.assertEqual(clamp_image_dims(2000, 50), (1024, 64))
-        self.assertEqual(clamp_image_dims(1000, 700), (992, 704))
+        self.assertEqual(clamp_image_dims(2000, 50), (2000, 64))
+        self.assertEqual(clamp_image_dims(1001, 701), (1000, 700))
 
 
 class PromptModelTests(unittest.TestCase):

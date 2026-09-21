@@ -1,0 +1,619 @@
+[
+  {
+    "kind": "checkpoint",
+    "family": "flux2",
+    "base": "FLUX.2 klein 4B",
+    "file": "flux-2-klein-4b.safetensors",
+    "id": "flux-2-klein-4b.safetensors",
+    "title": "FLUX.2 klein 4B",
+    "version": "distilled",
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "default_for_services": [
+      "image"
+    ],
+    "workflow": "gen_image_flux2_klein.json",
+    "recommended": {
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler": "euler"
+    },
+    "recommended_from": "BFL model card: num_inference_steps=4, guidance_scale=1.0; ComfyUI reference uses Euler.",
+    "recommendation_kind": "author_reference_implementation",
+    "page": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B",
+    "source_checked_at": "2026-09-22",
+    "triggers": [],
+    "preview": "",
+    "size_mb": 7751,
+    "validated_workers": [
+      "worker-4090"
+    ]
+  },
+  {
+    "kind": "checkpoint",
+    "family": "ltx23",
+    "base": "LTXV 2.3",
+    "file": "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+    "id": "ltx23-distilled11",
+    "title": "LTX 2.3 distilled 1.1",
+    "version": "1.1 FP8",
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "default_for_services": [
+      "video"
+    ],
+    "workflow": "gen_animation_ltx23_by_url.json",
+    "recommended": {
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler": "euler_ancestral_cfg_pp"
+    },
+    "recommended_from": "Lightricks distilled single-stage workflow: eight-step sigma schedule, CFG1, Euler ancestral CFG++.",
+    "recommendation_kind": "author_reference_workflow",
+    "page": "https://huggingface.co/Lightricks/LTX-2.3",
+    "file_source": "https://huggingface.co/Kijai/LTX2.3_comfy",
+    "source_checked_at": "2026-09-22",
+    "triggers": [],
+    "preview": "",
+    "size_mb": 25226,
+    "validated_workers": [
+      "worker-4090"
+    ]
+  },
+  {
+    "kind": "checkpoint",
+    "family": "ltx23",
+    "file": "ltx10eros_v14_2989633.safetensors",
+    "title": "LTX 10Eros",
+    "version": "v1.4",
+    "base": "LTXV 2.3",
+    "nsfw": true,
+    "triggers": [],
+    "downloads": 17367,
+    "page": "https://civitai.com/models/2447875?modelVersionId=3109610",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/130ab84e-6848-4e3b-914b-7754ff277f48/original=true/136150920.mp4",
+    "size_mb": 1621.1,
+    "services": [
+      "video"
+    ],
+    "usable": false,
+    "id": "ltx10eros_v14_2989633.safetensors",
+    "preview": "/api/ai/model-preview/ltx10eros_v14_2989633.safetensors.jpg",
+    "recommended": {
+      "steps": 9,
+      "cfg": 1.0,
+      "sampler": "Euler a"
+    },
+    "recommended_from": "Author example metadata; full model workflow has not yet been validated.",
+    "source_version_id": 3109610,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/2447875?modelVersionId=3109610",
+      "https://civitai.com/api/v1/model-versions/3109610",
+      "https://civitai.com/api/v1/models/2447875"
+    ],
+    "recommendation_kind": "author_example_metadata",
+    "workflow": "gen_animation_ltx23_by_url.json",
+    "unusable_reason": "The previously installed file is Civitai Other, not the checkpoint. A verified full 10Eros model is required."
+  },
+  {
+    "kind": "checkpoint",
+    "family": "pony",
+    "file": "CyberRealisticPony_V18.0_F16.safetensors",
+    "title": "CyberRealistic Pony",
+    "version": "v18.0 CoreShift",
+    "base": "Pony",
+    "nsfw": false,
+    "triggers": [
+      "score_9",
+      "score_8_up",
+      "score_7_up"
+    ],
+    "downloads": 53270,
+    "page": "https://civitai.com/models/443821?modelVersionId=2884631",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/6f02f31f-0de1-4d12-8e99-fe83f036e7ff/original=true/128392606.jpeg",
+    "size_mb": 6616.6,
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "id": "CyberRealisticPony_V18.0_F16.safetensors",
+    "preview": "/api/ai/model-preview/cyberrealisticPony_v180Coreshift_2764472.safetensors.jpg",
+    "recommended": {
+      "steps": 30,
+      "cfg": 5.0,
+      "sampler": "DPM++ 2M",
+      "scheduler": "karras",
+      "clip_skip": 2
+    },
+    "recommended_from": "Author How to Use: 30+ steps, CFG5, Clip Skip2, DPM++2M Karras (one of three listed samplers).",
+    "source_version_id": 2884631,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/443821?modelVersionId=2884631",
+      "https://civitai.com/api/v1/model-versions/2884631",
+      "https://civitai.com/api/v1/models/443821"
+    ],
+    "recommendation_kind": "author_description",
+    "workflow": "gen_image_sdxl.json",
+    "file_source": "https://huggingface.co/cyberdelia/CyberRealisticPony/blob/main/CyberRealisticPony_V18.0_F16.safetensors",
+    "sha256": "1d580c1c3f3612fa4db88af65372255582d5509ca0b28f85387273368301941b",
+    "control_channels": [
+      "pose",
+      "depth",
+      "canny"
+    ],
+    "legacy_files": [
+      "cyberrealisticPony_v180Coreshift_2764472.safetensors"
+    ],
+    "validated_workers": [
+      "worker-4090"
+    ]
+  },
+  {
+    "kind": "lora",
+    "family": "flux",
+    "file": "NSFW_master.safetensors",
+    "title": "NSFW MASTER",
+    "version": "v1.0",
+    "base": "Flux.1 D",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 131046,
+    "page": "https://civitai.com/models/667086?modelVersionId=746602",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/8651af10-92b0-43aa-b855-e97d0b50f9e7/original=true/25287839.jpeg",
+    "size_mb": 164.0,
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "id": "NSFW_master.safetensors",
+    "preview": "/api/ai/model-preview/NSFW_master.safetensors.jpg",
+    "recommended": {
+      "steps": 20,
+      "sampler": "Euler",
+      "scheduler": "simple",
+      "strength": 0.8
+    },
+    "recommended_from": "Author model description: LoRA weight 0.8; sampling settings from author examples.",
+    "source_version_id": 746602,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/667086?modelVersionId=746602",
+      "https://civitai.com/api/v1/model-versions/746602",
+      "https://civitai.com/api/v1/models/667086"
+    ],
+    "recommendation_kind": "author_example_metadata",
+    "workflow": "gen_image.json"
+  },
+  {
+    "kind": "lora",
+    "family": "flux",
+    "file": "flux_realism_lora.safetensors",
+    "title": "XLabs Flux Realism LoRA",
+    "version": "Converted for Comfyui",
+    "base": "Flux.1 D",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 54034,
+    "page": "https://civitai.com/models/631986?modelVersionId=706528",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/c078bd35-7ffe-49ec-9b2a-ae4e574d1ea0/original=true/23346089.jpeg",
+    "size_mb": 21.4,
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "id": "flux_realism_lora.safetensors",
+    "preview": "/api/ai/model-preview/flux_realism_lora.safetensors.jpg",
+    "recommended": {
+      "sampler": "Euler"
+    },
+    "recommended_from": "the author's example images",
+    "source_version_id": 706528,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/631986?modelVersionId=706528",
+      "https://civitai.com/api/v1/model-versions/706528",
+      "https://civitai.com/api/v1/models/631986"
+    ],
+    "recommendation_kind": "author_example_metadata",
+    "workflow": "gen_image.json"
+  },
+  {
+    "kind": "lora",
+    "family": "flux",
+    "file": "skin texture style v5.safetensors",
+    "title": "Realistic Skin Texture style (Detailed Skin) XL + SD1.5 + F1D + Pony + Illu + ZIT + ZIB",
+    "version": "Skin Texure F1D v2.5",
+    "base": "Flux.1 D",
+    "nsfw": false,
+    "triggers": [
+      "skin texture style",
+      "realism",
+      "detailed"
+    ],
+    "downloads": 43330,
+    "page": "https://civitai.com/models/580857?modelVersionId=1081450",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/28ef64e6-b8c7-493d-a7a4-c69650d47fbb/original=true/41132230.jpeg",
+    "size_mb": 641.5,
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "id": "skin texture style v5.safetensors",
+    "preview": "/api/ai/model-preview/skin_texture_style_v5.safetensors.jpg",
+    "recommended": {
+      "steps": 20,
+      "cfg": 1.0,
+      "sampler": "Euler",
+      "width": 1024,
+      "height": 1024
+    },
+    "recommended_from": "the author's example images",
+    "source_version_id": 1081450,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/580857?modelVersionId=1081450",
+      "https://civitai.com/api/v1/model-versions/1081450",
+      "https://civitai.com/api/v1/models/580857"
+    ],
+    "recommendation_kind": "author_example_metadata",
+    "workflow": "gen_image.json"
+  },
+  {
+    "kind": "lora",
+    "family": "flux",
+    "file": "FluxMythSharpL1nes.safetensors",
+    "title": "Velvet's Mythic Fantasy Styles | Flux + Pony + illustrious + ZiT + Anima + Krea2",
+    "version": "Flux Sharp Lines",
+    "base": "Flux.1 D",
+    "nsfw": false,
+    "triggers": [
+      "SharpL1nes"
+    ],
+    "downloads": 7468,
+    "page": "https://civitai.com/models/599757?modelVersionId=2228091",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/8aa3b0f6-b90b-426d-bafa-699d185faebc/original=true/101061606.jpeg",
+    "size_mb": 73.1,
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "id": "FluxMythSharpL1nes.safetensors",
+    "preview": "/api/ai/model-preview/FluxMythSharpL1nes.safetensors.jpg",
+    "recommended": {
+      "steps": 30,
+      "cfg": 1.0,
+      "sampler": "DPM++ 2M",
+      "width": 832,
+      "height": 1216,
+      "strength": 1.0
+    },
+    "recommended_from": "Author Flux section: weight 1, range 0.5–1.5; sampling settings from author examples.",
+    "source_version_id": 2228091,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/599757?modelVersionId=2228091",
+      "https://civitai.com/api/v1/model-versions/2228091",
+      "https://civitai.com/api/v1/models/599757"
+    ],
+    "recommendation_kind": "author_example_metadata",
+    "workflow": "gen_image.json",
+    "recommended_ranges": {
+      "strength": [
+        0.5,
+        1.5
+      ]
+    }
+  },
+  {
+    "kind": "lora",
+    "family": "flux",
+    "file": "microbikiniv12_FLUX.safetensors",
+    "title": "Micro Bikini SD1.5/FLUX | olaz",
+    "version": "v1.2 FLUX",
+    "base": "Flux.1 D",
+    "nsfw": true,
+    "triggers": [
+      "micro bikini",
+      "from behind"
+    ],
+    "downloads": 5436,
+    "page": "https://civitai.com/models/122200?modelVersionId=1857758",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/df1d1047-ebe9-4924-9efd-3f59b534971b/original=true/79846995.jpeg",
+    "size_mb": 146.2,
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "id": "microbikiniv12_FLUX.safetensors",
+    "preview": "/api/ai/model-preview/microbikiniv12_FLUX.safetensors.jpg",
+    "recommended": {
+      "steps": 25,
+      "cfg": 1.0,
+      "sampler": "Euler",
+      "width": 832,
+      "height": 1248,
+      "strength": 0.8
+    },
+    "recommended_from": "Author Flux section: weight 0.7–1.0; selected 0.8 within this range; sampling settings from author examples.",
+    "source_version_id": 1857758,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/122200?modelVersionId=1857758",
+      "https://civitai.com/api/v1/model-versions/1857758",
+      "https://civitai.com/api/v1/models/122200"
+    ],
+    "recommendation_kind": "author_example_metadata",
+    "workflow": "gen_image.json",
+    "recommended_ranges": {
+      "strength": [
+        0.7,
+        1.0
+      ]
+    }
+  },
+  {
+    "kind": "lora",
+    "family": "ltx23",
+    "file": "LTX2.3_Crisp_Enhance.safetensors",
+    "title": "LTX 2.3 - Enhancers",
+    "version": "Crisp Enhance",
+    "base": "LTXV 2.3",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 13855,
+    "page": "https://civitai.com/models/2535622?modelVersionId=2849716",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/2e50610f-07b7-4d68-9582-c1f6a4872c3f/original=true/127146275.mp4",
+    "size_mb": 672.5,
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "id": "LTX2.3_Crisp_Enhance.safetensors",
+    "preview": "/api/ai/model-preview/LTX2.3_Crisp_Enhance.safetensors.jpg",
+    "recommended": {},
+    "recommended_from": "The model/version pages publish no numeric sampling settings; use the compatible base workflow defaults.",
+    "source_version_id": 2849716,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/2535622?modelVersionId=2849716",
+      "https://civitai.com/api/v1/model-versions/2849716",
+      "https://civitai.com/api/v1/models/2535622"
+    ],
+    "recommendation_kind": "not_published",
+    "workflow": "gen_animation_ltx23_by_url.json"
+  },
+  {
+    "kind": "lora",
+    "family": "ltx23",
+    "file": "AmateurHour_01_rank16.safetensors",
+    "title": "Amateur Hour",
+    "version": "v1.0 -rank16",
+    "base": "LTXV 2.3",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 5716,
+    "page": "https://civitai.com/models/2530917?modelVersionId=2844417",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/93f694bc-275d-4c20-a1d2-e80d09f10d3c/original=true/126944102.mp4",
+    "size_mb": 168.3,
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "id": "AmateurHour_01_rank16.safetensors",
+    "preview": "/api/ai/model-preview/AmateurHour_01_rank16.safetensors.jpg",
+    "recommended": {},
+    "recommended_from": "The model/version pages publish no numeric sampling settings; use the compatible base workflow defaults.",
+    "source_version_id": 2844417,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/2530917?modelVersionId=2844417",
+      "https://civitai.com/api/v1/model-versions/2844417",
+      "https://civitai.com/api/v1/models/2530917"
+    ],
+    "recommendation_kind": "not_published",
+    "workflow": "gen_animation_ltx23_by_url.json"
+  },
+  {
+    "kind": "lora",
+    "family": "ltx23",
+    "file": "LTX2.3-IC-LORA-Dual-Character.safetensors",
+    "title": "LTX2.3-IC-LORA-Dual-Character",
+    "version": "v0.1",
+    "base": "LTXV 2.3",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 5328,
+    "page": "https://civitai.com/models/2500098?modelVersionId=2810376",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/235507c4-8282-4992-82f8-d20791b8586e/original=true/125629932.mp4",
+    "size_mb": 312.1,
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "id": "LTX2.3-IC-LORA-Dual-Character.safetensors",
+    "preview": "/api/ai/model-preview/LTX2.3-IC-LORA-Dual-Character.safetensors.jpg",
+    "recommended": {
+      "strength": 0.8
+    },
+    "recommended_from": "Author description: standalone LoRA weight 0.6–1.0; service midpoint 0.8.",
+    "source_version_id": 2810376,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/2500098?modelVersionId=2810376",
+      "https://civitai.com/api/v1/model-versions/2810376",
+      "https://civitai.com/api/v1/models/2500098"
+    ],
+    "recommendation_kind": "not_published",
+    "workflow": "gen_animation_ltx23_by_url.json",
+    "recommended_ranges": {
+      "strength": [
+        0.6,
+        1.0
+      ],
+      "stacked_strength": [
+        0.3,
+        0.5
+      ]
+    },
+    "author_notes": "Author recommends 16:9, 1280x720, >=10 seconds at 24fps; product output default remains 960x540."
+  },
+  {
+    "kind": "lora",
+    "family": "ltx23",
+    "file": "ltx23_edit_anything_global_rank128_v1_9000steps_adamw.safetensors",
+    "title": "EditAnything",
+    "version": "v1.0",
+    "base": "LTXV 2.3",
+    "nsfw": false,
+    "triggers": [
+      "Add a/an [subject/object] with [attributes], [location in the scene].",
+      "Remove the [subject/object] [location or identifying description].",
+      "Replace the [original subject/object] [location] with a/an [new subject/object] with [attributes].",
+      "Convert the video into a [style name] style."
+    ],
+    "downloads": 5080,
+    "page": "https://civitai.com/models/2553102?modelVersionId=2869279",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/42e643f2-5fdd-4137-9cc6-26bb93d9be92/original=true/127871658.mp4",
+    "size_mb": 1248.1,
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "id": "ltx23_edit_anything_global_rank128_v1_9000steps_adamw.safetensors",
+    "preview": "/api/ai/model-preview/ltx23_edit_anything_global_rank128_v1_9000steps_adamw.safetensors.jpg",
+    "recommended": {
+      "cfg": 1.0
+    },
+    "recommended_from": "the author's example images",
+    "source_version_id": 2869279,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/2553102?modelVersionId=2869279",
+      "https://civitai.com/api/v1/model-versions/2869279",
+      "https://civitai.com/api/v1/models/2553102"
+    ],
+    "recommendation_kind": "author_example_metadata",
+    "workflow": "gen_animation_ltx23_by_url.json",
+    "author_notes": "Author suggests starting at CFG1, optionally increasing strength to1.2 for weak edits. Requires the dedicated video-edit conditioning workflow."
+  },
+  {
+    "kind": "lora",
+    "family": "ltx23",
+    "file": "mvmt_lora_v2_600.safetensors",
+    "title": "Better Human Motion Minimax H3",
+    "version": "v2.0-LTX23",
+    "base": "LTXV 2.3",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 3539,
+    "page": "https://civitai.com/models/2734359?modelVersionId=3087364",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/ff0fd1a4-18be-40dc-9dfd-399c9ae6419d/original=true/135408633.mp4",
+    "size_mb": 643.0,
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "id": "mvmt_lora_v2_600.safetensors",
+    "preview": "/api/ai/model-preview/mvmt_lora_v2_600.safetensors.jpg",
+    "recommended": {
+      "strength": 0.6
+    },
+    "recommended_from": "Author description: weight 0.4–0.8; service midpoint 0.6. Sampling inherits the selected base model.",
+    "source_version_id": 3087364,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/2734359?modelVersionId=3087364",
+      "https://civitai.com/api/v1/model-versions/3087364",
+      "https://civitai.com/api/v1/models/2734359"
+    ],
+    "recommendation_kind": "not_published",
+    "workflow": "gen_animation_ltx23_by_url.json",
+    "recommended_ranges": {
+      "strength": [
+        0.4,
+        0.8
+      ],
+      "steps": [
+        15,
+        30
+      ]
+    },
+    "author_notes": "Author recommends 720x1280 and 15–30 steps for the training base. The distilled-1.1 runtime uses its own eight-step schedule."
+  },
+  {
+    "kind": "lora",
+    "family": "ltx23",
+    "file": "Pixar_Toon.safetensors",
+    "title": "LTX 2.3 - Pixar CGI Toon Style",
+    "version": "General Pixar Toon Style",
+    "base": "LTXV 2.3",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 3261,
+    "page": "https://civitai.com/models/2536130?modelVersionId=2850271",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/acb4cb20-b125-41e7-90b1-69cfe9bca6e7/original=true/127171192.mp4",
+    "size_mb": 336.3,
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "id": "Pixar_Toon.safetensors",
+    "preview": "/api/ai/model-preview/Pixar_Toon.safetensors.jpg",
+    "recommended": {},
+    "recommended_from": "The model/version pages publish no numeric sampling settings; use the compatible base workflow defaults.",
+    "source_version_id": 2850271,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/2536130?modelVersionId=2850271",
+      "https://civitai.com/api/v1/model-versions/2850271",
+      "https://civitai.com/api/v1/models/2536130"
+    ],
+    "recommendation_kind": "not_published",
+    "workflow": "gen_animation_ltx23_by_url.json"
+  },
+  {
+    "kind": "lora",
+    "family": "ltx",
+    "file": "DreamLTXV.safetensors",
+    "title": "DreamLTXV",
+    "version": "LTXV",
+    "base": "LTXV",
+    "nsfw": false,
+    "triggers": [],
+    "downloads": 1126,
+    "page": "https://civitai.com/models/1264762?modelVersionId=1426312",
+    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/9e3c8c43-c0dc-43cf-84ee-1bf644f7df44/original=true/58386340.mp4",
+    "size_mb": 182.1,
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "id": "DreamLTXV.safetensors",
+    "preview": "/api/ai/model-preview/DreamLTXV.safetensors.jpg",
+    "recommended": {
+      "strength": 0.75
+    },
+    "recommended_from": "Author description: weight 0.5–1.0; service midpoint 0.75, not an exact author preset.",
+    "source_version_id": 1426312,
+    "source_checked_at": "2026-09-22",
+    "recommendation_sources": [
+      "https://civitai.com/models/1264762?modelVersionId=1426312",
+      "https://civitai.com/api/v1/model-versions/1426312",
+      "https://civitai.com/api/v1/models/1264762"
+    ],
+    "recommendation_kind": "not_published",
+    "workflow": "gen_animation_by_url.json",
+    "recommended_ranges": {
+      "strength": [
+        0.5,
+        1.0
+      ]
+    }
+  }
+]

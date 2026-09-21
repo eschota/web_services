@@ -24,7 +24,7 @@ def _client() -> TestClient:
 class CatalogueShapeTests(unittest.TestCase):
     def test_every_service_the_owner_asked_for_is_declared(self):
         ids = {entry["id"] for entry in ai_services.SERVICES}
-        self.assertEqual(ids, {"vision", "text", "image", "video", "3dmodel"})
+        self.assertEqual(ids, {"vision", "text", "image", "video", "3dmodel", "control_pose", "control_depth", "control_canny"})
 
     def test_every_declared_type_is_a_known_entity_type(self):
         known = {entry["id"] for entry in ai_services.ENTITY_TYPES}
@@ -89,7 +89,7 @@ class HandoffTests(unittest.TestCase):
         """A nav link that answers 404 is worse than a greyed-out one."""
         live_paths = {e["path"] for e in ai_services.SERVICES if e["status"] == "live"}
         self.assertEqual(live_paths,
-                         {"/vision", "/text", "/image", "/video", "/3dmodel"})
+                         {"/vision", "/text", "/image", "/video", "/3dmodel", "/nodes"})
 
     def test_3d_runs_on_the_farm_not_the_account_flow(self):
         """Hunyuan3D is installed on the converter nodes; the credits-and-login

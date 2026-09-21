@@ -1,0 +1,37 @@
+import copy
+import unittest
+from types import SimpleNamespace
+
+from renderfin.runtime_settings import apply_runtime_settings
+
+
+class RuntimeSettingsTests(unittest.TestCase):
+    def test_half_hd_is_padded_for_model_and_exact_for_saved_video(self):
+        graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {'width': 1024, 'height': 1024}},
+                 'video': {'class_type': 'CreateVideo', 'inputs': {'images': ['decode', 0]}}}
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=25), 960, 540)
+        self.assertEqual(graph['latent']['inputs'], {'width': 960, 'height': 544, 'length': 25})
+        self.assertEqual(graph['video']['inputs']['images'], ['delivery_size_video', 0])
+        self.assertEqual(graph['delivery_size_video']['inputs']['height'], 540)
+        self.assertEqual(graph['delivery_size_video']['inputs']['image'], ['decode', 0])
+
+    def test_steps_sampler_cfg_scheduler_reach_sampler(self):
+        graph = {'sample': {'class_type': 'KSampler', 'inputs': {'steps': 4, 'cfg': 1, 'sampler_name': 'euler', 'scheduler': 'normal'}}}
+        apply_runtime_settings(graph, SimpleNamespace(steps=30, cfg=5, sampler='dpmpp_2m', scheduler='karras'), 960, 540)
+        self.assertEqual(graph['sample']['inputs'], {'steps': 30, 'cfg': 5.0, 'sampler_name': 'dpmpp_2m', 'scheduler': 'karras'})
+
+    def test_selected_lora_is_connected_when_template_has_no_loader(self):
+        graph = {'model': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'base'}},
+                 'guide': {'class_type': 'BasicGuider', 'inputs': {'model': ['model', 0]}}}
+        apply_runtime_settings(graph, SimpleNamespace(lora='style.safetensors', lora_strength=0.8), 960, 540)
+        self.assertEqual(graph['guide']['inputs']['model'], ['selected_lora', 0])
+        self.assertEqual(graph['selected_lora']['inputs']['lora_name'], 'style.safetensors')
+        self.assertEqual(graph['selected_lora']['inputs']['strength_model'], 0.8)
+
+    def test_distilled_schedule_is_not_silently_changed(self):
+        graph = {'schedule': {'class_type': 'ManualSigmas', 'inputs': {'sigmas': '1,0.9,0.8,0'}}}
+        original = copy.deepcopy(graph)
+        apply_runtime_settings(graph, SimpleNamespace(steps=3), 960, 540)
+        self.assertEqual(graph, original)
+        with self.assertRaisesRegex(ValueError, 'requires 3 steps'):
+            apply_runtime_settings(graph, SimpleNamespace(steps=12), 960, 540)

@@ -9,6 +9,7 @@ from .models import RenderPrompt, RenderServer
 SAFE_WORKFLOW_RE = re.compile(r"^[A-Za-z0-9_.-]+\.json$")
 
 WORKFLOW_GEN_IMAGE = "gen_image.json"
+WORKFLOW_GEN_IMAGE_SDXL = "gen_image_sdxl.json"
 WORKFLOW_T_POSE = "t_pose.json"
 WORKFLOW_Z_DEPTH = "gen_image_by_z_depth.json"
 WORKFLOW_OPEN_POSE = "open_pose.json"
@@ -50,6 +51,10 @@ def scheduling_token(prompt: RenderPrompt) -> str:
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
     if is_image_request(prompt):
+        requested = (prompt.work_flow or "").strip()
+        if (ptype in ("", "image") or ptype.startswith("image_control_")) \
+                and requested and SAFE_WORKFLOW_RE.match(requested):
+            return requested
         return WORKFLOW_GEN_IMAGE
     return select_animation_workflow(prompt.work_flow)
 
@@ -73,7 +78,8 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
         return WORKFLOW_IMAGE_TO_3D, None
     if ptype == "z_depth":
         return WORKFLOW_Z_DEPTH, None
-    if ptype in ("t_pose", "t_poses") and not has_aspect_ratio:
+    has_explicit_size = prompt.main_size_width > 0 and prompt.main_size_height > 0
+    if ptype in ("t_pose", "t_poses") and not has_aspect_ratio and not has_explicit_size:
         return WORKFLOW_T_POSE, (1024, 1024)
     if ptype == "open_pose":
         return WORKFLOW_OPEN_POSE, None
@@ -81,6 +87,9 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
         return WORKFLOW_INPAINT, None
     if "sphere.png" in image_url:
         return WORKFLOW_Z_DEPTH, None
+    requested = (prompt.work_flow or "").strip()
+    if requested and SAFE_WORKFLOW_RE.match(requested):
+        return requested, None
     return WORKFLOW_GEN_IMAGE, None
 
 
@@ -108,16 +117,16 @@ def server_can_run(server: RenderServer, token: str) -> bool:
 
 
 def clamp_image_dims(width: int, height: int) -> Tuple[int, int]:
-    """C# final clamp for image workflows: 64-1024 per side, rounded to /32."""
+    """Image render size: defaults 960x540, accepts exact even sizes to 2048."""
 
-    def one(v: int) -> int:
+    def one(v: int, default: int) -> int:
         v = int(v or 0)
         if v <= 0:
-            v = 1024
-        v = max(64, min(1024, v))
-        return max(64, round(v / 32) * 32)
+            v = default
+        v = max(64, min(2048, v))
+        return v if v % 2 == 0 else v - 1
 
-    return one(width), one(height)
+    return one(width, 960), one(height, 540)
 
 
 def clamp_video_dims(width: int, height: int) -> Tuple[int, int]:

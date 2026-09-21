@@ -14,6 +14,7 @@ class RenderPrompt(BaseModel):
     prompt: str = ""
     negative_prompt: str = ""
     image_url: str = ""
+    image_url_end: str = ""
     type: str = ""
     work_flow: str = ""
     main_size_width: int = 0
@@ -22,6 +23,13 @@ class RenderPrompt(BaseModel):
     frame_count: int = 60
     noise_seed: int = 0
     steps: int = 0
+    cfg: Optional[float] = None
+    clip_skip: Optional[int] = None
+    sampler: str = ""
+    scheduler: str = ""
+    control_strength: float = 0.8
+    control_start: float = 0.0
+    control_end: float = 1.0
     creativity: float = 0
     # Which model file to load. Empty leaves the workflow's own choice,
     # which is what every request did before these existed.
@@ -34,7 +42,7 @@ class RenderPrompt(BaseModel):
     @field_validator("frame_count")
     @classmethod
     def _clamp_frame_count(cls, v: int) -> int:
-        return max(0, min(300, int(v or 0)))
+        return max(0, min(400, int(v or 0)))
 
     @field_validator("user_name")
     @classmethod
@@ -63,6 +71,23 @@ class RenderServer(BaseModel):
     basic_auth: bool = False
     date_update: Optional[str] = None
     online_since_utc: Optional[str] = None
+    # Shared-GPU admission identity. External Comfy nodes remain unmanaged and
+    # are never preempted by the central broker.
+    managed_workload: bool = False
+    node_id_string: str = ""
+    physical_resource_id_string: str = ""
+    full_converter_bool: bool = False
+    ai_capable_bool: bool = False
+    reserve_role_string: str = "shared"
+    arbiter_online_bool: bool = False
+    arbiter_accepting_ai_vision_bool: bool = False
+    managed_comfy_artifact_spool_required_bool: bool = False
+    managed_comfy_artifact_spool_ready_bool: bool = False
+    managed_comfy_artifact_spool_protocol_string: str = ""
+    managed_comfy_central_control_ready_bool: bool = False
+    # Set only after an authenticated converter status probe matches the exact
+    # machine_* identity and role pinned in deployment configuration.
+    workload_identity_verified_bool: bool = False
 
 
 TASK_PENDING = "Pending"
@@ -90,6 +115,40 @@ class RenderTask(BaseModel):
     created_at: float = Field(default_factory=time.time)
     started_at: float = 0
     finished_at: float = 0
+    queue_class: str = "interactive"
+    logical_owner_task_id: str = ""
+    workload_class: str = "comfy"
+    workload_request_id: str = Field(default_factory=lambda: f"rf_{uuid.uuid4().hex}")
+    workload_lease_id: str = ""
+    workload_physical_resource_id: str = ""
+    workload_node_id: str = ""
+    workload_lease_state: str = "waiting"
+    workload_heartbeat_at: float = 0
+    managed_prompt: bool = False
+    host_comfy_registered: bool = False
+    retired_comfy_prompt_ids: List[str] = Field(default_factory=list)
+    artifact_sha256: str = ""
+    # Durable managed-Comfy artifact handoff.  The host spool is singular for
+    # one exact (prompt, logical task, lease, request) identity.  T-pose's
+    # isolated companion is therefore persisted centrally before the FULL
+    # primary is staged/detached on the host.
+    managed_comfy_artifact_spool_state: str = ""
+    managed_comfy_artifact_relative_path_string: str = ""
+    managed_comfy_artifact_size_int: int = 0
+    managed_comfy_artifact_spool_protocol_string: str = ""
+    managed_comfy_central_persistence_receipt_id_string: str = ""
+    managed_comfy_isolated_output_path: str = ""
+    managed_comfy_isolated_sha256: str = ""
+    managed_comfy_isolated_size_int: int = 0
+    # Durable no-progress watchdog state.  Host heartbeat timestamps are not
+    # used as progress because Renderfin itself refreshes them; only a changed
+    # state/stage/marker, an increased percentage, or a validated host
+    # last_progress_at advances this clock.
+    managed_comfy_progress_signature: str = ""
+    managed_comfy_progress_percent: float = -1.0
+    managed_comfy_last_progress_at: float = 0
+    managed_comfy_host_stale_at: float = 0
+    managed_comfy_watchdog_requested_at: float = 0
 
     def public_dict(self) -> Dict[str, Any]:
         return {
@@ -109,6 +168,8 @@ class RenderTask(BaseModel):
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "workload_class_string": self.workload_class,
+            "workload_lease_state_string": self.workload_lease_state,
         }
 
 
@@ -176,6 +237,13 @@ class CharacterGenJob(BaseModel):
     # completion is what makes the job finished, so it is what triggers the
     # chat cleanup.
     submitted_task_id: str = ""
+    # Every semantic repair keeps the same logical collection member/job id,
+    # but produces a fresh image/GLB generation.  The revision also scopes
+    # Telegram auto-submit idempotency so an earlier bad result cannot block
+    # the corrected one from entering conversion.
+    artifact_revision: int = 0
+    superseded_task_ids: List[str] = Field(default_factory=list)
+    quality_repair_reason: str = ""
     stage: str = CHARGEN_STAGE_FLUX
     flux_task_id: str = ""
     flux_task_id_b: str = ""
@@ -183,7 +251,20 @@ class CharacterGenJob(BaseModel):
     isolated_url_b: str = ""
     chosen_variant: str = ""
     hunyuan_task_id: str = ""
+    # Stable for one idempotent worker submission, regenerated only after a
+    # terminal quality rejection so the retry is not byte-for-byte identical.
+    hunyuan_seed: int = 0
     hunyuan_worker: str = ""
+    # Persisted before generate-3d POST so a lost response is replayed to the
+    # exact endpoint even if the mutable worker registry changes its name/url
+    # mapping while the request outcome is ambiguous.
+    hunyuan_worker_url: str = ""
+    hunyuan_workload_request_id: str = ""
+    hunyuan_workload_lease_id: str = ""
+    hunyuan_workload_physical_resource_id: str = ""
+    hunyuan_workload_node_id: str = ""
+    hunyuan_workload_lease_state: str = ""
+    hunyuan_workload_heartbeat_at: float = 0
     # A worker that cannot DNS-resolve our owned image URL is temporarily
     # skipped for this job; otherwise the least-loaded picker selects the same
     # broken box on every automatic retry.
@@ -219,6 +300,8 @@ class CharacterGenJob(BaseModel):
     image_url: str = ""       # full t_pose render
     isolated_url: str = ""    # alpha-isolated character
     glb_url: str = ""
+    glb_quality_report: Dict[str, Any] = Field(default_factory=dict)
+    glb_quality_rejection_count: int = 0
     video_url: str = ""
     error: str = ""
     created_at: float = Field(default_factory=time.time)
@@ -243,6 +326,9 @@ class CharacterGenJob(BaseModel):
             "collection_size": self.collection_size or None,
             "collection_member_title": self.collection_member_title or None,
             "submitted_task_id": self.submitted_task_id or None,
+            "artifact_revision": int(self.artifact_revision or 0),
+            "superseded_task_ids": list(self.superseded_task_ids or []),
+            "quality_repair_reason": self.quality_repair_reason or None,
             "prompt_b": self.prompt_b or None,
             "image_url": self.image_url or None,
             "isolated_url": self.isolated_url or None,
@@ -250,6 +336,10 @@ class CharacterGenJob(BaseModel):
             "isolated_url_b": self.isolated_url_b or None,
             "chosen_variant": self.chosen_variant or None,
             "glb_url": self.glb_url or None,
+            "glb_quality_report": dict(self.glb_quality_report or {}),
+            "glb_quality_rejection_count": int(
+                self.glb_quality_rejection_count or 0
+            ),
             "video_url": self.video_url or None,
             "error": self.error or None,
             "warning": self.warning or None,
@@ -257,6 +347,7 @@ class CharacterGenJob(BaseModel):
             "attempts": dict(self.attempts or {}),
             "retry_at": self.retry_at or None,
             "last_error": self.last_error or None,
+            "hunyuan_seed": int(self.hunyuan_seed or 0) or None,
             "hunyuan_worker_cooldowns": dict(self.hunyuan_worker_cooldowns or {}),
             "telegram_chat_id": self.telegram_chat_id or None,
             "telegram_message_id": self.telegram_message_id or None,
