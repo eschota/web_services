@@ -510,3 +510,87 @@ async def api_ai_status(task_id: str):
     result = _public_status(task_id, DEFAULT_MODEL_ID, raw)
     result["node_string"] = node_key
     return result
+
+class ImageRequest(BaseModel):
+    prompt: str = Field(..., description="What to draw")
+    image_url: Optional[str] = Field(None, description="Reference image URL")
+    image_base64: Optional[str] = Field(None, description="Reference image, inline")
+    wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+
+# Renderfin runs on the same host and owns the image farm; the public service
+# is a thin typed face over it so /image looks like every other service.
+RENDERFIN_BASE = os.getenv("RENDERFIN_INTERNAL_URL", "http://127.0.0.1:8210").rstrip("/")
+
+
+@router.get("/api/image")
+async def api_image_docs():
+    """GET mirror documenting the POST image endpoint."""
+    return {
+        "status_string": "ok",
+        "method_string": "POST",
+        "url_string": "/api/image",
+        "required_fields_array": ["prompt"],
+        "optional_fields_array": ["image_url", "image_base64", "wait_seconds"],
+        "produces_string": "image",
+        "example_request_object": {"prompt": "a black lamp post on magenta", "wait_seconds": 120},
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/image")
+async def api_image(body: ImageRequest):
+    """Prompt (and optionally a reference picture) into a generated image."""
+    prompt = _validate_prompt(body.prompt)
+    async with httpx.AsyncClient() as client:
+        reference = str(body.image_url or "").strip()
+        if not reference and body.image_base64:
+            reference = await _publish_inline_image(
+                client, _decode_inline_image(body.image_base64)
+            )
+        payload: Dict[str, object] = {"prompt": prompt}
+        if reference:
+            payload["image_url"] = reference
+        try:
+            response = await client.post(
+                RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
+            )
+        except Exception:
+            logger.exception("Renderfin did not accept an image request")
+            raise HTTPException(status_code=502, detail={
+                "error_string": "image_service_unreachable",
+                "message_string": "The image farm did not answer"}) from None
+        if response.status_code not in (200, 202):
+            raise HTTPException(status_code=502, detail={
+                "error_string": "image_service_rejected",
+                "message_string": f"Image farm answered HTTP {response.status_code}"})
+        accepted = response.json() or {}
+        output_url = str(accepted.get("output_url") or "").strip()
+        task_id = str(accepted.get("task_id") or "").strip()
+        if not output_url:
+            raise HTTPException(status_code=502, detail={
+                "error_string": "image_service_no_output",
+                "message_string": "Image farm accepted the request without an output URL"})
+        # Renderfin publishes the destination URL up front and fills it in when
+        # the render lands, so readiness is the file appearing, not a status row.
+        ready = False
+        if body.wait_seconds and body.wait_seconds > 0:
+            deadline = time.monotonic() + min(float(body.wait_seconds), MAX_WAIT_SECONDS)
+            while time.monotonic() < deadline:
+                await asyncio.sleep(3)
+                try:
+                    head = await client.head(output_url, timeout=15.0)
+                    if head.status_code == 200:
+                        ready = True
+                        break
+                except Exception:
+                    continue
+        return {
+            "success_bool": True,
+            "task_id_string": task_id,
+            "status_string": "completed" if ready else "pending",
+            "finished_bool": ready,
+            "image_url_string": output_url,
+            "poll_url_string": output_url,
+            "server_time_unix_int": int(time.time()),
+        }

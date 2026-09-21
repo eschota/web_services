@@ -15,6 +15,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="/static/js/ai-entities.js"></script>
     <style>
         .ai-page {
             background:
@@ -126,7 +127,10 @@
             <span class="ai-badge">No third-party API</span>
             <span class="ai-badge">Reads screenshots and text</span>
         </div>
+        <nav id="service-nav"></nav>
     </div>
+
+    <div id="received"></div>
 
     <div class="ai-grid">
         <div class="ai-card">
@@ -163,6 +167,7 @@
             <h2>Answer</h2>
             <div class="answer placeholder muted" id="answer">The answer will appear here.</div>
             <div class="meta" id="meta"></div>
+            <div id="handoff"></div>
         </div>
     </div>
 
@@ -192,6 +197,9 @@ const metaBox = document.getElementById('meta');
 const goButton = document.getElementById('go');
 const modelSelect = document.getElementById('model');
 let imageDataUrl = null;
+// A picture handed over from another service arrives as a URL, which the
+// API takes directly; only a local file has to be inlined.
+let imageUrl = null;
 
 fetch('/api/ai/models').then(r => r.json()).then(data => {
     window.__models = data.models_array || [];
@@ -221,6 +229,7 @@ function showImage(file) {
     const reader = new FileReader();
     reader.onload = () => {
         imageDataUrl = reader.result;
+        imageUrl = null;
         preview.src = imageDataUrl;
         preview.hidden = false;
         drop.querySelectorAll('div, small').forEach(el => { if (el !== preview) el.style.display = 'none'; });
@@ -254,8 +263,29 @@ function describeModel() {
 }
 modelSelect.addEventListener('change', describeModel);
 
+
+/* ---- typed entities: nav, what arrived, where the answer can go ---- */
+const SERVICE_ID = 'vision';
+AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
+
+const incoming = AIEntities.take(SERVICE_ID);
+if (incoming) {
+    AIEntities.renderReceived(document.getElementById('received'), incoming);
+    if (incoming.type === AIEntities.IMAGE) {
+        imageUrl = incoming.value;
+        imageDataUrl = null;
+        preview.src = incoming.value;
+        preview.hidden = false;
+        drop.querySelectorAll('div, small').forEach(el => {
+            if (el !== preview) el.style.display = 'none';
+        });
+    } else if (incoming.type === AIEntities.TEXT) {
+        document.getElementById('prompt').value = incoming.value;
+    }
+}
+
 goButton.addEventListener('click', async () => {
-    if (!imageDataUrl) { alert('Add an image first.'); return; }
+    if (!imageDataUrl && !imageUrl) { alert('Add an image first.'); return; }
     const prompt = document.getElementById('prompt').value.trim();
     if (!prompt) { alert('Ask a question about the image.'); return; }
 
@@ -268,13 +298,12 @@ goButton.addEventListener('click', async () => {
         const response = await fetch('/api/vision', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            body: JSON.stringify(Object.assign({
                 prompt: prompt,
-                image_base64: imageDataUrl,
                 model: modelSelect.value,
                 max_output_tokens: parseInt(document.getElementById('tokens').value, 10) || 1024,
                 wait_seconds: 180
-            })
+            }, imageUrl ? { image_url: imageUrl } : { image_base64: imageDataUrl }))
         });
         const data = await response.json();
         if (!response.ok) {
@@ -295,6 +324,14 @@ goButton.addEventListener('click', async () => {
         } else {
             answerBox.className = 'answer';
             answerBox.textContent = result.answer_string || '(empty answer)';
+        }
+        const answer = AIEntities.entity(AIEntities.TEXT, result.answer_string || '', {
+            label: 'answer', origin: { service: SERVICE_ID, task_id: result.task_id_string }
+        });
+        if (answer.value) {
+            AIEntities.remember(answer);
+            AIEntities.renderHandoff(document.getElementById('handoff'), answer,
+                                     { from: SERVICE_ID }).catch(() => {});
         }
         metaBox.textContent = '';
         [['node', result.node_string], ['model', result.model_string],

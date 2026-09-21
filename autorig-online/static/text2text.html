@@ -15,6 +15,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="/static/js/ai-entities.js"></script>
     <style>
         .ai-page {
             background:
@@ -120,7 +121,10 @@
             <span class="ai-badge">Reasoning model</span>
             <span class="ai-badge">262K context</span>
         </div>
+        <nav id="service-nav"></nav>
     </div>
+
+    <div id="received"></div>
 
     <div class="ai-grid">
         <div class="ai-card">
@@ -157,6 +161,7 @@
             <div class="think-toggle" id="think-toggle">Show the model's thinking ▾</div>
             <div class="think" id="think"></div>
             <div class="meta" id="meta"></div>
+            <div id="handoff"></div>
         </div>
     </div>
 
@@ -220,6 +225,17 @@ function describeModel() {
 }
 modelSelect.addEventListener('change', describeModel);
 
+
+/* ---- typed entities: nav, what arrived, where the answer can go ---- */
+const SERVICE_ID = 'text';
+AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
+
+const incoming = AIEntities.take(SERVICE_ID);
+if (incoming) {
+    AIEntities.renderReceived(document.getElementById('received'), incoming);
+    if (incoming.type === AIEntities.TEXT) promptBox.value = incoming.value;
+}
+
 goButton.addEventListener('click', async () => {
     const prompt = promptBox.value.trim();
     if (!prompt) { alert('Write a prompt first.'); return; }
@@ -264,6 +280,14 @@ goButton.addEventListener('click', async () => {
         if (result.reasoning_string) {
             thinkBox.textContent = result.reasoning_string;
             thinkToggle.style.display = 'block';
+        }
+        const answer = AIEntities.entity(AIEntities.TEXT, result.answer_string || '', {
+            label: 'answer', origin: { service: SERVICE_ID, task_id: result.task_id_string }
+        });
+        if (answer.value) {
+            AIEntities.remember(answer);
+            AIEntities.renderHandoff(document.getElementById('handoff'), answer,
+                                     { from: SERVICE_ID }).catch(() => {});
         }
         [['node', result.node_string], ['model', result.model_string],
          ['took', result.elapsed_seconds_float + ' s']].forEach(([k, v]) => {

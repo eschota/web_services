@@ -223,6 +223,7 @@ from animation_correction_exports import (
 import re
 import httpx
 
+from ai_services import router as ai_services_router
 from ai_vision_api import router as ai_vision_router
 from namecheap_remote_api import router as namecheap_remote_router
 from animal_animation_library import (
@@ -1310,6 +1311,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
 
+app.include_router(ai_services_router)
 app.include_router(ai_vision_router)
 app.include_router(namecheap_remote_router)
 
@@ -16837,6 +16839,18 @@ async def vision_page():
 async def text2text_page():
     """Text prompt playground served by the farm's own GPUs."""
     return _static_html_response("text2text.html")
+
+
+@app.get("/text")
+async def text_page():
+    """Canonical path for the text service; /text2text is the older name."""
+    return _static_html_response("text2text.html")
+
+
+@app.get("/image")
+async def image_page():
+    """Prompt to picture, rendered on the farm."""
+    return _static_html_response("image.html")
 
 
 @app.get("/rig-animals", include_in_schema=False)

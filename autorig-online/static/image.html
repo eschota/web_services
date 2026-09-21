@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image — Generate a Picture on Our Own GPUs | AutoRig</title>
+    <meta name="description" content="Describe a picture and get it rendered on AutoRig's own GPU farm. Hand the result straight to Vision, Video or 3D.">
+    <link rel="canonical" href="https://autorig.online/image">
+    <meta property="og:title" content="Image — Generate a Picture on Our Own GPUs">
+    <meta property="og:description" content="Describe a picture and get it rendered on AutoRig's own GPU farm.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/image">
+    <meta property="og:site_name" content="AutoRig.online">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="/static/js/ai-entities.js"></script>
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 12% 8%, rgba(236, 72, 153, 0.18), transparent 34%),
+                radial-gradient(circle at 88% 12%, rgba(123, 92, 255, 0.18), transparent 38%),
+                linear-gradient(180deg, #111226 0%, #15162b 48%, #10111d 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .ai-page, .ai-page input, .ai-page textarea, .ai-page select, .ai-page button {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+        .ai-wrap { max-width: 1180px; margin: 0 auto; padding: 48px 20px 80px; }
+        .ai-head { text-align: center; margin-bottom: 30px; }
+        .ai-head h1 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 12px; line-height: 1.15; }
+        .ai-head p { color: var(--text-secondary, #9aa0b5); max-width: 640px; margin: 0 auto; font-size: 16px; }
+
+        .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+        @media (max-width: 900px) { .ai-grid { grid-template-columns: 1fr; } }
+
+        .ai-card {
+            background: rgba(18, 19, 38, .72);
+            border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 16px; padding: 22px; backdrop-filter: blur(8px);
+        }
+        .ai-card h2 { font-size: 16px; margin: 0 0 16px; letter-spacing: .02em; }
+
+        .field { margin-top: 16px; }
+        .field:first-of-type { margin-top: 0; }
+        .field label { display: block; font-size: 13px; margin-bottom: 6px; color: var(--text-secondary, #9aa0b5); }
+        .field textarea, .field input {
+            width: 100%; box-sizing: border-box;
+            background: rgba(10, 11, 22, .8);
+            border: 1px solid rgba(255, 255, 255, .12);
+            border-radius: 10px; color: var(--text-primary, #eef);
+            padding: 11px 13px; font: inherit; font-size: 14px;
+        }
+        .field textarea { min-height: 150px; resize: vertical; }
+        .field textarea:focus, .field input:focus {
+            outline: none; border-color: #ec4899; box-shadow: 0 0 0 3px rgba(236, 72, 153, .18);
+        }
+
+        .ref { margin-top: 16px; display: none; }
+        .ref img { max-width: 100%; max-height: 180px; border-radius: 10px; display: block; }
+        .ref .drop-ref {
+            border: 2px dashed rgba(236, 72, 153, .4); border-radius: 12px;
+            padding: 14px; text-align: center; cursor: pointer; font-size: 13px;
+            color: var(--text-secondary, #9aa0b5);
+        }
+
+        .go {
+            width: 100%; margin-top: 18px; padding: 13px 18px;
+            border: 0; border-radius: 11px; cursor: pointer;
+            background: linear-gradient(135deg, #ec4899, #7b5cff);
+            color: #fff; font-size: 15px; font-weight: 600;
+        }
+        .go:disabled { opacity: .55; cursor: not-allowed; }
+
+        .result { min-height: 300px; display: flex; align-items: center; justify-content: center; }
+        .result img { max-width: 100%; border-radius: 12px; display: block; }
+        .muted { color: var(--text-secondary, #9aa0b5); font-size: 14px; }
+        .err { color: #ff8a9b; }
+        .meta { margin-top: 14px; font-size: 12px; color: var(--text-secondary, #9aa0b5); }
+        .spin {
+            display: inline-block; width: 14px; height: 14px; vertical-align: -2px;
+            border: 2px solid rgba(255, 255, 255, .25); border-top-color: #fff;
+            border-radius: 50%; animation: sp .8s linear infinite; margin-right: 8px;
+        }
+        @keyframes sp { to { transform: rotate(360deg); } }
+
+        .api { margin-top: 34px; }
+        .api pre {
+            background: rgba(8, 9, 18, .9); border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 12px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5;
+        }
+        .api code { color: #9ad8ff; }
+        .api p { color: var(--text-secondary, #9aa0b5); font-size: 14px; }
+    </style>
+</head>
+<body class="ai-page">
+<div class="ai-wrap">
+    <div class="ai-head">
+        <h1>Image</h1>
+        <p>Describe a picture and the farm renders it. The result carries on to
+           Vision, Video or 3D without downloading anything.</p>
+        <nav id="service-nav"></nav>
+    </div>
+
+    <div id="received"></div>
+
+    <div class="ai-grid">
+        <div class="ai-card">
+            <h2>What to draw</h2>
+            <div class="field">
+                <label for="prompt">Prompt</label>
+                <textarea id="prompt" placeholder="A black ornate lamp post on a magenta background, studio lighting"></textarea>
+            </div>
+
+            <div class="ref" id="ref">
+                <label class="muted">Reference image</label>
+                <img id="ref-img" alt="">
+            </div>
+
+            <button class="go" id="go">Render it</button>
+        </div>
+
+        <div class="ai-card">
+            <h2>Result</h2>
+            <div class="result" id="result"><span class="muted">The picture will appear here.</span></div>
+            <div class="meta" id="meta"></div>
+            <div id="handoff"></div>
+        </div>
+    </div>
+
+    <div class="ai-card api">
+        <h2>Use it from your own code</h2>
+        <pre><code>curl -X POST https://autorig.online/api/image \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "a black lamp post on magenta", "wait_seconds": 120}'</code></pre>
+        <p>Returns <code>image_url_string</code>. Service catalogue:
+           <code>GET /api/ai/services</code></p>
+    </div>
+</div>
+
+<script>
+const SERVICE_ID = 'image';
+const resultBox = document.getElementById('result');
+const metaBox = document.getElementById('meta');
+const goButton = document.getElementById('go');
+const promptBox = document.getElementById('prompt');
+let referenceUrl = null;
+
+AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
+
+const incoming = AIEntities.take(SERVICE_ID);
+if (incoming) {
+    AIEntities.renderReceived(document.getElementById('received'), incoming);
+    if (incoming.type === AIEntities.TEXT) {
+        promptBox.value = incoming.value;
+    } else if (incoming.type === AIEntities.IMAGE) {
+        referenceUrl = incoming.value;
+        document.getElementById('ref').style.display = 'block';
+        document.getElementById('ref-img').src = incoming.value;
+    }
+}
+
+function setBusy(busy) {
+    goButton.disabled = busy;
+    goButton.innerHTML = busy ? '<span class="spin"></span>Rendering…' : 'Render it';
+}
+
+goButton.addEventListener('click', async () => {
+    const prompt = promptBox.value.trim();
+    if (!prompt) { alert('Describe the picture first.'); return; }
+
+    resultBox.innerHTML = '<span class="muted">Sending to the farm…</span>';
+    metaBox.textContent = '';
+    document.getElementById('handoff').innerHTML = '';
+    setBusy(true);
+
+    try {
+        // No server-side wait: the farm publishes the destination URL up front,
+        // so the page polls it and can say what is happening meanwhile.
+        const body = { prompt: prompt };
+        if (referenceUrl) body.image_url = referenceUrl;
+        const response = await fetch('/api/image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data.detail || {};
+            throw new Error(detail.message_string || detail.error_string || ('HTTP ' + response.status));
+        }
+        const url = data.image_url_string;
+        // The farm publishes the destination URL before the render lands, so a
+        // pending result is polled by asking for the picture itself.
+        if (!data.finished_bool) {
+            const started = Date.now();
+            for (let i = 0; i < 75; i++) {
+                const seconds = Math.round((Date.now() - started) / 1000);
+                resultBox.innerHTML = '<span class="muted">Rendering on the farm… ' +
+                                      seconds + ' s</span>';
+                await new Promise(r => setTimeout(r, 4000));
+                const probe = await fetch(url, { method: 'HEAD' }).catch(() => null);
+                if (probe && probe.ok) break;
+            }
+        }
+        const img = document.createElement('img');
+        img.src = url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
+        img.alt = prompt;
+        resultBox.innerHTML = '';
+        resultBox.appendChild(img);
+        metaBox.textContent = 'task: ' + (data.task_id_string || '—');
+
+        const picture = AIEntities.entity(AIEntities.IMAGE, url, {
+            mime: 'image/png', label: prompt.slice(0, 60),
+            origin: { service: SERVICE_ID, task_id: data.task_id_string }
+        });
+        AIEntities.remember(picture);
+        AIEntities.renderHandoff(document.getElementById('handoff'), picture,
+                                 { from: SERVICE_ID }).catch(() => {});
+    } catch (err) {
+        resultBox.innerHTML = '';
+        const msg = document.createElement('span');
+        msg.className = 'err';
+        msg.textContent = String(err.message || err);
+        resultBox.appendChild(msg);
+    } finally {
+        setBusy(false);
+    }
+});
+</script>
+</body>
+</html>
