@@ -68,6 +68,10 @@ if ((Test-Path "$root\ComfyUI\models\diffusion_models\flux-2-klein-4b.safetensor
     (Test-Path "$root\ComfyUI\models\text_encoders\qwen_3_4b_fp4_flux2.safetensors") -and
     (Test-Path "$root\ComfyUI\models\vae\flux2-vae.safetensors")) { $workflows += 'gen_image_flux2_klein.json' }
 if (Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.safetensors") { $workflows += 'gen_image_sdxl.json' }
+if ((Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.safetensors") -and
+    (Test-Path "$root\ComfyUI\models\controlnet\xinsir-controlnet-union-sdxl-1.0.safetensors")) {
+    $workflows += @('gen_image_sdxl_control_pose.json','gen_image_sdxl_control_depth.json','gen_image_sdxl_control_canny.json')
+}
 if (-not $workflows.Count) { throw 'No complete current model set is installed' }
 # info preserves worker history, unlike add_server.
 Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;basic_auth=$false}

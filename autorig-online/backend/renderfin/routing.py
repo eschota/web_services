@@ -48,6 +48,8 @@ def scheduling_token(prompt: RenderPrompt) -> str:
     new here and gets its own token so it only lands on capable workers (4090).
     """
     ptype = (prompt.type or "").strip().lower()
+    if ptype in {"control_pose", "control_depth", "control_canny"}:
+        return "gen_" + ptype + ".json"
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
     if is_image_request(prompt):
@@ -74,13 +76,15 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
     image_url = (prompt.image_url or "").strip()
     has_aspect_ratio = (prompt.aspect_ratio or 0) > 0
 
+    if ptype in {"control_pose", "control_depth", "control_canny"}:
+        return "gen_" + ptype + ".json", None
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D, None
     if ptype == "z_depth":
         return WORKFLOW_Z_DEPTH, None
     has_explicit_size = prompt.main_size_width > 0 and prompt.main_size_height > 0
-    if ptype in ("t_pose", "t_poses") and not has_aspect_ratio and not has_explicit_size:
-        return WORKFLOW_T_POSE, (1024, 1024)
+    if ptype in ("t_pose", "t_poses") and not has_aspect_ratio:
+        return WORKFLOW_T_POSE, None if has_explicit_size else (1024, 1024)
     if ptype == "open_pose":
         return WORKFLOW_OPEN_POSE, None
     if ptype == "inpaint":

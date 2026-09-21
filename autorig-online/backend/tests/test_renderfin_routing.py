@@ -155,7 +155,7 @@ class ClampTests(unittest.TestCase):
 
 class PromptModelTests(unittest.TestCase):
     def test_frame_count_clamped(self):
-        self.assertEqual(RenderPrompt(frame_count=999).frame_count, 300)
+        self.assertEqual(RenderPrompt(frame_count=999).frame_count, 400)
         self.assertEqual(RenderPrompt(frame_count=-5).frame_count, 0)
 
     def test_user_name_sanitized(self):
@@ -165,3 +165,12 @@ class PromptModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ControlMapRoutingTests(unittest.TestCase):
+    def test_each_extraction_channel_has_its_own_capability(self):
+        for channel in ("pose", "depth", "canny"):
+            p = RenderPrompt(type="control_" + channel, image_url="https://example.org/ref.png")
+            expected = "gen_control_" + channel + ".json"
+            self.assertEqual(scheduling_token(p), expected)
+            self.assertEqual(resolve_workflow_file(p), (expected, None))
