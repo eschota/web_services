@@ -78,6 +78,12 @@ async def api_controlnet_docs():
 
 @router.post("/api/controlnet")
 async def api_controlnet(body: ControlNetRequest):
+    import ai_request_cache
+    return await ai_request_cache.run_cached("controlnet", body.model_dump(exclude_none=True),
+        lambda: _uncached_api_controlnet(body), namespace="control-maps-20260922-v1")
+
+
+async def _uncached_api_controlnet(body: ControlNetRequest):
     async with httpx.AsyncClient() as client:
         source = str(body.image_url or "").strip()
         if not source and body.image_base64:

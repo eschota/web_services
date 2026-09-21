@@ -168,11 +168,12 @@
     const outputs = entry.outputs || [];
     const id = editor.addNode(
       serviceId, inputs.length, outputs.length, x, y,
-      'ainode svc-' + serviceId, { service: serviceId }, serviceNodeHtml(entry)
+      'ainode svc-' + serviceId, { service: serviceId }, serviceNodeHtml(Object.assign({}, entry, {title: (params && params._label) || entry.title}))
     );
     setMeta(id, {
       kind: KIND_SERVICE,
       service: serviceId,
+      label: (params && params._label) || '',
       inFields: inputs.map(i => i.field),
       outFields: outputs.map(o => o.field)
     });
@@ -389,6 +390,7 @@
   function readParams(id) {
     const element = nodeElement(id);
     const values = {};
+    if (meta(id)?.label) values._label = meta(id).label;
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
       const raw = control.value;
@@ -601,6 +603,7 @@
     const body = {};
     if (serviceId.startsWith('control_')) body.channel = serviceId.slice('control_'.length);
     Object.keys(params || {}).forEach(name => {
+      if (name.startsWith('_')) return;
       const value = params[name];
       // A zero or an empty string here means "leave the workflow's own value",
       // so it is left out rather than sent as an override.
@@ -670,7 +673,7 @@
         }
         throw error;
       }
-      state.textContent = 'done';
+      state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);
       showResult(outBox, runner.type, value);
@@ -877,7 +880,6 @@
 
   /** A run needs a link to publish its progress to, so one is made up front. */
   async function ensureSaved() {
-    if (graphId) return;
     try {
       const response = await fetch('/api/ai/graphs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1012,22 +1014,12 @@
    * of saved graphs and the pictures and clips they produced.
    */
   async function purgeCache() {
-    if (!window.confirm('Delete every saved composition and the files they produced? This cannot be undone.')) return;
     try {
-      const response = await fetch('/api/ai/cache', { method: 'DELETE' });
+      const response = await fetch('/api/ai/request-cache', {method:'DELETE'});
       const data = await response.json();
-      if (!response.ok) {
-        toast((data.detail || {}).message_string || 'The cache was not cleared.');
-        return;
-      }
-      toast(`Cleared ${data.graphs_removed_int} composition(s) and `
-            + `${data.files_removed_int} file(s), ${data.bytes_freed_int} bytes.`);
-      graphId = null;
-      runState.clear();
-      history.replaceState(null, '', '/nodes');
-    } catch (error) {
-      toast('The cache was not cleared: ' + error.message);
-    }
+      if (!response.ok) throw new Error('The request cache could not be cleared');
+      toast(`Cleared ${data.entries_removed_int} cached request(s). Render will compute fresh results.`);
+    } catch (error) { toast(error.message); }
   }
 
   /* -------------------------------------------------------- load and save */
@@ -1083,7 +1075,7 @@
     accepted[runner.field] = record.value || '';
     try {
       const value = await runner.finish(accepted, runner, taskStateReporter(state, task, accepted));
-      state.textContent = 'done';
+      state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);
       showResult(outBox, runner.type, value);

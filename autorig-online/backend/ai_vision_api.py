@@ -47,7 +47,7 @@ async def api_render_task_status(task_id: str):
     raw = str(row.get("status_string") or row.get("status") or "").lower()
     state = {"pending": "queued", "rendering": "rendering", "done": "completed",
              "error": "failed", "cancelled": "cancelled"}.get(raw, raw or "unknown")
-    return {"success_bool": True, "task_id_string": task_id, "status_string": state,
+    result = {"success_bool": True, "task_id_string": task_id, "status_string": state,
             "finished_bool": state in {"completed", "failed", "cancelled"},
             "node_string": row.get("render_server_name") or "",
             "workflow_string": row.get("workflow_file") or row.get("workflow") or "",
@@ -55,6 +55,17 @@ async def api_render_task_status(task_id: str):
             "error_string": row.get("error_string") or row.get("error") or "",
             "started_at_unix_float": row.get("started_at") or 0,
             "created_at_unix_float": row.get("created_at") or 0}
+    import ai_request_cache
+    await ai_request_cache.anote_result(task_id, state, result)
+    return result
+
+
+@router.delete("/api/ai/request-cache")
+async def api_clear_request_cache():
+    import ai_request_cache
+    count = await asyncio.to_thread(ai_request_cache.clear)
+    return {"success_bool": True, "entries_removed_int": count}
+
 
 # One catalogue entry per model a caller may ask for. `worker_model` is empty
 # while a node serves exactly one local model; it becomes the selector once a
@@ -716,6 +727,27 @@ async def api_vision_docs():
 
 @router.post("/api/vision")
 async def api_vision(request: Request, body: VisionRequest):
+    import ai_request_cache
+    payload = body.model_dump(exclude_none=True)
+    if "vision" in ("vision", "text"):
+        model = _model_entry(body.model)
+        payload["model"] = model["id"]
+        payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
+    import hashlib
+    if "vision" in ("vision", "text"):
+        profile = _model_entry(body.model)
+    else:
+        import ai_model_catalogue
+        selected = {str(body.checkpoint or ""), str(body.lora or "")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+                   for entry in ai_model_catalogue.entries()
+                   if entry.get("file") in selected or "vision" in (entry.get("default_for_services") or [])]
+    payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
+    return await ai_request_cache.run_cached("vision", payload,
+        lambda: _uncached_api_vision(request, body), namespace="ai-workflows-20260922-v1")
+
+
+async def _uncached_api_vision(request: Request, body: VisionRequest):
     model = _model_entry(body.model)
     prompt = _validate_prompt(body.prompt)
     if not body.image_url and not body.image_base64:
@@ -750,6 +782,27 @@ async def api_text2text_docs():
 
 @router.post("/api/text2text")
 async def api_text2text(request: Request, body: TextRequest):
+    import ai_request_cache
+    payload = body.model_dump(exclude_none=True)
+    if "text" in ("vision", "text"):
+        model = _model_entry(body.model)
+        payload["model"] = model["id"]
+        payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
+    import hashlib
+    if "text" in ("vision", "text"):
+        profile = _model_entry(body.model)
+    else:
+        import ai_model_catalogue
+        selected = {str(body.checkpoint or ""), str(body.lora or "")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+                   for entry in ai_model_catalogue.entries()
+                   if entry.get("file") in selected or "text" in (entry.get("default_for_services") or [])]
+    payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
+    return await ai_request_cache.run_cached("text", payload,
+        lambda: _uncached_api_text2text(request, body), namespace="ai-workflows-20260922-v1")
+
+
+async def _uncached_api_text2text(request: Request, body: TextRequest):
     model = _model_entry(body.model)
     payload: Dict[str, object] = {"prompt": _validate_prompt(body.combined_prompt())}
     payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
@@ -774,6 +827,8 @@ async def api_ai_status(task_id: str):
     result = _public_status(task_id, DEFAULT_MODEL_ID, raw,
                             "vision" if mode == "vision" else "text")
     result["node_string"] = node_key
+    import ai_request_cache
+    await ai_request_cache.anote_result(task_id, str(result.get("status_string") or ""), result)
     return result
 
 # The knobs below are the ones Renderfin's RenderPrompt actually carries. They
@@ -839,6 +894,27 @@ async def api_image_docs():
 
 @router.post("/api/image")
 async def api_image(body: ImageRequest):
+    import ai_request_cache
+    payload = body.model_dump(exclude_none=True)
+    if "image" in ("vision", "text"):
+        model = _model_entry(body.model)
+        payload["model"] = model["id"]
+        payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
+    import hashlib
+    if "image" in ("vision", "text"):
+        profile = _model_entry(body.model)
+    else:
+        import ai_model_catalogue
+        selected = {str(body.checkpoint or ""), str(body.lora or "")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+                   for entry in ai_model_catalogue.entries()
+                   if entry.get("file") in selected or "image" in (entry.get("default_for_services") or [])]
+    payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
+    return await ai_request_cache.run_cached("image", payload,
+        lambda: _uncached_api_image(body), namespace="ai-workflows-20260922-v1")
+
+
+async def _uncached_api_image(body: ImageRequest):
     """Prompt (and optionally a reference picture) into a generated image."""
     prompt = _validate_prompt(body.prompt)
     controls = [(name, str(value or "").strip()) for name, value in (
@@ -1010,6 +1086,27 @@ async def api_video_docs():
 
 @router.post("/api/video")
 async def api_video(body: VideoRequest):
+    import ai_request_cache
+    payload = body.model_dump(exclude_none=True)
+    if "video" in ("vision", "text"):
+        model = _model_entry(body.model)
+        payload["model"] = model["id"]
+        payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
+    import hashlib
+    if "video" in ("vision", "text"):
+        profile = _model_entry(body.model)
+    else:
+        import ai_model_catalogue
+        selected = {str(body.checkpoint or ""), str(body.lora or "")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+                   for entry in ai_model_catalogue.entries()
+                   if entry.get("file") in selected or "video" in (entry.get("default_for_services") or [])]
+    payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
+    return await ai_request_cache.run_cached("video", payload,
+        lambda: _uncached_api_video(body), namespace="ai-workflows-20260922-v1")
+
+
+async def _uncached_api_video(body: VideoRequest):
     """Animate a frame into a short clip on the render farm.
 
     Renderfin treats a request with an image and no `type` as an animation, so

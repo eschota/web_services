@@ -1,0 +1,972 @@
+{
+  "name": "All image pipelines - one image - 27 comparisons",
+  "nodes": [
+    {
+      "id": "source",
+      "kind": "input",
+      "entity_type": "image",
+      "value": "",
+      "x": 30,
+      "y": 80
+    },
+    {
+      "id": "instructions",
+      "kind": "input",
+      "entity_type": "text",
+      "value": "Describe the visible image as a precise English image-generation prompt. Preserve the subject count, poses, clothing, setting, composition, colors and lighting. Do not invent objects or identify people. Return only the prompt, up to 180 words.",
+      "x": 30,
+      "y": 650
+    },
+    {
+      "id": "vision",
+      "kind": "service",
+      "service": "vision",
+      "params": {
+        "model": "qwen35-9b-uncensored",
+        "max_output_tokens": 500,
+        "_label": "Vision - shared prompt"
+      },
+      "x": 400,
+      "y": 150
+    },
+    {
+      "id": "control_pose",
+      "kind": "service",
+      "service": "control_pose",
+      "params": {
+        "_label": "ControlNet - pose"
+      },
+      "x": 800,
+      "y": 100
+    },
+    {
+      "id": "control_depth",
+      "kind": "service",
+      "service": "control_depth",
+      "params": {
+        "_label": "ControlNet - depth"
+      },
+      "x": 800,
+      "y": 660
+    },
+    {
+      "id": "control_canny",
+      "kind": "service",
+      "service": "control_canny",
+      "params": {
+        "_label": "ControlNet - canny"
+      },
+      "x": 800,
+      "y": 1220
+    },
+    {
+      "id": "flux2_text",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "flux-2-klein-4b.safetensors",
+        "lora": "",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "FLUX2 Klein - text"
+      },
+      "x": 1200,
+      "y": 80
+    },
+    {
+      "id": "flux2_reference",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "flux-2-klein-4b.safetensors",
+        "lora": "",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "FLUX2 Klein - reference"
+      },
+      "x": 1585,
+      "y": 80
+    },
+    {
+      "id": "pony_text",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "CyberRealisticPony_V18.0_F16.safetensors",
+        "lora": "",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Pony SDXL - text"
+      },
+      "x": 1200,
+      "y": 640
+    },
+    {
+      "id": "pony_reference",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "CyberRealisticPony_V18.0_F16.safetensors",
+        "lora": "",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Pony SDXL - reference"
+      },
+      "x": 1585,
+      "y": 640
+    },
+    {
+      "id": "pony_pose",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "CyberRealisticPony_V18.0_F16.safetensors",
+        "lora": "",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Pony SDXL - pose",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 1970,
+      "y": 640
+    },
+    {
+      "id": "pony_depth",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "CyberRealisticPony_V18.0_F16.safetensors",
+        "lora": "",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Pony SDXL - depth",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2355,
+      "y": 640
+    },
+    {
+      "id": "pony_canny",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "CyberRealisticPony_V18.0_F16.safetensors",
+        "lora": "",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Pony SDXL - canny",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2740,
+      "y": 640
+    },
+    {
+      "id": "lora_2_text",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "NSFW_master.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "NSFW Master - text"
+      },
+      "x": 1200,
+      "y": 1200
+    },
+    {
+      "id": "lora_2_pose",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "NSFW_master.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "NSFW Master - pose",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 1970,
+      "y": 1200
+    },
+    {
+      "id": "lora_2_depth",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "NSFW_master.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "NSFW Master - depth",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2355,
+      "y": 1200
+    },
+    {
+      "id": "lora_2_canny",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "NSFW_master.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "NSFW Master - canny",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2740,
+      "y": 1200
+    },
+    {
+      "id": "lora_3_text",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "flux_realism_lora.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Flux Realism - text"
+      },
+      "x": 1200,
+      "y": 1760
+    },
+    {
+      "id": "lora_3_pose",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "flux_realism_lora.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Flux Realism - pose",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 1970,
+      "y": 1760
+    },
+    {
+      "id": "lora_3_depth",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "flux_realism_lora.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Flux Realism - depth",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2355,
+      "y": 1760
+    },
+    {
+      "id": "lora_3_canny",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "flux_realism_lora.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Flux Realism - canny",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2740,
+      "y": 1760
+    },
+    {
+      "id": "lora_4_text",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "skin texture style v5.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Skin Texture - text"
+      },
+      "x": 1200,
+      "y": 2320
+    },
+    {
+      "id": "lora_4_pose",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "skin texture style v5.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Skin Texture - pose",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 1970,
+      "y": 2320
+    },
+    {
+      "id": "lora_4_depth",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "skin texture style v5.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Skin Texture - depth",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2355,
+      "y": 2320
+    },
+    {
+      "id": "lora_4_canny",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "skin texture style v5.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Skin Texture - canny",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2740,
+      "y": 2320
+    },
+    {
+      "id": "lora_5_text",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "FluxMythSharpL1nes.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Mythic Fantasy - text"
+      },
+      "x": 1200,
+      "y": 2880
+    },
+    {
+      "id": "lora_5_pose",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "FluxMythSharpL1nes.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Mythic Fantasy - pose",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 1970,
+      "y": 2880
+    },
+    {
+      "id": "lora_5_depth",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "FluxMythSharpL1nes.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Mythic Fantasy - depth",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2355,
+      "y": 2880
+    },
+    {
+      "id": "lora_5_canny",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "FluxMythSharpL1nes.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Mythic Fantasy - canny",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2740,
+      "y": 2880
+    },
+    {
+      "id": "lora_6_text",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "microbikiniv12_FLUX.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Micro Bikini - text"
+      },
+      "x": 1200,
+      "y": 3440
+    },
+    {
+      "id": "lora_6_pose",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "microbikiniv12_FLUX.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Micro Bikini - pose",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 1970,
+      "y": 3440
+    },
+    {
+      "id": "lora_6_depth",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "microbikiniv12_FLUX.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Micro Bikini - depth",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2355,
+      "y": 3440
+    },
+    {
+      "id": "lora_6_canny",
+      "kind": "service",
+      "service": "image",
+      "params": {
+        "checkpoint": "",
+        "lora": "microbikiniv12_FLUX.safetensors",
+        "width": 960,
+        "height": 540,
+        "seed": 20260922,
+        "steps": 0,
+        "cfg": 0,
+        "sampler": "",
+        "scheduler": "",
+        "lora_strength": 0,
+        "_label": "Micro Bikini - canny",
+        "control_strength": 0.8,
+        "control_start": 0,
+        "control_end": 1
+      },
+      "x": 2740,
+      "y": 3440
+    }
+  ],
+  "links": [
+    {
+      "from": "source",
+      "output": "value",
+      "to": "vision",
+      "input": "image"
+    },
+    {
+      "from": "instructions",
+      "output": "value",
+      "to": "vision",
+      "input": "prompt"
+    },
+    {
+      "from": "source",
+      "output": "value",
+      "to": "control_pose",
+      "input": "image"
+    },
+    {
+      "from": "source",
+      "output": "value",
+      "to": "control_depth",
+      "input": "image"
+    },
+    {
+      "from": "source",
+      "output": "value",
+      "to": "control_canny",
+      "input": "image"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "flux2_text",
+      "input": "prompt"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "flux2_reference",
+      "input": "prompt"
+    },
+    {
+      "from": "source",
+      "output": "value",
+      "to": "flux2_reference",
+      "input": "image"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "pony_text",
+      "input": "prompt"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "pony_reference",
+      "input": "prompt"
+    },
+    {
+      "from": "source",
+      "output": "value",
+      "to": "pony_reference",
+      "input": "image"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "pony_pose",
+      "input": "prompt"
+    },
+    {
+      "from": "control_pose",
+      "output": "image_url_string",
+      "to": "pony_pose",
+      "input": "control_pose"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "pony_depth",
+      "input": "prompt"
+    },
+    {
+      "from": "control_depth",
+      "output": "image_url_string",
+      "to": "pony_depth",
+      "input": "control_depth"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "pony_canny",
+      "input": "prompt"
+    },
+    {
+      "from": "control_canny",
+      "output": "image_url_string",
+      "to": "pony_canny",
+      "input": "control_canny"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_2_text",
+      "input": "prompt"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_2_pose",
+      "input": "prompt"
+    },
+    {
+      "from": "control_pose",
+      "output": "image_url_string",
+      "to": "lora_2_pose",
+      "input": "control_pose"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_2_depth",
+      "input": "prompt"
+    },
+    {
+      "from": "control_depth",
+      "output": "image_url_string",
+      "to": "lora_2_depth",
+      "input": "control_depth"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_2_canny",
+      "input": "prompt"
+    },
+    {
+      "from": "control_canny",
+      "output": "image_url_string",
+      "to": "lora_2_canny",
+      "input": "control_canny"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_3_text",
+      "input": "prompt"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_3_pose",
+      "input": "prompt"
+    },
+    {
+      "from": "control_pose",
+      "output": "image_url_string",
+      "to": "lora_3_pose",
+      "input": "control_pose"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_3_depth",
+      "input": "prompt"
+    },
+    {
+      "from": "control_depth",
+      "output": "image_url_string",
+      "to": "lora_3_depth",
+      "input": "control_depth"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_3_canny",
+      "input": "prompt"
+    },
+    {
+      "from": "control_canny",
+      "output": "image_url_string",
+      "to": "lora_3_canny",
+      "input": "control_canny"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_4_text",
+      "input": "prompt"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_4_pose",
+      "input": "prompt"
+    },
+    {
+      "from": "control_pose",
+      "output": "image_url_string",
+      "to": "lora_4_pose",
+      "input": "control_pose"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_4_depth",
+      "input": "prompt"
+    },
+    {
+      "from": "control_depth",
+      "output": "image_url_string",
+      "to": "lora_4_depth",
+      "input": "control_depth"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_4_canny",
+      "input": "prompt"
+    },
+    {
+      "from": "control_canny",
+      "output": "image_url_string",
+      "to": "lora_4_canny",
+      "input": "control_canny"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_5_text",
+      "input": "prompt"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_5_pose",
+      "input": "prompt"
+    },
+    {
+      "from": "control_pose",
+      "output": "image_url_string",
+      "to": "lora_5_pose",
+      "input": "control_pose"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_5_depth",
+      "input": "prompt"
+    },
+    {
+      "from": "control_depth",
+      "output": "image_url_string",
+      "to": "lora_5_depth",
+      "input": "control_depth"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_5_canny",
+      "input": "prompt"
+    },
+    {
+      "from": "control_canny",
+      "output": "image_url_string",
+      "to": "lora_5_canny",
+      "input": "control_canny"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_6_text",
+      "input": "prompt"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_6_pose",
+      "input": "prompt"
+    },
+    {
+      "from": "control_pose",
+      "output": "image_url_string",
+      "to": "lora_6_pose",
+      "input": "control_pose"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_6_depth",
+      "input": "prompt"
+    },
+    {
+      "from": "control_depth",
+      "output": "image_url_string",
+      "to": "lora_6_depth",
+      "input": "control_depth"
+    },
+    {
+      "from": "vision",
+      "output": "answer_string",
+      "to": "lora_6_canny",
+      "input": "prompt"
+    },
+    {
+      "from": "control_canny",
+      "output": "image_url_string",
+      "to": "lora_6_canny",
+      "input": "control_canny"
+    }
+  ],
+  "results": {}
+}
