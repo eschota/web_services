@@ -739,7 +739,7 @@ async def api_vision(request: Request, body: VisionRequest):
     else:
         import ai_model_catalogue
         selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
                    for entry in ai_model_catalogue.entries()
                    if entry.get("file") in selected or "vision" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
@@ -794,7 +794,7 @@ async def api_text2text(request: Request, body: TextRequest):
     else:
         import ai_model_catalogue
         selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
                    for entry in ai_model_catalogue.entries()
                    if entry.get("file") in selected or "text" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
@@ -906,12 +906,12 @@ async def api_image(body: ImageRequest):
     else:
         import ai_model_catalogue
         selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
                    for entry in ai_model_catalogue.entries()
                    if entry.get("file") in selected or "image" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("image", payload,
-        lambda: _uncached_api_image(body), namespace="ai-workflows-20260922-v1")
+        lambda: _uncached_api_image(body), namespace="ai-workflows-20260922-v2")
 
 
 async def _uncached_api_image(body: ImageRequest):
@@ -955,7 +955,8 @@ async def _uncached_api_image(body: ImageRequest):
                     "error_string": "control_model_incompatible",
                     "message_string": str(exc)}) from None
         if trigger_prefix:
-            prompt = trigger_prefix + ", " + prompt
+            import ai_model_defaults
+            prompt = ai_model_defaults.add_triggers(prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
         payload: Dict[str, object] = {
             "prompt": prompt, "main_size_width": int(body.width or 960),
             "main_size_height": int(body.height or 540),
@@ -1098,12 +1099,12 @@ async def api_video(body: VideoRequest):
     else:
         import ai_model_catalogue
         selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "source_version_id", "sha256")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
                    for entry in ai_model_catalogue.entries()
                    if entry.get("file") in selected or "video" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("video", payload,
-        lambda: _uncached_api_video(body), namespace="ai-workflows-20260922-v1")
+        lambda: _uncached_api_video(body), namespace="ai-workflows-20260922-v2")
 
 
 async def _uncached_api_video(body: VideoRequest):
@@ -1141,7 +1142,8 @@ async def _uncached_api_video(body: VideoRequest):
             payload["image_url_end"] = last_frame
         if body.prompt and str(body.prompt).strip():
             rendered_prompt = _validate_prompt(body.prompt)
-            payload["prompt"] = ((trigger_prefix + ", ") if trigger_prefix else "") + rendered_prompt
+            import ai_model_defaults
+            payload["prompt"] = ai_model_defaults.add_triggers(rendered_prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
         if body.frame_count:
             payload["frame_count"] = int(body.frame_count)
         quality = str(body.quality or "").strip().lower()

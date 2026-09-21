@@ -275,7 +275,7 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 leaves the workflow's own value"},
         {"name": "creativity", "title": "Creativity", "type": "range", "min": 0,
          "max": 1, "step": 0.05, "default": 0, "help": "0 leaves the workflow's own value"},
-        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 2147483647,
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991,
          "step": 1, "default": 0, "help": "0 gives a different picture each run"},
     ],
     "video": [
@@ -295,8 +295,8 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
              {"value": "hq", "title": "High quality — slower, fewer nodes take it"},
          ],
          "help": "These are the animation workflows the render workers advertise"},
-        {"name": "frame_count", "title": "Frames", "type": "range", "min": 24, "max": 400,
-         "step": 8, "default": 96, "help": "About 24 frames to the second"},
+        {"name": "frame_count", "title": "Frames", "type": "range", "min": 9, "max": 393,
+         "step": 8, "default": 97, "help": "LTX uses 8n+1 frames: 9, 17, 25... at 24 fps"},
         {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
         {"name": "cfg", "title": "CFG", "type": "number", "default": 0, "min": 0, "max": 30, "step": 0.1},
         {"name": "sampler", "title": "Sampler", "type": "select", "default": "",
@@ -318,7 +318,7 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 leaves the workflow's own value"},
         {"name": "creativity", "title": "Creativity", "type": "range", "min": 0,
          "max": 1, "step": 0.05, "default": 0, "help": "0 leaves the workflow's own value"},
-        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 2147483647,
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991,
          "step": 1, "default": 0},
     ],
     "3dmodel": [

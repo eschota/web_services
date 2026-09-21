@@ -184,6 +184,7 @@
   }
 
   function addInputNode(entityType, x, y, value) {
+    if (!(catalogue.entity_types_array || []).some(item => item.id === entityType)) return null;
     const id = editor.addNode(
       'input-' + entityType, 0, 1, x, y,
       'ainode input-node', { entity_type: entityType }, inputNodeHtml(entityType)
@@ -379,6 +380,10 @@
     Object.keys(params || {}).forEach(name => {
       const control = element.querySelector('[data-param="' + CSS.escape(name) + '"]');
       if (!control) return;
+      if (['width','height'].includes(name) && control.tagName === 'SELECT' &&
+          ![...control.options].some(option => option.value === String(params[name]))) {
+        control.add(new Option(String(params[name]), String(params[name])));
+      }
       control.value = params[name];
       const slot = element.querySelector('.mpick-slot[data-model-param="' + CSS.escape(name) + '"]');
       if (slot && slot._picker) slot._picker.value = params[name];
@@ -1233,6 +1238,9 @@
     editor.reroute = true;
     editor.start();
     installWheelZoom();
+    if (window.AINodeGroups) window.AINodeGroups.install({editor,
+      canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
+      addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200});
     document.addEventListener('paste', event => {
       const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
       if (!item) return;

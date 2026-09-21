@@ -121,14 +121,14 @@ def server_can_run(server: RenderServer, token: str) -> bool:
 
 
 def clamp_image_dims(width: int, height: int) -> Tuple[int, int]:
-    """Image render size: defaults 960x540, accepts exact even sizes to 2048."""
+    """Image render size: defaults 960x540, preserves exact pixels to 2048."""
 
     def one(v: int, default: int) -> int:
         v = int(v or 0)
         if v <= 0:
             v = default
         v = max(64, min(2048, v))
-        return v if v % 2 == 0 else v - 1
+        return v
 
     return one(width, 960), one(height, 540)
 

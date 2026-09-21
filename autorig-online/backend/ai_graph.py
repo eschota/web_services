@@ -33,8 +33,8 @@ router = APIRouter()
 GRAPH_DIR = pathlib.Path(
     os.getenv("AUTORIG_AI_GRAPH_DIR", "/srv/autorig/data/var/ai-graphs")
 )
-MAX_NODES = 60
-MAX_GRAPH_BYTES = 256 * 1024
+MAX_NODES = 200
+MAX_GRAPH_BYTES = 1024 * 1024
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
 
 # A node is either a service call or a value the person supplies. Keeping the

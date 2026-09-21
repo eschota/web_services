@@ -150,7 +150,7 @@ class ClampTests(unittest.TestCase):
 
     def test_clamp_and_round(self):
         self.assertEqual(clamp_image_dims(2000, 50), (2000, 64))
-        self.assertEqual(clamp_image_dims(1001, 701), (1000, 700))
+        self.assertEqual(clamp_image_dims(1001, 701), (1001, 701))
 
 
 class PromptModelTests(unittest.TestCase):
