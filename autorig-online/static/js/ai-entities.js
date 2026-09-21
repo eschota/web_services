@@ -134,6 +134,43 @@
   }
 
 
+
+  /* ------------------------------------------------------------- auto start */
+
+  /**
+   * Whether a service has everything it needs to run right now.
+   *
+   * Derived from the catalogue's required inputs rather than hard-coded per
+   * page, so adding a service or changing what it needs does not leave five
+   * pages disagreeing about when a run can begin.
+   */
+  async function canAutoStart(serviceId, providedTypes) {
+    let data;
+    try { data = await loadCatalogue(); } catch (err) { return false; }
+    const entry = (data.services_array || []).find(s => s.id === serviceId);
+    if (!entry) return false;
+    const required = (entry.inputs || []).filter(i => i.required);
+    if (!required.length) return false;
+    return required.every(i => providedTypes.indexOf(i.type) !== -1);
+  }
+
+  /**
+   * Arriving with an entity is already a decision to generate, so the run
+   * starts on its own. The short delay lets the page paint what it received
+   * first, and the note says it is happening rather than leaving it to guess.
+   */
+  async function autoStart(serviceId, providedTypes, run, noticeHost) {
+    if (!(await canAutoStart(serviceId, providedTypes))) return false;
+    if (noticeHost) {
+      const note = document.createElement('div');
+      note.className = 'auto-note';
+      note.textContent = 'Starting automatically — edit and send again any time';
+      noticeHost.appendChild(note);
+    }
+    setTimeout(run, 400);
+    return true;
+  }
+
   /* ------------------------------------------------- fleet + task indicator */
 
   let fleet = null;
@@ -319,6 +356,7 @@
       .task-prog.done .task-bar i { background:#38d996; }
       .task-prog.failed .task-bar i { background:#ff6474; }
       .task-eta { margin-top:6px; font-size:11px; color:var(--text-secondary,#9aa0b5); }
+      .auto-note { margin-top:8px; font-size:12px; color:#8ab4ff; }
     `;
     document.head.appendChild(style);
   }
@@ -376,6 +414,8 @@
     getFleet: getFleet,
     mountFleet: mountFleet,
     startTask: startTask,
-    human: human
+    human: human,
+    canAutoStart: canAutoStart,
+    autoStart: autoStart
   };
 })(window);

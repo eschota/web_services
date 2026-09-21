@@ -15,7 +15,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="/static/js/ai-entities.js?v=20260921-fleet"></script>
+    <script src="/static/js/ai-entities.js?v=20260921-autostart"></script>
     <style>
         .ai-page {
             background:
@@ -236,8 +236,11 @@ AIEntities.mountFleet(document.getElementById('fleet'), SERVICE_ID);
 
 const incoming = AIEntities.take(SERVICE_ID);
 if (incoming) {
-    AIEntities.renderReceived(document.getElementById('received'), incoming);
+    const receivedBox = document.getElementById('received');
+    AIEntities.renderReceived(receivedBox, incoming);
     if (incoming.type === AIEntities.TEXT) promptBox.value = incoming.value;
+    const have = promptBox.value.trim() ? [AIEntities.TEXT] : [];
+    AIEntities.autoStart(SERVICE_ID, have, () => goButton.click(), receivedBox);
 }
 
 goButton.addEventListener('click', async () => {
