@@ -4,7 +4,8 @@
   "gpu_name": "RTX 3080 Ti",
   "status": "online",
   "available_workflows": [
-    "gen_image.json"
+    "gen_image.json",
+    "gen_animation_by_url.json"
   ],
   "workflow_overrides": {},
   "basic_auth": false
