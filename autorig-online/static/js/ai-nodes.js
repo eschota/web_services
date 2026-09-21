@@ -106,6 +106,12 @@
     } else if (param.type === 'number') {
       control = `<input type="number" data-param="${name}" min="${param.min}" max="${param.max}" `
               + `step="${param.step || 1}" value="${param.default}"${help}>`;
+    } else if (param.type === 'model') {
+      // Filled in after the node exists: the picker needs a live element to
+      // mount into, which the HTML string cannot give it.
+      control = `<span class="mpick-slot" data-model-param="${name}" `
+              + `data-model-source="${escapeAttr(param.source || 'loras')}"></span>`
+              + `<input type="hidden" data-param="${name}" value="">`;
     } else if (param.type === 'textarea') {
       control = `<textarea data-param="${name}" rows="3"${help}>${escapeHtml(param.default || '')}</textarea>`;
     } else {
@@ -169,6 +175,7 @@
       outFields: outputs.map(o => o.field)
     });
     alignPorts(id, inputs.length, outputs.length);
+    mountModelPickers(id, serviceId);
     if (params) applyParams(id, params);
     return id;
   }
@@ -186,6 +193,21 @@
     }
     wireInputNode(id, entityType);
     return id;
+  }
+
+  /** Turn every `model` parameter on a node into a picture dropdown. */
+  function mountModelPickers(id, serviceId) {
+    const element = nodeElement(id);
+    if (!element || !window.AIEntities || !window.AIEntities.modelPicker) return;
+    element.querySelectorAll('.mpick-slot').forEach(slot => {
+      const name = slot.dataset.modelParam;
+      const hidden = element.querySelector('input[data-param="' + CSS.escape(name) + '"]');
+      const picker = window.AIEntities.modelPicker(slot, serviceId, slot.dataset.modelSource, {
+        value: hidden ? hidden.value : '',
+        onChange: value => { if (hidden) hidden.value = value; }
+      });
+      slot._picker = picker;
+    });
   }
 
   function nodeElement(id) {
@@ -242,6 +264,8 @@
       const control = element.querySelector('[data-param="' + CSS.escape(name) + '"]');
       if (!control) return;
       control.value = params[name];
+      const slot = element.querySelector('.mpick-slot[data-model-param="' + CSS.escape(name) + '"]');
+      if (slot && slot._picker) slot._picker.value = params[name];
       const readout = element.querySelector('[data-for="' + CSS.escape(name) + '"]');
       if (readout) readout.textContent = rangeLabel(params[name]);
     });

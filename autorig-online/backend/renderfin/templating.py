@@ -41,10 +41,17 @@ def render_workflow_text(
     workflow_type: str = "",
     randomize_seeds: bool = True,
     seed: Optional[int] = None,
+    checkpoint: str = "",
+    lora: str = "",
+    lora_strength: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Substitute placeholders, parse, normalize. Returns the workflow dict
     ready for POST /prompt."""
     text = template_text
+    # The longer edge, for workflows that scale by it rather than by a
+    # width and a height. Without this the template keeps a bare token
+    # and does not parse.
+    text = text.replace("$long_side", str(int(max(width, height))))
     text = text.replace("$width", str(int(width)))
     text = text.replace("$height", str(int(height)))
     text = text.replace("$prompt", _json_escape(sanitize_prompt(prompt)))
@@ -61,6 +68,9 @@ def render_workflow_text(
     if randomize_seeds:
         _randomize_seeds(workflow, seed)
     _normalize_workflow(workflow, width=width, height=height, workflow_type=workflow_type)
+    # Last, so a chosen model is not undone by normalisation or pruning.
+    apply_model_choice(workflow, checkpoint=checkpoint, lora=lora,
+                       lora_strength=lora_strength)
     return workflow
 
 
@@ -102,6 +112,76 @@ def _normalize_workflow(
             meta = node.get("_meta")
             if isinstance(meta, dict):
                 meta["title"] = "VAE Decode"
+
+
+# Which input on which loader names the model file. Keyed by class_type so a
+# workflow can be re-saved with different node ids without breaking this.
+CHECKPOINT_SLOTS = {
+    "CheckpointLoaderSimple": "ckpt_name",
+    "UNETLoader": "unet_name",
+    "ImageOnlyCheckpointLoader": "ckpt_name",
+}
+LORA_SLOTS = {
+    "LoraLoaderModelOnly": "lora_name",
+    "LoraLoader": "lora_name",
+}
+POWER_LORA_LOADER = "Power Lora Loader (rgthree)"
+
+
+def apply_model_choice(
+    workflow: Dict[str, Any],
+    *,
+    checkpoint: str = "",
+    lora: str = "",
+    lora_strength: Optional[float] = None,
+) -> Dict[str, list]:
+    """Point the workflow's loaders at the chosen files.
+
+    Done after parsing rather than by substituting a placeholder, because the
+    templates were exported from ComfyUI with real file names already in them
+    and adding placeholders to every one of them would be a bigger change than
+    this. Returns what was actually swapped so a caller can tell the difference
+    between "not asked for" and "asked for but this workflow has no such node".
+    """
+    changed: Dict[str, list] = {"checkpoint": [], "lora": []}
+    if not checkpoint and not lora and lora_strength is None:
+        return changed
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "")
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+
+        if checkpoint and class_type in CHECKPOINT_SLOTS:
+            slot = CHECKPOINT_SLOTS[class_type]
+            if slot in inputs:
+                inputs[slot] = checkpoint
+                changed["checkpoint"].append(node_id)
+
+        if lora and class_type in LORA_SLOTS:
+            slot = LORA_SLOTS[class_type]
+            if slot in inputs:
+                inputs[slot] = lora
+                if lora_strength is not None and "strength_model" in inputs:
+                    inputs["strength_model"] = float(lora_strength)
+                changed["lora"].append(node_id)
+
+        if class_type == POWER_LORA_LOADER:
+            # rgthree keeps each LoRA as its own dict rather than a flat input.
+            # Only the first slot is steered; the rest of the stack the workflow
+            # ships with is left alone.
+            entry = inputs.get("lora_1")
+            if isinstance(entry, dict):
+                if lora:
+                    entry["lora"] = lora
+                    entry["on"] = True
+                    changed["lora"].append(node_id)
+                if lora_strength is not None:
+                    entry["strength"] = float(lora_strength)
+    return changed
 
 
 def workflow_placeholders(template_text: str) -> Tuple[str, ...]:

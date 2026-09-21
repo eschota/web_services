@@ -362,6 +362,42 @@ def _validate_prompt(raw: str) -> str:
     return prompt
 
 
+def _validate_model_choice(service_id: str, checkpoint: Optional[str],
+                           lora: Optional[str]) -> Dict[str, object]:
+    """Accept only files the catalogue offers for this service.
+
+    A name here ends up in a workflow that a worker then loads off its own
+    disk, so an unchecked string would let a caller point a GPU at an arbitrary
+    path. Checking against the catalogue also means a model the farm cannot run
+    is refused with a reason instead of failing minutes later on the card.
+    """
+    import ai_model_catalogue
+
+    chosen: Dict[str, object] = {}
+    for name, kind in ((checkpoint, "checkpoint"), (lora, "lora")):
+        wanted = str(name or "").strip()
+        if not wanted:
+            continue
+        entry = ai_model_catalogue.known_file(wanted, kind)
+        if entry is None:
+            raise HTTPException(status_code=400, detail={
+                "error_string": "unknown_" + kind,
+                "message_string": f"No {kind} called '{wanted}' is in the catalogue"})
+        if not entry.get("usable"):
+            raise HTTPException(status_code=400, detail={
+                "error_string": kind + "_not_runnable",
+                "message_string": str(entry.get("unusable_reason")
+                                      or "The farm has no workflow that loads this")})
+        if service_id not in (entry.get("services") or []):
+            raise HTTPException(status_code=400, detail={
+                "error_string": kind + "_wrong_service",
+                "message_string": (f"'{wanted}' is for "
+                                   f"{', '.join(entry.get('services') or []) or 'nothing here'}, "
+                                   f"not {service_id}")})
+        chosen[kind] = wanted
+    return chosen
+
+
 def _decode_inline_image(raw: str) -> bytes:
     payload = str(raw or "").strip()
     if payload.startswith("data:"):
@@ -652,6 +688,9 @@ class ImageRequest(BaseModel):
     steps: Optional[int] = Field(None, ge=1, le=100)
     creativity: Optional[float] = Field(None, ge=0, le=1)
     seed: Optional[int] = Field(None, ge=0, description="0 or absent randomises")
+    checkpoint: Optional[str] = Field(None, description="Model file from /api/ai/model-catalogue")
+    lora: Optional[str] = Field(None, description="LoRA file from /api/ai/model-catalogue")
+    lora_strength: Optional[float] = Field(None, ge=0, le=2)
 
 
 # Renderfin runs on the same host and owns the image farm; the public service
@@ -705,6 +744,9 @@ async def api_image(body: ImageRequest):
             payload["creativity"] = float(body.creativity)
         if body.seed:
             payload["noise_seed"] = int(body.seed)
+        payload.update(_validate_model_choice("image", body.checkpoint, body.lora))
+        if body.lora_strength is not None:
+            payload["lora_strength"] = float(body.lora_strength)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
@@ -761,6 +803,9 @@ class VideoRequest(BaseModel):
     image_url_end: Optional[str] = Field(None, description="Last frame, public URL")
     image_base64_end: Optional[str] = Field(None, description="Last frame, inline")
     quality: Optional[str] = Field(None, description="standard or hq")
+    checkpoint: Optional[str] = Field(None, description="Model file from /api/ai/model-catalogue")
+    lora: Optional[str] = Field(None, description="LoRA file from /api/ai/model-catalogue")
+    lora_strength: Optional[float] = Field(None, ge=0, le=2)
     negative_prompt: Optional[str] = Field(None, description="What to avoid")
     steps: Optional[int] = Field(None, ge=1, le=100)
     creativity: Optional[float] = Field(None, ge=0, le=1)
@@ -824,6 +869,9 @@ async def api_video(body: VideoRequest):
             payload["creativity"] = float(body.creativity)
         if body.seed:
             payload["noise_seed"] = int(body.seed)
+        payload.update(_validate_model_choice("video", body.checkpoint, body.lora))
+        if body.lora_strength is not None:
+            payload["lora_strength"] = float(body.lora_strength)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload,

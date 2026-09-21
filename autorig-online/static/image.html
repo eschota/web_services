@@ -13,7 +13,7 @@
     <meta property="og:site_name" content="AutoRig.online">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="/static/js/ai-entities.js?v=20260921-autostart"></script>
+    <script src="/static/js/ai-entities.js?v=20260922-models2"></script>
     <style>
         .ai-page {
             background:
@@ -120,6 +120,15 @@
                 <img id="ref-img" alt="">
             </div>
 
+
+            <div class="field">
+                <label>Model</label>
+                <span id="pick-checkpoint"></span>
+            </div>
+            <div class="field">
+                <label>Style (LoRA)</label>
+                <span id="pick-lora"></span>
+            </div>
             <div id="progress" class="task-prog"></div>
             <button class="go" id="go">Render it</button>
         </div>
@@ -152,6 +161,13 @@ let referenceUrl = null;
 
 AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
 AIEntities.mountFleet(document.getElementById('fleet'), SERVICE_ID);
+
+// A model is recognised by what it makes, so these are picture lists rather
+// than dropdowns of file names.
+const checkpointPick = AIEntities.modelPicker(
+    document.getElementById('pick-checkpoint'), SERVICE_ID, 'checkpoints', {});
+const loraPick = AIEntities.modelPicker(
+    document.getElementById('pick-lora'), SERVICE_ID, 'loras', {});
 
 const incoming = AIEntities.take(SERVICE_ID);
 if (incoming) {
@@ -191,6 +207,9 @@ goButton.addEventListener('click', async () => {
         // so the page polls it and can say what is happening meanwhile.
         const body = { prompt: prompt };
         if (referenceUrl) body.image_url = referenceUrl;
+        if (checkpointPick.value) body.checkpoint = checkpointPick.value;
+        if (loraPick.value) body.lora = loraPick.value;
+
         const response = await fetch('/api/image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

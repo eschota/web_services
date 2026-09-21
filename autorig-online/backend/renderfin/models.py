@@ -23,6 +23,11 @@ class RenderPrompt(BaseModel):
     noise_seed: int = 0
     steps: int = 0
     creativity: float = 0
+    # Which model file to load. Empty leaves the workflow's own choice,
+    # which is what every request did before these existed.
+    checkpoint: str = ""
+    lora: str = ""
+    lora_strength: float = 0
     user_name: str = "default_user"
     render_mode: str = ""
 

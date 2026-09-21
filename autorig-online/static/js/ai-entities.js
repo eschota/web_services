@@ -375,6 +375,40 @@
                    color:var(--text-secondary,#9aa0b5); }
       .fleet-key span { display:inline-flex; align-items:center; gap:5px; }
       .fleet-key i { width:7px; height:7px; border-radius:50%; display:block; }
+
+      /* ---- model picker: a dropdown whose options are pictures */
+      .mpick { position:relative; display:block; width:100%; }
+      .mpick-open { position:relative; z-index:60; }
+      .mpick-button { display:flex; align-items:center; gap:8px; width:100%;
+        background:rgba(10,11,22,.85); border:1px solid rgba(255,255,255,.14);
+        border-radius:9px; color:inherit; padding:5px 8px; cursor:pointer;
+        font:inherit; font-size:12px; text-align:left; }
+      .mpick-button:hover { border-color:#7b5cff; }
+      .mpick-thumb { width:30px; height:30px; flex:0 0 30px; border-radius:6px;
+        background:#1a1b30 center/cover no-repeat; display:block; }
+      .mpick-thumb.empty { background:
+        repeating-linear-gradient(45deg,#23243d 0 5px,#1a1b30 5px 10px); }
+      .mpick-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+        white-space:nowrap; }
+      .mpick-caret { opacity:.6; font-size:10px; }
+      .mpick-panel { position:absolute; z-index:40; top:calc(100% + 5px); left:0; right:0;
+        max-height:330px; overflow-y:auto; background:rgba(18,19,38,.99);
+        border:1px solid rgba(255,255,255,.16); border-radius:11px; padding:5px;
+        box-shadow:0 16px 40px rgba(0,0,0,.55); }
+      .mpick-item { display:flex; gap:9px; align-items:flex-start; width:100%;
+        background:none; border:0; border-radius:8px; padding:6px; cursor:pointer;
+        color:inherit; font:inherit; text-align:left; }
+      .mpick-item:hover:not(:disabled) { background:rgba(123,92,255,.18); }
+      .mpick-item.chosen { background:rgba(123,92,255,.26); }
+      .mpick-item.blocked { opacity:.45; cursor:not-allowed; }
+      .mpick-item .mpick-thumb { width:52px; height:52px; flex:0 0 52px; }
+      .mpick-text { min-width:0; }
+      .mpick-text b { display:block; font-size:12.5px; font-weight:600; }
+      .mpick-text i, .mpick-text u, .mpick-text s {
+        display:block; font-style:normal; text-decoration:none; font-size:11px;
+        color:var(--text-secondary,#9aa0b5); margin-top:1px; }
+      .mpick-text u { color:#c7b9ff; }
+      .mpick-text s { color:#ff8a9b; }
       .fleet-pop { position:absolute; top:calc(100% + 8px); left:50%; transform:translateX(-50%);
                    min-width:210px; padding:12px 14px; border-radius:12px; z-index:40;
                    background:rgba(12,13,26,.97); border:1px solid rgba(255,255,255,.14);
@@ -441,6 +475,137 @@
     container.appendChild(box);
   }
 
+
+  /* --------------------------------------------------------- model picker */
+
+  /**
+   * A dropdown of models shown as pictures.
+   *
+   * A checkpoint or a LoRA is recognised by what it produces; `Pixar_Toon.safetensors`
+   * tells a person nothing and `skin texture style v5` barely more. The preview
+   * Civitai shows on the model page is the thing that actually identifies it,
+   * so that is what the list is made of.
+   *
+   * Built as a button plus a panel rather than a `<select>`, because a native
+   * option cannot hold an image.
+   */
+  let modelCatalogue = {};
+
+  async function loadModels(serviceId) {
+    if (modelCatalogue[serviceId]) return modelCatalogue[serviceId];
+    const response = await fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(serviceId));
+    const data = await response.json();
+    modelCatalogue[serviceId] = data;
+    return data;
+  }
+
+  function modelPicker(host, serviceId, kind, options) {
+    const settings = options || {};
+    const state = { value: settings.value || '', entries: [] };
+    host.className = 'mpick';
+    host.innerHTML =
+      '<button type="button" class="mpick-button">' +
+        '<span class="mpick-thumb"></span>' +
+        '<span class="mpick-label">Loading…</span>' +
+        '<span class="mpick-caret">▾</span>' +
+      '</button>' +
+      '<div class="mpick-panel" hidden></div>';
+
+    const button = host.querySelector('.mpick-button');
+    const panel = host.querySelector('.mpick-panel');
+    const thumb = host.querySelector('.mpick-thumb');
+    const label = host.querySelector('.mpick-label');
+
+    function paintButton() {
+      const entry = state.entries.find(e => e.file === state.value);
+      if (!entry) {
+        thumb.style.backgroundImage = '';
+        thumb.className = 'mpick-thumb empty';
+        label.textContent = settings.emptyLabel || 'Workflow default';
+        return;
+      }
+      thumb.className = 'mpick-thumb';
+      thumb.style.backgroundImage = entry.preview ? 'url(' + entry.preview + ')' : '';
+      label.textContent = entry.title || entry.file;
+    }
+
+    // The cards on these pages use `backdrop-filter`, which makes each one its
+    // own stacking context, so a later card paints over the open panel no
+    // matter how high its z-index is. Lifting the card that owns the picker is
+    // the only thing that actually works.
+    function setOpen(open) {
+      panel.hidden = !open;
+      const card = host.closest('.ai-card') || host.closest('.drawflow-node');
+      if (card) card.classList.toggle('mpick-open', open);
+    }
+
+    function choose(value) {
+      state.value = value;
+      paintButton();
+      setOpen(false);
+      if (settings.onChange) settings.onChange(value);
+    }
+
+    function row(entry) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'mpick-item' + (entry.usable === false ? ' blocked' : '') +
+                       (entry.file === state.value ? ' chosen' : '');
+      const triggers = (entry.triggers || []).slice(0, 2).join(', ');
+      item.innerHTML =
+        '<span class="mpick-thumb"' +
+          (entry.preview ? ' style="background-image:url(' + entry.preview + ')"' : '') + '></span>' +
+        '<span class="mpick-text">' +
+          '<b>' + escapeHtml(entry.title || entry.file) + '</b>' +
+          '<i>' + escapeHtml(entry.base || '') +
+            (entry.size_mb ? ' · ' + Math.round(entry.size_mb) + ' MB' : '') +
+            (entry.nsfw ? ' · 18+' : '') + '</i>' +
+          (triggers ? '<u>' + escapeHtml(triggers) + '</u>' : '') +
+          (entry.usable === false
+            ? '<s>' + escapeHtml(entry.unusable_reason || 'not runnable here') + '</s>' : '') +
+        '</span>';
+      if (entry.usable === false) {
+        item.disabled = true;
+      } else {
+        item.addEventListener('click', () => choose(entry.file));
+      }
+      return item;
+    }
+
+    loadModels(serviceId).then(data => {
+      state.entries = (kind === 'checkpoints' ? data.checkpoints_array : data.loras_array) || [];
+      panel.innerHTML = '';
+      const none = document.createElement('button');
+      none.type = 'button';
+      none.className = 'mpick-item' + (state.value ? '' : ' chosen');
+      none.innerHTML = '<span class="mpick-thumb empty"></span><span class="mpick-text">' +
+                       '<b>' + escapeHtml(settings.emptyLabel || 'Workflow default') + '</b>' +
+                       '<i>whatever the workflow already uses</i></span>';
+      none.addEventListener('click', () => choose(''));
+      panel.appendChild(none);
+      state.entries.forEach(entry => panel.appendChild(row(entry)));
+      paintButton();
+    }).catch(() => { label.textContent = 'catalogue unavailable'; });
+
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      setOpen(panel.hidden);
+    });
+    document.addEventListener('click', () => setOpen(false));
+    panel.addEventListener('click', event => event.stopPropagation());
+
+    return {
+      get value() { return state.value; },
+      set value(v) { state.value = v; paintButton(); }
+    };
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   injectStyles();
 
   global.AIEntities = {
@@ -459,6 +624,8 @@
     startTask: startTask,
     human: human,
     canAutoStart: canAutoStart,
-    autoStart: autoStart
+    autoStart: autoStart,
+    modelPicker: modelPicker,
+    loadModels: loadModels
   };
 })(window);

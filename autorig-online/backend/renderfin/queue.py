@@ -409,6 +409,9 @@ class RenderQueue:
             output_prefix=task.id,
             workflow_type=prompt.type,
             seed=prompt.noise_seed or None,
+            checkpoint=getattr(prompt, "checkpoint", "") or "",
+            lora=getattr(prompt, "lora", "") or "",
+            lora_strength=(getattr(prompt, "lora_strength", 0) or None),
         )
         prompt_id = await comfy_adapter.submit(self._client, server, workflow)
         task.comfy_prompt_id = prompt_id

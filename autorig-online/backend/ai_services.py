@@ -194,6 +194,16 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "min": 64, "max": 4096, "step": 64, "default": 512},
     ],
     "image": [
+        # Drawn as a picture list, not a text dropdown: a model is recognised
+        # by what it produces, and the file name says nothing.
+        {"name": "checkpoint", "title": "Model", "type": "model",
+         "source": "checkpoints", "default": "",
+         "help": "Leave empty for the workflow's own model"},
+        {"name": "lora", "title": "Style (LoRA)", "type": "model",
+         "source": "loras", "default": ""},
+        {"name": "lora_strength", "title": "Style strength", "type": "range",
+         "min": 0, "max": 1.5, "step": 0.05, "default": 0,
+         "help": "0 leaves the workflow's own strength"},
         {"name": "mode", "title": "Mode", "type": "select", "default": "",
          "options": [
              {"value": "", "title": "Plain"},
@@ -222,6 +232,14 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 gives a different picture each run"},
     ],
     "video": [
+        {"name": "checkpoint", "title": "Model", "type": "model",
+         "source": "checkpoints", "default": "",
+         "help": "Leave empty for the workflow's own model"},
+        {"name": "lora", "title": "Style (LoRA)", "type": "model",
+         "source": "loras", "default": ""},
+        {"name": "lora_strength", "title": "Style strength", "type": "range",
+         "min": 0, "max": 1.5, "step": 0.05, "default": 0,
+         "help": "0 leaves the workflow's own strength"},
         {"name": "quality", "title": "Workflow", "type": "select", "default": "standard",
          "options": [
              {"value": "standard", "title": "Standard — gen_animation_by_url"},

@@ -13,7 +13,7 @@
     <meta property="og:site_name" content="AutoRig.online">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="/static/js/ai-entities.js?v=20260921-autostart"></script>
+    <script src="/static/js/ai-entities.js?v=20260922-models2"></script>
     <style>
         .ai-page {
             background:
@@ -126,6 +126,15 @@
                 <textarea id="prompt" placeholder="slow push in, the beam sweeps across the water"></textarea>
             </div>
 
+
+            <div class="field">
+                <label>Model</label>
+                <span id="pick-checkpoint"></span>
+            </div>
+            <div class="field">
+                <label>Style (LoRA)</label>
+                <span id="pick-lora"></span>
+            </div>
             <div id="progress" class="task-prog"></div>
             <button class="go" id="go">Animate it</button>
         </div>
@@ -161,6 +170,13 @@ let frameUrl = null;
 
 AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
 AIEntities.mountFleet(document.getElementById('fleet'), SERVICE_ID);
+
+// A model is recognised by what it makes, so these are picture lists rather
+// than dropdowns of file names.
+const checkpointPick = AIEntities.modelPicker(
+    document.getElementById('pick-checkpoint'), SERVICE_ID, 'checkpoints', {});
+const loraPick = AIEntities.modelPicker(
+    document.getElementById('pick-lora'), SERVICE_ID, 'loras', {});
 
 function showFrame(src) {
     preview.src = src;
@@ -218,6 +234,9 @@ goButton.addEventListener('click', async () => {
         if (frameUrl) body.image_url = frameUrl; else body.image_base64 = frameDataUrl;
         const prompt = document.getElementById('prompt').value.trim();
         if (prompt) body.prompt = prompt;
+
+        if (checkpointPick.value) body.checkpoint = checkpointPick.value;
+        if (loraPick.value) body.lora = loraPick.value;
 
         const response = await fetch('/api/video', {
             method: 'POST',

@@ -301,9 +301,12 @@ class CatalogueParameterTests(unittest.TestCase):
         for service_id, params in ai_services.PARAMS.items():
             self.assertIsNotNone(ai_services.service(service_id), service_id)
             for param in params:
-                self.assertIn(param["type"], ("select", "range", "number", "text", "textarea"))
+                self.assertIn(param["type"],
+                              ("select", "range", "number", "text", "textarea", "model"))
                 self.assertTrue(param["name"])
                 self.assertTrue(param["title"])
+                if param["type"] == "model":
+                    self.assertIn(param["source"], ("checkpoints", "loras"))
                 if param["type"] == "select" and "source" not in param:
                     self.assertTrue(param["options"], param["name"])
 
