@@ -35,6 +35,7 @@
   // alongside the graph so a deep link shows the run and not only the wiring:
   // somebody handed the link while a clip renders should see it arrive.
   const runState = new Map();
+  const pendingImageUploads = new Map();
   let graphId = null;
   let resultsTimer = null;
   // Set by Cancel. It only stops work that has not been handed to the farm
@@ -317,18 +318,51 @@
       preview.hidden = false;
     }
     pick.addEventListener('click', () => file.click());
-    file.addEventListener('change', event => {
-      const chosen = event.target.files[0];
-      if (!chosen) return;
+    async function acceptImage(chosen) {
+      if (!chosen || !chosen.type.startsWith('image/')) return;
+      if (chosen.size > 12 * 1024 * 1024) { toast('Images must be at most 12 MB.'); return; }
+      const generation = (element._uploadGeneration || 0) + 1;
+      element._uploadGeneration = generation;
+      const status = element.querySelector('.nstate');
+      status.textContent = 'uploading image...';
+      status.className = 'nstate running';
+      text.value = '';
       const reader = new FileReader();
       reader.onload = () => {
-        // Held as a data URL and sent inline; the API publishes it and the
-        // rest of the graph then works with an ordinary address.
-        text.value = reader.result;
+        if (element._uploadGeneration !== generation) return;
         preview.src = reader.result;
         preview.hidden = false;
       };
       reader.readAsDataURL(chosen);
+      const form = new FormData();
+      form.append('file', chosen, chosen.name || 'clipboard.png');
+      const upload = fetch('/dev/api/scratch', {method: 'POST', body: form})
+        .then(async response => {
+          const data = await response.json();
+          if (!response.ok || !data.url) throw new Error('The image upload failed');
+          if (element._uploadGeneration !== generation) return;
+          text.value = data.url;
+          preview.src = data.url;
+          status.textContent = 'image ready';
+          status.className = 'nstate done';
+        }).catch(error => {
+          if (element._uploadGeneration !== generation) return;
+          status.textContent = error.message;
+          status.className = 'nstate failed';
+        }).finally(() => {
+          if (pendingImageUploads.get(String(id)) === upload) pendingImageUploads.delete(String(id));
+        });
+      pendingImageUploads.set(String(id), upload);
+      await upload;
+    }
+    element._acceptImage = acceptImage;
+    element.tabIndex = 0;
+    element.querySelector('.npick').textContent = 'Choose a file or Ctrl+V';
+    file.addEventListener('change', event => acceptImage(event.target.files[0]));
+    element.addEventListener('dragover', event => event.preventDefault());
+    element.addEventListener('drop', event => {
+      event.preventDefault();
+      acceptImage([...event.dataTransfer.files].find(item => item.type.startsWith('image/')));
     });
     text.addEventListener('change', () => {
       if (/^https?:\/\//.test(text.value.trim())) {
@@ -704,19 +738,38 @@
     if (!dialog) {
       dialog = document.createElement('dialog');
       dialog.id = 'media-preview';
-      dialog.setAttribute('aria-label', 'Expanded preview; click to close');
+      dialog.setAttribute('aria-label', 'Media preview');
       document.body.appendChild(dialog);
-      dialog.addEventListener('click', () => dialog.close());
-      dialog.addEventListener('close', () => { dialog.innerHTML = ''; });
+      dialog.addEventListener('click', event => {
+        if (event.target === dialog || event.target.classList.contains('media-stage')) dialog.close();
+      });
+      dialog.addEventListener('close', () => {
+        dialog.querySelectorAll('video').forEach(video => video.pause());
+        dialog.innerHTML = '';
+      });
     }
     dialog.innerHTML = '';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'media-close';
+    close.setAttribute('aria-label', 'Close preview (Escape)');
+    close.textContent = '\u00d7';
+    close.addEventListener('click', () => dialog.close());
+    const stage = document.createElement('div');
+    stage.className = 'media-stage';
     const media = document.createElement(type === 'video' ? 'video' : 'img');
     media.src = url;
     if (type === 'video') {
-      media.autoplay = true; media.loop = true; media.muted = true; media.playsInline = true;
+      media.autoplay = true; media.loop = true; media.muted = true;
+      media.playsInline = true; media.controls = true;
+    } else {
+      media.alt = 'Expanded preview';
+      media.addEventListener('click', () => dialog.close());
     }
-    dialog.appendChild(media);
+    stage.appendChild(media);
+    dialog.append(stage, close);
     dialog.showModal();
+    close.focus();
     if (type === 'video') media.play().catch(() => {});
   }
 
@@ -839,6 +892,7 @@
    *        minutes should not be paid for twice because a later step failed.
    */
   async function runGraph(keepDone) {
+    await Promise.all([...pendingImageUploads.values()]);
     const graph = graphFromCanvas();
     const order = executionOrder(graph);
     if (order.length !== graph.nodes.length) {
@@ -1095,6 +1149,7 @@
   }
 
   async function saveGraph() {
+    await Promise.all([...pendingImageUploads.values()]);
     // If the graph already has a link, the click copies it at once and the
     // save follows: the copy then happens while the gesture is still live.
     if (graphId) {
@@ -1181,6 +1236,15 @@
     editor.reroute = true;
     editor.start();
     installWheelZoom();
+    document.addEventListener('paste', event => {
+      const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
+      if (!item) return;
+      const current = event.target.closest && event.target.closest('.drawflow-node');
+      const target = current || document.querySelector('#canvas .drawflow-node.selected');
+      if (!target || !target._acceptImage) { toast('Select an Image in node to paste an image.'); return; }
+      event.preventDefault();
+      target._acceptImage(item.getAsFile());
+    });
     editor.on('connectionCreated', onConnectionCreated);
     // A range's number is only useful if it is shown next to the slider.
     document.getElementById('canvas').addEventListener('change', event => {
