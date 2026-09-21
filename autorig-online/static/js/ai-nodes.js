@@ -36,16 +36,146 @@
   // alongside the graph so a deep link shows the run and not only the wiring:
   // somebody handed the link while a clip renders should see it arrive.
   const runState = new Map();
+  // Incremental runner state. A task is identified by the node, the exact
+  // resolved request and the canvas incarnation that launched it. This lets a
+  // second Render click append changed/new work without duplicating anything
+  // already active.
+  const activeExecutions = new Map();
+  const completedExecutions = new Map();
+  const continuableResults = new Map();
+  const restoredExecutions = new Map();
+  const desiredSignatures = new Map();
+  const nodeRunVersions = new Map();
+  const latestPlannedRequests = new Map();
+  const runRequests = new Set();
+  let nextRunRequestId = 0;
+  let canvasEpoch = 1;
   const pendingImageUploads = new Map();
   let graphId = null;
   let resultsTimer = null;
   // Set by Cancel. It only stops work that has not been handed to the farm
   // yet: a job already on a card is left to finish, because killing it wastes
   // the GPU minutes it has already spent and the result is wanted anyway.
-  let cancelled = false;
+
+  function stableJson(value) {
+    if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+    if (value && typeof value === 'object') {
+      return '{' + Object.keys(value).sort().map(key =>
+        JSON.stringify(key) + ':' + stableJson(value[key])).join(',') + '}';
+    }
+    return JSON.stringify(value);
+  }
+
+  function executionKey(epoch, id, signature) {
+    return epoch + ':' + String(id) + ':' + signature;
+  }
+
+  function reusableCompleted(service, body) {
+    if (/vision|control|text/.test(service) ||
+        service === 'video_frame' || service === 'video_storyboard') return true;
+    if (!/image|video|animation|render/.test(service)) return true;
+    return ![undefined, null, '', 0, '0'].includes(body.seed);
+  }
+
+  function executionIsCurrent(execution) {
+    return execution.epoch === canvasEpoch &&
+      meta(execution.id) && nodeElement(execution.id) &&
+      desiredSignatures.get(String(execution.id)) === execution.signature &&
+      nodeRunVersions.get(String(execution.id)) === execution.version;
+  }
+
+  function finishTaskTracker(task, ok, execution, progress) {
+    if (!task) return;
+    const current = executionIsCurrent(execution);
+    task.finish(ok);
+    if (current || !progress) return;
+    progress.classList.remove('done', 'failed', 'queued', 'running');
+    const record = runState.get(String(execution.id));
+    if (record?.status === 'done') progress.classList.add('done');
+    else if (record?.status === 'failed') progress.classList.add('failed');
+    else {
+      const wanted = desiredSignatures.get(String(execution.id));
+      if (wanted && activeExecutions.has(executionKey(canvasEpoch, execution.id, wanted))) {
+        progress.classList.add('running');
+      }
+    }
+  }
+
+  function forgetNodes(ids) {
+    (ids || []).map(String).forEach(id => {
+      activeExecutions.forEach((execution, key) => {
+        if (String(execution.id) === id) activeExecutions.delete(key);
+      });
+      nodeMeta.delete(id);
+      runState.delete(id);
+      continuableResults.delete(id);
+      const restored = restoredExecutions.get(id);
+      if (restored) restored.invalidated = true;
+      restoredExecutions.delete(id);
+      pendingImageUploads.delete(id);
+      desiredSignatures.delete(id);
+      completedExecutions.delete(id);
+      latestPlannedRequests.delete(id);
+      nodeRunVersions.set(id, (nodeRunVersions.get(id) || 0) + 1);
+    });
+    pushResults();
+    refreshRunningControls();
+  }
+
+  function invalidateNodeAndDownstream(startId) {
+    if (!editor) return;
+    const graph = graphFromCanvas();
+    const affected = new Set([String(startId)]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      graph.links.forEach(link => {
+        if (affected.has(String(link.from)) && !affected.has(String(link.to))) {
+          affected.add(String(link.to));
+          changed = true;
+        }
+      });
+    }
+    affected.forEach(id => {
+      desiredSignatures.delete(id);
+      latestPlannedRequests.delete(id);
+      nodeRunVersions.set(id, (nodeRunVersions.get(id) || 0) + 1);
+      runState.delete(id);
+      continuableResults.delete(id);
+      const restored = restoredExecutions.get(id);
+      if (restored) restored.invalidated = true;
+      restoredExecutions.delete(id);
+      const element = nodeElement(id);
+      if (element && meta(id)?.kind === KIND_SERVICE) {
+        const state = element.querySelector('.nstate');
+        if (state) {
+          state.textContent = 'changed — render to update';
+          state.className = 'nstate';
+        }
+      }
+    });
+    pushResults();
+  }
+
+  function resetCanvasExecutionState() {
+    canvasEpoch += 1;
+    restoredExecutions.forEach(execution => { execution.invalidated = true; });
+    restoredExecutions.clear();
+    continuableResults.clear();
+    desiredSignatures.clear();
+    completedExecutions.clear();
+    nodeRunVersions.clear();
+    latestPlannedRequests.clear();
+  }
 
   function recordResult(id, record) {
     runState.set(String(id), record);
+    if (record.status === 'done' && record.value) {
+      continuableResults.set(String(id), {type:record.type, value:record.value,
+        task_id:record.task_id || ''});
+    } else if (record.status === 'failed') {
+      continuableResults.delete(String(id));
+    }
     pushResults();
   }
 
@@ -152,15 +282,20 @@
       + '<a href="/avatars" target="_blank" rel="noopener">Manage Avatars</a><img data-preview hidden alt="Avatar reference"></div>'
       + '<div class="nstate"></div>';
     const isText = entityType === 'text';
+    const isVideo = entityType === 'video';
     const field = isText
       ? '<textarea data-value rows="3" placeholder="Type the text…"></textarea>'
       : '<input type="text" data-value placeholder="https://… or drop a file">'
-        + '<input type="file" data-file accept="image/*" hidden>'
+        + `<input type="file" data-file accept="${isVideo ? 'video/mp4,video/webm,video/quicktime' : 'image/*'}" hidden>`
         + '<button type="button" data-pick class="npick">Choose a file</button>'
-        + '<img data-preview alt="" hidden>';
+        + (isVideo
+          ? '<video data-preview muted autoplay loop playsinline hidden></video>'
+          : '<img data-preview alt="" hidden>');
+    const title = isText ? 'Text in' : isVideo ? 'Video in' : 'Image in';
+    const output = isText ? 'text' : isVideo ? 'video' : 'image';
     return `
-      <div class="nhead"><b>${isText ? 'Text in' : 'Image in'}</b></div>
-      <div class="nports"><div class="prow pout">${isText ? 'text' : 'image'} ${typeIcon(entityType)}</div></div>
+      <div class="nhead"><b>${title}</b></div>
+      <div class="nports"><div class="prow pout">${output} ${typeIcon(entityType)}</div></div>
       <div class="ninput">${field}</div>
       <div class="nstate"></div>`;
   }
@@ -350,45 +485,63 @@
       }).catch(() => { state.textContent = 'Could not load Avatars'; });
       return;
     }
-    if (!element || entityType !== 'image') return;
+    if (!element || !['image', 'video'].includes(entityType)) return;
+    const isVideo = entityType === 'video';
     const file = element.querySelector('[data-file]');
     const pick = element.querySelector('[data-pick]');
     const preview = element.querySelector('[data-preview]');
     const text = element.querySelector('[data-value]');
     preview.classList.add('preview-expandable');
     preview.title = 'Click to enlarge';
-    preview.addEventListener('click', event => { event.stopPropagation(); if (preview.src) openPreview('image', preview.src); });
+    preview.addEventListener('click', event => {
+      event.stopPropagation();
+      if (preview.src) openPreview(isVideo ? 'video' : 'image', preview.src);
+    });
     if (/^(https?:\/\/|data:image\/)/.test(text.value.trim())) {
       preview.src = text.value.trim();
       preview.hidden = false;
+      if (isVideo) preview.play().catch(() => {});
     }
     pick.addEventListener('click', () => file.click());
-    async function acceptImage(chosen) {
-      if (!chosen || !chosen.type.startsWith('image/')) return;
-      if (chosen.size > 12 * 1024 * 1024) { toast('Images must be at most 12 MB.'); return; }
+    async function acceptMedia(chosen) {
+      const expected = isVideo ? 'video/' : 'image/';
+      if (!chosen || !chosen.type.startsWith(expected)) return;
+      const limit = (isVideo ? 100 : 12) * 1024 * 1024;
+      if (chosen.size > limit) {
+        toast(`${isVideo ? 'Videos' : 'Images'} must be at most ${isVideo ? 100 : 12} MB.`);
+        return;
+      }
       const generation = (element._uploadGeneration || 0) + 1;
       element._uploadGeneration = generation;
       const status = element.querySelector('.nstate');
-      status.textContent = 'uploading image...';
+      status.textContent = `uploading ${isVideo ? 'video' : 'image'}...`;
       status.className = 'nstate running';
       text.value = '';
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (element._uploadGeneration !== generation) return;
-        preview.src = reader.result;
+      if (isVideo) {
+        if (element._previewObjectUrl) URL.revokeObjectURL(element._previewObjectUrl);
+        element._previewObjectUrl = URL.createObjectURL(chosen);
+        preview.src = element._previewObjectUrl;
         preview.hidden = false;
-      };
-      reader.readAsDataURL(chosen);
+        preview.play().catch(() => {});
+      } else {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (element._uploadGeneration !== generation) return;
+          preview.src = reader.result;
+          preview.hidden = false;
+        };
+        reader.readAsDataURL(chosen);
+      }
       const form = new FormData();
-      form.append('file', chosen, chosen.name || 'clipboard.png');
+      form.append('file', chosen, chosen.name || (isVideo ? 'input.mp4' : 'clipboard.png'));
       const upload = fetch('/dev/api/scratch', {method: 'POST', body: form})
         .then(async response => {
           const data = await response.json();
-          if (!response.ok || !data.url) throw new Error('The image upload failed');
+          if (!response.ok || !data.url) throw new Error(`The ${isVideo ? 'video' : 'image'} upload failed`);
           if (element._uploadGeneration !== generation) return;
           text.value = data.url;
           preview.src = data.url;
-          status.textContent = 'image ready';
+          status.textContent = `${isVideo ? 'video' : 'image'} ready`;
           status.className = 'nstate done';
         }).catch(error => {
           if (element._uploadGeneration !== generation) return;
@@ -400,19 +553,21 @@
       pendingImageUploads.set(String(id), upload);
       await upload;
     }
-    element._acceptImage = acceptImage;
+    if (isVideo) element._acceptVideo = acceptMedia;
+    else element._acceptImage = acceptMedia;
     element.tabIndex = 0;
-    element.querySelector('.npick').textContent = 'Choose a file or Ctrl+V';
-    file.addEventListener('change', event => acceptImage(event.target.files[0]));
+    element.querySelector('.npick').textContent = isVideo ? 'Choose a video file' : 'Choose a file or Ctrl+V';
+    file.addEventListener('change', event => acceptMedia(event.target.files[0]));
     element.addEventListener('dragover', event => event.preventDefault());
     element.addEventListener('drop', event => {
       event.preventDefault();
-      acceptImage([...event.dataTransfer.files].find(item => item.type.startsWith('image/')));
+      acceptMedia([...event.dataTransfer.files].find(item => item.type.startsWith(isVideo ? 'video/' : 'image/')));
     });
     text.addEventListener('change', () => {
       if (/^https?:\/\//.test(text.value.trim())) {
         preview.src = text.value.trim();
         preview.hidden = false;
+        if (isVideo) preview.play().catch(() => {});
       }
     });
   }
@@ -487,6 +642,7 @@
         }
       }
       replaceOlderInput(connection);
+      invalidateNodeAndDownstream(connection.input_id);
       return;
     }
     // A wrong wire is removed rather than left to fail at render time, when
@@ -542,6 +698,9 @@
   // id; waiting on the submit would leave both blank for minutes.
   const RUNNERS = {
     avatar_image: { api: '/api/ai/avatar-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    video_frame: { api: '/api/ai/video-reference', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    video_storyboard: { api: '/api/ai/video-reference', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    video_control: { api: '/api/ai/video', finish: pollForFile, field: 'video_url_string', type: 'video' },
     vision: { api: '/api/vision', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     text: { api: '/api/text2text', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     image: { api: '/api/image', finish: pollForFile, field: 'image_url_string', type: 'image' },
@@ -578,8 +737,9 @@
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  function taskStateReporter(element, tracker, accepted) {
+  function taskStateReporter(element, tracker, accepted, execution) {
     return data => {
+      if (execution && !executionIsCurrent(execution)) return;
       const status = String(data.status_string || data.status || 'queued').toLowerCase();
       const worker = data.node_string || data.render_server_name || accepted.node_string ||
         (String(accepted.task_id_string || '').includes('.') ? accepted.task_id_string.split('.')[0] : '');
@@ -652,6 +812,8 @@
   function bodyFor(serviceId, resolved, params) {
     const body = {};
     if (serviceId.startsWith('control_')) body.channel = serviceId.slice('control_'.length);
+    if (serviceId === 'video_frame') body.view = 'first_frame';
+    if (serviceId === 'video_storyboard') body.view = 'storyboard';
     Object.keys(params || {}).forEach(name => {
       if (name.startsWith('_')) return;
       const value = params[name];
@@ -678,17 +840,21 @@
   // not, and says it is doing so instead of looking like a stall.
   const BUDGET_EXHAUSTED = 'model_spent_its_budget_thinking';
 
-  async function runServiceNode(id, resolved, budget) {
+  async function runServiceNode(id, resolved, params, execution, budget) {
     const attempt = budget ? 1 : 0;
     const node = meta(id);
+    if (!node) throw new Error('node was removed');
     const runner = RUNNERS[node.service];
     const element = nodeElement(id);
+    if (!element) throw new Error('node was removed');
     const state = element.querySelector('.nstate');
     const progress = element.querySelector('.nprog, .task-prog');
     const outBox = element.querySelector('.nout');
-    state.textContent = 'sending…';
-    state.className = 'nstate running';
-    outBox.innerHTML = '';
+    if (executionIsCurrent(execution)) {
+      state.textContent = 'sending…';
+      state.className = 'nstate running';
+      outBox.innerHTML = '';
+    }
     let task = null;
     try {
       task = window.AIEntities ? window.AIEntities.startTask(progress, node.service) : null;
@@ -696,46 +862,57 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.assign(
-          bodyFor(node.service, resolved, readParams(id)),
+          bodyFor(node.service, resolved, params),
           budget ? { max_output_tokens: budget } : {}))
       });
       const accepted = await response.json();
       if (!response.ok) throw new Error(describeError(accepted, response.status));
-      state.textContent = 'queued — waiting for a worker';
+      execution.taskId = accepted.task_id_string || '';
+      if (executionIsCurrent(execution)) state.textContent = 'queued — waiting for a worker';
       // Recorded before the wait, not after: the whole point is that a link
       // opened mid-render knows which task to carry on watching.
-      recordResult(id, {
-        status: 'running', type: runner.type,
-        value: accepted[runner.field] || '',
-        task_id: accepted.task_id_string || '',
-        started_at: Date.now() / 1000
-      });
+      if (executionIsCurrent(execution)) {
+        recordResult(id, {
+          status: 'running', type: runner.type,
+          value: accepted[runner.field] || '',
+          task_id: accepted.task_id_string || '',
+          started_at: Date.now() / 1000
+        });
+      }
       let value;
       try {
-        value = await runner.finish(accepted, runner, taskStateReporter(state, task, accepted));
+        value = await runner.finish(accepted, runner,
+          taskStateReporter(state, task, accepted, execution));
       } catch (error) {
         if (!attempt && String(error.message || '').indexOf(BUDGET_EXHAUSTED) !== -1) {
-          state.textContent = 'the answer budget ran out — retrying with more';
-          const body = bodyFor(node.service, resolved, readParams(id));
+          if (!executionIsCurrent(execution)) throw error;
+          if (executionIsCurrent(execution)) {
+            state.textContent = 'the answer budget ran out — retrying with more';
+          }
+          const body = bodyFor(node.service, resolved, params);
           const bigger = (Number(body.max_output_tokens) || 1024) * 2;
           if (task) task.clear();
-          return runServiceNode(id, resolved, Math.min(bigger, 8192));
+          return runServiceNode(id, resolved, params, execution, Math.min(bigger, 8192));
         }
         throw error;
       }
-      state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
-      state.className = 'nstate done';
-      if (task) task.finish(true);
-      showResult(outBox, runner.type, value);
-      recordResult(id, { status: 'done', type: runner.type, value: value,
-                         task_id: accepted.task_id_string || '' });
+      finishTaskTracker(task, true, execution, progress);
+      if (executionIsCurrent(execution)) {
+        state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
+        state.className = 'nstate done';
+        showResult(outBox, runner.type, value);
+        recordResult(id, { status: 'done', type: runner.type, value: value,
+                           task_id: accepted.task_id_string || '' });
+      }
       return { type: runner.type, value: value };
     } catch (error) {
-      state.textContent = String(error.message || error);
-      state.className = 'nstate failed';
-      if (task) task.finish(false);
-      recordResult(id, { status: 'failed', type: runner.type, value: '',
-                         error: String(error.message || error) });
+      finishTaskTracker(task, false, execution, progress);
+      if (executionIsCurrent(execution)) {
+        state.textContent = String(error.message || error);
+        state.className = 'nstate failed';
+        recordResult(id, { status: 'failed', type: runner.type, value: '',
+                           error: String(error.message || error) });
+      }
       throw error;
     }
   }
@@ -916,8 +1093,17 @@
   function setRunning(running) {
     const cancel = document.getElementById('cancel');
     const carry = document.getElementById('continue');
+    const run = document.getElementById('run');
     if (cancel) cancel.hidden = !running;
     if (carry) carry.hidden = running;
+    if (run) {
+      run.disabled = false;
+      run.textContent = running ? 'Add to queue' : 'Render';
+    }
+  }
+
+  function refreshRunningControls() {
+    setRunning(runRequests.size > 0 || activeExecutions.size > 0 || restoredExecutions.size > 0);
   }
 
   function markState(id, message, className) {
@@ -943,34 +1129,96 @@
     } catch (error) { /* a run is still worth doing without a link */ }
   }
 
-  /**
-   * @param keepDone when true, nodes that already produced something are not
-   *        run again. That is what Continue means: a clip that took eleven
-   *        minutes should not be paid for twice because a later step failed.
-   */
+  function startIncrementalService(id, node, resolved, params, signature, epoch, keepDone) {
+    const idString = String(id);
+    const key = executionKey(epoch, idString, signature);
+    desiredSignatures.set(idString, signature);
+
+    const restored = restoredExecutions.get(idString);
+    if (restored && !restored.invalidated && restored.epoch === epoch) {
+      return restored.promise;
+    }
+
+    const active = activeExecutions.get(key);
+    if (active) {
+      nodeRunVersions.set(idString, active.version);
+      return active.promise;
+    }
+
+    const continued = keepDone && continuableResults.get(idString);
+    if (continued) {
+      const element = nodeElement(idString);
+      if (element && epoch === canvasEpoch) {
+        const state = element.querySelector('.nstate');
+        state.textContent = 'continued';
+        state.className = 'nstate done';
+        showResult(element.querySelector('.nout'), continued.type, continued.value);
+      }
+      return Promise.resolve({type:continued.type, value:continued.value});
+    }
+
+    const requestBody = bodyFor(node.service, resolved, params);
+    const completed = (completedExecutions.get(idString) || new Map()).get(signature);
+    if (completed && reusableCompleted(node.service, requestBody)) {
+      const element = nodeElement(idString);
+      if (element && epoch === canvasEpoch) {
+        const state = element.querySelector('.nstate');
+        state.textContent = 'cached';
+        state.className = 'nstate done';
+        showResult(element.querySelector('.nout'), completed.type, completed.value);
+        recordResult(idString, {status:'done', type:completed.type, value:completed.value,
+          task_id:completed.task_id || ''});
+      }
+      return Promise.resolve({type: completed.type, value: completed.value});
+    }
+
+    const version = (nodeRunVersions.get(idString) || 0) + 1;
+    nodeRunVersions.set(idString, version);
+    continuableResults.delete(idString);
+    const execution = {id:idString, signature, epoch, version, taskId:''};
+    const promise = runServiceNode(idString, resolved, params, execution)
+      .then(result => {
+        if (epoch === canvasEpoch && reusableCompleted(node.service, requestBody)) {
+          const bucket = completedExecutions.get(idString) || new Map();
+          bucket.set(signature, {...result, task_id:execution.taskId || ''});
+          // Keep a few useful variants without allowing a long editing session
+          // to grow memory forever.
+          while (bucket.size > 8) bucket.delete(bucket.keys().next().value);
+          completedExecutions.set(idString, bucket);
+        }
+        return result;
+      })
+      .finally(() => {
+        activeExecutions.delete(key);
+        refreshRunningControls();
+      });
+    execution.promise = promise;
+    activeExecutions.set(key, execution);
+    refreshRunningControls();
+    return promise;
+  }
+
+  /** Add the current graph snapshot to the live queue. */
   async function runGraph(keepDone) {
     await Promise.all([...pendingImageUploads.values()]);
     const graph = graphFromCanvas();
+    const epoch = canvasEpoch;
     const order = executionOrder(graph);
     if (order.length !== graph.nodes.length) {
       toast('The wiring loops back on itself, so there is no order to run it in.');
       return;
     }
-    const results = new Map();
-    const failed = new Set();
-    if (keepDone) {
-      runState.forEach((record, id) => {
-        if (record.status === 'done' && record.value) {
-          results.set(String(id), { type: record.type, value: record.value });
-        }
-      });
-    }
-    const button = document.getElementById('run');
-    button.disabled = true;
-    button.textContent = 'Rendering…';
-    cancelled = false;
-    if (!keepDone) runState.clear();
-    setRunning(true);
+    const inputValues = new Map();
+    graph.nodes.filter(node => node.kind === KIND_INPUT).forEach(node => {
+      const field = nodeElement(node.id)?.querySelector('[data-value]');
+      inputValues.set(node.id, field ? field.value.trim() : '');
+    });
+    const token = {cancelled:false, id:++nextRunRequestId};
+    graph.nodes.filter(node => node.kind === KIND_SERVICE).forEach(node => {
+      latestPlannedRequests.set(String(node.id), token.id);
+    });
+    runRequests.add(token);
+    refreshRunningControls();
     await ensureSaved();
     // Nodes whose inputs are all ready run together: the two clips and the 3D
     // model come off the same picture and there is no reason to queue them.
@@ -981,50 +1229,58 @@
         const node = byId.get(id);
         const feeds = graph.links.filter(link => link.to === id);
         const start = (async () => {
-          await Promise.all(feeds.map(link => pending.get(link.from)));
-          if (cancelled && !results.has(id)) {
-            failed.add(id);
-            markState(id, 'cancelled before it started', 'nstate');
-            return;
+          const upstreamRecords = await Promise.all(feeds.map(link => pending.get(link.from)));
+          const superseded = node.kind === KIND_SERVICE &&
+            latestPlannedRequests.get(String(id)) !== token.id;
+          if (superseded || epoch !== canvasEpoch || !meta(id)) {
+            return {ok:false, superseded:true};
           }
-          if (feeds.some(link => failed.has(link.from))) {
-            failed.add(id);
-            markState(id, 'skipped — what it needed did not arrive', 'nstate failed');
-            return;
+          if (token.cancelled) {
+            markState(id, 'cancelled before it started', 'nstate');
+            return {ok:false, cancelled:true};
+          }
+          if (upstreamRecords.some(record => !record || !record.ok)) {
+            if (epoch === canvasEpoch && meta(id)) {
+              markState(id, 'skipped — what it needed did not arrive', 'nstate failed');
+            }
+            return {ok:false};
           }
           if (node.kind === KIND_INPUT) {
-            const field = nodeElement(id).querySelector('[data-value]');
-            const value = field ? field.value.trim() : '';
-            if (!value) { failed.add(id); throw new Error('empty input'); }
-            results.set(id, { type: node.entity_type, value: value });
-            return;
+            const value = inputValues.get(id) || '';
+            if (!value) return {ok:false, error:'empty input'};
+            return {ok:true, result:{type:node.entity_type, value}};
           }
-          if (results.has(id)) return;      // Continue: this one is already done.
           const resolved = {};
-          feeds.forEach(link => {
-            const upstream = results.get(link.from);
+          feeds.forEach((link, index) => {
+            const upstream = upstreamRecords[index]?.result;
             if (upstream) resolved[link.input] = upstream.value;
           });
+          const params = {...(node.params || {})};
+          const requestBody = bodyFor(node.service, resolved, params);
+          const signature = stableJson({service:node.service, body:requestBody});
           try {
-            results.set(id, await runServiceNode(id, resolved));
+            const result = await startIncrementalService(
+              id, node, resolved, params, signature, epoch, keepDone);
+            return {ok:true, result};
           } catch (error) {
-            failed.add(id);
+            return {ok:false, error:String(error.message || error)};
           }
         })();
         pending.set(id, start);
       }
-      await Promise.all(pending.values());
+      const settled = await Promise.all(pending.values());
+      const serviceIds = order.filter(id => byId.get(id)?.kind === KIND_SERVICE);
+      const produced = serviceIds.filter(id => settled[order.indexOf(id)]?.ok).length;
+      const failed = serviceIds.length - produced;
+      if (!settled.some(record => record?.superseded)) {
+        toast(failed
+          ? `${produced} of ${serviceIds.length} steps finished; ${failed} did not.`
+          : `All ${serviceIds.length} steps finished.`);
+      }
     } finally {
-      button.disabled = false;
-      button.textContent = 'Render';
-      setRunning(false);
+      runRequests.delete(token);
+      refreshRunningControls();
     }
-    const steps = graph.nodes.filter(node => node.kind === KIND_SERVICE).length;
-    const produced = graph.nodes.filter(
-      node => node.kind === KIND_SERVICE && results.has(node.id)).length;
-    toast(failed.size
-      ? `${produced} of ${steps} steps finished; ${failed.size} did not.`
-      : `All ${steps} steps finished.`);
   }
 
   /**
@@ -1035,18 +1291,19 @@
    * rendering is deliberately left alone.
    */
   async function cancelRun() {
-    cancelled = true;
+    runRequests.forEach(token => { token.cancelled = true; });
     toast('Cancelling — anything already rendering will finish.');
-    const ids = [];
+    const ids = [...activeExecutions.values()].map(execution => execution.taskId).filter(Boolean);
     runState.forEach(record => {
       if (record.status === 'running' && record.task_id) ids.push(record.task_id);
     });
-    if (!ids.length) return;
+    const uniqueIds = [...new Set(ids)];
+    if (!uniqueIds.length) return;
     try {
       const response = await fetch('/api/ai/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_ids: ids })
+        body: JSON.stringify({ task_ids: uniqueIds })
       });
       const data = await response.json();
       if (response.ok) {
@@ -1092,6 +1349,8 @@
       const outBox = element.querySelector('.nout');
       runState.set(String(id), record);
       if (record.status === 'done' && record.value) {
+        continuableResults.set(String(id), {type:record.type, value:record.value,
+          task_id:record.task_id || ''});
         state.textContent = 'done';
         state.className = 'nstate done';
         showResult(outBox, record.type, record.value);
@@ -1103,11 +1362,24 @@
         return;
       }
       if (record.status !== 'running') return;
-      resumeNode(id, record).catch(() => {});
+      const registration = {id:String(id), epoch:canvasEpoch, invalidated:false, promise:null};
+      registration.promise = resumeNode(id, record, registration)
+        .finally(() => {
+          if (restoredExecutions.get(String(id)) === registration) {
+            restoredExecutions.delete(String(id));
+          }
+          refreshRunningControls();
+        });
+      restoredExecutions.set(String(id), registration);
+      refreshRunningControls();
+      registration.promise.catch(() => {});
     });
   }
 
-  async function resumeNode(id, record) {
+  async function resumeNode(id, record, registration) {
+    const epoch = canvasEpoch;
+    const stillHere = () => !registration.invalidated && epoch === canvasEpoch &&
+      meta(id) && nodeElement(id);
     const node = meta(id);
     if (!node) return;
     const runner = RUNNERS[node.service];
@@ -1124,23 +1396,31 @@
     const accepted = { task_id_string: record.task_id };
     accepted[runner.field] = record.value || '';
     try {
-      const value = await runner.finish(accepted, runner, taskStateReporter(state, task, accepted));
+      const reporter = taskStateReporter(state, task, accepted);
+      const value = await runner.finish(accepted, runner, data => {
+        if (stillHere()) reporter(data);
+      });
+      if (!stillHere()) return;
       state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);
       showResult(outBox, runner.type, value);
       recordResult(id, { status: 'done', type: runner.type, value: value,
                          task_id: record.task_id || '' });
+      return {type:runner.type, value};
     } catch (error) {
+      if (!stillHere()) throw error;
       state.textContent = String(error.message || error);
       state.className = 'nstate failed';
       if (task) task.finish(false);
       recordResult(id, { status: 'failed', type: runner.type, value: '',
                          error: String(error.message || error) });
+      throw error;
     }
   }
 
   function loadGraph(graph) {
+    resetCanvasExecutionState();
     editor.clear();
     nodeMeta.clear();
     runState.clear();
@@ -1164,7 +1444,7 @@
       editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1));
     });
     restoreResults(graph.results, mapping);
-    setRunning(false);
+    refreshRunningControls();
   }
 
   /**
@@ -1250,7 +1530,7 @@
     heading.className = 'pgroup';
     heading.textContent = 'Sources';
     host.appendChild(heading);
-    [['image', 'Image in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
+    [['image', 'Image in'], ['video', 'Video in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
       host.appendChild(paletteButton(title, typeIcon(type), '', () =>
         addInputNode(type, 60 + editor.canvas_x * -1, 80, '')));
     });
@@ -1288,7 +1568,8 @@
     installWheelZoom();
     if (window.AINodeGroups) window.AINodeGroups.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
-      addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200});
+      addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200,
+      onNodesRemoved:forgetNodes});
     document.addEventListener('paste', event => {
       const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
       if (!item) return;
@@ -1299,15 +1580,29 @@
       target._acceptImage(item.getAsFile());
     });
     editor.on('connectionCreated', onConnectionCreated);
+    editor.on('connectionRemoved', connection => {
+      if (connection && connection.input_id != null) {
+        invalidateNodeAndDownstream(connection.input_id);
+      }
+    });
+    editor.on('nodeRemoved', id => forgetNodes([id]));
     // A range's number is only useful if it is shown next to the slider.
     document.getElementById('canvas').addEventListener('change', event => {
       if (event.target.dataset && event.target.dataset.param) {
         event.target.dataset.touched = 'yes';
       }
+      const node = event.target.closest && event.target.closest('.drawflow-node');
+      if (node && (event.target.dataset?.param || event.target.dataset?.value !== undefined)) {
+        invalidateNodeAndDownstream(node.id.replace(/^node-/, ''));
+      }
     });
     document.getElementById('canvas').addEventListener('input', event => {
       if (event.target.dataset && event.target.dataset.param) {
         event.target.dataset.touched = 'yes';
+      }
+      const node = event.target.closest && event.target.closest('.drawflow-node');
+      if (node && (event.target.dataset?.param || event.target.dataset?.value !== undefined)) {
+        invalidateNodeAndDownstream(node.id.replace(/^node-/, ''));
       }
       if (event.target.type !== 'range') return;
       const readout = event.target.parentElement.querySelector('output');
@@ -1327,6 +1622,7 @@
     document.getElementById('cancel').addEventListener('click', cancelRun);
     document.getElementById('purge').addEventListener('click', purgeCache);
     document.getElementById('clear').addEventListener('click', () => {
+      resetCanvasExecutionState();
       editor.clear();
       nodeMeta.clear();
       runState.clear();
@@ -1358,6 +1654,7 @@
         toast('That link does not open a graph any more.');
       }
     } else if (wantedAvatar) {
+      resetCanvasExecutionState();
       editor.clear(); nodeMeta.clear(); runState.clear();
       document.getElementById('graph-name').value = 'Avatar production';
       addInputNode('avatar', 60, 100, wantedAvatar);

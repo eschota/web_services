@@ -5,7 +5,8 @@
   "status": "online",
   "available_workflows": [
     "image_to_3d.json",
-    "gen_animation_by_url.json"
+    "gen_animation_by_url.json",
+    "gen_animation_ltx10eros_by_url.json"
   ],
   "workflow_overrides": {},
   "basic_auth": true

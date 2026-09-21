@@ -12,6 +12,12 @@ function Set-Worker([hashtable]$Fields) {
 function Get-Comfy {
     try { Invoke-RestMethod "$comfyUrl/system_stats" -TimeoutSec 5 } catch { $null }
 }
+function Test-ComfyNode([string]$NodeName) {
+    try {
+        $info = Invoke-RestMethod "$comfyUrl/object_info/$NodeName" -TimeoutSec 10
+        return $null -ne $info.$NodeName
+    } catch { return $false }
+}
 
 if ($Mode -eq 'Status') {
     Get-Comfy | ConvertTo-Json -Depth 6
@@ -65,9 +71,14 @@ if ((Test-Path "$root\ComfyUI\models\diffusion_models\ltx-2.3-22b-distilled-1.1_
     (Test-Path "$root\ComfyUI\models\text_encoders\gemma_3_12B_it_fp4_mixed.safetensors") -and
     (Test-Path "$root\ComfyUI\models\vae\LTX23_video_vae_bf16.safetensors") -and
     (Test-Path "$root\ComfyUI\models\vae\LTX23_audio_vae_bf16.safetensors")) { $workflows += 'gen_animation_ltx23_by_url.json' }
+if ((Test-Path "$root\ComfyUI\models\checkpoints\ltx10eros_v14_2989669.safetensors") -and
+    (Test-Path "$root\ComfyUI\models\text_encoders\gemma_3_12B_it_fp4_mixed.safetensors")) { $workflows += 'gen_animation_ltx10eros_by_url.json' }
 if ((Test-Path "$root\ComfyUI\models\diffusion_models\flux-2-klein-4b.safetensors") -and
     (Test-Path "$root\ComfyUI\models\text_encoders\qwen_3_4b_fp4_flux2.safetensors") -and
-    (Test-Path "$root\ComfyUI\models\vae\flux2-vae.safetensors")) { $workflows += @('gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json') }
+    (Test-Path "$root\ComfyUI\models\vae\flux2-vae.safetensors")) {
+    $workflows += @('gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json')
+    if (Test-ComfyNode 'ReferenceLatent') { $workflows += 'gen_image_flux2_avatar.json' }
+}
 if (Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.safetensors") { $workflows += @('gen_image_sdxl.json','gen_image_sdxl_edit.json') }
 if ((Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.safetensors") -and
     (Test-Path "$root\ComfyUI\models\controlnet\xinsir-controlnet-union-sdxl-1.0.safetensors")) {

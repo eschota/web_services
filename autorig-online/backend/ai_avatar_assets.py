@@ -36,6 +36,7 @@ _FORMATS = {
     "WEBP": ("webp", "image/webp", {".webp"}),
 }
 _ALLOWED_IMPORT_PREFIXES = (
+    "/api/ai/video-references/",
     "/dev/api/scratch/",
     "/renderfin/render/",
     "/api/ai/avatar-assets/",

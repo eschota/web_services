@@ -14,8 +14,10 @@ def apply_runtime_settings(workflow, prompt, width, height):
     # map to the product's landscape render default would cut off both bodies.
     if getattr(prompt, 'type', '') in {'control_pose', 'control_depth', 'control_canny'}:
         return workflow
-    internal_width = math.ceil(width / 32) * 32
-    internal_height = math.ceil(height / 32) * 32
+    has_video_control = any(n.get('class_type') in {'LTXAddVideoICLoRAGuide', 'LTXAddVideoICLoRAGuideAdvanced'} for n in workflow.values())
+    grid = 64 if has_video_control else 32
+    internal_width = math.ceil(width / grid) * grid
+    internal_height = math.ceil(height / grid) * grid
     lora = getattr(prompt, 'lora', '')
     if lora and not any(n.get('class_type') in {'LoraLoaderModelOnly', 'LoraLoader', 'Power Lora Loader (rgthree)'} for n in workflow.values()):
         loader = next((nid for nid,n in workflow.items() if n.get('class_type') in {'UNETLoader', 'CheckpointLoaderSimple'}), None)
@@ -31,6 +33,8 @@ def apply_runtime_settings(workflow, prompt, width, height):
     for node in list(workflow.values()):
         inputs = node.get('inputs', {})
         kind = node.get('class_type', '')
+        if kind in {'LTXAddVideoICLoRAGuide', 'LTXAddVideoICLoRAGuideAdvanced'}:
+            inputs['strength'] = float(getattr(prompt, 'control_strength', 0.8))
         if kind == 'ControlNetApplyAdvanced':
             inputs['strength'] = float(getattr(prompt, 'control_strength', 0.8))
             inputs['start_percent'] = float(getattr(prompt, 'control_start', 0.0))

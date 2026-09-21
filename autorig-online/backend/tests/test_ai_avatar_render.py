@@ -113,17 +113,17 @@ class AvatarRenderTests(unittest.TestCase):
                 bob = AvatarOwner(owner_type="user", owner_id="bob@example.com")
 
                 first_v1 = store.create(alice, _draft("Mira", "Mira v1", [
-                    _reference("asset_mira_body", "https://assets.example/mira-body.png",
+                    _reference("asset_mira_body", "https://autorig.online/dev/api/scratch/mira-body.png",
                                "1" * 64, role="body"),
-                    _reference("asset_mira_face", "https://assets.example/mira-face-v1.png",
+                    _reference("asset_mira_face", "https://autorig.online/dev/api/scratch/mira-face-v1.png",
                                "2" * 64, role="face"),
                 ]))
                 store.update(first_v1.avatar_id, alice, _draft("Mira", "Mira v2", [
-                    _reference("asset_mira_face_v2", "https://assets.example/mira-face-v2.png",
+                    _reference("asset_mira_face_v2", "https://autorig.online/dev/api/scratch/mira-face-v2.png",
                                "3" * 64, role="face"),
                 ]))
                 second = store.create(alice, _draft("Noah", "Noah identity", [
-                    _reference("asset_noah_face", "https://assets.example/noah-face.png",
+                    _reference("asset_noah_face", "https://autorig.online/dev/api/scratch/noah-face.png",
                                "4" * 64, role="face"),
                 ]))
 
@@ -171,8 +171,8 @@ class AvatarRenderTests(unittest.TestCase):
                         self.assertEqual(payload["work_flow"],
                                          "gen_image_flux2_avatar.json")
                         self.assertEqual(payload["reference_image_urls"], [
-                            "https://assets.example/mira-face-v1.png",
-                            "https://assets.example/noah-face.png",
+                            "https://autorig.online/dev/api/scratch/mira-face-v1.png",
+                            "https://autorig.online/dev/api/scratch/noah-face.png",
                             "https://autorig.online/dev/api/scratch/scene.png",
                         ])
                         self.assertEqual((payload["main_size_width"],
@@ -200,7 +200,7 @@ class AvatarRenderTests(unittest.TestCase):
                 store = AvatarStore(pathlib.Path(folder) / "avatars")
                 owner_value = AvatarOwner(owner_type="user", owner_id="owner@example.com")
                 profile = store.create(owner_value, _draft("Ari", "Ari identity", [
-                    _reference("asset_ari", "https://assets.example/ari.png", "7" * 64),
+                    _reference("asset_ari", "https://autorig.online/dev/api/scratch/ari.png", "7" * 64),
                 ]))
 
                 async def owner():
@@ -236,7 +236,7 @@ class AvatarRenderTests(unittest.TestCase):
                 store = AvatarStore(pathlib.Path(folder) / "avatars")
                 owner_value = AvatarOwner(owner_type="user", owner_id="owner@example.com")
                 profile = store.create(owner_value, _draft("Ari", "Ari identity", [
-                    _reference("asset_ari", "https://assets.example/ari.png", "8" * 64),
+                    _reference("asset_ari", "https://autorig.online/dev/api/scratch/ari.png", "8" * 64),
                 ]))
 
                 async def owner():
@@ -267,7 +267,7 @@ class AvatarRenderTests(unittest.TestCase):
                 store = AvatarStore(pathlib.Path(folder) / "avatars")
                 owner_value = AvatarOwner(owner_type="anon", owner_id="anon-1")
                 profile = store.create(owner_value, _draft("Motion", "Motion identity", [
-                    _reference("asset_motion", "https://assets.example/motion.mp4",
+                    _reference("asset_motion", "https://autorig.online/dev/api/scratch/motion.mp4",
                                "5" * 64, role="face", media_type="video"),
                 ]))
 
@@ -300,7 +300,7 @@ class AvatarRenderTests(unittest.TestCase):
                 store = AvatarStore(root / "avatars")
                 owner_value = AvatarOwner(owner_type="user", owner_id="owner@example.com")
                 profile = store.create(owner_value, _draft("Ari", "Ari identity", [
-                    _reference("asset_ari", "https://assets.example/ari.png",
+                    _reference("asset_ari", "https://autorig.online/dev/api/scratch/ari.png",
                                "6" * 64),
                 ]))
 

@@ -39,6 +39,7 @@
     const addInputNode = options.addInputNode;
     const addServiceNode = options.addServiceNode;
     const exportGraph = options.exportGraph;
+    const onNodesRemoved = typeof options.onNodesRemoved === 'function' ? options.onNodesRemoved : function () {};
     const toast = typeof options.toast === 'function' ? options.toast : function () {};
     const nodeLimit = clamp(Number(options.nodeLimit) || 200, 1, 1000);
     if (!editor || !canvas || !getMeta || !addInputNode || !addServiceNode || !exportGraph) {
@@ -102,13 +103,13 @@
 
     function beginMarquee(event) {
       closeMenu();
-      if (!(event.ctrlKey || event.metaKey)) clearSelection();
+      if (!(event.ctrlKey || event.metaKey || event.shiftKey)) clearSelection();
       const overlay = document.createElement('div');
       overlay.className = 'ai-group-marquee';
       document.body.appendChild(overlay);
       marquee = {
         startX: event.clientX, startY: event.clientY, overlay,
-        additive: !!(event.ctrlKey || event.metaKey), before: new Set(selected)
+        additive: !!(event.ctrlKey || event.metaKey || event.shiftKey), before: new Set(selected)
       };
       updateMarquee(event);
       document.addEventListener('mousemove', updateMarquee, true);
@@ -216,7 +217,7 @@
         return;
       }
       const id = numericId(node);
-      if (event.ctrlKey || event.metaKey) {
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
         event.preventDefault();
         event.stopImmediatePropagation();
         toggleSelection(id);
@@ -257,7 +258,23 @@
       const links = graph.links.filter(link => kept.has(String(link.from)) && kept.has(String(link.to))).map(link => ({
         from: String(link.from), to: String(link.to), output: String(link.output || ''), input: String(link.input || '')
       }));
-      return { version: VERSION, source: pageKey, nodes, links };
+      // A copied child still depends on its unselected parents. Keep only
+      // those incoming boundary wires; copying outgoing wires would connect a
+      // clone into existing descendants and replace their current inputs.
+      const graphNodes = new Map(graph.nodes.map(node => [String(node.id), node]));
+      const externalInputs = graph.links.filter(link =>
+        !kept.has(String(link.from)) && kept.has(String(link.to))).map(link => {
+        const parent = graphNodes.get(String(link.from)) || {};
+        return {
+          from: String(link.from), to: String(link.to),
+          output: String(link.output || ''), input: String(link.input || ''),
+          parent: {
+            kind: String(parent.kind || ''), service: String(parent.service || ''),
+            entity_type: String(parent.entity_type || '')
+          }
+        };
+      });
+      return { version: VERSION, source: pageKey, nodes, links, external_inputs: externalInputs };
     }
 
     function writeClipboard(event) {
@@ -286,6 +303,7 @@
       let payload;
       try { payload = JSON.parse(raw); } catch (_) { return null; }
       if (!payload || payload.version !== VERSION || !Array.isArray(payload.nodes) || !Array.isArray(payload.links)) return null;
+      if (payload.external_inputs != null && !Array.isArray(payload.external_inputs)) return null;
       if (!payload.nodes.length || payload.nodes.length > nodeLimit) return null;
       const ids = new Set();
       for (const node of payload.nodes) {
@@ -303,7 +321,55 @@
         if (!link || !ids.has(String(link.from)) || !ids.has(String(link.to)) ||
             typeof link.output !== 'string' || typeof link.input !== 'string') return null;
       }
+      payload.external_inputs = payload.external_inputs || [];
+      if (payload.external_inputs.length > nodeLimit * 12) return null;
+      for (const link of payload.external_inputs) {
+        if (!link || ids.has(String(link.from)) || !ids.has(String(link.to)) ||
+            typeof link.from !== 'string' || typeof link.output !== 'string' || typeof link.input !== 'string' ||
+            !link.parent || typeof link.parent !== 'object' || Array.isArray(link.parent) ||
+            !['kind', 'service', 'entity_type'].every(name => typeof link.parent[name] === 'string')) return null;
+      }
       return payload;
+    }
+
+    function matchingExternalParent(link) {
+      const parent = getMeta(link.from);
+      if (!parent || !nodeElement(link.from)) return null;
+      const signature = link.parent || {};
+      if (signature.kind && String(parent.kind || '') !== signature.kind) return null;
+      if (signature.service && String(parent.service || '') !== signature.service) return null;
+      if (signature.entity_type && String(parent.entityType || parent.entity_type || '') !== signature.entity_type) return null;
+      return parent;
+    }
+
+    function restoreExternalInputs(payload, mapping) {
+      if (payload.source !== pageKey) return { restored: 0, missing: 0 };
+      let restored = 0, missing = 0;
+      (payload.external_inputs || []).forEach(link => {
+        const from = String(link.from);
+        const to = mapping.get(String(link.to));
+        const fromMeta = to && matchingExternalParent(link);
+        const toMeta = to && getMeta(to);
+        if (!fromMeta || !toMeta) { missing += 1; return; }
+        const outIndex = (fromMeta.outFields || []).indexOf(link.output);
+        const inIndex = (toMeta.inFields || []).indexOf(link.input);
+        if (outIndex < 0 || inIndex < 0) { missing += 1; return; }
+        try {
+          const target = editor.getNodeFromId(to);
+          const portName = 'input_' + (inIndex + 1);
+          const port = target && target.inputs && target.inputs[portName];
+          // Never let a malformed clipboard boundary link replace an internal
+          // link that was already restored into the cloned group.
+          if (!port || (port.connections || []).length) { missing += 1; return; }
+          // The host's connectionCreated handler remains the authority on
+          // entity-type compatibility and removes an invalid wire immediately.
+          editor.addConnection(from, to, 'output_' + (outIndex + 1), portName);
+          const exists = port && (port.connections || []).some(item =>
+            String(item.node) === from && String(item.input) === 'output_' + (outIndex + 1));
+          if (exists) restored += 1; else missing += 1;
+        } catch (_) { missing += 1; }
+      });
+      return { restored, missing };
     }
 
     function pastePayload(payload) {
@@ -330,9 +396,11 @@
         if (node.kind === 'input') id = addInputNode(node.entity_type, Number(node.x) + offsetX, Number(node.y) + offsetY, node.value, node.params);
         else id = addServiceNode(node.service, Number(node.x) + offsetX, Number(node.y) + offsetY, JSON.parse(JSON.stringify(node.params)));
         if (!id) {
-          mapping.forEach(newId => editor.removeNodeId('node-' + newId));
+          const rolledBack = Array.from(mapping.values());
+          rolledBack.forEach(newId => editor.removeNodeId('node-' + newId));
+          if (rolledBack.length) onNodesRemoved(rolledBack);
           toast('Paste contains an unavailable node type.');
-          return;
+          return null;
         }
         mapping.set(node.id, String(id));
       }
@@ -345,10 +413,53 @@
         if (outIndex < 0 || inIndex < 0) continue;
         editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1));
       }
+      const external = restoreExternalInputs(payload, mapping);
       selected.clear();
       mapping.forEach(id => selected.add(id));
       paintSelection();
-      toast(mapping.size + ' nodes pasted.');
+      toast(mapping.size + ' nodes pasted' +
+        (external.restored ? '; ' + external.restored + ' incoming link' + (external.restored === 1 ? '' : 's') + ' restored' : '') +
+        (external.missing ? '; ' + external.missing + ' incoming link' + (external.missing === 1 ? '' : 's') + ' unavailable' : '') + '.');
+      return mapping;
+    }
+
+    function duplicateSelection() {
+      const payload = clipboardPayload();
+      if (!payload) { toast('Select one or more nodes first.'); return false; }
+      return !!pastePayload(payload);
+    }
+
+    function removeSelection() {
+      pruneSelection();
+      const ids = Array.from(selected).filter(id => !!nodeElement(id));
+      if (!ids.length) return false;
+      closeMenu();
+      // Drawflow removes every connection attached to the node as part of
+      // removeNodeId. Run this before its own Delete handler sees the event.
+      ids.forEach(id => editor.removeNodeId('node-' + id));
+      if (editor.node_selected && ids.includes(numericId(editor.node_selected))) {
+        editor.node_selected = null;
+        editor.ele_selected = null;
+        editor.drag = false;
+      }
+      selected.clear();
+      paintSelection();
+      onNodesRemoved(ids);
+      toast(ids.length + (ids.length === 1 ? ' node deleted.' : ' nodes deleted.'));
+      return true;
+    }
+
+    async function pasteFromSystemClipboard() {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        toast('Use Ctrl+V to paste copied nodes.'); return false;
+      }
+      try {
+        const payload = parsePayload(await navigator.clipboard.readText());
+        if (!payload) { toast('The clipboard does not contain AutoRig nodes.'); return false; }
+        return !!pastePayload(payload);
+      } catch (_) {
+        toast('Clipboard access was refused. Use Ctrl+V instead.'); return false;
+      }
     }
 
     function onPaste(event) {
@@ -517,6 +628,27 @@
       const title = document.createElement('strong');
       title.textContent = 'Edit ' + selected.size + ' selected nodes';
       menu.appendChild(title);
+      const commands = document.createElement('div');
+      commands.className = 'ai-group-menu-commands';
+      const commandButton = (label, titleText, action, className) => {
+        const button = document.createElement('button');
+        button.type = 'button'; button.textContent = label; button.title = titleText;
+        if (className) button.className = className;
+        button.addEventListener('click', async () => {
+          const keepOpen = label === 'Paste';
+          if (!keepOpen) closeMenu();
+          await action();
+          if (keepOpen) closeMenu();
+        });
+        return button;
+      };
+      commands.append(
+        commandButton('Copy', 'Copy selected nodes (Ctrl/Cmd+C)', () => writeClipboard(null)),
+        commandButton('Paste', 'Paste AutoRig nodes from the clipboard (Ctrl/Cmd+V)', pasteFromSystemClipboard),
+        commandButton('Duplicate', 'Duplicate selected nodes and their internal wires (Ctrl/Cmd+D)', duplicateSelection),
+        commandButton('Delete', 'Delete every selected node and its attached wires (Delete)', removeSelection, 'danger')
+      );
+      menu.appendChild(commands);
       const dirty = new Set();
       fields.forEach(field => {
         const label = document.createElement('label');
@@ -608,13 +740,23 @@
 
     function onKeyDown(event) {
       if (event.key === ' ') spaceDown = true;
-      if (event.key === 'Escape') { closeMenu(); return; }
+      if (event.key === 'Escape') {
+        closeMenu(); clearSelection();
+        if (!editableTarget(event.target)) { event.preventDefault(); event.stopImmediatePropagation(); }
+        return;
+      }
       if (editableTarget(event.target)) return;
       const command = event.ctrlKey || event.metaKey;
       if (command && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); }
       if (command && event.key.toLowerCase() === 'c' && selected.size) {
         event.preventDefault();
         if (!document.execCommand('copy')) writeClipboard(null);
+      }
+      if (command && event.key.toLowerCase() === 'd' && selected.size) {
+        event.preventDefault(); event.stopImmediatePropagation(); duplicateSelection();
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selected.size) {
+        event.preventDefault(); event.stopImmediatePropagation(); removeSelection();
       }
     }
 
@@ -638,6 +780,8 @@
       selected,
       clearSelection,
       selectAll,
+      duplicateSelection,
+      removeSelection,
       destroy: function () {
         closeMenu();
         canvas.removeEventListener('mousedown', onMouseDown, true);
@@ -659,10 +803,13 @@
       '.drawflow .drawflow-node.multi-selected{outline:2px solid #22d3ee;outline-offset:3px;box-shadow:0 0 0 1px rgba(34,211,238,.35),0 12px 30px rgba(0,0,0,.28)}',
       '.ai-group-marquee{position:fixed;z-index:9998;border:1px solid #38bdf8;background:rgba(56,189,248,.15);pointer-events:none}',
       '.ai-group-menu{position:fixed;z-index:10020;min-width:260px;max-height:min(520px,85vh);overflow:auto;padding:12px;border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 18px 55px rgba(0,0,0,.5);display:grid;gap:9px}',
+      '.ai-group-menu-commands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:2px 0 8px;border-bottom:1px solid #334155}',
       '.ai-group-menu label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(90px,130px);gap:10px;align-items:center;text-transform:capitalize;font-size:12px}',
       '.ai-group-menu input,.ai-group-menu select{min-width:0;background:#111827;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:6px}',
       '.ai-group-menu-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:4px}',
-      '.ai-group-menu button{border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;padding:6px 10px}'
+      '.ai-group-menu button{border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;padding:6px 10px;cursor:pointer}',
+      '.ai-group-menu button:hover{background:#334155}',
+      '.ai-group-menu button.danger{border-color:rgba(251,113,133,.55);color:#fda4af}'
     ].join('');
     document.head.appendChild(style);
   }

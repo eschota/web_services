@@ -21,6 +21,7 @@ SCHEDULER_ALIASES = {
     "simple": "simple",
 }
 MODEL_FILE_ALIASES = {
+    "ltx10eros_v14_2989633.safetensors": "ltx10eros_v14_2989669.safetensors",
     "cyberrealisticPony_v180Coreshift_2764472.safetensors":
         "CyberRealisticPony_V18.0_F16.safetensors",
 }

@@ -1,0 +1,277 @@
+"""Strict preparation of a public control video for a ComfyUI workflow.
+
+Only explicitly trusted public asset origins are accepted.  The downloaded
+source is kept unchanged while ffprobe and ffmpeg operate on a unique temporary
+directory below the Renderfin data tree; that directory alone is removed when
+the operation ends.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+import shutil
+import tempfile
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Tuple
+from urllib.parse import urlsplit
+
+import httpx
+
+from . import config
+
+
+MAX_VIDEO_BYTES = 100 * 1024 * 1024
+MAX_DIMENSION = 2048
+MAX_DURATION_SECONDS = 16.4
+PROCESS_TIMEOUT_SECONDS = 60.0
+DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+FFMPEG_BIN = os.getenv("RENDERFIN_FFMPEG_BIN", "ffmpeg")
+FFPROBE_BIN = os.getenv("RENDERFIN_FFPROBE_BIN", "ffprobe")
+
+_AUTORIG_PATH_PREFIXES = (
+    "/dev/api/scratch/",
+    "/renderfin/render/",
+    "/api/ai/avatar-assets/",
+)
+_PVS_HOST = re.compile(r"pvs[1-9]\.microstock\.plus", re.IGNORECASE)
+_MP4_FORMATS = {"mov", "mp4", "m4a", "3gp", "3g2", "mj2"}
+
+
+class VideoInputError(RuntimeError):
+    """The control video cannot be admitted or prepared safely."""
+
+
+def _validated_url(value: str) -> str:
+    url = str(value or "").strip()
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise VideoInputError("invalid control video URL") from exc
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if parsed.scheme.lower() != "https" or not hostname:
+        raise VideoInputError("control video URL must use HTTPS")
+    if parsed.username is not None or parsed.password is not None:
+        raise VideoInputError("credentials are not allowed in a control video URL")
+    if port is not None:
+        raise VideoInputError("custom ports are not allowed in a control video URL")
+    if parsed.fragment:
+        raise VideoInputError("fragments are not allowed in a control video URL")
+    if hostname == "autorig.online":
+        if not any(parsed.path.startswith(prefix) for prefix in _AUTORIG_PATH_PREFIXES):
+            raise VideoInputError("autorig.online control video path is not allowed")
+    elif not _PVS_HOST.fullmatch(hostname):
+        raise VideoInputError("control video host is not allowed")
+    if not parsed.path or parsed.path.endswith("/"):
+        raise VideoInputError("control video URL must identify a file")
+    return url
+
+
+def _validated_frame_count(frame_count: int, fps: int) -> Tuple[int, int]:
+    if isinstance(frame_count, bool) or not isinstance(frame_count, int):
+        raise VideoInputError("frame_count must be an integer")
+    if isinstance(fps, bool) or not isinstance(fps, int) or fps != 24:
+        raise VideoInputError("control video fps must be 24")
+    if frame_count < 9 or frame_count > 393 or (frame_count - 1) % 8:
+        raise VideoInputError("frame_count must be 8k+1 in the range 9..393")
+    if frame_count / fps > MAX_DURATION_SECONDS:
+        raise VideoInputError("requested control video duration exceeds 16.4 seconds")
+    return frame_count, fps
+
+
+async def _run_process(*argv: str) -> bytes:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise VideoInputError(f"cannot start {argv[0]}: {exc}") from exc
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=PROCESS_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError as exc:
+        process.kill()
+        await process.communicate()
+        raise VideoInputError(f"{argv[0]} exceeded {PROCESS_TIMEOUT_SECONDS:g}s") from exc
+    if process.returncode:
+        detail = stderr.decode("utf-8", errors="replace")[-2000:]
+        raise VideoInputError(f"{argv[0]} failed with exit {process.returncode}: {detail}")
+    return stdout
+
+
+async def _probe(path: Path, *, count_frames: bool = False) -> Dict[str, Any]:
+    argv = [
+        FFPROBE_BIN,
+        "-v", "error",
+        "-show_entries", "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,nb_read_frames",
+        "-of", "json",
+    ]
+    if count_frames:
+        argv.insert(3, "-count_frames")
+    argv.append(str(path))
+    raw = await _run_process(*argv)
+    try:
+        result = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise VideoInputError("ffprobe returned invalid JSON") from exc
+    if not isinstance(result, dict):
+        raise VideoInputError("ffprobe returned a non-object result")
+    return result
+
+
+def _video_stream(probe: Dict[str, Any]) -> Dict[str, Any]:
+    streams = probe.get("streams")
+    if not isinstance(streams, list):
+        raise VideoInputError("ffprobe found no streams")
+    stream = next(
+        (row for row in streams if isinstance(row, dict) and row.get("codec_type") == "video"),
+        None,
+    )
+    if stream is None:
+        raise VideoInputError("control input has no video stream")
+    try:
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+    except (TypeError, ValueError) as exc:
+        raise VideoInputError("control input has invalid dimensions") from exc
+    if width < 2 or height < 2:
+        raise VideoInputError("control input has invalid dimensions")
+    return stream
+
+
+def _validate_mp4_probe(probe: Dict[str, Any]) -> Dict[str, Any]:
+    stream = _video_stream(probe)
+    format_row = probe.get("format")
+    if not isinstance(format_row, dict):
+        raise VideoInputError("ffprobe found no container")
+    formats = {part.strip().lower() for part in str(format_row.get("format_name") or "").split(",")}
+    if not formats.intersection(_MP4_FORMATS):
+        raise VideoInputError("control input is not an MP4 container")
+    try:
+        duration = float(format_row.get("duration") or 0)
+    except (TypeError, ValueError) as exc:
+        raise VideoInputError("control input has invalid duration") from exc
+    if duration <= 0:
+        raise VideoInputError("control input has invalid duration")
+    return stream
+
+
+async def _download(client: httpx.AsyncClient, url: str, target: Path) -> None:
+    try:
+        async with client.stream("GET", url, timeout=60.0, follow_redirects=False) as response:
+            if 300 <= response.status_code < 400:
+                raise VideoInputError("redirects are not allowed for control videos")
+            if response.status_code != 200:
+                raise VideoInputError(
+                    f"control video download returned HTTP {response.status_code}"
+                )
+            declared = response.headers.get("content-length")
+            if declared:
+                try:
+                    declared_size = int(declared)
+                except ValueError as exc:
+                    raise VideoInputError("invalid control video Content-Length") from exc
+                if declared_size < 1 or declared_size > MAX_VIDEO_BYTES:
+                    raise VideoInputError("control video exceeds the 100 MB limit")
+            size = 0
+            with target.open("wb") as output:
+                async for chunk in response.aiter_bytes(DOWNLOAD_CHUNK_BYTES):
+                    size += len(chunk)
+                    if size > MAX_VIDEO_BYTES:
+                        raise VideoInputError("control video exceeds the 100 MB limit")
+                    output.write(chunk)
+            if size == 0:
+                raise VideoInputError("control video download is empty")
+    except VideoInputError:
+        raise
+    except (httpx.HTTPError, OSError) as exc:
+        raise VideoInputError(f"control video download failed: {exc}") from exc
+
+
+validate_video_url = _validated_url
+
+
+async def download_prepare_video(
+    client: httpx.AsyncClient,
+    url: str,
+    frame_count: int,
+    fps: int = 24,
+) -> Tuple[str, bytes]:
+    """Download and normalize a trusted control video.
+
+    The returned filename is unique and safe to upload directly to ComfyUI.
+    The source file is preserved byte-for-byte throughout processing, then the
+    function removes only its own unique working directory.
+    """
+    admitted_url = _validated_url(url)
+    frame_count, fps = _validated_frame_count(frame_count, fps)
+    temp_root = (config.RENDER_DIR / ".video-input-temp").resolve()
+    temp_root.mkdir(parents=True, exist_ok=True)
+    work_dir = Path(tempfile.mkdtemp(prefix="control-", dir=temp_root)).resolve()
+    try:
+        work_dir.relative_to(temp_root)
+    except ValueError as exc:  # defensive: never clean an unexpected path
+        raise VideoInputError("video input temporary directory escaped its root") from exc
+    source = work_dir / "source.mp4"
+    output = work_dir / "control.mp4"
+    filename = f"control-{uuid.uuid4().hex}.mp4"
+    try:
+        await _download(client, admitted_url, source)
+        source_probe = await _probe(source)
+        _validate_mp4_probe(source_probe)
+        video_filter = (
+            f"fps={fps},"
+            "scale=w='min(2048,iw)':h='min(2048,ih)':"
+            "force_original_aspect_ratio=decrease:force_divisible_by=2"
+        )
+        await _run_process(
+            FFMPEG_BIN,
+            "-v", "error",
+            "-y",
+            "-i", str(source),
+            "-map", "0:v:0",
+            "-an",
+            "-vf", video_filter,
+            "-frames:v", str(frame_count),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(output),
+        )
+        if not output.is_file():
+            raise VideoInputError("ffmpeg produced no control video")
+        size = output.stat().st_size
+        if size < 1 or size > MAX_VIDEO_BYTES:
+            raise VideoInputError("prepared control video exceeds the 100 MB limit")
+        output_probe = await _probe(output, count_frames=True)
+        stream = _validate_mp4_probe(output_probe)
+        if str(stream.get("codec_name") or "").lower() != "h264":
+            raise VideoInputError("prepared control video is not H.264")
+        if str(stream.get("pix_fmt") or "").lower() != "yuv420p":
+            raise VideoInputError("prepared control video is not yuv420p")
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        if width > MAX_DIMENSION or height > MAX_DIMENSION:
+            raise VideoInputError("prepared control video exceeds 2048 pixels")
+        duration = float((output_probe.get("format") or {}).get("duration") or 0)
+        if duration <= 0 or duration > MAX_DURATION_SECONDS:
+            raise VideoInputError("prepared control video duration exceeds 16.4 seconds")
+        try:
+            decoded_frames = int(stream.get("nb_read_frames") or 0)
+        except (TypeError, ValueError) as exc:
+            raise VideoInputError("cannot verify prepared control video frame count") from exc
+        if decoded_frames != frame_count:
+            raise VideoInputError(
+                f"prepared control video has {decoded_frames} frames; expected {frame_count}"
+            )
+        return filename, output.read_bytes()
+    finally:
+        # ``work_dir`` came from mkdtemp under ``temp_root`` and was checked
+        # above.  Never remove the shared root or any sibling job.
+        shutil.rmtree(work_dir, ignore_errors=True)

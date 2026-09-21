@@ -1043,6 +1043,9 @@ async def _uncached_api_image(body: ImageRequest):
         }
 
 class VideoRequest(BaseModel):
+    control_video_url: Optional[str] = Field(None, description="Driving MP4 for whole-sequence motion guidance")
+    control_channel: Optional[str] = Field(None, pattern="^(canny|pose|depth)$")
+    control_strength: float = Field(0.8, ge=0, le=1)
     image_url: Optional[str] = Field(None, description="First frame, public URL")
     image_base64: Optional[str] = Field(None, description="First frame, inline")
     prompt: Optional[str] = Field(None, description="What should happen in the clip")
@@ -1113,6 +1116,19 @@ async def _uncached_api_video(body: VideoRequest):
     Renderfin treats a request with an image and no `type` as an animation, so
     the frame is what selects the workflow; the caller never names one.
     """
+    if bool(body.control_video_url) != bool(body.control_channel):
+        raise HTTPException(400, detail="Choose both a driving video and its control channel")
+    if body.control_video_url:
+        import ai_services
+        if (ai_services.service('video_control') or {}).get('status') != 'live':
+            raise HTTPException(503, detail="Video motion transfer is still completing its render checks")
+        from renderfin.video_input import validate_video_url, VideoInputError
+        try:
+            validate_video_url(body.control_video_url)
+        except (ValueError, VideoInputError) as error:
+            raise HTTPException(400, detail=str(error)) from None
+        if body.lora:
+            raise HTTPException(400, detail="Video control uses its dedicated Union adapter; remove the style LoRA")
     if not body.image_url and not body.image_base64:
         raise HTTPException(status_code=400, detail={
             "error_string": "image_required",
@@ -1132,6 +1148,7 @@ async def _uncached_api_video(body: VideoRequest):
         payload: Dict[str, object] = {
             "image_url": frame, "main_size_width": int(body.width or 960),
             "main_size_height": int(body.height or 540),
+            "frame_count": int(body.frame_count or 97),
         }
         last_frame = str(body.image_url_end or "").strip()
         if not last_frame and body.image_base64_end:
@@ -1152,6 +1169,16 @@ async def _uncached_api_video(body: VideoRequest):
         if body.negative_prompt and str(body.negative_prompt).strip():
             payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
         payload.update(model_payload)
+        if body.control_video_url:
+            if 'ltx-2.3-22b-distilled-1.1' not in str(payload.get('checkpoint', '')):
+                raise HTTPException(400, detail="Video control requires the LTX-2.3 distilled 1.1 model")
+            payload['control_video_url'] = body.control_video_url
+            payload['control_strength'] = body.control_strength
+            payload['work_flow'] = {
+                'canny': 'gen_video_ltx23_control_by_url.json',
+                'pose': 'gen_video_ltx23_pose_by_url.json',
+                'depth': 'gen_video_ltx23_depth_by_url.json',
+            }[body.control_channel]
         if body.creativity is not None:
             payload["creativity"] = float(body.creativity)
         if body.seed:

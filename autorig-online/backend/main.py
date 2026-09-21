@@ -1526,10 +1526,12 @@ async def get_avatar_owner(
 from ai_avatars import build_avatar_router
 from ai_avatar_assets import build_avatar_asset_router
 from ai_avatar_render import build_avatar_render_router
+from ai_video_reference import router as ai_video_reference_router
 
 app.include_router(build_avatar_router(get_avatar_owner))
 app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
+app.include_router(ai_video_reference_router)
 
 
 async def require_admin(
@@ -15962,7 +15964,10 @@ def _inject_static_layout(html_content: str, canonical_path: Optional[str] = Non
 
 
 def _static_html_response(filename: str) -> HTMLResponse:
-    path = STATIC_DIR / filename
+    # Follow the same immutable release switch as nginx. A static-only release
+    # must not require restarting active API connections to refresh its HTML.
+    live_static = Path("/srv/autorig/current/autorig-online/static")
+    path = (live_static if live_static.is_dir() else STATIC_DIR) / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Not found")
     return HTMLResponse(

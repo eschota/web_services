@@ -54,6 +54,10 @@ def build_avatar_render_router(owner_dependency: Callable, *, store=None):
             if not images:
                 raise HTTPException(400, detail="This Avatar needs an image reference")
             primary = next((r for r in images if r.role == "face"), images[0])
+            try:
+                validate_import_url(primary.canonical_url)
+            except ValueError:
+                raise HTTPException(400, detail="Import the Avatar reference into AutoRig before rendering") from None
             references.append(primary.canonical_url)
             instructions.append(
                 f"Reference image {len(references)} defines character {index}, {profile.display_name}. "

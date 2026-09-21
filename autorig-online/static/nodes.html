@@ -16,9 +16,9 @@
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260922-groups"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260922-display"></script>
-    <script src="/static/js/ai-node-display.js?v=20260922-display"></script>
-    <script src="/static/js/ai-nodes.js?v=20260922-display"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260922-incremental"></script>
+    <script src="/static/js/ai-node-display.js?v=20260922-incremental"></script>
+    <script src="/static/js/ai-nodes.js?v=20260922-incremental"></script>
     <style>
         .ai-page {
             background:
@@ -104,11 +104,15 @@
         }
         .drawflow .drawflow-node.selected { background: rgba(21,22,42,.97); border-color: #38bdf8; }
         .drawflow .drawflow-node .input, .drawflow .drawflow-node .output {
-            width: 13px; height: 13px; margin-bottom: 13px;
+            width: 26px; height: 26px; margin-bottom: 0;
             background: #0f1020; border: 2px solid #7b5cff;
+            transform: scale(var(--socket-zoom-scale, 1)); transform-origin: center;
+            cursor: crosshair; z-index: 3;
         }
-        .drawflow .drawflow-node .input { left: -7px; background: #0f1020; border-color: #38bdf8; }
-        .drawflow .drawflow-node .output { right: -7px; }
+        .drawflow .drawflow-node > .inputs, .drawflow .drawflow-node > .outputs { transform: translateY(-6.5px); }
+        .drawflow .drawflow-node .input { left: -13px; background: #0f1020; border-color: #38bdf8; }
+        .drawflow .drawflow-node .output { right: -13px; }
+        .drawflow .drawflow-node .input:hover, .drawflow .drawflow-node .output:hover { background:#38bdf8; box-shadow:0 0 0 3px rgba(56,189,248,.2); }
         .drawflow .connection .main-path { stroke: #7b5cff; stroke-width: 2.6px; }
         .drawflow .connection .main-path:hover { stroke: #38bdf8; }
 
@@ -226,6 +230,8 @@
             another. Only sockets that carry the same kind of thing will connect.
             Render runs the whole composition; steps that do not depend on each
             other run at the same time.
+            Select with left-drag or Shift-click. Right-drag pans. Ctrl+C/V copies and pastes;
+            Ctrl+D duplicates; Delete removes selected nodes. Double-click a header for S/M/A views.
         </p>
     </aside>
     <main><div id="canvas"></div></main>

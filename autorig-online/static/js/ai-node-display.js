@@ -240,6 +240,10 @@
     // so defer one frame and let storedMode read the final meta object.
     const onCreated = id => requestAnimationFrame(() => prepare(nodeElement(canvas, id)));
     if (typeof editor.on === 'function') editor.on('nodeCreated', onCreated);
+    const scaleSockets = () => canvas.style.setProperty('--socket-zoom-scale',
+      String(Math.max(1, Math.min(1.8, 1 / Math.sqrt(Number(editor.zoom) || 1)))));
+    if (typeof editor.on === 'function') editor.on('zoom', scaleSockets);
+    scaleSockets();
     refresh();
 
     return {

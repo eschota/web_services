@@ -70,8 +70,33 @@ ENTITY_TYPES: List[Dict[str, object]] = [
 # shows a planned service greyed out instead of pretending it works.
 SERVICES: List[Dict[str, object]] = [
     {
+        "id": "video_frame", "title": "Video first frame", "path": "/nodes",
+        "api": "/api/ai/video-reference", "status": "live",
+        "summary": "Extract the first frame of a driving video for scene and character editing.",
+        "inputs": [{"type": VIDEO, "field": "video_url", "required": True, "title": "Source video"}],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "First frame"}],
+    },
+    {
+        "id": "video_storyboard", "title": "Video storyboard", "path": "/nodes",
+        "api": "/api/ai/video-reference", "status": "live",
+        "summary": "Five chronological frames for Vision to describe the scene and action.",
+        "inputs": [{"type": VIDEO, "field": "video_url", "required": True, "title": "Source video"}],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Timeline image"}],
+    },
+    {
+        "id": "video_control", "title": "Video motion transfer", "path": "/nodes",
+        "api": "/api/video", "status": "planned", "slow": True,
+        "summary": "Animate a character keyframe using motion from the source video.",
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True, "title": "Character keyframe"},
+            {"type": VIDEO, "field": "control_video_url", "required": True, "title": "Driving video"},
+            {"type": TEXT, "field": "prompt", "required": False, "title": "Scene and action"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Clip"}],
+    },
+    {
         "id": "avatar_image", "title": "Avatar scene", "path": "/avatars",
-        "api": "/api/ai/avatar-image", "status": "planned",
+        "api": "/api/ai/avatar-image", "status": "live",
         "summary": "Place one or two saved characters into a scene using their reference images.",
         "inputs": [
             {"type": AVATAR, "field": "avatar", "required": True, "title": "Main character"},
@@ -213,6 +238,15 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
 
 
 PARAMS: Dict[str, List[Dict[str, object]]] = {
+    "video_control": [
+        {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 960},
+        {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 540},
+        {"name": "frame_count", "title": "Frames", "type": "number", "min": 9, "max": 393, "step": 8, "default": 97},
+        {"name": "control_channel", "title": "Motion guide", "type": "select", "default": "canny",
+         "options": [{"value": "canny", "title": "Canny"}, {"value": "pose", "title": "Pose"}, {"value": "depth", "title": "Depth"}]},
+        {"name": "control_strength", "title": "Control strength", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 0.8},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
+    ],
     "avatar_image": [
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 960},
         {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 540},

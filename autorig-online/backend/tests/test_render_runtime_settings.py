@@ -6,6 +6,15 @@ from renderfin.runtime_settings import apply_runtime_settings
 
 
 class RuntimeSettingsTests(unittest.TestCase):
+    def test_video_union_control_uses_half_grid_and_exact_delivery(self):
+        graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {}},
+                 'control': {'class_type': 'LTXAddVideoICLoRAGuide', 'inputs': {'strength': 1}},
+                 'video': {'class_type': 'CreateVideo', 'inputs': {'images': ['decode', 0]}}}
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=97, control_strength=0.6), 960, 540)
+        self.assertEqual(graph['latent']['inputs']['height'], 576)
+        self.assertEqual(graph['control']['inputs']['strength'], 0.6)
+        self.assertEqual(graph['delivery_size_video']['inputs']['height'], 540)
+
     def test_half_hd_is_padded_for_model_and_exact_for_saved_video(self):
         graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {'width': 1024, 'height': 1024}},
                  'video': {'class_type': 'CreateVideo', 'inputs': {'images': ['decode', 0]}}}

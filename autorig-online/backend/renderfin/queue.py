@@ -1252,6 +1252,17 @@ class RenderQueue:
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url)
             image_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         image_end_filename = ""
+        control_video_filename = ""
+        control_url = str(getattr(prompt, "control_video_url", "") or "").strip()
+        controlled_video = workflow_file in {
+            "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
+            "gen_video_ltx23_depth_by_url.json"}
+        if bool(control_url) != controlled_video:
+            raise comfy_adapter.ComfyAdapterError("A video control workflow requires its driving video")
+        if control_url:
+            from .video_input import download_prepare_video
+            name, data = await download_prepare_video(self._client, control_url, prompt.frame_count)
+            control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
             image_end_filename = await comfy_adapter.upload_image(self._client, server, name, data)
@@ -1280,6 +1291,7 @@ class RenderQueue:
             negative_prompt=prompt.negative_prompt,
             image_filename=image_filename,
             image_end_filename=image_end_filename,
+            control_video_filename=control_video_filename,
             output_prefix=task.id,
             workflow_type=prompt.type,
             frames=prompt.frame_count,
