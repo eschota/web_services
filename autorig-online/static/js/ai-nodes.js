@@ -737,6 +737,110 @@
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+  // Submissions are cheap HTTP calls but a large graph can make dozens at the
+  // same instant. Space their starts and bound requests waiting for response
+  // headers; the permit is released on HTTP acceptance, not after the GPU job.
+  const submitQueue = [];
+  let submitInFlight = 0;
+  let submitLastStartedAt = 0;
+  let submitPumpTimer = null;
+  const SUBMIT_START_GAP_MS = 250;
+  const SUBMIT_MAX_IN_FLIGHT = 4;
+
+  function pumpSubmitQueue() {
+    if (!submitQueue.length || submitInFlight >= SUBMIT_MAX_IN_FLIGHT) return;
+    const wait = Math.max(0, SUBMIT_START_GAP_MS - (Date.now() - submitLastStartedAt));
+    if (wait > 0) {
+      if (!submitPumpTimer) {
+        submitPumpTimer = setTimeout(() => {
+          submitPumpTimer = null;
+          pumpSubmitQueue();
+        }, wait);
+      }
+      return;
+    }
+    const entry = submitQueue.shift();
+    submitInFlight += 1;
+    submitLastStartedAt = Date.now();
+    Promise.resolve().then(entry.start).then(entry.resolve, entry.reject).finally(() => {
+      submitInFlight -= 1;
+      pumpSubmitQueue();
+    });
+    // Arrange the next spaced start even while this request is in flight.
+    pumpSubmitQueue();
+  }
+
+  function pacedSubmitFetch(url, options) {
+    return new Promise((resolve, reject) => {
+      submitQueue.push({start: () => fetch(url, options), resolve, reject});
+      pumpSubmitQueue();
+    });
+  }
+
+  async function readJsonResponse(response) {
+    const text = await response.text();
+    if (!text.trim()) return {data:null, text:''};
+    try {
+      return {data:JSON.parse(text), text};
+    } catch (error) {
+      return {data:null, text};
+    }
+  }
+
+  function retryAfterMilliseconds(response) {
+    const raw = response.headers?.get?.('Retry-After');
+    if (!raw) return 1000;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const at = Date.parse(raw);
+    return Number.isFinite(at) ? Math.max(0, at - Date.now()) : 1000;
+  }
+
+  function nonJsonHttpError(response, text) {
+    const status = Number(response.status) || 0;
+    const kind = /^\s*</.test(text || '') ? 'an HTML error page' : 'a non-JSON response';
+    const ambiguous = [502, 504].includes(status)
+      ? ' It was not retried because the farm may already have accepted the task.' : '';
+    return `HTTP ${status || 'error'} — the service returned ${kind}.${ambiguous}`;
+  }
+
+  async function submitJson(url, body, onRetry) {
+    for (let attempt = 0; attempt <= 6; attempt += 1) {
+      let response;
+      try {
+        response = await pacedSubmitFetch(url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+      } catch (error) {
+        throw new Error('Could not connect to the service. The request was not retried because its acceptance is unknown.');
+      }
+      let parsed;
+      try {
+        parsed = await readJsonResponse(response);
+      } catch (error) {
+        throw new Error('The service response could not be read. It was not retried because task acceptance is unknown.');
+      }
+      if (response.status === 429 && attempt < 6) {
+        const delay = Math.min(15000, retryAfterMilliseconds(response)) +
+          Math.floor(Math.random() * 126);
+        if (onRetry) onRetry({attempt:attempt + 1, delay});
+        await sleep(delay);
+        continue;
+      }
+      if (!response.ok) {
+        if (parsed.data) throw new Error(describeError(parsed.data, response.status));
+        throw new Error(nonJsonHttpError(response, parsed.text));
+      }
+      if (!parsed.data || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
+        throw new Error(nonJsonHttpError(response, parsed.text));
+      }
+      return parsed.data;
+    }
+    throw new Error('The service is still rate limited after 6 retries. Try Render again shortly.');
+  }
+
   function taskStateReporter(element, tracker, accepted, execution) {
     return data => {
       if (execution && !executionIsCurrent(execution)) return;
@@ -858,15 +962,14 @@
     let task = null;
     try {
       task = window.AIEntities ? window.AIEntities.startTask(progress, node.service) : null;
-      const response = await fetch(runner.api, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign(
-          bodyFor(node.service, resolved, params),
-          budget ? { max_output_tokens: budget } : {}))
+      const submitBody = Object.assign(
+        bodyFor(node.service, resolved, params),
+        budget ? {max_output_tokens:budget} : {});
+      const accepted = await submitJson(runner.api, submitBody, retry => {
+        if (!executionIsCurrent(execution)) return;
+        state.textContent = `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
+        state.className = 'nstate running';
       });
-      const accepted = await response.json();
-      if (!response.ok) throw new Error(describeError(accepted, response.status));
       execution.taskId = accepted.task_id_string || '';
       if (executionIsCurrent(execution)) state.textContent = 'queued — waiting for a worker';
       // Recorded before the wait, not after: the whole point is that a link

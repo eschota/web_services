@@ -102,6 +102,7 @@ function harness(graphs) {
     "  window.addEventListener('DOMContentLoaded', () => {",
     `  window.__aiNodesTest = {
       runGraph, cancelRun, resetCanvasExecutionState,
+      submitJson,
       continuableResults, restoredExecutions, completedExecutions,
       activeExecutions, runRequests, setMeta
     };
@@ -115,7 +116,7 @@ function harness(graphs) {
         : {kind: 'service', service: node.service, inFields: ['prompt'], outFields: ['image_url_string']});
     }
   }
-  return {api, calls, jobs, controls};
+  return {api, calls, jobs, controls, setFetch(fn) { context.fetch = fn; }};
 }
 
 
@@ -217,4 +218,73 @@ test('canvas reset prevents an old completion entering the completed cache', asy
   h.jobs[0].resolve({type: 'image', value: 'https://result/old.png'});
   await run;
   assert.equal(h.api.completedExecutions.size, 0);
+});
+
+
+function response(status, body, headers = {}) {
+  const normalized = new Map(Object.entries(headers).map(([key, value]) =>
+    [key.toLowerCase(), String(value)]));
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: {get(name) { return normalized.get(String(name).toLowerCase()) || null; }},
+    async text() { return body; },
+  };
+}
+
+
+test('submit retries a known-unaccepted 429 and preserves the exact body', async () => {
+  const h = harness([graph([input('a')])]);
+  const bodies = [];
+  let attempt = 0;
+  h.setFetch(async (_url, options) => {
+    bodies.push(options.body);
+    attempt += 1;
+    return attempt === 1
+      ? response(429, '{"detail":"rate limited"}', {'Retry-After': '0'})
+      : response(202, '{"task_id_string":"accepted-1","image_url_string":"https://result/1.png"}');
+  });
+  const accepted = await h.api.submitJson('/api/ai/image', {prompt:'same', seed:0});
+  assert.equal(accepted.task_id_string, 'accepted-1');
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0], bodies[1]);
+});
+
+
+test('HTML 502 becomes a clear error and is never retried', async () => {
+  const h = harness([graph([input('a')])]);
+  let calls = 0;
+  h.setFetch(async () => {
+    calls += 1;
+    return response(502, '<html><title>Bad Gateway</title></html>');
+  });
+  await assert.rejects(
+    h.api.submitJson('/api/ai/image', {prompt:'ambiguous', seed:0}),
+    error => /HTTP 502/.test(error.message) && /not retried/.test(error.message) &&
+      !/Unexpected token/.test(error.message));
+  assert.equal(calls, 1);
+});
+
+
+test('a burst starts at most four submits in flight and spaces starts', async () => {
+  const h = harness([graph([input('a')])]);
+  const starts = [];
+  let inFlight = 0;
+  let maximum = 0;
+  h.setFetch(async () => {
+    starts.push(Date.now());
+    inFlight += 1;
+    maximum = Math.max(maximum, inFlight);
+    await new Promise(resolve => setTimeout(resolve, 700));
+    inFlight -= 1;
+    return response(202, '{"task_id_string":"ok"}');
+  });
+  await Promise.all(Array.from({length: 9}, (_, index) =>
+    h.api.submitJson('/api/ai/image', {prompt:'burst-' + index, seed:index + 1})));
+  assert.equal(starts.length, 9);
+  assert.ok(maximum <= 4, `maximum in flight was ${maximum}`);
+  for (let index = 1; index < starts.length; index += 1) {
+    assert.ok(starts[index] - starts[index - 1] >= 225,
+      `starts ${index - 1}/${index} were only ${starts[index] - starts[index - 1]}ms apart`);
+  }
 });
