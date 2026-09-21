@@ -31,6 +31,33 @@
   function meta(id) { return nodeMeta.get(String(id)); }
   function setMeta(id, value) { nodeMeta.set(String(id), value); }
 
+  // What this run has produced so far, keyed by node id. Kept on the server
+  // alongside the graph so a deep link shows the run and not only the wiring:
+  // somebody handed the link while a clip renders should see it arrive.
+  const runState = new Map();
+  let graphId = null;
+  let resultsTimer = null;
+
+  function recordResult(id, record) {
+    runState.set(String(id), record);
+    pushResults();
+  }
+
+  /** Written a beat after the change so a burst of finishes is one request. */
+  function pushResults() {
+    if (!graphId) return;
+    clearTimeout(resultsTimer);
+    resultsTimer = setTimeout(() => {
+      const body = {};
+      runState.forEach((value, key) => { body[key] = value; });
+      fetch('/api/ai/graphs/' + encodeURIComponent(graphId) + '/results', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).catch(() => {});
+    }, 800);
+  }
+
   /* ------------------------------------------------------------- catalogue */
 
   async function loadCatalogue() {
@@ -266,9 +293,12 @@
    * status endpoint of its own. Rather than pretend to one shape, each says
    * what it does.
    */
+  // None of these hold the connection open. A graph run wants the task id back
+  // at once so the node can say it is running and the deep link can carry the
+  // id; waiting on the submit would leave both blank for minutes.
   const RUNNERS = {
-    vision: { api: '/api/vision', wait: 150, finish: pollAiStatus, field: 'answer_string', type: 'text' },
-    text: { api: '/api/text2text', wait: 150, finish: pollAiStatus, field: 'answer_string', type: 'text' },
+    vision: { api: '/api/vision', finish: pollAiStatus, field: 'answer_string', type: 'text' },
+    text: { api: '/api/text2text', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     image: { api: '/api/image', finish: pollForFile, field: 'image_url_string', type: 'image' },
     video: { api: '/api/video', finish: pollForFile, field: 'video_url_string', type: 'video' },
     '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
@@ -337,8 +367,6 @@
         body[field] = value;
       }
     });
-    const runner = RUNNERS[serviceId];
-    if (runner.wait) body.wait_seconds = runner.wait;
     return body;
   }
 
@@ -365,16 +393,28 @@
         throw new Error(detail.message_string || detail.error_string || ('HTTP ' + response.status));
       }
       state.textContent = 'running on the farm…';
+      // Recorded before the wait, not after: the whole point is that a link
+      // opened mid-render knows which task to carry on watching.
+      recordResult(id, {
+        status: 'running', type: runner.type,
+        value: accepted[runner.field] || '',
+        task_id: accepted.task_id_string || '',
+        started_at: Date.now() / 1000
+      });
       const value = await runner.finish(accepted, runner);
       state.textContent = 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);
       showResult(outBox, runner.type, value);
+      recordResult(id, { status: 'done', type: runner.type, value: value,
+                         task_id: accepted.task_id_string || '' });
       return { type: runner.type, value: value };
     } catch (error) {
       state.textContent = String(error.message || error);
       state.className = 'nstate failed';
       if (task) task.finish(false);
+      recordResult(id, { status: 'failed', type: runner.type, value: '',
+                         error: String(error.message || error) });
       throw error;
     }
   }
@@ -444,7 +484,10 @@
         });
       });
     });
-    return { name: document.getElementById('graph-name').value.trim() || 'Untitled', nodes, links };
+    const results = {};
+    runState.forEach((value, key) => { results[key] = value; });
+    return { name: document.getElementById('graph-name').value.trim() || 'Untitled',
+             nodes, links, results };
   }
 
   /** Nodes in an order where everything a node needs has already run. */
@@ -464,6 +507,22 @@
     return order;
   }
 
+  /** A run needs a link to publish its progress to, so one is made up front. */
+  async function ensureSaved() {
+    if (graphId) return;
+    try {
+      const response = await fetch('/api/ai/graphs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(graphFromCanvas())
+      });
+      const data = await response.json();
+      if (response.ok) {
+        graphId = data.graph_id_string;
+        history.replaceState(null, '', data.deep_link_string);
+      }
+    } catch (error) { /* a run is still worth doing without a link */ }
+  }
+
   async function runGraph() {
     const graph = graphFromCanvas();
     const order = executionOrder(graph);
@@ -476,6 +535,8 @@
     const button = document.getElementById('run');
     button.disabled = true;
     button.textContent = 'Rendering…';
+    runState.clear();
+    await ensureSaved();
     // Nodes whose inputs are all ready run together: the two clips and the 3D
     // model come off the same picture and there is no reason to queue them.
     const byId = new Map(graph.nodes.map(node => [node.id, node]));
@@ -531,9 +592,76 @@
 
   /* -------------------------------------------------------- load and save */
 
+  /**
+   * Put a stored run back on the canvas.
+   *
+   * A node that had finished shows what it produced. A node that was still
+   * running when the link was made is picked up where it was left: the same
+   * poller is started again from the stored task, so a link opened while a
+   * clip renders fills in when the clip lands rather than staying frozen.
+   */
+  function restoreResults(results, mapping) {
+    Object.keys(results || {}).forEach(originalId => {
+      const record = results[originalId];
+      const id = mapping.get(originalId);
+      const element = id && nodeElement(id);
+      if (!element) return;
+      const state = element.querySelector('.nstate');
+      const outBox = element.querySelector('.nout');
+      runState.set(String(id), record);
+      if (record.status === 'done' && record.value) {
+        state.textContent = 'done';
+        state.className = 'nstate done';
+        showResult(outBox, record.type, record.value);
+        return;
+      }
+      if (record.status === 'failed') {
+        state.textContent = record.error || 'failed';
+        state.className = 'nstate failed';
+        return;
+      }
+      if (record.status !== 'running') return;
+      resumeNode(id, record).catch(() => {});
+    });
+  }
+
+  async function resumeNode(id, record) {
+    const node = meta(id);
+    if (!node) return;
+    const runner = RUNNERS[node.service];
+    const element = nodeElement(id);
+    const state = element.querySelector('.nstate');
+    const outBox = element.querySelector('.nout');
+    state.textContent = 'still running on the farm…';
+    state.className = 'nstate running';
+    const task = window.AIEntities
+      ? window.AIEntities.startTask(element.querySelector('.nprog'), node.service)
+      : null;
+    // The pollers only need what the submit returned, and that is exactly
+    // what was stored, so the same code finishes the job.
+    const accepted = { task_id_string: record.task_id };
+    accepted[runner.field] = record.value || '';
+    try {
+      const value = await runner.finish(accepted, runner);
+      state.textContent = 'done';
+      state.className = 'nstate done';
+      if (task) task.finish(true);
+      showResult(outBox, runner.type, value);
+      recordResult(id, { status: 'done', type: runner.type, value: value,
+                         task_id: record.task_id || '' });
+    } catch (error) {
+      state.textContent = String(error.message || error);
+      state.className = 'nstate failed';
+      if (task) task.finish(false);
+      recordResult(id, { status: 'failed', type: runner.type, value: '',
+                         error: String(error.message || error) });
+    }
+  }
+
   function loadGraph(graph) {
     editor.clear();
     nodeMeta.clear();
+    runState.clear();
     document.getElementById('graph-name').value = graph.name || 'Untitled';
     const mapping = new Map();
     (graph.nodes || []).forEach(node => {
@@ -553,6 +681,7 @@
       if (inIndex < 0) return;
       editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1));
     });
+    restoreResults(graph.results, mapping);
   }
 
   async function saveGraph() {
@@ -568,6 +697,7 @@
       toast(detail.message_string || 'The graph was not saved.');
       return;
     }
+    graphId = data.graph_id_string;
     const link = location.origin + data.deep_link_string;
     history.replaceState(null, '', data.deep_link_string);
     navigator.clipboard.writeText(link).then(
@@ -642,6 +772,12 @@
     });
 
     buildPalette();
+    // The strip says what the whole farm is doing, coloured by the kind of
+    // work, which on this page matters more than on any single-service one:
+    // a composition is waiting on several sorts of job at once.
+    if (window.AIEntities) {
+      window.AIEntities.mountFleet(document.getElementById('fleet'), 'image');
+    }
     document.getElementById('run').addEventListener('click', runGraph);
     document.getElementById('save').addEventListener('click', saveGraph);
     document.getElementById('clear').addEventListener('click', () => {
@@ -664,8 +800,12 @@
     if (wanted) {
       const data = await fetch('/api/ai/graphs/' + encodeURIComponent(wanted))
         .then(r => r.json()).catch(() => null);
-      if (data && data.success_bool) loadGraph(data.graph_object);
-      else toast('That link does not open a graph any more.');
+      if (data && data.success_bool) {
+        if (!data.template_bool) graphId = data.graph_id_string;
+        loadGraph(data.graph_object);
+      } else {
+        toast('That link does not open a graph any more.');
+      }
     } else if ((templates.templates_array || []).length) {
       loadGraph(templates.templates_array[0].graph);
     }

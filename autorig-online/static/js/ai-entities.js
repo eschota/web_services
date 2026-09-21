@@ -194,8 +194,29 @@
   }
 
   /**
-   * A compact fleet dot-strip: one dot per node, lit when online, amber when
-   * busy. Detail only on hover, because the strip itself is the status.
+   * What each kind of work looks like in the strip. A busy dot says which
+   * kind of job is on that card, because "something is running" is not worth
+   * a colour of its own when six different things can be running.
+   *
+   * `conversion` is the farm's own rig and GLB work: not one of these
+   * services, but it occupies the same cards and so has to be visible.
+   */
+  const ACTIVITY = {
+    vision: { colour: '#38bdf8', title: 'Vision' },
+    text: { colour: '#a78bfa', title: 'Text' },
+    // A node that does not report which of the two it is running.
+    ai: { colour: '#818cf8', title: 'Vision / text' },
+    image: { colour: '#facc15', title: 'Image' },
+    video: { colour: '#fb7185', title: 'Video' },
+    model3d: { colour: '#34d399', title: '3D model' },
+    '3dmodel': { colour: '#34d399', title: '3D model' },
+    conversion: { colour: '#94a3b8', title: 'Rig / GLB conversion' }
+  };
+
+  /**
+   * A compact fleet dot-strip: one dot per node, dim when offline, green when
+   * free, and coloured by the kind of work it is doing when busy. Detail only
+   * on hover, because the strip itself is the status.
    */
   function mountFleet(host, serviceId) {
     host.className = 'fleet';
@@ -208,12 +229,19 @@
       try { data = await getFleet(); } catch (err) { return; }
       const nodes = data.nodes_array || [];
       dots.innerHTML = '';
+      const seen = [];
       nodes.forEach(node => {
         const dot = document.createElement('i');
         dot.className = 'fleet-dot' +
           (!node.online ? ' off' : node.busy ? ' busy' : ' free') +
           (node.kind === 'render' ? ' render' : '');
-        dot.title = node.id;
+        const work = node.online && node.busy ? ACTIVITY[node.activity] : null;
+        if (work) {
+          dot.style.background = work.colour;
+          if (seen.indexOf(node.activity) === -1) seen.push(node.activity);
+        }
+        dot.title = node.id + (work ? ' — ' + work.title
+                                    : node.online ? ' — free' : ' — offline');
         dots.appendChild(dot);
       });
       const service = (data.services_object || {})[serviceId] || {};
@@ -233,9 +261,19 @@
         (service.measured_bool
           ? '<div class="fleet-pop-note">measured over ' + (service.samples_int || 0) + ' recent jobs</div>'
           : '<div class="fleet-pop-note">no recent jobs, estimate</div>') +
-        '<div class="fleet-pop-nodes">' + nodes.map(n =>
-            '<span class="' + (!n.online ? 'off' : n.busy ? 'busy' : 'free') + '">' +
-            n.id + '</span>').join('') + '</div>';
+        '<div class="fleet-pop-nodes">' + nodes.map(n => {
+            const work = n.online && n.busy ? ACTIVITY[n.activity] : null;
+            const style = work ? ' style="border-color:' + work.colour +
+                                 ';color:' + work.colour + '"' : '';
+            return '<span class="' + (!n.online ? 'off' : n.busy ? 'busy' : 'free') +
+                   '"' + style + '>' + n.id +
+                   (work ? ' · ' + work.title : '') + '</span>';
+          }).join('') + '</div>' +
+        (seen.length
+          ? '<div class="fleet-key">' + seen.map(id =>
+              '<span><i style="background:' + ACTIVITY[id].colour + '"></i>' +
+              ACTIVITY[id].title + '</span>').join('') + '</div>'
+          : '');
     }
 
     paint();
@@ -332,6 +370,11 @@
       .fleet-dot.off { background:#3a4050; }
       .fleet-dot.render { border-radius:2px; }
       .fleet-sum { font-size:11px; color:var(--text-secondary,#9aa0b5); margin-left:4px; }
+      .fleet-key { display:flex; flex-wrap:wrap; gap:10px; margin-top:9px; padding-top:8px;
+                   border-top:1px solid rgba(255,255,255,.1); font-size:11px;
+                   color:var(--text-secondary,#9aa0b5); }
+      .fleet-key span { display:inline-flex; align-items:center; gap:5px; }
+      .fleet-key i { width:7px; height:7px; border-radius:50%; display:block; }
       .fleet-pop { position:absolute; top:calc(100% + 8px); left:50%; transform:translateX(-50%);
                    min-width:210px; padding:12px 14px; border-radius:12px; z-index:40;
                    background:rgba(12,13,26,.97); border:1px solid rgba(255,255,255,.14);

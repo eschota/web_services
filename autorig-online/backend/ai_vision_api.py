@@ -235,7 +235,44 @@ async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) ->
         for entry in catalogue.get("models") or []:
             if isinstance(entry, dict) and entry.get("id"):
                 models.append(str(entry["id"]))
-    return True, {"load": queued + active_count, "models": models, "loaded": loaded}
+    return True, {"load": queued + active_count, "models": models, "loaded": loaded,
+                  "activities": _activities(payload)}
+
+
+# What a node is actually doing, in the vocabulary the services use. A node
+# reports every task it is processing with a `workload_class`, and the AI tasks
+# carry a `mode` saying whether a picture was involved, so a busy dot can say
+# which kind of work is on the card rather than only that there is some.
+WORKLOAD_ACTIVITY = {
+    "hunyuan": "3dmodel",
+    "comfy": "image",
+    "glb": "conversion",
+    "conversion": "conversion",
+    "autorig": "conversion",
+    "autorig_interactive": "conversion",
+}
+
+
+def _activities(payload: Dict[str, object]) -> List[str]:
+    found: List[str] = []
+    for task in payload.get("processing_tasks") or []:
+        if not isinstance(task, dict):
+            continue
+        workload = str(task.get("workload_class") or "").strip().lower()
+        if workload == "ai_vision":
+            # One queue serves both. A node that reports the mode gets the
+            # finer colour; one that does not is shown as language-model work
+            # rather than guessed at, because guessing puts a wrong label on
+            # somebody's dot.
+            mode = str(task.get("mode") or task.get("ai_mode") or "").strip().lower()
+            found.append(mode if mode in ("vision", "text") else "ai")
+            continue
+        activity = WORKLOAD_ACTIVITY.get(workload)
+        if not activity and workload:
+            activity = "conversion"
+        if activity:
+            found.append(activity)
+    return found
 
 
 async def _pick_worker(
@@ -377,9 +414,22 @@ async def _submit(
             "message_string": "The farm node is not accepting AI work right now",
             "retryable_bool": True})
     if response.status_code not in (200, 202):
+        # The node usually says why, and its reason is the useful part: a node
+        # holding a maintenance claim during a deploy refuses work on purpose,
+        # and "HTTP 400" alone reads like a bug in the request.
+        reason = ""
+        try:
+            body = response.json() or {}
+            reason = str(body.get("error") or body.get("message")
+                         or body.get("detail") or "").strip()
+        except Exception:
+            reason = response.text.strip()[:200]
         raise HTTPException(status_code=502, detail={
             "error_string": "worker_rejected",
-            "message_string": f"Farm node answered HTTP {response.status_code}"})
+            "message_string": (f"Farm node {_node_key(worker)} refused the job: {reason}"
+                               if reason else
+                               f"Farm node {_node_key(worker)} answered HTTP "
+                               f"{response.status_code}")})
     task_id = str((response.json() or {}).get("task_id") or "").strip()
     if not task_id:
         raise HTTPException(status_code=502, detail={

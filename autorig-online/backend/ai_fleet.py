@@ -96,6 +96,36 @@ def _running_from_renderfin(tasks: List[dict]) -> Dict[str, int]:
     return running
 
 
+def render_node(server: Dict[str, object],
+                by_task: Optional[Dict[str, dict]] = None) -> Dict[str, object]:
+    """One render worker as the fleet strip needs it.
+
+    A render worker is named `render_server_name`; reading `name` gave every
+    one of them the same fallback label, so the strip showed five identical
+    dots. And a worker reports `online` all the way through a render — the
+    task it is holding is what says it is busy, not its status.
+
+    That same task also says what kind of work it is: the workflow it runs is
+    what separates a picture from a clip, which is what colours the dot.
+    """
+    state = str(server.get("status") or server.get("status_string") or "").lower()
+    held = str(server.get("current_render_task") or "")
+    queued = int(server.get("queue_size") or 0) > 0
+    activity = ""
+    task = (by_task or {}).get(held)
+    if task:
+        activity = _service_of_workflow(
+            task.get("workflow") or task.get("workflow_file") or "") or ""
+    return {
+        "id": str(server.get("render_server_name") or server.get("name")
+                  or server.get("id") or "render"),
+        "kind": "render",
+        "online": state in ("online", "busy"),
+        "busy": bool(held) or queued or state == "busy",
+        "activity": activity,
+    }
+
+
 async def _renderfin_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
     try:
         response = await client.get(RENDERFIN_BASE + "/api-render", timeout=8.0)
@@ -106,17 +136,13 @@ async def _renderfin_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
         return {}
     servers = payload.get("servers") or []
     tasks = payload.get("tasks") or []
+    by_task = {str(task.get("task_id")): task for task in tasks
+               if isinstance(task, dict) and task.get("task_id")}
     nodes = []
     for server in servers:
         if not isinstance(server, dict):
             continue
-        state = str(server.get("status") or server.get("status_string") or "").lower()
-        nodes.append({
-            "id": str(server.get("name") or server.get("id") or "render"),
-            "kind": "render",
-            "online": state == "online",
-            "busy": state == "busy",
-        })
+        nodes.append(render_node(server, by_task))
     return {
         "nodes": nodes,
         "durations": _durations_from_renderfin(tasks),
@@ -138,16 +164,22 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
     for worker, probe in zip(workers, probes):
         node_id = ai_vision_api._node_key(worker)
         if isinstance(probe, Exception) or not isinstance(probe, tuple):
-            nodes.append({"id": node_id, "kind": "ai", "online": False, "busy": False})
+            nodes.append({"id": node_id, "kind": "ai", "online": False,
+                          "busy": False, "activity": "", "activities": []})
             continue
         ok, info = probe
         load = int((info or {}).get("load") or 0) if isinstance(info, dict) else 0
         total_load += load
+        activities = list((info or {}).get("activities") or []) if isinstance(info, dict) else []
         nodes.append({
             "id": node_id,
             "kind": "ai",
             "online": bool(ok),
             "busy": bool(ok and load > 0),
+            # A node can hold more than one task; the strip has one dot, so it
+            # shows the first and the hover panel lists the rest.
+            "activity": activities[0] if activities else "",
+            "activities": activities,
             "loaded_model": str((info or {}).get("loaded") or "") if isinstance(info, dict) else "",
         })
     return {"nodes": nodes, "load": total_load}

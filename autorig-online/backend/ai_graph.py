@@ -64,10 +64,29 @@ class GraphLink(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class NodeResult(BaseModel):
+    """What one node produced, or is still producing.
+
+    Stored with the graph so a deep link shows the run and not just the
+    wiring. `task_id` is what lets a reopened link carry on watching a render
+    that is still going rather than showing a permanently half-finished page.
+    """
+
+    status: str = "done"          # running | done | failed | skipped
+    type: str = ""                # entity type of `value`
+    value: str = ""               # the text, or the address of the file
+    task_id: str = ""
+    error: str = ""
+    started_at: float = 0
+
+
 class Graph(BaseModel):
     name: str = "Untitled"
     nodes: List[GraphNode] = Field(default_factory=list)
     links: List[GraphLink] = Field(default_factory=list)
+    # Keyed by node id. Never part of what makes a graph's identity: a rerun
+    # must update the same link, not mint a new one.
+    results: Dict[str, NodeResult] = Field(default_factory=dict)
 
 
 # ----------------------------------------------------------------- templates
@@ -274,12 +293,16 @@ async def api_graph_save(graph: Graph):
     """Store a graph and hand back the link that reopens it."""
     validate(graph)
     body = graph.model_dump(by_alias=True)
+    # The link names the composition, not the run: saving after a render must
+    # land on the same link so the one already shared stays the right one.
+    identity = json.dumps({key: value for key, value in body.items() if key != "results"},
+                          ensure_ascii=False, sort_keys=True)
     payload = json.dumps(body, ensure_ascii=False, sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_GRAPH_BYTES:
         raise HTTPException(status_code=400, detail={
             "error_string": "graph_too_large",
             "message_string": "The graph is larger than the store accepts"})
-    graph_id = _new_id(payload)
+    graph_id = _new_id(identity)
     try:
         GRAPH_DIR.mkdir(parents=True, exist_ok=True)
         _path_for(graph_id).write_text(
@@ -300,6 +323,46 @@ async def api_graph_save(graph: Graph):
         "deep_link_string": f"/nodes?g={graph_id}",
         "server_time_unix_int": int(time.time()),
     }
+
+
+@router.put("/api/ai/graphs/{graph_id}/results")
+async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
+    """Record what a run has produced so far, without touching the wiring.
+
+    Written as the run goes rather than once at the end: a clip takes minutes,
+    and a link shared while it renders should show it arriving.
+    """
+    path = _path_for(graph_id)
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail={
+            "error_string": "graph_not_found",
+            "message_string": f"No graph saved as '{graph_id}'"}) from None
+    except Exception:
+        logger.exception("Could not read graph %s", graph_id)
+        raise HTTPException(status_code=500, detail={
+            "error_string": "graph_unreadable",
+            "message_string": "The stored graph could not be read"}) from None
+    graph = stored.get("graph") or {}
+    known = {str(node.get("id")) for node in graph.get("nodes") or []}
+    unknown = set(results) - known
+    if unknown:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unknown_node",
+            "message_string": f"The graph has no node called '{sorted(unknown)[0]}'"})
+    graph["results"] = {key: value.model_dump() for key, value in results.items()}
+    stored["graph"] = graph
+    stored["results_at_unix_int"] = int(time.time())
+    try:
+        path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("Could not write results for graph %s", graph_id)
+        raise HTTPException(status_code=500, detail={
+            "error_string": "results_not_saved",
+            "message_string": "The graph store did not accept the update"}) from None
+    return {"success_bool": True, "graph_id_string": graph_id,
+            "server_time_unix_int": int(time.time())}
 
 
 @router.get("/api/ai/graphs/{graph_id}")

@@ -241,6 +241,50 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(len(list(Path(self._dir.name).glob("*.json"))), 0)
 
+    def test_a_run_is_kept_with_the_graph_so_a_link_shows_it(self):
+        saved = self.client.post("/api/ai/graphs", json=self._payload()).json()
+        graph_id = saved["graph_id_string"]
+        response = self.client.put(
+            f"/api/ai/graphs/{graph_id}/results",
+            json={"b": {"status": "done", "type": "image",
+                        "value": "https://x/y.png", "task_id": "t1"}})
+        self.assertEqual(response.status_code, 200)
+        loaded = self.client.get("/api/ai/graphs/" + graph_id).json()
+        result = loaded["graph_object"]["results"]["b"]
+        self.assertEqual(result["value"], "https://x/y.png")
+        self.assertEqual(result["status"], "done")
+
+    def test_an_unfinished_task_keeps_its_id_so_the_link_can_carry_on(self):
+        saved = self.client.post("/api/ai/graphs", json=self._payload()).json()
+        graph_id = saved["graph_id_string"]
+        self.client.put(f"/api/ai/graphs/{graph_id}/results",
+                        json={"b": {"status": "running", "type": "image",
+                                    "value": "https://x/pending.png",
+                                    "task_id": "task-42"}})
+        loaded = self.client.get("/api/ai/graphs/" + graph_id).json()
+        self.assertEqual(loaded["graph_object"]["results"]["b"]["task_id"], "task-42")
+
+    def test_recording_a_run_does_not_move_the_link(self):
+        """A link shared while a clip renders has to stay the right link."""
+        first = self.client.post("/api/ai/graphs", json=self._payload()).json()
+        payload = self._payload()
+        payload["results"] = {"b": {"status": "done", "type": "image",
+                                    "value": "https://x/y.png"}}
+        second = self.client.post("/api/ai/graphs", json=payload).json()
+        self.assertEqual(first["graph_id_string"], second["graph_id_string"])
+
+    def test_a_result_for_a_node_that_is_not_in_the_graph_is_refused(self):
+        saved = self.client.post("/api/ai/graphs", json=self._payload()).json()
+        response = self.client.put(
+            f"/api/ai/graphs/{saved['graph_id_string']}/results",
+            json={"ghost": {"status": "done", "type": "image", "value": "x"}})
+        self.assertEqual(response.status_code, 400)
+
+    def test_results_for_a_graph_nobody_saved_are_refused(self):
+        response = self.client.put("/api/ai/graphs/nothinghere/results",
+                                   json={"b": {"status": "done"}})
+        self.assertEqual(response.status_code, 404)
+
     def test_an_id_that_was_never_saved_says_so(self):
         response = self.client.get("/api/ai/graphs/nothinghere")
         self.assertEqual(response.status_code, 404)
@@ -297,3 +341,135 @@ class CatalogueParameterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FleetSnapshotTests(unittest.TestCase):
+    """The fleet strip is only useful if the nodes in it are told apart."""
+
+    def test_render_workers_keep_their_own_names(self):
+        import ai_fleet
+        nodes = [ai_fleet.render_node({"render_server_name": "f5", "status": "online"}),
+                 ai_fleet.render_node({"render_server_name": "Raptor", "status": "online"})]
+        self.assertEqual([node["id"] for node in nodes], ["f5", "Raptor"])
+
+    def test_a_worker_holding_a_task_is_busy_even_while_it_says_online(self):
+        import ai_fleet
+        node = ai_fleet.render_node({"render_server_name": "f5", "status": "online",
+                                     "current_render_task": "abc"})
+        self.assertTrue(node["busy"])
+        self.assertTrue(node["online"])
+
+    def test_a_worker_with_a_queue_is_busy(self):
+        import ai_fleet
+        self.assertTrue(ai_fleet.render_node(
+            {"render_server_name": "f5", "status": "online", "queue_size": 2})["busy"])
+
+    def test_an_idle_worker_is_online_and_not_busy(self):
+        import ai_fleet
+        node = ai_fleet.render_node({"render_server_name": "f5", "status": "online"})
+        self.assertTrue(node["online"])
+        self.assertFalse(node["busy"])
+
+    def test_an_offline_worker_is_neither(self):
+        import ai_fleet
+        node = ai_fleet.render_node({"render_server_name": "f5", "status": "offline"})
+        self.assertFalse(node["online"])
+        self.assertFalse(node["busy"])
+
+
+class ActivityTests(unittest.TestCase):
+    """A busy dot says which kind of work is on the card."""
+
+    def test_a_render_worker_shows_what_its_held_task_is(self):
+        import ai_fleet
+        tasks = {"t1": {"task_id": "t1", "workflow": "gen_animation_by_url.json"}}
+        node = ai_fleet.render_node(
+            {"render_server_name": "f5", "status": "online", "current_render_task": "t1"},
+            tasks)
+        self.assertEqual(node["activity"], "video")
+
+    def test_a_picture_and_a_clip_are_told_apart(self):
+        import ai_fleet
+        tasks = {"t1": {"task_id": "t1", "workflow": "gen_image.json"}}
+        node = ai_fleet.render_node(
+            {"render_server_name": "f5", "status": "online", "current_render_task": "t1"},
+            tasks)
+        self.assertEqual(node["activity"], "image")
+
+    def test_an_idle_worker_claims_no_activity(self):
+        import ai_fleet
+        node = ai_fleet.render_node({"render_server_name": "f5", "status": "online"}, {})
+        self.assertEqual(node["activity"], "")
+
+    def test_hunyuan_on_a_converter_reads_as_3d_work(self):
+        import ai_vision_api
+        found = ai_vision_api._activities(
+            {"processing_tasks": [{"workload_class": "hunyuan"}]})
+        self.assertEqual(found, ["3dmodel"])
+
+    def test_an_ai_task_is_split_into_vision_and_text(self):
+        import ai_vision_api
+        found = ai_vision_api._activities({"processing_tasks": [
+            {"workload_class": "ai_vision", "mode": "vision"},
+            {"workload_class": "ai_vision", "mode": "text"}]})
+        self.assertEqual(found, ["vision", "text"])
+
+    def test_the_farms_own_conversion_work_is_visible_too(self):
+        import ai_vision_api
+        found = ai_vision_api._activities(
+            {"processing_tasks": [{"workload_class": "autorig_interactive"}]})
+        self.assertEqual(found, ["conversion"])
+
+    def test_a_workload_nobody_named_still_shows_as_occupied(self):
+        import ai_vision_api
+        found = ai_vision_api._activities(
+            {"processing_tasks": [{"workload_class": "something_new"}]})
+        self.assertEqual(found, ["conversion"])
+
+    def test_an_idle_node_reports_nothing(self):
+        import ai_vision_api
+        self.assertEqual(ai_vision_api._activities({"processing_tasks": []}), [])
+
+
+class RejectionMessageTests(unittest.TestCase):
+    """A refusal should say why, because the reason is usually actionable."""
+
+    def _submit(self, status_code, payload=None, text=""):
+        import ai_vision_api
+        import asyncio
+
+        class Response:
+            status_code = None
+            def json(self):
+                if payload is None:
+                    raise ValueError("no body")
+                return payload
+            @property
+            def text(self):
+                return text
+
+        response = Response()
+        response.status_code = status_code
+
+        class Client:
+            async def post(self, *args, **kwargs):
+                return response
+
+        worker = {"name": "f13", "url": "http://x", "token": "t",
+                  "physical_node": "f13"}
+        return asyncio.get_event_loop().run_until_complete(
+            ai_vision_api._submit(Client(), worker, "/generate-3d", {}))
+
+    def test_the_nodes_own_reason_reaches_the_caller(self):
+        with self.assertRaises(Exception) as caught:
+            self._submit(400, {"error": "node is in maintenance"})
+        message = caught.exception.detail["message_string"]
+        self.assertIn("node is in maintenance", message)
+        self.assertIn("f13", message)
+
+    def test_a_silent_refusal_still_names_the_node_and_the_code(self):
+        with self.assertRaises(Exception) as caught:
+            self._submit(400, None, text="")
+        message = caught.exception.detail["message_string"]
+        self.assertIn("f13", message)
+        self.assertIn("400", message)
