@@ -30,6 +30,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+@router.get("/api/ai/render-status/{task_id}")
+async def api_render_task_status(task_id: str):
+    """Actual queue state and assigned worker, independent of output-file timing."""
+    import re
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", task_id):
+        raise HTTPException(status_code=400, detail="Invalid render task id")
+    async with httpx.AsyncClient() as client:
+        response = await client.get(RENDERFIN_BASE + "/api-render/tasks/" + task_id,
+                                    timeout=10.0)
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail="Render task not found")
+    response.raise_for_status()
+    row = response.json()
+    raw = str(row.get("status_string") or row.get("status") or "").lower()
+    state = {"pending": "queued", "rendering": "rendering", "done": "completed",
+             "error": "failed", "cancelled": "cancelled"}.get(raw, raw or "unknown")
+    return {"success_bool": True, "task_id_string": task_id, "status_string": state,
+            "finished_bool": state in {"completed", "failed", "cancelled"},
+            "node_string": row.get("render_server_name") or "",
+            "workflow_string": row.get("workflow_file") or row.get("workflow") or "",
+            "output_url_string": row.get("output_url_string") or row.get("output_url") or "",
+            "error_string": row.get("error_string") or row.get("error") or "",
+            "started_at_unix_float": row.get("started_at") or 0,
+            "created_at_unix_float": row.get("created_at") or 0}
+
 # One catalogue entry per model a caller may ask for. `worker_model` is empty
 # while a node serves exactly one local model; it becomes the selector once a
 # node offers more than one.
@@ -873,6 +899,15 @@ async def api_image(body: ImageRequest):
         if body.negative_prompt and str(body.negative_prompt).strip():
             payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
         payload.update(model_payload)
+        if reference and not controls and not mode:
+            import ai_model_catalogue
+            import ai_model_defaults
+            selected = ai_model_catalogue.known_file(str(model_payload.get("checkpoint") or ""), "checkpoint")
+            family = ai_model_defaults.model_family(selected)
+            if family == "flux2":
+                payload["work_flow"] = "gen_image_flux2_klein_edit.json"
+            elif family in {"pony", "sdxl"}:
+                payload["work_flow"] = "gen_image_sdxl_edit.json"
         if controls:
             channel = controls[0][0]
             payload["type"] = f"image_control_{channel}"

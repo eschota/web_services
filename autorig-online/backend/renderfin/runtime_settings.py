@@ -27,7 +27,7 @@ def apply_runtime_settings(workflow, prompt, width, height):
         strength = getattr(prompt, 'lora_strength', None)
         workflow['selected_lora'] = {'class_type': 'LoraLoaderModelOnly', 'inputs': {
             'model': [loader, 0], 'lora_name': lora,
-            'strength_model': 1.0 if strength is None else float(strength)}}
+            'strength_model': float(strength) if strength else 1.0}}
     for node in list(workflow.values()):
         inputs = node.get('inputs', {})
         kind = node.get('class_type', '')
@@ -48,6 +48,9 @@ def apply_runtime_settings(workflow, prompt, width, height):
         elif kind == 'LTXVBaseSampler':
             inputs['num_frames'] = frames
         steps = getattr(prompt, 'steps', 0)
+        creativity = getattr(prompt, 'creativity', 0)
+        if creativity and kind in {'KSampler', 'BasicScheduler'} and 'denoise' in inputs:
+            inputs['denoise'] = float(creativity)
         if steps and kind in {'KSampler', 'KSamplerAdvanced', 'BasicScheduler', 'LTXVScheduler', 'Flux2Scheduler'}:
             inputs['steps'] = int(steps)
         cfg = getattr(prompt, 'cfg', None)

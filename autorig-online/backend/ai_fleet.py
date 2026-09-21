@@ -38,6 +38,7 @@ FALLBACK_SECONDS = {
     "image": 100.0,
     "video": 600.0,
     "3dmodel": 900.0,
+    "control": 30.0,
 }
 # Renderfin schedules by workflow token; these map onto our service ids.
 IMAGE_WORKFLOWS = {"gen_image.json", "t_pose.json", "gen_image_by_z_depth.json",
@@ -53,7 +54,9 @@ def _service_of_workflow(workflow: str) -> Optional[str]:
     name = str(workflow or "").strip()
     if not name:
         return None
-    if name in IMAGE_WORKFLOWS:
+    if name.startswith("gen_control_"):
+        return "control"
+    if name in IMAGE_WORKFLOWS or name.startswith("gen_image"):
         return "image"
     if name in MODEL_WORKFLOWS:
         return "3dmodel"
@@ -80,8 +83,8 @@ def _durations_from_renderfin(tasks: List[dict]) -> Dict[str, List[float]]:
     return durations
 
 
-def _running_from_renderfin(tasks: List[dict]) -> Dict[str, int]:
-    running: Dict[str, int] = {}
+def _running_from_renderfin(tasks: List[dict]) -> Dict[str, Dict[str, int]]:
+    running: Dict[str, Dict[str, int]] = {}
     for task in tasks:
         if not isinstance(task, dict):
             continue
@@ -92,12 +95,18 @@ def _running_from_renderfin(tasks: List[dict]) -> Dict[str, int]:
             task.get("workflow") or task.get("workflow_file") or ""
         )
         if service:
-            running[service] = running.get(service, 0) + 1
+            bucket = running.setdefault(service, {"active": 0, "queued": 0})
+            if state in ("rendering", "running") and task.get("render_server_name"):
+                bucket["active"] += 1
+            else:
+                bucket["queued"] += 1
     return running
 
 
 def render_node(server: Dict[str, object],
-                by_task: Optional[Dict[str, dict]] = None) -> Dict[str, object]:
+                by_task: Optional[Dict[str, dict]] = None,
+                by_server: Optional[Dict[str, dict]] = None,
+                comfy_depth: int = 0) -> Dict[str, object]:
     """One render worker as the fleet strip needs it.
 
     A render worker is named `render_server_name`; reading `name` gave every
@@ -112,7 +121,10 @@ def render_node(server: Dict[str, object],
     held = str(server.get("current_render_task") or "")
     queued = int(server.get("queue_size") or 0) > 0
     activity = ""
-    task = (by_task or {}).get(held)
+    task = (by_task or {}).get(held) or (by_server or {}).get(
+        str(server.get("render_server_name") or ""))
+    if task and not held:
+        held = str(task.get("id") or task.get("task_id") or "")
     if task:
         activity = _service_of_workflow(
             task.get("workflow") or task.get("workflow_file") or "") or ""
@@ -121,9 +133,34 @@ def render_node(server: Dict[str, object],
                   or server.get("id") or "render"),
         "kind": "render",
         "online": state in ("online", "busy"),
-        "busy": bool(held) or queued or state == "busy",
+        "busy": bool(held) or queued or comfy_depth > 0 or state == "busy",
         "activity": activity,
+        "activities": [activity] if activity else [],
+        "state": "offline" if state not in ("online", "busy") else (
+            "active" if held or comfy_depth > 0 or state == "busy" else
+            "queued" if queued else "idle"),
+        "task_id": held,
+        "task_status": str((task or {}).get("status") or ""),
+        "workflow": str((task or {}).get("workflow") or
+                        (task or {}).get("workflow_file") or ""),
+        "assigned_worker": str(server.get("render_server_name") or ""),
+        "queue_depth": int(comfy_depth),
     }
+
+
+async def _comfy_queue_depth(client: httpx.AsyncClient,
+                             server: Dict[str, object]) -> int:
+    url = str(server.get("render_server_url") or "").rstrip("/")
+    if not url:
+        return 0
+    try:
+        response = await client.get(url + "/queue", timeout=3.0)
+        if response.status_code != 200:
+            return 0
+        payload = response.json() or {}
+        return len(payload.get("queue_running") or []) + len(payload.get("queue_pending") or [])
+    except Exception:
+        return 0
 
 
 async def _renderfin_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
@@ -136,13 +173,23 @@ async def _renderfin_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
         return {}
     servers = payload.get("servers") or []
     tasks = payload.get("tasks") or []
-    by_task = {str(task.get("task_id")): task for task in tasks
-               if isinstance(task, dict) and task.get("task_id")}
+    active_tasks = [task for task in tasks if isinstance(task, dict)
+                    and str(task.get("status") or "").lower()
+                    not in ("done", "failed", "error", "cancelled")]
+    by_task = {str(task.get("id") or task.get("task_id")): task
+               for task in active_tasks if task.get("id") or task.get("task_id")}
+    by_server = {str(task.get("render_server_name")): task for task in active_tasks
+                 if task.get("render_server_name")}
+    depths = await asyncio.gather(
+        *(_comfy_queue_depth(client, server) for server in servers),
+        return_exceptions=True,
+    )
     nodes = []
-    for server in servers:
+    for server, depth in zip(servers, depths):
         if not isinstance(server, dict):
             continue
-        nodes.append(render_node(server, by_task))
+        nodes.append(render_node(server, by_task, by_server,
+                                 depth if isinstance(depth, int) else 0))
     return {
         "nodes": nodes,
         "durations": _durations_from_renderfin(tasks),
@@ -161,16 +208,24 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
     )
     nodes = []
     total_load = 0
+    running: Dict[str, int] = {}
     for worker, probe in zip(workers, probes):
         node_id = ai_vision_api._node_key(worker)
         if isinstance(probe, Exception) or not isinstance(probe, tuple):
             nodes.append({"id": node_id, "kind": "ai", "online": False,
-                          "busy": False, "activity": "", "activities": []})
+                          "busy": False, "activity": "", "activities": [],
+                          "state": "offline", "queue_depth": 0, "task_id": "",
+                          "task_status": "", "workflow": "",
+                          "assigned_worker": node_id})
             continue
         ok, info = probe
         load = int((info or {}).get("load") or 0) if isinstance(info, dict) else 0
         total_load += load
         activities = list((info or {}).get("activities") or []) if isinstance(info, dict) else []
+        for activity in activities:
+            service = str(activity or "")
+            if service in FALLBACK_SECONDS:
+                running[service] = running.get(service, 0) + 1
         nodes.append({
             "id": node_id,
             "kind": "ai",
@@ -181,8 +236,57 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
             "activity": activities[0] if activities else "",
             "activities": activities,
             "loaded_model": str((info or {}).get("loaded") or "") if isinstance(info, dict) else "",
+            "state": "active" if ok and load > 0 else "idle" if ok else "offline",
+            "queue_depth": load,
+            "task_id": "",
+            "task_status": "",
+            "workflow": activities[0] if activities else "",
+            "assigned_worker": node_id,
         })
-    return {"nodes": nodes, "load": total_load}
+    return {"nodes": nodes, "load": total_load, "running": running}
+
+
+def _canonical_node_id(node_id: object) -> str:
+    value = str(node_id or "").strip()
+    aliases = {"raptor": "ryzen-server"}
+    return aliases.get(value.lower(), value.lower())
+
+
+def _merge_physical_nodes(nodes: List[dict]) -> List[dict]:
+    """One dot per physical GPU even when converter and Renderfin both list it."""
+    merged: Dict[str, dict] = {}
+    order: List[str] = []
+    for source in nodes:
+        if not isinstance(source, dict):
+            continue
+        key = _canonical_node_id(source.get("id"))
+        if not key:
+            continue
+        if key not in merged:
+            merged[key] = dict(source)
+            merged[key]["id"] = "ryzen-server" if key == "ryzen-server" else str(source.get("id") or key)
+            merged[key]["sources"] = [str(source.get("kind") or "")]
+            order.append(key)
+            continue
+        target = merged[key]
+        target["sources"].append(str(source.get("kind") or ""))
+        target["kind"] = "mixed"
+        target["online"] = bool(target.get("online") or source.get("online"))
+        target["busy"] = bool(target.get("busy") or source.get("busy"))
+        target["queue_depth"] = max(int(target.get("queue_depth") or 0),
+                                    int(source.get("queue_depth") or 0))
+        activities = list(target.get("activities") or [])
+        for activity in source.get("activities") or ([source.get("activity")] if source.get("activity") else []):
+            if activity and activity not in activities:
+                activities.append(activity)
+        target["activities"] = activities
+        target["activity"] = activities[0] if activities else ""
+        if source.get("task_id"):
+            for field in ("task_id", "task_status", "workflow", "assigned_worker"):
+                target[field] = source.get(field) or target.get(field) or ""
+        target["state"] = "active" if target["busy"] else (
+            "idle" if target["online"] else "offline")
+    return [merged[key] for key in order]
 
 
 def _summarise(durations: List[float]) -> Dict[str, float]:
@@ -203,9 +307,13 @@ async def _build_snapshot() -> Dict[str, object]:
         render, converter = await asyncio.gather(
             _renderfin_snapshot(client), _converter_snapshot(client)
         )
-    nodes = list(converter.get("nodes") or []) + list(render.get("nodes") or [])
+    nodes = _merge_physical_nodes(
+        list(converter.get("nodes") or []) + list(render.get("nodes") or []))
     durations = dict(render.get("durations") or {})
     running = dict(render.get("running") or {})
+    for service_id, count in (converter.get("running") or {}).items():
+        bucket = running.setdefault(service_id, {"active": 0, "queued": 0})
+        bucket["active"] += int(count or 0)
 
     # The AI services measure themselves: the converter reports how long each
     # task took, and those are the only real numbers for vision and text.
@@ -222,14 +330,11 @@ async def _build_snapshot() -> Dict[str, object]:
                 "median_seconds_float": fallback,
                 "p90_seconds_float": round(fallback * 1.8, 1),
             }
-        summary["running_int"] = int(running.get(service_id) or 0)
+        counts = running.get(service_id) or {}
+        summary["running_int"] = int(counts.get("active") or 0)
+        summary["queued_int"] = int(counts.get("queued") or 0)
         summary["measured_bool"] = bool(durations.get(service_id))
         services[service_id] = summary
-
-    # AI work shares the converter nodes, so its occupancy is their load.
-    ai_load = int(converter.get("load") or 0)
-    for service_id in ("vision", "text"):
-        services[service_id]["running_int"] = ai_load
 
     online = [n for n in nodes if n.get("online")]
     busy = [n for n in online if n.get("busy")]
@@ -241,6 +346,7 @@ async def _build_snapshot() -> Dict[str, object]:
         "nodes_busy_int": len(busy),
         "services_object": services,
         "server_time_unix_int": int(time.time()),
+        "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,
     }
 
 
@@ -267,10 +373,12 @@ async def api_ai_fleet():
                 "services_object": {
                     key: {"samples_int": 0, "median_seconds_float": value,
                           "p90_seconds_float": round(value * 1.8, 1),
-                          "running_int": 0, "measured_bool": False}
+                          "running_int": 0, "queued_int": 0,
+                          "measured_bool": False}
                     for key, value in FALLBACK_SECONDS.items()
                 },
                 "server_time_unix_int": int(time.time()),
+                "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,
             }
         _snapshot_at = time.monotonic()
         return _snapshot

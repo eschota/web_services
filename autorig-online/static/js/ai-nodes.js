@@ -492,13 +492,29 @@
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  async function pollAiStatus(accepted, runner) {
+  function taskStateReporter(element, tracker, accepted) {
+    return data => {
+      const status = String(data.status_string || data.status || 'queued').toLowerCase();
+      const worker = data.node_string || data.render_server_name || accepted.node_string ||
+        (String(accepted.task_id_string || '').includes('.') ? accepted.task_id_string.split('.')[0] : '');
+      const active = ['rendering', 'processing', 'running', 'in_progress', 'generating', 'converting'].includes(status);
+      const phase = data.stage_string || data.stage || (active ? 'rendering' : 'queued');
+      element.textContent = (active ? phase : status === 'completed' ? 'completed' : 'queued') +
+        (worker ? ' · ' + worker : ' — waiting for a worker');
+      if (tracker && tracker.setState) tracker.setState({active, worker, phase,
+        startedAt: data.started_at_unix_float || 0});
+      document.dispatchEvent(new CustomEvent('ai-task-status', {detail: {worker, status}}));
+    };
+  }
+
+  async function pollAiStatus(accepted, runner, report) {
     if (accepted[runner.field]) return accepted[runner.field];
     const id = accepted.task_id_string;
     for (let attempt = 0; attempt < 120; attempt++) {
       await sleep(3000);
       const data = await fetch('/api/ai/status/' + encodeURIComponent(id)).then(r => r.json()).catch(() => null);
       if (!data) continue;
+      if (report) report(data);
       if (data.finished_bool) {
         if (data[runner.field]) return data[runner.field];
         throw new Error(data.error_string || 'the model returned nothing');
@@ -507,26 +523,38 @@
     throw new Error('the answer did not arrive in time');
   }
 
-  async function pollForFile(accepted, runner) {
+  async function pollForFile(accepted, runner, report) {
     const url = accepted[runner.field];
     if (!url) throw new Error('the farm accepted the job without an output address');
     // The farm publishes where the file will be before it exists, so the file
     // appearing is the completion signal. Video is allowed half an hour.
-    for (let attempt = 0; attempt < 400; attempt++) {
-      await sleep(5000);
+    for (let attempt = 0; attempt < 800; attempt++) {
+      if (accepted.task_id_string) {
+        const status = await fetch('/api/ai/render-status/' + encodeURIComponent(accepted.task_id_string))
+          .then(response => response.ok ? response.json() : null).catch(() => null);
+        if (status) {
+          if (report) report(status);
+          if (status.status_string === 'failed' || status.status_string === 'cancelled') {
+            throw new Error(status.error_string || status.status_string);
+          }
+          if (status.status_string === 'completed') return status.output_url_string || url;
+        }
+      }
       const probe = await fetch(url, { method: 'HEAD' }).catch(() => null);
       if (probe && probe.ok) return url;
+      await sleep(2500);
     }
     throw new Error('the render did not land in time; it may still be running');
   }
 
-  async function poll3dStatus(accepted) {
+  async function poll3dStatus(accepted, runner, report) {
     const id = accepted.task_id_string;
     for (let attempt = 0; attempt < 400; attempt++) {
       await sleep(5000);
       const data = await fetch('/api/3dmodel/status/' + encodeURIComponent(id))
         .then(r => r.json()).catch(() => null);
       if (!data) continue;
+      if (report) report(data);
       if (data.finished_bool) {
         if (data.model_url_string) return data.model_url_string;
         throw new Error(data.error_string || 'the node did not produce a model');
@@ -585,7 +613,7 @@
       });
       const accepted = await response.json();
       if (!response.ok) throw new Error(describeError(accepted, response.status));
-      state.textContent = 'running on the farm…';
+      state.textContent = 'queued — waiting for a worker';
       // Recorded before the wait, not after: the whole point is that a link
       // opened mid-render knows which task to carry on watching.
       recordResult(id, {
@@ -596,7 +624,7 @@
       });
       let value;
       try {
-        value = await runner.finish(accepted, runner);
+        value = await runner.finish(accepted, runner, taskStateReporter(state, task, accepted));
       } catch (error) {
         if (!attempt && String(error.message || '').indexOf(BUDGET_EXHAUSTED) !== -1) {
           state.textContent = 'the answer budget ran out — retrying with more';
@@ -995,7 +1023,7 @@
     const accepted = { task_id_string: record.task_id };
     accepted[runner.field] = record.value || '';
     try {
-      const value = await runner.finish(accepted, runner);
+      const value = await runner.finish(accepted, runner, taskStateReporter(state, task, accepted));
       state.textContent = 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);

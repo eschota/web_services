@@ -207,6 +207,7 @@
     // A node that does not report which of the two it is running.
     ai: { colour: '#818cf8', title: 'Vision / text' },
     image: { colour: '#facc15', title: 'Image' },
+    control: { colour: '#c084fc', title: 'ControlNet' },
     video: { colour: '#fb7185', title: 'Video' },
     model3d: { colour: '#34d399', title: '3D model' },
     '3dmodel': { colour: '#34d399', title: '3D model' },
@@ -277,7 +278,14 @@
     }
 
     paint();
-    const timer = setInterval(paint, 7000);
+    const timer = setInterval(paint, 2500);
+    let lastRefresh = 0;
+    document.addEventListener('ai-task-status', () => {
+      if (Date.now() - lastRefresh < 2000) return;
+      lastRefresh = Date.now();
+      getFleet(true).then(paint).catch(() => {});
+    });
+    host.addEventListener('click', () => host.classList.toggle('pinned'));
     host.addEventListener('mouseenter', () => { getFleet(true).then(paint).catch(() => {}); });
     return { stop: () => clearInterval(timer), refresh: paint };
   }
@@ -298,6 +306,9 @@
     const started = Date.now();
     let typical = 0;
     let stopped = false;
+    let active = false;
+    let worker = '';
+    let activeSince = 0;
 
     getFleet().then(data => {
       const service = (data.services_object || {})[serviceId] || {};
@@ -307,19 +318,42 @@
     function tick() {
       if (stopped) return;
       const elapsed = (Date.now() - started) / 1000;
+      if (!active) {
+        fill.style.width = '3%';
+        eta.textContent = 'Queued' + (worker ? ' · ' + worker : '') + ' · ' + human(elapsed);
+        setTimeout(tick, 500);
+        return;
+      }
       // Without a measurement yet, creep on a neutral curve rather than stall.
       const scale = typical || 30;
-      const ratio = 1 - Math.exp(-elapsed / (scale * 0.65));
+      const renderingElapsed = (Date.now() - activeSince) / 1000;
+      const ratio = 1 - Math.exp(-renderingElapsed / (scale * 0.65));
       fill.style.width = Math.min(95, ratio * 95).toFixed(1) + '%';
-      const left = typical ? Math.max(0, typical - elapsed) : 0;
+      const left = typical ? Math.max(0, typical - renderingElapsed) : 0;
       eta.textContent = typical
-        ? (left > 0 ? '~' + human(left) + ' left' : 'any moment now · ' + human(elapsed))
-        : human(elapsed);
+        ? ((worker ? worker + ' · ' : '') + (left > 0 ? '~' + human(left) + ' estimated' : 'rendering · ' + human(renderingElapsed)))
+        : (worker ? worker + ' · ' : '') + human(renderingElapsed);
       setTimeout(tick, 400);
     }
     tick();
 
     return {
+      setState(info) {
+        if (info.active && !active) activeSince = info.startedAt ? info.startedAt * 1000 : Date.now();
+        active = !!info.active;
+        worker = info.worker || '';
+        host.className = 'task-prog ' + (active ? 'running' : 'queued');
+      },
+      async pollRender(taskId) {
+        const response = await fetch('/api/ai/render-status/' + encodeURIComponent(taskId));
+        if (!response.ok) return null;
+        const data = await response.json();
+        this.setState({active: data.status_string === 'rendering', worker: data.node_string,
+          startedAt: data.started_at_unix_float});
+        document.dispatchEvent(new CustomEvent('ai-task-status', {detail: data}));
+        if (['failed', 'cancelled'].includes(data.status_string)) throw new Error(data.error_string || data.status_string);
+        return data;
+      },
       finish(ok) {
         stopped = true;
         fill.style.width = '100%';
@@ -416,7 +450,9 @@
                    min-width:210px; padding:12px 14px; border-radius:12px; z-index:40;
                    background:rgba(12,13,26,.97); border:1px solid rgba(255,255,255,.14);
                    opacity:0; pointer-events:none; transition:opacity .12s; text-align:left; }
-      .fleet:hover .fleet-pop { opacity:1; }
+      .fleet:hover .fleet-pop, .fleet.pinned .fleet-pop { opacity:1; }
+      .fleet-dot.busy { outline:1px solid currentColor; outline-offset:2px; animation:fleet-working 1s infinite alternate; }
+      @keyframes fleet-working { to { opacity:.45; } }
       .fleet-pop-head { font-size:13px; margin-bottom:8px; }
       .fleet-pop-row { display:flex; justify-content:space-between; gap:12px; font-size:12px;
                        color:var(--text-secondary,#9aa0b5); }
@@ -429,7 +465,7 @@
       .fleet-pop-nodes span.busy { color:#ffc857; }
       .fleet-pop-nodes span.off { opacity:.4; text-decoration:line-through; }
       .task-prog { margin-top:14px; display:none; }
-      .task-prog.running, .task-prog.done, .task-prog.failed { display:block; }
+      .task-prog.running, .task-prog.queued, .task-prog.done, .task-prog.failed { display:block; }
       .task-bar { height:4px; border-radius:999px; overflow:hidden; background:rgba(255,255,255,.08); }
       .task-bar i { display:block; height:100%; width:0;
                     background:linear-gradient(90deg,#7b5cff,#38bdf8); transition:width .4s linear; }

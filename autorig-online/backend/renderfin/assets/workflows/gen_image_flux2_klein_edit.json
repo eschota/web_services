@@ -1,0 +1,18 @@
+{
+  "model":{"class_type":"UNETLoader","inputs":{"unet_name":"flux-2-klein-4b.safetensors","weight_dtype":"default"}},
+  "clip":{"class_type":"CLIPLoader","inputs":{"clip_name":"qwen_3_4b_fp4_flux2.safetensors","type":"flux2","device":"cpu"}},
+  "vae":{"class_type":"VAELoader","inputs":{"vae_name":"flux2-vae.safetensors"}},
+  "positive":{"class_type":"CLIPTextEncode","inputs":{"text":"$prompt","clip":["clip",0]}},
+  "reference_image":{"class_type":"LoadImage","inputs":{"image":"$image"}},
+  "reference_scale":{"class_type":"ImageScaleToTotalPixels","inputs":{"image":["reference_image",0],"upscale_method":"area","megapixels":1.0,"resolution_steps":1}},
+  "reference_encode":{"class_type":"VAEEncode","inputs":{"pixels":["reference_scale",0],"vae":["vae",0]}},
+  "reference":{"class_type":"ReferenceLatent","inputs":{"conditioning":["positive",0],"latent":["reference_encode",0]}},
+  "latent":{"class_type":"EmptyFlux2LatentImage","inputs":{"width":$width,"height":$height,"batch_size":1}},
+  "noise":{"class_type":"RandomNoise","inputs":{"noise_seed":42}},
+  "guider":{"class_type":"BasicGuider","inputs":{"model":["model",0],"conditioning":["reference",0]}},
+  "sampler":{"class_type":"KSamplerSelect","inputs":{"sampler_name":"euler"}},
+  "sigmas":{"class_type":"Flux2Scheduler","inputs":{"steps":4,"width":$width,"height":$height}},
+  "sample":{"class_type":"SamplerCustomAdvanced","inputs":{"noise":["noise",0],"guider":["guider",0],"sampler":["sampler",0],"sigmas":["sigmas",0],"latent_image":["latent",0]}},
+  "decode":{"class_type":"VAEDecode","inputs":{"samples":["sample",0],"vae":["vae",0]}},
+  "save":{"class_type":"SaveImage","inputs":{"images":["decode",0],"filename_prefix":"$output_url"}}
+}

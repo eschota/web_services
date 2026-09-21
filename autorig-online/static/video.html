@@ -13,7 +13,7 @@
     <meta property="og:site_name" content="AutoRig.online">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="/static/js/ai-entities.js?v=20260922-model-control"></script>
+    <script src="/static/js/ai-entities.js?v=20260922-live-status"></script>
     <style>
         .ai-page {
             background:
@@ -256,6 +256,9 @@ goButton.addEventListener('click', async () => {
         // holding a request open that a proxy would time out anyway.
         let ready = false;
         for (let i = 0; i < 450; i++) {
+            const status = await task.pollRender(data.task_id_string);
+            if (status) resultBox.textContent = status.status_string + (status.node_string ? ' on ' + status.node_string : ' - waiting for a worker');
+            if (status && status.status_string === 'completed') { ready = true; break; }
             await new Promise(r => setTimeout(r, 5000));
             const probe = await fetch(url, { method: 'HEAD' }).catch(() => null);
             if (probe && probe.ok) { ready = true; break; }

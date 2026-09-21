@@ -133,6 +133,10 @@ def resolve(checkpoint: Optional[Mapping[str, object]],
         effective["lora_strength"] = effective.pop("strength")
     else:
         effective.pop("strength", None)
+    if lora and not effective.get("lora_strength"):
+        # The existing UI uses zero for "automatic", not for disabling the
+        # selected adapter. A selected LoRA must never silently run at zero.
+        effective["lora_strength"] = 1.0
     workflow = str((checkpoint or {}).get("workflow") or (lora or {}).get("workflow") or "").strip()
     family = model_family(checkpoint) or model_family(lora)
     if workflow:

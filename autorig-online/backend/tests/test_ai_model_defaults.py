@@ -13,6 +13,14 @@ class ModelDefaultsTests(unittest.TestCase):
         self.assertEqual(got["sampler"], "dpmpp_2m_sde")
         self.assertEqual(got["steps"], 30)
 
+    def test_author_resolution_never_changes_product_or_user_resolution(self):
+        entry = {"family": "pony", "recommended": {"steps": 30, "width": 1024, "height": 1536},
+                 "recommended_from": "author example"}
+        effective = defaults.resolve(entry, None, {})
+        self.assertNotIn("width", effective)
+        self.assertNotIn("height", effective)
+        self.assertEqual(defaults.resolve(entry, None, {"width": 960, "height": 540})["height"], 540)
+
     def test_explicit_values_win(self):
         entry = {"family": "flux", "recommended": {"steps": 20, "cfg": 1},
                  "recommended_from": "author examples"}

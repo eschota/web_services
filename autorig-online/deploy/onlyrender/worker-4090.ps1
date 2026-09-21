@@ -1,6 +1,7 @@
 param([ValidateSet('Start','Stop','Status')][string]$Mode = 'Status')
 $ErrorActionPreference = 'Stop'
 $root = 'R:\ComfyUI_windows_portable'
+$env:CIVITAI_API_TOKEN = [Environment]::GetEnvironmentVariable('CIVITAI_API_TOKEN', 'User')
 $comfyUrl = 'http://127.0.0.1:8988'
 
 function Set-Worker([hashtable]$Fields) {
@@ -66,13 +67,18 @@ if ((Test-Path "$root\ComfyUI\models\diffusion_models\ltx-2.3-22b-distilled-1.1_
     (Test-Path "$root\ComfyUI\models\vae\LTX23_audio_vae_bf16.safetensors")) { $workflows += 'gen_animation_ltx23_by_url.json' }
 if ((Test-Path "$root\ComfyUI\models\diffusion_models\flux-2-klein-4b.safetensors") -and
     (Test-Path "$root\ComfyUI\models\text_encoders\qwen_3_4b_fp4_flux2.safetensors") -and
-    (Test-Path "$root\ComfyUI\models\vae\flux2-vae.safetensors")) { $workflows += 'gen_image_flux2_klein.json' }
-if (Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.safetensors") { $workflows += 'gen_image_sdxl.json' }
+    (Test-Path "$root\ComfyUI\models\vae\flux2-vae.safetensors")) { $workflows += @('gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json') }
+if (Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.safetensors") { $workflows += @('gen_image_sdxl.json','gen_image_sdxl_edit.json') }
 if ((Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.safetensors") -and
     (Test-Path "$root\ComfyUI\models\controlnet\xinsir-controlnet-union-sdxl-1.0.safetensors")) {
     $workflows += @('gen_image_sdxl_control_pose.json','gen_image_sdxl_control_depth.json','gen_image_sdxl_control_canny.json')
 }
 if (-not $workflows.Count) { throw 'No complete current model set is installed' }
+$overrides=@{}
+if (Test-Path "$root\ComfyUI\models\checkpoints\flux1-schnell-fp8.safetensors") {
+    $workflows += @('gen_image.json','gen_image_flux1_schnell.json')
+    $overrides['gen_image.json']='gen_image_flux1_schnell.json'
+}
 # info preserves worker history, unlike add_server.
-Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;basic_auth=$false}
+Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;workflow_overrides=$overrides;basic_auth=$false}
 Write-Host ('OnlyRender ready: ' + ($workflows -join ', '))

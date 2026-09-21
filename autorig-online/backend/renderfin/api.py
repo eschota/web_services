@@ -65,6 +65,14 @@ async def health(request: Request) -> Dict[str, Any]:
     }
 
 
+@router.get("/api-render/tasks/{task_id}")
+async def api_render_task(request: Request, task_id: str) -> Dict[str, Any]:
+    task = _queue(request).get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="render task not found")
+    return task.public_dict()
+
+
 @router.get("/api-render")
 async def api_render_get(request: Request) -> Dict[str, Any]:
     return {
