@@ -394,3 +394,147 @@ async def api_graph_load(graph_id: str):
         "saved_at_unix_int": int(stored.get("saved_at_unix_int") or 0),
         "server_time_unix_int": int(time.time()),
     }
+
+
+# --------------------------------------------------------------- cancellation
+
+class CancelRequest(BaseModel):
+    task_ids: List[str] = Field(default_factory=list)
+
+
+@router.post("/api/ai/cancel")
+async def api_cancel(body: CancelRequest):
+    """Stand down work that has not started, and leave alone work that has.
+
+    A render still waiting for a card is pure waste once nobody wants it, and
+    the queue is shared, so dropping it gives the capacity back to somebody
+    else. A job already on a card has spent real GPU minutes and its output is
+    usually still wanted, so it is left to finish — and the converter offers no
+    way to stop one anyway, which is the honest reason its tasks are only
+    counted here rather than cancelled.
+    """
+    import httpx
+
+    import ai_vision_api
+
+    cancelled = 0
+    running = 0
+    unknown = 0
+    async with httpx.AsyncClient() as client:
+        for task_id in body.task_ids[:64]:
+            task_id = str(task_id).strip()
+            if not task_id:
+                continue
+            if "." in task_id:
+                # `<node>.<id>` is a converter task: AI or Hunyuan.
+                running += 1
+                continue
+            try:
+                response = await client.post(
+                    ai_vision_api.RENDERFIN_BASE + "/api-render/cancel-if-pending",
+                    json={"task_id": task_id}, timeout=15.0)
+                payload = response.json() if response.status_code == 200 else {}
+            except Exception:
+                logger.warning("Could not reach the render queue to cancel %s", task_id)
+                unknown += 1
+                continue
+            if payload.get("cancelled"):
+                cancelled += 1
+            elif payload.get("status") == "unknown":
+                unknown += 1
+            else:
+                running += 1
+    return {
+        "success_bool": True,
+        "cancelled_int": cancelled,
+        "running_int": running,
+        "unknown_int": unknown,
+        "note_string": "Jobs already on a card are left to finish",
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+# -------------------------------------------------------------- cache purging
+
+# Where the render farm writes what it produces. Compositions share this tree
+# with the rest of the site, so nothing is deleted because of where it lives:
+# a file is only removed when a stored composition says it produced it.
+RENDER_OUTPUT_DIR = pathlib.Path(
+    os.getenv("AUTORIG_AI_OUTPUT_DIR", "/srv/autorig/data/var/renderfin/render")
+)
+RENDER_URL_MARKER = "/renderfin/render/"
+
+
+def _local_path_for(url: str) -> Optional[pathlib.Path]:
+    """The file behind a render URL, or nothing if it is not ours to touch.
+
+    Resolved and then checked to be inside the render tree, so a stored value
+    cannot walk out of it — the results are written by a browser and a graph
+    can be handed to anybody.
+    """
+    text = str(url or "").strip()
+    marker = text.find(RENDER_URL_MARKER)
+    if marker < 0:
+        return None
+    relative = text[marker + len(RENDER_URL_MARKER):].split("?")[0].split("#")[0]
+    if not relative:
+        return None
+    try:
+        candidate = (RENDER_OUTPUT_DIR / relative).resolve()
+        root = RENDER_OUTPUT_DIR.resolve()
+    except Exception:
+        return None
+    if root not in candidate.parents:
+        return None
+    return candidate
+
+
+@router.delete("/api/ai/cache")
+async def api_purge_cache():
+    """Delete the saved compositions and the files they produced.
+
+    Really deletes: the point of the button is to get the disk back, so a
+    tidy-up that only forgot the index would be worse than none. It deletes
+    only files a stored composition claims as its own output — the render tree
+    holds work from the rest of the site too, and none of that is ours.
+
+    The farm nodes clean up after themselves, so nothing is asked of them.
+    """
+    graphs = 0
+    removed = 0
+    freed = 0
+    seen: set = set()
+    if GRAPH_DIR.is_dir():
+        for path in sorted(GRAPH_DIR.glob("*.json")):
+            try:
+                stored = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                stored = {}
+            results = ((stored.get("graph") or {}).get("results") or {})
+            for record in results.values():
+                target = _local_path_for((record or {}).get("value") or "")
+                if target is None or target in seen:
+                    continue
+                seen.add(target)
+                try:
+                    if target.is_file():
+                        size = target.stat().st_size
+                        target.unlink()
+                        removed += 1
+                        freed += size
+                except Exception:
+                    logger.warning("Could not remove %s", target)
+            try:
+                path.unlink()
+                graphs += 1
+            except Exception:
+                logger.warning("Could not remove graph %s", path)
+    logger.info("AI cache purge: %s compositions, %s files, %s bytes",
+                graphs, removed, freed)
+    return {
+        "success_bool": True,
+        "graphs_removed_int": graphs,
+        "files_removed_int": removed,
+        "bytes_freed_int": freed,
+        "server_time_unix_int": int(time.time()),
+    }

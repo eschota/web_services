@@ -37,6 +37,10 @@
   const runState = new Map();
   let graphId = null;
   let resultsTimer = null;
+  // Set by Cancel. It only stops work that has not been handed to the farm
+  // yet: a job already on a card is left to finish, because killing it wastes
+  // the GPU minutes it has already spent and the result is wanted anyway.
+  let cancelled = false;
 
   function recordResult(id, record) {
     runState.set(String(id), record);
@@ -102,10 +106,13 @@
     } else if (param.type === 'number') {
       control = `<input type="number" data-param="${name}" min="${param.min}" max="${param.max}" `
               + `step="${param.step || 1}" value="${param.default}"${help}>`;
+    } else if (param.type === 'textarea') {
+      control = `<textarea data-param="${name}" rows="3"${help}>${escapeHtml(param.default || '')}</textarea>`;
     } else {
       control = `<input type="text" data-param="${name}" value="${escapeAttr(param.default || '')}"${help}>`;
     }
-    return `<label class="nparam"><span>${escapeHtml(param.title)}</span>${control}</label>`;
+    const wide = param.type === 'textarea' ? ' nparam-wide' : '';
+    return `<label class="nparam${wide}"><span>${escapeHtml(param.title)}</span>${control}</label>`;
   }
 
   function rangeLabel(value) {
@@ -246,8 +253,8 @@
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
       const raw = control.value;
-      values[control.dataset.param] = control.type === 'range' || control.type === 'number'
-        ? Number(raw) : raw;
+      values[control.dataset.param] =
+        (control.type === 'range' || control.type === 'number') ? Number(raw) : raw;
     });
     return values;
   }
@@ -507,6 +514,22 @@
     return order;
   }
 
+  /** Cancel is only offered while there is something to cancel. */
+  function setRunning(running) {
+    const cancel = document.getElementById('cancel');
+    const carry = document.getElementById('continue');
+    if (cancel) cancel.hidden = !running;
+    if (carry) carry.hidden = running;
+  }
+
+  function markState(id, message, className) {
+    const element = nodeElement(id);
+    if (!element) return;
+    const state = element.querySelector('.nstate');
+    state.textContent = message;
+    state.className = className;
+  }
+
   /** A run needs a link to publish its progress to, so one is made up front. */
   async function ensureSaved() {
     if (graphId) return;
@@ -523,7 +546,12 @@
     } catch (error) { /* a run is still worth doing without a link */ }
   }
 
-  async function runGraph() {
+  /**
+   * @param keepDone when true, nodes that already produced something are not
+   *        run again. That is what Continue means: a clip that took eleven
+   *        minutes should not be paid for twice because a later step failed.
+   */
+  async function runGraph(keepDone) {
     const graph = graphFromCanvas();
     const order = executionOrder(graph);
     if (order.length !== graph.nodes.length) {
@@ -532,10 +560,19 @@
     }
     const results = new Map();
     const failed = new Set();
+    if (keepDone) {
+      runState.forEach((record, id) => {
+        if (record.status === 'done' && record.value) {
+          results.set(String(id), { type: record.type, value: record.value });
+        }
+      });
+    }
     const button = document.getElementById('run');
     button.disabled = true;
     button.textContent = 'Rendering…';
-    runState.clear();
+    cancelled = false;
+    if (!keepDone) runState.clear();
+    setRunning(true);
     await ensureSaved();
     // Nodes whose inputs are all ready run together: the two clips and the 3D
     // model come off the same picture and there is no reason to queue them.
@@ -547,14 +584,14 @@
         const feeds = graph.links.filter(link => link.to === id);
         const start = (async () => {
           await Promise.all(feeds.map(link => pending.get(link.from)));
+          if (cancelled && !results.has(id)) {
+            failed.add(id);
+            markState(id, 'cancelled before it started', 'nstate');
+            return;
+          }
           if (feeds.some(link => failed.has(link.from))) {
             failed.add(id);
-            const element = nodeElement(id);
-            if (element) {
-              const state = element.querySelector('.nstate');
-              state.textContent = 'skipped — what it needed did not arrive';
-              state.className = 'nstate failed';
-            }
+            markState(id, 'skipped — what it needed did not arrive', 'nstate failed');
             return;
           }
           if (node.kind === KIND_INPUT) {
@@ -564,6 +601,7 @@
             results.set(id, { type: node.entity_type, value: value });
             return;
           }
+          if (results.has(id)) return;      // Continue: this one is already done.
           const resolved = {};
           feeds.forEach(link => {
             const upstream = results.get(link.from);
@@ -581,6 +619,7 @@
     } finally {
       button.disabled = false;
       button.textContent = 'Render';
+      setRunning(false);
     }
     const steps = graph.nodes.filter(node => node.kind === KIND_SERVICE).length;
     const produced = graph.nodes.filter(
@@ -588,6 +627,61 @@
     toast(failed.size
       ? `${produced} of ${steps} steps finished; ${failed.size} did not.`
       : `All ${steps} steps finished.`);
+  }
+
+  /**
+   * Stop the composition without touching what the farm has already begun.
+   *
+   * Steps not yet submitted are dropped, and anything already queued on the
+   * farm but not yet picked up is asked to stand down. A job that has started
+   * rendering is deliberately left alone.
+   */
+  async function cancelRun() {
+    cancelled = true;
+    toast('Cancelling — anything already rendering will finish.');
+    const ids = [];
+    runState.forEach(record => {
+      if (record.status === 'running' && record.task_id) ids.push(record.task_id);
+    });
+    if (!ids.length) return;
+    try {
+      const response = await fetch('/api/ai/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_ids: ids })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        toast(data.cancelled_int
+          ? `${data.cancelled_int} queued job(s) stood down; ${data.running_int} already rendering and left to finish.`
+          : `Nothing was still queued; ${data.running_int} already rendering and left to finish.`);
+      }
+    } catch (error) { /* the local stop already happened */ }
+  }
+
+  /**
+   * Throw away what these compositions have left on the site's disk.
+   *
+   * The farm nodes clean up after themselves; this is the server's own cache
+   * of saved graphs and the pictures and clips they produced.
+   */
+  async function purgeCache() {
+    if (!window.confirm('Delete every saved composition and the files they produced? This cannot be undone.')) return;
+    try {
+      const response = await fetch('/api/ai/cache', { method: 'DELETE' });
+      const data = await response.json();
+      if (!response.ok) {
+        toast((data.detail || {}).message_string || 'The cache was not cleared.');
+        return;
+      }
+      toast(`Cleared ${data.graphs_removed_int} composition(s) and `
+            + `${data.files_removed_int} file(s), ${data.bytes_freed_int} bytes.`);
+      graphId = null;
+      runState.clear();
+      history.replaceState(null, '', '/nodes');
+    } catch (error) {
+      toast('The cache was not cleared: ' + error.message);
+    }
   }
 
   /* -------------------------------------------------------- load and save */
@@ -682,9 +776,45 @@
       editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1));
     });
     restoreResults(graph.results, mapping);
+    setRunning(false);
+  }
+
+  /**
+   * Copy, with a fallback.
+   *
+   * `navigator.clipboard` needs the click still to count as a user gesture,
+   * and awaiting a save first can spend that. When it refuses, a hidden
+   * textarea and `execCommand` still work, and if even that fails the link is
+   * put on screen so it can be copied by hand rather than silently lost.
+   */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+
+  function legacyCopy(text) {
+    const holder = document.createElement('textarea');
+    holder.value = text;
+    holder.setAttribute('readonly', '');
+    holder.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(holder);
+    holder.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (error) { ok = false; }
+    document.body.removeChild(holder);
+    return ok;
   }
 
   async function saveGraph() {
+    // If the graph already has a link, the click copies it at once and the
+    // save follows: the copy then happens while the gesture is still live.
+    if (graphId) {
+      const known = location.origin + '/nodes?g=' + graphId;
+      const copied = await copyText(known);
+      toast(copied ? 'Deep link copied: ' + known : 'Deep link: ' + known);
+    }
     const graph = graphFromCanvas();
     const response = await fetch('/api/ai/graphs', {
       method: 'POST',
@@ -697,13 +827,13 @@
       toast(detail.message_string || 'The graph was not saved.');
       return;
     }
+    const changed = graphId !== data.graph_id_string;
     graphId = data.graph_id_string;
     const link = location.origin + data.deep_link_string;
     history.replaceState(null, '', data.deep_link_string);
-    navigator.clipboard.writeText(link).then(
-      () => toast('Deep link copied: ' + link),
-      () => toast('Deep link: ' + link)
-    );
+    if (!changed) return;
+    const copied = await copyText(link);
+    toast(copied ? 'Deep link copied: ' + link : 'Deep link (copy it): ' + link);
   }
 
   /* ------------------------------------------------------------- the shell */
@@ -778,12 +908,19 @@
     if (window.AIEntities) {
       window.AIEntities.mountFleet(document.getElementById('fleet'), 'image');
     }
-    document.getElementById('run').addEventListener('click', runGraph);
+    document.getElementById('run').addEventListener('click', () => runGraph(false));
+    document.getElementById('continue').addEventListener('click', () => runGraph(true));
     document.getElementById('save').addEventListener('click', saveGraph);
+    document.getElementById('cancel').addEventListener('click', cancelRun);
+    document.getElementById('purge').addEventListener('click', purgeCache);
     document.getElementById('clear').addEventListener('click', () => {
       editor.clear();
       nodeMeta.clear();
+      runState.clear();
+      graphId = null;
+      history.replaceState(null, '', '/nodes');
     });
+    setRunning(false);
 
     const templates = await fetch('/api/ai/graph/templates').then(r => r.json()).catch(() => ({}));
     const picker = document.getElementById('templates');

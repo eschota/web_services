@@ -87,7 +87,13 @@ SERVICES: List[Dict[str, object]] = [
         "summary": "Send a prompt to a language model and get text back.",
         "status": "live",
         "inputs": [
-            {"type": TEXT, "field": "prompt", "required": True, "title": "Prompt"},
+            {"type": TEXT, "field": "prompt", "required": False,
+             "title": "Instruction"},
+            # The material to work on, kept apart from the instruction so a
+            # text coming from another service can be processed rather than
+            # merely passed to the model as the whole request.
+            {"type": TEXT, "field": "input", "required": False,
+             "title": "Text to work on"},
         ],
         "outputs": [
             {"type": TEXT, "field": "answer_string", "title": "Answer"},
@@ -180,6 +186,10 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
     "text": [
         {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
          "default": "bonsai2-27b"},
+        # The instruction can be typed here instead of needing a node of its
+        # own; a wired instruction wins over this one when both are present.
+        {"name": "prompt", "title": "Instruction", "type": "textarea", "default": "",
+         "help": "What to do with the text coming in, e.g. 'Summarise in one sentence'"},
         {"name": "max_output_tokens", "title": "Answer length", "type": "number",
          "min": 64, "max": 4096, "step": 64, "default": 512},
     ],

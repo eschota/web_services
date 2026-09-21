@@ -101,10 +101,29 @@ class VisionRequest(BaseModel):
 
 
 class TextRequest(BaseModel):
-    prompt: str = Field(..., description="The prompt")
+    prompt: str = Field("", description="What to do; may be empty if `input` is given")
+    # The text to work on, kept apart from the instruction. Sending the two
+    # already glued together works, but then a caller who has a document and a
+    # standing instruction has to do the gluing, and every caller does it
+    # slightly differently.
+    input: Optional[str] = Field(None, description="Text the instruction applies to")
     model: Optional[str] = Field(None, description="Model id from /api/ai/models")
     max_output_tokens: Optional[int] = Field(None, ge=1, le=8192)
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+    def combined_prompt(self) -> str:
+        """Instruction first, then the material, with a marker between them.
+
+        A plain blank line is not enough: a long document runs into the
+        instruction and the model answers about the wrong half.
+        """
+        instruction = str(self.prompt or "").strip()
+        material = str(self.input or "").strip()
+        if not material:
+            return instruction
+        if not instruction:
+            return material
+        return instruction + "\n\n--- text ---\n" + material
 
 
 def _model_entry(model_id: Optional[str]) -> Dict[str, object]:
@@ -585,7 +604,7 @@ async def api_text2text_docs():
 @router.post("/api/text2text")
 async def api_text2text(request: Request, body: TextRequest):
     model = _model_entry(body.model)
-    payload: Dict[str, object] = {"prompt": _validate_prompt(body.prompt)}
+    payload: Dict[str, object] = {"prompt": _validate_prompt(body.combined_prompt())}
     if body.max_output_tokens:
         payload["max_output_tokens"] = int(body.max_output_tokens)
     return await _run(model, "/text2text", payload, body.wait_seconds, "text")

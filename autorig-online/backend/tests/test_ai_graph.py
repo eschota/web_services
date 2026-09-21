@@ -301,7 +301,7 @@ class CatalogueParameterTests(unittest.TestCase):
         for service_id, params in ai_services.PARAMS.items():
             self.assertIsNotNone(ai_services.service(service_id), service_id)
             for param in params:
-                self.assertIn(param["type"], ("select", "range", "number", "text"))
+                self.assertIn(param["type"], ("select", "range", "number", "text", "textarea"))
                 self.assertTrue(param["name"])
                 self.assertTrue(param["title"])
                 if param["type"] == "select" and "source" not in param:
@@ -473,3 +473,122 @@ class RejectionMessageTests(unittest.TestCase):
         message = caught.exception.detail["message_string"]
         self.assertIn("f13", message)
         self.assertIn("400", message)
+
+
+class TextProcessingTests(unittest.TestCase):
+    """The text service takes an instruction and the material separately."""
+
+    def test_an_instruction_and_a_text_are_joined_with_a_marker(self):
+        import ai_vision_api
+        body = ai_vision_api.TextRequest(prompt="Summarise this.", input="A long story.")
+        combined = body.combined_prompt()
+        self.assertTrue(combined.startswith("Summarise this."))
+        self.assertIn("A long story.", combined)
+        self.assertIn("--- text ---", combined)
+
+    def test_an_instruction_alone_is_sent_unchanged(self):
+        import ai_vision_api
+        self.assertEqual(
+            ai_vision_api.TextRequest(prompt="Name three colours.").combined_prompt(),
+            "Name three colours.")
+
+    def test_material_alone_is_sent_unchanged(self):
+        import ai_vision_api
+        self.assertEqual(
+            ai_vision_api.TextRequest(input="Just this.").combined_prompt(), "Just this.")
+
+    def test_the_service_declares_both_of_them(self):
+        fields = {item["field"] for item in ai_services.service("text")["inputs"]}
+        self.assertEqual(fields, {"prompt", "input"})
+
+    def test_the_instruction_can_be_typed_on_the_node_instead_of_wired(self):
+        names = {param["name"] for param in ai_services.params_for("text")}
+        self.assertIn("prompt", names)
+
+
+class CachePurgeTests(unittest.TestCase):
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self._out = tempfile.TemporaryDirectory()
+        self._graphs, self._outputs = ai_graph.GRAPH_DIR, ai_graph.RENDER_OUTPUT_DIR
+        ai_graph.GRAPH_DIR = Path(self._dir.name)
+        ai_graph.RENDER_OUTPUT_DIR = Path(self._out.name)
+        self.client = _client()
+
+    def tearDown(self):
+        ai_graph.GRAPH_DIR, ai_graph.RENDER_OUTPUT_DIR = self._graphs, self._outputs
+        self._dir.cleanup()
+        self._out.cleanup()
+
+    def _store(self, graph_id, values):
+        import json as _json
+        results = {str(i): {"status": "done", "type": "image", "value": v}
+                   for i, v in enumerate(values)}
+        (Path(self._dir.name) / f"{graph_id}.json").write_text(
+            _json.dumps({"id": graph_id, "graph": {"nodes": [], "links": [],
+                                                   "results": results}}),
+            encoding="utf-8")
+
+    def _output(self, relative, data=b"0123456789"):
+        path = Path(self._out.name) / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def test_the_files_a_composition_produced_are_really_gone(self):
+        mine = self._output("default_user/clip.mp4")
+        self._store("abc123", ["https://autorig.online/renderfin/render/default_user/clip.mp4"])
+        body = self.client.delete("/api/ai/cache").json()
+        self.assertEqual(body["graphs_removed_int"], 1)
+        self.assertEqual(body["files_removed_int"], 1)
+        self.assertEqual(body["bytes_freed_int"], 10)
+        self.assertFalse(mine.exists())
+        self.assertEqual(list(Path(self._dir.name).glob("*.json")), [])
+
+    def test_a_render_no_composition_claims_is_left_alone(self):
+        """The render tree is shared with the rest of the site."""
+        someone_else = self._output("default_user/not-mine.png")
+        self._store("abc123", ["https://autorig.online/renderfin/render/default_user/mine.png"])
+        self._output("default_user/mine.png")
+        self.client.delete("/api/ai/cache")
+        self.assertTrue(someone_else.exists())
+
+    def test_a_value_that_tries_to_walk_out_of_the_tree_is_ignored(self):
+        outside = Path(self._out.name).parent / "escape.txt"
+        outside.write_bytes(b"x")
+        try:
+            self._store("abc123", [
+                "https://autorig.online/renderfin/render/../escape.txt"])
+            self.client.delete("/api/ai/cache")
+            self.assertTrue(outside.exists())
+        finally:
+            if outside.exists():
+                outside.unlink()
+
+    def test_a_text_answer_names_no_file_and_removes_none(self):
+        self._store("abc123", ["just some words the model wrote"])
+        body = self.client.delete("/api/ai/cache").json()
+        self.assertEqual(body["files_removed_int"], 0)
+        self.assertEqual(body["graphs_removed_int"], 1)
+
+    def test_purging_an_empty_cache_is_not_an_error(self):
+        body = self.client.delete("/api/ai/cache").json()
+        self.assertTrue(body["success_bool"])
+        self.assertEqual(body["files_removed_int"], 0)
+
+
+class CancelTests(unittest.TestCase):
+    def setUp(self):
+        self.client = _client()
+
+    def test_a_converter_task_is_reported_as_left_running(self):
+        """The converter has no way to stop one, so it is counted, not claimed."""
+        body = self.client.post("/api/ai/cancel",
+                                json={"task_ids": ["f13.abc"]}).json()
+        self.assertEqual(body["running_int"], 1)
+        self.assertEqual(body["cancelled_int"], 0)
+
+    def test_an_empty_request_is_harmless(self):
+        body = self.client.post("/api/ai/cancel", json={"task_ids": []}).json()
+        self.assertTrue(body["success_bool"])
+        self.assertEqual(body["cancelled_int"], 0)

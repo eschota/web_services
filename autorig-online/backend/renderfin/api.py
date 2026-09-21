@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from .models import RenderPrompt, RenderServer
+from .models import TASK_PENDING, RenderPrompt, RenderServer
 
 router = APIRouter(prefix="/renderfin")
 
@@ -71,6 +71,32 @@ async def api_render_get(request: Request) -> Dict[str, Any]:
         "servers": [s.model_dump() for s in _registry(request).all()],
         "tasks": [t.public_dict() for t in _queue(request).all_tasks()[:100]],
     }
+
+
+@router.post("/api-render/cancel-if-pending")
+async def api_render_cancel_if_pending(request: Request) -> Dict[str, Any]:
+    """Stand a task down, but only while it is still waiting for a card.
+
+    Deliberately narrower than the queue's own cancel, which also interrupts a
+    render in progress. A job that has started has already spent GPU minutes
+    and its result is still wanted; only the queue ahead of it is waste.
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    task_id = str(body.get("task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="task_id is required")
+    queue = _queue(request)
+    task = queue.get(task_id)
+    if task is None:
+        return {"cancelled": False, "status": "unknown", "reason": "no such task"}
+    if task.status != TASK_PENDING:
+        return {"cancelled": False, "status": task.status,
+                "reason": "already started or finished"}
+    cancelled = await queue.cancel(task_id, reason="cancelled by the composition")
+    return {"cancelled": bool(cancelled), "status": TASK_PENDING}
 
 
 @router.post("/api-render")
