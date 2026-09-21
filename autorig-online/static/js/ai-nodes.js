@@ -335,6 +335,29 @@
     '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
   };
 
+  /**
+   * Turn a rejection into something a person can act on.
+   *
+   * FastAPI reports a validation failure as a *list* under `detail`, so
+   * reading `detail.message_string` found nothing and the node showed a bare
+   * "HTTP 422" — which says a field was wrong but not which one.
+   */
+  function describeError(body, status) {
+    const detail = (body || {}).detail;
+    if (Array.isArray(detail)) {
+      const parts = detail.map(item => {
+        const where = (item.loc || []).filter(x => x !== 'body').join('.');
+        return (where ? where + ': ' : '') + (item.msg || 'invalid');
+      });
+      return parts.join('; ') || ('HTTP ' + status);
+    }
+    if (detail && typeof detail === 'object') {
+      return detail.message_string || detail.error_string || ('HTTP ' + status);
+    }
+    if (typeof detail === 'string' && detail) return detail;
+    return 'HTTP ' + status;
+  }
+
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   async function pollAiStatus(accepted, runner) {
@@ -401,7 +424,14 @@
     return body;
   }
 
-  async function runServiceNode(id, resolved) {
+  // The language models charge their reasoning to the answer budget, so a
+  // budget that is merely a bit small produces no answer at all rather than a
+  // short one. One retry at double covers the case the per-model default does
+  // not, and says it is doing so instead of looking like a stall.
+  const BUDGET_EXHAUSTED = 'model_spent_its_budget_thinking';
+
+  async function runServiceNode(id, resolved, budget) {
+    const attempt = budget ? 1 : 0;
     const node = meta(id);
     const runner = RUNNERS[node.service];
     const element = nodeElement(id);
@@ -416,13 +446,12 @@
       const response = await fetch(runner.api, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyFor(node.service, resolved, readParams(id)))
+        body: JSON.stringify(Object.assign(
+          bodyFor(node.service, resolved, readParams(id)),
+          budget ? { max_output_tokens: budget } : {}))
       });
       const accepted = await response.json();
-      if (!response.ok) {
-        const detail = accepted.detail || {};
-        throw new Error(detail.message_string || detail.error_string || ('HTTP ' + response.status));
-      }
+      if (!response.ok) throw new Error(describeError(accepted, response.status));
       state.textContent = 'running on the farm…';
       // Recorded before the wait, not after: the whole point is that a link
       // opened mid-render knows which task to carry on watching.
@@ -432,7 +461,19 @@
         task_id: accepted.task_id_string || '',
         started_at: Date.now() / 1000
       });
-      const value = await runner.finish(accepted, runner);
+      let value;
+      try {
+        value = await runner.finish(accepted, runner);
+      } catch (error) {
+        if (!attempt && String(error.message || '').indexOf(BUDGET_EXHAUSTED) !== -1) {
+          state.textContent = 'the answer budget ran out — retrying with more';
+          const body = bodyFor(node.service, resolved, readParams(id));
+          const bigger = (Number(body.max_output_tokens) || 1024) * 2;
+          if (task) task.clear();
+          return runServiceNode(id, resolved, Math.min(bigger, 8192));
+        }
+        throw error;
+      }
       state.textContent = 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);

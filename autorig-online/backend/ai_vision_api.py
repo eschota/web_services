@@ -44,6 +44,12 @@ AI_MODELS: List[Dict[str, object]] = [
         "modes": ["vision", "text"],
         "context_tokens": 4096,
         "max_output_tokens": 2048,
+        # This one reasons before it answers, and the reasoning is charged to
+        # the same budget. A budget sized for a plain answer is spent before
+        # the answer starts, which is what "the whole budget went to reasoning"
+        # was: not a broken model, a budget set for the wrong kind of model.
+        "reasons_first": True,
+        "default_output_tokens": 2048,
         "hosting": "local-farm",
         "default": True,
     },
@@ -59,6 +65,9 @@ AI_MODELS: List[Dict[str, object]] = [
         "max_output_tokens": 2048,
         "hosting": "local-farm",
         "uncensored": True,
+        # Served with reasoning off, so a modest budget is all it needs.
+        "reasons_first": False,
+        "default_output_tokens": 1024,
         "default": False,
     },
 ]
@@ -349,6 +358,19 @@ def _worker_by_key(key: str) -> Optional[Dict[str, object]]:
     return None
 
 
+def _output_budget(model: Dict[str, object], asked: Optional[int]) -> int:
+    """How many tokens the answer may take.
+
+    Absent or zero means automatic, and automatic is per model rather than one
+    number for all: a model that reasons before answering spends the same
+    budget on the reasoning, so the figure that suits a plain answer leaves
+    nothing for the answer itself.
+    """
+    if asked and int(asked) > 0:
+        return int(asked)
+    return int(model.get("default_output_tokens") or 1024)
+
+
 def _validate_prompt(raw: str) -> str:
     prompt = str(raw or "").strip()
     if not prompt:
@@ -617,8 +639,7 @@ async def api_vision(request: Request, body: VisionRequest):
                 client, _decode_inline_image(body.image_base64 or "")
             )
     payload: Dict[str, object] = {"prompt": prompt, "image_url": image_url}
-    if body.max_output_tokens:
-        payload["max_output_tokens"] = int(body.max_output_tokens)
+    payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
     return await _run(model, "/ai-vision", payload, body.wait_seconds, "vision")
 
 
@@ -641,8 +662,7 @@ async def api_text2text_docs():
 async def api_text2text(request: Request, body: TextRequest):
     model = _model_entry(body.model)
     payload: Dict[str, object] = {"prompt": _validate_prompt(body.combined_prompt())}
-    if body.max_output_tokens:
-        payload["max_output_tokens"] = int(body.max_output_tokens)
+    payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
     return await _run(model, "/text2text", payload, body.wait_seconds, "text")
 
 

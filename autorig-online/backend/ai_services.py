@@ -71,7 +71,10 @@ SERVICES: List[Dict[str, object]] = [
         "inputs": [
             {"type": IMAGE, "field": "image", "required": True,
              "title": "Image to look at"},
-            {"type": TEXT, "field": "prompt", "required": True,
+            # Not required as a wire: the question is usually a fixed sentence,
+            # and needing a whole node to hold it was the commonest way to end
+            # up submitting a request with no prompt at all.
+            {"type": TEXT, "field": "prompt", "required": False,
              "title": "What to ask about it"},
         ],
         "outputs": [
@@ -179,9 +182,16 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
     "vision": [
         {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
          "default": "bonsai2-27b"},
+        # Typed on the node when nothing is wired in; a wired question wins.
+        {"name": "prompt", "title": "Question", "type": "textarea",
+         "default": "Describe this picture.",
+         "help": "What to ask about the image"},
+        # Zero means automatic, and automatic is per model: a model that
+        # reasons before answering needs a far bigger budget than one that
+        # does not, and a single number for both starves one of them.
         {"name": "max_output_tokens", "title": "Answer length", "type": "number",
-         "min": 64, "max": 4096, "step": 64, "default": 512,
-         "help": "Tokens the model may spend on the answer"},
+         "min": 0, "max": 4096, "step": 64, "default": 0,
+         "help": "0 picks a budget to suit the model"},
     ],
     "text": [
         {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
@@ -191,7 +201,8 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "prompt", "title": "Instruction", "type": "textarea", "default": "",
          "help": "What to do with the text coming in, e.g. 'Summarise in one sentence'"},
         {"name": "max_output_tokens", "title": "Answer length", "type": "number",
-         "min": 64, "max": 4096, "step": 64, "default": 512},
+         "min": 0, "max": 4096, "step": 64, "default": 0,
+         "help": "0 picks a budget to suit the model"},
     ],
     "image": [
         # Drawn as a picture list, not a text dropdown: a model is recognised

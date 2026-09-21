@@ -595,3 +595,65 @@ class CancelTests(unittest.TestCase):
         body = self.client.post("/api/ai/cancel", json={"task_ids": []}).json()
         self.assertTrue(body["success_bool"])
         self.assertEqual(body["cancelled_int"], 0)
+
+
+class VisionPromptTests(unittest.TestCase):
+    """A Vision node can hold its own question.
+
+    Wiring a whole Text node in just to carry a fixed sentence was the
+    commonest way to submit a request with no prompt, which the API rejects
+    with a validation error that used to surface as a bare "HTTP 422".
+    """
+
+    def test_the_question_can_be_typed_on_the_node(self):
+        names = {param["name"] for param in ai_services.params_for("vision")}
+        self.assertIn("prompt", names)
+
+    def test_the_typed_question_has_a_usable_default(self):
+        prompt = next(p for p in ai_services.params_for("vision") if p["name"] == "prompt")
+        self.assertTrue(str(prompt["default"]).strip())
+        self.assertEqual(prompt["type"], "textarea")
+
+    def test_only_the_picture_is_required_as_a_wire(self):
+        required = {i["field"] for i in ai_services.service("vision")["inputs"]
+                    if i["required"]}
+        self.assertEqual(required, {"image"})
+
+    def test_a_wired_question_is_still_offered(self):
+        fields = {i["field"] for i in ai_services.service("vision")["inputs"]}
+        self.assertIn("prompt", fields)
+
+
+class OutputBudgetTests(unittest.TestCase):
+    """How many tokens the answer may take, when nobody says."""
+
+    def setUp(self):
+        import ai_vision_api
+        self.api = ai_vision_api
+
+    def test_a_reasoning_model_gets_a_bigger_budget_than_a_plain_one(self):
+        """Reasoning is charged to the same budget, so it needs headroom."""
+        thinking = next(m for m in self.api.AI_MODELS if m.get("reasons_first"))
+        plain = next(m for m in self.api.AI_MODELS if not m.get("reasons_first"))
+        self.assertGreater(self.api._output_budget(thinking, None),
+                           self.api._output_budget(plain, None))
+
+    def test_zero_means_automatic(self):
+        model = self.api.AI_MODELS[0]
+        self.assertEqual(self.api._output_budget(model, 0),
+                         self.api._output_budget(model, None))
+
+    def test_an_explicit_number_is_obeyed(self):
+        self.assertEqual(self.api._output_budget(self.api.AI_MODELS[0], 333), 333)
+
+    def test_every_model_declares_a_default(self):
+        for model in self.api.AI_MODELS:
+            self.assertGreater(int(model["default_output_tokens"]), 0, model["id"])
+
+    def test_the_node_control_offers_automatic(self):
+        """Zero has to be reachable on the control, or automatic is unusable."""
+        for service in ("vision", "text"):
+            param = next(p for p in ai_services.params_for(service)
+                         if p["name"] == "max_output_tokens")
+            self.assertEqual(param["default"], 0)
+            self.assertEqual(param["min"], 0)

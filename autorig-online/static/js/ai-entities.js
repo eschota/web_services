@@ -502,7 +502,10 @@
   function modelPicker(host, serviceId, kind, options) {
     const settings = options || {};
     const state = { value: settings.value || '', entries: [] };
-    host.className = 'mpick';
+    // Added, not assigned: the node editor marks its slots with `mpick-slot`
+    // and looks them up again to restore a saved choice, so overwriting the
+    // class list quietly broke reopening a graph with a model on it.
+    host.classList.add('mpick');
     host.innerHTML =
       '<button type="button" class="mpick-button">' +
         '<span class="mpick-thumb"></span>' +
