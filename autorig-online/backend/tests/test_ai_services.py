@@ -88,7 +88,16 @@ class HandoffTests(unittest.TestCase):
     def test_a_live_service_has_a_page_behind_its_path(self):
         """A nav link that answers 404 is worse than a greyed-out one."""
         live_paths = {e["path"] for e in ai_services.SERVICES if e["status"] == "live"}
-        self.assertEqual(live_paths, {"/vision", "/text", "/image", "/video"})
+        self.assertEqual(live_paths,
+                         {"/vision", "/text", "/image", "/video", "/3dmodel"})
+
+    def test_3d_runs_on_the_farm_not_the_account_flow(self):
+        """Hunyuan3D is installed on the converter nodes; the credits-and-login
+        endpoint is a different product and must not be what this calls."""
+        entry = ai_services.service("3dmodel")
+        self.assertEqual(entry["status"], "live")
+        self.assertEqual(entry["api"], "/api/3dmodel")
+        self.assertNotIn("requires_account", entry)
 
     def test_the_chain_the_owner_described_is_possible(self):
         """image → vision → text → image → video, each step by declared types."""

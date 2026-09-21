@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nodes — Wire the AI Services Together | AutoRig</title>
+    <meta name="description" content="Connect Vision, Image, Video and 3D into one composition and render all of it at once on AutoRig's own GPUs.">
+    <link rel="canonical" href="https://autorig.online/nodes">
+    <meta property="og:title" content="Nodes — Wire the AI Services Together">
+    <meta property="og:description" content="One picture in, a clip, a loop and a 3D model out.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/nodes">
+    <meta property="og:site_name" content="AutoRig.online">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
+    <script src="/static/vendor/drawflow/drawflow.min.js"></script>
+    <script src="/static/js/ai-entities.js?v=20260921-nodes"></script>
+    <script src="/static/js/ai-nodes.js?v=20260921-nodes3"></script>
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 10% 6%, rgba(56, 189, 248, .14), transparent 34%),
+                radial-gradient(circle at 90% 10%, rgba(123, 92, 255, .18), transparent 38%),
+                linear-gradient(180deg, #101122 0%, #14152a 48%, #0f101c 100%);
+            color: var(--text-primary, #eef);
+            min-height: 100vh; margin: 0;
+        }
+        .ai-page, .ai-page input, .ai-page textarea, .ai-page select, .ai-page button {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+
+        .bar {
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+            padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,.08);
+            background: rgba(12,13,26,.85); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 6;
+        }
+        .bar h1 { font-size: 17px; margin: 0 8px 0 0; }
+        .bar .grow { flex: 1; }
+        #graph-name {
+            background: rgba(10,11,22,.8); border: 1px solid rgba(255,255,255,.12);
+            border-radius: 9px; color: inherit; padding: 8px 11px; font-size: 14px; width: 230px;
+        }
+        .bar button {
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+            color: inherit; border-radius: 9px; padding: 9px 15px; font-size: 14px; cursor: pointer;
+        }
+        .bar button:hover { background: rgba(255,255,255,.12); }
+        .bar button#run {
+            border: 0; font-weight: 700; color: #071018;
+            background: linear-gradient(135deg, #38bdf8, #7b5cff);
+        }
+        .bar button:disabled { opacity: .55; cursor: not-allowed; }
+        .bar nav a { color: var(--text-secondary, #9aa0b5); font-size: 13px; margin-left: 12px; text-decoration: none; }
+        .bar nav a:hover { color: #38bdf8; }
+
+        .shell { display: grid; grid-template-columns: 268px 1fr; height: calc(100vh - 59px); }
+        @media (max-width: 860px) { .shell { grid-template-columns: 1fr; height: auto; } }
+
+        .side {
+            border-right: 1px solid rgba(255,255,255,.08); padding: 16px;
+            overflow-y: auto; background: rgba(12,13,26,.5);
+        }
+        .pgroup {
+            font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+            color: var(--text-secondary, #9aa0b5); margin: 16px 0 8px;
+        }
+        .pgroup:first-child { margin-top: 0; }
+        .pitem {
+            display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left;
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 10px; padding: 10px 11px; margin-bottom: 7px; cursor: pointer; color: inherit;
+        }
+        .pitem:hover:not(:disabled) { border-color: #38bdf8; background: rgba(56,189,248,.1); }
+        .pitem:disabled { opacity: .4; cursor: not-allowed; }
+        .pitem b { display: block; font-size: 13.5px; font-weight: 600; }
+        .pitem i { display: block; font-style: normal; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); margin-top: 2px; line-height: 1.35; }
+        .picon { font-size: 16px; line-height: 1.2; }
+
+        .tmpl {
+            display: block; width: 100%; text-align: left; color: inherit; cursor: pointer;
+            background: rgba(123,92,255,.1); border: 1px solid rgba(123,92,255,.35);
+            border-radius: 10px; padding: 10px 11px; margin-bottom: 7px;
+        }
+        .tmpl:hover { background: rgba(123,92,255,.2); }
+        .tmpl b { display: block; font-size: 13px; }
+        .tmpl i { display: block; font-style: normal; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); margin-top: 3px; line-height: 1.35; }
+
+        #canvas { height: 100%; min-height: 620px; background:
+            radial-gradient(rgba(255,255,255,.055) 1px, transparent 1px) 0 0 / 22px 22px; }
+
+        /* ---- nodes ------------------------------------------------------- */
+        .drawflow .drawflow-node {
+            align-items: flex-start; padding: 0; width: 244px; border-radius: 13px;
+            background: rgba(21,22,42,.97); border: 1px solid rgba(255,255,255,.13);
+            color: var(--text-primary, #eef); box-shadow: 0 12px 30px rgba(0,0,0,.4);
+        }
+        .drawflow .drawflow-node.selected { background: rgba(21,22,42,.97); border-color: #38bdf8; }
+        .drawflow .drawflow-node .input, .drawflow .drawflow-node .output {
+            width: 13px; height: 13px; margin-bottom: 13px;
+            background: #0f1020; border: 2px solid #7b5cff;
+        }
+        .drawflow .drawflow-node .input { left: -7px; background: #0f1020; border-color: #38bdf8; }
+        .drawflow .drawflow-node .output { right: -7px; }
+        .drawflow .connection .main-path { stroke: #7b5cff; stroke-width: 2.6px; }
+        .drawflow .connection .main-path:hover { stroke: #38bdf8; }
+
+        .nhead {
+            height: 46px; box-sizing: border-box; display: flex; align-items: center; gap: 8px;
+            padding: 0 14px; border-bottom: 1px solid rgba(255,255,255,.1);
+            background: rgba(255,255,255,.04); border-radius: 12px 12px 0 0;
+        }
+        .nhead b { font-size: 13.5px; }
+        .nslow { font-style: normal; font-size: 10.5px; color: #facc15; margin-left: auto; }
+        .nports { padding: 6px 0 0; }
+        .prow {
+            height: 26px; display: flex; align-items: center; padding: 0 14px;
+            font-size: 12px; color: var(--text-secondary, #9aa0b5); white-space: nowrap;
+        }
+        .prow.pout { justify-content: flex-end; color: #c7b9ff; }
+        .prow i { font-style: normal; opacity: .55; margin-left: 4px; }
+
+        .nparams { margin: 6px 12px 4px; }
+        .nparams summary {
+            cursor: pointer; font-size: 11.5px; color: var(--text-secondary, #9aa0b5);
+            padding: 4px 2px; list-style: none;
+        }
+        .nparams summary::before { content: '⚙ '; }
+        .nparam { display: flex; align-items: center; gap: 7px; margin: 5px 0; font-size: 11.5px; }
+        .nparam > span { flex: 0 0 82px; color: var(--text-secondary, #9aa0b5); }
+        .nparam select, .nparam input[type=text], .nparam input[type=number] {
+            flex: 1; min-width: 0; background: rgba(10,11,22,.85);
+            border: 1px solid rgba(255,255,255,.14); border-radius: 7px;
+            color: inherit; padding: 4px 6px; font-size: 11.5px;
+        }
+        .nparam input[type=range] { flex: 1; min-width: 0; accent-color: #7b5cff; }
+        .nparam output { font-size: 11px; min-width: 30px; text-align: right; color: #c7b9ff; }
+
+        .ninput { padding: 4px 12px 10px; }
+        .ninput input[type=text], .ninput textarea {
+            width: 100%; box-sizing: border-box; background: rgba(10,11,22,.85);
+            border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+            color: inherit; padding: 6px 8px; font-size: 11.5px; resize: vertical;
+        }
+        .npick {
+            margin-top: 6px; width: 100%; cursor: pointer; font-size: 11.5px;
+            background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 8px; color: inherit; padding: 5px;
+        }
+        .ninput img { margin-top: 7px; width: 100%; border-radius: 8px; display: block; }
+
+        .nstate { padding: 0 14px 8px; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); }
+        .nstate.running { color: #38bdf8; }
+        .nstate.done { color: #4ade80; }
+        .nstate.failed { color: #ff8a9b; }
+        .nprog { margin: 0 12px; }
+        .nout { padding: 0 12px 12px; }
+        .nout img, .nout video { width: 100%; border-radius: 9px; display: block; }
+        .ntext {
+            font-size: 11.5px; line-height: 1.45; max-height: 130px; overflow-y: auto;
+            background: rgba(10,11,22,.7); border-radius: 8px; padding: 8px;
+        }
+        .nlink { display: inline-block; margin-top: 6px; font-size: 11.5px; color: #38bdf8; }
+
+        .toast {
+            position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px);
+            background: rgba(18,19,38,.97); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 11px; padding: 11px 17px; font-size: 13px; max-width: 80vw;
+            opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 30;
+        }
+        .toast.shown { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        .hint { font-size: 11.5px; color: var(--text-secondary, #9aa0b5); line-height: 1.5; margin-top: 14px; }
+    </style>
+</head>
+<body class="ai-page">
+
+<div class="bar">
+    <h1>Nodes</h1>
+    <input type="text" id="graph-name" value="SimpleTextToVideoByVision" aria-label="Composition name">
+    <button id="run">Render</button>
+    <button id="save">Save &amp; copy link</button>
+    <button id="clear">Clear</button>
+    <span class="grow"></span>
+    <nav>
+        <a href="/vision">Vision</a><a href="/text">Text</a><a href="/image">Image</a>
+        <a href="/video">Video</a><a href="/3dmodel">3D</a>
+    </nav>
+</div>
+
+<div class="shell">
+    <aside class="side">
+        <div class="pgroup">Compositions</div>
+        <div id="templates"></div>
+        <div id="palette"></div>
+        <p class="hint">
+            Drag from a socket on the right of a node to a socket on the left of
+            another. Only sockets that carry the same kind of thing will connect.
+            Render runs the whole composition; steps that do not depend on each
+            other run at the same time.
+        </p>
+    </aside>
+    <main><div id="canvas"></div></main>
+</div>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>

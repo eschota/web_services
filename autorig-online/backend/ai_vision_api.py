@@ -78,6 +78,7 @@ MAX_WAIT_SECONDS = 180.0
 RECENT_DURATIONS: Dict[str, deque] = {
     "vision": deque(maxlen=40),
     "text": deque(maxlen=40),
+    "3dmodel": deque(maxlen=20),
 }
 
 
@@ -126,24 +127,18 @@ WORKERS_FILE = os.getenv(
 )
 
 
-def _load_ai_workers() -> List[Dict[str, object]]:
-    """Farm nodes that can answer an AI request, with their per-node token.
-
-    The node list and tokens are shared with Hunyuan, but its `enabled` flag is
-    not: a node parked for a Hunyuan bake bug still reads images perfectly well.
-    Only `ai_vision_enabled: false` parks a node for AI, and whether it is
-    actually free is settled by probing it, not by this file.
-    """
+def _worker_entries() -> List[Tuple[Dict[str, object], Dict[str, object]]]:
+    """(normalised worker, raw file entry) pairs, one per physical node."""
     try:
         raw = json.loads(pathlib.Path(WORKERS_FILE).read_text(encoding="utf-8"))
     except FileNotFoundError:
-        logger.warning("AI worker list %s does not exist", WORKERS_FILE)
+        logger.warning("Worker list %s does not exist", WORKERS_FILE)
         return []
     except Exception:
-        logger.exception("Could not read the AI worker list %s", WORKERS_FILE)
+        logger.exception("Could not read the worker list %s", WORKERS_FILE)
         return []
     entries = raw.get("workers") if isinstance(raw, dict) else raw
-    workers: List[Dict[str, object]] = []
+    pairs = []
     seen_nodes = set()
     for entry in entries or []:
         if not isinstance(entry, dict):
@@ -152,19 +147,47 @@ def _load_ai_workers() -> List[Dict[str, object]]:
         token = str(entry.get("token") or "").strip()
         if not url or not token:
             continue
-        if entry.get("ai_vision_enabled") is False:
-            continue
         node = str(entry.get("physical_node") or entry.get("name") or url).strip().lower()
         if node in seen_nodes:
             continue
         seen_nodes.add(node)
-        workers.append({
+        pairs.append(({
             "name": str(entry.get("name") or node),
             "url": url,
             "token": token,
             "physical_node": node,
-        })
+        }, entry))
+    return pairs
+
+
+def _load_hunyuan_workers() -> List[Dict[str, object]]:
+    """Nodes allowed to run Hunyuan, which is a narrower set than AI Vision.
+
+    Here the file's `enabled` flag does matter: those entries are parked for
+    Hunyuan-specific reasons — a bake contract failure, a torch crash, capacity
+    held back for conversion — and ignoring them would send 3D work to a node
+    somebody deliberately took out of 3D.
+    """
+    workers = []
+    for entry, raw in _worker_entries():
+        if raw.get("enabled") is False or raw.get("disabled") is True:
+            continue
+        if raw.get("canary_approved") is False:
+            continue
+        workers.append(entry)
     return workers
+
+
+def _load_ai_workers() -> List[Dict[str, object]]:
+    """Farm nodes that can answer an AI request, with their per-node token.
+
+    The node list and tokens are shared with Hunyuan, but its `enabled` flag is
+    not: a node parked for a Hunyuan bake bug still reads images perfectly well.
+    Only `ai_vision_enabled: false` parks a node for AI, and whether it is
+    actually free is settled by probing it, not by this file.
+    """
+    return [entry for entry, raw in _worker_entries()
+            if raw.get("ai_vision_enabled") is not False]
 
 
 def _node_key(worker: Dict[str, object]) -> str:
@@ -538,11 +561,28 @@ async def api_ai_status(task_id: str):
     result["node_string"] = node_key
     return result
 
+# The knobs below are the ones Renderfin's RenderPrompt actually carries. They
+# are optional everywhere: a caller who sends only a prompt gets exactly the
+# behaviour it had before these existed.
+IMAGE_MODES = ("", "z_depth", "t_pose", "open_pose", "inpaint")
+VIDEO_QUALITIES = {
+    "standard": "gen_animation_by_url.json",
+    "hq": "gen_animation_hq_by_url.json",
+}
+
+
 class ImageRequest(BaseModel):
     prompt: str = Field(..., description="What to draw")
     image_url: Optional[str] = Field(None, description="Reference image URL")
     image_base64: Optional[str] = Field(None, description="Reference image, inline")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+    mode: Optional[str] = Field(None, description="z_depth, t_pose, open_pose or inpaint")
+    negative_prompt: Optional[str] = Field(None, description="What to avoid")
+    width: Optional[int] = Field(None, ge=256, le=2048)
+    height: Optional[int] = Field(None, ge=256, le=2048)
+    steps: Optional[int] = Field(None, ge=1, le=100)
+    creativity: Optional[float] = Field(None, ge=0, le=1)
+    seed: Optional[int] = Field(None, ge=0, description="0 or absent randomises")
 
 
 # Renderfin runs on the same host and owns the image farm; the public service
@@ -558,7 +598,9 @@ async def api_image_docs():
         "method_string": "POST",
         "url_string": "/api/image",
         "required_fields_array": ["prompt"],
-        "optional_fields_array": ["image_url", "image_base64", "wait_seconds"],
+        "optional_fields_array": ["image_url", "image_base64", "wait_seconds",
+                                  "mode", "negative_prompt", "width", "height",
+                                  "steps", "creativity", "seed"],
         "produces_string": "image",
         "example_request_object": {"prompt": "a black lamp post on magenta", "wait_seconds": 120},
         "server_time_unix_int": int(time.time()),
@@ -578,6 +620,22 @@ async def api_image(body: ImageRequest):
         payload: Dict[str, object] = {"prompt": prompt}
         if reference:
             payload["image_url"] = reference
+        mode = str(body.mode or "").strip().lower()
+        if mode and mode in IMAGE_MODES:
+            # Renderfin picks the template from `type`, not from a file name.
+            payload["type"] = mode
+        if body.negative_prompt and str(body.negative_prompt).strip():
+            payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
+        if body.width:
+            payload["main_size_width"] = int(body.width)
+        if body.height:
+            payload["main_size_height"] = int(body.height)
+        if body.steps:
+            payload["steps"] = int(body.steps)
+        if body.creativity is not None:
+            payload["creativity"] = float(body.creativity)
+        if body.seed:
+            payload["noise_seed"] = int(body.seed)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
@@ -626,7 +684,18 @@ class VideoRequest(BaseModel):
     image_url: Optional[str] = Field(None, description="First frame, public URL")
     image_base64: Optional[str] = Field(None, description="First frame, inline")
     prompt: Optional[str] = Field(None, description="What should happen in the clip")
-    frame_count: Optional[int] = Field(None, ge=8, le=480)
+    frame_count: Optional[int] = Field(None, ge=8, le=400)
+    # Giving a last frame turns the clip into a journey between two pictures;
+    # passing the first frame again is how a loop is made. Renderfin prunes the
+    # guide node from the workflow when this is absent, so the plain animation
+    # is unchanged by its existence.
+    image_url_end: Optional[str] = Field(None, description="Last frame, public URL")
+    image_base64_end: Optional[str] = Field(None, description="Last frame, inline")
+    quality: Optional[str] = Field(None, description="standard or hq")
+    negative_prompt: Optional[str] = Field(None, description="What to avoid")
+    steps: Optional[int] = Field(None, ge=1, le=100)
+    creativity: Optional[float] = Field(None, ge=0, le=1)
+    seed: Optional[int] = Field(None, ge=0, description="0 or absent randomises")
 
 
 @router.get("/api/video")
@@ -637,7 +706,9 @@ async def api_video_docs():
         "method_string": "POST",
         "url_string": "/api/video",
         "required_fields_array": ["image_url or image_base64"],
-        "optional_fields_array": ["prompt", "frame_count"],
+        "optional_fields_array": ["prompt", "frame_count", "image_url_end",
+                                  "image_base64_end", "quality", "negative_prompt",
+                                  "steps", "creativity", "seed"],
         "produces_string": "video",
         "note_string": "A clip is animated from the frame you give it; expect minutes, not seconds.",
         "server_time_unix_int": int(time.time()),
@@ -662,10 +733,28 @@ async def api_video(body: VideoRequest):
                 client, _decode_inline_image(body.image_base64 or "")
             )
         payload: Dict[str, object] = {"image_url": frame}
+        last_frame = str(body.image_url_end or "").strip()
+        if not last_frame and body.image_base64_end:
+            last_frame = await _publish_inline_image(
+                client, _decode_inline_image(body.image_base64_end)
+            )
+        if last_frame:
+            payload["image_url_end"] = last_frame
         if body.prompt and str(body.prompt).strip():
             payload["prompt"] = _validate_prompt(body.prompt)
         if body.frame_count:
             payload["frame_count"] = int(body.frame_count)
+        quality = str(body.quality or "").strip().lower()
+        if quality in VIDEO_QUALITIES:
+            payload["work_flow"] = VIDEO_QUALITIES[quality]
+        if body.negative_prompt and str(body.negative_prompt).strip():
+            payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
+        if body.steps:
+            payload["steps"] = int(body.steps)
+        if body.creativity is not None:
+            payload["creativity"] = float(body.creativity)
+        if body.seed:
+            payload["noise_seed"] = int(body.seed)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload,
@@ -694,5 +783,148 @@ async def api_video(body: VideoRequest):
             "video_url_string": output_url,
             "poll_url_string": output_url,
             "source_image_url_string": frame,
+            "end_image_url_string": last_frame,
             "server_time_unix_int": int(time.time()),
         }
+
+class ModelRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Picture of the subject")
+    image_base64: Optional[str] = Field(None, description="Picture, inline")
+    quality: Optional[str] = Field(None, description="draft, standard or high")
+    background_method: Optional[str] = Field(None, description="auto, alpha or solid")
+
+
+@router.get("/api/3dmodel")
+async def api_3dmodel_docs():
+    """GET mirror documenting the POST 3D endpoint."""
+    return {
+        "status_string": "ok",
+        "method_string": "POST",
+        "url_string": "/api/3dmodel",
+        "required_fields_array": ["image_url or image_base64"],
+        "optional_fields_array": ["quality", "background_method"],
+        "produces_string": "model3d",
+        "note_string": "Hunyuan3D on the farm; minutes, and only nodes cleared for 3D take it.",
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/3dmodel")
+async def api_3dmodel(body: ModelRequest):
+    """Turn a picture into a 3D model on a farm node cleared for Hunyuan."""
+    if not body.image_url and not body.image_base64:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "image_required",
+            "message_string": "Provide image_url or image_base64"})
+    async with httpx.AsyncClient() as client:
+        picture = str(body.image_url or "").strip()
+        if not picture:
+            picture = await _publish_inline_image(
+                client, _decode_inline_image(body.image_base64 or "")
+            )
+        workers = _load_hunyuan_workers()
+        if not workers:
+            raise HTTPException(status_code=503, detail={
+                "error_string": "no_3d_node_available",
+                "message_string": "No farm node is currently cleared for 3D generation"})
+        probes = await asyncio.gather(
+            *(_node_is_free(client, worker) for worker in workers),
+            return_exceptions=True,
+        )
+        candidates = []
+        for worker, probe in zip(workers, probes):
+            if isinstance(probe, Exception) or not isinstance(probe, tuple):
+                continue
+            ok, info = probe
+            if ok:
+                candidates.append((int((info or {}).get("load") or 0), worker))
+        if not candidates:
+            raise HTTPException(status_code=503, detail={
+                "error_string": "no_3d_node_available",
+                "message_string": "No 3D-capable node answered; try again shortly"})
+        candidates.sort(key=lambda item: item[0])
+        worker = candidates[0][1]
+
+        payload: Dict[str, object] = {"image_url": picture}
+        if body.quality:
+            payload["quality"] = str(body.quality).strip().lower()
+        if body.background_method:
+            payload["background_method"] = str(body.background_method).strip().lower()
+        worker_task_id = await _submit(client, worker, "/generate-3d", payload)
+        return {
+            "success_bool": True,
+            "task_id_string": f"{_node_key(worker)}.{worker_task_id}",
+            "status_string": "pending",
+            "finished_bool": False,
+            "status_url_string": f"/api/3dmodel/status/{_node_key(worker)}.{worker_task_id}",
+            "node_string": _node_key(worker),
+            "source_image_url_string": picture,
+            "server_time_unix_int": int(time.time()),
+        }
+
+
+@router.get("/api/3dmodel/status/{task_id}")
+async def api_3dmodel_status(task_id: str):
+    """Hunyuan has its own status path, so 3D tasks cannot share /api/ai/status."""
+    node_key, _, worker_task_id = str(task_id).partition(".")
+    if not node_key or not worker_task_id:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "malformed_task_id",
+            "message_string": "task_id must look like <node>.<id>"})
+    worker = next((w for w in _load_hunyuan_workers()
+                   if _node_key(w) == node_key), None)
+    if worker is None:
+        raise HTTPException(status_code=404, detail={
+            "error_string": "unknown_node",
+            "message_string": "The node that owns this task is not configured for 3D"})
+    url = _ai_base(worker) + f"/generate-3d/status/{worker_task_id}"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                url, headers={"Authorization": f"Bearer {worker['token']}"},
+                timeout=STATUS_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            raise HTTPException(status_code=502, detail={
+                "error_string": "worker_unreachable",
+                "message_string": "The farm node did not answer"}) from None
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail={
+            "error_string": "task_not_found", "message_string": "No such task"})
+    if response.status_code != 200:
+        raise HTTPException(status_code=502, detail={
+            "error_string": "worker_status_failed",
+            "message_string": f"Farm node answered HTTP {response.status_code}"})
+    raw = response.json() or {}
+    status = str(raw.get("status") or "")
+    outputs = raw.get("output_urls")
+    model_url = ""
+    preview_url = ""
+    if isinstance(outputs, dict):
+        for key in ("glb", "high", "high_textured", "model", "standard"):
+            value = outputs.get(key)
+            if isinstance(value, str) and value.strip():
+                model_url = value.strip()
+                break
+        for key in ("preview", "preview_front", "thumbnail"):
+            value = outputs.get(key)
+            if isinstance(value, str) and value.strip():
+                preview_url = value.strip()
+                break
+    if status == "Completed":
+        record_duration("3dmodel", float(raw.get("elapsed_seconds") or 0))
+    return {
+        "success_bool": status != "Failed",
+        "task_id_string": task_id,
+        "status_string": status.lower() or "pending",
+        "finished_bool": status in ("Completed", "Failed"),
+        "model_url_string": model_url,
+        "preview_url_string": preview_url,
+        "outputs_object": outputs if isinstance(outputs, dict) else {},
+        "error_string": str(raw.get("error") or ""),
+        "stage_string": str(raw.get("current_stage") or ""),
+        "progress_int": int(raw.get("progress") or 0),
+        "elapsed_seconds_float": round(float(raw.get("elapsed_seconds") or 0.0), 2),
+        "node_string": node_key,
+        "server_time_unix_int": int(time.time()),
+    }

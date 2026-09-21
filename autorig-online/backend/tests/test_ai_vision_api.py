@@ -128,6 +128,56 @@ class WorkerFileTests(unittest.TestCase):
         )
 
 
+class HunyuanWorkerTests(unittest.TestCase):
+    """3D and AI read the same file but must not read the same flag."""
+
+    def _write(self, tmp, payload):
+        path = Path(tmp) / "workers.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return str(path)
+
+    def test_a_node_parked_for_hunyuan_is_kept_out_of_3d(self):
+        payload = {"workers": [
+            {"name": "f11", "physical_node": "f11", "url": "http://127.0.0.1:15533",
+             "token": "t", "enabled": False,
+             "disabled_reason": "Hunyuan-only quarantine"},
+            {"name": "f13", "physical_node": "f13", "url": "http://127.0.0.1:15267",
+             "token": "t", "enabled": True},
+        ]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ai_vision_api, "WORKERS_FILE", self._write(tmp, payload)):
+                three_d = [w["physical_node"] for w in ai_vision_api._load_hunyuan_workers()]
+                ai = [w["physical_node"] for w in ai_vision_api._load_ai_workers()]
+        # The quarantine is about 3D bakes, so AI keeps the node and 3D does not.
+        self.assertEqual(three_d, ["f13"])
+        self.assertEqual(sorted(ai), ["f11", "f13"])
+
+    def test_an_unapproved_canary_is_kept_out_of_3d(self):
+        payload = {"workers": [
+            {"name": "f2", "physical_node": "f2", "url": "http://127.0.0.1:15279",
+             "token": "t", "enabled": True, "canary_approved": False},
+        ]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ai_vision_api, "WORKERS_FILE", self._write(tmp, payload)):
+                self.assertEqual(ai_vision_api._load_hunyuan_workers(), [])
+
+    def test_no_cleared_node_is_a_service_error_not_a_crash(self):
+        with mock.patch.object(ai_vision_api, "_load_hunyuan_workers", return_value=[]):
+            response = _app().post("/api/3dmodel", json={"image_url": "https://e.test/a.png"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"]["error_string"], "no_3d_node_available")
+
+    def test_3d_requires_a_picture(self):
+        response = _app().post("/api/3dmodel", json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["error_string"], "image_required")
+
+    def test_a_3d_task_id_carries_its_node(self):
+        response = _app().get("/api/3dmodel/status/no-node")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["error_string"], "malformed_task_id")
+
+
 class TaskIdRoutingTests(unittest.TestCase):
     def test_node_key_is_url_safe_and_stable(self):
         self.assertEqual(ai_vision_api._node_key(WORKER), "f1-pc")

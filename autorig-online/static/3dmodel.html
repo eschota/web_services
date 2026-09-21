@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Model — Turn a Picture into Geometry | AutoRig</title>
+    <meta name="description" content="Give the farm a picture and Hunyuan3D builds a textured 3D model. Runs on AutoRig's own GPUs.">
+    <link rel="canonical" href="https://autorig.online/3dmodel">
+    <meta property="og:title" content="3D Model — Turn a Picture into Geometry">
+    <meta property="og:description" content="Hunyuan3D on AutoRig's own GPU farm: a picture in, a textured model out.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/3dmodel">
+    <meta property="og:site_name" content="AutoRig.online">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="/static/js/ai-entities.js?v=20260921-autostart"></script>
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 12% 8%, rgba(45, 212, 191, 0.16), transparent 34%),
+                radial-gradient(circle at 88% 12%, rgba(123, 92, 255, 0.18), transparent 38%),
+                linear-gradient(180deg, #111226 0%, #15162b 48%, #10111d 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .ai-page, .ai-page input, .ai-page textarea, .ai-page select, .ai-page button {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+        .ai-wrap { max-width: 1180px; margin: 0 auto; padding: 48px 20px 80px; }
+        .ai-head { text-align: center; margin-bottom: 30px; }
+        .ai-head h1 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 12px; line-height: 1.15; }
+        .ai-head p { color: var(--text-secondary, #9aa0b5); max-width: 640px; margin: 0 auto; font-size: 16px; }
+        .fleet-slot { display: flex; justify-content: center; margin-top: 12px; }
+
+        .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+        @media (max-width: 900px) { .ai-grid { grid-template-columns: 1fr; } }
+
+        .ai-card {
+            background: rgba(18, 19, 38, .72);
+            border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 16px; padding: 22px; backdrop-filter: blur(8px);
+        }
+        .ai-card h2 { font-size: 16px; margin: 0 0 16px; letter-spacing: .02em; }
+
+        .drop {
+            border: 2px dashed rgba(45, 212, 191, .42);
+            border-radius: 14px; min-height: 200px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 10px; cursor: pointer; text-align: center; padding: 18px;
+            background: rgba(45, 212, 191, .05);
+        }
+        .drop:hover, .drop.over { border-color: #2dd4bf; background: rgba(45, 212, 191, .11); }
+        .drop img { max-width: 100%; max-height: 270px; border-radius: 10px; display: block; }
+        .drop small { color: var(--text-secondary, #9aa0b5); }
+        .drop-icon { font-size: 32px; opacity: .85; }
+
+        .field { margin-top: 16px; }
+        .field label { display: block; font-size: 13px; margin-bottom: 6px; color: var(--text-secondary, #9aa0b5); }
+        .field select {
+            width: 100%; box-sizing: border-box;
+            background: rgba(10, 11, 22, .8);
+            border: 1px solid rgba(255, 255, 255, .12);
+            border-radius: 10px; color: var(--text-primary, #eef);
+            padding: 11px 13px; font: inherit; font-size: 14px;
+        }
+        .field select:focus { outline: none; border-color: #2dd4bf; box-shadow: 0 0 0 3px rgba(45, 212, 191, .16); }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+        .go {
+            width: 100%; margin-top: 18px; padding: 13px 18px;
+            border: 0; border-radius: 11px; cursor: pointer;
+            background: linear-gradient(135deg, #2dd4bf, #6366f1);
+            color: #fff; font-size: 15px; font-weight: 600;
+        }
+        .go:disabled { opacity: .55; cursor: not-allowed; }
+
+        .result { min-height: 300px; display: flex; align-items: center; justify-content: center; }
+        .result img { max-width: 100%; border-radius: 12px; display: block; }
+        .muted { color: var(--text-secondary, #9aa0b5); font-size: 14px; }
+        .err { color: #ff8a9b; }
+        .meta { margin-top: 14px; font-size: 12px; color: var(--text-secondary, #9aa0b5); }
+        .files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+        .files a {
+            font-size: 12px; padding: 6px 12px; border-radius: 999px; text-decoration: none;
+            color: #b6f3ea; background: rgba(45, 212, 191, .14);
+            border: 1px solid rgba(45, 212, 191, .4);
+        }
+        .spin {
+            display: inline-block; width: 14px; height: 14px; vertical-align: -2px;
+            border: 2px solid rgba(255, 255, 255, .25); border-top-color: #fff;
+            border-radius: 50%; animation: sp .8s linear infinite; margin-right: 8px;
+        }
+        @keyframes sp { to { transform: rotate(360deg); } }
+
+        .api { margin-top: 34px; }
+        .api pre {
+            background: rgba(8, 9, 18, .9); border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 12px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5;
+        }
+        .api code { color: #9ad8ff; }
+        .api p { color: var(--text-secondary, #9aa0b5); font-size: 14px; }
+    </style>
+</head>
+<body class="ai-page">
+<div class="ai-wrap">
+    <div class="ai-head">
+        <h1>3D Model</h1>
+        <p>A picture becomes textured geometry. Hunyuan3D runs on the same farm
+           nodes as everything else here — minutes, not seconds.</p>
+        <nav id="service-nav"></nav>
+        <div class="fleet-slot"><span id="fleet"></span></div>
+    </div>
+
+    <div id="received"></div>
+
+    <div class="ai-grid">
+        <div class="ai-card">
+            <h2>Your picture</h2>
+            <div class="drop" id="drop">
+                <div class="drop-icon">🧊</div>
+                <div>Click, paste or drop a picture</div>
+                <small>One clear subject works best</small>
+                <img id="preview" alt="" hidden>
+            </div>
+            <input type="file" id="file" accept="image/*" hidden>
+
+            <div class="row2">
+                <div class="field">
+                    <label for="quality">Quality</label>
+                    <select id="quality">
+                        <option value="draft">Draft — fastest</option>
+                        <option value="standard" selected>Standard</option>
+                        <option value="high">High — slowest</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="background">Background</label>
+                    <select id="background">
+                        <option value="auto" selected>Auto</option>
+                        <option value="alpha">Already transparent</option>
+                        <option value="solid">Solid colour</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="progress" class="task-prog"></div>
+            <button class="go" id="go">Build the model</button>
+        </div>
+
+        <div class="ai-card">
+            <h2>Result</h2>
+            <div class="result" id="result"><span class="muted">The model will appear here.</span></div>
+            <div class="files" id="files"></div>
+            <div class="meta" id="meta"></div>
+            <div id="handoff"></div>
+        </div>
+    </div>
+
+    <div class="ai-card api">
+        <h2>Use it from your own code</h2>
+        <pre><code>curl -X POST https://autorig.online/api/3dmodel \
+  -H "Content-Type: application/json" \
+  -d '{"image_url": "https://example.com/subject.png", "quality": "standard"}'</code></pre>
+        <p>Poll <code>/api/3dmodel/status/&lt;task_id&gt;</code> for
+           <code>model_url_string</code>. Service catalogue: <code>GET /api/ai/services</code></p>
+    </div>
+</div>
+
+<script>
+const SERVICE_ID = '3dmodel';
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const preview = document.getElementById('preview');
+const resultBox = document.getElementById('result');
+const filesBox = document.getElementById('files');
+const metaBox = document.getElementById('meta');
+const goButton = document.getElementById('go');
+let pictureDataUrl = null;
+let pictureUrl = null;
+
+AIEntities.renderNav(document.getElementById('service-nav'), SERVICE_ID).catch(() => {});
+AIEntities.mountFleet(document.getElementById('fleet'), SERVICE_ID);
+
+function showPicture(src) {
+    preview.src = src;
+    preview.hidden = false;
+    drop.querySelectorAll('div, small').forEach(el => {
+        if (el !== preview) el.style.display = 'none';
+    });
+}
+
+const incoming = AIEntities.take(SERVICE_ID);
+if (incoming) {
+    const receivedBox = document.getElementById('received');
+    AIEntities.renderReceived(receivedBox, incoming);
+    if (incoming.type === AIEntities.IMAGE) { pictureUrl = incoming.value; showPicture(incoming.value); }
+    // A picture is the whole brief for a model, so it runs on arrival.
+    const have = (pictureUrl || pictureDataUrl) ? [AIEntities.IMAGE] : [];
+    AIEntities.autoStart(SERVICE_ID, have, () => goButton.click(), receivedBox);
+}
+
+function readFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { pictureDataUrl = reader.result; pictureUrl = null; showPicture(reader.result); };
+    reader.readAsDataURL(file);
+}
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => readFile(e.target.files[0]));
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); readFile(e.dataTransfer.files[0]); });
+window.addEventListener('paste', e => {
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+    if (item) readFile(item.getAsFile());
+});
+
+function setBusy(busy) {
+    goButton.disabled = busy;
+    goButton.innerHTML = busy ? '<span class="spin"></span>Building…' : 'Build the model';
+}
+
+goButton.addEventListener('click', async () => {
+    if (!pictureDataUrl && !pictureUrl) { alert('Add a picture first.'); return; }
+    resultBox.innerHTML = '<span class="muted">Sending to the farm…</span>';
+    filesBox.innerHTML = '';
+    metaBox.textContent = '';
+    document.getElementById('handoff').innerHTML = '';
+    setBusy(true);
+    const task = AIEntities.startTask(document.getElementById('progress'), SERVICE_ID);
+
+    try {
+        const body = {
+            quality: document.getElementById('quality').value,
+            background_method: document.getElementById('background').value
+        };
+        if (pictureUrl) body.image_url = pictureUrl; else body.image_base64 = pictureDataUrl;
+
+        const response = await fetch('/api/3dmodel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = data.detail || {};
+            throw new Error(detail.message_string || detail.error_string || ('HTTP ' + response.status));
+        }
+        metaBox.textContent = 'node: ' + (data.node_string || '—');
+
+        let state = data;
+        // Hunyuan reports its own stage, so the wait says what it is doing
+        // rather than only how long it has been going.
+        for (let i = 0; i < 400; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            const poll = await fetch('/api/3dmodel/status/' + encodeURIComponent(data.task_id_string));
+            state = await poll.json();
+            if (state.finished_bool) break;
+            resultBox.innerHTML = '<span class="muted">' +
+                (state.stage_string || state.status_string || 'working') + '…</span>';
+        }
+        if (!state.finished_bool) throw new Error('The model did not arrive in time; the task may still be running.');
+        if (state.error_string) throw new Error(state.error_string);
+
+        resultBox.innerHTML = '';
+        if (state.preview_url_string) {
+            const img = document.createElement('img');
+            img.src = state.preview_url_string;
+            img.alt = 'preview';
+            resultBox.appendChild(img);
+        } else {
+            resultBox.innerHTML = '<span class="muted">Model ready.</span>';
+        }
+        Object.entries(state.outputs_object || {}).forEach(([name, url]) => {
+            if (typeof url !== 'string' || !url) return;
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = name;
+            link.target = '_blank';
+            link.rel = 'noreferrer';
+            filesBox.appendChild(link);
+        });
+        metaBox.textContent = 'node: ' + (state.node_string || '—') +
+                              ' · took: ' + state.elapsed_seconds_float + ' s';
+        task.finish(true);
+
+        const model = AIEntities.entity(AIEntities.MODEL3D,
+            state.model_url_string || state.preview_url_string || '', {
+            origin: { service: SERVICE_ID, task_id: state.task_id_string }
+        });
+        if (model.value) {
+            AIEntities.remember(model);
+            AIEntities.renderHandoff(document.getElementById('handoff'), model,
+                                     { from: SERVICE_ID }).catch(() => {});
+        }
+    } catch (err) {
+        resultBox.innerHTML = '';
+        const msg = document.createElement('span');
+        msg.className = 'err';
+        msg.textContent = String(err.message || err);
+        resultBox.appendChild(msg);
+        task.finish(false);
+    } finally {
+        setBusy(false);
+    }
+});
+</script>
+</body>
+</html>

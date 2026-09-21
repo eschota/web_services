@@ -124,6 +124,11 @@ SERVICES: List[Dict[str, object]] = [
         "inputs": [
             {"type": IMAGE, "field": "image", "required": True,
              "title": "First frame"},
+            # Optional, and the reason a loop is possible at all: give the last
+            # frame and the clip travels to it; give the first frame again and
+            # it comes back to where it started.
+            {"type": IMAGE, "field": "image_url_end", "required": False,
+             "title": "Last frame"},
             {"type": TEXT, "field": "prompt", "required": False,
              "title": "What should happen"},
         ],
@@ -135,24 +140,115 @@ SERVICES: List[Dict[str, object]] = [
         "id": "3dmodel",
         "title": "3D model",
         "path": "/3dmodel",
-        "api": "/api/generate/from-image",
-        "summary": "Turn a picture into a rigged 3D character.",
-        # The backend exists and works, but it spends credits and needs a
-        # signed-in account, so it needs a page of its own before it can be
-        # offered here. Planned until that page exists, so the nav never links
-        # somewhere that answers 404.
-        "status": "planned",
-        "requires_account": True,
+        "api": "/api/3dmodel",
+        "summary": "Turn a picture into a 3D model. Hunyuan3D on the farm's own GPUs.",
+        # Runs on the converter nodes' own Hunyuan3D, which is installed and
+        # idle there; `/api/generate/from-image` is the separate account-and-
+        # credits product flow and is not what this uses.
+        "status": "live",
+        "slow": True,
         "inputs": [
             {"type": IMAGE, "field": "image", "required": True,
-             "title": "Picture of the character"},
+             "title": "Picture of the subject"},
         ],
         "outputs": [
-            {"type": MODEL3D, "field": "model_url_string", "title": "Rigged model"},
+            {"type": MODEL3D, "field": "model_url_string", "title": "3D model"},
             {"type": IMAGE, "field": "preview_url_string", "title": "Preview"},
         ],
     },
 ]
+
+
+# ------------------------------------------------------------------ parameters
+
+# What a caller may tune beyond the typed inputs. These are declared here, in
+# the same catalogue, so a graph editor can draw the controls for a service it
+# has never heard of; every one of them is optional and maps onto a field the
+# API already accepts.
+#
+# Only knobs the farm genuinely has are listed. There is no LoRA picker because
+# there are no LoRAs on these workers: the equivalent choice is the animation
+# workflow the workers advertise, which is what `quality` selects.
+PARAMS: Dict[str, List[Dict[str, object]]] = {
+    "vision": [
+        {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
+         "default": "bonsai2-27b"},
+        {"name": "max_output_tokens", "title": "Answer length", "type": "number",
+         "min": 64, "max": 4096, "step": 64, "default": 512,
+         "help": "Tokens the model may spend on the answer"},
+    ],
+    "text": [
+        {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
+         "default": "bonsai2-27b"},
+        {"name": "max_output_tokens", "title": "Answer length", "type": "number",
+         "min": 64, "max": 4096, "step": 64, "default": 512},
+    ],
+    "image": [
+        {"name": "mode", "title": "Mode", "type": "select", "default": "",
+         "options": [
+             {"value": "", "title": "Plain"},
+             {"value": "z_depth", "title": "From depth"},
+             {"value": "t_pose", "title": "T-pose"},
+             {"value": "open_pose", "title": "Open pose"},
+             {"value": "inpaint", "title": "Inpaint"},
+         ],
+         "help": "The reference picture is read differently in each mode"},
+        {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
+        {"name": "width", "title": "Width", "type": "select", "default": 1024,
+         "options": [{"value": 768, "title": "768"}, {"value": 1024, "title": "1024"},
+                     {"value": 1280, "title": "1280"}, {"value": 1536, "title": "1536"}]},
+        {"name": "height", "title": "Height", "type": "select", "default": 1024,
+         "options": [{"value": 768, "title": "768"}, {"value": 1024, "title": "1024"},
+                     {"value": 1280, "title": "1280"}, {"value": 1536, "title": "1536"}]},
+        # The range starts at zero because zero is a real choice here: it
+        # means "leave the workflow's own value alone". A minimum of 4 would
+        # be silently clamped up by the browser and every render would go out
+        # with four steps, which ruins the picture.
+        {"name": "steps", "title": "Steps", "type": "range", "min": 0, "max": 60,
+         "step": 1, "default": 0, "help": "0 leaves the workflow's own value"},
+        {"name": "creativity", "title": "Creativity", "type": "range", "min": 0,
+         "max": 1, "step": 0.05, "default": 0, "help": "0 leaves the workflow's own value"},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 2147483647,
+         "step": 1, "default": 0, "help": "0 gives a different picture each run"},
+    ],
+    "video": [
+        {"name": "quality", "title": "Workflow", "type": "select", "default": "standard",
+         "options": [
+             {"value": "standard", "title": "Standard — gen_animation_by_url"},
+             {"value": "hq", "title": "High quality — slower, fewer nodes take it"},
+         ],
+         "help": "These are the animation workflows the render workers advertise"},
+        {"name": "frame_count", "title": "Frames", "type": "range", "min": 24, "max": 400,
+         "step": 8, "default": 96, "help": "About 24 frames to the second"},
+        {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
+        # The range starts at zero because zero is a real choice here: it
+        # means "leave the workflow's own value alone". A minimum of 4 would
+        # be silently clamped up by the browser and every render would go out
+        # with four steps, which ruins the picture.
+        {"name": "steps", "title": "Steps", "type": "range", "min": 0, "max": 60,
+         "step": 1, "default": 0, "help": "0 leaves the workflow's own value"},
+        {"name": "creativity", "title": "Creativity", "type": "range", "min": 0,
+         "max": 1, "step": 0.05, "default": 0, "help": "0 leaves the workflow's own value"},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 2147483647,
+         "step": 1, "default": 0},
+    ],
+    "3dmodel": [
+        {"name": "quality", "title": "Quality", "type": "select", "default": "standard",
+         "options": [{"value": "fast", "title": "Fast"},
+                     {"value": "standard", "title": "Standard"},
+                     {"value": "high", "title": "High"}]},
+        {"name": "background_method", "title": "Cut out the subject", "type": "select",
+         "default": "auto",
+         "options": [{"value": "auto", "title": "Automatic"},
+                     {"value": "rembg", "title": "rembg"},
+                     {"value": "none", "title": "Leave the background"}],
+         "help": "Hunyuan fails outright when nothing survives the cut-out"},
+    ],
+}
+
+
+def params_for(service_id: str) -> List[Dict[str, object]]:
+    return PARAMS.get(service_id) or []
 
 
 def service(service_id: str) -> Optional[Dict[str, object]]:
@@ -201,7 +297,8 @@ async def api_ai_services():
         "entity_types_array": ENTITY_TYPES,
         "services_array": [
             dict(entry, accepts_array=accepted_types(entry),
-                 produces_array=produced_types(entry))
+                 produces_array=produced_types(entry),
+                 params_array=params_for(str(entry["id"])))
             for entry in SERVICES
         ],
         "handoff_object": {
