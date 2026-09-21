@@ -14,7 +14,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import json
 import logging
+import os
+import pathlib
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -89,19 +92,50 @@ def _model_entry(model_id: Optional[str]) -> Dict[str, object]:
     )
 
 
+WORKERS_FILE = os.getenv(
+    "RENDERFIN_HUNYUAN_WORKERS_FILE", "/etc/autorig-renderfin-hunyuan.json"
+)
+
+
 def _load_ai_workers() -> List[Dict[str, object]]:
-    """AI work rides on the same farm nodes and tokens as Hunyuan generation."""
+    """Farm nodes that can answer an AI request, with their per-node token.
+
+    The node list and tokens are shared with Hunyuan, but its `enabled` flag is
+    not: a node parked for a Hunyuan bake bug still reads images perfectly well.
+    Only `ai_vision_enabled: false` parks a node for AI, and whether it is
+    actually free is settled by probing it, not by this file.
+    """
     try:
-        from renderfin.config import load_hunyuan_workers
-    except Exception:  # pragma: no cover - import shape differs in some deploys
-        logger.exception("Renderfin worker configuration is unavailable")
+        raw = json.loads(pathlib.Path(WORKERS_FILE).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logger.warning("AI worker list %s does not exist", WORKERS_FILE)
         return []
-    try:
-        workers = load_hunyuan_workers() or []
     except Exception:
-        logger.exception("Could not read the farm worker list")
+        logger.exception("Could not read the AI worker list %s", WORKERS_FILE)
         return []
-    return [w for w in workers if str(w.get("url") or "").strip()]
+    entries = raw.get("workers") if isinstance(raw, dict) else raw
+    workers: List[Dict[str, object]] = []
+    seen_nodes = set()
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        url = str(entry.get("url") or "").strip().rstrip("/")
+        token = str(entry.get("token") or "").strip()
+        if not url or not token:
+            continue
+        if entry.get("ai_vision_enabled") is False:
+            continue
+        node = str(entry.get("physical_node") or entry.get("name") or url).strip().lower()
+        if node in seen_nodes:
+            continue
+        seen_nodes.add(node)
+        workers.append({
+            "name": str(entry.get("name") or node),
+            "url": url,
+            "token": token,
+            "physical_node": node,
+        })
+    return workers
 
 
 def _node_key(worker: Dict[str, object]) -> str:
@@ -111,7 +145,8 @@ def _node_key(worker: Dict[str, object]) -> str:
 
 
 def _ai_base(worker: Dict[str, object]) -> str:
-    return str(worker["url"]).rstrip("/")
+    """Worker URLs are bare origins; the converter API lives under this path."""
+    return str(worker["url"]).rstrip("/") + "/api-converter-glb"
 
 
 async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) -> Tuple[bool, int]:

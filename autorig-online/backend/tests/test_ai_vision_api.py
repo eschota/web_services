@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -17,7 +19,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 WORKER = {
     "name": "F1",
-    "url": "https://converter-f1.freestock.online/api-converter-glb",
+    "url": "http://127.0.0.1:15132",
     "token": "test-token",
     "physical_node": "f1-pc",
 }
@@ -55,6 +57,69 @@ class ModelCatalogueTests(unittest.TestCase):
             body = client.get(path).json()
             self.assertEqual(body["method_string"], "POST")
             self.assertEqual(body["url_string"], path)
+
+
+class WorkerFileTests(unittest.TestCase):
+    """The node list is shared with Hunyuan; its parking reasons are not."""
+
+    def _write(self, tmp, payload):
+        path = Path(tmp) / "workers.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return str(path)
+
+    def test_a_node_parked_for_hunyuan_still_serves_ai(self):
+        # f11 is quarantined for a Hunyuan crash; it reads images perfectly well.
+        payload = {"workers": [
+            {"name": "f11", "physical_node": "f11", "url": "http://127.0.0.1:15533",
+             "token": "t", "enabled": False, "canary_approved": False,
+             "disabled_reason": "Hunyuan-only quarantine"},
+        ]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ai_vision_api, "WORKERS_FILE", self._write(tmp, payload)):
+                workers = ai_vision_api._load_ai_workers()
+        self.assertEqual([w["physical_node"] for w in workers], ["f11"])
+
+    def test_an_ai_specific_opt_out_is_honoured(self):
+        payload = {"workers": [
+            {"name": "f7", "physical_node": "f7", "url": "http://127.0.0.1:15131",
+             "token": "t", "ai_vision_enabled": False},
+            {"name": "f1", "physical_node": "f1", "url": "http://127.0.0.1:15132",
+             "token": "t"},
+        ]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ai_vision_api, "WORKERS_FILE", self._write(tmp, payload)):
+                workers = ai_vision_api._load_ai_workers()
+        self.assertEqual([w["physical_node"] for w in workers], ["f1"])
+
+    def test_entries_without_a_token_or_url_are_skipped(self):
+        payload = {"workers": [
+            {"name": "no-token", "physical_node": "a", "url": "http://127.0.0.1:1"},
+            {"name": "no-url", "physical_node": "b", "token": "t"},
+            {"name": "ok", "physical_node": "c", "url": "http://127.0.0.1:2", "token": "t"},
+        ]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ai_vision_api, "WORKERS_FILE", self._write(tmp, payload)):
+                workers = ai_vision_api._load_ai_workers()
+        self.assertEqual([w["physical_node"] for w in workers], ["c"])
+
+    def test_one_physical_node_is_listed_once(self):
+        payload = {"workers": [
+            {"name": "raptor", "physical_node": "ryzen-server", "url": "http://127.0.0.1:15188", "token": "t"},
+            {"name": "raptor-alias", "physical_node": "ryzen-server", "url": "http://127.0.0.1:15189", "token": "t"},
+        ]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ai_vision_api, "WORKERS_FILE", self._write(tmp, payload)):
+                workers = ai_vision_api._load_ai_workers()
+        self.assertEqual(len(workers), 1)
+
+    def test_a_missing_file_is_not_a_crash(self):
+        with mock.patch.object(ai_vision_api, "WORKERS_FILE", "/nope/missing.json"):
+            self.assertEqual(ai_vision_api._load_ai_workers(), [])
+
+    def test_the_converter_api_path_is_appended_to_the_origin(self):
+        self.assertEqual(
+            ai_vision_api._ai_base(WORKER), "http://127.0.0.1:15132/api-converter-glb"
+        )
 
 
 class TaskIdRoutingTests(unittest.TestCase):
