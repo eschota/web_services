@@ -2,6 +2,7 @@ import argparse
 import importlib.util
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,27 @@ SPEC.loader.exec_module(video_benchmark)
 
 
 class VideoBenchmarkTests(unittest.TestCase):
+    def test_curl_json_post_uses_stdin_status_suffix_and_no_retry(self):
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b'{"task_id_string":"abc"}\n202', stderr=b""
+        )
+        with patch.object(video_benchmark.subprocess, "run", return_value=completed) as run:
+            status, value = video_benchmark._request_json(
+                "POST", "https://example.test/api/video", {"prompt": "hello"}, 12,
+                transport="curl",
+            )
+
+        self.assertEqual(status, 202)
+        self.assertEqual(value, {"task_id_string": "abc"})
+        command = run.call_args.args[0]
+        self.assertIn("--data-binary", command)
+        self.assertIn("@-", command)
+        self.assertNotIn("--retry", command)
+        self.assertEqual(
+            json.loads(run.call_args.kwargs["input"].decode("utf-8")),
+            {"prompt": "hello"},
+        )
+
     def test_cases_require_fixed_seed(self):
         with self.assertRaises(video_benchmark.BenchmarkError):
             video_benchmark._manifest_cases({

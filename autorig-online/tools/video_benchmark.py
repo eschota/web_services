@@ -142,12 +142,43 @@ def _ffprobe(ffprobe: str, path: Path) -> Dict[str, Any]:
     return value
 
 
-def _download(url: str, destination: Path, timeout: float, max_bytes: int) -> None:
+def _download(url: str, destination: Path, timeout: float, max_bytes: int,
+              transport: str = "urllib") -> None:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise BenchmarkError(f"Only declared HTTP(S) source URLs are accepted: {url!r}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
+    if transport == "curl":
+        command = [
+            "curl.exe" if os.name == "nt" else "curl",
+            "--silent", "--show-error", "--location",
+            "--max-time", str(timeout), "--max-filesize", str(max_bytes),
+            "--user-agent", "AutoRigVideoBenchmark/1",
+            "--output", str(partial), "--write-out", "%{http_code}", url,
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        except OSError as exc:
+            raise BenchmarkError(f"Source download failed for {url}: {exc}") from exc
+        try:
+            status = int(result.stdout.strip())
+        except ValueError as exc:
+            partial.unlink(missing_ok=True)
+            raise BenchmarkError(f"Source download returned no HTTP status for {url}") from exc
+        if result.returncode or not 200 <= status < 300:
+            partial.unlink(missing_ok=True)
+            raise BenchmarkError(
+                f"Source download failed for {url}: curl {result.returncode}, HTTP {status}: "
+                f"{result.stderr[-1000:]}"
+            )
+        if partial.stat().st_size > max_bytes:
+            partial.unlink(missing_ok=True)
+            raise BenchmarkError(f"Download exceeds {max_bytes} bytes: {url}")
+        os.replace(partial, destination)
+        return
+    if transport != "urllib":
+        raise BenchmarkError(f"Unsupported HTTP transport: {transport!r}")
     request = urllib.request.Request(url, headers={"User-Agent": "AutoRigVideoBenchmark/1"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response, partial.open("wb") as output:
@@ -169,7 +200,7 @@ def _download(url: str, destination: Path, timeout: float, max_bytes: int) -> No
 
 
 def _request_json(method: str, url: str, payload: Optional[Mapping[str, Any]], timeout: float,
-                  token: str = "") -> tuple[int, Dict[str, Any]]:
+                  token: str = "", transport: str = "urllib") -> tuple[int, Dict[str, Any]]:
     headers = {"Accept": "application/json", "User-Agent": "AutoRigVideoBenchmark/1"}
     data = None
     if payload is not None:
@@ -177,14 +208,51 @@ def _request_json(method: str, url: str, payload: Optional[Mapping[str, Any]], t
         headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = "Bearer " + token
-    request = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
-            status = int(response.status)
-    except urllib.error.HTTPError as exc:
-        raw = exc.read()
-        status = int(exc.code)
+    if transport == "curl":
+        command = [
+            "curl.exe" if os.name == "nt" else "curl",
+            "--silent", "--show-error", "--max-time", str(timeout),
+            "--request", method, "--header", "Accept: application/json",
+            "--header", "User-Agent: AutoRigVideoBenchmark/1",
+        ]
+        if payload is not None:
+            command += ["--header", "Content-Type: application/json", "--data-binary", "@-"]
+        header_path: Optional[Path] = None
+        if token:
+            temp_root = Path(__file__).resolve().parents[2] / ".codex_tmp" / "video-benchmark-http"
+            temp_root.mkdir(parents=True, exist_ok=True)
+            fd, name = tempfile.mkstemp(prefix="headers-", suffix=".txt", dir=temp_root)
+            header_path = Path(name)
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+                stream.write("Authorization: Bearer " + token + "\n")
+            command += ["--header", "@" + str(header_path)]
+        command += ["--write-out", "\n%{http_code}", url]
+        try:
+            result = subprocess.run(command, input=data, capture_output=True, check=False)
+        except OSError as exc:
+            raise BenchmarkError(f"HTTP request failed for {url}: {exc}") from exc
+        finally:
+            if header_path is not None:
+                header_path.unlink(missing_ok=True)
+        if result.returncode:
+            detail = result.stderr.decode("utf-8", errors="replace")[-1000:]
+            raise BenchmarkError(f"HTTP request failed for {url}: curl {result.returncode}: {detail}")
+        try:
+            raw, status_raw = result.stdout.rsplit(b"\n", 1)
+            status = int(status_raw)
+        except (ValueError, TypeError) as exc:
+            raise BenchmarkError(f"HTTP request returned no status suffix from {url}") from exc
+    elif transport == "urllib":
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+                status = int(response.status)
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            status = int(exc.code)
+    else:
+        raise BenchmarkError(f"Unsupported HTTP transport: {transport!r}")
     try:
         value = json.loads(raw.decode("utf-8")) if raw else {}
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -314,7 +382,8 @@ class Benchmark:
             paths = self._source_paths(case)
             url = str(source.get("url_string", source.get("url", ""))).strip()
             if not paths["original"].exists():
-                _download(url, paths["original"], self.args.http_timeout, self.args.max_source_bytes)
+                _download(url, paths["original"], self.args.http_timeout, self.args.max_source_bytes,
+                          getattr(self.args, "http_transport", "urllib"))
             expected = str(source.get("sha256_string") or "").lower().strip()
             actual = _sha256(paths["original"])
             if expected and expected != actual:
@@ -357,7 +426,8 @@ class Benchmark:
         self.save()
         try:
             status, response = _request_json("POST", self.args.base_url.rstrip("/") + endpoint,
-                                             request, self.args.http_timeout, self.args.token)
+                                             request, self.args.http_timeout, self.args.token,
+                                             getattr(self.args, "http_transport", "urllib"))
         except (BenchmarkError, TimeoutError, OSError) as exc:
             # Submission may have reached the server.  Never spend GPU twice by
             # guessing; reconciliation or an explicit state edit is required.
@@ -383,7 +453,10 @@ class Benchmark:
                 continue
             url = self.args.base_url.rstrip("/") + "/api/ai/render-status/" + urllib.parse.quote(task_id)
             try:
-                status, response = _request_json("GET", url, None, self.args.http_timeout, self.args.token)
+                status, response = _request_json(
+                    "GET", url, None, self.args.http_timeout, self.args.token,
+                    getattr(self.args, "http_transport", "urllib"),
+                )
                 if status != 200:
                     raise BenchmarkError(f"Status HTTP {status}: {response}")
                 remote = str(response.get("status_string") or "").lower()
@@ -441,7 +514,8 @@ class Benchmark:
                 self.save()
                 continue
             if not generated.exists():
-                _download(url, generated, self.args.http_timeout, self.args.max_source_bytes)
+                _download(url, generated, self.args.http_timeout, self.args.max_source_bytes,
+                          getattr(self.args, "http_transport", "urllib"))
             generated_probe = _ffprobe(self.args.ffprobe, generated)
             _atomic_json(case_dir / "generated.ffprobe.json", generated_probe)
             source = self._source_paths(case)["trimmed"]
@@ -505,6 +579,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-wait-seconds", type=float, default=900)
     parser.add_argument("--poll-interval-seconds", type=float, default=10)
     parser.add_argument("--http-timeout", type=float, default=60)
+    parser.add_argument("--http-transport", choices=("urllib", "curl"), default="urllib",
+                        help="HTTP client; curl avoids Windows urllib TLS reset failures")
     parser.add_argument("--max-segment-seconds", type=float, default=8)
     parser.add_argument("--max-source-bytes", type=int, default=500 * 1024 * 1024)
     parser.add_argument("--case-id", action="append", default=[],
