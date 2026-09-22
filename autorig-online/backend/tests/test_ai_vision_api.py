@@ -71,7 +71,14 @@ class EffectiveRenderModelTests(unittest.TestCase):
             {"kind": "checkpoint", "family": "flux2",
              "file": "flux-2-klein-4b.safetensors", "usable": True,
              "services": ["image"], "default_for_services": ["image"],
-             "workflow": "gen_image_flux2_klein.json"},
+             "workflow": "gen_image_flux2_klein.json",
+             "sampling_policy": {"cfg": "workflow_native"}},
+            {"kind": "checkpoint", "family": "pony",
+             "file": "pony.safetensors", "usable": True,
+             "services": ["image"], "default_for_families": ["pony", "sdxl"],
+             "control_channels": ["pose", "depth", "canny"],
+             "workflow": "gen_image_sdxl.json",
+             "sampling_policy": {"cfg": "ksampler"}},
             {"kind": "lora", "family": "flux",
              "file": "flux-style.safetensors", "usable": True,
              "services": ["image"], "workflow": "gen_image.json"},
@@ -101,14 +108,90 @@ class EffectiveRenderModelTests(unittest.TestCase):
         self.assertEqual(effective["work_flow"], "gen_image.json")
         self.assertEqual(effective["steps"], 4)
 
-    def test_legacy_control_without_model_materializes_schnell(self):
+    def test_control_without_model_materializes_pony_and_reports_policy(self):
         entries = self._entries()
         with mock.patch("ai_model_catalogue.entries", return_value=entries), \
              mock.patch("ai_model_catalogue.known_file",
                         side_effect=lambda name, kind: self._known(entries, name, kind)):
             response = _app().get("/api/ai/model-settings?service=image&control_channel=pose")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["checkpoint_string"], "flux1-schnell.safetensors")
+        self.assertEqual(response.json()["checkpoint_string"], "pony.safetensors")
+        self.assertEqual(response.json()["sampling_policy_object"], {"cfg": "ksampler"})
+
+    def test_legacy_mode_uses_flux1_without_flattening_template_auto_sampling(self):
+        entries = self._entries()
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            effective, _ = ai_vision_api._effective_model_settings(
+                "image", None, None, {}, mode="t_pose", use_default=False)
+        self.assertEqual(effective["checkpoint"], "flux1-schnell.safetensors")
+        self.assertNotIn("steps", effective)
+        self.assertNotIn("sampler", effective)
+        self.assertNotIn("scheduler", effective)
+
+    def test_legacy_mode_keeps_explicit_sampling_knobs(self):
+        entries = self._entries()
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            effective, _ = ai_vision_api._effective_model_settings(
+                "image", None, None, {"steps": 7, "sampler": "euler"},
+                mode="t_pose", use_default=False)
+        self.assertEqual((effective["steps"], effective["sampler"]), (7, "euler"))
+
+    def test_legacy_mode_rejects_explicit_flux2(self):
+        entries = self._entries()
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            with self.assertRaises(HTTPException) as caught:
+                ai_vision_api._effective_model_settings(
+                    "image", "flux-2-klein-4b.safetensors", None, {}, mode="open_pose")
+        self.assertEqual(caught.exception.detail["error_string"], "mode_model_incompatible")
+
+    def test_inpaint_fails_before_model_resolution(self):
+        with self.assertRaises(HTTPException) as caught:
+            ai_vision_api._effective_model_settings(
+                "image", None, None, {}, mode="inpaint", use_default=False)
+        self.assertEqual(caught.exception.detail["error_string"], "unsupported_image_mode")
+
+    def test_compatible_pair_sampling_error_is_not_misreported_as_family_error(self):
+        entries = self._entries()
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)), \
+             mock.patch("ai_model_defaults.resolve", side_effect=ValueError("unsupported scheduler")):
+            with self.assertRaises(HTTPException) as caught:
+                ai_vision_api._effective_model_settings(
+                    "image", "flux-2-klein-4b.safetensors", None, {})
+        self.assertEqual(caught.exception.detail["error_string"], "invalid_sampling_settings")
+
+    def test_modern_ltx_hq_is_rejected_and_standard_preserves_model_workflow(self):
+        with self.assertRaises(HTTPException) as caught:
+            ai_vision_api._video_quality_workflow("hq", "ltx23")
+        self.assertEqual(caught.exception.detail["error_string"], "unsupported_video_quality")
+        self.assertEqual(ai_vision_api._video_quality_workflow("standard", "ltx23"), "")
+        self.assertEqual(
+            ai_vision_api._video_quality_workflow("hq", "ltx"),
+            "gen_animation_hq_by_url.json",
+        )
+
+    def test_mode_cache_profile_includes_legacy_family_sampling_policy(self):
+        entries = self._entries()
+        flux = next(entry for entry in entries if entry.get("file") == "flux1-schnell.safetensors")
+        flux["sampling_policy"] = {"scheduler": "template_stages"}
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            profile = ai_vision_api._render_model_profile(
+                "image", None, None, mode="t_pose")
+        files = {item["file"]: item for item in profile}
+        self.assertIn("flux1-schnell.safetensors", files)
+        self.assertEqual(
+            files["flux1-schnell.safetensors"]["sampling_policy"],
+            {"scheduler": "template_stages"},
+        )
 
     def test_blank_checkpoint_and_lora_still_uses_modern_service_default(self):
         entries = self._entries()

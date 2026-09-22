@@ -49,6 +49,20 @@ def _client():
     return TestClient(app)
 
 
+def _fixed_sampling_catalogue():
+    return [{
+        "file": "distilled.safetensors", "kind": "checkpoint",
+        "family": "flux2", "services": ["image"], "usable": True,
+        "recommended_from": "author reference workflow",
+        "recommended": {"steps": 4, "cfg": 1.0, "sampler": "euler"},
+        "sampling_policy": {
+            "auto_steps": 4, "fixed_steps": 4, "steps_min": 4, "steps_max": 4,
+            "auto_reason": "distilled schedule", "cfg_mode": "fixed", "cfg_value": 1.0,
+            "scheduler_mode": "native", "scheduler_label": "native sigma schedule",
+        },
+    }]
+
+
 class ApplyOperationsTests(unittest.TestCase):
     def test_parameter_change_invalidates_node_and_downstream_only(self):
         graph = ai_graph.Graph(**_payload())
@@ -194,6 +208,45 @@ class ApplyOperationsTests(unittest.TestCase):
                 ai_graph_edits.apply_operations(graph, [])
         self.assertEqual(caught.exception.detail["error_string"], "unsupported_control_family")
 
+    def test_fixed_sampling_steps_reject_entire_patch(self):
+        graph = ai_graph.Graph(**_payload())
+        before = graph.model_dump(by_alias=True)
+        with patch.object(ai_model_catalogue, "entries", return_value=_fixed_sampling_catalogue()):
+            with self.assertRaises(Exception) as caught:
+                ai_graph_edits.apply_operations(graph, [{
+                    "op": "update_params", "id": "image1",
+                    "values": {"checkpoint": "distilled.safetensors", "steps": 5},
+                }])
+        self.assertEqual(caught.exception.detail["error_string"], "invalid_sampling_settings")
+        self.assertIn("fixed 4-step", caught.exception.detail["message_string"])
+        self.assertEqual(graph.model_dump(by_alias=True), before)
+
+    def test_fixed_basic_guider_cfg_rejects_entire_patch(self):
+        graph = ai_graph.Graph(**_payload())
+        before = graph.model_dump(by_alias=True)
+        with patch.object(ai_model_catalogue, "entries", return_value=_fixed_sampling_catalogue()):
+            with self.assertRaises(Exception) as caught:
+                ai_graph_edits.apply_operations(graph, [{
+                    "op": "update_params", "id": "image1",
+                    "values": {"checkpoint": "distilled.safetensors", "cfg": 2.0},
+                }])
+        self.assertEqual(caught.exception.detail["error_string"], "invalid_sampling_settings")
+        self.assertIn("fixed CFG 1", caught.exception.detail["message_string"])
+        self.assertEqual(graph.model_dump(by_alias=True), before)
+
+    def test_auto_zero_sampling_values_are_accepted(self):
+        graph = ai_graph.Graph(**_payload())
+        with patch.object(ai_model_catalogue, "entries", return_value=_fixed_sampling_catalogue()):
+            edited, _, _ = ai_graph_edits.apply_operations(graph, [{
+                "op": "update_params", "id": "image1",
+                "values": {
+                    "checkpoint": "distilled.safetensors", "steps": 0, "cfg": 0,
+                    "sampler": "", "scheduler": "", "lora_strength": 0,
+                },
+            }])
+        self.assertEqual(edited.nodes[1].params["steps"], 0)
+        self.assertEqual(edited.nodes[1].params["cfg"], 0)
+
 
 class EndpointTests(unittest.TestCase):
     def setUp(self):
@@ -235,6 +288,13 @@ class EndpointTests(unittest.TestCase):
             "add_node", "remove_node", "update_params", "set_input", "connect",
             "disconnect", "move_node", "rename_graph"})
         self.assertIn("does not save", body["side_effects_string"])
+
+    def test_schema_exposes_sampling_policy_to_the_agent(self):
+        with patch.object(ai_model_catalogue, "entries", return_value=_fixed_sampling_catalogue()):
+            body = self.client.get("/api/ai/graph-edits/schema").json()
+        model = body["models_array"][0]
+        self.assertEqual(model["sampling_policy"]["fixed_steps"], 4)
+        self.assertEqual(model["sampling_policy"]["scheduler_mode"], "native")
 
 
 if __name__ == "__main__":

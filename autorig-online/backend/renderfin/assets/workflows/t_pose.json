@@ -342,6 +342,7 @@
     },
     "class_type": "KSamplerAdvanced",
     "_meta": {
+      "preserve_sampling": true,
       "title": "KSampler (Advanced)"
     }
   },

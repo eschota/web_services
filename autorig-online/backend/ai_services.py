@@ -223,9 +223,8 @@ SERVICES: List[Dict[str, object]] = [
 # has never heard of; every one of them is optional and maps onto a field the
 # API already accepts.
 #
-# Only knobs the farm genuinely has are listed. There is no LoRA picker because
-# there are no LoRAs on these workers: the equivalent choice is the animation
-# workflow the workers advertise, which is what `quality` selects.
+# Only knobs implemented by the selected model's workflow are presented.
+# The checkpoint determines the video architecture and its trained schedule.
 for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth", CONTROL_DEPTH), ("canny", "Canny", CONTROL_CANNY)):
     SERVICES.append({
         "id": "control_" + _channel, "title": "ControlNet - " + _title,
@@ -297,7 +296,7 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
              {"value": "z_depth", "title": "From depth"},
              {"value": "t_pose", "title": "T-pose"},
              {"value": "open_pose", "title": "Open pose"},
-             {"value": "inpaint", "title": "Inpaint"},
+             {"value": "inpaint", "title": "Inpaint — requires a separate Fill model", "disabled": True},
          ],
          "help": "The reference picture is read differently in each mode"},
         {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
@@ -342,12 +341,6 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "lora_strength", "title": "Style strength", "type": "range",
          "min": 0, "max": 1.5, "step": 0.05, "default": 0,
          "help": "0 leaves the workflow's own strength"},
-        {"name": "quality", "title": "Workflow", "type": "select", "default": "standard",
-         "options": [
-             {"value": "standard", "title": "Standard — gen_animation_by_url"},
-             {"value": "hq", "title": "High quality — slower, fewer nodes take it"},
-         ],
-         "help": "These are the animation workflows the render workers advertise"},
         {"name": "frame_count", "title": "Frames", "type": "range", "min": 9, "max": 393,
          "step": 8, "default": 97, "help": "LTX uses 8n+1 frames: 9, 17, 25... at 24 fps"},
         {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},

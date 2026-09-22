@@ -245,7 +245,7 @@
         ? models.map(m => ({ value: m.id, title: m.title + (m.uncensored ? ' · uncensored' : '') }))
         : (param.options || []);
       control = `<select data-param="${name}"${help}>` + options.map(option =>
-        `<option value="${escapeAttr(option.value)}"${String(option.value) === String(param.default) ? ' selected' : ''}>${escapeHtml(option.title)}</option>`
+        `<option value="${escapeAttr(option.value)}"${String(option.value) === String(param.default) ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${escapeHtml(option.title)}</option>`
       ).join('') + '</select>';
     } else if (param.type === 'range') {
       // Zero on these sliders means "leave the workflow's own value", so it is
@@ -273,6 +273,114 @@
 
   function rangeLabel(value) {
     return Number(value) === 0 ? 'auto' : String(value);
+  }
+
+  function updateSamplingReadout(control) {
+    if (!control) return;
+    const element = control.closest('.drawflow-node');
+    const readout = element && element.querySelector('[data-for="' + CSS.escape(control.dataset.param || '') + '"]');
+    if (!readout) return;
+    if (control.dataset.policyFixedLabel) readout.textContent = control.dataset.policyFixedLabel;
+    else if (Number(control.value) === 0 && control.dataset.policyAutoLabel) readout.textContent = control.dataset.policyAutoLabel;
+    else readout.textContent = rangeLabel(control.value);
+  }
+
+  function samplingNote(control, text) {
+    if (!control) return;
+    const row = control.closest('.nparam');
+    if (!row) return;
+    let note = row.querySelector('.sampling-policy-note');
+    if (!text) { if (note) note.remove(); return; }
+    if (!note) {
+      note = document.createElement('small');
+      note.className = 'sampling-policy-note';
+      note.style.cssText = 'display:block;flex:1 0 100%;color:#8ab4ff;font-size:10px;text-align:right';
+      row.appendChild(note);
+    }
+    note.textContent = text;
+  }
+
+  function unlockPolicyControl(control, emptyValue) {
+    if (!control) return;
+    if (control.dataset.policyGenerated !== undefined &&
+        String(control.value) === control.dataset.policyGenerated) control.value = emptyValue;
+    control.disabled = false;
+    delete control.dataset.policyGenerated;
+    delete control.dataset.policyFixedLabel;
+    delete control.dataset.policyAutoLabel;
+    samplingNote(control, '');
+  }
+
+  function applySamplingPolicy(id, policy) {
+    const element = nodeElement(id);
+    if (!element) return [];
+    policy = policy || {};
+    const steps = element.querySelector('[data-param="steps"]');
+    const cfg = element.querySelector('[data-param="cfg"]');
+    const scheduler = element.querySelector('[data-param="scheduler"]');
+    const descriptions = [];
+
+    unlockPolicyControl(steps, '0');
+    unlockPolicyControl(cfg, '0');
+    unlockPolicyControl(scheduler, '');
+    if (steps) {
+      if (!steps.dataset.originalMin) steps.dataset.originalMin = steps.min;
+      if (!steps.dataset.originalMax) steps.dataset.originalMax = steps.max;
+      // Zero remains the Auto sentinel even when explicit manual steps start at 1.
+      steps.min = '0';
+      steps.max = policy.steps_max != null ? String(policy.steps_max) : steps.dataset.originalMax;
+      const autoSteps = Number(policy.auto_steps);
+      if (autoSteps > 0) steps.dataset.policyAutoLabel = 'Auto (' + autoSteps + ')';
+      const fixedSteps = Number(policy.fixed_steps);
+      if (fixedSteps > 0) {
+        steps.value = String(fixedSteps); steps.disabled = true;
+        steps.dataset.policyGenerated = String(fixedSteps);
+        steps.dataset.policyFixedLabel = 'Fixed (' + fixedSteps + ')';
+        samplingNote(steps, 'Workflow requires exactly ' + fixedSteps + ' steps');
+        descriptions.push('steps fixed ' + fixedSteps);
+      } else if (autoSteps > 0) {
+        samplingNote(steps, 'Auto uses ' + autoSteps + ' steps; manual values stay explicit');
+        descriptions.push('steps Auto ' + autoSteps);
+      }
+      updateSamplingReadout(steps);
+    }
+    if (cfg && policy.cfg_mode === 'fixed') {
+      const value = Number.isFinite(Number(policy.cfg_value)) ? Number(policy.cfg_value) : 1;
+      cfg.value = String(value); cfg.disabled = true; cfg.dataset.policyGenerated = String(value);
+      samplingNote(cfg, 'Fixed CFG ' + value + (value === 1 ? ' · no extra guidance' : ''));
+      descriptions.push('CFG fixed ' + value);
+    }
+    if (scheduler && policy.scheduler_mode === 'native') {
+      scheduler.value = ''; scheduler.disabled = true; scheduler.dataset.policyGenerated = '';
+      const label = policy.scheduler_label || 'Native scheduler';
+      samplingNote(scheduler, label); descriptions.push(label);
+    }
+    element._samplingPolicy = policy;
+    return descriptions;
+  }
+
+  function refreshModeOptions(id, checkpointEntry) {
+    const mode = nodeElement(id)?.querySelector('[data-param="mode"]');
+    if (!mode) return;
+    const family = String(checkpointEntry?.family || '').toLowerCase();
+    const fluxOnly = new Set(['z_depth', 't_pose', 'open_pose']);
+    Array.from(mode.options).forEach(option => {
+      if (option.value === 'inpaint') {
+        option.disabled = true;
+        option.title = 'Requires a separate Fill model that this fleet does not offer';
+      } else if (fluxOnly.has(option.value)) {
+        option.disabled = !!family && family !== 'flux';
+        option.title = option.disabled ? 'This mode is available only with a Flux checkpoint' : '';
+      }
+    });
+    // Keep a restored legacy choice visible even when disabled. Submission
+    // validation will explain why it cannot run; silently changing it to Plain
+    // would alter the user's graph.
+    if (mode.selectedOptions[0]?.disabled) {
+      samplingNote(mode, mode.value === 'inpaint'
+        ? 'Unavailable: this fleet has no Fill model'
+        : 'Unavailable for the selected checkpoint family');
+    } else samplingNote(mode, '');
   }
 
   function serviceNodeHtml(entry) {
@@ -372,6 +480,17 @@
       const hidden = element.querySelector('input[data-param="' + CSS.escape(name) + '"]');
       const picker = window.AIEntities.modelPicker(slot, serviceId, slot.dataset.modelSource, {
         value: hidden ? hidden.value : '',
+        onReady: (value, entry) => {
+          if (name === 'checkpoint' && entry) {
+            applySamplingPolicy(id, entry.sampling_policy_object || entry.sampling_policy || {});
+            refreshModeOptions(id, entry);
+            const pending = applyRecommended(id, entry, { annotateOnly: true });
+            pendingModelSelections.set(String(id), pending);
+            pending.finally(() => {
+              if (pendingModelSelections.get(String(id)) === pending) pendingModelSelections.delete(String(id));
+            });
+          }
+        },
         onChange: (value, entry, reason) => {
           if (name === 'checkpoint' && value && !modelAcceptsConnectedControls(id, entry)) {
             picker.value = hidden ? hidden.value : '';
@@ -381,6 +500,8 @@
           if (hidden) hidden.value = value;
           if (reason && reason.materialized) return;
           if (name === 'checkpoint') {
+            applySamplingPolicy(id, entry?.sampling_policy_object || entry?.sampling_policy || {});
+            refreshModeOptions(id, entry);
             const loraField = element.querySelector('[data-param="lora"]');
             const loraPicker = element.querySelector('[data-model-param="lora"]')?._picker;
             const left = entry?.family, right = loraPicker?.entry?.family;
@@ -403,9 +524,9 @@
    * Put the author's own settings on the node when their model is chosen.
    *
    * These come off the model's Civitai page — mostly from the metadata of the
-   * example images, which is what the author actually ran. Only values this
-   * service has a control for are applied; the rest (sampler, CFG) are shown
-   * in the picker but there is nowhere here to put them.
+   * example images, which is what the author actually ran. Runtime sampling
+   * policy remains authoritative: Auto stays the zero sentinel and fixed
+   * workflow knobs are shown read-only instead of impersonating author input.
    *
    * A value the person has already changed by hand is left alone. Choosing a
    * model should not quietly undo a decision they made.
@@ -414,7 +535,27 @@
     steps: 'steps', strength: 'lora_strength'
   };
 
-  async function applyRecommended(id, entry) {
+  function annotateAutoSampling(id, effective, policy) {
+    const element = nodeElement(id);
+    if (!element) return [];
+    const notes = [];
+    [['cfg', 'CFG'], ['sampler', 'Sampler'], ['scheduler', 'Scheduler']].forEach(([name, title]) => {
+      const control = element.querySelector('[data-param="' + name + '"]');
+      if (!control || control.disabled || ![0, '0', ''].includes(control.value)) return;
+      const value = effective && effective[name];
+      if (value === undefined || value === null || value === '') return;
+      const option = control.tagName === 'SELECT'
+        ? Array.from(control.options).find(item => String(item.value) === String(value))
+        : null;
+      const shown = option ? option.textContent : value;
+      samplingNote(control, 'Auto (' + shown + ')');
+      notes.push(title + ' Auto ' + shown);
+    });
+    return notes;
+  }
+
+  async function applyRecommended(id, entry, options) {
+    options = options || {};
     const element = nodeElement(id);
     if (!element) return;
     const generation = (element._settingsGeneration || 0) + 1;
@@ -426,6 +567,7 @@
       if (control && control.value) selection.set(name, control.value);
     });
     addWorkflowSelectionContext(id, selection);
+    let policyApplied = [];
     try {
       const response = await fetch('/api/ai/model-settings?' + selection);
       const data = await response.json();
@@ -438,6 +580,9 @@
         if (picker) picker.value = data.checkpoint_string;
       }
       const effective = data.effective_params_object || {};
+      const samplingPolicy = data.sampling_policy_object || {};
+      policyApplied = applySamplingPolicy(id, samplingPolicy);
+      policyApplied = policyApplied.concat(annotateAutoSampling(id, effective, samplingPolicy));
       entry = { recommended: effective };
     } catch (error) {
       const note = element.querySelector('.nrec');
@@ -446,8 +591,13 @@
     }
     const applied = [];
     Object.keys(entry.recommended).forEach(key => {
+      if (options.annotateOnly) return;
       const name = RECOMMENDED_TO_PARAM[key] || ({cfg:'cfg', sampler:'sampler', scheduler:'scheduler', lora_strength:'lora_strength'})[key];
       if (!name) return;
+      // Sampling values remain Auto sentinels or the person's explicit saved
+      // choices. Effective backend values describe what Auto will resolve to;
+      // materialising them here would turn Auto into a stale manual override.
+      if (['steps', 'cfg', 'sampler', 'scheduler'].includes(name)) return;
       const control = element.querySelector('[data-param="' + CSS.escape(name) + '"]');
       if (!control || control.dataset.touched === 'yes') return;
       const value = entry.recommended[key];
@@ -456,13 +606,13 @@
           ![...control.options].some(o => String(o.value) === String(value))) return;
       control.value = value;
       const readout = element.querySelector('[data-for="' + CSS.escape(name) + '"]');
-      if (readout) readout.textContent = rangeLabel(value);
+      if (readout) updateSamplingReadout(control);
       applied.push(name + ' ' + value);
     });
     const note = element.querySelector('.nrec');
     if (note) {
-      note.textContent = applied.length
-        ? 'Applied settings: ' + applied.join(', ')
+      note.textContent = applied.length || policyApplied.length
+        ? 'Applied settings: ' + policyApplied.concat(applied).join(', ')
         : (Object.keys(entry.recommended).length
             ? 'the model page suggests ' +
               Object.keys(entry.recommended).sort()
@@ -636,7 +786,7 @@
       const slot = element.querySelector('.mpick-slot[data-model-param="' + CSS.escape(name) + '"]');
       if (slot && slot._picker) slot._picker.value = params[name];
       const readout = element.querySelector('[data-for="' + CSS.escape(name) + '"]');
-      if (readout) readout.textContent = rangeLabel(params[name]);
+      if (readout) updateSamplingReadout(control);
     });
   }
 
@@ -1840,7 +1990,7 @@
       }
       if (event.target.type !== 'range') return;
       const readout = event.target.parentElement.querySelector('output');
-      if (readout) readout.textContent = rangeLabel(event.target.value);
+      if (readout) updateSamplingReadout(event.target);
     });
 
     buildPalette();

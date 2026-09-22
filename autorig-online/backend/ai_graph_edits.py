@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 import ai_graph
 import ai_model_catalogue
+import ai_model_defaults
 import ai_services
 
 
@@ -170,6 +171,17 @@ def _validate_catalogue_and_controls(graph: ai_graph.Graph) -> None:
         if checkpoint and lora and not _families_compatible(checkpoint, lora):
             _reject("incompatible_model_family",
                     f"Checkpoint and LoRA on '{node.id}' belong to incompatible families")
+        if checkpoint:
+            explicit = {
+                key: value for key, value in node.params.items()
+                if key in {"steps", "cfg", "sampler", "scheduler", "lora_strength"}
+                and value not in (None, "", 0, "0")
+            }
+            try:
+                ai_model_defaults.resolve(checkpoint, lora, explicit)
+            except (TypeError, ValueError) as exc:
+                _reject("invalid_sampling_settings",
+                        f"Sampling settings on '{node.id}' are not supported: {exc}")
 
     occupied_inputs: Set[tuple[str, str]] = set()
     control_links: Dict[str, List[ai_graph.GraphLink]] = {}
@@ -367,7 +379,7 @@ async def api_graph_edits_schema():
         })
     models = [{key: entry.get(key) for key in (
         "file", "title", "kind", "family", "base", "services", "usable",
-        "control_channels", "unusable_reason")}
+        "control_channels", "sampling_policy", "unusable_reason")}
               for entry in ai_model_catalogue.entries() if entry.get("usable")]
     return {
         "success_bool": True,

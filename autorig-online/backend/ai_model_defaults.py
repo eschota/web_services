@@ -10,6 +10,8 @@ SAMPLER_ALIASES = {
     "euler ancestral": "euler_ancestral",
     "dpm++ 2m": "dpmpp_2m",
     "dpm++ 2m sde": "dpmpp_2m_sde",
+    "dpm++ sde": "dpmpp_sde",
+    "dpmpp_sde": "dpmpp_sde",
     "dpmpp_2m": "dpmpp_2m",
     "dpmpp_2m_sde": "dpmpp_2m_sde",
     "euler_ancestral": "euler_ancestral",
@@ -19,6 +21,9 @@ SCHEDULER_ALIASES = {
     "karras": "karras",
     "normal": "normal",
     "simple": "simple",
+    "sgm uniform": "sgm_uniform",
+    "sgm_uniform": "sgm_uniform",
+    "beta": "beta",
 }
 MODEL_FILE_ALIASES = {
     "ltx10eros_v14_2989633.safetensors": "ltx10eros_v14_2989669.safetensors",
@@ -149,6 +154,11 @@ def resolve(checkpoint: Optional[Mapping[str, object]],
     for entry in (checkpoint, lora):
         if entry and entry.get("recommended_from"):
             recommended = _normalise_recommended(entry.get("recommended"))
+            policy = entry.get("sampling_policy") or {}
+            if policy.get("auto_steps") and policy.get("auto_reason"):
+                # Product quality policy is separate from the author's exact
+                # example. It must never be represented as an author maximum.
+                recommended["steps"] = int(policy["auto_steps"])
             if (str(entry.get("kind") or "").strip().lower() == "lora"
                     and entry.get("sampling_recommendations_compatible") is False):
                 # The LoRA page's sampler/steps describe its training base
@@ -166,6 +176,29 @@ def resolve(checkpoint: Optional[Mapping[str, object]],
         effective["sampler"] = SAMPLER_ALIASES[explicit_sampler]
     if explicit_scheduler in SCHEDULER_ALIASES:
         effective["scheduler"] = SCHEDULER_ALIASES[explicit_scheduler]
+    policy = (checkpoint or {}).get("sampling_policy") or {}
+    fixed_steps = policy.get("fixed_steps")
+    if fixed_steps and effective.get("steps") != fixed_steps:
+        raise ValueError(
+            f"This distilled workflow uses a fixed {fixed_steps}-step schedule; "
+            "select Auto or that exact number of steps")
+    if policy.get("steps_max") and effective.get("steps", 0) > policy["steps_max"]:
+        raise ValueError(
+            f"This model supports at most {policy['steps_max']} sampling steps; "
+            "select Auto or a value within the model's range")
+    if policy.get("cfg_mode") == "fixed":
+        fixed_cfg = float(policy.get("cfg_value", 1))
+        if explicit.get("cfg") not in (None, "", 0, fixed_cfg):
+            raise ValueError(
+                f"This distilled workflow has fixed CFG {fixed_cfg:g}; "
+                "a different CFG would not be applied")
+        effective["cfg"] = fixed_cfg
+    if policy.get("scheduler_mode") == "native":
+        if explicit_scheduler:
+            raise ValueError(
+                f"This workflow uses {policy.get('scheduler_label', 'its native schedule')}; "
+                "choose Automatic instead of a generic scheduler")
+        effective.pop("scheduler", None)
     if lora and "lora_strength" not in effective and "strength" in effective:
         effective["lora_strength"] = effective.pop("strength")
     else:

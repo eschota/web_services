@@ -471,14 +471,43 @@ def _validate_model_choice(service_id: str, checkpoint: Optional[str],
 def _effective_model_settings(service_id: str, checkpoint: Optional[str],
                               lora: Optional[str], explicit: Dict[str, object],
                               use_default: bool = True,
+                              mode: str = "", control_channel: str = "",
                               ) -> tuple[Dict[str, object], str]:
     """Validate a selection and merge its attributed recommendations."""
     import ai_model_catalogue
     import ai_model_defaults
 
-    if not use_default and not checkpoint and not lora and service_id == "image":
+    mode = str(mode or "").strip().lower()
+    control_channel = str(control_channel or "").strip().lower()
+    if service_id == "image" and mode == "inpaint":
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unsupported_image_mode",
+            "message_string": (
+                "Inpaint needs the FLUX.1 Fill Dev checkpoint, which is not "
+                "installed or validated; choose Plain or another available mode")})
+
+    entries = ai_model_catalogue.entries()
+    required_default_family = ""
+    if service_id == "image" and mode in LEGACY_FLUX_IMAGE_MODES:
+        required_default_family = "flux"
+    elif service_id == "image" and control_channel and not checkpoint and not lora:
+        required_default_family = "pony"
+
+    if required_default_family and not checkpoint and not lora:
+        family_default = ai_model_defaults.family_default_checkpoint(
+            entries, {"family": required_default_family}, service_id)
+        if family_default is None:
+            raise HTTPException(status_code=400, detail={
+                "error_string": "model_family_default_missing",
+                "message_string": (
+                    f"No validated {required_default_family} checkpoint is configured "
+                    "for this image mode")})
+        checkpoint = str(family_default.get("file") or "") or None
+
+    if (not required_default_family and not use_default and not checkpoint
+            and not lora and service_id == "image"):
         legacy_base = ai_model_defaults.family_default_checkpoint(
-            ai_model_catalogue.entries(), {"family": "flux"}, "image")
+            entries, {"family": "flux"}, "image")
         checkpoint = str((legacy_base or {}).get("file") or "") or None
     if not checkpoint and lora:
         # Validate the adapter first, then resolve only a catalogue-declared
@@ -489,7 +518,7 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
         lora_entry = ai_model_catalogue.known_file(
             str(lora_choice.get("lora") or ""), "lora")
         family_default = ai_model_defaults.family_default_checkpoint(
-            ai_model_catalogue.entries(), lora_entry, service_id)
+            entries, lora_entry, service_id)
         if family_default is None:
             raise HTTPException(status_code=400, detail={
                 "error_string": "checkpoint_required_for_lora",
@@ -498,7 +527,7 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
                     "does not declare an automatic base model for its family")})
         checkpoint = str(family_default.get("file") or "") or None
     if use_default and not checkpoint and not lora:
-        default_entry = next((entry for entry in ai_model_catalogue.entries()
+        default_entry = next((entry for entry in entries
                               if entry.get("kind") == "checkpoint"
                               and (entry.get("default") is True
                                    or service_id in (entry.get("default_for_services") or []))
@@ -508,14 +537,70 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
     chosen = _validate_model_choice(service_id, checkpoint, lora)
     checkpoint_entry = ai_model_catalogue.known_file(chosen.get("checkpoint", ""), "checkpoint")
     lora_entry = ai_model_catalogue.known_file(chosen.get("lora", ""), "lora")
+    selected_entry = checkpoint_entry or lora_entry
+    selected_family = ai_model_defaults.model_family(selected_entry)
+    if mode in LEGACY_FLUX_IMAGE_MODES and selected_family != "flux":
+        raise HTTPException(status_code=400, detail={
+            "error_string": "mode_model_incompatible",
+            "message_string": f"{mode} requires a validated FLUX.1 checkpoint"})
+    if control_channel:
+        try:
+            ai_model_defaults.control_workflow(selected_family, control_channel)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={
+                "error_string": "control_model_incompatible",
+                "message_string": str(exc)}) from None
     try:
         effective = ai_model_defaults.resolve(checkpoint_entry, lora_entry, explicit)
     except ValueError as exc:
+        compatible_pair = ai_model_defaults.compatible(checkpoint_entry, lora_entry)
         raise HTTPException(status_code=400, detail={
-            "error_string": "incompatible_model_pair", "message_string": str(exc)}) from None
+            "error_string": ("invalid_sampling_settings" if compatible_pair
+                             else "incompatible_model_pair"),
+            "message_string": str(exc)}) from None
+    if mode in LEGACY_FLUX_IMAGE_MODES:
+        # These audited templates contain more than one sampling stage (the
+        # T-pose refiner intentionally differs from its Schnell base stage).
+        # Model-level Auto values must not flatten every stage to one preset.
+        # A caller's explicit knob is still forwarded and remains authoritative.
+        for key in ("steps", "cfg", "sampler", "scheduler", "clip_skip"):
+            if explicit.get(key) in (None, ""):
+                effective.pop(key, None)
     payload = dict(chosen)
     payload.update(effective)
     return payload, ai_model_defaults.add_triggers("", (checkpoint_entry, lora_entry))
+
+
+def _render_model_profile(service_id: str, checkpoint: Optional[str],
+                          lora: Optional[str], *, mode: str = "",
+                          has_control: bool = False) -> List[Dict[str, object]]:
+    """Catalogue material whose policy can change this automatic request."""
+    import ai_model_catalogue
+    import ai_model_defaults
+
+    entries = ai_model_catalogue.entries()
+    selected = {str(checkpoint or ""), str(lora or "")}
+    families = set()
+    if str(mode or "").strip().lower() in LEGACY_FLUX_IMAGE_MODES:
+        families.add("flux")
+    elif has_control and not checkpoint and not lora:
+        families.add("pony")
+    if lora:
+        lora_entry = ai_model_catalogue.known_file(str(lora), "lora")
+        family = ai_model_defaults.model_family(lora_entry)
+        if family:
+            families.add(family)
+    fields = ("file", "base", "version", "workflow", "recommended",
+              "sampling_policy", "triggers", "source_version_id", "sha256")
+    return [
+        {key: entry.get(key) for key in fields}
+        for entry in entries
+        if (
+            entry.get("file") in selected
+            or service_id in (entry.get("default_for_services") or [])
+            or (families.intersection(entry.get("default_for_families") or []))
+        )
+    ]
 
 
 @router.get("/api/ai/model-settings")
@@ -529,9 +614,13 @@ async def api_ai_model_settings(service: str, checkpoint: Optional[str] = None,
             "message_string": "service must be image or video"})
     effective, trigger_prefix = _effective_model_settings(
         service_id, checkpoint, lora, {},
-        use_default=not (service_id == "image" and bool(control_channel or mode)))
+        use_default=not (service_id == "image" and bool(control_channel or mode)),
+        mode=mode, control_channel=control_channel)
     effective.setdefault("main_size_width", 960)
     effective.setdefault("main_size_height", 540)
+    import ai_model_catalogue
+    selected_checkpoint = ai_model_catalogue.known_file(
+        str(effective.get("checkpoint") or ""), "checkpoint") or {}
     return {
         "success_bool": True,
         "service_string": service_id,
@@ -539,6 +628,7 @@ async def api_ai_model_settings(service: str, checkpoint: Optional[str] = None,
         "lora_string": str(effective.get("lora") or ""),
         "trigger_prefix_string": trigger_prefix,
         "effective_params_object": effective,
+        "sampling_policy_object": selected_checkpoint.get("sampling_policy") or {},
         "server_time_unix_int": int(time.time()),
     }
 
@@ -761,7 +851,7 @@ async def api_vision(request: Request, body: VisionRequest):
     else:
         import ai_model_catalogue
         selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "sampling_policy", "triggers", "source_version_id", "sha256")}
                    for entry in ai_model_catalogue.entries()
                    if entry.get("file") in selected or "vision" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
@@ -816,7 +906,7 @@ async def api_text2text(request: Request, body: TextRequest):
     else:
         import ai_model_catalogue
         selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
+        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "sampling_policy", "triggers", "source_version_id", "sha256")}
                    for entry in ai_model_catalogue.entries()
                    if entry.get("file") in selected or "text" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
@@ -861,6 +951,19 @@ VIDEO_QUALITIES = {
     "standard": "gen_animation_by_url.json",
     "hq": "gen_animation_hq_by_url.json",
 }
+LEGACY_FLUX_IMAGE_MODES = {"z_depth", "t_pose", "open_pose"}
+
+
+def _video_quality_workflow(quality: str, family: str) -> str:
+    quality = str(quality or "").strip().lower()
+    family = str(family or "").strip().lower()
+    if quality == "hq" and family == "ltx23":
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unsupported_video_quality",
+            "message_string": (
+                "High quality is not a separate validated workflow for modern "
+                "LTX 2.3; use Standard, which keeps the selected model's workflow")})
+    return str(VIDEO_QUALITIES.get(quality) or "") if family != "ltx23" else ""
 
 
 class ImageRequest(BaseModel):
@@ -926,14 +1029,12 @@ async def api_image(body: ImageRequest):
     if "image" in ("vision", "text"):
         profile = _model_entry(body.model)
     else:
-        import ai_model_catalogue
-        selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
-                   for entry in ai_model_catalogue.entries()
-                   if entry.get("file") in selected or "image" in (entry.get("default_for_services") or [])]
+        profile = _render_model_profile(
+            "image", body.checkpoint, body.lora, mode=str(body.mode or ""),
+            has_control=bool(body.control_pose or body.control_depth or body.control_canny))
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("image", payload,
-        lambda: _uncached_api_image(body), namespace="ai-exact-models-20260922-v3")
+        lambda: _uncached_api_image(body), namespace="ai-exact-models-20260922-v4")
 
 
 async def _uncached_api_image(body: ImageRequest):
@@ -952,15 +1053,14 @@ async def _uncached_api_image(body: ImageRequest):
             reference = await _publish_inline_image(
                 client, _decode_inline_image(body.image_base64)
             )
-        control_checkpoint = body.checkpoint
-        if controls and not control_checkpoint and not body.lora:
-            control_checkpoint = "CyberRealisticPony_V18.0_F16.safetensors"
+        mode = str(body.mode or "").strip().lower()
         model_payload, trigger_prefix = _effective_model_settings(
-            "image", control_checkpoint, body.lora, {
+            "image", body.checkpoint, body.lora, {
                 "steps": body.steps, "cfg": body.cfg,
                 "sampler": body.sampler, "scheduler": body.scheduler,
                 "lora_strength": body.lora_strength,
-            }, use_default=not controls)
+            }, use_default=not (controls or mode), mode=mode,
+            control_channel=controls[0][0] if controls else "")
         control_workflow = ""
         if controls:
             import ai_model_catalogue
@@ -989,7 +1089,6 @@ async def _uncached_api_image(body: ImageRequest):
             channel, control_url = controls[0]
             payload["image_url"] = control_url
             payload["type"] = f"image_control_{channel}"
-        mode = str(body.mode or "").strip().lower()
         if not controls and mode and mode in IMAGE_MODES:
             # Renderfin picks the template from `type`, not from a file name.
             payload["type"] = mode
@@ -1122,14 +1221,10 @@ async def api_video(body: VideoRequest):
     if "video" in ("vision", "text"):
         profile = _model_entry(body.model)
     else:
-        import ai_model_catalogue
-        selected = {str(body.checkpoint or ""), str(body.lora or "")}
-        profile = [{key: entry.get(key) for key in ("file", "base", "version", "workflow", "recommended", "triggers", "source_version_id", "sha256")}
-                   for entry in ai_model_catalogue.entries()
-                   if entry.get("file") in selected or "video" in (entry.get("default_for_services") or [])]
+        profile = _render_model_profile("video", body.checkpoint, body.lora)
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("video", payload,
-        lambda: _uncached_api_video(body), namespace="ai-video-exact-models-20260922-v4")
+        lambda: _uncached_api_video(body), namespace="ai-video-exact-models-20260922-v5")
 
 
 async def _uncached_api_video(body: VideoRequest):
@@ -1185,12 +1280,19 @@ async def _uncached_api_video(body: VideoRequest):
             payload["prompt"] = ai_model_defaults.add_triggers(rendered_prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
         if body.frame_count:
             payload["frame_count"] = int(body.frame_count)
+        payload.update(model_payload)
         quality = str(body.quality or "").strip().lower()
-        if quality in VIDEO_QUALITIES:
-            payload["work_flow"] = VIDEO_QUALITIES[quality]
+        import ai_model_catalogue
+        import ai_model_defaults
+        selected_video_model = (
+            ai_model_catalogue.known_file(str(payload.get("checkpoint") or ""), "checkpoint")
+            or ai_model_catalogue.known_file(str(payload.get("lora") or ""), "lora"))
+        video_family = ai_model_defaults.model_family(selected_video_model)
+        quality_workflow = _video_quality_workflow(quality, video_family)
+        if quality_workflow:
+            payload["work_flow"] = quality_workflow
         if body.negative_prompt and str(body.negative_prompt).strip():
             payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
-        payload.update(model_payload)
         if body.control_video_url:
             if 'ltx-2.3-22b-distilled-1.1' not in str(payload.get('checkpoint', '')):
                 raise HTTPException(400, detail="Video control requires the LTX-2.3 distilled 1.1 model")

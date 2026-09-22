@@ -53,21 +53,24 @@ def apply_runtime_settings(workflow, prompt, width, height):
             inputs['num_frames'] = frames
         steps = getattr(prompt, 'steps', 0)
         creativity = getattr(prompt, 'creativity', 0)
+        # A multi-stage workflow can have an independently authored refinement
+        # sampler. Public sampling controls target its primary generation pass.
+        preserve_sampling = node.get('_meta', {}).get('preserve_sampling') is True
         if creativity and kind in {'KSampler', 'BasicScheduler'} and 'denoise' in inputs:
             inputs['denoise'] = float(creativity)
-        if steps and kind in {'KSampler', 'KSamplerAdvanced', 'BasicScheduler', 'LTXVScheduler', 'Flux2Scheduler'}:
+        if steps and not preserve_sampling and kind in {'KSampler', 'KSamplerAdvanced', 'BasicScheduler', 'LTXVScheduler', 'Flux2Scheduler'}:
             inputs['steps'] = int(steps)
         cfg = getattr(prompt, 'cfg', None)
-        if cfg is not None:
+        if cfg is not None and not preserve_sampling:
             if kind in {'KSampler', 'KSamplerAdvanced', 'CFGGuider'}:
                 inputs['cfg'] = float(cfg)
             elif kind == 'STGGuiderAdvanced':
                 inputs['cfg_values'] = ','.join([str(cfg)] * len(inputs['cfg_values'].split(',')))
         sampler = getattr(prompt, 'sampler', '')
-        if sampler and kind in {'KSamplerSelect', 'KSampler', 'KSamplerAdvanced'}:
+        if sampler and not preserve_sampling and kind in {'KSamplerSelect', 'KSampler', 'KSamplerAdvanced'}:
             inputs['sampler_name'] = sampler
         scheduler = getattr(prompt, 'scheduler', '')
-        if scheduler and kind in {'BasicScheduler', 'KSampler', 'KSamplerAdvanced'}:
+        if scheduler and not preserve_sampling and kind in {'BasicScheduler', 'KSampler', 'KSamplerAdvanced'}:
             inputs['scheduler'] = scheduler
         if kind == 'CLIPSetLastLayer' and getattr(prompt, 'clip_skip', None):
             inputs['stop_at_clip_layer'] = -abs(int(prompt.clip_skip))

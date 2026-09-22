@@ -556,6 +556,40 @@
    */
   let modelCatalogue = {};
 
+  function samplingPolicy(entry) {
+    return (entry && (entry.sampling_policy_object || entry.sampling_policy)) || {};
+  }
+
+  function samplingPresentation(entry, kind) {
+    const policy = samplingPolicy(entry);
+    const parts = [];
+    if (Number(policy.fixed_steps) > 0) parts.push('Fixed ' + Number(policy.fixed_steps) + ' steps');
+    else if (Number(policy.auto_steps) > 0) parts.push('Auto preset · ' + Number(policy.auto_steps) + ' steps');
+    if (policy.cfg_mode === 'fixed') {
+      const cfg = Number(policy.cfg_value);
+      parts.push('CFG ' + (Number.isFinite(cfg) ? cfg : 1) + (cfg === 1 ? ' (no extra guidance)' : ''));
+    }
+    if (policy.scheduler_mode === 'native') parts.push(policy.scheduler_label || 'Native scheduler');
+    const recommended = entry && entry.recommended || {};
+    const compatible = !entry || entry.sampling_recommendations_compatible !== false;
+    const visibleRecommended = {};
+    const authorSampling = [];
+    Object.keys(recommended).forEach(key => {
+      const samplingKey = ['steps', 'cfg', 'sampler', 'scheduler'].includes(key);
+      if (samplingKey) authorSampling.push(key + ' ' + recommended[key]);
+      if ((compatible || ['strength', 'lora_strength'].includes(key)) &&
+          !(kind === 'checkpoints' && Object.keys(policy).length && samplingKey)) {
+        visibleRecommended[key] = recommended[key];
+      }
+    });
+    return {
+      policy_text: parts.join(' · '),
+      recommended: visibleRecommended,
+      note: kind === 'loras' && !compatible ? 'Sampling inherits the selected base model.' : '',
+      author_sampling_text: authorSampling.join(' · ')
+    };
+  }
+
   async function loadModels(serviceId) {
     if (modelCatalogue[serviceId]) return modelCatalogue[serviceId];
     const response = await fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(serviceId));
@@ -603,7 +637,11 @@
       thumb.style.backgroundImage = entry.preview ? 'url(' + entry.preview + ')' : '';
       label.textContent = entry.title || entry.file;
       fileLabel.textContent = entry.file;
-      button.title = (entry.title || entry.file) + ' — ' + entry.file;
+      const sampling = samplingPresentation(entry, kind);
+      button.title = (entry.title || entry.file) + ' — ' + entry.file +
+        (sampling.policy_text ? '. ' + sampling.policy_text : '') +
+        (sampling.author_sampling_text ? '. Author examples: ' + sampling.author_sampling_text : '') +
+        (sampling.note ? '. ' + sampling.note : '');
     }
 
     // The cards on these pages use `backdrop-filter`, which makes each one its
@@ -657,12 +695,16 @@
       item.className = 'mpick-item' + (entry.usable === false ? ' blocked' : '') +
                        (entry.file === state.value ? ' chosen' : '');
       const triggers = (entry.triggers || []).slice(0, 2).join(', ');
-      const rec = entry.recommended || {};
+      const sampling = samplingPresentation(entry, kind);
+      const rec = sampling.recommended;
       const recText = Object.keys(rec).length
         ? Object.keys(rec).sort().map(k => k + ' ' + rec[k]).join(' · ')
         : '';
       item.title = (entry.title || entry.file) + ' — ' + entry.file + '. ' +
-        (entry.recommended_from || 'No author settings published.');
+        (entry.recommended_from || 'No author settings published.') +
+        (sampling.policy_text ? ' Runtime preset: ' + sampling.policy_text + '.' : '') +
+        (sampling.author_sampling_text ? ' Author examples: ' + sampling.author_sampling_text + '.' : '') +
+        (sampling.note ? ' ' + sampling.note : '');
       item.innerHTML =
         '<span class="mpick-thumb"' +
           (entry.preview ? ' style="background-image:url(' + entry.preview + ')"' : '') + '></span>' +
@@ -673,7 +715,9 @@
             (entry.size_mb ? ' · ' + Math.round(entry.size_mb) + ' MB' : '') +
             (entry.nsfw ? ' · 18+' : '') + '</i>' +
           (triggers ? '<u>' + escapeHtml(triggers) + '</u>' : '') +
+          (sampling.policy_text ? '<em class="mpick-rec">' + escapeHtml(sampling.policy_text) + '</em>' : '') +
           (recText ? '<em class="mpick-rec">' + escapeHtml(recText) + '</em>' : '') +
+          (sampling.note ? '<i>' + escapeHtml(sampling.note) + '</i>' : '') +
           (entry.usable === false
             ? '<s>' + escapeHtml(entry.unusable_reason || 'not runnable here') + '</s>' : '') +
         '</span>';
@@ -717,6 +761,8 @@
         }
       }
       paintButton();
+      if (settings.onReady) settings.onReady(state.value,
+        state.entries.find(entry => entry.file === state.value) || null);
     }).catch(() => { label.textContent = 'catalogue unavailable'; });
 
     button.addEventListener('click', event => {
@@ -763,6 +809,8 @@
     canAutoStart: canAutoStart,
     autoStart: autoStart,
     modelPicker: modelPicker,
-    loadModels: loadModels
+    loadModels: loadModels,
+    samplingPolicy: samplingPolicy,
+    samplingPresentation: samplingPresentation
   };
 })(window);

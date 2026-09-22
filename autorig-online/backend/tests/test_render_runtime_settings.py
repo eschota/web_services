@@ -31,6 +31,18 @@ class RuntimeSettingsTests(unittest.TestCase):
         apply_runtime_settings(graph, SimpleNamespace(steps=30, cfg=5, sampler='dpmpp_2m', scheduler='karras'), 960, 540)
         self.assertEqual(graph['sample']['inputs'], {'steps': 30, 'cfg': 5.0, 'sampler_name': 'dpmpp_2m', 'scheduler': 'karras'})
 
+    def test_primary_defaults_do_not_overwrite_independent_refinement_schedule(self):
+        graph = {
+            'primary': {'class_type': 'BasicScheduler', 'inputs': {'steps': 20, 'scheduler': 'normal'}},
+            'refine': {'class_type': 'KSamplerAdvanced', '_meta': {'preserve_sampling': True},
+                       'inputs': {'steps': 6, 'cfg': 1, 'sampler_name': 'dpmpp_2m',
+                                  'scheduler': 'karras', 'start_at_step': 1, 'end_at_step': 6}},
+        }
+        refine = copy.deepcopy(graph['refine'])
+        apply_runtime_settings(graph, SimpleNamespace(steps=4, cfg=1, sampler='euler', scheduler='simple'), 960, 540)
+        self.assertEqual(graph['primary']['inputs'], {'steps': 4, 'scheduler': 'simple'})
+        self.assertEqual(graph['refine'], refine)
+
     def test_selected_lora_is_connected_when_template_has_no_loader(self):
         graph = {'model': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'base'}},
                  'guide': {'class_type': 'BasicGuider', 'inputs': {'model': ['model', 0]}}}

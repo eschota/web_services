@@ -29,6 +29,33 @@ class ModelDefaultsTests(unittest.TestCase):
         got = defaults.resolve(entry, None, {"steps": 12, "cfg": 2.5})
         self.assertEqual((got["steps"], got["cfg"]), (12, 2.5))
 
+    def test_quality_auto_does_not_relabel_author_example_or_change_manual_steps(self):
+        entry = {"family": "pony", "recommended": {"steps": 30, "cfg": 5},
+                 "recommended_from": "Author: 30+",
+                 "sampling_policy": {"auto_steps": 50, "auto_reason": "Product quality preset"}}
+        self.assertEqual(defaults.resolve(entry, None, {})["steps"], 50)
+        self.assertEqual(defaults.resolve(entry, None, {"steps": 34})["steps"], 34)
+        self.assertEqual(entry["recommended"]["steps"], 30)
+
+    def test_distilled_fixed_schedule_and_ineffective_controls_fail_before_queue(self):
+        entry = {"family": "flux2", "recommended": {"steps": 4, "cfg": 1},
+                 "recommended_from": "BFL reference",
+                 "sampling_policy": {"fixed_steps": 4, "cfg_mode": "fixed", "cfg_value": 1,
+                                     "scheduler_mode": "native", "scheduler_label": "FLUX.2 native"}}
+        for explicit in ({"steps": 30}, {"cfg": 7}, {"scheduler": "karras"}):
+            with self.assertRaises(ValueError):
+                defaults.resolve(entry, None, explicit)
+        effective = defaults.resolve(entry, None, {"cfg": 0})
+        self.assertEqual(effective["cfg"], 1)
+        self.assertNotIn("scheduler", effective)
+
+    def test_schnell_auto_uses_top_of_author_range(self):
+        entry = {"family": "flux", "recommended": {"steps": 4},
+                 "recommended_from": "BFL: 1-4 steps", "sampling_policy": {"steps_max": 4}}
+        self.assertEqual(defaults.resolve(entry, None, {"steps": 2})["steps"], 2)
+        with self.assertRaises(ValueError):
+            defaults.resolve(entry, None, {"steps": 20})
+
     def test_unattributed_metadata_is_not_applied(self):
         entry = {"family": "flux", "recommended": {"steps": 99}}
         self.assertNotIn("steps", defaults.resolve(entry, None, {}))
@@ -143,8 +170,10 @@ class ModelDefaultsTests(unittest.TestCase):
             effective = defaults.resolve(checkpoint, lora, {})
             self.assertEqual(effective["work_flow"], "gen_animation_ltx23_by_url.json")
             self.assertEqual(effective["steps"], 8)
-            explicit = defaults.resolve(checkpoint, lora, {"steps": 12, "cfg": 1.2})
-            self.assertEqual((explicit["steps"], explicit["cfg"]), (12, 1.2))
+            explicit = defaults.resolve(checkpoint, lora, {"steps": 8, "cfg": 1.2})
+            self.assertEqual((explicit["steps"], explicit["cfg"]), (8, 1.2))
+            with self.assertRaises(ValueError):
+                defaults.resolve(checkpoint, lora, {"steps": 12})
 
     def test_legacy_dream_ltxv_has_no_false_ltx23_fallback(self):
         catalogue_path = (
