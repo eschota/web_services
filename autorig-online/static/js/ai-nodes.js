@@ -3170,6 +3170,7 @@
     if (window.AINodeSockets) window.AINodeSockets.install({editor, canvas:document.getElementById('canvas'),
       socketTypes, linkAllowed, entityTypes:catalogue.entity_types_array || []});
     installStatusLines(document.getElementById('canvas'));
+    if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
