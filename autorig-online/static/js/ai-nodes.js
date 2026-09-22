@@ -917,6 +917,14 @@
       field: 'image_url_string', type: 'control_' + channel };
   });
 
+  function runnerFor(serviceId) {
+    const runner = RUNNERS[serviceId];
+    if (!runner) {
+      throw new Error('This service was updated after this page loaded. Reload the page and try again.');
+    }
+    return runner;
+  }
+
   /**
    * Turn a rejection into something a person can act on.
    *
@@ -1197,7 +1205,7 @@
     const attempt = budget ? 1 : 0;
     const node = meta(id);
     if (!node) throw new Error('node was removed');
-    const runner = RUNNERS[node.service];
+    let runner = null;
     const element = nodeElement(id);
     if (!element) throw new Error('node was removed');
     const state = element.querySelector('.nstate');
@@ -1210,6 +1218,7 @@
     }
     let task = null;
     try {
+      runner = runnerFor(node.service);
       task = window.AIEntities ? window.AIEntities.startTask(progress, node.service) : null;
       const submitBody = Object.assign(
         bodyFor(node.service, resolved, params),
@@ -1264,7 +1273,7 @@
       if (executionIsCurrent(execution)) {
         state.textContent = String(error.message || error);
         state.className = 'nstate failed';
-        recordResult(id, { status: 'failed', type: runner.type, value: '',
+        recordResult(id, { status: 'failed', type: runner?.type || '', value: '',
                            error: String(error.message || error) });
       }
       throw error;
@@ -1744,7 +1753,7 @@
       meta(id) && nodeElement(id);
     const node = meta(id);
     if (!node) return;
-    const runner = RUNNERS[node.service];
+    let runner;
     const element = nodeElement(id);
     const state = element.querySelector('.nstate');
     const outBox = element.querySelector('.nout');
@@ -1753,6 +1762,15 @@
     const task = window.AIEntities
       ? window.AIEntities.startTask(element.querySelector('.nprog, .task-prog'), node.service)
       : null;
+    try {
+      runner = runnerFor(node.service);
+    } catch (error) {
+      state.textContent = error.message;
+      state.className = 'nstate failed';
+      if (task) task.finish(false);
+      recordResult(id, {status:'failed', type:'', value:'', error:error.message});
+      throw error;
+    }
     // The pollers only need what the submit returned, and that is exactly
     // what was stored, so the same code finishes the job.
     const accepted = { task_id_string: record.task_id };

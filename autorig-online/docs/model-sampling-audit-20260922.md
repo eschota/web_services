@@ -160,3 +160,30 @@ settings. Generic Inpaint requires a different Fill model and is unavailable
 in this model catalogue. The obsolete generic video HQ selector was removed
 from the modern checkpoint UI; its old legacy template is not interchangeable
 with LTX2.3.
+
+## Dedicated Avatar video preset added after the catalogue audit
+
+The `avatar_video` service uses an exact composite recipe, rather than a new
+choice in the generic image/video checkpoint picker:
+
+- `wan_animate_2_int8_convrot.safetensors` with the LightX2V I2V 14B 480p
+  CFG/step-distillation rank64 LoRA at strength 1;
+- **6 steps, CFG 1, LCM, simple scheduler, model shift 5**;
+- separate character-appearance and driver-motion text conditioning;
+- CPU/int8 motion cache and static context windows of 21 with overlap 8;
+- 960×540 delivery by default, internal 960×544 sampling, 97 frames at 24 fps.
+
+These sampling values match the nested motion-transfer graph in the
+[official Comfy template](https://github.com/Comfy-Org/workflow_templates/blob/main/templates/video_wan_animate2.json):
+nodes 579/591/592/593/597 supply LoRA 1, simple/6, shift 5, LCM and CFG 1.
+This is the verified accelerated composite preset, not a claim that the bare
+Wan base model universally requires six steps. The API does not expose
+unsupported sampling overrides; extra CFG/sampler fields are rejected.
+
+The 81-frame and 97-frame real GPU proofs and the durable ComfyUI 0.37
+compatibility gate are recorded in
+`wan-animate2-candidate-20260922.md` and
+`onlyrender-v037-promotion-20260922.md`. The public service was deployed in
+release Q. Four saved-Avatar story jobs were then accepted from the real
+production browser graph `30cb8f68083f`; visual acceptance of those story
+results is tracked separately and is not implied by enqueue success.

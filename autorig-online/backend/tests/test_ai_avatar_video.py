@@ -144,8 +144,8 @@ class AvatarVideoTests(unittest.TestCase):
                 self.assertEqual(payload["pose_prompt"], "turns left; raises both hands")
                 self.assertIn("short black bob, oval face", payload["prompt"])
                 self.assertIn("navy jacket", payload["prompt"])
+                self.assertIn("Maya private identity wording", payload["prompt"])
                 self.assertNotIn("turns left", payload["prompt"])
-                self.assertNotIn("private identity wording", payload["prompt"])
                 self.assertNotIn("short black bob", payload["pose_prompt"])
                 self.assertEqual((payload["main_size_width"], payload["main_size_height"]),
                                  (960, 540))
@@ -159,6 +159,44 @@ class AvatarVideoTests(unittest.TestCase):
                 self.assertEqual(cache_call["payload"]["avatar_versions"][0]["version"], 1)
                 self.assertEqual(cache_call["payload"]["control_video_url"],
                                  "https://pvs1.microstock.plus/path/driver.mp4")
+
+        asyncio.run(scenario())
+
+    def test_required_identity_survives_when_appearance_and_wardrobe_are_empty(self):
+        async def scenario():
+            with _temporary_directory() as folder:
+                store = AvatarStore(pathlib.Path(folder) / "avatars")
+                owner = AvatarOwner(owner_type="user", owner_id="identity@example.com")
+                profile = store.create(owner, AvatarDraft.model_validate({
+                    "display_name": "Iris",
+                    "identity_prompt": "distinct heart-shaped face, green eyes, silver pixie cut",
+                    "references": [_reference("iris", "9" * 64, role="face")],
+                }))
+                app = self._app(store, owner)
+                farm, cache = _Farm(), _Cache()
+                with patch.object(ai_avatar_video.ai_services, "service",
+                                  side_effect=self._live_service), \
+                     patch.object(ai_avatar_video, "httpx", farm.httpx_module), \
+                     patch.object(ai_avatar_video.ai_request_cache, "run_cached",
+                                  new=cache.run_cached):
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app=app), base_url="https://testserver"
+                    ) as client:
+                        response = await client.post("/api/ai/avatar-video", json={
+                            "avatar": f"{profile.avatar_id}@1",
+                            "control_video_url": "https://pvs1.microstock.plus/a/driver.mp4",
+                            "prompt": "turns right; looks upward",
+                        })
+                self.assertEqual(response.status_code, 200, response.text)
+                payload = farm.payloads[0]["json"]
+                self.assertIn(
+                    "Character 1 canonical identity: distinct heart-shaped face, green eyes, silver pixie cut",
+                    payload["prompt"],
+                )
+                self.assertNotIn("canonical appearance:", payload["prompt"])
+                self.assertNotIn("canonical wardrobe:", payload["prompt"])
+                self.assertNotIn("turns right", payload["prompt"])
+                self.assertEqual(payload["pose_prompt"], "turns right; looks upward")
 
         asyncio.run(scenario())
 

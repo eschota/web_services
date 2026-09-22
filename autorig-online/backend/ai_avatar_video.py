@@ -97,10 +97,12 @@ def _primary_image(profile):
 def _appearance_prompt(profiles) -> str:
     constraints = []
     for index, profile in enumerate(profiles, 1):
-        constraints.append(
-            f"Character {index} canonical appearance: {profile.appearance}. "
-            f"Character {index} canonical wardrobe: {profile.wardrobe}."
-        )
+        clauses = [f"Character {index} canonical identity: {profile.identity_prompt}."]
+        if str(profile.appearance or "").strip():
+            clauses.append(f"Character {index} canonical appearance: {profile.appearance}.")
+        if str(profile.wardrobe or "").strip():
+            clauses.append(f"Character {index} canonical wardrobe: {profile.wardrobe}.")
+        constraints.append(" ".join(clauses))
     return (
         "Keep each saved character visually consistent in every frame. "
         + " ".join(constraints)

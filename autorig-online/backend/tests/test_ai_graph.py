@@ -183,6 +183,67 @@ class AvatarVideoTemplateTests(unittest.TestCase):
                             f"{node['id']} sets {set(node['params']) - declared}")
 
 
+class AvatarWanVideoTemplateTests(unittest.TestCase):
+    def setUp(self):
+        self.template = next(item for item in ai_graph.templates()
+                             if item["id"] == "SavedAvatarWanMotion")
+        self.graph = self.template["graph"]
+
+    def test_identity_title_summary_and_complete_topology(self):
+        self.assertEqual(self.template["title"], "Avatar reenacts a video · Wan-Animate-2")
+        self.assertEqual(self.template["summary"],
+                         "Stable Avatar + driving video; catalogue-fixed 6-step "
+                         "Wan-Animate-2 motion transfer.")
+        self.assertEqual(len(self.graph["nodes"]), 8)
+        # Six preparation edges plus the four required Wan inputs.
+        self.assertEqual(len(self.graph["links"]), 10)
+
+    def test_graph_validates_and_only_the_final_service_may_follow_runtime_promotion(self):
+        ai_graph.validate(ai_graph.Graph(**self.graph))
+        statuses = {node["id"]: ai_services.service(node["service"])["status"]
+                    for node in self.graph["nodes"] if node["kind"] == ai_graph.NODE_SERVICE}
+        self.assertIn(statuses["motion_video"], {"planned", "live"})
+        self.assertTrue(all(status == "live" for node, status in statuses.items()
+                            if node != "motion_video"))
+
+    def test_final_wan_node_receives_avatar_driver_keyframe_and_motion_verbs(self):
+        final = next(node for node in self.graph["nodes"] if node["id"] == "motion_video")
+        self.assertEqual(final["service"], "avatar_video")
+        self.assertEqual(final["params"], {
+            "width": 960, "height": 540, "frame_count": 97,
+            "control_strength": 1, "seed": 0,
+        })
+        incoming = {(link["from"], link["output"], link["input"])
+                    for link in self.graph["links"] if link["to"] == "motion_video"}
+        self.assertEqual(incoming, {
+            ("saved_avatar", "value", "avatar"),
+            ("source_video", "value", "control_video_url"),
+            ("avatar_scene", "image_url_string", "image"),
+            ("action_vision", "answer_string", "prompt"),
+        })
+
+    def test_all_service_fields_and_parameters_are_declared(self):
+        by_service = {entry["id"]: entry for entry in ai_services.SERVICES}
+        nodes = {node["id"]: node for node in self.graph["nodes"]}
+        for link in self.graph["links"]:
+            target = nodes[link["to"]]
+            if target["kind"] == ai_graph.NODE_SERVICE:
+                fields = {item["field"] for item in by_service[target["service"]]["inputs"]}
+                self.assertIn(link["input"], fields, link)
+        for node in nodes.values():
+            if node["kind"] != ai_graph.NODE_SERVICE:
+                continue
+            declared = {param["name"] for param in ai_services.params_for(node["service"])}
+            self.assertTrue(set(node.get("params") or {}) <= declared)
+
+    def test_staging_instruction_keeps_avatar_hair_wardrobe_and_profile_headwear(self):
+        instruction = next(node["value"] for node in self.graph["nodes"]
+                           if node["id"] == "first_frame_instruction")
+        self.assertIn("canonical hair and wardrobe override", instruction)
+        self.assertIn("all source garments and headwear", instruction)
+        self.assertIn("headwear that belongs to the saved Avatar profile", instruction)
+
+
 def links_of(graph):
     return graph["links"]
 
@@ -296,6 +357,8 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(body["templates_array"][0]["id"], "SimpleTextToVideoByVision")
         self.assertIn("SavedAvatarVideoMotion",
                       [item["id"] for item in body["templates_array"]])
+        self.assertIn("SavedAvatarWanMotion",
+                      [item["id"] for item in body["templates_array"]])
 
     def test_a_template_id_opens_without_ever_being_saved(self):
         body = self.client.get("/api/ai/graphs/SimpleTextToVideoByVision").json()
@@ -307,6 +370,12 @@ class EndpointTests(unittest.TestCase):
         self.assertTrue(body["template_bool"])
         self.assertEqual(len(body["graph_object"]["nodes"]), 8)
         self.assertEqual(len(body["graph_object"]["links"]), 9)
+
+    def test_avatar_wan_template_id_opens_without_being_saved(self):
+        body = self.client.get("/api/ai/graphs/SavedAvatarWanMotion").json()
+        self.assertTrue(body["template_bool"])
+        self.assertEqual(len(body["graph_object"]["nodes"]), 8)
+        self.assertEqual(len(body["graph_object"]["links"]), 10)
 
     def test_saving_returns_a_link_that_opens_the_same_graph(self):
         saved = self.client.post("/api/ai/graphs", json=self._payload()).json()

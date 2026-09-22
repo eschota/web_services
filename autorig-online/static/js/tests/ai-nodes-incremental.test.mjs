@@ -117,7 +117,7 @@ function harness(graphs) {
     `  window.__aiNodesTest = {
       runGraph, cancelRun, resetCanvasExecutionState,
       submitJson,
-      bodyFor, RUNNERS,
+      bodyFor, RUNNERS, runnerFor,
       continuableResults, restoredExecutions, completedExecutions,
       activeExecutions, runRequests, setMeta
     };
@@ -251,6 +251,14 @@ test('Avatar video runner and request body match the typed service contract', ()
     control_video_url:'https://example.test/drive.mp4',
     image_url:'https://example.test/keyframe.png', prompt:'turn and wave',
   });
+});
+
+test('a catalogue newer than cached runner JS asks for a reload instead of throwing TypeError', () => {
+  const h = harness([graph([input('a')])]);
+  assert.throws(
+    () => h.api.runnerFor('new_service_from_fresh_catalogue'),
+    error => /Reload the page/.test(error.message) && !/undefined|properties/i.test(error.message),
+  );
 });
 
 

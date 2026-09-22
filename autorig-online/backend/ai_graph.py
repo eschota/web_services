@@ -234,13 +234,16 @@ def _template_avatar_video_motion() -> Dict[str, object]:
     )
     first_frame_instruction = (
         "Replace the principal actor in the scene reference with the saved "
-        "Avatar. Preserve the exact first-frame body pose, head angle, hand and "
-        "finger positions, framing, camera angle, and background. This is frame "
+        "Avatar. The Avatar's canonical hair and wardrobe override all source "
+        "garments and headwear; preserve any headwear that belongs to the saved "
+        "Avatar profile. Preserve only the exact first-frame body pose, head "
+        "angle, hand and finger positions, framing, camera angle, background, "
+        "and scene props. This is frame "
         "zero: do not anticipate, begin, or advance any later action."
     )
     return {
         "id": "SavedAvatarVideoMotion",
-        "title": "Avatar reenacts a video",
+        "title": "Avatar reenacts a video · LTX Pose",
         "summary": (
             "Choose a saved Avatar and a driving video. The scene and action "
             "are reconstructed without copying the source person's identity."
@@ -296,8 +299,36 @@ def _template_avatar_video_motion() -> Dict[str, object]:
     }
 
 
+def _template_saved_avatar_wan_motion() -> Dict[str, object]:
+    """The same identity-safe preparation, finished by Wan-Animate-2."""
+    template = json.loads(json.dumps(_template_avatar_video_motion()))
+    template["id"] = "SavedAvatarWanMotion"
+    template["title"] = "Avatar reenacts a video · Wan-Animate-2"
+    template["summary"] = (
+        "Stable Avatar + driving video; catalogue-fixed 6-step "
+        "Wan-Animate-2 motion transfer."
+    )
+    graph = template["graph"]
+    graph["name"] = "Saved Avatar Wan-Animate-2 motion"
+    final = next(node for node in graph["nodes"] if node["id"] == "motion_video")
+    final["service"] = "avatar_video"
+    final["params"] = {
+        "width": 960, "height": 540, "frame_count": 97,
+        "control_strength": 1, "seed": 0,
+    }
+    graph["links"].append({
+        "from": "saved_avatar", "output": "value",
+        "to": "motion_video", "input": "avatar",
+    })
+    return template
+
+
 def templates() -> List[Dict[str, object]]:
-    return [_template_simple_text_to_video_by_vision(), _template_avatar_video_motion()]
+    return [
+        _template_simple_text_to_video_by_vision(),
+        _template_avatar_video_motion(),
+        _template_saved_avatar_wan_motion(),
+    ]
 
 
 # ------------------------------------------------------------------ validation
