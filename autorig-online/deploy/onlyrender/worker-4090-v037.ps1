@@ -102,6 +102,25 @@ if (Test-Path "$runtime\WAN2_PROMOTED") {
     foreach ($node in 'WanAnimate2ToVideo','WanAnimate2Cache') { if (-not (Test-ComfyNode $node)) { throw "Missing promoted node $node" } }
     $workflows += 'gen_video_wan_animate2_by_url.json'
 }
+# LTX-2.5 weights live on C: (R: is full); extra_model_paths.yaml maps C:\AIModels.
+$ltx25 = 'C:\AIModels'
+if ((Test-Path "$ltx25\diffusion_models\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors") -and
+    (Test-Path "$ltx25\text_encoders\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors") -and
+    (Test-Path "$ltx25\vae\ltx-2.5-video-vae-bf16.safetensors") -and
+    (Test-Path "$ltx25\vae\ltx-2.5-audio-vae-bf16.safetensors")) {
+    # The historical tokens run the same LTX-2.5 graphs since 2026-09-23.
+    $workflows += @('gen_animation_ltx25_by_url.json', 'gen_animation_by_url.json')
+    if (Test-Path "$ltx25\latent_upscale_models\ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors") {
+        $workflows += @('gen_animation_ltx25_hq_by_url.json', 'gen_animation_hq_by_url.json')
+    }
+}
+# MiniMax H3 (full int8-convrot transformer, nvfp4 Qwen3-VL encoder, 4-step turbo LoRA).
+if ((Test-Path "$ltx25\diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors") -and
+    (Test-Path "$ltx25\text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors") -and
+    (Test-Path "$ltx25\vae\minimax_h3_video_vae_fp16.safetensors") -and
+    (Test-Path "$ltx25\vae\minimax_h3_audio_vae_fp32.safetensors") -and
+    (Test-Path "$ltx25\loras\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors") -and
+    (Test-ComfyNode 'MiniMaxH3ImageToVideo')) { $workflows += 'gen_video_minimax_h3_by_url.json' }
 $overrides = @{'gen_image.json'='gen_image_flux1_schnell.json'}
 Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;workflow_overrides=$overrides;basic_auth=$false}
 Write-Host ('OnlyRender v0.37 ready: ' + ($workflows -join ', '))

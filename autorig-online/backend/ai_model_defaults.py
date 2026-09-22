@@ -35,8 +35,12 @@ FAMILY_WORKFLOWS = {
     "sdxl": "gen_image_sdxl.json",
     "illustrious": "gen_image_sdxl.json",
     "noobai": "gen_image_sdxl.json",
-    "flux": "gen_image.json",
     "flux2": "gen_image_flux2_klein.json",
+    # Z-Image Turbo replaced FLUX.1 Schnell behind the same farm token, so
+    # every saved graph and public request that named gen_image.json keeps
+    # working. Krea 2 is the quality tier with its own token.
+    "zimage": "gen_image.json",
+    "krea2": "gen_image_krea2.json",
 }
 # Video architectures whose catalogue entry names its own family because the
 # base string alone cannot separate them: "LTX-2 19B" and "LTXV 13B 0.9.8" both
@@ -58,8 +62,26 @@ SDXL_FAMILIES = frozenset({"pony", "sdxl", "illustrious", "noobai"})
 FORWARD_COMPATIBLE_LORAS = frozenset({("ltx25", "ltx23")})
 
 
+# Video checkpoints retired by the LTX-2.5 migration (2026-09-23). A saved node
+# or caller that still names one renders on LTX-2.5. Kept out of
+# MODEL_FILE_ALIASES on purpose: renderfin treats those as byte-identical files
+# and would load a retired file that is still on a box's disk.
+LTX25_CHECKPOINT = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
+RETIRED_MODEL_REPLACEMENTS = {
+    "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors": LTX25_CHECKPOINT,
+    "ltx-2.3-22b-distilled-fp8.safetensors": LTX25_CHECKPOINT,
+    "ltx10eros_v14_2989669.safetensors": LTX25_CHECKPOINT,
+    "ltx10eros_v14_2989633.safetensors": LTX25_CHECKPOINT,
+    "ltx-2-19b-distilled-fp8.safetensors": LTX25_CHECKPOINT,
+    "ltxv-13b-0.9.8-distilled-fp8.safetensors": LTX25_CHECKPOINT,
+    "ltxv-13b-0.9.8-distilled.safetensors": LTX25_CHECKPOINT,
+    "ltxv-13b-0.9.8-dev-fp8.safetensors": LTX25_CHECKPOINT,
+}
+
+
 def canonical_file(name: object) -> str:
     value = str(name or "").strip()
+    value = RETIRED_MODEL_REPLACEMENTS.get(value, value)
     return MODEL_FILE_ALIASES.get(value, value)
 
 
@@ -70,9 +92,9 @@ def control_workflow(family: str, channel: str) -> str:
         raise ValueError("unsupported ControlNet channel")
     if family in SDXL_FAMILIES:
         return f"gen_image_sdxl_control_{channel}.json"
-    if family == "flux":
+    if family == "zimage":
         return f"gen_image_control_{channel}.json"
-    raise ValueError("ControlNet generation requires a Pony/SDXL or Flux.1 model")
+    raise ValueError("ControlNet generation requires a Pony/SDXL or Z-Image model")
 
 
 def wan_family(base: str) -> str:

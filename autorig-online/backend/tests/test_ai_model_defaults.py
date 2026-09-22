@@ -96,10 +96,13 @@ class ModelDefaultsTests(unittest.TestCase):
                          "gen_image_sdxl_control_pose.json")
         self.assertEqual(defaults.control_workflow("sdxl", "depth"),
                          "gen_image_sdxl_control_depth.json")
-        self.assertEqual(defaults.control_workflow("flux", "canny"),
+        self.assertEqual(defaults.control_workflow("zimage", "canny"),
                          "gen_image_control_canny.json")
         with self.assertRaises(ValueError):
             defaults.control_workflow("flux2", "pose")
+        # FLUX.1 left the farm on 2026-09-23; its control graphs are Z-Image now.
+        with self.assertRaises(ValueError):
+            defaults.control_workflow("flux", "canny")
 
     def test_lora_family_default_is_explicit_not_catalogue_order(self):
         lora = {"kind": "lora", "family": "flux", "services": ["image"]}
@@ -163,12 +166,13 @@ class ModelDefaultsTests(unittest.TestCase):
         for lora in loras:
             checkpoint = defaults.family_default_checkpoint(entries, lora, "video")
             self.assertIsNotNone(checkpoint, lora["file"])
+            # LTX 2.3 adapters render on LTX-2.5 since the 2026-09-23 migration.
             self.assertEqual(
                 checkpoint["file"],
-                "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+                "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
             )
             effective = defaults.resolve(checkpoint, lora, {})
-            self.assertEqual(effective["work_flow"], "gen_animation_ltx23_by_url.json")
+            self.assertEqual(effective["work_flow"], "gen_animation_ltx25_by_url.json")
             self.assertEqual(effective["steps"], 8)
             explicit = defaults.resolve(checkpoint, lora, {"steps": 8, "cfg": 1.2})
             self.assertEqual((explicit["steps"], explicit["cfg"]), (8, 1.2))

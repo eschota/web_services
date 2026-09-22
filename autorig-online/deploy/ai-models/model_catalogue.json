@@ -156,41 +156,87 @@
   },
   {
     "kind": "checkpoint",
-    "family": "ltx23",
-    "base": "LTXV 2.3",
-    "file": "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
-    "id": "ltx23-distilled11",
-    "title": "LTX 2.3 distilled 1.1",
-    "version": "1.1 FP8",
+    "family": "minimax_h3",
+    "base": "MiniMax H3",
+    "file": "minimax_h3_fl2va_int8_convrot.safetensors",
+    "id": "minimax-h3-fl2va",
+    "title": "MiniMax H3",
+    "version": "33B fl2va int8-convrot + 4-step turbo",
     "services": [
       "video"
     ],
     "usable": true,
-    "default_for_services": [
+    "default_for_families": [
+      "minimax_h3"
+    ],
+    "workflow": "gen_video_minimax_h3_by_url.json",
+    "recommended": {
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler": "res_multistep"
+    },
+    "recommended_from": "Comfy-Org MiniMax H3 image-to-video template with the lightx2v fl2v turbo LoRA (4 steps, BasicGuider, res_multistep, simple schedule).",
+    "recommendation_kind": "author_reference_workflow",
+    "page": "https://huggingface.co/MiniMaxAI/MiniMax-H3",
+    "file_source": "https://huggingface.co/Comfy-Org/MiniMax-H3 ; turbo LoRA https://huggingface.co/lightx2v/Minimax-h3-Turbo",
+    "source_checked_at": "2026-09-23",
+    "triggers": [],
+    "preview": "",
+    "size_mb": 32462,
+    "validated_workers": [
+      "worker-4090"
+    ],
+    "sampling_policy": {
+      "auto_steps": 4,
+      "fixed_steps": 4,
+      "steps_min": 4,
+      "steps_max": 4,
+      "auto_reason": "The turbo distill LoRA baked into the workflow is trained for exactly four steps.",
+      "cfg_mode": "fixed",
+      "scheduler_mode": "native",
+      "scheduler_label": "H3 turbo 4-step"
+    },
+    "recommendation_sources": [
+      "https://huggingface.co/Comfy-Org/MiniMax-H3",
+      "https://github.com/Comfy-Org/workflow_templates/blob/main/templates/video_minimax_h3_i2v.json",
+      "https://huggingface.co/lightx2v/Minimax-h3-Turbo"
+    ],
+    "author_notes": "Premium tier, RTX 4090 only for now (24 GB VRAM, ~48 GB system RAM peak). Clip length snaps up to the H3 17k+5 frame grid (97 requested -> 107). Generates stereo audio. Civitai baseModel 'MiniMax H3'.",
+    "sampling_audit_at": "2026-09-23"
+  },
+  {
+    "kind": "checkpoint",
+    "family": "ltx25",
+    "base": "LTX-2.5",
+    "file": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+    "id": "ltx25-distilled",
+    "title": "LTX-2.5 distilled",
+    "version": "22B distilled int8-convrot",
+    "services": [
       "video"
     ],
+    "usable": true,
     "default_for_families": [
+      "ltx25",
       "ltx23"
     ],
-    "workflow": "gen_animation_ltx23_by_url.json",
+    "workflow": "gen_animation_ltx25_by_url.json",
     "recommended": {
       "steps": 8,
       "cfg": 1.0,
-      "sampler": "euler_ancestral_cfg_pp"
+      "sampler": "euler_ancestral"
     },
-    "recommended_from": "Lightricks distilled single-stage workflow: eight-step sigma schedule, CFG1, Euler ancestral CFG++.",
+    "recommended_from": "Lightricks LTX-2.5 distilled single-stage workflow: eight-step sigma schedule, CFG 1, Euler ancestral; Gemma 4 12B text encoder with the LTX-2.5 projection.",
     "recommendation_kind": "author_reference_workflow",
-    "page": "https://huggingface.co/Lightricks/LTX-2.3",
-    "file_source": "https://huggingface.co/Kijai/LTX2.3_comfy",
-    "source_checked_at": "2026-09-22",
+    "page": "https://huggingface.co/Lightricks/LTX-2.5",
+    "file_source": "https://huggingface.co/comfyicu/LTX-2.5 (mirror of the gated Lightricks/LTX-2.5; sha256 identical across comfyicu, lxxxy6, yuvraj108c)",
+    "source_checked_at": "2026-09-23",
     "triggers": [],
     "preview": "",
-    "size_mb": 25226,
+    "size_mb": 20508,
     "validated_workers": [
-      "worker-4090",
-      "Raptor",
-      "f5",
-      "f15"
+      "f12",
+      "worker-4090"
     ],
     "sampling_policy": {
       "auto_steps": 8,
@@ -203,153 +249,14 @@
       "scheduler_label": "LTX distilled sigmas"
     },
     "recommendation_sources": [
-      "https://huggingface.co/Lightricks/LTX-2.3",
-      "https://github.com/Lightricks/ComfyUI-LTXVideo/blob/master/example_workflows/2.3/LTX-2.3_T2V_I2V_Single_Stage_Distilled_Full.json"
+      "https://huggingface.co/Lightricks/LTX-2.5",
+      "https://github.com/Lightricks/ComfyUI-LTXVideo/blob/master/example_workflows/2.5/LTX-2.5_T2V_I2V_Single_Stage_Distilled.json"
     ],
-    "sampling_audit_at": "2026-09-22"
-  },
-  {
-    "kind": "checkpoint",
-    "family": "ltx23",
-    "file": "ltx10eros_v14_2989669.safetensors",
-    "title": "LTX 10Eros",
-    "version": "v1.4",
-    "base": "LTXV 2.3",
-    "nsfw": true,
-    "triggers": [],
-    "downloads": 17367,
-    "page": "https://civitai.com/models/2447875?modelVersionId=3109610",
-    "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/130ab84e-6848-4e3b-914b-7754ff277f48/original=true/136150920.mp4",
-    "size_mb": 27810.9,
-    "services": [
+    "author_notes": "Replaces LTX 2.3 / LTX-2 19B / LTXV 13B. Quality 'hq' runs the official two-stage graph (half-size pass, x2 latent upscale, 3-step refine). LTX 2.3 LoRAs load onto it (Lightricks: most 2.3 LoRAs work on 2.5 unchanged).",
+    "sampling_audit_at": "2026-09-23",
+    "default_for_services": [
       "video"
-    ],
-    "usable": true,
-    "id": "ltx10eros_v14_2989669.safetensors",
-    "preview": "/api/ai/model-preview/ltx10eros_v14_2989633.safetensors.jpg",
-    "recommended": {
-      "steps": 9,
-      "cfg": 1.0,
-      "sampler": "Euler a"
-    },
-    "recommended_from": "Author V5 DMD workflow and example metadata; full checkpoint validated on worker-4090 at exact 960x540.",
-    "source_version_id": 3109610,
-    "source_checked_at": "2026-09-22",
-    "recommendation_sources": [
-      "https://civitai.com/models/2447875?modelVersionId=3109610",
-      "https://civitai.com/api/v1/model-versions/3109610",
-      "https://civitai.com/api/v1/models/2447875",
-      "https://huggingface.co/TenStrip/LTX2.3-10Eros_Workflows/blob/main/10Eros_10SNodes_I2V_Basic_DMD_V5.json"
-    ],
-    "recommendation_kind": "author_example_metadata",
-    "workflow": "gen_animation_ltx10eros_by_url.json",
-    "sampling_policy": {
-      "auto_steps": 9,
-      "fixed_steps": 9,
-      "steps_min": 9,
-      "steps_max": 9,
-      "auto_reason": "Exact author distilled sigma schedule. More steps require a different trained model and workflow.",
-      "cfg_mode": "tunable",
-      "scheduler_mode": "native",
-      "scheduler_label": "10Eros DMD sigmas"
-    },
-    "sampling_audit_at": "2026-09-22"
-  },
-  {
-    "kind": "checkpoint",
-    "family": "ltx2",
-    "base": "LTX-2 19B distilled",
-    "file": "ltx-2-19b-distilled-fp8.safetensors",
-    "id": "ltx2-19b-distilled-fp8",
-    "title": "LTX-2 19B distilled",
-    "version": "19B distilled FP8",
-    "services": [
-      "video"
-    ],
-    "usable": true,
-    "workflow": "gen_animation_hq_by_url.json",
-    "recommended": {
-      "steps": 8,
-      "cfg": 1.0,
-      "sampler": "euler_ancestral_cfg_pp"
-    },
-    "recommended_from": "The deployed gen_animation_hq_by_url.json template: a nine-value ManualSigmas schedule (eight steps), CFGGuider at 1.0 and Euler ancestral CFG++, with the Gemma 3 12B text encoder.",
-    "recommendation_kind": "deployed_validated_workflow",
-    "page": "https://huggingface.co/Lightricks/LTX-2",
-    "file_source": "https://huggingface.co/Lightricks/LTX-2",
-    "source_checked_at": "2026-09-22",
-    "triggers": [],
-    "preview": "",
-    "size_mb": 27730,
-    "validated_workers": [
-      "Raptor",
-      "f5"
-    ],
-    "sampling_policy": {
-      "auto_steps": 8,
-      "fixed_steps": 8,
-      "steps_min": 8,
-      "steps_max": 8,
-      "auto_reason": "Exact distilled sigma schedule of the deployed workflow. More steps require a different trained model and workflow.",
-      "cfg_mode": "tunable",
-      "scheduler_mode": "native",
-      "scheduler_label": "LTX-2 distilled sigmas"
-    },
-    "recommendation_sources": [
-      "https://huggingface.co/Lightricks/LTX-2",
-      "backend/renderfin/assets/workflows/gen_animation_hq_by_url.json"
-    ],
-    "author_notes": "Runs off the 4090: this is the 12 GB tier. The template bakes in ltx-2-19b-lora-camera-control-static and produces an audio track, so no separate LoRA is selectable for it. The checkpoint file is on Raptor, f12, f5 and f15, but only Raptor currently advertises gen_animation_hq_by_url.json, so this tier does not yet fan out. Measured on Raptor: 13/13 successful, median 445 s at 800x448.",
-    "sampling_audit_at": "2026-09-22"
-  },
-  {
-    "kind": "checkpoint",
-    "family": "ltx098",
-    "base": "LTXV 13B 0.9.8",
-    "file": "ltxv-13b-0.9.8-distilled-fp8.safetensors",
-    "id": "ltxv-13b-098-distilled-fp8",
-    "title": "LTXV 13B 0.9.8 distilled",
-    "version": "0.9.8 distilled FP8",
-    "services": [
-      "video"
-    ],
-    "usable": true,
-    "workflow": "gen_animation_by_url.json",
-    "recommended": {
-      "steps": 8,
-      "cfg": 1.0,
-      "sampler": "euler_ancestral"
-    },
-    "recommended_from": "The deployed gen_animation_by_url.json template: a nine-value StringToFloatList sigma schedule (eight steps), STG guider with all CFG values at 1.0 and Euler ancestral, with the T5-XXL FP8 encoder.",
-    "recommendation_kind": "deployed_validated_workflow",
-    "page": "https://huggingface.co/Lightricks/LTX-Video",
-    "file_source": "https://huggingface.co/Lightricks/LTX-Video",
-    "source_checked_at": "2026-09-22",
-    "triggers": [],
-    "preview": "",
-    "size_mb": 16067,
-    "validated_workers": [
-      "f15",
-      "f5",
-      "f12",
-      "Raptor"
-    ],
-    "sampling_policy": {
-      "auto_steps": 8,
-      "fixed_steps": 8,
-      "steps_min": 8,
-      "steps_max": 8,
-      "auto_reason": "Exact distilled sigma schedule of the deployed workflow. More steps require a different trained model and workflow.",
-      "cfg_mode": "tunable",
-      "scheduler_mode": "native",
-      "scheduler_label": "LTXV 0.9.8 distilled sigmas"
-    },
-    "recommendation_sources": [
-      "https://huggingface.co/Lightricks/LTX-Video",
-      "backend/renderfin/assets/workflows/gen_animation_by_url.json"
-    ],
-    "author_notes": "The only video tier that fans out: all four image boxes (f15, f5, f12, Raptor) hold the file and advertise gen_animation_by_url.json, so three clips can render on three boxes at once. Silent video, no audio track, and no compatible LoRA in this catalogue — the LTX 2.3 adapters are a different architecture. Measured medians: f15 21 s, f12 40 s, f5 59 s, Raptor 100 s.",
-    "sampling_audit_at": "2026-09-22"
+    ]
   },
   {
     "kind": "checkpoint",

@@ -691,17 +691,10 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
 
     mode = str(mode or "").strip().lower()
     control_channel = str(control_channel or "").strip().lower()
-    if service_id == "image" and mode == "inpaint":
-        raise HTTPException(status_code=400, detail={
-            "error_string": "unsupported_image_mode",
-            "message_string": (
-                "Inpaint needs the FLUX.1 Fill Dev checkpoint, which is not "
-                "installed or validated; choose Plain or another available mode")})
-
     entries = ai_model_catalogue.entries()
     required_default_family = ""
-    if service_id == "image" and mode in LEGACY_FLUX_IMAGE_MODES:
-        required_default_family = "flux"
+    if service_id == "image" and mode in LEGACY_IMAGE_MODES:
+        required_default_family = LEGACY_IMAGE_MODE_FAMILY
     elif service_id == "image" and control_channel and not checkpoint and not lora:
         required_default_family = "pony"
 
@@ -719,7 +712,7 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
     if (not required_default_family and not use_default and not checkpoint
             and not lora and service_id == "image"):
         legacy_base = ai_model_defaults.family_default_checkpoint(
-            entries, {"family": "flux"}, "image")
+            entries, {"family": LEGACY_IMAGE_MODE_FAMILY}, "image")
         checkpoint = str((legacy_base or {}).get("file") or "") or None
     if not checkpoint and lora:
         # Validate the adapter first, then resolve only a catalogue-declared
@@ -751,10 +744,10 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
     lora_entry = ai_model_catalogue.known_file(chosen.get("lora", ""), "lora")
     selected_entry = checkpoint_entry or lora_entry
     selected_family = ai_model_defaults.model_family(selected_entry)
-    if mode in LEGACY_FLUX_IMAGE_MODES and selected_family != "flux":
+    if mode in LEGACY_IMAGE_MODES and selected_family != LEGACY_IMAGE_MODE_FAMILY:
         raise HTTPException(status_code=400, detail={
             "error_string": "mode_model_incompatible",
-            "message_string": f"{mode} requires a validated FLUX.1 checkpoint"})
+            "message_string": f"{mode} requires a Z-Image checkpoint"})
     if control_channel:
         try:
             ai_model_defaults.control_workflow(selected_family, control_channel)
@@ -770,9 +763,9 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
             "error_string": ("invalid_sampling_settings" if compatible_pair
                              else "incompatible_model_pair"),
             "message_string": str(exc)}) from None
-    if mode in LEGACY_FLUX_IMAGE_MODES:
-        # These audited templates contain more than one sampling stage (the
-        # T-pose refiner intentionally differs from its Schnell base stage).
+    if mode in LEGACY_IMAGE_MODES:
+        # These templates carry their own tuned sampling (the inpaint and
+        # T-pose graphs keep their own control strength and step counts).
         # Model-level Auto values must not flatten every stage to one preset.
         # A caller's explicit knob is still forwarded and remains authoritative.
         for key in ("steps", "cfg", "sampler", "scheduler", "clip_skip"):
@@ -793,8 +786,8 @@ def _render_model_profile(service_id: str, checkpoint: Optional[str],
     entries = ai_model_catalogue.entries()
     selected = {str(checkpoint or ""), str(lora or "")}
     families = set()
-    if str(mode or "").strip().lower() in LEGACY_FLUX_IMAGE_MODES:
-        families.add("flux")
+    if str(mode or "").strip().lower() in LEGACY_IMAGE_MODES:
+        families.add(LEGACY_IMAGE_MODE_FAMILY)
     elif has_control and not checkpoint and not lora:
         families.add("pony")
     if lora:
@@ -1255,7 +1248,17 @@ VIDEO_QUALITIES = {
     "standard": "gen_animation_by_url.json",
     "hq": "gen_animation_hq_by_url.json",
 }
-LEGACY_FLUX_IMAGE_MODES = {"z_depth", "t_pose", "open_pose"}
+# Typed image modes with their own graphs (depth from a sphere, T-pose from a
+# skeleton, pose from a photo, background extraction). FLUX.1 ran them until
+# 2026-09-23; they now run on Z-Image Turbo with the Fun ControlNet Union patch,
+# which also gives inpaint a model again (FLUX.1 Fill Dev was never installed).
+LEGACY_IMAGE_MODES = {"z_depth", "t_pose", "open_pose", "inpaint"}
+LEGACY_IMAGE_MODE_FAMILY = "zimage"
+# Pose / depth / canny video control runs LTX-2.5 with the Union-Control
+# IC-LoRA. The 2.3 name is accepted from nodes saved before the migration.
+VIDEO_CONTROL_CHECKPOINT = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
+VIDEO_CONTROL_CHECKPOINTS = (VIDEO_CONTROL_CHECKPOINT, "ltx-2.3-22b-distilled-1.1")
+LTX25_HQ_WORKFLOW = "gen_animation_ltx25_hq_by_url.json"
 
 
 def _video_quality_workflow(quality: str, family: str,
@@ -1272,6 +1275,10 @@ def _video_quality_workflow(quality: str, family: str,
     quality = str(quality or "").strip().lower()
     family = str(family or "").strip().lower()
     model_workflow = str(model_workflow or "").strip()
+    if family == "ltx25":
+        # LTX-2.5 has a real second tier: the official two-stage graph
+        # (half-size pass, x2 latent upscale, three-step refine).
+        return LTX25_HQ_WORKFLOW if quality == "hq" else ""
     if quality == "hq" and family == "ltx23":
         raise HTTPException(status_code=400, detail={
             "error_string": "unsupported_video_quality",
@@ -1750,8 +1757,12 @@ async def _uncached_api_video(body: VideoRequest):
         if body.negative_prompt and str(body.negative_prompt).strip():
             payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
         if body.control_video_url:
-            if 'ltx-2.3-22b-distilled-1.1' not in str(payload.get('checkpoint', '')):
-                raise HTTPException(400, detail="Video control requires the LTX-2.3 distilled 1.1 model")
+            if not any(name in str(payload.get('checkpoint', '')) for name in VIDEO_CONTROL_CHECKPOINTS):
+                raise HTTPException(400, detail="Video control requires the LTX-2.5 distilled model")
+            # The control templates are LTX-2.5 graphs carrying the 2.3
+            # Union-Control IC-LoRA; a saved node that still names the 2.3
+            # transformer is rendered on the model those graphs were built for.
+            payload['checkpoint'] = VIDEO_CONTROL_CHECKPOINT
             payload['control_video_url'] = body.control_video_url
             payload['control_strength'] = body.control_strength
             payload['work_flow'] = {
