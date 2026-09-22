@@ -165,6 +165,10 @@ class NodeResult(BaseModel):
         return clean
 
 
+# Render quality: the factor every width/height is multiplied by at submit time.
+RENDER_QUALITIES = {"preview": 0.25, "fast": 0.5, "normal": 1.0, "highquality": 2.0}
+
+
 class Graph(BaseModel):
     name: str = "Untitled"
     # Empty keeps every legacy graph's content-derived id unchanged. A
@@ -172,6 +176,11 @@ class Graph(BaseModel):
     # an independent deep link and subsequent result updates stay on it.
     instance_id: str = Field("", max_length=64)
     comparison_anchor_id: str = Field("", max_length=64)
+    # One scale for every width/height the graph sends (the editor applies it
+    # at submit time; node params keep the base size). "normal" is the
+    # default and is left out of a graph's identity, so every graph saved
+    # before this existed keeps its id.
+    render_quality: str = Field("normal", max_length=16)
     nodes: List[GraphNode] = Field(default_factory=list)
     links: List[GraphLink] = Field(default_factory=list)
     # Keyed by node id. Never part of what makes a graph's identity: a rerun
@@ -184,6 +193,14 @@ class Graph(BaseModel):
         value = str(value or "")
         if value and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
             raise ValueError("instance_id may contain letters, digits, - and _")
+        return value
+
+    @field_validator("render_quality")
+    @classmethod
+    def validate_render_quality(cls, value: str) -> str:
+        value = str(value or "normal").strip().lower()
+        if value not in RENDER_QUALITIES:
+            raise ValueError("render_quality is one of " + ", ".join(RENDER_QUALITIES))
         return value
 
     @field_validator("comparison_anchor_id")
@@ -547,7 +564,7 @@ def _identity_payload(body: Dict[str, object]) -> str:
         for key, value in body.items()
         if key != "results" and not (
             key in {"instance_id", "comparison_anchor_id"} and not value
-        )
+        ) and not (key == "render_quality" and value in ("", "normal"))
     }
     # Pydantic preserves an incoming integer ``0`` for a float field on the
     # first model dump, while JSON load + revalidation emits ``0.0``. New

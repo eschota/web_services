@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260922-ui6d"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260923-multiout1"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260922-sysprompt1"></script>
     <script src="/static/js/ai-node-display.js?v=20260923-sockets1"></script>
     <script src="/static/js/ai-node-sockets.js?v=20260923-sockets1"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
@@ -27,7 +27,8 @@
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260923-lstack3"></script>
-    <script src="/static/js/ai-nodes.js?v=20260923-lstack3"></script>
+    <script src="/static/js/ai-render-quality.js?v=20260923-rq2"></script>
+    <script src="/static/js/ai-nodes.js?v=20260923-rq2"></script>
     <style>
         .ai-page {
             background:
@@ -65,6 +66,26 @@
         }
         .bar button:disabled { opacity: .55; cursor: not-allowed; }
         .bar button#cancel { border-color: rgba(251,113,133,.5); color: #fb7185; }
+        /* Render quality: four icon segments; the name is in the tooltip. */
+        .rq-group {
+            display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04);
+        }
+        .bar .rq-group .rq-btn {
+            min-width: 30px; padding: 6px 7px; border: 0; border-radius: 7px; font-size: 13px;
+            font-weight: 700; background: transparent; color: #9aa0b5; font-variant-numeric: tabular-nums;
+        }
+        .bar .rq-group .rq-btn:hover { background: rgba(255,255,255,.1); color: #eef; }
+        .bar .rq-group .rq-btn.on { background: rgba(56,189,248,.2); color: #38bdf8; }
+        .bar .rq-group .rq-btn.on[data-quality="preview"], .bar .rq-group .rq-btn.on[data-quality="fast"] { background: rgba(250,204,21,.16); color: #facc15; }
+        .bar .rq-group .rq-btn.on[data-quality="highquality"] { background: rgba(192,132,252,.2); color: #c084fc; }
+        /* The size a node will actually send when the quality is not normal. */
+        .nqual {
+            font-style: normal; font-size: 10px; font-weight: 700; flex: 0 0 auto; cursor: help;
+            font-variant-numeric: tabular-nums; color: #facc15; padding: 2px 5px; border-radius: 6px;
+            background: rgba(250,204,21,.12); border: 1px solid rgba(250,204,21,.35);
+        }
+        .nqual.limited { color: #fb923c; border-color: rgba(251,146,60,.5); background: rgba(251,146,60,.12); }
         .bar button.danger { border-color: rgba(148,163,184,.35); color: #94a3b8; }
         .bar button.danger:hover { border-color: #fb7185; color: #fb7185; }
         .bar nav a { color: var(--text-secondary, #9aa0b5); font-size: 13px; margin-left: 12px; text-decoration: none; }

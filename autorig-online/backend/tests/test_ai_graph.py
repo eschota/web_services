@@ -395,6 +395,7 @@ class EndpointTests(unittest.TestCase):
         legacy_body = ai_graph.Graph(**payload).model_dump(by_alias=True)
         legacy_body.pop("instance_id")
         legacy_body.pop("comparison_anchor_id")
+        legacy_body.pop("render_quality")
         legacy_body.pop("results")
         legacy_identity = json.dumps(legacy_body, ensure_ascii=False, sort_keys=True)
         expected = ai_graph._new_id(legacy_identity)

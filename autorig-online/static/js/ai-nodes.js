@@ -27,6 +27,11 @@
   let graphAgent = null;
   let graphBridge = null;
   let graphInstanceId = '';
+  // Graph-wide render quality (ai-render-quality.js): scales every width and
+  // height at submit time; node params keep the base size.
+  let renderQuality = 'normal';
+  let renderQualityToolbar = null;
+  let renderQualityBadges = null;
   let comparisonAnchorId = '';
   let nodeCompare = null;
   let catalogue = null;
@@ -1888,6 +1893,11 @@
       if (text.trim()) body.system_prompt = text;
       body.structured = true;
     }
+    // Render quality: every width/height scaled, rounded and clamped here, so
+    // the scaled size is what the signature records and what the server gets.
+    if (typeof window !== 'undefined' && window.AIRenderQuality && renderQuality !== 'normal') {
+      window.AIRenderQuality.applyToBody(serviceId, body, renderQuality, declaration);
+    }
     return body;
   }
 
@@ -2338,6 +2348,7 @@
     runState.forEach((value, key) => { results[key] = value; });
     return { name: document.getElementById('graph-name').value.trim() || 'Untitled',
              instance_id: graphInstanceId, comparison_anchor_id: comparisonAnchorId,
+             render_quality: renderQuality,
              nodes, links, results };
   }
 
@@ -2417,9 +2428,29 @@
     return { response, data: await response.json().catch(() => ({})), created: true };
   }
 
+  /** The quality rides in the address too (?q=), so a shared link opens in it. */
+  function syncQualityUrl() {
+    try {
+      const url = new URL(location.href);
+      if (renderQuality === 'normal') url.searchParams.delete('q');
+      else url.searchParams.set('q', renderQuality);
+      history.replaceState(null, '', url.pathname + url.search);
+    } catch (error) { /* an address that cannot be parsed keeps what it had */ }
+  }
+
+  function setRenderQuality(mode) {
+    const quality = window.AIRenderQuality ? window.AIRenderQuality.normalize(mode) : 'normal';
+    renderQuality = quality;
+    if (renderQualityToolbar) renderQualityToolbar.paint();
+    if (renderQualityBadges) renderQualityBadges.refresh();
+    syncQualityUrl();
+    return quality;
+  }
+
   function adoptSavedId(data) {
     graphId = data.graph_id_string;
     history.replaceState(null, '', data.deep_link_string);
+    syncQualityUrl();
     document.dispatchEvent(new CustomEvent('ai-graph-saved', {detail:{graphId}}));
   }
 
@@ -2757,6 +2788,7 @@
     nodeMeta.clear();
     runState.clear();
     graphInstanceId = graph.instance_id || '';
+    setRenderQuality(graph.render_quality || 'normal');
     comparisonAnchorId = '';
     document.getElementById('graph-name').value = graph.name || 'Untitled';
     const mapping = new Map();
@@ -3170,6 +3202,13 @@
     if (window.AINodeSockets) window.AINodeSockets.install({editor, canvas:document.getElementById('canvas'),
       socketTypes, linkAllowed, entityTypes:catalogue.entity_types_array || []});
     installStatusLines(document.getElementById('canvas'));
+    if (window.AIRenderQuality) {
+      renderQualityToolbar = window.AIRenderQuality.installToolbar({
+        host: document.getElementById('run'), get: () => renderQuality, set: setRenderQuality});
+      renderQualityBadges = window.AIRenderQuality.installBadges({
+        canvas: document.getElementById('canvas'), getMeta: meta, serviceById,
+        getQuality: () => renderQuality});
+    }
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
@@ -3279,6 +3318,7 @@
       graphId = null;
       graphInstanceId = ''; comparisonAnchorId = '';
       history.replaceState(null, '', '/nodes');
+      syncQualityUrl();
     });
     setRunning(false);
 
@@ -3303,6 +3343,7 @@
 
     const wanted = new URLSearchParams(location.search).get('g');
     const wantedAvatar = new URLSearchParams(location.search).get('avatar');
+    const wantedQuality = new URLSearchParams(location.search).get('q');
     if (wanted) {
       const data = await fetch('/api/ai/graphs/' + encodeURIComponent(wanted))
         .then(r => r.json()).catch(() => null);
@@ -3320,6 +3361,7 @@
     } else if ((templates.templates_array || []).length) {
       loadGraph(templates.templates_array[0].graph);
     }
+    if (wantedQuality) setRenderQuality(wantedQuality);
     scheduleFitView();
     if (window.AINodeCompare) nodeCompare = window.AINodeCompare.install({
       canvas:document.getElementById('canvas'), getMeta:meta, getGraph:graphFromCanvas,

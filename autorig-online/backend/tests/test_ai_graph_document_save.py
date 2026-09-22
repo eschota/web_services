@@ -160,5 +160,44 @@ class DocumentSaveTests(unittest.TestCase):
         self.assertEqual(results.status_code, 200)
 
 
+class RenderQualityTests(unittest.TestCase):
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self._previous = ai_graph.GRAPH_DIR
+        ai_graph.GRAPH_DIR = Path(self._dir.name)
+        self.client = _client()
+
+    def tearDown(self):
+        ai_graph.GRAPH_DIR = self._previous
+        self._dir.cleanup()
+
+    def test_old_graphs_are_normal_and_keep_their_id(self):
+        plain = self.client.post("/api/ai/graphs", json=_payload()).json()["graph_id_string"]
+        explicit = self.client.post("/api/ai/graphs",
+                                    json={**_payload(), "render_quality": "normal"}).json()["graph_id_string"]
+        self.assertEqual(plain, explicit)
+        loaded = self.client.get(f"/api/ai/graphs/{plain}").json()["graph_object"]
+        self.assertEqual(loaded["render_quality"], "normal")
+
+    def test_quality_is_stored_and_survives_an_update(self):
+        graph_id = self.client.post("/api/ai/graphs",
+                                    json={**_payload(), "render_quality": "preview"}).json()["graph_id_string"]
+        self.assertEqual(self.client.get(f"/api/ai/graphs/{graph_id}").json()
+                         ["graph_object"]["render_quality"], "preview")
+        self.client.put(f"/api/ai/graphs/{graph_id}", json={**_payload(), "render_quality": "highquality"})
+        self.assertEqual(self.client.get(f"/api/ai/graphs/{graph_id}").json()
+                         ["graph_object"]["render_quality"], "highquality")
+
+    def test_an_unknown_quality_is_refused(self):
+        response = self.client.post("/api/ai/graphs", json={**_payload(), "render_quality": "ultra"})
+        self.assertEqual(response.status_code, 422)
+
+    def test_a_non_normal_quality_is_part_of_identity(self):
+        normal = self.client.post("/api/ai/graphs", json=_payload()).json()["graph_id_string"]
+        fast = self.client.post("/api/ai/graphs",
+                                json={**_payload(), "render_quality": "fast"}).json()["graph_id_string"]
+        self.assertNotEqual(normal, fast)
+
+
 if __name__ == "__main__":
     unittest.main()
