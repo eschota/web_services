@@ -12,7 +12,7 @@ function load() {
   let source = fs.readFileSync(sourcePath, 'utf8');
   source = source.replace(
     '  window.AIGraphAgent = {install};',
-    '  window.AIGraphAgent = {install}; window.__agentTest = {compactGraph, compactCatalogue, parseProposal};');
+    '  window.AIGraphAgent = {install}; window.__agentTest = {compactGraph, compactCatalogue, parseProposal, buildAgentInput, modelBudget, reasoningRetryBudget, systemPrompt:SYSTEM_PROMPT};');
   const context = {window:{}, URL, URLSearchParams, console};
   vm.runInNewContext(source, context, {filename:sourcePath});
   return context.window.__agentTest;
@@ -62,4 +62,51 @@ test('proposal rejects invented URLs and unsafe schemes but permits an existing 
   assert.throws(() => api.parseProposal(JSON.stringify({
     message:'unsafe', operations:[{op:'set_input', id:'a', value:'javascript:alert(1)'}]
   }), graph), /unsafe value/);
+});
+
+test('two-node Canny edit keeps both nodes before compacting a large catalogue', () => {
+  const api = load();
+  const graph = {
+    name:'Canny QA',
+    nodes:[
+      {id:'source', kind:'input', entity_type:'image', value:'https://autorig.online/dev/api/scratch/source.png', x:0, y:0, params:{}},
+      {id:'canny', kind:'service', service:'control_canny', x:400, y:200,
+       params:{low_threshold:100, high_threshold:200}}
+    ],
+    links:[{from:'source', output:'value', to:'canny', input:'image'}]
+  };
+  const services = Array.from({length:90}, (_, index) => ({
+    id:index === 42 ? 'control_canny' : 'service_' + index,
+    title:'Service ' + index,
+    status:'live',
+    inputs:[{field:'image', type:'image', required:true}],
+    outputs:[{field:'result', type:'image'}],
+    params_array:Array.from({length:8}, (_unused, param) => ({
+      name:index === 42 && param === 0 ? 'low_threshold' : 'parameter_' + param,
+      type:'number', min:0, max:2048,
+      options:Array.from({length:30}, (_x, option) => ({value:'option_' + option}))
+    }))
+  }));
+  const catalogue = {
+    entity_types_array:[{id:'image', title:'Image'}], services_array:services
+  };
+  const model = {context_tokens:4096, max_output_tokens:2048};
+  const built = api.buildAgentInput('Move the Canny node to the right', model,
+    graph, catalogue, [], []);
+  const payload = JSON.parse(built.encoded);
+  assert.deepEqual(Array.from(payload.graph.nodes, node => node.id), ['source', 'canny']);
+  assert.deepEqual(Array.from(payload.graph.all_node_ids), ['source', 'canny']);
+  const canny = payload.catalogue.services.find(service => service.id === 'control_canny');
+  assert.ok(canny);
+  assert.ok((canny.params || []).some(param => param.name === 'low_threshold'));
+  assert.ok(api.systemPrompt.length + 20 + built.encoded.length < 8000);
+});
+
+test('reasoning exhaustion gets one larger budget and never loops', () => {
+  const api = load();
+  assert.equal(api.reasoningRetryBudget(
+    'model_spent_its_budget_thinking: no answer', 2048, false), 4096);
+  assert.equal(api.reasoningRetryBudget(
+    'model_spent_its_budget_thinking: no answer', 4096, true), null);
+  assert.equal(api.reasoningRetryBudget('worker unavailable', 2048, false), null);
 });

@@ -123,18 +123,25 @@ Use only service, entity, parameter and socket names present in the supplied cat
     };
   }
 
-  function compactCatalogue(raw) {
+  function compactCatalogue(raw, relevantServiceIds, minimal) {
+    const relevant = relevantServiceIds || new Set();
     return {
       entity_types:(raw.entity_types_array || []).map(item => ({id:item.id, title:item.title})),
-      services:(raw.services_array || []).map(service => ({
-        id:service.id, title:service.title, status:service.status,
-        inputs:(service.inputs || []).map(item => ({field:item.field, type:item.type, required:!!item.required})),
-        outputs:(service.outputs || []).map(item => ({field:item.field, type:item.type})),
-        params:(service.params_array || []).map(item => ({
+      services:(raw.services_array || []).map(service => {
+        const current = relevant.has(String(service.id));
+        const summary = {id:service.id, status:service.status};
+        if (minimal && !current) return summary;
+        summary.title = service.title;
+        summary.inputs = (service.inputs || []).map(item => ({
+          field:item.field, type:item.type, required:!!item.required
+        }));
+        summary.outputs = (service.outputs || []).map(item => ({field:item.field, type:item.type}));
+        if (current) summary.params = (service.params_array || []).map(item => ({
           name:item.name, type:item.type, min:item.min, max:item.max,
-          options:(item.options || []).slice(0, 40).map(option => option.value)
-        }))
-      }))
+          options:minimal ? undefined : (item.options || []).slice(0, 40).map(option => option.value)
+        }));
+        return summary;
+      })
     };
   }
 
@@ -184,6 +191,78 @@ Use only service, entity, parameter and socket names present in the supplied cat
       })(operation);
     });
     return {message:cleanString(value.message, 2000), operations:value.operations};
+  }
+
+  function modelBudget(entry) {
+    const contextTokens = Math.max(2048, Number(entry?.context_tokens) || 4096);
+    const outputTokens = Math.min(2048, Number(entry?.max_output_tokens) || 2048);
+    const contextChars = Math.max(3000,
+      Math.floor((contextTokens - outputTokens - 700) * 3));
+    // TextRequest joins prompt and input, then enforces an 8000-char ceiling.
+    const apiInputCeiling = Math.max(1800, 7800 - SYSTEM_PROMPT.length - 40);
+    return {outputTokens, inputChars:Math.min(apiInputCeiling, contextChars)};
+  }
+
+  function reasoningRetryBudget(errorString, currentBudget, alreadyRetried) {
+    if (alreadyRetried ||
+        !String(errorString || '').includes('model_spent_its_budget_thinking')) return null;
+    return Math.min(8192, Math.max(4096, Number(currentBudget || 0) * 2));
+  }
+
+  function buildAgentInput(userText, entry, graph, rawCatalogue, selectedIds, history) {
+    const compact = compactGraph(graph, selectedIds);
+    const relevant = new Set(compact.nodes.map(node => node.service).filter(Boolean));
+    const budget = modelBudget(entry);
+    const newest = [];
+    let used = 0;
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const item = history[index];
+      const row = {role:item.role, text:cleanString(item.text, 700)};
+      const size = JSON.stringify(row).length;
+      if (used + size > Math.max(500, budget.inputChars * .28)) break;
+      newest.unshift(row); used += size;
+    }
+    const payload = {
+      graph:compact,
+      catalogue:compactCatalogue(rawCatalogue, relevant, false),
+      recent_conversation:newest,
+      user_request:cleanString(userText, 2000)
+    };
+    let encoded = JSON.stringify(payload);
+    if (encoded.length > budget.inputChars) {
+      payload.recent_conversation = [];
+      encoded = JSON.stringify(payload);
+    }
+    if (encoded.length > budget.inputChars) {
+      // Shrink catalogue detail before sacrificing a requested graph node.
+      payload.catalogue = compactCatalogue(rawCatalogue, relevant, true);
+      encoded = JSON.stringify(payload);
+    }
+    if (encoded.length > budget.inputChars) {
+      const relevantCatalogue = compactCatalogue(rawCatalogue, relevant, true);
+      payload.catalogue = {
+        entity_types:(rawCatalogue.entity_types_array || []).map(item => item.id),
+        available_service_ids:(rawCatalogue.services_array || []).map(service => service.id),
+        services:relevantCatalogue.services.filter(service => relevant.has(String(service.id)))
+      };
+      encoded = JSON.stringify(payload);
+    }
+    if (encoded.length > budget.inputChars) {
+      payload.graph.nodes = payload.graph.nodes.slice(0, Math.max(1,
+        Math.floor(payload.graph.nodes.length * budget.inputChars / encoded.length)));
+      payload.graph.context_scope += '; node details truncated to fit model context';
+      encoded = JSON.stringify(payload);
+    }
+    if (encoded.length > budget.inputChars) {
+      payload.graph.nodes = [];
+      payload.graph.links = [];
+      payload.graph.context_scope += '; details omitted, ask for a selected subset';
+      encoded = JSON.stringify(payload);
+    }
+    if (encoded.length > budget.inputChars) {
+      throw new Error('This graph is too large for the selected model. Select the nodes to edit and try again.');
+    }
+    return {encoded, scope:compact.context_scope, outputTokens:budget.outputTokens};
   }
 
   function install(options) {
@@ -276,70 +355,15 @@ Use only service, entity, parameter and socket names present in the supplied cat
       loadConversation();
     }
 
-    function modelBudget(entry) {
-      const contextTokens = Math.max(2048, Number(entry?.context_tokens) || 4096);
-      const outputTokens = Math.min(2048, Number(entry?.max_output_tokens) || 2048);
-      return {
-        outputTokens,
-        inputChars:Math.min(8000 - SYSTEM_PROMPT.length - 128, Math.max(3000,
-          Math.floor((contextTokens - outputTokens - 700) * 3)))
-      };
-    }
-
     function buildInput(userText, entry, graph) {
       const selected = typeof options.getSelectedIds === 'function'
         ? options.getSelectedIds() : [];
-      const compact = compactGraph(graph, selected);
-      const catalogue = compactCatalogue(typeof options.getCatalogue === 'function'
-        ? options.getCatalogue() : {});
-      const budget = modelBudget(entry);
-      const newest = [];
-      let used = 0;
-      for (let index = conversation.length - 1; index >= 0; index -= 1) {
-        const item = conversation[index];
-        const row = {role:item.role, text:cleanString(item.text, 700)};
-        const size = JSON.stringify(row).length;
-        if (used + size > Math.max(500, budget.inputChars * .28)) break;
-        newest.unshift(row); used += size;
-      }
-      const payload = {graph:compact, catalogue, recent_conversation:newest,
-        user_request:cleanString(userText, 2000)};
-      let encoded = JSON.stringify(payload);
-      if (encoded.length > budget.inputChars) {
-        payload.recent_conversation = [];
-        encoded = JSON.stringify(payload);
-      }
-      if (encoded.length > budget.inputChars) {
-        // Keep all ids and the scope statement even when node details are too
-        // large for this model's published context.
-        payload.graph.nodes = payload.graph.nodes.slice(0, Math.max(1,
-          Math.floor(payload.graph.nodes.length * budget.inputChars / encoded.length)));
-        payload.graph.context_scope += '; node details truncated to fit model context';
-        encoded = JSON.stringify(payload);
-      }
-      if (encoded.length > budget.inputChars) {
-        payload.catalogue.services = payload.catalogue.services.map(service => ({
-          id:service.id,
-          inputs:service.inputs.map(item => item.field + ':' + item.type),
-          outputs:service.outputs.map(item => item.field + ':' + item.type)
-        }));
-        payload.catalogue.entity_types = payload.catalogue.entity_types.map(item => item.id);
-        encoded = JSON.stringify(payload);
-      }
-      if (encoded.length > budget.inputChars) {
-        payload.graph.nodes = [];
-        payload.graph.links = [];
-        payload.graph.context_scope += '; details omitted, ask for a selected subset';
-        encoded = JSON.stringify(payload);
-      }
-      if (encoded.length > budget.inputChars) {
-        throw new Error('This graph is too large for the selected model. Select the nodes to edit and try again.');
-      }
-      return {encoded, scope:compact.context_scope,
-        outputTokens:budget.outputTokens};
+      return buildAgentInput(userText, entry, graph,
+        typeof options.getCatalogue === 'function' ? options.getCatalogue() : {},
+        selected, conversation);
     }
 
-    async function submitModel(prompt, input, entry, outputTokens) {
+    async function submitModel(prompt, input, entry, outputTokens, budgetRetried) {
       const response = await fetch('/api/text2text', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({model:entry.id, prompt, input,
@@ -360,6 +384,11 @@ Use only service, entity, parameter and socket names present in the supplied cat
         setStatus((data.status_string || 'working') + (data.node_string ? ' · ' + data.node_string : ''));
         if (data.finished_bool) {
           if (data.answer_string) return data.answer_string;
+          const larger = reasoningRetryBudget(data.error_string, outputTokens, budgetRetried);
+          if (larger) {
+            setStatus('The model used its answer budget thinking · retrying once with ' + larger);
+            return submitModel(prompt, input, entry, larger, true);
+          }
           throw new Error(data.error_string || 'The model returned no answer');
         }
       }

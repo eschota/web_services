@@ -602,12 +602,23 @@
       event.preventDefault();
       acceptMedia([...event.dataTransfer.files].find(item => item.type.startsWith(isVideo ? 'video/' : 'image/')));
     });
-    text.addEventListener('change', () => {
+    let previewTimer = null;
+    const refreshInputPreview = () => {
+      clearTimeout(previewTimer);
       if (/^https?:\/\//.test(text.value.trim())) {
         preview.src = text.value.trim();
         preview.hidden = false;
         if (isVideo) preview.play().catch(() => {});
+      } else {
+        if (isVideo) preview.pause();
+        preview.removeAttribute('src');
+        preview.hidden = true;
       }
+    };
+    text.addEventListener('change', refreshInputPreview);
+    text.addEventListener('input', () => {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(refreshInputPreview, 180);
     });
   }
 

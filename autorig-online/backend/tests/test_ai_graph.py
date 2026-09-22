@@ -417,8 +417,65 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(len(result["history"]), 5)
         self.assertEqual(
             [entry["value"] for entry in result["history"]],
-            [f"https://x/current-{index}.png" for index in range(1, 6)],
+            [f"https://x/current-{index}.png" for index in range(5, 0, -1)],
         )
+
+    def test_browser_and_server_archives_dedupe_same_value_across_timestamps(self):
+        payload = self._payload()
+        payload["instance_id"] = "history-dedupe"
+        graph_id = self.client.post("/api/ai/graphs", json=payload).json()["graph_id_string"]
+        current = {"status": "done", "type": "image", "value": "https://x/a.png",
+                   "input_reference_url": "https://x/ref.png"}
+        self.assertEqual(self.client.put(
+            f"/api/ai/graphs/{graph_id}/results", json={"b": current}
+        ).status_code, 200)
+        replacement = {
+            "status": "running", "type": "image", "value": "",
+            "input_reference_url": "https://x/ref-2.png",
+            "history": [{"type": "image", "value": "https://x/a.png",
+                         "input_reference_url": "https://x/ref.png", "created_at": 1}],
+        }
+        self.assertEqual(self.client.put(
+            f"/api/ai/graphs/{graph_id}/results", json={"b": replacement}
+        ).status_code, 200)
+        result = self.client.get(
+            f"/api/ai/graphs/{graph_id}"
+        ).json()["graph_object"]["results"]["b"]
+        self.assertEqual([item["value"] for item in result["history"]], ["https://x/a.png"])
+
+    def test_control_image_alias_dedupes_and_current_media_is_excluded(self):
+        payload = self._payload()
+        payload["instance_id"] = "history-control-alias"
+        graph_id = self.client.post("/api/ai/graphs", json=payload).json()["graph_id_string"]
+        first = {"status": "done", "type": "control_canny",
+                 "value": "https://x/control.png", "input_reference_url": "https://x/ref.png"}
+        self.assertEqual(self.client.put(
+            f"/api/ai/graphs/{graph_id}/results", json={"b": first}
+        ).status_code, 200)
+        running = {
+            "status": "running", "type": "control_canny", "value": "",
+            "history": [
+                {"type": "image", "value": "https://x/control.png",
+                 "input_reference_url": "https://x/ref.png", "created_at": 1},
+            ],
+        }
+        self.assertEqual(self.client.put(
+            f"/api/ai/graphs/{graph_id}/results", json={"b": running}
+        ).status_code, 200)
+        completed = {
+            "status": "done", "type": "control_canny", "value": "https://x/new-control.png",
+            "history": [
+                {"type": "image", "value": "https://x/new-control.png", "created_at": 3},
+                {"type": "image", "value": "https://x/control.png", "created_at": 2},
+            ],
+        }
+        self.assertEqual(self.client.put(
+            f"/api/ai/graphs/{graph_id}/results", json={"b": completed}
+        ).status_code, 200)
+        result = self.client.get(
+            f"/api/ai/graphs/{graph_id}"
+        ).json()["graph_object"]["results"]["b"]
+        self.assertEqual([item["value"] for item in result["history"]], ["https://x/control.png"])
 
     def test_a_graph_that_could_not_run_is_not_saved(self):
         payload = self._payload()

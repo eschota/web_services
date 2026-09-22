@@ -31,6 +31,13 @@ test('history uses strict numeric Unix timestamps and keeps at most five unique 
   assert.equal(next.history[0].value, previous.value);
   assert.ok(next.history.every((entry) => Number.isFinite(entry.created_at)));
   assert.equal(new Set(next.history.map((entry) => entry.value)).size, 5);
+  assert.deepEqual(Array.from(next.history, (entry) => entry.value), [
+    'https://example.test/current.png',
+    'https://example.test/history-0.png',
+    'https://example.test/history-1.png',
+    'https://example.test/history-2.png',
+    'https://example.test/history-3.png',
+  ]);
 });
 
 test('running and failed states carry history and the pinned input reference', () => {
@@ -48,6 +55,33 @@ test('stale visual output is retained once and current output is never duplicate
   assert.equal(next.history.filter((entry) => entry.value === stale.value).length, 1);
   const same = api.enhanceRecord(finished(stale.value), stale);
   assert.equal(same.history.some((entry) => entry.value === stale.value), false);
+});
+
+test('ControlNet image aliases with the same URL occupy one history slot', () => {
+  const previous = finished('https://example.test/control.png', {
+    type: 'control_canny',
+    history: [{ type: 'image', value: 'https://example.test/control.png',
+      input_reference_url: 'https://example.test/other-ref.png', created_at: 10 }],
+  });
+  const next = api.enhanceRecord({ status: 'running', type: 'control_canny', value: '' }, previous);
+  assert.equal(next.history.length, 1);
+  assert.equal(next.history[0].value, previous.value);
+});
+
+test('legacy oldest-first history is normalized newest-first before bounding', () => {
+  const previous = finished('https://example.test/current.png', {
+    created_at: 20,
+    history: [
+      { type: 'image', value: 'https://example.test/old.png', created_at: 1 },
+      { type: 'image', value: 'https://example.test/newer.png', created_at: 10 },
+    ],
+  });
+  const next = api.enhanceRecord({ status: 'running', type: 'image', value: '' }, previous);
+  assert.deepEqual(Array.from(next.history, (entry) => entry.value), [
+    'https://example.test/current.png',
+    'https://example.test/newer.png',
+    'https://example.test/old.png',
+  ]);
 });
 
 test('blank, relative and credential-bearing URLs cannot become comparison A', () => {

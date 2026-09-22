@@ -504,16 +504,6 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
         except Exception:
             previous = NodeResult()
 
-        history: List[HistoryEntry] = []
-        seen_history = set()
-        for entry in [*previous.history, *incoming.history]:
-            signature = (
-                entry.type, entry.value, entry.input_reference_url, entry.created_at
-            )
-            if signature not in seen_history:
-                history.append(entry)
-                seen_history.add(signature)
-
         previous_completed = previous.status.lower() in {"done", "completed"}
         previous_changed = (
             previous.type,
@@ -525,6 +515,7 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
             incoming.input_reference_url,
         )
         allowed_types = {str(item["id"]) for item in ai_services.ENTITY_TYPES}
+        archived: Optional[HistoryEntry] = None
         if (
             previous_completed
             and previous_changed
@@ -537,15 +528,41 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
                 input_reference_url=previous.input_reference_url,
                 created_at=time.time(),
             )
+        # Newest first everywhere. The browser already archives the visible
+        # result before publishing a running replacement, while this endpoint
+        # also archives the previously stored completed result. Those copies
+        # have different clocks, so timestamp cannot be part of their identity.
+        candidates = ([archived] if archived else []) + [
+            *incoming.history, *previous.history
+        ]
+        candidates.sort(key=lambda entry: entry.created_at, reverse=True)
+        history: List[HistoryEntry] = []
+        seen_history = set()
+        current_media_value = (
+            incoming.value
+            if incoming.status.lower() in {"done", "completed", "stale"}
+            and incoming.type != ai_services.TEXT
+            else ""
+        )
+        for entry in candidates:
+            if current_media_value and entry.value == current_media_value:
+                continue
+            # ControlNet outputs are images. The browser normalises their
+            # archived type to `image`, while an older server result still says
+            # `control_canny`/`control_pose`/`control_depth`. The URL is the
+            # visual identity; type, reference and clocks must not duplicate it.
             signature = (
-                archived.type,
-                archived.value,
-                archived.input_reference_url,
-                archived.created_at,
+                (entry.type, entry.value)
+                if entry.type == ai_services.TEXT
+                else ("media", entry.value)
             )
-            if signature not in seen_history:
-                history.append(archived)
-        incoming.history = history[-5:]
+            if signature in seen_history:
+                continue
+            history.append(entry)
+            seen_history.add(signature)
+            if len(history) == 5:
+                break
+        incoming.history = history
         merged_results[key] = incoming.model_dump()
     graph["results"] = merged_results
     serialized_graph = json.dumps(graph, ensure_ascii=False, sort_keys=True)

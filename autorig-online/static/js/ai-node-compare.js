@@ -29,6 +29,7 @@
     const next = Object.assign({}, newRecord || {});
     const prior = previousRecord || {};
     const entries = [];
+    const timestamp = item => Number(item && item.created_at) || 0;
     const add = item => {
       if (!item || !item.value) return;
       const mediaType = inferType(item.value, item.type === 'video' ? 'video' : 'image');
@@ -44,9 +45,11 @@
       type: prior.type === 'video' ? 'video' : 'image', value: prior.value,
       input_reference_url: prior.input_reference_url || '', created_at: prior.created_at
     });
-    (Array.isArray(prior.history) ? prior.history : []).forEach(add);
-    (Array.isArray(next.history) ? next.history : []).forEach(add);
-    next.history = entries.slice(0, MAX_HISTORY);
+    const saved = (Array.isArray(prior.history) ? prior.history : [])
+      .concat(Array.isArray(next.history) ? next.history : [])
+      .sort((a, b) => timestamp(b) - timestamp(a));
+    saved.forEach(add);
+    next.history = entries.sort((a, b) => timestamp(b) - timestamp(a)).slice(0, MAX_HISTORY);
     if (!next.input_reference_url && prior.input_reference_url) next.input_reference_url = prior.input_reference_url;
     return next;
   }
@@ -267,7 +270,8 @@
 
     function historyEntries(record) {
       const seen = new Set();
-      return (Array.isArray(record && record.history) ? record.history : []).reduce((items, item) => {
+      return (Array.isArray(record && record.history) ? record.history : [])
+        .slice().sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)).reduce((items, item) => {
         const url = httpUrl(item && item.value);
         if (!url || seen.has(url)) return items;
         seen.add(url); items.push(Object.assign({}, item, { value: url })); return items;
@@ -414,7 +418,7 @@
       '.node-compare-ab button{color:#67e8f9;cursor:zoom-in}.node-compare-ab button:hover,.node-compare-ab button:focus-visible{background:rgba(56,189,248,.22);outline:none}',
       '.node-compare-ab span{background:rgba(123,92,255,.28);color:#ddd6fe}',
       '.node-history-strip{position:absolute;z-index:8;display:flex;gap:3px;padding:3px;border:1px solid rgba(255,255,255,.18);border-radius:7px;background:var(--compare-control-bg);overflow:hidden}',
-      '.node-history-item{width:29px;height:25px;padding:0;overflow:hidden;border:1px solid transparent;border-radius:4px;background:#111827;cursor:zoom-in}',
+      '.node-history-item{flex:0 1 29px;min-width:0;width:29px;height:25px;padding:0;overflow:hidden;border:1px solid transparent;border-radius:4px;background:#111827;cursor:zoom-in}',
       '.node-history-item:hover,.node-history-item:focus-visible{border-color:#38bdf8;outline:none}',
       '.node-history-item img,.node-history-item video{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}',
       '.node-compare-overlay{position:absolute;z-index:7;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:8px;background:#080914;pointer-events:none}',
