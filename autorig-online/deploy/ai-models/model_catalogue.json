@@ -654,12 +654,7 @@
     "version": "v1.0",
     "base": "LTXV 2.3",
     "nsfw": false,
-    "triggers": [
-      "Add a/an [subject/object] with [attributes], [location in the scene].",
-      "Remove the [subject/object] [location or identifying description].",
-      "Replace the [original subject/object] [location] with a/an [new subject/object] with [attributes].",
-      "Convert the video into a [style name] style."
-    ],
+    "triggers": [],
     "downloads": 5080,
     "page": "https://civitai.com/models/2553102?modelVersionId=2869279",
     "preview_source": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/42e643f2-5fdd-4137-9cc6-26bb93d9be92/original=true/127871658.mp4",
@@ -684,7 +679,8 @@
     "recommendation_kind": "author_example_metadata",
     "workflow": "gen_animation_ltx23_by_url.json",
     "author_notes": "Author suggests starting at CFG1, optionally increasing strength to1.2 for weak edits. Requires the dedicated video-edit conditioning workflow.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "trigger_note": "EditAnything is driven by an instruction prompt; its published trigger lines are placeholder templates, not words to prepend."
   },
   {
     "kind": "lora",
