@@ -942,7 +942,12 @@
       "f15"
     ],
     "notes": "A 20B MMDiT at three-bit weights: 9.2 GB, which streams on a 3070 Ti with the text encoder resident, so two boxes render at once.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "validated_workers": [
+      "Raptor",
+      "f5",
+      "f15"
+    ]
   },
   {
     "kind": "checkpoint",
@@ -977,7 +982,11 @@
       "f15"
     ],
     "notes": "The edit twin of the same architecture; chosen automatically when a picture is wired into the node.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "validated_workers": [
+      "f5",
+      "f15"
+    ]
   },
   {
     "kind": "checkpoint",

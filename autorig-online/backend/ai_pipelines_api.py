@@ -57,6 +57,8 @@ try:  # pragma: no cover - exercised by the live service
     from renderfin.routing import (  # type: ignore
         ENHANCE_SCHEDULING_TOKEN,
         ENHANCE_WORKFLOWS,
+        QWEN_IMAGE_SCHEDULING_TOKEN,
+        QWEN_IMAGE_WORKFLOWS,
     )
 except Exception:  # a page must not fall over because a package moved
     ENHANCE_SCHEDULING_TOKEN = "gen_image_control_canny.json"
@@ -68,8 +70,16 @@ except Exception:  # a page must not fall over because a package moved
         "face_fix": "face_fix.json",
         "face_fix_skin": "face_fix_skin.json",
     }
+    QWEN_IMAGE_SCHEDULING_TOKEN = ENHANCE_SCHEDULING_TOKEN
+    QWEN_IMAGE_WORKFLOWS = {
+        "qwen_image": "qwen_image_generate.json",
+        "qwen_image_edit": "qwen_image_edit.json",
+    }
 
 ENHANCE_FILES = frozenset(ENHANCE_WORKFLOWS.values())
+# The Qwen-Image pair rides the same canny token: the four image boxes
+# advertise it, and which of them holds a GGUF is settled per model file.
+QWEN_IMAGE_FILES = frozenset(QWEN_IMAGE_WORKFLOWS.values())
 
 # One physical box, two names: the converter registry calls the Ryzen machine
 # by its host name and the render registry by its farm name. The fleet strip
@@ -112,7 +122,14 @@ SERVICE_TOKENS = {
     "upscale": ENHANCE_SCHEDULING_TOKEN,
     "detail_enhance": ENHANCE_SCHEDULING_TOKEN,
     "face_fix": ENHANCE_SCHEDULING_TOKEN,
+    "qwen_image": QWEN_IMAGE_SCHEDULING_TOKEN,
 }
+
+# Services scheduled under a token that names more boxes than can serve them:
+# the canny token is carried by every image box, but a Qwen-Image job only
+# lands where the chosen GGUF is. For these the answer with no model chosen
+# is the union of the answers per model, not the token's own box list.
+BORROWED_TOKEN_SERVICES = frozenset({"qwen_image"})
 
 # Templates a service reaches through one of its own settings rather than by
 # default: the Image node's modes and control channels, the Video node's
@@ -222,13 +239,16 @@ def scheduling_token(workflow: object) -> str:
     """The name scheduling matches against a box's advertised workflows.
 
     For almost every template that is the file name itself. The enhancement
-    templates are the exception and the reason this function exists: they are
-    dispatched under the canny-control token because that is the token the
-    boxes carrying ESRGAN and TiledDiffusion advertise.
+    and Qwen-Image templates are the exception and the reason this function
+    exists: they are dispatched under the canny-control token because that is
+    the token the boxes carrying ESRGAN, TiledDiffusion and the GGUF loader
+    advertise.
     """
     name = str(workflow or "").strip()
     if name in ENHANCE_FILES:
         return ENHANCE_SCHEDULING_TOKEN
+    if name in QWEN_IMAGE_FILES:
+        return QWEN_IMAGE_SCHEDULING_TOKEN
     return TYPED_IMAGE_TOKENS.get(name, name)
 
 
@@ -542,19 +562,27 @@ def capacity_object(nodes: List[Dict[str, object]],
         entry = summarise(comfy_capable(token), token)
         entry["kind_string"] = "comfy"
         checkpoints: Dict[str, object] = {}
-        # Only the two services that expose a model picker can move off their
+        # Only the services that expose a model picker can move off their
         # default token; the rest run one template by construction.
-        if service_id in ("image", "video"):
+        if service_id in ("image", "video", "qwen_image"):
             for model in catalogue:
                 if str(model.get("kind") or "") != "checkpoint" or not model.get("usable"):
                     continue
                 if service_id not in (model.get("services") or []):
                     continue
                 model_token = str(model.get("workflow") or "") or token
+                # Matched the way scheduling matches: a Qwen template is
+                # advertised by nobody, the canny token it rides under is.
                 summary = summarise(
-                    comfy_capable(model_token, checkpoint_workers(model)), model_token)
+                    comfy_capable(scheduling_token(model_token), checkpoint_workers(model)),
+                    model_token)
                 summary["title_string"] = str(model.get("title") or model.get("file") or "")
                 checkpoints[str(model.get("file"))] = summary
+        if service_id in BORROWED_TOKEN_SERVICES and checkpoints:
+            held = {key for key in by_computer
+                    if any(label(key) in (item.get("computers_array") or [])
+                           for item in checkpoints.values())}
+            entry.update(summarise(held, token))
         entry["checkpoints_object"] = checkpoints
         capacity[service_id] = entry
 
@@ -735,6 +763,10 @@ def build_matrix(*, now: Optional[float] = None,
         bucket = services_by_token.setdefault(workflow, [])
         if service_id not in bucket:
             bucket.append(service_id)
+    for workflow in QWEN_IMAGE_WORKFLOWS.values():
+        bucket = services_by_token.setdefault(workflow, [])
+        if "qwen_image" not in bucket:
+            bucket.append("qwen_image")
 
     rows: List[Dict[str, object]] = []
     render_by_token: Dict[str, List[Dict[str, object]]] = {}

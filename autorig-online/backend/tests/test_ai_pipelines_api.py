@@ -36,6 +36,11 @@ class SchedulingTokenTests(unittest.TestCase):
             self.assertEqual(pipelines.scheduling_token(workflow),
                              pipelines.ENHANCE_SCHEDULING_TOKEN)
 
+    def test_qwen_image_templates_are_dispatched_under_the_canny_token(self):
+        for name in ("qwen_image_generate.json", "qwen_image_edit.json"):
+            self.assertEqual(pipelines.scheduling_token(name),
+                             "gen_image_control_canny.json")
+
     def test_the_two_names_of_the_ryzen_box_are_one_computer(self):
         self.assertEqual(pipelines.canonical_computer("ryzen-server"),
                          pipelines.canonical_computer("Raptor"))
@@ -234,6 +239,14 @@ class MatrixShapeTests(unittest.TestCase):
         # page draws a dash, so there is nothing to send.
         self.assertNotIn("f5", row["computers_object"])
 
+    def test_a_qwen_image_row_names_its_service_and_the_canny_dispatch(self):
+        catalogue = [_checkpoint("qwen-image-2512-Q3_K_S.gguf",
+                                 "qwen_image_generate.json", "qwen_image", ["f5"])]
+        row = next(r for r in self.matrix(catalogue=catalogue)["pipelines_array"]
+                   if r["id"] == "qwen_image_generate.json")
+        self.assertEqual(row["dispatch_token_string"], "gen_image_control_canny.json")
+        self.assertIn("qwen_image", row["services_array"])
+
     def test_empty_cells_are_left_out_of_the_answer(self):
         row = next(r for r in self.matrix()["pipelines_array"]
                    if r["id"] == "upscale_fast.json")
@@ -325,6 +338,29 @@ class CapacityTests(unittest.TestCase):
         frame = self.capacity()["video_frame"]
         self.assertEqual(frame["kind_string"], "local")
         self.assertEqual(frame["computers_array"], ["this server"])
+
+    def test_qwen_image_counts_the_boxes_holding_a_gguf_behind_the_canny_token(self):
+        servers = self.servers + [_server("Raptor", ["gen_image_control_canny.json"]),
+                                  _server("f12", ["gen_image_control_canny.json"])]
+        nodes = self.nodes + [{"id": "ryzen-server", "online": True, "busy": False},
+                              {"id": "f12", "online": True, "busy": False}]
+        catalogue = self.catalogue + [
+            _checkpoint("qwen-image-2512-Q3_K_S.gguf", "qwen_image_generate.json",
+                        "qwen_image", ["Raptor"]),
+            _checkpoint("qwen-image-edit-2511-Q3_K_S.gguf", "qwen_image_edit.json",
+                        "qwen_image", ["Raptor", "f12"])]
+        capacity = pipelines.capacity_object(
+            nodes, servers, ai_models_by_node={}, converters=self.converters,
+            catalogue=catalogue)
+        qwen = capacity["qwen_image"]
+        held = qwen["checkpoints_object"]
+        self.assertEqual(held["qwen-image-2512-Q3_K_S.gguf"]["computers_array"], ["Raptor"])
+        self.assertEqual(held["qwen-image-edit-2511-Q3_K_S.gguf"]["computers_array"],
+                         ["f12", "Raptor"])
+        # No model chosen: whichever GGUF the mode picks, only a box holding
+        # one can take the job, however many advertise the canny token.
+        self.assertEqual(qwen["computers_array"], ["f12", "Raptor"])
+        self.assertEqual(qwen["idle_int"], 2)
 
     def test_enhancement_nodes_share_the_canny_token(self):
         servers = self.servers + [_server("Raptor", ["gen_image_control_canny.json"])]
