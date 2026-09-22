@@ -5,7 +5,9 @@
   "status": "online",
   "available_workflows": [
     "gen_image.json",
-    "gen_animation_by_url.json"
+    "gen_animation_by_url.json",
+    "gen_image_flux2_klein.json",
+    "gen_image_flux2_klein_edit.json"
   ],
   "workflow_overrides": {},
   "basic_auth": false

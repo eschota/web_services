@@ -105,3 +105,16 @@ def test_flux2_klein_edit_encodes_and_injects_reference_image():
     assert workflow["guider"]["inputs"]["conditioning"] == ["reference", 0]
     assert workflow["latent"]["inputs"]["width"] == 960
     assert workflow["latent"]["inputs"]["height"] == 540
+
+
+def test_flux2_workflows_resize_delivery_to_exact_requested_dimensions():
+    for name in ("gen_image_flux2_klein.json", "gen_image_flux2_klein_edit.json"):
+        workflow = templating.render_workflow_text(
+            (WORKFLOWS / name).read_text(encoding="utf-8"), prompt="test",
+            negative_prompt="", image_filename="input.png", output_prefix="out",
+            width=960, height=540, seed=123,
+        )
+        assert workflow["delivery"]["class_type"] == "ImageScale"
+        assert workflow["delivery"]["inputs"]["width"] == 960
+        assert workflow["delivery"]["inputs"]["height"] == 540
+        assert workflow["save"]["inputs"]["images"] == ["delivery", 0]
