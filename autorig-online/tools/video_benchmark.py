@@ -255,7 +255,32 @@ class Benchmark:
         self.manifest = _json_object(self.manifest_path)
         if int(self.manifest.get("schema_version_int", 1)) != SCHEMA_VERSION:
             raise BenchmarkError(f"Unsupported manifest schema: {self.manifest.get('schema_version_int')}")
-        self.cases = _manifest_cases(self.manifest)
+        all_cases = _manifest_cases(self.manifest)
+        requested_ids = list(dict.fromkeys(args.case_id or []))
+        known_ids = {str(case["id"]) for case in all_cases}
+        unknown_ids = set(requested_ids) - known_ids
+        if unknown_ids:
+            raise BenchmarkError(f"Unknown case id: {sorted(unknown_ids)[0]}")
+        self.cases = [
+            case for case in all_cases
+            if not requested_ids or case["id"] in requested_ids
+        ]
+        if not self.cases:
+            raise BenchmarkError("Case selection is empty")
+        if args.prompt_overrides:
+            overrides = _json_object(args.prompt_overrides.resolve())
+            unselected = set(overrides) - {str(case["id"]) for case in self.cases}
+            if unselected:
+                raise BenchmarkError(
+                    f"Prompt override does not name a selected case: {sorted(unselected)[0]}"
+                )
+            for case in self.cases:
+                if case["id"] not in overrides:
+                    continue
+                prompt = overrides[case["id"]]
+                if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12000:
+                    raise BenchmarkError(f"Invalid prompt override for {case['id']}")
+                case["request"]["prompt"] = prompt.strip()
         self.state_path = self.output / "state.json"
         self.state = self._load_state()
 
@@ -482,6 +507,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--http-timeout", type=float, default=60)
     parser.add_argument("--max-segment-seconds", type=float, default=8)
     parser.add_argument("--max-source-bytes", type=int, default=500 * 1024 * 1024)
+    parser.add_argument("--case-id", action="append", default=[],
+                        help="Run only this exact manifest case; repeat for a bounded batch")
+    parser.add_argument("--prompt-overrides", type=Path,
+                        help="JSON object mapping selected case ids to reviewed prompts")
     return parser
 
 

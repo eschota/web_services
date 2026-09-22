@@ -53,7 +53,8 @@ class VideoBenchmarkTests(unittest.TestCase):
             args = argparse.Namespace(manifest=manifest, output_dir=output, base_url="https://example.test",
                                       token="", ffmpeg="ffmpeg", ffprobe="ffprobe", max_inflight=1,
                                       submit_limit=1, max_wait_seconds=0, poll_interval_seconds=1,
-                                      http_timeout=1, max_segment_seconds=8, max_source_bytes=1024)
+                                      http_timeout=1, max_segment_seconds=8, max_source_bytes=1024,
+                                      case_id=[], prompt_overrides=None)
             try:
                 runner = video_benchmark.Benchmark(args)
                 case = runner.cases[0]
@@ -87,7 +88,8 @@ class VideoBenchmarkTests(unittest.TestCase):
             args = argparse.Namespace(manifest=manifest, output_dir=output, base_url="https://example.test",
                                       token="", ffmpeg="ffmpeg", ffprobe="ffprobe", max_inflight=1,
                                       submit_limit=1, max_wait_seconds=0, poll_interval_seconds=1,
-                                      http_timeout=1, max_segment_seconds=8, max_source_bytes=1024)
+                                      http_timeout=1, max_segment_seconds=8, max_source_bytes=1024,
+                                      case_id=[], prompt_overrides=None)
             try:
                 runner = video_benchmark.Benchmark(args)
                 row = runner._case_state(runner.cases[0])
@@ -100,6 +102,34 @@ class VideoBenchmarkTests(unittest.TestCase):
                 self.assertIn("last_poll_error_string", row)
             finally:
                 shutil.rmtree(output, ignore_errors=True)
+
+    def test_case_filter_and_prompt_override_are_exact(self):
+        with tempfile.TemporaryDirectory(dir=MODULE_PATH.parents[2] / ".codex_tmp") as temporary:
+            root = Path(temporary)
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "sources_array": [
+                    {"id_string": "s1", "url_string": "https://example.test/1.mp4"},
+                    {"id_string": "s2", "url_string": "https://example.test/2.mp4"},
+                ],
+                "pipelines_array": [{"id_string": "p", "request_object": {"seed": 7}}],
+            }), encoding="utf-8")
+            overrides = root / "overrides.json"
+            overrides.write_text(json.dumps({"s2--p": "reviewed exact prompt"}), encoding="utf-8")
+            args = argparse.Namespace(
+                manifest=manifest, output_dir=root / "out", base_url="https://example.test",
+                token="", ffmpeg="ffmpeg", ffprobe="ffprobe", max_inflight=1,
+                submit_limit=1, max_wait_seconds=0, poll_interval_seconds=1,
+                http_timeout=1, max_segment_seconds=8, max_source_bytes=1024,
+                case_id=["s2--p"], prompt_overrides=overrides,
+            )
+            runner = video_benchmark.Benchmark(args)
+            self.assertEqual([case["id"] for case in runner.cases], ["s2--p"])
+            self.assertEqual(runner.cases[0]["request"]["prompt"], "reviewed exact prompt")
+
+            args.case_id = ["missing--p"]
+            with self.assertRaises(video_benchmark.BenchmarkError):
+                video_benchmark.Benchmark(args)
 
 
 if __name__ == "__main__":
