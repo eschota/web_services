@@ -11,9 +11,7 @@
       "image"
     ],
     "usable": true,
-    "default_for_services": [
-      "image"
-    ],
+    "default_for_services": [],
     "default_for_families": [
       "flux2"
     ],
@@ -63,10 +61,7 @@
     "services": [
       "image"
     ],
-    "usable": true,
-    "default_for_families": [
-      "flux"
-    ],
+    "usable": false,
     "workflow": "gen_image.json",
     "recommended": {
       "steps": 4,
@@ -104,7 +99,9 @@
       "scheduler_mode": "select"
     },
     "sampling_note": "Schnell is distilled for 1-4 steps. Dev-trained style adapters and Union ControlNet remain compatibility fallbacks; their Dev sampling presets do not apply to this base.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "unusable_reason": "FLUX.1 was retired from the farm on 2026-09-23: use Krea 2 (quality, default) or Z-Image Turbo (fast, ControlNet, T-pose, enhance).",
+    "obsolete": true
   },
   {
     "kind": "checkpoint",
@@ -117,7 +114,7 @@
     "services": [
       "image"
     ],
-    "usable": true,
+    "usable": false,
     "workflow": "gen_image_flux1_schnell.json",
     "recommended": {
       "steps": 4,
@@ -152,7 +149,9 @@
       "scheduler_mode": "select"
     },
     "sampling_note": "Schnell is distilled for 1-4 steps. Dev-trained style adapters and Union ControlNet remain compatibility fallbacks; their Dev sampling presets do not apply to this base.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "unusable_reason": "FLUX.1 was retired from the farm on 2026-09-23: use Krea 2 (quality, default) or Z-Image Turbo (fast, ControlNet, T-pose, enhance).",
+    "obsolete": true
   },
   {
     "kind": "checkpoint",
@@ -326,6 +325,118 @@
     "sampling_audit_at": "2026-09-22"
   },
   {
+    "kind": "checkpoint",
+    "family": "zimage",
+    "base": "Z-Image Turbo",
+    "file": "z_image_turbo_fp8_e4m3fn.safetensors",
+    "id": "z_image_turbo_fp8_e4m3fn.safetensors",
+    "title": "Z-Image Turbo",
+    "version": "fp8 e4m3fn",
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "default_for_families": [
+      "zimage"
+    ],
+    "workflow": "gen_image.json",
+    "control_channels": [
+      "pose",
+      "depth",
+      "canny"
+    ],
+    "recommended": {
+      "steps": 8,
+      "cfg": 1.0,
+      "scheduler": "simple"
+    },
+    "recommended_from": "Comfy-Org official Z-Image Turbo template: 8 steps, CFG 1, res_multistep sampler, simple scheduler, AuraFlow shift 3.",
+    "recommendation_kind": "author_reference_implementation",
+    "recommendation_sources": [
+      "https://github.com/Comfy-Org/workflow_templates/blob/main/templates/image_z_image_turbo.json",
+      "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+    ],
+    "page": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+    "file_source": "https://huggingface.co/drbaph/Z-Image-Turbo-FP8/blob/main/z_image_turbo_fp8_e4m3fn.safetensors",
+    "sha256": "56c06ad6cb80941e8203d3e248a16ad1263499ba870f2c1931aa724fdc7c25d3",
+    "size_mb": 5869.8,
+    "source_checked_at": "2026-09-23",
+    "triggers": [],
+    "preview": "",
+    "sampling_policy": {
+      "auto_steps": 8,
+      "steps_min": 4,
+      "steps_max": 12,
+      "auto_reason": "The Comfy-Org reference graph uses 8 steps for the Turbo distillation.",
+      "cfg_mode": "fixed",
+      "cfg_value": 1.0,
+      "cfg_note": "Turbo is guidance-distilled; the graph zeroes the negative and runs CFG 1.",
+      "scheduler_mode": "select"
+    },
+    "sampling_note": "Fast tier on every image box (8 GB and up). The Fun ControlNet Union 2.1 patch serves pose, depth, canny and inpaint; T-pose, detail, face fix and upscale refine run on it.",
+    "sampling_audit_at": "2026-09-23",
+    "author_notes": "Replaced FLUX.1 Schnell behind gen_image.json on 2026-09-23. Text encoder qwen_3_4b.safetensors (Comfy-Org), VAE ae.safetensors.",
+    "validated_workers": [
+      "Raptor",
+      "f5",
+      "f15"
+    ]
+  },
+  {
+    "kind": "checkpoint",
+    "family": "krea2",
+    "base": "Krea 2",
+    "file": "krea2_turbo_fp8_scaled.safetensors",
+    "id": "krea2_turbo_fp8_scaled.safetensors",
+    "title": "Krea 2 Turbo",
+    "version": "fp8 scaled",
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "default_for_families": [
+      "krea2"
+    ],
+    "default_for_services": [
+      "image"
+    ],
+    "workflow": "gen_image_krea2.json",
+    "recommended": {
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler": "euler",
+      "scheduler": "simple"
+    },
+    "recommended_from": "Comfy-Org official Krea 2 Turbo template: 8 steps, CFG 1, Euler, simple scheduler.",
+    "recommendation_kind": "author_reference_implementation",
+    "recommendation_sources": [
+      "https://github.com/Comfy-Org/workflow_templates/blob/main/templates/image_krea2_turbo_t2i.json",
+      "https://docs.comfy.org/tutorials/image/krea/krea-2"
+    ],
+    "page": "https://huggingface.co/krea/Krea-2-Turbo",
+    "file_source": "https://huggingface.co/Comfy-Org/Krea-2/blob/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+    "sha256": "eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1",
+    "size_mb": 12532.9,
+    "source_checked_at": "2026-09-23",
+    "triggers": [],
+    "preview": "",
+    "sampling_policy": {
+      "auto_steps": 8,
+      "steps_min": 4,
+      "steps_max": 12,
+      "auto_reason": "The Comfy-Org reference graph uses 8 steps for Krea 2 Turbo.",
+      "cfg_mode": "fixed",
+      "cfg_value": 1.0,
+      "cfg_note": "Turbo runs CFG 1 with a zeroed negative.",
+      "scheduler_mode": "select"
+    },
+    "sampling_note": "Quality tier with the largest live realism/3D LoRA ecosystem on Civitai. Text encoder qwen3vl_4b_fp8_scaled.safetensors, VAE qwen_image_vae.safetensors. No local ControlNet: pose/depth/canny stay on Z-Image.",
+    "sampling_audit_at": "2026-09-23",
+    "validated_workers": [
+      "Raptor"
+    ]
+  },
+  {
     "kind": "lora",
     "family": "flux",
     "file": "NSFW_master.safetensors",
@@ -342,7 +453,7 @@
     "services": [
       "image"
     ],
-    "usable": true,
+    "usable": false,
     "id": "NSFW_master.safetensors",
     "preview": "/api/ai/model-preview/NSFW_master.safetensors.jpg",
     "recommended": {
@@ -361,7 +472,9 @@
     "recommendation_kind": "author_example_metadata",
     "workflow": "gen_image.json",
     "sampling_note": "Author examples use FLUX.1 Dev. On this farm the compatible sampling fallback is Schnell (Auto 4); only adapter strength transfers. Style fidelity on Schnell is not author-validated.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "unusable_reason": "FLUX.1 was retired from the farm on 2026-09-23: use Krea 2 (quality, default) or Z-Image Turbo (fast, ControlNet, T-pose, enhance).",
+    "obsolete": true
   },
   {
     "kind": "lora",
@@ -380,7 +493,7 @@
     "services": [
       "image"
     ],
-    "usable": true,
+    "usable": false,
     "id": "flux_realism_lora.safetensors",
     "preview": "/api/ai/model-preview/flux_realism_lora.safetensors.jpg",
     "recommended": {
@@ -397,7 +510,9 @@
     "recommendation_kind": "author_example_metadata",
     "workflow": "gen_image.json",
     "sampling_note": "Author examples use FLUX.1 Dev. On this farm the compatible sampling fallback is Schnell (Auto 4); only adapter strength transfers. Style fidelity on Schnell is not author-validated.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "unusable_reason": "FLUX.1 was retired from the farm on 2026-09-23: use Krea 2 (quality, default) or Z-Image Turbo (fast, ControlNet, T-pose, enhance).",
+    "obsolete": true
   },
   {
     "kind": "lora",
@@ -420,7 +535,7 @@
     "services": [
       "image"
     ],
-    "usable": true,
+    "usable": false,
     "id": "skin texture style v5.safetensors",
     "preview": "/api/ai/model-preview/skin_texture_style_v5.safetensors.jpg",
     "recommended": {
@@ -441,7 +556,9 @@
     "recommendation_kind": "author_example_metadata",
     "workflow": "gen_image.json",
     "sampling_note": "Author examples use FLUX.1 Dev. On this farm the compatible sampling fallback is Schnell (Auto 4); only adapter strength transfers. Style fidelity on Schnell is not author-validated.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "unusable_reason": "FLUX.1 was retired from the farm on 2026-09-23: use Krea 2 (quality, default) or Z-Image Turbo (fast, ControlNet, T-pose, enhance).",
+    "obsolete": true
   },
   {
     "kind": "lora",
@@ -462,7 +579,7 @@
     "services": [
       "image"
     ],
-    "usable": true,
+    "usable": false,
     "id": "FluxMythSharpL1nes.safetensors",
     "preview": "/api/ai/model-preview/FluxMythSharpL1nes.safetensors.jpg",
     "recommended": {
@@ -491,7 +608,9 @@
       ]
     },
     "sampling_note": "Author examples use FLUX.1 Dev. On this farm the compatible sampling fallback is Schnell (Auto 4); only adapter strength transfers. Style fidelity on Schnell is not author-validated.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "unusable_reason": "FLUX.1 was retired from the farm on 2026-09-23: use Krea 2 (quality, default) or Z-Image Turbo (fast, ControlNet, T-pose, enhance).",
+    "obsolete": true
   },
   {
     "kind": "lora",
@@ -513,7 +632,7 @@
     "services": [
       "image"
     ],
-    "usable": true,
+    "usable": false,
     "id": "microbikiniv12_FLUX.safetensors",
     "preview": "/api/ai/model-preview/microbikiniv12_FLUX.safetensors.jpg",
     "recommended": {
@@ -542,7 +661,9 @@
       ]
     },
     "sampling_note": "Author examples use FLUX.1 Dev. On this farm the compatible sampling fallback is Schnell (Auto 4); only adapter strength transfers. Style fidelity on Schnell is not author-validated.",
-    "sampling_audit_at": "2026-09-22"
+    "sampling_audit_at": "2026-09-22",
+    "unusable_reason": "FLUX.1 was retired from the farm on 2026-09-23: use Krea 2 (quality, default) or Z-Image Turbo (fast, ControlNet, T-pose, enhance).",
+    "obsolete": true
   },
   {
     "kind": "lora",

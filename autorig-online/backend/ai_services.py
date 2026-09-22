@@ -272,7 +272,7 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
         "summary": "Extract a tested " + _title + " map for compatible image generation.",
         "inputs": [{"type": IMAGE, "field": "image", "required": True, "title": "Source image"}],
         "outputs": [{"type": _type, "field": "image_url_string", "title": _title + " map"}],
-        "compatible_image_families": ["flux"],
+        "compatible_image_families": ["zimage"],
     })
 
 
@@ -283,7 +283,7 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
 # different places in a graph — an upscale usually ends a chain, a face fix
 # usually sits in the middle of one.
 #
-# Everything here runs on the FLUX image boxes (f5, f12, f15, Raptor). The
+# Everything here runs on the image boxes (f5, f12, f15, Raptor). The
 # video card, worker-4090, carries no ESRGAN weights and no TiledDiffusion, so
 # video super-resolution is declared and disabled rather than quietly missing;
 # `blocked_reason` is what the palette shows instead of a generic tooltip.

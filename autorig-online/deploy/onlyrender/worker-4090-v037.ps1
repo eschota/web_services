@@ -95,9 +95,21 @@ $workflows = @(
     'gen_video_ltx23_control_by_url.json','gen_video_ltx23_pose_by_url.json','gen_video_ltx23_depth_by_url.json',
     'gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json','gen_image_flux2_avatar.json',
     'gen_image_sdxl.json','gen_image_sdxl_edit.json',
-    'gen_image_sdxl_control_pose.json','gen_image_sdxl_control_depth.json','gen_image_sdxl_control_canny.json',
-    'gen_image.json','gen_image_flux1_schnell.json'
+    'gen_image_sdxl_control_pose.json','gen_image_sdxl_control_depth.json','gen_image_sdxl_control_canny.json'
 )
+# FLUX.1 left the farm on 2026-09-23. Z-Image Turbo and Krea 2 weights live on C:
+# (extra_model_paths.yaml maps C:\AIModels). gen_image.json is also the T-pose
+# and legacy-mode token, whose graphs need RMBG, and the canny token carries the
+# enhancement and Qwen-Image jobs (ESRGAN, TiledDiffusion, GGUF): this box claims
+# neither, only Z-Image pose/depth control and Krea 2 text-to-image.
+$img = 'C:\AIModels'
+if ((Test-Path "$img\diffusion_models\z_image_turbo_fp8_e4m3fn.safetensors") -and
+    (Test-Path "$img\text_encoders\qwen_3_4b.safetensors") -and (Test-Path "$img\vae\ae.safetensors") -and
+    (Test-Path "$img\model_patches\Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors") -and
+    (Test-ComfyNode 'ZImageFunControlnet')) { $workflows += @('gen_image_control_pose.json','gen_image_control_depth.json') }
+if ((Test-Path "$img\diffusion_models\krea2_turbo_fp8_scaled.safetensors") -and
+    (Test-Path "$img\text_encoders\qwen3vl_4b_fp8_scaled.safetensors") -and
+    (Test-Path "$img\vae\qwen_image_vae.safetensors")) { $workflows += 'gen_image_krea2.json' }
 if (Test-Path "$runtime\WAN2_PROMOTED") {
     foreach ($node in 'WanAnimate2ToVideo','WanAnimate2Cache') { if (-not (Test-ComfyNode $node)) { throw "Missing promoted node $node" } }
     $workflows += 'gen_video_wan_animate2_by_url.json'
@@ -121,6 +133,7 @@ if ((Test-Path "$ltx25\diffusion_models\minimax_h3_fl2va_int8_convrot.safetensor
     (Test-Path "$ltx25\vae\minimax_h3_audio_vae_fp32.safetensors") -and
     (Test-Path "$ltx25\loras\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors") -and
     (Test-ComfyNode 'MiniMaxH3ImageToVideo')) { $workflows += 'gen_video_minimax_h3_by_url.json' }
-$overrides = @{'gen_image.json'='gen_image_flux1_schnell.json'}
+# Identity: renderfin ignores an empty map, and the old Schnell override must go.
+$overrides = @{'gen_image.json'='gen_image.json'}
 Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;workflow_overrides=$overrides;basic_auth=$false}
 Write-Host ('OnlyRender v0.37 ready: ' + ($workflows -join ', '))

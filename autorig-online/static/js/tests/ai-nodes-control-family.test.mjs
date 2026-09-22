@@ -30,13 +30,13 @@ function load() {
 // The production catalogue, as /api/ai/model-catalogue?service=image serves it.
 const PONY = {id: 'CyberRealisticPony_V18.0_F16.safetensors', title: 'CyberRealistic Pony',
               family: 'pony', control_channels: ['pose', 'depth', 'canny'], usable: true};
-const SCHNELL = {id: 'flux1-schnell.safetensors', title: 'FLUX.1 Schnell',
-                 family: 'flux', usable: true};
-const SCHNELL_FP8 = {id: 'flux1-schnell-fp8.safetensors', title: 'FLUX.1 Schnell FP8 checkpoint',
-                     family: 'flux', usable: true};
+const SCHNELL = {id: 'z_image_turbo_fp8_e4m3fn.safetensors', title: 'Z-Image Turbo',
+                 family: 'zimage', usable: true};
+const SCHNELL_FP8 = {id: 'cyberrealisticZImage_v80_fp8mixed.safetensors', title: 'CyberRealistic Z-Image Turbo',
+                     family: 'zimage', usable: true};
 const KLEIN = {id: 'flux-2-klein-4b.safetensors', title: 'FLUX.2 klein 4B',
                family: 'flux2', usable: true};
-const DEPTH = {id: 'control_depth', compatible_image_families: ['flux']};
+const DEPTH = {id: 'control_depth', compatible_image_families: ['zimage']};
 
 
 test('a checkpoint that names the channel is accepted whatever its family', () => {
@@ -49,7 +49,7 @@ test('a compatible family is accepted even with no channels declared', () => {
   const api = load();
   assert.equal(api.controlChannelAccepted('depth', SCHNELL, DEPTH), true);
   assert.equal(api.controlChannelAccepted('depth', SCHNELL_FP8, DEPTH), true);
-  assert.equal(api.controlChannelAccepted('depth', {family: 'FLUX'}, DEPTH), true);
+  assert.equal(api.controlChannelAccepted('depth', {family: 'ZIMAGE'}, DEPTH), true);
 });
 
 test('neither the channel nor the family leaves the wire refused', () => {
@@ -69,7 +69,7 @@ test('no checkpoint chosen means the deployed default workflow decides', () => {
 test('the refusal names the models that would have connected', () => {
   const api = load();
   const names = api.controlChannelModels('depth', DEPTH, [KLEIN, SCHNELL, PONY, SCHNELL_FP8]);
-  assert.deepEqual(names, ['FLUX.1 Schnell', 'CyberRealistic Pony', 'FLUX.1 Schnell FP8 checkpoint']);
+  assert.deepEqual(names, ['Z-Image Turbo', 'CyberRealistic Pony', 'CyberRealistic Z-Image Turbo']);
   const message = api.controlRefusalMessage('depth', names);
   assert.match(message, /^Depth control needs a model validated for it: /);
   assert.match(message, /CyberRealistic Pony/);
@@ -88,5 +88,5 @@ test('the backend validator consults the same two declarations', () => {
   assert.match(rule, /channel not in explicit_channels and family not in compatible_families/);
   // And the catalogue really does declare the families the page now reads.
   const services = fs.readFileSync(path.join(backend, 'ai_services.py'), 'utf8');
-  assert.match(services, /"compatible_image_families": \["flux"\]/);
+  assert.match(services, /"compatible_image_families": \["zimage"\]/);
 });

@@ -264,7 +264,7 @@ async def deliver_image_review(
             {
                 "type": "photo",
                 "media": "attach://variant_b" if use_upload else job.image_url_b,
-                "caption": "2️⃣ low-poly cartoon PBR",
+                "caption": "2️⃣ 3D animation style",
                 "parse_mode": "HTML",
             },
         ]

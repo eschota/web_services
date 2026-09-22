@@ -169,7 +169,7 @@ def _poster_data_url(task_id: str) -> Optional[str]:
 #   - "arms straight out to the sides", never "stretched", which reads as a
 #     stretch deformation on the limbs
 _BASE_STYLE_PHRASE = "full-body stylized 3D game character render"
-_LOWPOLY_STYLE_PHRASE = "full-body low-poly cartoon 3D game character render"
+_LOWPOLY_STYLE_PHRASE = "full-body 3D animated feature film character render"
 
 _POSE_SENTENCE = (
     "It stands alone in a strict T-pose, arms straight out to the sides, hands open "
@@ -185,10 +185,12 @@ _BASE_TAIL = (
     "distortion, no text."
 )
 
-# The base style gets material contrast; the cartoon style gets the opposite -
-# fewer, larger, flatter faces. Naming triangles explicitly is what makes FLUX
-# actually drop the polygon count instead of rendering a smooth model in bright
-# colours, and coarse geometry is also what Hunyuan3D reconstructs best.
+# The base style gets material contrast; the second style is a polished
+# animated-feature CG look (the owner wants realism and quality 3D styling, not
+# low-poly cartoons). It still asks for clean, simplified, readable forms and
+# solid colour per part, which is what Hunyuan3D reconstructs best, and it
+# keeps every T-pose clause, so the second render feeds the 3D stage as well
+# as the first.
 _BASE_MATERIALS = (
     "Every surface is fully opaque with a clearly stated finish, matte woven fabric "
     "against satin worn leather and brushed metal fittings, so the materials read "
@@ -196,17 +198,16 @@ _BASE_MATERIALS = (
 )
 
 _LOWPOLY_MATERIALS = (
-    "Built from very few large flat triangles, visible triangular facets across every "
-    "surface with hard creased edges between them, each facet catching the light as "
-    "one flat tone, chunky blocky limbs, mitten hands with a separated thumb, simple "
-    "rounded boots, all shapes reduced to their coarsest form with no fine detail, no "
-    "fabric weave, no wrinkles and no small parts."
+    "Appealing stylized proportions built from clean simplified forms, smoothly "
+    "sculpted surfaces with soft subsurface skin, hair shaped into a few large "
+    "readable locks, clothing and boots with crisp clear edges, each part in one "
+    "solid colour with a gentle painted texture, five distinct fingers on each open "
+    "hand, no loose strands, no tiny accessories and no floating parts."
 )
 
 _LOWPOLY_TAIL = (
-    "Low-poly flat-shaded cartoon game asset, faceted triangular geometry, bold "
-    "saturated colour blocking in flat blocks with hard boundaries, high contrast, "
-    "smooth uncluttered opaque surfaces. "
+    "Polished stylized CG animation look with soft global illumination, rich but "
+    "controlled colour, smooth opaque surfaces. "
 ) + _BASE_TAIL
 
 

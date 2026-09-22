@@ -37,7 +37,7 @@ ENHANCE_TYPES = frozenset(ENHANCE_WORKFLOWS)
 # job would never be dispatched. gen_image.json would match, but it also
 # matches worker-4090, which has no ESRGAN weights and no TiledDiffusion and
 # would fail every one of these. The canny-control token is advertised by the
-# four FLUX image boxes (f5, f12, f15, Raptor) and by no video box, which is
+# four image boxes (f5, f12, f15, Raptor) and by no video box, which is
 # exactly the set that can run these templates.
 ENHANCE_SCHEDULING_TOKEN = "gen_image_control_canny.json"
 

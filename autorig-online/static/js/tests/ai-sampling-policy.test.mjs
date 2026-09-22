@@ -55,8 +55,8 @@ test('node runtime keeps the zero Auto sentinel and locks only fixed policy knob
   assert.match(nodes, /policy\.scheduler_mode === 'native'/);
   assert.match(nodes, /\['steps', 'cfg', 'sampler', 'scheduler'\]\.includes\(name\)/);
   assert.match(nodes, /option\.disabled \? ' disabled'/);
-  assert.match(nodes, /fluxOnly\.has\(option\.value\)/);
-  assert.match(nodes, /family !== 'flux'/);
+  assert.match(nodes, /zimageOnly\.has\(option\.value\)/);
+  assert.match(nodes, /family !== 'zimage'/);
   assert.doesNotMatch(nodes, /BasicGuider/);
   assert.match(nodes, /annotateOnly: true/);
 });

@@ -390,23 +390,19 @@
     const mode = nodeElement(id)?.querySelector('[data-param="mode"]');
     if (!mode) return;
     const family = String(checkpointEntry?.family || '').toLowerCase();
-    const fluxOnly = new Set(['z_depth', 't_pose', 'open_pose']);
+    // The typed modes run their own Z-Image graphs (FLUX.1 until 2026-09-23).
+    const zimageOnly = new Set(['z_depth', 't_pose', 'open_pose', 'inpaint']);
     Array.from(mode.options).forEach(option => {
-      if (option.value === 'inpaint') {
-        option.disabled = true;
-        option.title = 'Requires a separate Fill model that this fleet does not offer';
-      } else if (fluxOnly.has(option.value)) {
-        option.disabled = !!family && family !== 'flux';
-        option.title = option.disabled ? 'This mode is available only with a Flux checkpoint' : '';
+      if (zimageOnly.has(option.value)) {
+        option.disabled = !!family && family !== 'zimage';
+        option.title = option.disabled ? 'Z-Image checkpoints only' : '';
       }
     });
     // Keep a restored legacy choice visible even when disabled. Submission
     // validation will explain why it cannot run; silently changing it to Plain
     // would alter the user's graph.
     if (mode.selectedOptions[0]?.disabled) {
-      samplingNote(mode, mode.value === 'inpaint'
-        ? 'Unavailable: this fleet has no Fill model'
-        : 'Unavailable for the selected checkpoint family');
+      samplingNote(mode, 'Unavailable for the selected checkpoint family');
     } else samplingNote(mode, '');
   }
 

@@ -89,7 +89,7 @@ class AssetIntegrityTests(unittest.TestCase):
 class SubstitutionTests(unittest.TestCase):
     def test_prompt_json_escaped(self):
         wf = _render("t_pose.json", workflow_type="t_pose")
-        node = wf["171"]
+        node = wf["positive"]
         self.assertEqual(node["inputs"]["text"], 'a "brave" knight\nwith sword')
 
     def test_identity_attributes_and_props_preserved(self):
@@ -103,17 +103,17 @@ class SubstitutionTests(unittest.TestCase):
     def test_gen_image_bare_width_height(self):
         wf = _render("gen_image.json", width=512, height=768)
         # bare $width/$height placeholders must produce valid ints
-        node5 = wf["5"]
-        self.assertEqual(node5["inputs"]["width"], 512)
-        self.assertEqual(node5["inputs"]["height"], 768)
+        latent = wf["latent"]
+        self.assertEqual(latent["inputs"]["width"], 512)
+        self.assertEqual(latent["inputs"]["height"], 768)
 
 
 class SeedRandomizationTests(unittest.TestCase):
     def test_seeds_randomized(self):
         wf1 = _render("t_pose.json", workflow_type="t_pose")
         wf2 = _render("t_pose.json", workflow_type="t_pose")
-        seeds1 = [n["inputs"]["noise_seed"] for n in wf1.values() if "noise_seed" in n.get("inputs", {})]
-        seeds2 = [n["inputs"]["noise_seed"] for n in wf2.values() if "noise_seed" in n.get("inputs", {})]
+        seeds1 = [n["inputs"][k] for n in wf1.values() for k in ("noise_seed", "seed") if k in n.get("inputs", {})]
+        seeds2 = [n["inputs"][k] for n in wf2.values() for k in ("noise_seed", "seed") if k in n.get("inputs", {})]
         self.assertTrue(seeds1)
         self.assertNotEqual(seeds1, seeds2)
         for s in seeds1:
@@ -130,7 +130,7 @@ class SeedRandomizationTests(unittest.TestCase):
 
     def test_disable_randomization(self):
         wf = _render("t_pose.json", workflow_type="t_pose", randomize_seeds=False)
-        self.assertEqual(wf["25"]["inputs"]["noise_seed"], 650639755073450)
+        self.assertEqual(wf["sample"]["inputs"]["seed"], 42)
 
 
 class NormalizationTests(unittest.TestCase):
@@ -140,15 +140,26 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(helper["inputs"]["width"], 1024)
         self.assertEqual(helper["inputs"]["height"], 1024)  # was 1280 on disk
 
+    # The Z-Image T-pose graph decodes with a plain VAEDecode; the rewrite
+    # still protects any tiled-decode T-pose graph a worker override names.
+    _TILED = json.dumps({"223": {"class_type": "VAEDecodeTiled_TiledDiffusion", "inputs": {
+        "tile_size": 1024, "fast": True, "samples": ["222", 0], "vae": ["10", 0]}}})
+
     def test_t_pose_tiled_vae_rewritten(self):
-        wf = _render("t_pose.json", workflow_type="t_pose")
+        wf = render_workflow_text(self._TILED, width=1024, height=1024, prompt="", negative_prompt="",
+                                  image_filename="", output_prefix="x", workflow_type="t_pose")
         node = wf["223"]
         self.assertEqual(node["class_type"], "VAEDecode")
         self.assertEqual(set(node["inputs"].keys()), {"samples", "vae"})
 
     def test_tiled_vae_kept_for_other_types(self):
-        wf = _render("t_pose.json", workflow_type="")
+        wf = render_workflow_text(self._TILED, width=1024, height=1024, prompt="", negative_prompt="",
+                                  image_filename="", output_prefix="x", workflow_type="")
         self.assertEqual(wf["223"]["class_type"], "VAEDecodeTiled_TiledDiffusion")
+
+    def test_t_pose_decodes_without_tiling(self):
+        wf = _render("t_pose.json", workflow_type="t_pose")
+        self.assertFalse([n for n in wf.values() if "Tiled" in n.get("class_type", "")])
 
 
 class PlaceholderScanTests(unittest.TestCase):

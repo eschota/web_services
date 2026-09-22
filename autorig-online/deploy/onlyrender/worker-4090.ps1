@@ -104,12 +104,29 @@ if ((Test-Path "$root\ComfyUI\models\checkpoints\CyberRealisticPony_V18.0_F16.sa
     (Test-Path "$root\ComfyUI\models\controlnet\xinsir-controlnet-union-sdxl-1.0.safetensors")) {
     $workflows += @('gen_image_sdxl_control_pose.json','gen_image_sdxl_control_depth.json','gen_image_sdxl_control_canny.json')
 }
+# Image weights added after R: filled up live on C: (extra_model_paths.yaml
+# base C:/AIModels); a file counts wherever ComfyUI can see it.
+function Has-Model([string]$rel) {
+    (Test-Path "$root\ComfyUI\models\$rel") -or (Test-Path "C:\AIModels\$rel")
+}
+# Z-Image Turbo fast tier. gen_image.json is also the T-pose/legacy-mode token,
+# and those graphs need RMBG, which this box does not carry, so only the
+# ControlNet tokens are claimed unless RMBG is present. The canny token is left
+# out on purpose: upscale/detail/face-fix and Qwen-Image jobs are scheduled on it
+# and need ESRGAN, TiledDiffusion and GGUF weights this box lacks.
+$zimage = (Has-Model 'diffusion_models\z_image_turbo_fp8_e4m3fn.safetensors') -and
+    (Has-Model 'text_encoders\qwen_3_4b.safetensors') -and (Has-Model 'vae\ae.safetensors') -and
+    (Has-Model 'model_patches\Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors')
+if ($zimage) {
+    $workflows += @('gen_image_control_pose.json','gen_image_control_depth.json')
+    if ((Test-ComfyNode 'RMBG') -and (Test-ComfyNode 'easy cleanGpuUsed')) { $workflows += 'gen_image.json' }
+}
+# Krea 2 Turbo quality tier.
+if ((Has-Model 'diffusion_models\krea2_turbo_fp8_scaled.safetensors') -and
+    (Has-Model 'text_encoders\qwen3vl_4b_fp8_scaled.safetensors') -and
+    (Has-Model 'vae\qwen_image_vae.safetensors')) { $workflows += 'gen_image_krea2.json' }
 if (-not $workflows.Count) { throw 'No complete current model set is installed' }
 $overrides=@{}
-if (Test-Path "$root\ComfyUI\models\checkpoints\flux1-schnell-fp8.safetensors") {
-    $workflows += @('gen_image.json','gen_image_flux1_schnell.json')
-    $overrides['gen_image.json']='gen_image_flux1_schnell.json'
-}
 # info preserves worker history, unlike add_server.
 Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;workflow_overrides=$overrides;basic_auth=$false}
 Write-Host ('OnlyRender ready: ' + ($workflows -join ', '))

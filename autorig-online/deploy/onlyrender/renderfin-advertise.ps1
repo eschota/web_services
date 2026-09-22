@@ -7,14 +7,21 @@
 # the only route these boxes have to the VPS.
 # Additive by design: a token this script does not know about is preserved, so
 # a list another operator set is never clobbered.
-param([string]$NodeName = $env:COMPUTERNAME, [switch]$WhatIfOnly)
+param([string]$NodeName = $env:COMPUTERNAME, [switch]$WhatIfOnly, [string]$Models = '')
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
-$models = 'D:\ComfyUI_windows_portable\ComfyUI\models'
+# f5/f15/Raptor keep ComfyUI on D:, f12 on C:\AI.
+$models = $Models
+if (-not $models) {
+    $models = @('D:\ComfyUI_windows_portable\ComfyUI\models', 'C:\AI\ComfyUI_windows_portable\ComfyUI\models') |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+}
 $api = 'https://autorig.online/renderfin/api-render'
 $log = 'C:\ProgramData\AutoRig\fleet-ltx23\advertise.log'
 $blockFile = 'C:\ProgramData\AutoRig\fleet-ltx23\advertise_block.txt'
+New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
 if ($NodeName -match '^F5') { $NodeName = 'f5' } elseif ($NodeName -match '^F15') { $NodeName = 'f15' }
+elseif ($NodeName -match '^WIN-HGEREJIMQDO') { $NodeName = 'f12' } elseif ($NodeName -match '^RYZEN-SERVER') { $NodeName = 'Raptor' }
 function Log($m) { Add-Content -Path $log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m) -Encoding utf8 }
 function Has([string]$rel) { Test-Path (Join-Path $models $rel) }
 
@@ -53,6 +60,20 @@ $sdxl = @('CyberRealisticPony_V18.0_F16.safetensors', 'cyberrealisticPony_v180Co
 if (@($sdxl | Where-Object { (Has ('checkpoints\' + $_)) -or (Test-Path ('X:\FleetModels\checkpoints\' + $_)) }).Count -gt 0) {
     $tokens += 'gen_image_sdxl.json'
 }
+# Z-Image Turbo is the fast image tier: plain text-to-image, the T-pose render
+# and legacy typed modes all schedule as gen_image.json, and the Fun ControlNet
+# Union patch serves pose/depth/canny/inpaint. The enhancement and Qwen-Image
+# jobs ride the canny token, so it needs the same files.
+if ((Has 'diffusion_models\z_image_turbo_fp8_e4m3fn.safetensors') -and
+    (Has 'text_encoders\qwen_3_4b.safetensors') -and
+    (Has 'vae\ae.safetensors') -and
+    (Has 'model_patches\Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors')) {
+    $tokens += @('gen_image.json','gen_image_control_pose.json','gen_image_control_depth.json','gen_image_control_canny.json')
+}
+# Krea 2 Turbo is the quality tier with the live LoRA ecosystem.
+if ((Has 'diffusion_models\krea2_turbo_fp8_scaled.safetensors') -and
+    (Has 'text_encoders\qwen3vl_4b_fp8_scaled.safetensors') -and
+    (Has 'vae\qwen_image_vae.safetensors')) { $tokens += 'gen_image_krea2.json' }
 
 # Having the files is not the same as being able to run them: measurement
 # settles that. Names listed one per line in advertise_block.txt are stripped

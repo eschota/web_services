@@ -262,7 +262,7 @@ class LowPolyVariantTests(unittest.TestCase):
         self.assertTrue(plan.prompt)
         self.assertTrue(plan.prompt_b)
         self.assertNotEqual(plan.prompt, plan.prompt_b)
-        self.assertIn("low-poly", plan.prompt_b)
+        self.assertIn("animated feature film", plan.prompt_b)
         # both variants must render the same subject
         self.assertIn("orc warrior", plan.prompt_b)
 
@@ -321,8 +321,8 @@ class LowPolyVariantTests(unittest.TestCase):
             self.assertIn(token, plan.prompt, "base render lost the character")
             self.assertIn(token, plan.prompt_b, "cartoon render lost the character")
         # and only the style differs
-        self.assertIn("low-poly cartoon", plan.prompt_b)
-        self.assertNotIn("low-poly", plan.prompt)
+        self.assertIn("animated feature film", plan.prompt_b)
+        self.assertNotIn("animated feature film", plan.prompt)
 
     def test_both_variants_use_one_pose_skeleton(self):
         """A different mask would change the build, not just the look."""
@@ -332,14 +332,17 @@ class LowPolyVariantTests(unittest.TestCase):
         self.assertIn("t_pose_dwarf.jpg", plan.mask_url)
         self.assertFalse(hasattr(plan, "mask_url_b"))
 
-    def test_the_cartoon_style_asks_for_triangles(self):
+    def test_the_second_style_is_quality_3d_not_low_poly(self):
         plan = _plan_from_llm_json(
             {"subject": "a slim teenage boy", "outfit": "a white jacket", "body_type": "normal"}
         )
-        for token in ("triangles", "triangular facets", "coarsest form"):
+        # clean readable forms are what the 3D stage reconstructs best
+        for token in ("clean simplified forms", "solid colour", "no floating parts"):
             self.assertIn(token, plan.prompt_b)
-        # the base render must not be simplified
-        self.assertNotIn("triangles", plan.prompt)
+        for token in ("low-poly", "triangles", "facets", "flat-shaded"):
+            self.assertNotIn(token, plan.prompt_b)
+        # the base render must not be restyled
+        self.assertNotIn("clean simplified forms", plan.prompt)
 
     def test_a_legacy_single_prompt_answer_still_works(self):
         plan = _plan_from_llm_json(
@@ -352,7 +355,7 @@ class LowPolyVariantTests(unittest.TestCase):
         plan = build_template_plan({"title": "orc warrior", "description": "green skin"})
         self.assertIn("orc warrior", plan.prompt)
         self.assertIn("orc warrior", plan.prompt_b)
-        self.assertIn("low-poly cartoon", plan.prompt_b)
+        self.assertIn("animated feature film", plan.prompt_b)
 
     def test_both_styles_failing_falls_back_to_the_template(self):
         async def scenario():
@@ -364,7 +367,7 @@ class LowPolyVariantTests(unittest.TestCase):
                         plan = await render_prompting.build_render_request("t1")
             self.assertEqual(plan.source, "template")
             self.assertTrue(plan.prompt)
-            self.assertIn("low-poly", plan.prompt_b)
+            self.assertIn("animated feature film", plan.prompt_b)
 
         run(scenario())
 

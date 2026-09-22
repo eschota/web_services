@@ -55,6 +55,12 @@ def apply_runtime_settings(workflow, prompt, width, height):
             inputs['strength'] = float(getattr(prompt, 'control_strength', 0.8))
             inputs['start_percent'] = float(getattr(prompt, 'control_start', 0.0))
             inputs['end_percent'] = float(getattr(prompt, 'control_end', 1.0))
+        # Z-Image Fun ControlNet patches the model rather than the conditioning,
+        # so it has one strength and no start/end window. A template that tuned
+        # its own value for a fixed input (the T-pose skeleton, the inpaint
+        # hole) marks it preserve_control and keeps it.
+        if kind == 'ZImageFunControlnet' and node.get('_meta', {}).get('preserve_control') is not True:
+            inputs['strength'] = float(getattr(prompt, 'control_strength', 0.8))
         if kind == 'WanAnimate2ToVideo':
             inputs['pose_strength'] = float(getattr(prompt, 'control_strength', 1.0))
         if kind in {'EmptyLatentImage', 'EmptySD3LatentImage', 'EmptyFlux2LatentImage', 'Flux2Scheduler', 'EmptyLTXVLatentVideo',
