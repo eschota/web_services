@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Library — Saved Compositions | AutoRig</title>
+    <meta name="description" content="Every saved node composition on AutoRig, newest first, with what went in and what came out.">
+    <!-- A saved composition is whatever its author wired up, including work
+         nobody asked to be indexed. The library is for people who already have
+         the link to the editor, not for search engines. -->
+    <meta name="robots" content="noindex,nofollow">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 10% 6%, rgba(56, 189, 248, .14), transparent 34%),
+                radial-gradient(circle at 90% 10%, rgba(123, 92, 255, .18), transparent 38%),
+                linear-gradient(180deg, #101122 0%, #14152a 48%, #0f101c 100%);
+            background-attachment: fixed;
+            color: var(--text-primary, #eef);
+            min-height: 100vh; margin: 0;
+            overflow-x: hidden;
+        }
+        .ai-page, .ai-page input, .ai-page button, .ai-page select {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+
+        /* An author rule such as `.wf-btn { display: inline-block }` outranks the
+           browser's own `[hidden] { display: none }`, so say it here instead. */
+        .ai-page [hidden] { display: none !important; }
+
+        .wf-wrap { max-width: 1480px; margin: 0 auto; padding: 26px 20px 60px; }
+
+        .wf-head { display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: flex-end; margin-bottom: 6px; }
+        .wf-head h1 {
+            margin: 0; font-size: 28px; line-height: 1.15; font-weight: 700;
+            background: linear-gradient(135deg, #38bdf8, #7b5cff);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .wf-head p { margin: 6px 0 0; font-size: 13.5px; color: var(--text-secondary, #9aa0b5); max-width: 62ch; line-height: 1.5; }
+        .wf-head .grow { flex: 1 1 260px; }
+
+        .wf-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 18px 0 14px; }
+        #wf-search {
+            background: rgba(10,11,22,.8); border: 1px solid rgba(255,255,255,.12);
+            border-radius: 10px; color: inherit; padding: 10px 13px; font-size: 14px;
+            width: 280px; max-width: 100%;
+        }
+        #wf-search:focus { outline: none; border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56,189,248,.16); }
+        .wf-count { font-size: 13px; color: var(--text-secondary, #9aa0b5); }
+        .wf-btn {
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+            color: inherit; border-radius: 10px; padding: 9px 15px; font-size: 13.5px;
+            cursor: pointer; text-decoration: none; display: inline-block;
+        }
+        .wf-btn:hover { background: rgba(255,255,255,.12); color: inherit; }
+        .wf-btn.primary {
+            border: 0; font-weight: 700; color: #071018;
+            background: linear-gradient(135deg, #38bdf8, #7b5cff);
+        }
+
+        .wf-grid {
+            display: grid; gap: 16px;
+            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+        }
+        @media (max-width: 700px) { .wf-grid { grid-template-columns: 1fr; } }
+
+        .wf-card {
+            display: flex; flex-direction: column; min-width: 0;
+            background: rgba(21,22,42,.97); border: 1px solid rgba(255,255,255,.13);
+            border-radius: 14px; overflow: hidden;
+            box-shadow: 0 12px 30px rgba(0,0,0,.34);
+            transition: border-color .15s, transform .15s;
+        }
+        .wf-card:hover, .wf-card:focus-within { border-color: #38bdf8; transform: translateY(-2px); }
+
+        .wf-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(255,255,255,.1); }
+        .wf-tile {
+            position: relative; margin: 0; aspect-ratio: 4 / 3; overflow: hidden;
+            background: #0f1020; display: flex; align-items: center; justify-content: center;
+        }
+        .wf-tile img, .wf-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .wf-tile .wf-quote {
+            font-size: 11.5px; line-height: 1.45; color: #cbd5f5; padding: 26px 10px 10px;
+            display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;
+            overflow: hidden; overflow-wrap: anywhere; width: 100%; height: 100%; box-sizing: border-box;
+        }
+        .wf-tile .wf-none {
+            font-size: 11.5px; color: #6b7392; text-align: center; padding: 0 10px; overflow-wrap: anywhere;
+        }
+        .wf-tile .wf-none .big { display: block; font-size: 22px; margin-bottom: 5px; opacity: .8; }
+        .wf-badge {
+            position: absolute; top: 6px; left: 6px; z-index: 2;
+            font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600;
+            padding: 3px 6px; border-radius: 6px; color: #cfe9ff;
+            background: rgba(8,10,22,.76); border: 1px solid rgba(255,255,255,.14);
+        }
+        .wf-badge.out { color: #e3d8ff; border-color: rgba(123,92,255,.45); }
+
+        .wf-body { padding: 12px 13px 13px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+        .wf-name {
+            margin: 0; font-size: 14.5px; font-weight: 600; line-height: 1.35;
+            overflow-wrap: anywhere;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .wf-meta { font-size: 11.5px; color: var(--text-secondary, #9aa0b5); line-height: 1.5; overflow-wrap: anywhere; }
+        .wf-meta .sep { opacity: .45; margin: 0 5px; }
+        .wf-run {
+            display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: .07em; color: #7dd3fc;
+            border: 1px solid rgba(56,189,248,.4); background: rgba(56,189,248,.1);
+            border-radius: 999px; padding: 2px 8px; margin-left: 6px; vertical-align: 1px;
+        }
+        .wf-run i { width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; animation: wf-pulse 1.4s infinite; }
+        @keyframes wf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+        .wf-fail { color: #fb7185; }
+
+        .wf-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+        .wf-open {
+            flex: 1; text-align: center; text-decoration: none; font-weight: 600; font-size: 13px;
+            color: #071018; background: linear-gradient(135deg, #38bdf8, #7b5cff);
+            border-radius: 9px; padding: 8px 10px;
+        }
+        .wf-open:hover { color: #071018; filter: brightness(1.08); }
+        .wf-copy {
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+            color: inherit; border-radius: 9px; padding: 8px 11px; font-size: 12.5px; cursor: pointer;
+        }
+        .wf-copy:hover { background: rgba(255,255,255,.12); border-color: #38bdf8; }
+
+        .wf-note { font-size: 13px; color: var(--text-secondary, #9aa0b5); padding: 30px 2px; line-height: 1.6; }
+        .wf-more { display: flex; justify-content: center; margin: 22px 0 0; }
+
+        .wf-toast {
+            position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(10px);
+            background: rgba(18,19,38,.97); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 11px; padding: 10px 17px; font-size: 13px; max-width: 80vw;
+            opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 40;
+        }
+        .wf-toast.shown { opacity: 1; transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body class="ai-page" data-layout-free3d-init="none">
+
+<div id="site-header"></div>
+
+<main class="wf-wrap">
+    <div class="wf-head">
+        <div class="grow">
+            <h1>Workflow Library</h1>
+            <p>Every composition saved from the node editor, newest first. Each card shows what
+               went in on the left and the last thing the graph produced on the right.</p>
+        </div>
+        <a class="wf-btn primary" href="/nodes">New composition</a>
+    </div>
+
+    <div class="wf-tools">
+        <input type="search" id="wf-search" placeholder="Search by name" aria-label="Search saved compositions" autocomplete="off">
+        <span class="wf-count" id="wf-count">Loading…</span>
+    </div>
+
+    <div class="wf-grid" id="wf-grid"></div>
+    <div class="wf-note" id="wf-note" hidden></div>
+    <div class="wf-more"><button class="wf-btn" id="wf-more" hidden>Show more</button></div>
+</main>
+
+<div id="site-footer"></div>
+
+<div class="wf-toast" id="wf-toast" role="status" aria-live="polite"></div>
+
+<script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+<script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+<script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+<script src="/static/js/i18n.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // A card carries two full-resolution previews, so a page asks for a screenful
+  // at a time rather than the whole store; `Show more` fetches the next batch.
+  var PAGE = 36;
+  var grid = document.getElementById('wf-grid');
+  var note = document.getElementById('wf-note');
+  var count = document.getElementById('wf-count');
+  var more = document.getElementById('wf-more');
+  var search = document.getElementById('wf-search');
+  var toast = document.getElementById('wf-toast');
+
+  // `token` is what makes a fast typist safe: a reply that is not the newest
+  // request is dropped rather than painted over a later search.
+  var state = { query: '', offset: 0, total: 0, shown: 0, token: 0 };
+
+  // Everything a card prints comes from a saved graph, so every one of those
+  // values is somebody else's text and is escaped before it becomes markup.
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/"/g, '&quot;');
+  }
+
+  var TYPE_TITLES = {
+    image: 'Image', video: 'Video', text: 'Text', avatar: 'Avatar',
+    model3d: '3D model', control_pose: 'Pose', control_depth: 'Depth', control_canny: 'Canny'
+  };
+  var TYPE_ICONS = {
+    image: '🖼️', video: '🎬', text: '📝', avatar: '👤',
+    model3d: '🧊', control_pose: '🧍', control_depth: '▧', control_canny: '▱'
+  };
+  function typeTitle(type) {
+    return TYPE_TITLES[type] || (type ? String(type).replace(/_/g, ' ') : 'Result');
+  }
+
+  function relativeTime(unix) {
+    var seconds = Math.floor(Date.now() / 1000) - (Number(unix) || 0);
+    if (!unix) { return 'undated'; }
+    if (seconds < 90) { return 'just now'; }
+    var minutes = Math.round(seconds / 60);
+    if (minutes < 60) { return minutes + ' min ago'; }
+    var hours = Math.round(minutes / 60);
+    if (hours < 24) { return hours + ' h ago'; }
+    var days = Math.round(hours / 24);
+    if (days < 30) { return days + ' d ago'; }
+    try {
+      return new Date(unix * 1000).toLocaleDateString(undefined,
+        { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch (error) {
+      return days + ' d ago';
+    }
+  }
+
+  // "17 image · 6 video · 1 vision": the shape of the graph in one line,
+  // biggest first, with the tail rolled into a single count.
+  function serviceSummary(services) {
+    var pairs = [];
+    Object.keys(services || {}).forEach(function (key) {
+      if (key.indexOf('input:') === 0) { return; }
+      pairs.push([key, Number(services[key]) || 0]);
+    });
+    pairs.sort(function (a, b) { return b[1] - a[1] || a[0].localeCompare(b[0]); });
+    var head = pairs.slice(0, 3).map(function (pair) { return pair[1] + ' ' + pair[0]; });
+    var rest = pairs.slice(3).reduce(function (sum, pair) { return sum + pair[1]; }, 0);
+    if (rest) { head.push('+' + rest + ' more'); }
+    return head.join(' · ');
+  }
+
+  function tile(preview, label) {
+    var badgeClass = label === 'output' ? 'wf-badge out' : 'wf-badge';
+    if (!preview || !preview.value_string) {
+      var empty = label === 'output' ? 'no output yet' : 'no input';
+      return '<figure class="wf-tile"><span class="' + badgeClass + '">' + escapeHtml(label) + '</span>' +
+             '<div class="wf-none"><span class="big">◦</span>' + escapeHtml(empty) + '</div></figure>';
+    }
+    var type = String(preview.type_string || '');
+    var value = String(preview.value_string || '');
+    var badge = '<span class="' + badgeClass + '">' + escapeHtml(label) + ' · ' +
+                escapeHtml(typeTitle(type)) + '</span>';
+    var media = value.indexOf('http://') === 0 || value.indexOf('https://') === 0;
+    var inner;
+    if (media && type === 'video') {
+      inner = '<video muted loop playsinline preload="metadata" src="' + escapeAttr(value) + '"></video>';
+    } else if (media && (type === 'image' || type.indexOf('control_') === 0)) {
+      inner = '<img loading="lazy" decoding="async" alt="" src="' + escapeAttr(value) + '">';
+    } else if (media) {
+      inner = '<div class="wf-none"><span class="big">' + (TYPE_ICONS[type] || '🗂️') + '</span>' +
+              escapeHtml(typeTitle(type)) + '</div>';
+    } else {
+      inner = '<div class="wf-quote">' + escapeHtml(value) + '</div>';
+    }
+    return '<figure class="wf-tile">' + badge + inner + '</figure>';
+  }
+
+  function card(row) {
+    var counts = row.result_counts_object || {};
+    var when = row.results_at_unix_int || row.saved_at_unix_int;
+    var services = serviceSummary(row.services_object);
+    var meta = escapeHtml(relativeTime(when)) +
+      '<span class="sep">·</span>' + escapeHtml(String(row.node_count_int || 0)) + ' nodes';
+    if (services) { meta += '<span class="sep">·</span>' + escapeHtml(services); }
+    if (counts.failed) {
+      meta += '<span class="sep">·</span><span class="wf-fail">' +
+              escapeHtml(String(counts.failed)) + ' failed</span>';
+    }
+    var running = counts.running
+      ? '<span class="wf-run"><i></i>running</span>'
+      : '';
+    var link = '/nodes?g=' + encodeURIComponent(String(row.graph_id_string || ''));
+    return '<article class="wf-card">' +
+      '<div class="wf-pair">' + tile(row.preview_a_object, 'input') +
+      tile(row.preview_b_object, 'output') + '</div>' +
+      '<div class="wf-body">' +
+        '<h2 class="wf-name">' + escapeHtml(row.name_string || 'Untitled') + running + '</h2>' +
+        '<div class="wf-meta">' + meta + '</div>' +
+        '<div class="wf-actions">' +
+          '<a class="wf-open" href="' + escapeAttr(link) + '">Open</a>' +
+          '<button class="wf-copy" type="button" data-link="' + escapeAttr(link) +
+          '" title="Copy the deep link">Copy link</button>' +
+        '</div>' +
+      '</div>' +
+    '</article>';
+  }
+
+  function say(message) {
+    toast.textContent = message;
+    toast.classList.add('shown');
+    window.clearTimeout(say.timer);
+    say.timer = window.setTimeout(function () { toast.classList.remove('shown'); }, 2200);
+  }
+
+  function describe() {
+    if (!state.total) {
+      count.textContent = state.query ? 'Nothing matches “' + state.query + '”' : 'No saved compositions yet';
+      return;
+    }
+    var noun = state.total === 1 ? 'composition' : 'compositions';
+    count.textContent = state.shown < state.total
+      ? state.shown + ' of ' + state.total + ' ' + noun
+      : state.total + ' ' + noun + (state.query ? ' matching “' + state.query + '”' : '');
+  }
+
+  function load(append) {
+    var token = ++state.token;
+    if (!append) {
+      state.offset = 0;
+      state.shown = 0;
+      note.hidden = true;
+      count.textContent = 'Loading…';
+    }
+    more.hidden = true;
+    var url = '/api/ai/graphs?limit=' + PAGE + '&offset=' + state.offset +
+              '&q=' + encodeURIComponent(state.query);
+    fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (response) {
+        if (!response.ok) { throw new Error('HTTP ' + response.status); }
+        return response.json();
+      })
+      .then(function (payload) {
+        if (token !== state.token) { return; }
+        var rows = payload.graphs_array || [];
+        state.total = Number(payload.total_int) || 0;
+        var markup = rows.map(card).join('');
+        if (append) { grid.insertAdjacentHTML('beforeend', markup); }
+        else { grid.innerHTML = markup; }
+        state.shown += rows.length;
+        state.offset += rows.length;
+        describe();
+        more.hidden = state.shown >= state.total || !rows.length;
+        if (!state.total) {
+          note.hidden = false;
+          note.textContent = state.query
+            ? 'No saved composition has that in its name.'
+            : 'Nothing has been saved from the node editor yet. Open a composition, press Save, and it will appear here.';
+        }
+      })
+      .catch(function (error) {
+        if (token !== state.token) { return; }
+        count.textContent = 'Could not load';
+        note.hidden = false;
+        note.textContent = 'The library could not be read just now (' + error.message + '). Try again in a moment.';
+      });
+  }
+
+  grid.addEventListener('click', function (event) {
+    var button = event.target.closest ? event.target.closest('.wf-copy') : null;
+    if (!button) { return; }
+    var absolute = window.location.origin + button.getAttribute('data-link');
+    var done = function () { say('Link copied'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(absolute).then(done, function () { say(absolute); });
+    } else {
+      var helper = document.createElement('textarea');
+      helper.value = absolute;
+      document.body.appendChild(helper);
+      helper.select();
+      try { document.execCommand('copy'); done(); } catch (error) { say(absolute); }
+      document.body.removeChild(helper);
+    }
+  });
+
+  // A wall of autoplaying clips would be unreadable and expensive; one plays
+  // while it is pointed at or focused, and rewinds when it is let go.
+  function playFrom(target) {
+    var card = target && target.closest ? target.closest('.wf-card') : null;
+    if (!card) { return; }
+    Array.prototype.forEach.call(card.querySelectorAll('video'), function (element) {
+      if (!element.paused) { return; }
+      var attempt = element.play();
+      if (attempt && attempt.catch) { attempt.catch(function () {}); }
+    });
+  }
+  function stopFrom(target) {
+    var card = target && target.closest ? target.closest('.wf-card') : null;
+    if (!card) { return; }
+    Array.prototype.forEach.call(card.querySelectorAll('video'), function (element) {
+      element.pause();
+      try { element.currentTime = 0; } catch (error) { /* not seekable yet */ }
+    });
+  }
+  grid.addEventListener('mouseover', function (event) { playFrom(event.target); });
+  grid.addEventListener('mouseout', function (event) {
+    var card = event.target.closest ? event.target.closest('.wf-card') : null;
+    var to = event.relatedTarget;
+    if (card && to && card.contains(to)) { return; }
+    stopFrom(event.target);
+  });
+  grid.addEventListener('focusin', function (event) { playFrom(event.target); });
+  grid.addEventListener('focusout', function (event) { stopFrom(event.target); });
+
+  var debounce;
+  search.addEventListener('input', function () {
+    window.clearTimeout(debounce);
+    debounce = window.setTimeout(function () {
+      var next = search.value.trim();
+      if (next === state.query) { return; }
+      state.query = next;
+      load(false);
+    }, 260);
+  });
+
+  more.addEventListener('click', function () { load(true); });
+
+  var initial = new URLSearchParams(window.location.search).get('q') || '';
+  if (initial) { search.value = initial; state.query = initial.trim(); }
+  load(false);
+})();
+</script>
+</body>
+</html>

@@ -286,6 +286,136 @@ def _validate_final(graph: ai_graph.Graph) -> None:
         _reject("graph_too_large", "The edited graph is larger than the store accepts")
 
 
+MAX_CLONE_VARIANTS = 40
+
+
+def _free_id(base: str, used: Set[str], start: int) -> str:
+    """``<base>_<n>`` with the first free n at or after ``start``."""
+    n = max(1, int(start))
+    while f"{base}_{n}" in used:
+        n += 1
+    return f"{base}_{n}"
+
+
+def _override_node(node: ai_graph.GraphNode, overrides: Mapping[str, Any],
+                   operation_index: int) -> None:
+    """Apply per-copy overrides with the same checks as update_params."""
+    values = dict(overrides)
+    # A model may wrap overrides the way a node is written ({"params": {...}}).
+    if isinstance(values.get("params"), Mapping):
+        values.update(values.pop("params"))
+    if node.kind == ai_graph.NODE_INPUT and "value" in values:
+        value = values.pop("value")
+        if value is not None and not isinstance(value, str):
+            _reject("bad_input_value", "An input value must be text or null", operation_index)
+        node.value = value
+    if not values:
+        return
+    service_id = str(node.service or "")
+    allowed = (_declared_param_names(service_id)
+               if node.kind == ai_graph.NODE_SERVICE else DISPLAY_PARAM_KEYS)
+    unknown = set(map(str, values)) - allowed
+    if unknown:
+        _reject("unknown_parameter",
+                f"Node '{node.id}' does not declare parameter '{sorted(unknown)[0]}'",
+                operation_index)
+    normalized = {str(name): _normalize_param_value(service_id, str(name), value)
+                  for name, value in values.items()}
+    for name, value in normalized.items():
+        try:
+            _validate_param_value(service_id, name, value)
+        except HTTPException as exc:
+            if isinstance(exc.detail, dict):
+                exc.detail.setdefault("operation_index_int", operation_index)
+            raise
+    node.params.update(copy.deepcopy(normalized))
+    if (("width" in values or "height" in values) and "_follow_input_size" in DISPLAY_PARAM_KEYS
+            and "_follow_input_size" not in values):
+        node.params["_follow_input_size"] = False
+
+
+def _clone_nodes(graph: ai_graph.Graph, raw: Mapping[str, Any],
+                 operation_index: int) -> List[str]:
+    """Copy a set of nodes once per variant, the way the editor's paste does.
+
+    Links between the copied nodes are remapped onto the copies and links
+    coming into the set from outside are duplicated, so every copy keeps the
+    same sources.  Links leaving the set are never copied: a copy must not
+    replace an existing node's input.  Each variant may override declared
+    parameters (or an input node's ``value``) per source id.  Copies start
+    without results and are laid out below the originals unless ``dx``/``dy``
+    say otherwise.
+    """
+    ids_raw = raw.get("ids")
+    if not isinstance(ids_raw, list) or not ids_raw:
+        _reject("bad_clone", "clone_nodes requires a non-empty ids list", operation_index)
+    ids: List[str] = []
+    for value in ids_raw:
+        node = _node(graph, value, operation_index)
+        if node.id not in ids:
+            ids.append(node.id)
+    variants = raw.get("variants")
+    if variants is None:
+        try:
+            count = int(raw.get("count", 1))
+        except (TypeError, ValueError):
+            _reject("bad_clone", "clone_nodes count must be an integer", operation_index)
+        if count < 1:
+            _reject("bad_clone", "clone_nodes count must be at least 1", operation_index)
+        variants = [{} for _ in range(count)]
+    if not isinstance(variants, list) or not variants:
+        _reject("bad_clone", "clone_nodes variants must be a non-empty list", operation_index)
+    if len(variants) > MAX_CLONE_VARIANTS:
+        _reject("too_many_variants",
+                f"At most {MAX_CLONE_VARIANTS} copies per clone_nodes operation", operation_index)
+    try:
+        dx = float(raw.get("dx") or 0)
+        dy = float(raw.get("dy") or 0)
+    except (TypeError, ValueError):
+        _reject("bad_position", "clone_nodes dx and dy must be numbers", operation_index)
+    if not math.isfinite(dx) or not math.isfinite(dy):
+        _reject("bad_position", "clone_nodes dx and dy must be finite", operation_index)
+    by_id = _node_map(graph)
+    sources = [by_id[node_id] for node_id in ids]
+    if not dx and not dy:
+        dy = (max(node.y for node in sources) - min(node.y for node in sources)) + 320.0
+    incoming = [link for link in graph.links if link.to_node in ids]
+    used: Set[str] = set(by_id)
+    added: List[str] = []
+    for position, variant in enumerate(variants, start=1):
+        if not isinstance(variant, Mapping):
+            _reject("bad_clone", "Every clone_nodes variant must be an object keyed by source id",
+                    operation_index)
+        unknown = set(map(str, variant)) - set(ids)
+        if unknown:
+            _reject("bad_clone",
+                    f"Variant {position} overrides '{sorted(unknown)[0]}', which is not being cloned",
+                    operation_index)
+        mapping: Dict[str, str] = {}
+        for source in sources:
+            overrides = variant.get(source.id) or {}
+            if not isinstance(overrides, Mapping):
+                _reject("bad_clone", f"Overrides for '{source.id}' must be an object",
+                        operation_index)
+            clone = ai_graph.GraphNode.model_validate(source.model_dump(by_alias=True))
+            clone.id = _free_id(source.id, used, position)
+            clone.x = source.x + dx * position
+            clone.y = source.y + dy * position
+            _override_node(clone, overrides, operation_index)
+            graph.nodes.append(clone)
+            used.add(clone.id)
+            mapping[source.id] = clone.id
+            added.append(clone.id)
+        for link in incoming:
+            graph.links.append(ai_graph.GraphLink(**{
+                "from": mapping.get(link.from_node, link.from_node), "output": link.output,
+                "to": mapping[link.to_node], "input": link.input}))
+    if len(graph.nodes) > ai_graph.MAX_NODES:
+        _reject("graph_too_large", f"A graph may hold at most {ai_graph.MAX_NODES} nodes",
+                operation_index)
+    return added
+
+
 def apply_operations(original: ai_graph.Graph,
                      operations: List[Mapping[str, Any]]) -> tuple[ai_graph.Graph, Dict[str, Any], List[str]]:
     """Return a fully validated copy or raise without mutating ``original``."""
@@ -303,6 +433,7 @@ def apply_operations(original: ai_graph.Graph,
         "connections_added_int": 0,
         "connections_removed_int": 0,
         "renamed_bool": False,
+        "cloned_node_ids_array": [],
     }
 
     for index, raw in enumerate(operations):
@@ -407,6 +538,11 @@ def apply_operations(original: ai_graph.Graph,
                 _reject("bad_graph_name", "A graph name must be 1-200 visible characters", index)
             graph.name = name.strip()
             summary["renamed_bool"] = True
+        elif op == "clone_nodes":
+            cloned = _clone_nodes(graph, raw, index)
+            invalidated.update(cloned)
+            summary["added_node_ids_array"].extend(cloned)
+            summary["cloned_node_ids_array"].extend(cloned)
         else:
             _reject("unknown_operation", f"Operation '{op}' is not allowed", index)
 
@@ -416,6 +552,7 @@ def apply_operations(original: ai_graph.Graph,
     summary["added_node_ids_array"] = sorted(set(summary["added_node_ids_array"]))
     summary["removed_node_ids_array"] = sorted(set(summary["removed_node_ids_array"]))
     summary["updated_node_ids_array"] = sorted(set(summary["updated_node_ids_array"]))
+    summary["cloned_node_ids_array"] = sorted(set(summary["cloned_node_ids_array"]))
     return graph, summary, sorted(invalidated)
 
 
@@ -462,6 +599,8 @@ async def api_graph_edits_schema():
             {"op": "disconnect", "fields": ["from", "output", "to", "input"]},
             {"op": "move_node", "fields": ["id", "x", "y"]},
             {"op": "rename_graph", "fields": ["name"]},
+            {"op": "clone_nodes", "fields": ["ids", "variants", "count", "dx", "dy"],
+             "note": "copies the listed nodes once per variant with their incoming links; variants override parameters per source id"},
         ],
         "services_array": services,
         "models_array": models,

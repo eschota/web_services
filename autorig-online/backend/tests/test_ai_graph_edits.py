@@ -317,7 +317,7 @@ class EndpointTests(unittest.TestCase):
             body = self.client.get("/api/ai/graph-edits/schema").json()
         self.assertEqual({row["op"] for row in body["operations_array"]}, {
             "add_node", "remove_node", "update_params", "set_input", "connect",
-            "disconnect", "move_node", "rename_graph"})
+            "disconnect", "move_node", "rename_graph", "clone_nodes"})
         self.assertIn("does not save", body["side_effects_string"])
 
     def test_schema_exposes_sampling_policy_to_the_agent(self):

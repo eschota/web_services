@@ -74,6 +74,9 @@ AI_MODELS: List[Dict[str, object]] = [
     {
         "id": "bonsai2-27b",
         "graph_agent_supported": True,
+        # Verified system role; 4k window, thinks before answering, so keep
+        # graph edits small (a few operations or clone variants per request).
+        "graph_agent_instruction_role": "system",
         "unlimited_output_supported": True,
         "title": "Bonsai 2 27B",
         "description": (
@@ -94,7 +97,12 @@ AI_MODELS: List[Dict[str, object]] = [
     },
     {
         "id": "qwen35-9b-uncensored",
-        "graph_agent_supported": False,
+        # Its system role failed the conflict canary, so the graph editor sends
+        # its standing instructions in the prompt instead. With reasoning off
+        # and an 8k window it completed ten-variant edits the 27B could not.
+        "graph_agent_supported": True,
+        "graph_agent_instruction_role": "prompt",
+        "graph_agent_default": True,
         "unlimited_output_supported": True,
         "title": "Qwen3.5 9B Defiant Fable",
         "description": (

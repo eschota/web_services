@@ -696,6 +696,285 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
             "server_time_unix_int": int(time.time())}
 
 
+# --------------------------------------------------------------- the library
+
+# `/workflows` shows every saved composition at once, so one request reads the
+# whole store. The summaries are therefore kept in memory and rebuilt only for
+# the files whose mtime or size moved; nothing here writes, because the store
+# belongs to the editor and a gallery that repaired it would be a second
+# author of the same files.
+LIBRARY_LIMIT_DEFAULT = 60
+LIBRARY_LIMIT_MAX = 200
+PREVIEW_TEXT_LIMIT = 300
+_DONE_STATUSES = {"done", "completed"}
+
+_library_index: Dict[str, object] = {"key": None, "rows": []}
+_library_summaries: Dict[tuple, Dict[str, object]] = {}
+
+
+def _is_public_url(value: str) -> bool:
+    return str(value or "").startswith(("http://", "https://"))
+
+
+def _library_signature(directory: pathlib.Path) -> Optional[tuple]:
+    """What the store looks like right now, cheaply enough to ask every time."""
+    try:
+        directory_mtime = directory.stat().st_mtime_ns
+    except OSError:
+        return None
+    entries = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        entries.append((path.name, info.st_mtime_ns, info.st_size))
+    return (str(directory), directory_mtime, tuple(entries))
+
+
+def _topological_order(node_ids: List[str], links: List[Dict[str, object]]) -> List[str]:
+    """Execution order, which is also the order a person reads the canvas in.
+
+    Ties are broken by position in the stored graph so the same file always
+    yields the same previews. A stored graph should never contain a cycle, but
+    if one somehow does, the nodes it traps are appended rather than dropped.
+    """
+    position = {node_id: index for index, node_id in enumerate(node_ids)}
+    indegree = {node_id: 0 for node_id in node_ids}
+    edges: Dict[str, List[str]] = {node_id: [] for node_id in node_ids}
+    for link in links:
+        source = str(link.get("from") or "")
+        target = str(link.get("to") or "")
+        if source not in indegree or target not in indegree or source == target:
+            continue
+        edges[source].append(target)
+        indegree[target] += 1
+    ready = sorted(position[node_id] for node_id in node_ids if not indegree[node_id])
+    order: List[str] = []
+    while ready:
+        index = ready.pop(0)
+        node_id = node_ids[index]
+        order.append(node_id)
+        for nxt in edges[node_id]:
+            indegree[nxt] -= 1
+            if indegree[nxt] == 0:
+                ready.append(position[nxt])
+                ready.sort()
+    if len(order) < len(node_ids):
+        seen = set(order)
+        order.extend(node_id for node_id in node_ids if node_id not in seen)
+    return order
+
+
+def _preview(entity_type: str, value: str, node_id: str, label: str) -> Dict[str, object]:
+    """One tile on a card: a type, something to show, and nothing else.
+
+    Deliberately carries no task id, no error text and no history — a listing
+    is a public-facing index of what exists, not a window into a run.
+    """
+    text = str(value or "")
+    if not _is_public_url(text):
+        text = text.strip()
+        if len(text) > PREVIEW_TEXT_LIMIT:
+            text = text[:PREVIEW_TEXT_LIMIT - 1].rstrip() + "…"
+    return {
+        "type_string": str(entity_type or ""),
+        "value_string": text,
+        "node_id_string": str(node_id),
+        "label_string": label,
+    }
+
+
+def _preview_input(
+    order: List[str],
+    by_id: Dict[str, Dict[str, object]],
+    results: Dict[str, object],
+) -> Optional[Dict[str, object]]:
+    """What went in: the picture or clip the person supplied, if there was one."""
+    for wanted in (ai_services.IMAGE, ai_services.VIDEO):
+        for node_id in order:
+            node = by_id.get(node_id) or {}
+            if str(node.get("kind") or NODE_SERVICE) != NODE_INPUT:
+                continue
+            if str(node.get("entity_type") or "") != wanted:
+                continue
+            value = str(node.get("value") or "").strip()
+            if _is_public_url(value):
+                return _preview(wanted, value, node_id, "input")
+    # A graph can begin with a prompt rather than a picture. Then the first
+    # thing it made is the closest honest stand-in for its raw material.
+    for node_id in order:
+        record = results.get(node_id)
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("status") or "").strip().lower() not in _DONE_STATUSES:
+            continue
+        value = str(record.get("value") or "").strip()
+        if _is_public_url(value):
+            return _preview(str(record.get("type") or ""), value, node_id, "input")
+    return None
+
+
+def _preview_output(
+    order: List[str],
+    by_id: Dict[str, Dict[str, object]],
+    results: Dict[str, object],
+    has_outgoing: set,
+) -> Optional[Dict[str, object]]:
+    """What came out: the last editable node that produced anything at all.
+
+    Sinks win over mid-pipeline nodes because a sink is what the composition
+    was built to reach; a finished result wins over a stale one because stale
+    means the wiring has moved on since it was made.
+    """
+    best: Optional[Dict[str, object]] = None
+    best_key: Optional[tuple] = None
+    for index, node_id in enumerate(order):
+        node = by_id.get(node_id) or {}
+        if str(node.get("kind") or NODE_SERVICE) != NODE_SERVICE:
+            continue
+        record = results.get(node_id)
+        if not isinstance(record, dict):
+            continue
+        status = str(record.get("status") or "").strip().lower()
+        if status in _DONE_STATUSES:
+            rank = 2
+        elif status == "stale":
+            rank = 1
+        else:
+            continue
+        value = str(record.get("value") or "").strip()
+        if not value:
+            continue
+        key = (rank, 0 if node_id in has_outgoing else 1, index)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = _preview(str(record.get("type") or ""), value, node_id, "output")
+    return best
+
+
+def _summarize(path: pathlib.Path) -> Optional[Dict[str, object]]:
+    """One stored file reduced to the card that stands for it."""
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("Skipping unreadable graph %s in the library", path.name)
+        return None
+    if not isinstance(stored, dict):
+        return None
+    graph = stored.get("graph")
+    if not isinstance(graph, dict):
+        graph = {}
+    nodes = [node for node in (graph.get("nodes") or []) if isinstance(node, dict)]
+    links = [link for link in (graph.get("links") or []) if isinstance(link, dict)]
+    stored_results = graph.get("results")
+    results: Dict[str, object] = (
+        {str(key): value for key, value in stored_results.items()}
+        if isinstance(stored_results, dict) else {}
+    )
+
+    services: Dict[str, int] = {}
+    for node in nodes:
+        if str(node.get("kind") or NODE_SERVICE) == NODE_INPUT:
+            name = f"input:{str(node.get('entity_type') or 'unknown')}"
+        else:
+            name = str(node.get("service") or "unknown")
+        services[name] = services.get(name, 0) + 1
+
+    result_counts: Dict[str, int] = {}
+    for record in results.values():
+        if not isinstance(record, dict):
+            continue
+        status = str(record.get("status") or "").strip().lower() or "unknown"
+        if status == "completed":
+            status = "done"
+        result_counts[status] = result_counts.get(status, 0) + 1
+
+    node_ids = [str(node.get("id")) for node in nodes]
+    by_id = {str(node.get("id")): node for node in nodes}
+    has_outgoing = {str(link.get("from") or "") for link in links}
+    order = _topological_order(node_ids, links)
+
+    graph_id = str(stored.get("id") or path.stem)
+    try:
+        saved_at = int(stored.get("saved_at_unix_int") or 0)
+    except (TypeError, ValueError):
+        saved_at = 0
+    try:
+        results_at = int(stored.get("results_at_unix_int") or 0)
+    except (TypeError, ValueError):
+        results_at = 0
+    return {
+        "graph_id_string": graph_id,
+        "name_string": str(graph.get("name") or "Untitled"),
+        "deep_link_string": f"/nodes?g={graph_id}",
+        "saved_at_unix_int": saved_at,
+        "results_at_unix_int": results_at,
+        "node_count_int": len(nodes),
+        "link_count_int": len(links),
+        "services_object": services,
+        "result_counts_object": result_counts,
+        "preview_a_object": _preview_input(order, by_id, results),
+        "preview_b_object": _preview_output(order, by_id, results, has_outgoing),
+    }
+
+
+def _library_rows() -> List[Dict[str, object]]:
+    """Every saved composition as a card, newest first."""
+    directory = GRAPH_DIR
+    signature = _library_signature(directory)
+    if signature is None:
+        return []
+    if _library_index.get("key") == signature:
+        return list(_library_index.get("rows") or [])
+    rows: List[Dict[str, object]] = []
+    fresh: Dict[tuple, Dict[str, object]] = {}
+    for name, mtime, size in signature[2]:
+        key = (str(directory / name), mtime, size)
+        row = _library_summaries.get(key)
+        if row is None:
+            row = _summarize(directory / name)
+            if row is None:
+                continue
+        fresh[key] = row
+        rows.append(row)
+    rows.sort(
+        key=lambda row: (
+            int(row["results_at_unix_int"] or row["saved_at_unix_int"] or 0),
+            str(row["graph_id_string"]),
+        ),
+        reverse=True,
+    )
+    _library_summaries.clear()
+    _library_summaries.update(fresh)
+    _library_index["key"] = signature
+    _library_index["rows"] = rows
+    return list(rows)
+
+
+@router.get("/api/ai/graphs")
+async def api_graph_library(
+    limit: int = LIBRARY_LIMIT_DEFAULT,
+    offset: int = 0,
+    q: str = "",
+):
+    """The saved compositions, newest first, for the workflow library."""
+    limit = max(1, min(LIBRARY_LIMIT_MAX, int(limit or LIBRARY_LIMIT_DEFAULT)))
+    offset = max(0, int(offset or 0))
+    needle = str(q or "").strip().lower()
+    rows = _library_rows()
+    if needle:
+        rows = [row for row in rows if needle in str(row["name_string"]).lower()]
+    return {
+        "success_bool": True,
+        "total_int": len(rows),
+        "limit_int": limit,
+        "offset_int": offset,
+        "graphs_array": rows[offset:offset + limit],
+        "server_time_unix_int": int(time.time()),
+    }
+
+
 @router.get("/api/ai/graphs/{graph_id}")
 async def api_graph_load(graph_id: str):
     """Reopen a saved graph, or a template if the id names one."""
