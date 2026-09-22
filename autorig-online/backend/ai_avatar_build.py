@@ -56,6 +56,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlsplit
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
+
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -80,7 +85,9 @@ MAX_VIDEO_BYTES = 400 * 1024 * 1024
 MAX_PARALLEL_BUILDS = 3
 RENDER_TIMEOUT_SECONDS = 30 * 60
 VISION_TIMEOUT_SECONDS = 15 * 60
-PIPELINE_VERSION = "avatar_build_v1"
+PIPELINE_VERSION = "avatar_build_v2"
+# The first view drawn, and the picture every other view is anchored to.
+ANCHOR_SLOT = "full_body"
 
 # ------------------------------------------------------------------ the views
 #
@@ -93,18 +100,24 @@ _PREFIX = (
     "person, nobody else in the picture. "
 )
 VIEW_SPECS: Dict[str, Dict[str, Any]] = {
+    # klein keeps the composition of picture 1, so asking it to reframe a
+    # full-body picture as a portrait mostly fails (2026-09-23: "waist up" and
+    # "close-up" both came back full length). These two views are therefore
+    # cut from the anchor around its detected face and re-rendered sharp.
     "front": {
         "engine": "klein", "size": (832, 1216), "framing": "upper_body", "yaw": 0.0,
-        "family": "front",
-        "text": ("Upper-body portrait from the waist up, standing upright, body and head "
-                 "facing the camera directly, neutral relaxed expression, eyes open looking "
-                 "into the lens, arms relaxed at the sides, eye-level camera."),
+        "family": "front", "crop": "upper",
+        "text": ("Upper-body portrait from the waist up: keep exactly the framing, pose and "
+                 "composition of image 1 and render it as a sharp, high-resolution photograph "
+                 "with fine skin, hair and fabric detail, facing the camera, eyes open."),
     },
     "face_closeup": {
         "engine": "klein", "size": (1024, 1024), "framing": "face", "yaw": 0.0,
-        "family": "front",
-        "text": ("Head and shoulders close-up portrait, facing the camera directly, neutral "
-                 "expression, eyes open, looking into the lens, the whole head visible."),
+        "family": "front", "crop": "face",
+        "text": ("Head and shoulders close-up portrait: keep exactly the framing of image 1, the "
+                 "face filling most of the picture, and render it as a sharp, high-resolution "
+                 "photograph with fine skin and hair detail, eyes open looking into the lens; "
+                 "take the facial features from image 2."),
     },
     "full_body": {
         "engine": "klein", "size": (832, 1216), "framing": "full_body", "yaw": 0.0,
@@ -150,7 +163,7 @@ VIEW_SPECS: Dict[str, Dict[str, Any]] = {
     },
 }
 assert tuple(sorted(VIEW_SPECS)) == tuple(sorted(CANONICAL_VIEW_SLOTS))
-DEFAULT_VIEWS = list(CANONICAL_VIEW_SLOTS)
+DEFAULT_VIEWS = [ANCHOR_SLOT] + [slot for slot in CANONICAL_VIEW_SLOTS if slot != ANCHOR_SLOT]
 NEGATIVE = ("second person, crowd, extra limbs, deformed face, different face, text, "
             "watermark, collage, split screen, character sheet, busy background")
 
@@ -171,14 +184,21 @@ DESCRIBE_INSTRUCTION = (
 )
 JUDGE_INSTRUCTION = (
     "Two photos side by side. LEFT is the reference character. RIGHT is a generated "
-    "view that must show the SAME character. Return ONLY one JSON object: "
-    '{"same_person": integer 0-10 (10 = certainly the same individual: same face, hair, '
-    'skin, body; for a view from behind judge hair, head shape, body and clothing), '
+    "view that must show the SAME character. Ignore clothing, pose, expression, makeup "
+    "intensity, lighting and background: they are allowed to differ. Compare only the "
+    "person, feature by feature: face shape, eyes, eyebrows, nose, lips, hairline, hair "
+    "color, length and style, skin tone, age, body build. First list every identity "
+    "difference you see, then score. Return ONLY one JSON "
+    'object: {"issues": "every identity difference or defect, empty only if none", '
+    '"same_person": integer 0-10 where 10 = indistinguishable, 8-9 = same person with '
+    "minor differences, 6-7 = probably the same person but the face or hair drifted, 3-5 = "
+    "a different person of similar style, 0-2 = clearly someone else (for a view from "
+    "behind judge hair, head shape, body and clothing), "
     '"view": one of "front","three_quarter_left","three_quarter_right","profile_left",'
     '"profile_right","back","other" describing the RIGHT photo, where left/right is the '
     'edge of the frame the nose points to, '
-    '"people": number of people in the RIGHT photo, '
-    '"issues": "short list of differences or defects, empty if none"}. No markdown.'
+    '"people": number of people in the RIGHT photo}. Give 10 only if you checked every '
+    "feature and found nothing. No markdown."
 )
 IDENTITY_PASS = 0.6
 
@@ -217,8 +237,7 @@ def parse_views(raw: Optional[str]) -> List[str]:
         raise HTTPException(400, detail={"error_string": "unknown_view",
             "message_string": f"Unknown view slot(s): {', '.join(unknown)}; "
                               f"choose from {', '.join(DEFAULT_VIEWS)}"})
-    ordered = ["front"] + [slot for slot in DEFAULT_VIEWS if slot in wanted and slot != "front"]
-    return ordered
+    return [ANCHOR_SLOT] + [slot for slot in DEFAULT_VIEWS if slot in wanted and slot != ANCHOR_SLOT]
 
 
 class BuildJobStore:
@@ -372,7 +391,7 @@ def judge_verdict(slot: str, answer: Dict[str, Any], haar: str) -> Dict[str, Any
     # Vision models confuse a strong three-quarter with a profile; a neighbour
     # is a warning, the wrong side of the head is a failure.
     neighbours = {("three_quarter", "profile"), ("profile", "three_quarter"),
-                  ("front", "three_quarter")}
+                  ("front", "three_quarter"), ("three_quarter", "front")}
     angle_ok = seen_family == family
     notes = str(answer.get("issues") or "")[:600]
     warnings = []
@@ -571,6 +590,59 @@ def compose_sheet(tiles: List[Tuple[str, bytes]], cell: Tuple[int, int] = (360, 
     return out.getvalue()
 
 
+def face_box(data: bytes) -> Optional[List[int]]:
+    """The largest frontal face as [x, y, w, h] in the picture's own pixels."""
+    try:
+        cv2 = _cv2()
+        import numpy as np
+    except Exception:
+        return None
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if image is None:
+        return None
+    frontal = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    minimum = max(24, int(min(image.shape) * 0.04))
+    faces = frontal.detectMultiScale(image, 1.1, 5, minSize=(minimum, minimum))
+    if not len(faces):
+        return None
+    x, y, w, h = max(faces, key=lambda item: item[2] * item[3])
+    return [int(x), int(y), int(w), int(h)]
+
+
+def crop_to_framing(data: bytes, framing: str, width: int, height: int) -> bytes:
+    """Cut a full-body picture to an upper-body or face framing at (width, height).
+
+    Uses the detected face when there is one; otherwise assumes the usual
+    full-body composition (head in the top eighth, centred).
+    """
+    from PIL import Image
+    box = face_box(data)
+    with Image.open(io.BytesIO(data)) as image:
+        image = image.convert("RGB")
+        W, H = image.size
+        if box:
+            fx, fy, fw, fh = box
+        else:
+            fw = fh = max(1, int(H * 0.09))
+            fx, fy = (W - fw) // 2, int(H * 0.05)
+        cx = fx + fw / 2
+        aspect = width / height
+        if framing == "face":
+            crop_h = fh * 2.6
+            top = fy - fh * 0.75
+        else:  # upper body: head to waist
+            crop_h = fh * 6.2
+            top = fy - fh * 0.7
+        crop_w = crop_h * aspect
+        left = max(0.0, min(cx - crop_w / 2, W - crop_w)) if crop_w <= W else (W - crop_w) / 2
+        top = max(0.0, min(top, H - crop_h)) if crop_h <= H else 0.0
+        region = image.crop((int(left), int(top), int(left + crop_w), int(top + crop_h)))
+        region = region.resize((width, height), Image.LANCZOS)
+        out = io.BytesIO()
+        region.save(out, "PNG")
+        return out.getvalue()
+
+
 def crop_face_region(data: bytes, box: Optional[List[int]], pad: float = 1.6) -> bytes:
     """The face and some hair around it, for the identity judge."""
     from PIL import Image
@@ -640,28 +712,49 @@ class AvatarBuilder:
             job = self.jobs.load(job_id)
             if job.get("finished"):
                 return job
-            owner = AvatarOwner(owner_type=job["owner_type"], owner_id=job["owner_id"])
-            started = time.monotonic()
+            # Two processes (the web app resuming, a CLI run) must never drive
+            # the same job: each keeps its own copy and the last write wins.
+            if fcntl is None:  # Windows development machines
+                return await self._run_locked(job_id)
+            handle = open(self.jobs.work_dir(job_id) / "runner.lock", "w")
             try:
-                async with self.factory() as client:
-                    await self._stage(job, "source", lambda: self._source(client, job, owner))
-                    await self._stage(job, "describe", lambda: self._describe(client, job))
-                    slots = job["request"]["views"]
-                    await self._stage(job, "front", lambda: self._views(client, job, owner, ["front"]))
-                    rest = [slot for slot in slots if slot != "front"]
-                    if rest:
-                        await self._stage(job, "views", lambda: self._views(client, job, owner, rest))
-                    await self._stage(job, "sheet", lambda: self._sheet(job, owner))
-                    await self._stage(job, "save", lambda: self._save(job, owner))
-                job.update(status="completed", stage="done", finished=True)
-                job["timings"]["total_seconds"] = round(
-                    job["timings"].get("total_seconds", 0) + time.monotonic() - started, 1)
-                _log(job, "done")
-            except BuildError as error:
-                job.update(status="failed", finished=True, error=str(error))
-                _log(job, f"failed: {error}")
-            self.jobs.write(job)
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                handle.close()
+                logger.info("avatar build %s is driven by another process", job_id)
+                return job
+            try:
+                return await self._run_locked(job_id)
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+                handle.close()
+
+    async def _run_locked(self, job_id: str) -> Dict[str, Any]:
+        job = self.jobs.load(job_id)
+        if job.get("finished"):
             return job
+        owner = AvatarOwner(owner_type=job["owner_type"], owner_id=job["owner_id"])
+        started = time.monotonic()
+        try:
+            async with self.factory() as client:
+                await self._stage(job, "source", lambda: self._source(client, job, owner))
+                await self._stage(job, "describe", lambda: self._describe(client, job))
+                slots = job["request"]["views"]
+                await self._stage(job, "anchor", lambda: self._views(client, job, owner, [ANCHOR_SLOT]))
+                rest = [slot for slot in slots if slot != ANCHOR_SLOT]
+                if rest:
+                    await self._stage(job, "views", lambda: self._views(client, job, owner, rest))
+                await self._stage(job, "sheet", lambda: self._sheet(job, owner))
+                await self._stage(job, "save", lambda: self._save(job, owner))
+            job.update(status="completed", stage="done", finished=True)
+            job["timings"]["total_seconds"] = round(
+                job["timings"].get("total_seconds", 0) + time.monotonic() - started, 1)
+            _log(job, "done")
+        except BuildError as error:
+            job.update(status="failed", finished=True, error=str(error))
+            _log(job, f"failed: {error}")
+        self.jobs.write(job)
+        return job
 
     async def _stage(self, job: Dict[str, Any], name: str, action) -> None:
         if job["steps"].get(name) == "done":
@@ -843,14 +936,34 @@ class AvatarBuilder:
 
     # ---- stages 3-4: views
 
-    def _references(self, job: Dict[str, Any], slot: str) -> Tuple[List[str], List[str]]:
+    def _anchor_url(self, job: Dict[str, Any]) -> str:
+        return ((job["views"].get(ANCHOR_SLOT) or {}).get("final") or {}).get("canonical_url") or ""
+
+    async def _crop_reference(self, client: httpx.AsyncClient, job: Dict[str, Any], owner: AvatarOwner,
+                              slot: str) -> str:
+        """The anchor cut to this view's framing, stored as an asset."""
+        state = job["views"].setdefault(slot, {"attempts": []})
+        if state.get("crop_url"):
+            return state["crop_url"]
+        data = await self._fetch(client, self._anchor_url(job))
+        width, height = VIEW_SPECS[slot]["size"]
+        cropped = await asyncio.to_thread(crop_to_framing, data, VIEW_SPECS[slot]["crop"], width, height)
+        asset = self._store_bytes(owner, cropped, f"{slot}_crop.png")
+        state["crop_url"] = asset["canonical_url"]
+        self.jobs.write(job)
+        return state["crop_url"]
+
+    async def _references(self, client: httpx.AsyncClient, job: Dict[str, Any], owner: AvatarOwner,
+                          slot: str) -> Tuple[List[str], List[str]]:
         source = job["source"]["frame_url"]
-        front = ((job["views"].get("front") or {}).get("final") or {}).get("canonical_url")
-        if slot == "front" or not front:
+        anchor = self._anchor_url(job)
+        if slot == ANCHOR_SLOT or not anchor:
             return [source], ["source"]
+        if VIEW_SPECS[slot].get("crop"):
+            return [await self._crop_reference(client, job, owner, slot), source], ["anchor_crop", "source"]
         if slot == "back":
-            return [front], ["front"]
-        return [front, source], ["front", "source"]
+            return [anchor], [ANCHOR_SLOT]
+        return [anchor, source], [ANCHOR_SLOT, "source"]
 
     async def _render_view(self, client: httpx.AsyncClient, job: Dict[str, Any], owner: AvatarOwner,
                            slot: str, engine: str, seed: int) -> Dict[str, Any]:
@@ -860,7 +973,7 @@ class AvatarBuilder:
         description = job["description"]
         prompt = view_prompt(slot, description, job["request"].get("outfit") or "")
         width, height = VIEW_SPECS[slot]["size"]
-        refs, ref_slots = self._references(job, slot)
+        refs, ref_slots = await self._references(client, job, owner, slot)
         if attempt is None:
             attempt = {"engine": engine, "seed": seed, "prompt": prompt, "reference_slots": ref_slots,
                        "started_at": _now()}
@@ -924,7 +1037,7 @@ class AvatarBuilder:
         self.jobs.write(job)
 
     async def _view(self, client: httpx.AsyncClient, job: Dict[str, Any], owner: AvatarOwner,
-                    slot: str, source_face: bytes) -> None:
+                    slot: str, reference_face: bytes) -> None:
         state = job["views"].setdefault(slot, {"attempts": []})
         if state.get("final"):
             return
@@ -943,7 +1056,7 @@ class AvatarBuilder:
                 _log(job, f"{slot} on {engine} failed: {error}")
                 self.jobs.write(job)
                 continue
-            await self._check(client, job, slot, attempt, source_face)
+            await self._check(client, job, slot, attempt, reference_face)
             tried.append(attempt)
             status = (attempt.get("qa") or {}).get("status")
             _log(job, f"{slot} via {engine}: {status} "
@@ -978,18 +1091,29 @@ class AvatarBuilder:
         data = await self._fetch(client, job["source"]["frame_url"])
         return await asyncio.to_thread(crop_face_region, data, job["source"].get("frame_box"), 2.2)
 
+    async def _anchor_face(self, client: httpx.AsyncClient, job: Dict[str, Any]) -> bytes:
+        data = await self._fetch(client, self._anchor_url(job))
+        box = await asyncio.to_thread(face_box, data)
+        return await asyncio.to_thread(crop_face_region, data, box, 2.2)
+
     async def _views(self, client: httpx.AsyncClient, job: Dict[str, Any], owner: AvatarOwner,
                      slots: List[str]) -> None:
-        source_face = await self._source_face(client, job)
-        results = await asyncio.gather(*[self._view(client, job, owner, slot, source_face)
+        # The anchor is checked against the source; every other view against
+        # the anchor, which was itself checked: same studio, same outfit, so
+        # the judge compares people rather than settings.
+        if ANCHOR_SLOT in slots or not self._anchor_url(job):
+            reference_face = await self._source_face(client, job)
+        else:
+            reference_face = await self._anchor_face(client, job)
+        results = await asyncio.gather(*[self._view(client, job, owner, slot, reference_face)
                                          for slot in slots], return_exceptions=True)
         failures = [f"{slot}: {result}" for slot, result in zip(slots, results)
                     if isinstance(result, Exception)]
         for slot, result in zip(slots, results):
             if isinstance(result, Exception) and not isinstance(result, BuildError):
                 logger.error("avatar build view %s crashed", slot, exc_info=result)
-        if "front" in slots and failures:
-            raise BuildError("the front view could not be made: " + "; ".join(failures))
+        if ANCHOR_SLOT in slots and failures:
+            raise BuildError("the anchor view could not be made: " + "; ".join(failures))
         if failures:
             job.setdefault("warnings", []).extend(failures)
             _log(job, "views without a picture: " + "; ".join(failures))
@@ -1020,7 +1144,7 @@ class AvatarBuilder:
         request = job["request"]
         source = job["source"]
         views = {slot: state["final"] for slot, state in job["views"].items() if state.get("final")}
-        front = views.get("front")
+        front = views.get("front") or views.get(ANCHOR_SLOT)
         references = [{"asset_id": None, "role": "face", "media_type": "image",
                        "canonical_url": source["frame_url"], "sha256": source["frame_sha256"],
                        "width": source.get("frame_width") or source.get("width") or 1,
@@ -1193,8 +1317,36 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
         payload = {**public_status(job), "cache_hit_bool": hit}
         return JSONResponse(status_code=200 if job.get("finished") else 202, content=payload)
 
+    async def resume_unfinished() -> None:
+        """A restart must not strand a build: pick up web jobs left running.
+
+        main.py runs a lifespan, which makes router startup hooks dead
+        letters, so this runs on the first request to any build route after
+        a start (the /nodes and /avatars pages poll, so that is within
+        seconds of anyone looking).
+        """
+        if state.get("resumed"):
+            return
+        state["resumed"] = True
+        jobs_dir = get_builder().jobs.jobs_dir
+        if not jobs_dir.is_dir():
+            return
+        cutoff = time.time() - 6 * 3600
+        for path in jobs_dir.glob("avb_*.json"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    continue
+                job = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if job.get("finished") or (job.get("request") or {}).get("runner") == "cli":
+                continue
+            logger.info("resuming avatar build %s", job.get("job_id"))
+            get_builder().ensure_running(str(job.get("job_id")))
+
     @router.post("/api/ai/avatar-build")
     async def create(body: BuildRequest, owner: AvatarOwner = Depends(owner_dependency)):
+        await resume_unfinished()
         url = str(body.video_url or body.image_url or "").strip()
         if not url and body.image_base64:
             raw = str(body.image_base64).split(",", 1)[-1]
@@ -1227,6 +1379,7 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
                      views: str = Form(""), avatar: str = Form(""),
                      owner: AvatarOwner = Depends(owner_dependency)):
         """A picture or video straight from the page; the video never becomes public."""
+        await resume_unfinished()
         body = BuildRequest(display_name=display_name or None, outfit=outfit or None,
                             views=views or None, avatar=avatar or None)
         content_type = str(file.content_type or "").lower()
@@ -1264,6 +1417,7 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
 
     @router.get("/api/ai/avatar-build/status/{job_id}")
     async def status(job_id: str, owner: AvatarOwner = Depends(owner_dependency)):
+        await resume_unfinished()
         job = get_builder().jobs.read(job_id, owner)
         return respond(job, False)
 
@@ -1288,6 +1442,7 @@ async def _cli(args) -> Dict[str, Any]:
                         views=args.views or None, seed=args.seed or None)
     identity = _identity(kind, sha, body, None)
     identity["local_file"] = str(path)
+    identity["runner"] = "cli"
     job, _ = builder.jobs.create(owner, identity)
     print(json.dumps({"job_id": job["job_id"]}), flush=True)
     job = await builder.run(job["job_id"])

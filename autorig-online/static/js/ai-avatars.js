@@ -17,7 +17,7 @@
   const STAGES = [
     ['source', 'Source', '<path d="M4 6h16v12H4z"/><path d="M10 9.5v5l4-2.5z"/>'],
     ['describe', 'Describe', '<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>'],
-    ['front', 'Front view', '<circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/>'],
+    ['anchor', 'Full-body anchor', '<circle cx="12" cy="5" r="2.4"/><path d="M12 8v7M8 11h8M12 15l-3 6M12 15l3 6"/>'],
     ['views', 'All views', '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
     ['sheet', 'Sheet', '<path d="M4 4h16v16H4z"/><path d="M4 12h16M12 4v16"/>'],
     ['save', 'Saved', '<path d="M5 12.5 10 17l9-10"/>'],

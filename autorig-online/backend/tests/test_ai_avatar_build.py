@@ -155,21 +155,27 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(summary.view_count, 8)
         self.assertEqual(summary.cover_url, profile.views["front"].canonical_url)
 
-    def test_front_is_made_first_and_anchors_the_other_views(self):
+    def test_the_full_body_anchor_is_made_first_and_anchors_the_other_views(self):
         farm = FakeFarm(self.assets)
-        self.start(self.builder(farm), views="front,back,profile_left")
+        job = self.start(self.builder(farm), views="back,profile_left,face_closeup")
         engines = [(engine, body) for engine, body in farm.posts]
         first = engines[0][1]
-        self.assertIn(build.VIEW_SPECS["front"]["text"], first["prompt"])
+        self.assertIn(build.VIEW_SPECS[build.ANCHOR_SLOT]["text"], first["prompt"])
         self.assertNotIn("reference_image_urls", first)
-        front_url = None
+        anchor = job["views"][build.ANCHOR_SLOT]["final"]["canonical_url"]
         for engine, body in engines[1:]:
             self.assertEqual(engine, "klein")
-            front_url = front_url or body["image_url"]
-            self.assertEqual(body["image_url"], front_url)
             self.assertEqual(body["checkpoint"], build.KLEIN_CHECKPOINT)
         back = next(body for _, body in engines if build.VIEW_SPECS["back"]["text"] in body["prompt"])
+        self.assertEqual(back["image_url"], anchor)
         self.assertNotIn("reference_image_urls", back)  # the back never sees the face
+        profile = next(body for _, body in engines if build.VIEW_SPECS["profile_left"]["text"] in body["prompt"])
+        self.assertEqual(profile["image_url"], anchor)
+        # The close-up starts from a crop of the anchor, with the source for the face.
+        face = next(body for _, body in engines if build.VIEW_SPECS["face_closeup"]["text"] in body["prompt"])
+        self.assertEqual(face["image_url"], job["views"]["face_closeup"]["crop_url"])
+        self.assertNotEqual(face["image_url"], anchor)
+        self.assertEqual(face["reference_image_urls"], [job["source"]["frame_url"]])
 
     def test_failed_view_is_retried_once_on_the_other_engine(self):
         farm = FakeFarm(self.assets, scores={("back", "klein"): 2, ("back", "qwen"): 9})
@@ -205,12 +211,21 @@ class BuilderTests(unittest.TestCase):
         farm = FakeFarm(self.assets, fail_engines=("klein", "qwen"))
         job = self.start(self.builder(farm), views="front")
         self.assertEqual(job["status"], "failed")
-        self.assertIn("front", job["error"])
+        self.assertIn("anchor", job["error"])
 
     def test_unknown_view_is_refused(self):
         with self.assertRaises(Exception):
             build.parse_views("front,left_ear")
-        self.assertEqual(build.parse_views("back, front")[0], "front")
+        self.assertEqual(build.parse_views("back, front")[0], build.ANCHOR_SLOT)
+
+
+class CropTests(unittest.TestCase):
+    def test_crops_have_the_view_size_and_fall_back_without_a_face(self):
+        tall = png((120, 130, 140), size=(832, 1216))
+        for framing, size in (("upper", (832, 1216)), ("face", (1024, 1024))):
+            data = build.crop_to_framing(tall, framing, *size)
+            with Image.open(io.BytesIO(data)) as image:
+                self.assertEqual(image.size, size)
 
 
 class VerdictTests(unittest.TestCase):
