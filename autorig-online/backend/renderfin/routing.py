@@ -139,7 +139,11 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
         return WORKFLOW_Z_DEPTH, None
     has_explicit_size = prompt.main_size_width > 0 and prompt.main_size_height > 0
     if ptype in ("t_pose", "t_poses") and not has_aspect_ratio:
-        return WORKFLOW_T_POSE, None if has_explicit_size else (1024, 1024)
+        # The pose skeleton is square and the T-pose quality gate compares the
+        # render against it, so a landscape default (the image API sends
+        # 960x540) would be rejected every time. Only a square size is honoured.
+        square = has_explicit_size and prompt.main_size_width == prompt.main_size_height
+        return WORKFLOW_T_POSE, None if square else (1024, 1024)
     if ptype == "open_pose":
         return WORKFLOW_OPEN_POSE, None
     if ptype == "inpaint":

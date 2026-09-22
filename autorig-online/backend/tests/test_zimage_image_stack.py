@@ -105,6 +105,16 @@ class PortedTemplateTests(unittest.TestCase):
         self.assertEqual(routing.scheduling_token(prompt), "gen_image.json")
         self.assertEqual(routing.resolve_workflow_file(prompt), ("t_pose.json", (1024, 1024)))
 
+    def test_t_pose_renders_square_whatever_landscape_default_it_is_sent(self):
+        # /api/image sends the product default 960x540; the square skeleton and
+        # the T-pose quality gate need a square render.
+        api = RenderPrompt(prompt="x", type="t_pose", image_url="https://x/t_pose.jpg",
+                           main_size_width=960, main_size_height=540)
+        self.assertEqual(routing.resolve_workflow_file(api), ("t_pose.json", (1024, 1024)))
+        square = RenderPrompt(prompt="x", type="t_pose", image_url="https://x/t_pose.jpg",
+                              main_size_width=1536, main_size_height=1536)
+        self.assertEqual(routing.resolve_workflow_file(square), ("t_pose.json", None))
+
     def test_a_chosen_z_image_finetune_replaces_the_base(self):
         workflow = render("gen_image.json", checkpoint="cyberrealisticZImage_v80_fp8mixed.safetensors")
         self.assertEqual([n["inputs"]["unet_name"] for n in nodes(workflow, "UNETLoader")],

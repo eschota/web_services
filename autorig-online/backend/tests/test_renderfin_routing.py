@@ -44,9 +44,15 @@ class RoutingImageBranchTests(unittest.TestCase):
         self.assertEqual(wf, WORKFLOW_T_POSE)
         self.assertEqual(forced, (1024, 1024))
 
-    def test_t_pose_honours_an_explicit_api_size(self):
-        p = RenderPrompt(type="t_pose", main_size_width=960, main_size_height=540)
+    def test_t_pose_honours_an_explicit_square_api_size(self):
+        p = RenderPrompt(type="t_pose", main_size_width=1536, main_size_height=1536)
         self.assertEqual(resolve_workflow_file(p), (WORKFLOW_T_POSE, None))
+
+    def test_t_pose_renders_square_when_sent_the_landscape_default(self):
+        # The T-pose quality gate compares the render with the square skeleton,
+        # so the image API's 960x540 default was rejected every time.
+        p = RenderPrompt(type="t_pose", main_size_width=960, main_size_height=540)
+        self.assertEqual(resolve_workflow_file(p), (WORKFLOW_T_POSE, (1024, 1024)))
 
     def test_legacy_typed_mode_keeps_gen_image_scheduling_token(self):
         p = RenderPrompt(type="open_pose", work_flow="gen_image_sdxl.json")
