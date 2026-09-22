@@ -1645,6 +1645,65 @@
     throw new Error('The service is still rate limited after 6 retries. Try Render again shortly.');
   }
 
+  /**
+   * One status line per node.
+   *
+   * The progress tracker (AIEntities.startTask) writes its own caption under
+   * the bar — "f12 · ~1m 29s estimated", "Queued · f12 · 2nd · ~3m" — which
+   * repeated what the node's state line already said. The caption is hidden
+   * on this page and folded into the state line instead:
+   * "rendering · f12 · ~1m 29s".
+   */
+  function compactStatus(etaText, phase) {
+    const text = String(etaText || '').trim();
+    if (!text) return '';
+    if (/^queued\b/i.test(text)) return 'queued' + text.slice(6);
+    const parts = text.split(' · ')
+      .map(part => part.replace(/\s+estimated$/, '').trim())
+      .filter(part => part && part.toLowerCase() !== 'rendering');
+    return [phase || 'rendering'].concat(parts).join(' · ');
+  }
+
+  function syncStatusLine(node) {
+    if (!node || !node.querySelector) return;
+    const state = node.querySelector('.nstate');
+    const eta = node.querySelector('.nprog .task-eta');
+    const bar = eta && eta.closest('.nprog');
+    if (!state || !bar || !(bar.classList.contains('running') || bar.classList.contains('queued'))) return;
+    const text = compactStatus(eta.textContent, state.dataset.phase);
+    if (text && state.textContent !== text) state.textContent = text;
+  }
+
+  /**
+   * Keep the state line in step with the tracker, and carry the (hidden)
+   * applied-settings note as the state line's tooltip.
+   */
+  function installStatusLines(canvas) {
+    if (!canvas || typeof MutationObserver === 'undefined') return;
+    const pending = new Set();
+    let queued = false;
+    const flush = () => {
+      queued = false;
+      pending.forEach(node => {
+        syncStatusLine(node);
+        const note = node.querySelector('.nrec');
+        const state = node.querySelector('.nstate');
+        if (note && state) state.title = note.textContent || '';
+      });
+      pending.clear();
+    };
+    new MutationObserver(records => {
+      for (const record of records) {
+        const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+        if (!target || !target.closest) continue;
+        const holder = target.closest('.task-eta, .nrec');
+        const node = holder && holder.closest('.drawflow-node');
+        if (node) pending.add(node);
+      }
+      if (pending.size && !queued) { queued = true; setTimeout(flush, 60); }
+    }).observe(canvas, {subtree: true, childList: true, characterData: true});
+  }
+
   function taskStateReporter(element, tracker, accepted, execution) {
     return data => {
       if (execution && !executionIsCurrent(execution)) return;
@@ -1660,9 +1719,11 @@
       element.textContent = (active ? phase : status === 'completed' ? 'completed' : 'queued') +
         (place ? ' · ' + place : '') +
         (worker ? ' · ' + worker : place ? '' : ' — waiting for a worker');
+      element.dataset.phase = active ? phase : 'queued';
       if (tracker && tracker.setState) tracker.setState({active, worker, phase,
         startedAt: data.started_at_unix_float || 0,
         queuePosition: data.queue_position_int, queueLength: data.queue_length_int});
+      syncStatusLine(element.closest && element.closest('.drawflow-node'));
       document.dispatchEvent(new CustomEvent('ai-task-status', {detail: {worker, status}}));
     };
   }
@@ -2032,7 +2093,8 @@
     link.target = '_blank';
     link.rel = 'noopener';
     link.className = 'nlink';
-    link.textContent = type === 'text' ? '' : 'open';
+    // The preview itself opens full size; no separate Open link.
+    link.textContent = '';
     if (link.textContent) host.appendChild(link);
   }
 
@@ -3107,6 +3169,7 @@
     if (window.AINodeShare) window.AINodeShare.install({canvas:document.getElementById('canvas'), getMeta:meta, toast});
     if (window.AINodeSockets) window.AINodeSockets.install({editor, canvas:document.getElementById('canvas'),
       socketTypes, linkAllowed, entityTypes:catalogue.entity_types_array || []});
+    installStatusLines(document.getElementById('canvas'));
     installWheelZoom();
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,

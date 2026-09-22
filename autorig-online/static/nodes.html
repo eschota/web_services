@@ -26,7 +26,7 @@
     <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-nodes.js?v=20260923-sockets1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260923-status1"></script>
     <style>
         .ai-page {
             background:
@@ -390,6 +390,16 @@
         .drawflow .drawflow-node[data-display-mode] .ninput > .nres:empty { display: none !important; }
 
         .nrec { padding: 0 14px 6px; font-size: 10.5px; color: #4ade80; line-height: 1.4; }
+        /* One status line per node: the applied-settings note lives in the
+           state line's tooltip, and the tracker's caption under the bar is
+           folded into the state line (ai-nodes.js syncStatusLine). */
+        .drawflow .drawflow-node .nrec { display: none !important; }
+        .drawflow .drawflow-node .nprog .task-eta { display: none; }
+        .drawflow .drawflow-node .nprog.task-prog { margin: 0 12px 8px; }
+        .drawflow .drawflow-node .nstate.running {
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            font-variant-numeric: tabular-nums;
+        }
         .nstate { padding: 0 14px 8px; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); }
         .nstate.running { color: #38bdf8; }
         .nstate.done { color: #4ade80; }
