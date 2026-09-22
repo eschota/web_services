@@ -654,7 +654,9 @@
           if (!response.ok || !data.avatar_object) throw new Error('Avatar is unavailable in this account');
           const avatar = data.avatar_object;
           const pinned = avatar.avatar_id + '@' + avatar.version;
-          if (!Array.from(select.options).some(item => item.value === pinned)) select.add(new Option(avatar.display_name + ' · v' + avatar.version, pinned));
+          const existingOption = Array.from(select.options).find(item => item.value === pinned);
+          if (existingOption) existingOption.textContent = avatar.display_name + ' · v' + avatar.version;
+          else select.add(new Option(avatar.display_name + ' · v' + avatar.version, pinned));
           select.value = pinned;
           const ref = avatar.references.find(item => item.media_type === 'image' && item.role === 'face') || avatar.references.find(item => item.media_type === 'image');
           preview.hidden = !ref;
@@ -668,7 +670,9 @@
       fetch('/api/ai/avatars').then(response => response.json()).then(data => {
         for (const item of data.avatars_array || []) {
           const key = item.avatar_id + '@' + item.current_version;
-          if (!Array.from(select.options).some(option => option.value === key)) select.add(new Option(item.display_name + ' · v' + item.current_version, key));
+          const existingOption = Array.from(select.options).find(option => option.value === key);
+          if (existingOption) existingOption.textContent = item.display_name + ' · v' + item.current_version;
+          else select.add(new Option(item.display_name + ' · v' + item.current_version, key));
         }
         update();
       }).catch(() => { state.textContent = 'Could not load Avatars'; });
@@ -900,7 +904,7 @@
     avatar_image: { api: '/api/ai/avatar-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
     video_frame: { api: '/api/ai/video-reference', finish: pollForFile, field: 'image_url_string', type: 'image' },
     video_storyboard: { api: '/api/ai/video-reference', finish: pollForFile, field: 'image_url_string', type: 'image' },
-    video_control: { api: '/api/ai/video', finish: pollForFile, field: 'video_url_string', type: 'video' },
+    video_control: { api: '/api/video', finish: pollForFile, field: 'video_url_string', type: 'video' },
     vision: { api: '/api/vision', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     text: { api: '/api/text2text', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     image: { api: '/api/image', finish: pollForFile, field: 'image_url_string', type: 'image' },

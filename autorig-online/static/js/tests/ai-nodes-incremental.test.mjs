@@ -9,6 +9,20 @@ import path from 'node:path';
 const sourcePath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), '..', 'ai-nodes.js');
 
+test('motion video runner calls the endpoint declared by the backend service', () => {
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const start = source.indexOf('const RUNNERS = {');
+  const end = source.indexOf("['pose', 'depth', 'canny'].forEach", start);
+  const runners = vm.runInNewContext(source.slice(start, end) + '; RUNNERS', {
+    pollForFile() {}, pollAiStatus() {}, poll3dStatus() {},
+  });
+  const catalogue = fs.readFileSync(path.resolve(path.dirname(sourcePath),
+    '..', '..', 'backend', 'ai_services.py'), 'utf8');
+  const declaredApi = catalogue.match(/"id": "video_control"[\s\S]*?"api": "([^"]+)"/)[1];
+  assert.equal(runners.video_control.api, declaredApi);
+  assert.equal(runners.video_control.api, runners.video.api);
+});
+
 
 function deferred() {
   let resolve;
