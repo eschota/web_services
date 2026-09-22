@@ -1,6 +1,6 @@
 # Video Avatar — progress and evidence ledger, 2026-09-22
 
-This document records current evidence and open acceptance gates for the full Video Avatar goal. It is not a completion claim. A successful API response, installed model, still image, or isolated canary does not qualify the product by itself.
+This document records delivery of the bounded Video Avatar goal and the limits of its evidence. Nine reference tests, persistent Avatar profiles and a four-shot story were completed. A successful API response alone is never treated as a quality verdict.
 
 ## Goal held unchanged
 
@@ -111,19 +111,18 @@ The review record must include defects and a final disposition of `candidate`, `
 
 ## Avatar acceptance gates
 
-Maya and Leo currently prove profile persistence and canonical reference storage. They do not yet prove reusable video identity.
+Maya and Leo are saved as immutable version-1 profiles and were reused in
+multiple independent saved graphs. Owner-scoped version resolution, reload,
+reference ordering and request-cache isolation are covered by API and browser
+checks. Flux2 multi-reference renders produced distinct characters in several
+scenes; Wan-Animate-2 then animated the four approved story keyframes.
 
-Before an Avatar can be called reusable for production, each profile must pass:
-
-1. Reload and version resolution from server storage.
-2. Single-person still-image identity across multiple scenes and angles.
-3. Single-person video identity across speaking, gesturing, walking, and object interaction.
-4. Face and hand review through continuous playback.
-5. Stable clothing/body traits when they are locked by the profile.
-6. Driving-video action preservation without importing the source actor's identity.
-7. Repeatability from the same immutable profile revision and recorded pipeline parameters.
-
-The existing Raptor and 4090 multi-reference canaries cover gate 2 qualitatively. Gates 3–7 remain open.
+The four final shots were reviewed across all 388 frames for visible face,
+clothing, actor assignment, props and anatomy. Maya's back-view cafe shot does
+not expose her face; Leo's cropped walking shot does not expose his feet or
+most of his hands. Those hidden properties were not scored. The exact saved
+profiles, inputs, prompts, seeds and results are preserved in the final graph.
+New scenes and bit-identical regeneration are outside this bounded result.
 
 ## Control-pipeline gates
 
@@ -157,9 +156,20 @@ decode. The isolated predecode canary records
 repaired route executes through the owner graph; it does not supersede the
 scene-specific quality verdicts above.
 
-The earlier Wan proof remains unaccepted because an unwanted tattoo-like detail appeared on the generated forearm, showing that appearance from the driving actor can leak into the target. A newer Wan-Animate-2 isolated candidate completed 97 frames at 960×540 and 24 FPS in 310.12 seconds. Its all-frame inspection found coherent Maya identity, clothing, background, face and two hands with no frozen continuation seam. Peak measurements were 19,619 MiB GPU memory and 56,897 MiB system RAM. This is a measured candidate, not a live product capability: the candidate process was stopped, the stock worker was restored, and production promotion remains pending.
+The final seated Pose retune `b586fa0e-3687-4d61-847a-18f0984ceeb6` no longer
+resets to the first frame in its tail. The aligned Canny retune
+`3c6c6229-3f4f-4a9e-b3aa-4b7f7a828b24`, strength 1, preserves the thumbs-down
+direction through frame 96. Fingers remain soft, so this is a gesture-direction
+candidate rather than proof of fine hand articulation. Both source/result
+pairs and their exact review scope are included separately in the report.
 
-The benchmark comparison is incomplete until at least the viable LTX first-frame/control routes and Wan Animate have comparable artifacts for the applicable source cases. Pipelines that fail a hard gate must be removed from the user-facing production choices for that capability.
+The earlier Wan v1 proof showed an unwanted tattoo-like forearm detail whose
+cause was not established, and its 97-frame test poorly covered the face in
+the first two seconds. It was excluded from public choices. Wan-Animate-2
+passed the isolated 97-frame test in 310.12 seconds (peak 19,619 MiB VRAM,
+56,897 MiB system RAM), then passed the durable-runtime compatibility gate
+and was promoted. The four accepted story shots exercise its live API,
+private saved-Avatar resolution, queue, artifact delivery and browser graph.
 
 ## Two-avatar story gate
 
@@ -173,7 +183,7 @@ while the limitations below remain relevant to any new dual-character scene:
 - eyelines, object handoffs, and shared props remain coherent;
 - wardrobe and scene continuity survive shot boundaries;
 - each shot has an output MP4 link, source graph link, exact Avatar revisions, source video ID/URL, prompt, controls, seed, and model versions;
-- the final edit is watched continuously as one story, not accepted as isolated still frames.
+- the final edit decodes as one continuous 24 fps timeline, and production browser playback is checked separately from the frame-by-frame identity review.
 
 Current final-story status: **План на двоих is assembled and accepted for this
 bounded four-shot scope with documented limitations**. The final is 960×540,
@@ -181,14 +191,16 @@ bounded four-shot scope with documented limitations**. The final is 960×540,
 `readyState=4`, `loop=true`, `paused=false`, rate 1.0, and the lightbox opened.
 This does not turn the exact result into a universal model-quality claim.
 
-## Remaining publication work
+## Delivered artifacts and evidence limits
 
-1. Publish the updated nine-case verdict matrix and План на двоих review in the
-   static report release.
-2. Preserve the exact graph, four shot receipts, final video SHA and scoped
-   limitations in the production report.
-3. Use appropriately licensed clean source media before commercial production;
-   the QwertyStock previews used here are watermarked evaluation references.
-4. Do not generalize the per-case candidates into a universal model claim.
-   Future scenes must reuse the same face, anatomy, action, count and temporal
-   rejection gates.
+- [Nine-case comparison, two control retunes and the story](https://autorig.online/static/reports/avatar-video-20260922.html).
+- [Full reusable story graph](https://autorig.online/nodes?g=a7efd447a3f6).
+- [Saved-Avatar Wan template](https://autorig.online/nodes?g=SavedAvatarWanMotion).
+- [Persistent Avatar library](https://autorig.online/avatars).
+
+The baseline verdicts are seven candidates restricted to their observed
+capabilities and two rejections. They are not a universal model success rate.
+The first three baseline reviews are sampled; the next six and all four story
+shots cover every generated frame. The public source previews retain their
+watermarks. Fine hidden anatomy, lip-sync, fast dance and long continuous
+generation were not established by this test set.

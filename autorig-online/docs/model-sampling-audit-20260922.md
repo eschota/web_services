@@ -187,3 +187,22 @@ compatibility gate are recorded in
 release Q. Four saved-Avatar story jobs were then accepted from the real
 production browser graph `30cb8f68083f`; visual acceptance of those story
 results is tracked separately and is not implied by enqueue success.
+
+## Final 10Eros runtime regression
+
+After promoting ComfyUI 0.37, public Auto request
+`e3b27e16-4b48-4c78-b110-597fe2b5e8b2` ran once on worker-4090 without a cache
+hit. The actual Comfy graph used the full
+`ltx10eros_v14_2989669.safetensors` checkpoint, CFG 1, Euler ancestral and
+the author schedule `1,.955,.893,.812,.715,.603,.482,.241,.121,0`: exactly
+nine denoise intervals. No generic scheduler replaced it.
+
+The canary delivered 25 frames at 960×540 and 24 fps in 132.6 seconds.
+Internal dimensions were 960×544. Seed 9221099 survived into the actual
+workflow. All 25 workflow nodes matched the promoted runtime's input schema;
+the result showed stable face, clothing and background during a small gaze
+shift and blink. The worker queue returned idle.
+
+[Production result](https://autorig.online/renderfin/render/default_user/e3b27e16-4b48-4c78-b110-597fe2b5e8b2.mp4).
+This proves the tested short-clip runtime contract, not arbitrary long-video
+or model-wide visual quality.

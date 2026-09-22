@@ -41,6 +41,19 @@ SOURCE_TITLES_RU = {
     "user-meeting": "Групповая презентация в офисе",
 }
 
+RETUNE_MEDIA = {
+    "seated-speaking-pose-predecode-crop": {
+        "title": "Речь и жест после исправления хвоста",
+        "source": "https://autorig.online/dev/api/scratch/44a6b18dee12.mp4",
+        "output": "https://autorig.online/renderfin/render/default_user/b586fa0e-3687-4d61-847a-18f0984ceeb6.mp4",
+    },
+    "single-hand-gesture-aligned-canny-strength1": {
+        "title": "Жест «палец вниз» после alignment и Canny",
+        "source": "https://autorig.online/dev/api/scratch/c8ff2cd4ef3a.mp4",
+        "output": "https://autorig.online/renderfin/render/default_user/3c6c6229-3f4f-4a9e-b3aa-4b7f7a828b24.mp4",
+    },
+}
+
 
 def read_json(path: Optional[Path]) -> Dict[str, Any]:
     if not path:
@@ -306,6 +319,38 @@ def case_html(
     </article>"""
 
 
+def retunes_html(review_set: Mapping[str, Any]) -> str:
+    reviews = review_set.get("retunes") or {}
+    cards = []
+    for retune_id, media in RETUNE_MEDIA.items():
+        review = reviews.get(retune_id)
+        if not isinstance(review, dict):
+            continue
+        disposition = str(review.get("disposition") or review.get("verdict") or "").lower()
+        label, css = REVIEW_LABELS.get(disposition, ("Требует проверки", "review"))
+        reason = review.get("reason_ru") or review.get("notes") or ""
+        scope = review.get("evidence_scope") or ""
+        defects = "".join(f"<li>{esc(item)}</li>" for item in review.get("defects") or [])
+        cards.append(f"""
+        <article class="case retune" id="{esc(retune_id)}">
+          <header><div><h3>{esc(media['title'])}</h3><code>{esc(retune_id)}</code></div>
+          <span class="verdict {esc(css)}">{esc(label)}</span></header>
+          <div class="pair" data-pair>
+            <section><h3>Контрольное движение</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="0" data-duration="4.041667" src="{esc(media['source'])}"></video></section>
+            <section><h3>Результат после исправления</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="{esc(media['output'])}"></video></section>
+            <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+          </div>
+          <p>{esc(reason)}</p>
+          {f'<ul>{defects}</ul>' if defects else ''}
+          <p class="limitation"><b>Границы этой оценки:</b> {esc(scope)}</p>
+        </article>""")
+    if not cards:
+        return ""
+    return ('<section class="story retunes"><h2>Контроль движения после исправлений</h2>'
+            '<p class="lead">Два дополнительных прогона показывают результат исправления хвоста видео и выравнивания управляющего движения. Под каждой парой указано, что именно проверено.</p>'
+            + "".join(cards) + '</section>')
+
+
 def build_report(
     state: Mapping[str, Any],
     manifest: Mapping[str, Any],
@@ -371,6 +416,7 @@ def build_report(
     )
     count = len(sections)
     evidence = manifest.get("evidence_scope_string") or ""
+    retunes = retunes_html(baseline_review)
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Видео: исходники и результаты</title>
@@ -386,10 +432,11 @@ details{{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}}summ
 .story-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}}.story-clip{{background:#101326;padding:10px;border-radius:11px}}.graphs{{display:flex;gap:10px;flex-wrap:wrap}}.graphs a,a{{color:#67e8f9}}@media(max-width:760px){{.pair{{grid-template-columns:1fr}}}}
 </style></head><body><main>
 <h1>Видео: исходники и результаты</h1>
-<p class="lead">Здесь исходные четырёхсекундные движения стоят рядом с результатами генерации. Наличие видео означает, что рендер завершён; вывод о качестве приводится только для случаев с зафиксированной ручной оценкой. Объём и границы каждой оценки сохранены рядом с её verdict.</p>
-<details class="summary"><summary>Технический scope набора</summary><p>{esc(evidence)}</p></details>
+<p class="lead">Здесь исходные четырёхсекундные движения стоят рядом с результатами генерации. Для каждого теста отдельно указаны оценка качества, найденные дефекты и объём проведённой проверки.</p>
+<details class="summary"><summary>Как подготовлены исходники</summary><p>{esc(evidence)}</p></details>
 <div class="summary"><span><b>{count}</b><br>Тестов</span><span><b>{len(clips[:4])}</b><br>Сцен истории</span><span><b>{sum(1 for key in case_order(manifest, cases) if verdict(cases[key], review_for(key, str(cases[key].get('source_id_string') or key.split('--', 1)[0]), cases[key], state_root, baseline_review))["css"] == "review")}</b><br>Ожидают оценки</span></div>
 {''.join(sections)}
+{retunes}
 <section class="story"><header><h2>{esc(story_final_receipt.get('title') or story_review.get('title_string') or 'План на двоих')}</h2><span class="verdict {esc(story_label[1])}">{esc(story_label[0])}</span></header>
 {f'<p class="lead"><b>Границы оценки:</b> {esc(story_scope)}</p>' if story_scope else ''}
 <div class="story-grid">{clip_cards or '<p>Story receipt не приложен.</p>'}</div><h3>Итоговый ролик</h3>{final_story}</section>

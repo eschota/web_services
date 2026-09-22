@@ -13,9 +13,9 @@ details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summar
 .story-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}.story-clip{background:#101326;padding:10px;border-radius:11px}.graphs{display:flex;gap:10px;flex-wrap:wrap}.graphs a,a{color:#67e8f9}@media(max-width:760px){.pair{grid-template-columns:1fr}}
 </style></head><body><main>
 <h1>Видео: исходники и результаты</h1>
-<p class="lead">Здесь исходные четырёхсекундные движения стоят рядом с результатами генерации. Наличие видео означает, что рендер завершён; вывод о качестве приводится только для случаев с зафиксированной ручной оценкой. Объём и границы каждой оценки сохранены рядом с её verdict.</p>
-<details class="summary"><summary>Технический scope набора</summary><p>Prompts and source difficulty annotations were written from five-frame contact sheets sampled from each declared four-second segment. This is motion-limited sample evidence, not full-video visual QA.</p></details>
-<div class="summary"><span><b>9</b><br>Тестов</span><span><b>4</b><br>Сцен истории</span><span><b>3</b><br>Ожидают оценки</span></div>
+<p class="lead">Здесь исходные четырёхсекундные движения стоят рядом с результатами генерации. Для каждого теста отдельно указаны оценка качества, найденные дефекты и объём проведённой проверки.</p>
+<details class="summary"><summary>Как подготовлены исходники</summary><p>Prompts and source difficulty annotations were written from five-frame contact sheets sampled from each declared four-second segment. This is motion-limited sample evidence, not full-video visual QA.</p></details>
+<div class="summary"><span><b>9</b><br>Тестов</span><span><b>4</b><br>Сцен истории</span><span><b>0</b><br>Ожидают оценки</span></div>
 
     <article class="case" id="walk-and-address-camera--ltx23-first-frame-baseline">
       <header><div><h2>Мужчина говорит и жестикулирует в камеру</h2><code>walk-and-address-camera--ltx23-first-frame-baseline</code></div>
@@ -123,7 +123,7 @@ details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summar
     </article>
     <article class="case" id="rear-view-walk--ltx23-first-frame-baseline">
       <header><div><h2>Человек уходит, камера поднимается к башне</h2><code>rear-view-walk--ltx23-first-frame-baseline</code></div>
-      <span class="verdict review">Требует проверки</span></header>
+      <span class="verdict candidate">Кандидат</span></header>
       <div class="pair" data-pair>
         <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="0.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/230f59f695fe.mp4"></video></section>
         <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/48e915d5-f7cf-4c43-88e3-8c5914da9005.mp4"></video></section>
@@ -144,7 +144,7 @@ details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summar
   &quot;width&quot;: 540
 }</pre>
       </details>
-      <details><summary>Ручная оценка</summary><p>Кейс не входит в шесть завершённых визуальных review; заключение не сформировано.</p><ul></ul></details>
+      <details><summary>Ручная оценка</summary><p>Сохранены уходящий из кадра человек, непрерывный наклон камеры вверх, фасад, зелень и башня; лицо, руки и полная анатомия не видны.</p><ul><li>лицо и руки не видны</li><li>не является identity/anatomy тестом</li><li>watermark/QR из source</li></ul></details>
       <p class="limitation"><b>Ограничение источника:</b> Poor identity benchmark because the person exits almost immediately; primarily a camera-motion and architecture stress case.</p>
     </article>
     <article class="case" id="two-person-cafe-conversation--ltx23-first-frame-baseline">
@@ -175,7 +175,7 @@ details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summar
     </article>
     <article class="case" id="two-person-walk--ltx23-first-frame-baseline">
       <header><div><h2>Двое идут рядом с крупными аксессуарами</h2><code>two-person-walk--ltx23-first-frame-baseline</code></div>
-      <span class="verdict review">Требует проверки</span></header>
+      <span class="verdict candidate">Кандидат</span></header>
       <div class="pair" data-pair>
         <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="0.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/12c662987598.mp4"></video></section>
         <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/d37a9d4f-9baf-4c06-b11c-e30ab5da8f9a.mp4"></video></section>
@@ -196,7 +196,7 @@ details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summar
   &quot;width&quot;: 540
 }</pre>
       </details>
-      <details><summary>Ручная оценка</summary><p>Кейс не входит в шесть завершённых визуальных review; заключение не сформировано.</p><ul></ul></details>
+      <details><summary>Ручная оценка</summary><p>Сохранены два человека, широкая шляпа, сумка, надувной круг, broad walking и top-down tracking; лица, стопы и часть рук сильно закрыты.</p><ul><li>лица почти полностью скрыты</li><li>часть рук и стоп закрыта</li><li>fine gait/digit anatomy не квалифицированы</li><li>watermark/QR из source</li></ul></details>
       <p class="limitation"><b>Ограничение источника:</b> Faces are mostly hidden by the top-down angle and large hat; suitable for gait, occlusion, and prop persistence, not facial identity scoring.</p>
     </article>
     <article class="case" id="seated-couple-object-action--ltx23-first-frame-baseline">
@@ -227,7 +227,7 @@ details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summar
     </article>
     <article class="case" id="user-meeting--ltx23-first-frame-baseline">
       <header><div><h2>Групповая презентация в офисе</h2><code>user-meeting--ltx23-first-frame-baseline</code></div>
-      <span class="verdict review">Требует проверки</span></header>
+      <span class="verdict candidate">Кандидат</span></header>
       <div class="pair" data-pair>
         <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="0.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/6caea32d8764.mp4"></video></section>
         <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/e3e10325-0b65-44de-8912-00ccb2841f3b.mp4"></video></section>
@@ -248,9 +248,34 @@ details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summar
   &quot;width&quot;: 960
 }</pre>
       </details>
-      <details><summary>Ручная оценка</summary><p>Кейс не входит в шесть завершённых визуальных review; заключение не сформировано.</p><ul></ul></details>
+      <details><summary>Ручная оценка</summary><p>Сохранены три стоящих ведущих, сидящая группа, стол, бумаги и одна длинная белая планка; точный count скрыт окклюзией, лица и пальцы слишком малы.</p><ul><li>точный people count неразрешим из-за окклюзии</li><li>лица и руки слишком малы для identity/digit review</li><li>watermark/QR из source</li></ul></details>
       <p class="limitation"><b>Ограничение источника:</b> People count is approximately nine because foreground occlusion makes an exact count uncertain; this is an extreme multi-person stress case and should not be used to qualify a two-avatar pipeline.</p>
     </article>
+<section class="story retunes"><h2>Контроль движения после исправлений</h2><p class="lead">Два дополнительных прогона показывают результат исправления хвоста видео и выравнивания управляющего движения. Под каждой парой указано, что именно проверено.</p>
+        <article class="case retune" id="seated-speaking-pose-predecode-crop">
+          <header><div><h3>Речь и жест после исправления хвоста</h3><code>seated-speaking-pose-predecode-crop</code></div>
+          <span class="verdict accepted">Принято</span></header>
+          <div class="pair" data-pair>
+            <section><h3>Контрольное движение</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="0" data-duration="4.041667" src="https://autorig.online/dev/api/scratch/44a6b18dee12.mp4"></video></section>
+            <section><h3>Результат после исправления</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/b586fa0e-3687-4d61-847a-18f0984ceeb6.mp4"></video></section>
+            <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+          </div>
+          <p>Преддекодный crop устранил возврат к frame 0: кадры 93–96 продолжают речь и жест, а финал больше не восстанавливает стартовое выражение и watermark ghost.</p>
+          
+          <p class="limitation"><b>Границы этой оценки:</b> целевая проверка хвоста frames 93–96 и сравнений со старым output/source; не полный новый обзор всех кадров</p>
+        </article>
+        <article class="case retune" id="single-hand-gesture-aligned-canny-strength1">
+          <header><div><h3>Жест «палец вниз» после alignment и Canny</h3><code>single-hand-gesture-aligned-canny-strength1</code></div>
+          <span class="verdict candidate">Кандидат</span></header>
+          <div class="pair" data-pair>
+            <section><h3>Контрольное движение</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="0" data-duration="4.041667" src="https://autorig.online/dev/api/scratch/c8ff2cd4ef3a.mp4"></video></section>
+            <section><h3>Результат после исправления</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/3c6c6229-3f4f-4a9e-b3aa-4b7f7a828b24.mp4"></video></section>
+            <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+          </div>
+          <p>После alignment и strength 1.0 рука сохраняет thumbs-down до кадров 93–96 и жест не переворачивается; согнутые пальцы остаются мягкими и плохо разделёнными.</p>
+          <ul><li>мягкие плохо разделённые согнутые пальцы</li><li>не является fine-finger benchmark</li></ul>
+          <p class="limitation"><b>Границы этой оценки:</b> пятикадровая проверка хвоста, включая frames 93–96; не fine-finger benchmark и не полный обзор всех кадров</p>
+        </article></section>
 <section class="story"><header><h2>План на двоих</h2><span class="verdict accepted">Принято</span></header>
 <p class="lead"><b>Границы оценки:</b> Проверены все 97 кадров каждого из четырёх точных роликов, соответствие утверждённым ключевым кадрам и исходным движениям, а также техническое воспроизведение итогового монтажа в production-браузере. Вердикт относится только к этим четырём роликам, графу, промптам, seed и финальному монтажу; это не универсальная оценка модели.</p>
 <div class="story-grid"><article class="story-clip"><h3>«Встретимся сегодня?»</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/9ab7a533-51f1-4491-918b-6f0c5df1b697.mp4"></video></article><article class="story-clip"><h3>Лео уже в пути.</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/2d96f091-ae43-41a3-a95d-a4a0a0e620a5.mp4"></video></article><article class="story-clip"><h3>Осталось выбрать маршрут.</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/19215ab5-5964-4753-84b9-c089a312e6ca.mp4"></video></article><article class="story-clip"><h3>Лучший план — быть вместе.</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/27804ff5-cf84-409f-bbe8-bbe5b51d1890.mp4"></video></article></div><h3>Итоговый ролик</h3><video class="final-story" controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/maya-leo-plan-for-two-20260922-7869863d.mp4"></video><p><a href="https://autorig.online/renderfin/render/default_user/maya-leo-plan-for-two-20260922-7869863d.mp4">Открыть итоговый ролик</a></p></section>

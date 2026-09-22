@@ -12,7 +12,7 @@
 | Один Avatar повторяет человеческое движение | Wan-Animate-2 + LightX2V, 6-step LCM | Допущенный основной путь. Проверены 81f и 97f canaries на RTX 4090, включая 97f exact 960×540. Это доказательство для проверенного seated speaking/hand-motion материала, а не универсальная гарантия модели. |
 | Нужны явные поза, глубина или края | LTX 2.3 Union-Control | Настоящее control-video conditioning. Использовать Pose для скелета, Depth для пространственного порядка, Canny для силуэта/границ. Результат зависит от качества и временного выравнивания control video. |
 | Старый Wan Animate v1 | Не выбирать публично | Отклонён как первый выбор: требует DWPose и в полном 97f тесте лицо было плохо покрыто примерно первые две секунды. Сохранён только как диагностический/rollback baseline. |
-| Два Avatar в диалоге | Короткие shots с утверждёнными keyframes; LTX Control для географии, Wan-Animate-2 только для отдельно проверенных single-character shots | Полная двухаватарная история ещё не принята. `Story 4` находится на review; не считать её завершённым доказательством всего сценария. |
+| Два Avatar в одной сцене | Wan-Animate-2 с общим подготовленным кадром, исходным видео и двумя сохранёнными Avatar | Проверены совместная работа с планом и разговор в кафе: два персонажа сохраняют свои места и одежду во всех 97 кадрах каждой сцены. Четыре сцены приняты для ограниченного сюжета «План на двоих», без гарантии для произвольных новых сцен. |
 
 ## Решения по baseline-кейсам
 
@@ -20,12 +20,21 @@ First-frame baseline остаётся дешёвым контрольным ма
 
 - `seated-speaking` — candidate для свободной речи и общих жестов;
 - `face-object-interaction` — candidate для простого устойчивого контакта с одним предметом;
-- `seated-couple-object-action` — сильнейший candidate из шести reviewed baseline cases;
+- `seated-couple-object-action` — сильнейший baseline candidate для последовательности поцелуй → разойтись → действие с тортом;
 - `single-hand-gesture` — rejected: thumbs-down превратился в thumbs-up;
 - `two-person-cafe-conversation` — rejected для reenactment: основной жест перешёл от женщины к мужчине;
 - `walk-and-address-camera` — candidate только как loose B-roll, поскольку жест и камера отличаются.
 
-Оставшиеся `rear-view-walk`, `two-person-walk` и `user-meeting` имеют статус `unreviewed`. Их нельзя включать в статистику успеха.
+Последние три случая тоже завершены и проверены по всем 97 кадрам:
+
+- `rear-view-walk` — candidate для перехода от человека к фасаду и башне при наклоне камеры вверх; лицо и руки скрыты;
+- `two-person-walk` — candidate для общей ходьбы двух людей и сохранения шляпы, сумки и круга; подробная анатомия закрыта ракурсом;
+- `user-meeting` — candidate для приблизительной групповой постановки и сохранения одной длинной планки; точный состав группы, лица и пальцы не оценимы надёжно из этого плана.
+
+Итого: девять baseline результатов, семь ограниченных candidates и два
+rejected. Первые три оценены по 24 кадрам и 12 сравнительным парам, следующие
+шесть — по всем 97 кадрам. Эти уровни доказательств не объединяются в
+выдуманный процент точности или сходства.
 
 ## Что исправили control-retune
 
@@ -36,7 +45,11 @@ First-frame baseline остаётся дешёвым контрольным ма
 1. Для motion transfer не подменять driving-video conditioning более подробным prompt.
 2. Считать `candidate` только в пределах просмотренного evidence scope: sparse samples и all-97-frame review — разные уровни доказательств.
 3. Перед production acceptance смотреть полный ролик на нормальной скорости со звуком; контактные листы не показывают cadence и flicker полностью.
-4. Не распространять успех одного Wan-Animate-2 seated clip на profile motion, props, fast dance, двух персонажей или long continuation.
+4. Ограничивать выводы конкретными проверенными сценами; четыре принятых коротких эпизода не доказывают качество быстрого танца или длинного непрерывного продолжения.
 5. Сохранять exact model/workflow hashes, Avatar revision, source/control hashes, seed, dimensions, frames/FPS и итоговый review verdict.
 
 Машиночитаемые решения находятся в `.codex_tmp/avatar-video-20260922/report/baseline-verdicts.json`.
+
+Публичные результаты: [сравнение исходников и генераций](https://autorig.online/static/reports/avatar-video-20260922.html),
+[полный граф сюжета](https://autorig.online/nodes?g=a7efd447a3f6),
+[готовый ролик](https://autorig.online/renderfin/render/default_user/maya-leo-plan-for-two-20260922-7869863d.mp4).
