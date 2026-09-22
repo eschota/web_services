@@ -20,15 +20,15 @@ This document records current evidence and open acceptance gates for the full Vi
 
 | Area | Current evidence | Status |
 |---|---|---|
-| Production | Release `K2` is current. The tested node UI behavior was introduced in `K1` and carried into `K2`; model/capability changes in `K2` do not turn the UI evidence into media-quality acceptance. | active, not full-goal acceptance |
+| Production | Release `P` is current. The tested node UI behavior introduced in `K1` is carried forward. Release `P` adds short-source video normalization and the repaired LTX guide/predecode path; deployment does not turn canary evidence into media-quality acceptance. | active, not full-goal acceptance |
 | Reference inputs | Nine four-second source segments and five-frame contact sheets exist under `.codex_tmp/avatar-video-20260922/reference-review`. Prompts were written from the observed frames. | prepared |
 | Benchmark manifest | Nine sources, one LTX 2.3 first-frame baseline, nine cases; fixed seed `9221001`; 97 frames; 960×540 landscape and 540×960 portrait cases. | validated structurally |
 | Benchmark batch | Six of nine baseline jobs completed. The first three are recorded in [the sampled baseline review](video-baseline-review-20260922.md). Cases 4–6 received an all-97-frame inspection in [the second-batch review](video-baseline-next3-review-20260922.md). Three cases remain prepared but unrendered. | six completed; no normal-speed continuous acceptance |
 | Avatar storage | Browser-created profiles persisted across reload: Maya `av_1c0510ac1ba21445555d2ab1@1` and Leo `av_465777c59b4ec81448c591c6@1`. | persistence demonstrated |
 | Avatar canonical images | Maya: `/renderfin/render/default_user/c50e5b12-fe98-4d9a-aee5-197ed4d972b6.png`; Leo: `/renderfin/render/default_user/b9651d0f-7fd7-4e22-82dd-ed87a3820579.png`. | stored inputs, not video acceptance |
 | Multi-reference image identity | Raptor canaries `0a56defa` and `015a049c`, plus 4090 canary `71fc1ec1`, passed qualitative still-image identity inspection. Evidence includes `.codex_tmp/avatar_identity_maya_cafe.png` and related artifacts. | image-only evidence; no video identity pass |
-| LTX controls | Pose, Depth, and Canny each completed a 25-frame execution canary. Pose also completed an exact 97-frame canary. Two public 97-frame cases now add sampled quality evidence: seated Pose is a candidate; hand Canny is rejected for quality. | executable; quality remains capability- and scene-specific |
-| Wan Animate | A 25-frame GPU proof completed. The sampled result retained an unwanted tattoo-like forearm detail from the driver, demonstrating appearance leakage. | executable candidate; not accepted |
+| LTX controls | Pose, Depth, and Canny each completed a 25-frame execution canary. Pose also completed an exact 97-frame canary. Release `P` normalizes short sources before guide construction, and a repaired predecode/guide owner-graph run completed as task `2f83c954-dcce-4fd9-96fd-450f5d4c7cf5` from graph `6decd42fc85d`. | live executable path; quality remains capability- and scene-specific |
+| Wan Animate | The earlier 25-frame proof exposed tattoo-like driver leakage. A separate Wan-Animate-2 97-frame 960×540 isolated candidate completed in 310.12 seconds without OOM and passed all-frame candidate inspection. Its candidate process was stopped and no live capability was registered. | measured candidate; live promotion pending |
 | UI production | Incremental execution, exact-model display, ETA/status, per-node share, graph duplication, A/B anchor and bounded result history are deployed in `K1`. | deployed; bounded production QA recorded |
 | Review navigation | Production QA exercised output preview/overlay, current-result sharing, graph copy/reload, and saved-history recovery. | working for tested cases; complete benchmark navigation still open |
 
@@ -147,7 +147,16 @@ These two cases show why controls cannot be admitted as a single blanket
 quality claim: Pose can improve broad human action in one scene while Canny can
 retain a silhouette yet still fail hand anatomy and end-frame persistence.
 
-Wan Animate has completed a 25-frame GPU proof and can enter the comparison matrix as a candidate. It is not accepted: an unwanted tattoo-like detail appeared on the generated forearm, showing that appearance from the driving actor can leak into the target. It must be evaluated under the same face, anatomy, identity, people-count, action, camera and temporal gates, including explicit accessory/tattoo mismatch tests.
+Release `P` also closes two execution-contract defects. Short driving sources
+are normalized to the requested LTX `8k+1` frame contract before the guide is
+built, and the guide/crop chain now selects delivery latents before video VAE
+decode. The isolated predecode canary records
+`predecode_crop_fix_pass`. Owner graph `6decd42fc85d` subsequently produced the
+97-frame video task `2f83c954-dcce-4fd9-96fd-450f5d4c7cf5`. This proves the
+repaired route executes through the owner graph; it does not supersede the
+scene-specific quality verdicts above.
+
+The earlier Wan proof remains unaccepted because an unwanted tattoo-like detail appeared on the generated forearm, showing that appearance from the driving actor can leak into the target. A newer Wan-Animate-2 isolated candidate completed 97 frames at 960×540 and 24 FPS in 310.12 seconds. Its all-frame inspection found coherent Maya identity, clothing, background, face and two hands with no frozen continuation seam. Peak measurements were 19,619 MiB GPU memory and 56,897 MiB system RAM. This is a measured candidate, not a live product capability: the candidate process was stopped, the stock worker was restored, and production promotion remains pending.
 
 The benchmark comparison is incomplete until at least the viable LTX first-frame/control routes and Wan Animate have comparable artifacts for the applicable source cases. Pipelines that fail a hard gate must be removed from the user-facing production choices for that capability.
 
