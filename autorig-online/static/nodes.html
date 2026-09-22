@@ -16,13 +16,15 @@
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260922-wan2-avatar"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260922-sampling-audit2"></script>
-    <script src="/static/js/ai-node-display.js?v=20260922-incremental2"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260922-toolbar"></script>
+    <script src="/static/js/ai-node-display.js?v=20260922-toolbar2"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
     <script src="/static/js/ai-node-compare.js?v=20260922-history2"></script>
-    <script src="/static/js/ai-graph-bridge.js?v=20260922-agent"></script>
+    <script src="/static/js/ai-graph-bridge.js?v=20260922-follow-input"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
-    <script src="/static/js/ai-nodes.js?v=20260922-wan2-avatar2"></script>
+    <script src="/static/js/ai-node-placement.js?v=20260922-toolbar2"></script>
+    <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
+    <script src="/static/js/ai-nodes.js?v=20260922-toolbar3"></script>
     <style>
         .ai-page {
             background:
@@ -65,28 +67,72 @@
         .bar nav a { color: var(--text-secondary, #9aa0b5); font-size: 13px; margin-left: 12px; text-decoration: none; }
         .bar nav a:hover { color: #38bdf8; }
 
-        .shell { display: grid; grid-template-columns: 268px 1fr; height: calc(100vh - 59px); }
-        @media (max-width: 860px) { .shell { grid-template-columns: 1fr; height: auto; } }
+        /* One column: the canvas is the page, and the tools float over it. */
+        .shell { display: block; height: calc(100vh - 59px); }
+        .stage { position: relative; height: 100%; }
+        @media (max-width: 860px) { .shell { height: auto; } }
 
-        .side {
-            border-right: 1px solid rgba(255,255,255,.08); padding: 16px;
-            overflow-y: auto; background: rgba(12,13,26,.5);
+        /* ---- compositions dropdown --------------------------------------- */
+        .drop { position: relative; }
+        .drop > summary {
+            list-style: none; cursor: pointer; user-select: none;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+            color: inherit; border-radius: 9px; padding: 9px 15px; font-size: 14px;
+        }
+        .drop > summary::-webkit-details-marker { display: none; }
+        .drop > summary::after { content: ' ▾'; opacity: .65; }
+        .drop > summary:hover { background: rgba(255,255,255,.12); }
+        .drop-panel {
+            position: absolute; z-index: 20; top: calc(100% + 8px); left: 0;
+            width: 310px; max-height: min(66vh, 560px); overflow-y: auto;
+            padding: 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px;
+            background: rgba(14,15,30,.98); box-shadow: 0 20px 55px rgba(0,0,0,.55);
         }
         .pgroup {
             font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
-            color: var(--text-secondary, #9aa0b5); margin: 16px 0 8px;
+            color: var(--text-secondary, #9aa0b5); margin: 14px 0 8px;
         }
         .pgroup:first-child { margin-top: 0; }
-        .pitem {
-            display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left;
-            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-            border-radius: 10px; padding: 10px 11px; margin-bottom: 7px; cursor: pointer; color: inherit;
+
+        /* ---- compact icon toolbar over the canvas ------------------------ */
+        .ntools {
+            position: absolute; z-index: 5; top: 10px; left: 10px;
+            display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px;
+            max-width: 388px; padding: 5px; border-radius: 12px;
+            border: 1px solid rgba(255,255,255,.1); background: rgba(12,13,26,.82);
+            backdrop-filter: blur(8px); box-shadow: 0 10px 28px rgba(0,0,0,.4);
         }
-        .pitem:hover:not(:disabled) { border-color: #38bdf8; background: rgba(56,189,248,.1); }
-        .pitem:disabled { opacity: .4; cursor: not-allowed; }
-        .pitem b { display: block; font-size: 13.5px; font-weight: 600; }
-        .pitem i { display: block; font-style: normal; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); margin-top: 2px; line-height: 1.35; }
-        .picon { font-size: 16px; line-height: 1.2; }
+        .ntools hr {
+            width: 1px; height: 26px; margin: 4px 3px; align-self: center;
+            border: 0; background: rgba(255,255,255,.14);
+        }
+        .titem {
+            width: 36px; height: 36px; padding: 0; flex: 0 0 auto;
+            display: flex; align-items: center; justify-content: center; cursor: grab;
+            font-size: 17px; line-height: 1; color: inherit;
+            background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+            border-radius: 9px;
+        }
+        .titem:hover:not(:disabled), .titem:focus-visible {
+            border-color: #38bdf8; background: rgba(56,189,248,.16); outline: none;
+        }
+        .titem:active:not(:disabled) { cursor: grabbing; }
+        .titem:disabled { opacity: .35; cursor: not-allowed; }
+        .titem.taction { cursor: pointer; }
+        /* Anchored to the strip, not to the button, so a tooltip never lands
+           on top of the row below it. */
+        .ttip {
+            position: absolute; z-index: 9; top: calc(100% + 8px); left: 0;
+            display: none; width: max-content; max-width: 300px; text-align: left;
+            padding: 7px 9px; border-radius: 9px; pointer-events: none;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(10,11,22,.98);
+            box-shadow: 0 12px 26px rgba(0,0,0,.5);
+        }
+        .titem:hover .ttip, .titem:focus-visible .ttip { display: block; }
+        .titem.dragging .ttip { display: none; }
+        .ttip b { display: block; font-size: 12.5px; font-weight: 600; }
+        .ttip i { display: block; font-style: normal; font-size: 11px; margin-top: 2px;
+                  line-height: 1.35; color: var(--text-secondary, #9aa0b5); }
 
         .tmpl {
             display: block; width: 100%; text-align: left; color: inherit; cursor: pointer;
@@ -210,6 +256,25 @@
 <div class="bar">
     <h1>Nodes</h1>
     <input type="text" id="graph-name" value="SimpleTextToVideoByVision" aria-label="Composition name">
+    <details class="drop" id="compositions">
+        <summary aria-label="Compositions: ready-made graphs and the saved graph library">Compositions</summary>
+        <div class="drop-panel">
+            <div class="pgroup">Start from</div>
+            <div id="templates"></div>
+            <a class="hint" href="/workflows" style="display:block;margin:10px 0 0">Browse all saved graphs →</a>
+            <p class="hint">
+                Drag a tool from the strip at the top left onto the canvas, or click it to
+                drop a node in the middle of the view. Drag from a socket on the right of a
+                node to a socket on the left of another; only sockets that carry the same
+                kind of thing will connect. Render runs the whole composition; steps that do
+                not depend on each other run at the same time.
+                Select with left-drag or Shift-click. Right-drag pans. Ctrl+C/V copies and
+                pastes; Ctrl+D duplicates; Delete removes selected nodes. Double-click a
+                header for S/M/A views, and Shift-click the S/M/A button to change every node.
+                Right-click a picture node for Functions.
+            </p>
+        </div>
+    </details>
     <button id="run">Render</button>
     <button id="continue">Continue</button>
     <button id="cancel" hidden>Cancel</button>
@@ -220,26 +285,17 @@
     <span id="fleet"></span>
     <span class="grow"></span>
     <nav>
+        <a href="/workflows">Library</a>
         <a href="/vision">Vision</a><a href="/text">Text</a><a href="/image">Image</a>
         <a href="/video">Video</a><a href="/avatars">Avatars</a><a href="/3dmodel">3D</a>
     </nav>
 </div>
 
 <div class="shell">
-    <aside class="side">
-        <div class="pgroup">Compositions</div>
-        <div id="templates"></div>
-        <div id="palette"></div>
-        <p class="hint">
-            Drag from a socket on the right of a node to a socket on the left of
-            another. Only sockets that carry the same kind of thing will connect.
-            Render runs the whole composition; steps that do not depend on each
-            other run at the same time.
-            Select with left-drag or Shift-click. Right-drag pans. Ctrl+C/V copies and pastes;
-            Ctrl+D duplicates; Delete removes selected nodes. Double-click a header for S/M/A views.
-        </p>
-    </aside>
-    <main><div id="canvas"></div></main>
+    <main class="stage">
+        <div id="palette" class="ntools" role="toolbar" aria-label="Node tools"></div>
+        <div id="canvas"></div>
+    </main>
 </div>
 
 <div class="toast" id="toast"></div>

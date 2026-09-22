@@ -26,6 +26,20 @@
     return MODES.includes(value) ? value : (MODES.includes(fallback) ? fallback : 'all');
   }
 
+  /**
+   * After the next frame, or shortly after — whichever the page allows.
+   *
+   * The wait exists to let the host finish attaching a node's metadata, and a
+   * frame is the natural moment for it. A tab that is not painting never gets
+   * a frame, though, and a node left without its controls is worse than one
+   * prepared a few milliseconds early. Everything scheduled here is
+   * idempotent, so running twice costs nothing.
+   */
+  function soon(callback) {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(callback);
+    if (typeof setTimeout === 'function') setTimeout(callback, 0);
+  }
+
   function nodeId(element) {
     return element && String(element.id || '').replace(/^node-/, '');
   }
@@ -114,8 +128,10 @@
     const button = element.querySelector('.node-display-mode');
     if (!button) return;
     button.textContent = LABELS[mode];
-    button.title = TITLES[mode] + '. Click or double-click the header to change mode.';
-    button.setAttribute('aria-label', TITLES[mode] + '. Activate to use the next display mode.');
+    button.title = TITLES[mode] + '. Click or double-click the header to change mode; ' +
+      'hold Shift to change every node in the graph.';
+    button.setAttribute('aria-label', TITLES[mode] +
+      '. Activate to use the next display mode, or hold Shift to apply it to every node.');
     button.setAttribute('aria-pressed', mode === 'all' ? 'true' : 'false');
   }
 
@@ -133,7 +149,7 @@
     if (details) details.open = mode !== 'small';
     updateButton(element, mode);
     if (typeof options.updateConnections === 'function') {
-      requestAnimationFrame(() => options.updateConnections(nodeId(element)));
+      soon(() => options.updateConnections(nodeId(element)));
     }
     return mode;
   }
@@ -165,7 +181,8 @@
       button.addEventListener('pointerdown', event => event.stopPropagation());
       button.addEventListener('dblclick', event => event.stopPropagation());
       button.addEventListener('click', event => {
-        event.preventDefault(); event.stopPropagation(); cycle(element, true);
+        event.preventDefault(); event.stopPropagation();
+        if (event.shiftKey) cycleAll(element, true); else cycle(element, true);
       });
       header.appendChild(button);
     }
@@ -210,6 +227,25 @@
       return setMode(idOrElement, MODES[(MODES.indexOf(current) + 1) % MODES.length], persist);
     }
 
+    function setModeAll(mode, persist) {
+      const applied = normalizeMode(mode, fallback);
+      canvas.querySelectorAll('.drawflow-node[id^="node-"]')
+        .forEach(element => setMode(element, applied, persist));
+      return applied;
+    }
+
+    /**
+     * Shift takes the whole graph with it.
+     *
+     * The next mode is read from the node that was clicked, so the one under
+     * the cursor behaves exactly as it would without Shift and the rest simply
+     * join it. Twenty nodes are otherwise twenty clicks.
+     */
+    function cycleAll(idOrElement, persist) {
+      const current = getMode(idOrElement) || fallback;
+      return setModeAll(MODES[(MODES.indexOf(current) + 1) % MODES.length], persist);
+    }
+
     function refresh(idOrElement) {
       if (idOrElement != null) return prepare(nodeElement(canvas, idOrElement));
       canvas.querySelectorAll('.drawflow-node[id^="node-"]').forEach(prepare);
@@ -230,15 +266,15 @@
       if (stopped) return;
       records.forEach(record => record.addedNodes.forEach(added => {
         if (added.nodeType !== 1) return;
-        if (added.matches && added.matches('.drawflow-node[id^="node-"]')) requestAnimationFrame(() => prepare(added));
-        else if (added.querySelectorAll) added.querySelectorAll('.drawflow-node[id^="node-"]').forEach(element => requestAnimationFrame(() => prepare(element)));
+        if (added.matches && added.matches('.drawflow-node[id^="node-"]')) soon(() => prepare(added));
+        else if (added.querySelectorAll) added.querySelectorAll('.drawflow-node[id^="node-"]').forEach(element => soon(() => prepare(element)));
       }));
     });
     mutations.observe(canvas, { childList: true, subtree: true });
 
     // Drawflow emits this before some hosts finish attaching their own metadata,
     // so defer one frame and let storedMode read the final meta object.
-    const onCreated = id => requestAnimationFrame(() => prepare(nodeElement(canvas, id)));
+    const onCreated = id => soon(() => prepare(nodeElement(canvas, id)));
     if (typeof editor.on === 'function') editor.on('nodeCreated', onCreated);
     const scaleSockets = () => canvas.style.setProperty('--socket-zoom-scale',
       String(Math.max(1, Math.min(1.8, 1 / Math.sqrt(Number(editor.zoom) || 1)))));
@@ -249,8 +285,10 @@
     return {
       applyNode: (idOrElement, mode) => setMode(idOrElement, mode, false),
       setMode,
+      setModeAll: mode => setModeAll(mode, true),
       getMode,
       cycle: idOrElement => cycle(idOrElement, true),
+      cycleAll: idOrElement => cycleAll(idOrElement, true),
       refresh,
       destroy: function () {
         stopped = true;

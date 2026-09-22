@@ -22,6 +22,8 @@
   let editor = null;
   let nodeDisplay = null;
   let nodeGroups = null;
+  let nodePlacement = null;
+  let nodePipelines = null;
   let graphAgent = null;
   let graphBridge = null;
   let graphInstanceId = '';
@@ -433,6 +435,8 @@
     if (!entry) return null;
     const inputs = entry.inputs || [];
     const outputs = entry.outputs || [];
+    const parameterNames = new Set((entry.params_array || []).map(item => item.name));
+    const hasDimensions = parameterNames.has('width') && parameterNames.has('height');
     const id = editor.addNode(
       serviceId, inputs.length, outputs.length, x, y,
       'ainode svc-' + serviceId, { service: serviceId }, serviceNodeHtml(Object.assign({}, entry, {title: (params && params._label) || entry.title}))
@@ -442,6 +446,7 @@
       service: serviceId,
       displayMode: params && params._display_mode,
       label: (params && params._label) || '',
+      followInputSize: hasDimensions ? (!params || params._follow_input_size !== false) : undefined,
       inFields: inputs.map(i => i.field),
       outFields: outputs.map(o => o.field)
     });
@@ -626,6 +631,22 @@
   }
 
   /**
+   * The socket on a node that hands out a picture, if it has one.
+   *
+   * Only a plain `image` counts. A ControlNet node publishes a pose or a depth
+   * map, which no image input accepts, so offering it the picture functions
+   * would only build wires the editor immediately refuses.
+   */
+  function imageOutputField(id) {
+    const node = meta(id);
+    if (!node) return '';
+    if (node.kind === KIND_INPUT) return node.entityType === 'image' ? 'value' : '';
+    const entry = serviceById(node.service);
+    const output = ((entry && entry.outputs) || []).find(item => item.type === 'image');
+    return output ? output.field : '';
+  }
+
+  /**
    * Drawflow stacks the port dots in one column centred on the node; the
    * labels live in the body. Spacing both on the same pitch is what makes a
    * dot sit beside the name of the thing it carries.
@@ -733,6 +754,7 @@
           if (!response.ok || !data.url) throw new Error(`The ${isVideo ? 'video' : 'image'} upload failed`);
           if (element._uploadGeneration !== generation) return;
           text.value = data.url;
+          text.dispatchEvent(new Event('change', {bubbles:true}));
           preview.src = data.url;
           status.textContent = `${isVideo ? 'video' : 'image'} ready`;
           status.className = 'nstate done';
@@ -799,6 +821,9 @@
     const values = {};
     if (meta(id)?.label) values._label = meta(id).label;
     if (meta(id)?.displayMode) values._display_mode = meta(id).displayMode;
+    if (typeof meta(id)?.followInputSize === 'boolean') {
+      values._follow_input_size = meta(id).followInputSize;
+    }
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
       const raw = control.value;
@@ -1928,38 +1953,131 @@
     return escapeHtml(value).replace(/"/g, '&quot;');
   }
 
-  function buildPalette() {
-    const host = document.getElementById('palette');
-    host.innerHTML = '';
-    const heading = document.createElement('div');
-    heading.className = 'pgroup';
-    heading.textContent = 'Sources';
-    host.appendChild(heading);
-    [['image', 'Image in'], ['video', 'Video in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
-      host.appendChild(paletteButton(title, typeIcon(type), '', () =>
-        addInputNode(type, 60 + editor.canvas_x * -1, 80, '')));
-    });
-    const services = document.createElement('div');
-    services.className = 'pgroup';
-    services.textContent = 'Tools';
-    host.appendChild(services);
-    (catalogue.services_array || []).forEach(entry => {
-      const disabled = entry.status !== 'live';
-      const button = paletteButton(entry.title, typeIcon((entry.produces_array || [])[0]),
-                                   entry.summary, () => addServiceNode(entry.id, 140, 120, null));
-      if (disabled) { button.disabled = true; button.title = 'Not wired up yet'; }
-      host.appendChild(button);
-    });
+  const SOURCE_HELP = {
+    image: 'A picture to start from: paste, drop a file or give an address.',
+    video: 'A clip to start from: drop a file or give an address.',
+    text: 'Words to hand to a service as a prompt.',
+    avatar: 'One of your saved characters, pinned to a version.'
+  };
+
+  /**
+   * One glyph per tool, because the icon is now the whole button.
+   *
+   * The catalogue only says what a service produces, and four different tools
+   * produce a picture; four identical buttons would be a worse palette than
+   * the list this replaced. A service with no glyph here still gets the icon
+   * of the thing it makes, so a new service appears without an edit.
+   */
+  const TOOL_ICONS = {
+    'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
+    vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
+    video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
+    avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪'
+  };
+
+  function toolIcon(key, fallbackType) {
+    return TOOL_ICONS[key] || typeIcon(fallbackType);
   }
 
-  function paletteButton(title, icon, help, onClick) {
+  /**
+   * A compact strip of icons over the top-left of the canvas.
+   *
+   * Tools are the thing a person reaches for constantly; a column of named
+   * cards took a quarter of the window to say what a row of icons says in two
+   * lines. The name and the one-line description are still there, on hover and
+   * in the accessible name, so nothing is lost but the space.
+   */
+  function buildPalette() {
+    const host = document.getElementById('palette');
+    if (!host) return;
+    host.innerHTML = '';
+    [['image', 'Image in'], ['video', 'Video in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
+      host.appendChild(paletteButton(title, toolIcon('input:' + type, type), SOURCE_HELP[type] || '',
+        {kind:'input', type, title}));
+    });
+    host.appendChild(document.createElement('hr'));
+    (catalogue.services_array || []).forEach(entry => {
+      const button = paletteButton(entry.title,
+                                   toolIcon(entry.id, (entry.produces_array || [])[0]),
+                                   entry.summary,
+                                   {kind:'service', service:entry.id, title:entry.title});
+      if (entry.status !== 'live') {
+        button.disabled = true;
+        button.setAttribute('aria-label', entry.title + '. Not wired up yet.');
+        const note = button.querySelector('.ttip i');
+        if (note) note.textContent = 'Not wired up yet.';
+      }
+      host.appendChild(button);
+    });
+    host.appendChild(document.createElement('hr'));
+    host.appendChild(actionButton('Arrange', '▦',
+      'Lay the selected nodes out in columns by depth, or the whole graph when nothing is selected.',
+      () => nodePipelines && nodePipelines.arrange(Array.from(nodeGroups?.selected || []))));
+  }
+
+  function toolButton(title, icon, help) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'pitem';
-    button.innerHTML = `<span class="picon">${icon}</span><span><b>${escapeHtml(title)}</b>`
-                     + (help ? `<i>${escapeHtml(help)}</i>` : '') + '</span>';
+    button.className = 'titem';
+    button.setAttribute('aria-label', help ? title + '. ' + help : title);
+    button.innerHTML = `<span class="ticon" aria-hidden="true">${icon}</span>`
+                     + `<span class="ttip"><b>${escapeHtml(title)}</b>`
+                     + `<i>${escapeHtml(help || '')}</i></span>`;
+    return button;
+  }
+
+  function paletteButton(title, icon, help, placement) {
+    const button = toolButton(title, icon, help);
+    if (nodePlacement) nodePlacement.bindPaletteButton(button, placement);
+    // The drag image is taken from the button, and a tooltip open under the
+    // cursor would be dragged along with it.
+    button.addEventListener('dragstart', () => button.classList.add('dragging'));
+    button.addEventListener('dragend', () => button.classList.remove('dragging'));
+    return button;
+  }
+
+  function actionButton(title, icon, help, onClick) {
+    const button = toolButton(title, icon, help);
+    button.classList.add('taction');
     button.addEventListener('click', onClick);
     return button;
+  }
+
+  /**
+   * Move a node and have the graph agree that it moved.
+   *
+   * `editor.getNodeFromId` hands back a deep copy, so writing a position into
+   * it changes nothing that is saved or exported: the node would slide on
+   * screen and snap back on reload. The live record is the one Drawflow keeps
+   * per module, which is also what a group drag writes to.
+   */
+  function moveNodeTo(id, x, y) {
+    const module = editor.drawflow.drawflow[editor.module];
+    const data = module && module.data[id];
+    const element = nodeElement(id);
+    if (!data || !element) return;
+    data.pos_x = x;
+    data.pos_y = y;
+    element.style.left = x + 'px';
+    element.style.top = y + 'px';
+    editor.updateConnectionNodes('node-' + id);
+  }
+
+  /**
+   * Start the view clear of the tool strip.
+   *
+   * The strip floats over the top-left corner, which is exactly where a graph
+   * that begins at the origin draws its first node. Panning the camera once,
+   * at startup, costs nothing and stops the first thing a person sees from
+   * being half-hidden; a graph already framed somewhere else is left alone.
+   */
+  function offsetViewBelowTools() {
+    const tools = document.getElementById('palette');
+    if (!tools || !editor || editor.canvas_x || editor.canvas_y) return;
+    editor.canvas_x = 20;
+    editor.canvas_y = Math.round(tools.getBoundingClientRect().height) + 26;
+    editor.precanvas.style.transform =
+      `translate(${editor.canvas_x}px, ${editor.canvas_y}px) scale(${editor.zoom})`;
   }
 
   async function boot() {
@@ -1967,15 +2085,30 @@
     editor = new Drawflow(document.getElementById('canvas'));
     editor.reroute = true;
     editor.start();
+    if (window.AINodePlacement) nodePlacement = window.AINodePlacement.install({
+      editor, canvas:document.getElementById('canvas'),
+      createNode:(spec, x, y) => spec.kind === 'input'
+        ? addInputNode(spec.type, x, y, '')
+        : addServiceNode(spec.service, x, y, null),
+      getNodeElement:nodeElement,
+      moveNode:moveNodeTo
+    });
     if (window.AINodeDisplay) nodeDisplay = window.AINodeDisplay.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, defaultMode:'medium',
       onModeChange:(id, mode) => { const value=meta(id); if(value) value.displayMode=mode; if(nodeCompare) nodeCompare.refresh(id); }});
     if (window.AINodeShare) window.AINodeShare.install({canvas:document.getElementById('canvas'), getMeta:meta, toast});
     installWheelZoom();
+    if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
+      editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
+      exportGraph:graphFromCanvas, imageOutput:imageOutputField, nodeLimit:200, toast,
+      loadModels:service => window.AIEntities.loadModels(service),
+      onNodesAdded:ids => { if (nodeGroups) nodeGroups.selectIds(ids); }});
     if (window.AINodeGroups) nodeGroups = window.AINodeGroups.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
       addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200,
       onNodesRemoved:forgetNodes,
+      nodeFunctions:id => nodePipelines ? nodePipelines.functionsFor(id) : [],
+      onArrange:ids => nodePipelines && nodePipelines.arrange(ids),
       onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
     document.addEventListener('paste', event => {
       const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
@@ -2017,6 +2150,13 @@
     });
 
     buildPalette();
+    // A dropdown that stays open after a click elsewhere reads as stuck.
+    const compositions = document.getElementById('compositions');
+    if (compositions) {
+      document.addEventListener('mousedown', event => {
+        if (compositions.open && !compositions.contains(event.target)) compositions.open = false;
+      }, true);
+    }
     // The strip says what the whole farm is doing, coloured by the kind of
     // work, which on this page matters more than on any single-service one:
     // a composition is waiting on several sorts of job at once.
@@ -2047,7 +2187,11 @@
       button.type = 'button';
       button.className = 'tmpl';
       button.innerHTML = `<b>${escapeHtml(template.title)}</b><i>${escapeHtml(template.summary)}</i>`;
-      button.addEventListener('click', () => loadGraph(template.graph));
+      button.addEventListener('click', () => {
+        loadGraph(template.graph);
+        const drop = document.getElementById('compositions');
+        if (drop) drop.open = false;
+      });
       picker.appendChild(button);
     });
 
@@ -2070,6 +2214,7 @@
     } else if ((templates.templates_array || []).length) {
       loadGraph(templates.templates_array[0].graph);
     }
+    offsetViewBelowTools();
     if (window.AINodeCompare) nodeCompare = window.AINodeCompare.install({
       canvas:document.getElementById('canvas'), getMeta:meta, getGraph:graphFromCanvas,
       getResult:id => runState.get(String(id)), getAnchorId:() => comparisonAnchorId,

@@ -26,7 +26,7 @@ import ai_services
 router = APIRouter()
 
 MAX_OPERATIONS = 200
-DISPLAY_PARAM_KEYS = {"_label", "_display_mode"}
+DISPLAY_PARAM_KEYS = {"_label", "_display_mode", "_follow_input_size"}
 CONTROL_INPUTS = {"control_pose": "pose", "control_depth": "depth", "control_canny": "canny"}
 
 
@@ -135,6 +135,10 @@ def _normalize_node_params(node: ai_graph.GraphNode) -> None:
 
 
 def _validate_param_value(service_id: str, name: str, value: Any) -> None:
+    if name == "_follow_input_size":
+        if not isinstance(value, bool):
+            _reject("bad_parameter_value", "Parameter '_follow_input_size' must be boolean")
+        return
     if name in DISPLAY_PARAM_KEYS:
         if not isinstance(value, str):
             _reject("bad_parameter_value", f"Parameter '{name}' must be text")
@@ -507,6 +511,8 @@ def apply_operations(original: ai_graph.Graph,
                     raise
             target.params.update(copy.deepcopy(normalized_values))
             _reset_sampling_on_model_change(target.params, normalized_values)
+            if ("width" in values or "height" in values) and "_follow_input_size" not in values:
+                target.params["_follow_input_size"] = False
             invalidated.update(_descendants(graph, {target.id}))
             summary["updated_node_ids_array"].append(target.id)
         elif op == "set_input":

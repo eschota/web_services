@@ -31,6 +31,25 @@
       !['__proto__', 'prototype', 'constructor'].includes(key) && safeJsonValue(value[key], depth + 1));
   }
 
+  function followsInputSize(params) {
+    return !params || params._follow_input_size !== false;
+  }
+
+  function targetDimensions(dimensions, service) {
+    let width = Math.round(Number(dimensions && dimensions.width));
+    let height = Math.round(Number(dimensions && dimensions.height));
+    if (!Number.isFinite(width) || !Number.isFinite(height) ||
+        width < 256 || width > 2048 || height < 256 || height > 2048) return null;
+    let evenAdjusted = false;
+    if (service === 'video') {
+      const evenWidth = Math.round(width / 2) * 2;
+      const evenHeight = Math.round(height / 2) * 2;
+      evenAdjusted = evenWidth !== width || evenHeight !== height;
+      width = evenWidth; height = evenHeight;
+    }
+    return {width, height, evenAdjusted};
+  }
+
   function install(options) {
     options = options || {};
     const editor = options.editor;
@@ -41,6 +60,8 @@
     const exportGraph = options.exportGraph;
     const onNodesRemoved = typeof options.onNodesRemoved === 'function' ? options.onNodesRemoved : function () {};
     const onSetComparisonAnchor = typeof options.onSetComparisonAnchor === 'function' ? options.onSetComparisonAnchor : null;
+    const nodeFunctions = typeof options.nodeFunctions === 'function' ? options.nodeFunctions : null;
+    const onArrange = typeof options.onArrange === 'function' ? options.onArrange : null;
     const toast = typeof options.toast === 'function' ? options.toast : function () {};
     const nodeLimit = clamp(Number(options.nodeLimit) || 200, 1, 1000);
     if (!editor || !canvas || !getMeta || !addInputNode || !addServiceNode || !exportGraph) {
@@ -55,6 +76,9 @@
     let menu = null;
     let pasteCount = 0;
     const imageSizeCache = new Map();
+    const internalDimensionControls = new WeakSet();
+    const followRefreshVersions = new Map();
+    let followRefreshTimer = null;
     const pageKey = location.origin + location.pathname + location.search;
 
     injectStyles();
@@ -218,7 +242,10 @@
         return;
       }
       const id = numericId(node);
-      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      // Shift on the display-mode button means "every node", not "add this
+      // one to the selection"; that control answers the click itself.
+      if ((event.ctrlKey || event.metaKey || event.shiftKey) &&
+          !(event.target.closest && event.target.closest('.node-display-mode'))) {
         event.preventDefault();
         event.stopImmediatePropagation();
         toggleSelection(id);
@@ -565,9 +592,61 @@
       }
       control.value = String(value);
       if (!control.checkValidity()) { control.value = previous; return false; }
-      control.dispatchEvent(new Event('input', { bubbles: true }));
-      control.dispatchEvent(new Event('change', { bubbles: true }));
+      internalDimensionControls.add(control);
+      try {
+        control.dispatchEvent(new Event('input', { bubbles: true }));
+        control.dispatchEvent(new Event('change', { bubbles: true }));
+      } finally { internalDimensionControls.delete(control); }
       return true;
+    }
+
+    async function refreshFollowingSizes() {
+      const graph = safeGraph();
+      if (!graph) return;
+      await Promise.all(graph.nodes.map(async graphNode => {
+        const id = String(graphNode.id);
+        const element = nodeElement(id);
+        const widthControl = element && element.querySelector('[data-param="width"]');
+        const heightControl = element && element.querySelector('[data-param="height"]');
+        if (!widthControl || !heightControl) return;
+        const item = getMeta(id) || {};
+        if (item.followInputSize === false || !followsInputSize(graphNode.params)) return;
+        const version = (followRefreshVersions.get(id) || 0) + 1;
+        followRefreshVersions.set(id, version);
+        let dimensions;
+        try { dimensions = await resolveInputDimensions(graph, id); }
+        catch (_) {
+          // Follow mode has one deterministic no-image fallback. This also
+          // upgrades old graphs whose dimensions predate the persisted mode.
+          setDimensionControl(widthControl, 960);
+          setDimensionControl(heightControl, 540);
+          return;
+        }
+        if (followRefreshVersions.get(id) !== version) return;
+        const normalized = targetDimensions(dimensions, item.service);
+        if (!normalized) return; // Never silently shrink an unsupported source.
+        setDimensionControl(widthControl, normalized.width);
+        setDimensionControl(heightControl, normalized.height);
+      }));
+    }
+
+    function scheduleFollowingRefresh() {
+      clearTimeout(followRefreshTimer);
+      followRefreshTimer = setTimeout(refreshFollowingSizes, 220);
+    }
+
+    function onFollowSourceChange(event) {
+      const target = event.target;
+      if (!target || !target.dataset) return;
+      const node = target.closest && target.closest('.drawflow-node');
+      if (!node) return;
+      const name = String(target.dataset.param || '');
+      if ((name === 'width' || name === 'height') && !internalDimensionControls.has(target)) {
+        const item = getMeta(numericId(node));
+        if (item) item.followInputSize = false;
+        return;
+      }
+      if (target.dataset.value !== undefined) scheduleFollowingRefresh();
     }
 
     async function matchInputImageSizes(button, fields) {
@@ -583,20 +662,21 @@
           const widthControl = node && node.querySelector('[data-param="width"]');
           const heightControl = node && node.querySelector('[data-param="height"]');
           if (!widthControl || !heightControl) continue;
+          const item = getMeta(id) || {};
+          item.followInputSize = true;
           let dimensions;
           try { dimensions = await resolveInputDimensions(graph, id); }
-          catch (_) { missing += 1; continue; }
-          let width = Math.round(Number(dimensions.width));
-          let height = Math.round(Number(dimensions.height));
-          if (width < 256 || width > 2048 || height < 256 || height > 2048) { outside += 1; continue; }
-          const item = getMeta(id) || {};
-          if (item.service === 'video') {
-            const evenWidth = Math.round(width / 2) * 2;
-            const evenHeight = Math.round(height / 2) * 2;
-            if (evenWidth !== width || evenHeight !== height) evenAdjusted += 1;
-            width = evenWidth; height = evenHeight;
+          catch (_) {
+            missing += 1;
+            if (setDimensionControl(widthControl, 960) &&
+                setDimensionControl(heightControl, 540)) applied += 1;
+            continue;
           }
-          if (setDimensionControl(widthControl, width) && setDimensionControl(heightControl, height)) applied += 1;
+          const normalized = targetDimensions(dimensions, item.service);
+          if (!normalized) { outside += 1; continue; }
+          if (normalized.evenAdjusted) evenAdjusted += 1;
+          if (setDimensionControl(widthControl, normalized.width) &&
+              setDimensionControl(heightControl, normalized.height)) applied += 1;
         }
         fields.filter(field => field.name === 'width' || field.name === 'height').forEach(field => {
           const bulk = menu && menu.querySelector('[data-bulk-param="' + CSS.escape(field.name) + '"]');
@@ -608,7 +688,7 @@
         if (outside) notes.push('not applied to ' + outside + ' nodes: input size is outside 256–2048 px');
         if (missing) notes.push('no upstream image for ' + missing + ' nodes');
         if (evenAdjusted) notes.push(evenAdjusted + ' video nodes rounded to even pixels');
-        toast(applied + ' nodes matched input image size' + (notes.length ? '; ' + notes.join('; ') : '') + '.');
+        toast(applied + ' nodes now follow input image size' + (notes.length ? '; ' + notes.join('; ') : '') + '.');
       } finally {
         button.disabled = false;
         button.textContent = originalText;
@@ -654,7 +734,28 @@
         commands.append(commandButton('Set as A', 'Use this node as the visual A/B comparison reference',
           () => onSetComparisonAnchor(String(contextNodeId))));
       }
+      if (onArrange) {
+        commands.append(commandButton('Arrange',
+          'Lay the selected nodes out in columns by depth; with nothing selected, the whole graph',
+          () => onArrange(Array.from(selected))));
+      }
       menu.appendChild(commands);
+      // Functions act on the one node the menu was opened on, never on the
+      // selection, so they are kept apart from the commands above.
+      const functions = nodeFunctions ? (nodeFunctions(String(contextNodeId)) || []) : [];
+      if (functions.length) {
+        const heading = document.createElement('strong');
+        heading.className = 'ai-group-menu-section';
+        heading.textContent = 'Functions';
+        menu.appendChild(heading);
+        const group = document.createElement('div');
+        group.className = 'ai-group-menu-commands ai-group-menu-functions';
+        functions.slice(0, 8).forEach(entry => {
+          group.appendChild(commandButton(String(entry.label || 'Function'),
+            String(entry.title || entry.label || ''), entry.run));
+        });
+        menu.appendChild(group);
+      }
       const dirty = new Set();
       fields.forEach(field => {
         const label = document.createElement('label');
@@ -699,12 +800,12 @@
         const match = document.createElement('button');
         match.type = 'button';
         match.className = 'ai-group-match-size';
-        match.textContent = 'Match input image size';
-        match.title = 'Use the nearest upstream original image. Video dimensions are rounded to even pixels.';
+        match.textContent = 'Follow input image size';
+        match.title = 'Keep using the nearest upstream original image size. Manual width or height disables following.';
         match.addEventListener('click', () => matchInputImageSizes(match, fields));
         menu.appendChild(match);
         const note = document.createElement('small');
-        note.textContent = 'Applies to ' + dimensionTargets + ' selected nodes. Videos use even dimensions.';
+        note.textContent = 'Enabled by default for ' + dimensionTargets + ' selected nodes. Manual dimensions switch a node to fixed size; videos use even dimensions.';
         menu.appendChild(note);
       }
       const actions = document.createElement('div'); actions.className = 'ai-group-menu-actions';
@@ -786,9 +887,22 @@
     document.addEventListener('copy', onCopy, true);
     document.addEventListener('paste', onPaste, true);
     document.addEventListener('mousedown', onOutsidePointer, true);
+    canvas.addEventListener('input', onFollowSourceChange, true);
+    canvas.addEventListener('change', onFollowSourceChange, true);
+    editor.on('connectionCreated', scheduleFollowingRefresh);
+    editor.on('connectionRemoved', scheduleFollowingRefresh);
+    scheduleFollowingRefresh();
+
+    function selectIds(ids) {
+      selected.clear();
+      (ids || []).forEach(id => { if (nodeElement(id)) selected.add(String(id)); });
+      paintSelection();
+      return selected.size;
+    }
 
     return {
       selected,
+      selectIds,
       clearSelection,
       selectAll,
       duplicateSelection,
@@ -802,6 +916,9 @@
         document.removeEventListener('copy', onCopy, true);
         document.removeEventListener('paste', onPaste, true);
         document.removeEventListener('mousedown', onOutsidePointer, true);
+        canvas.removeEventListener('input', onFollowSourceChange, true);
+        canvas.removeEventListener('change', onFollowSourceChange, true);
+        clearTimeout(followRefreshTimer);
       }
     };
   }
@@ -815,6 +932,9 @@
       '.ai-group-marquee{position:fixed;z-index:9998;border:1px solid #38bdf8;background:rgba(56,189,248,.15);pointer-events:none}',
       '.ai-group-menu{position:fixed;z-index:10020;min-width:260px;max-height:min(520px,85vh);overflow:auto;padding:12px;border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 18px 55px rgba(0,0,0,.5);display:grid;gap:9px}',
       '.ai-group-menu-commands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:2px 0 8px;border-bottom:1px solid #334155}',
+      '.ai-group-menu-section{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#94a3b8}',
+      '.ai-group-menu-functions{grid-template-columns:minmax(0,1fr)}',
+      '.ai-group-menu-functions button{text-align:left}',
       '.ai-group-menu label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(90px,130px);gap:10px;align-items:center;text-transform:capitalize;font-size:12px}',
       '.ai-group-menu input,.ai-group-menu select{min-width:0;background:#111827;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:6px}',
       '.ai-group-menu-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:4px}',

@@ -37,6 +37,12 @@
           Number.isFinite(Number(value))) result[name] = Number(value);
       else result[name] = clone(value);
     });
+    // Missing is the persisted legacy form of the current default-follow
+    // behaviour. Compare it as true so applying/reloading does not look like
+    // an edit merely because the live canvas serialises the explicit marker.
+    if ('width' in result && 'height' in result && !('_follow_input_size' in result)) {
+      result._follow_input_size = true;
+    }
     return result;
   }
 
@@ -177,6 +183,9 @@
         field.appendChild(option);
       }
       field.value = value;
+      if (typeof field.dispatchEvent === 'function' && typeof Event !== 'undefined') {
+        field.dispatchEvent(new Event('change', {bubbles:true}));
+      }
       const preview = element.querySelector('[data-preview]');
       if (preview && /^https?:\/\//.test(value)) {
         preview.src = value;
@@ -194,6 +203,11 @@
       if (metadata) {
         metadata.label = String(params._label || '');
         metadata.displayMode = params._display_mode || metadata.displayMode;
+        if (node.kind === 'service' &&
+            (typeof metadata.followInputSize === 'boolean' ||
+             ('width' in params && 'height' in params) || '_follow_input_size' in params)) {
+          metadata.followInputSize = params._follow_input_size !== false;
+        }
       }
       const element = nodeElement(id);
       const heading = element && element.querySelector('.nhead b');
