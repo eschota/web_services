@@ -249,7 +249,108 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
     })
 
 
+# --------------------------------------------------- enhancement (three nodes)
+#
+# Deliberately three services rather than one with a mode switch: they take
+# different settings, cost different amounts of GPU time, and are wired in
+# different places in a graph — an upscale usually ends a chain, a face fix
+# usually sits in the middle of one.
+#
+# Everything here runs on the FLUX image boxes (f5, f12, f15, Raptor). The
+# video card, worker-4090, carries no ESRGAN weights and no TiledDiffusion, so
+# video super-resolution is declared and disabled rather than quietly missing;
+# `blocked_reason` is what the palette shows instead of a generic tooltip.
+SERVICES.extend([
+    {
+        "id": "upscale", "title": "Upscale", "path": "/nodes",
+        "api": "/api/upscale", "status": "live",
+        "summary": "Enlarge a picture 2x or 4x, optionally re-rendering the new pixels.",
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True, "title": "Picture to enlarge"},
+            {"type": TEXT, "field": "prompt", "required": False, "title": "Subject (refine mode)"},
+        ],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Enlarged picture"}],
+    },
+    {
+        "id": "detail_enhance", "title": "Detail enhancer", "path": "/nodes",
+        "api": "/api/detail", "status": "live", "slow": True,
+        "summary": "Add texture and micro-detail at the picture's own size.",
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True, "title": "Picture to enrich"},
+            {"type": TEXT, "field": "prompt", "required": False, "title": "Subject"},
+        ],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Enriched picture"}],
+    },
+    {
+        "id": "face_fix", "title": "Face & detail fixer", "path": "/nodes",
+        "api": "/api/facefix", "status": "live", "slow": True,
+        "summary": "Re-render the face at a higher pixel density and stitch it back.",
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True, "title": "Picture with a face"},
+            {"type": TEXT, "field": "prompt", "required": False, "title": "Subject"},
+        ],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Repaired picture"}],
+    },
+    {
+        "id": "upscale_video", "title": "Upscale video", "path": "/nodes",
+        "api": "/api/upscale", "status": "planned", "slow": True,
+        "summary": "Super-resolution for a clip, with the frames kept consistent.",
+        "blocked_reason": (
+            "Needs weights the farm does not have: SeedVR2 (seedvr2_ema_3b, ~6 GB) "
+            "on worker-4090, or any ESRGAN file in its upscale_models folder, which "
+            "is empty. The image boxes have the weights but only 8 GB of VRAM."
+        ),
+        "inputs": [
+            {"type": VIDEO, "field": "video_url", "required": True, "title": "Clip to enlarge"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Enlarged clip"}],
+    },
+])
+
+
 PARAMS: Dict[str, List[Dict[str, object]]] = {
+    "upscale": [
+        {"name": "scale", "title": "Factor", "type": "select", "default": "2",
+         "options": [{"value": "2", "title": "2x"}, {"value": "4", "title": "4x"}],
+         "help": "The output is the source size times this, up to 4096 px on the long edge"},
+        {"name": "mode", "title": "Mode", "type": "select", "default": "fast",
+         "options": [
+             {"value": "fast", "title": "Fast — ESRGAN only"},
+             {"value": "refine", "title": "Refine — ESRGAN then tiled re-render"},
+         ],
+         "help": "Refine invents real texture in the new pixels and costs minutes"},
+        {"name": "model", "title": "Upscaler", "type": "select",
+         "default": "4x_NMKD-Siax_200k.pth",
+         "options": [
+             {"value": "4x_NMKD-Siax_200k.pth", "title": "NMKD Siax 4x"},
+             {"value": "RealESRGAN_x4.pth",
+              "title": "RealESRGAN 4x — installed on f15 only", "disabled": True},
+             {"value": "RealESRGAN_x2.pth",
+              "title": "RealESRGAN 2x — installed on f15 only", "disabled": True},
+         ],
+         "help": "Only models present on every image worker can be chosen"},
+    ],
+    "detail_enhance": [
+        {"name": "strength", "title": "Strength", "type": "range", "min": 0.05, "max": 1,
+         "step": 0.05, "default": 0.35,
+         "help": "How much texture to invent; above ~0.6 the subject starts to change"},
+        {"name": "tile", "title": "Tiling", "type": "select", "default": "true",
+         "options": [
+             {"value": "true", "title": "Tiled — safe at any size"},
+             {"value": "false", "title": "Single pass — small pictures only"},
+         ]},
+    ],
+    "face_fix": [
+        {"name": "fidelity", "title": "Fidelity", "type": "range", "min": 0.05, "max": 1,
+         "step": 0.05, "default": 0.6,
+         "help": "1 keeps the face it found, 0 rebuilds it"},
+        {"name": "hands_eyes", "title": "Region", "type": "select", "default": "false",
+         "options": [
+             {"value": "false", "title": "Face only"},
+             {"value": "true", "title": "Face and bare skin (hands, neck)"},
+         ],
+         "help": "The wider region is slower and rewrites more of the picture"},
+    ],
     "avatar_video": [
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,
          "step": 1, "default": 960,

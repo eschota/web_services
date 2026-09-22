@@ -16,6 +16,9 @@ SEED_MAX = 574131870028331  # C# random seed upper bound
 _GLASS_RE = re.compile(r"\bglass(?:es)?\b", re.IGNORECASE)
 _SEED_KEYS = ("noise_seed", "seed")
 MAX_PROMPT_CHARS = 12000
+# The one ESRGAN model every FLUX image box carries. A template that asks for
+# an upscaler must still parse when nothing was chosen.
+DEFAULT_UPSCALE_MODEL = "4x_NMKD-Siax_200k.pth"
 
 
 def sanitize_prompt(text: str) -> str:
@@ -56,6 +59,7 @@ def render_workflow_text(
     lora: str = "",
     lora_strength: Optional[float] = None,
     pose_prompt: str = "",
+    upscale_model: str = "",
 ) -> Dict[str, Any]:
     """Substitute placeholders, parse, normalize. Returns the workflow dict
     ready for POST /prompt."""
@@ -67,6 +71,10 @@ def render_workflow_text(
     text = text.replace("$long_side", str(int(max(width, height))))
     text = text.replace("$width", str(int(width)))
     text = text.replace("$height", str(int(height)))
+    text = text.replace(
+        "$upscale_model",
+        _json_escape((upscale_model or "").strip() or DEFAULT_UPSCALE_MODEL),
+    )
     text = text.replace("$prompt", _json_escape(sanitize_prompt(prompt)))
     text = text.replace("$pose_prompt", _json_escape(sanitize_prompt(pose_prompt)))
     text = text.replace("$negative_prompt", _json_escape(sanitize_prompt(negative_prompt)))

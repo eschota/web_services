@@ -1277,6 +1277,9 @@ class RenderQueue:
 
         if forced:
             width, height = forced
+        elif (prompt.type or "").strip().lower() in routing.ENHANCE_TYPES:
+            width, height = routing.clamp_enhance_dims(
+                prompt.main_size_width, prompt.main_size_height)
         elif routing.is_image_request(prompt):
             width, height = routing.clamp_image_dims(prompt.main_size_width, prompt.main_size_height)
         else:
@@ -1298,6 +1301,7 @@ class RenderQueue:
             frames=prompt.frame_count,
             seed=prompt.noise_seed or None,
             checkpoint=getattr(prompt, "checkpoint", "") or "",
+            upscale_model=getattr(prompt, "upscale_model", "") or "",
             lora=getattr(prompt, "lora", "") or "",
             lora_strength=(getattr(prompt, "lora_strength", 0) or None),
         )

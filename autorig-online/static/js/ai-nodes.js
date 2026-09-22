@@ -1010,6 +1010,11 @@
     text: { api: '/api/text2text', finish: pollAiStatus, field: 'answer_string', type: 'text' },
     image: { api: '/api/image', finish: pollForFile, field: 'image_url_string', type: 'image' },
     video: { api: '/api/video', finish: pollForFile, field: 'video_url_string', type: 'video' },
+    // Enhancement: a picture in, the same picture out, published at a URL the
+    // farm fills in later — exactly the ControlNet shape.
+    upscale: { api: '/api/upscale', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    detail_enhance: { api: '/api/detail', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    face_fix: { api: '/api/facefix', finish: pollForFile, field: 'image_url_string', type: 'image' },
     '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
   };
   ['pose', 'depth', 'canny'].forEach(channel => {
@@ -2194,7 +2199,8 @@
     'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
-    avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪'
+    avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
+    upscale: '🔎', detail_enhance: '✨', face_fix: '🙂', upscale_video: '📺'
   };
 
   function toolIcon(key, fallbackType) {
@@ -2224,10 +2230,14 @@
                                    entry.summary,
                                    {kind:'service', service:entry.id, title:entry.title});
       if (entry.status !== 'live') {
+        // A service can say *why* it is not callable. "Not wired up yet" is a
+        // fine default, but "the card has no weights for it" is the answer to
+        // the question the greyed-out button actually raises.
+        const why = entry.blocked_reason || 'Not wired up yet.';
         button.disabled = true;
-        button.setAttribute('aria-label', entry.title + '. Not wired up yet.');
+        button.setAttribute('aria-label', entry.title + '. ' + why);
         const note = button.querySelector('.ttip i');
-        if (note) note.textContent = 'Not wired up yet.';
+        if (note) note.textContent = why;
       }
       host.appendChild(button);
     });

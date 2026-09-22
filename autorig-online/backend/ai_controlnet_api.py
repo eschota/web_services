@@ -176,3 +176,12 @@ async def _uncached_api_controlnet(body: ControlNetRequest):
             "poll_url_string": output_url,
             "server_time_unix_int": int(time.time()),
         }
+
+
+# The enhancement endpoints (/api/upscale, /api/detail, /api/facefix) hang off
+# this router rather than being mounted separately in main.py: they are the
+# same shape — build a renderfin job, hand back the public URL it will appear
+# at — and main.py is a 700 kB file several people patch at once.
+from ai_enhance_api import router as _enhance_router  # noqa: E402
+
+router.include_router(_enhance_router)

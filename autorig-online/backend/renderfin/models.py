@@ -42,6 +42,10 @@ class RenderPrompt(BaseModel):
     # Which model file to load. Empty leaves the workflow's own choice,
     # which is what every request did before these existed.
     checkpoint: str = ""
+    # Which ESRGAN-family file the super-resolution templates load. Separate
+    # from `checkpoint`, which names a diffusion model and would be applied to
+    # the refinement pass instead.
+    upscale_model: str = ""
     lora: str = ""
     lora_strength: float = 0
     user_name: str = "default_user"

@@ -17,6 +17,34 @@ WORKFLOW_INPAINT = "inpaint.json"
 WORKFLOW_IMAGE_TO_3D = "image_to_3d.json"
 WORKFLOW_ANIMATION_DEFAULT = "gen_animation_by_url.json"
 
+# --------------------------------------------------------------- enhancement
+# Super-resolution, detail refinement and face repair. Each is a picture in and
+# the same picture out, so they share the typed-image branch; only the template
+# differs. The type name is the routing key, exactly as the control maps do it.
+ENHANCE_WORKFLOWS = {
+    "upscale_fast": "upscale_fast.json",
+    "upscale_refine": "upscale_refine.json",
+    "detail_tiled": "detail_tiled.json",
+    "detail_plain": "detail_plain.json",
+    "face_fix": "face_fix.json",
+    "face_fix_skin": "face_fix_skin.json",
+}
+ENHANCE_TYPES = frozenset(ENHANCE_WORKFLOWS)
+
+# Which workers may take this work. Scheduling matches a token against a
+# server's advertised `available_workflows`, and those lists are published by
+# the farm boxes themselves, so a brand-new file name matches nothing and the
+# job would never be dispatched. gen_image.json would match, but it also
+# matches worker-4090, which has no ESRGAN weights and no TiledDiffusion and
+# would fail every one of these. The canny-control token is advertised by the
+# four FLUX image boxes (f5, f12, f15, Raptor) and by no video box, which is
+# exactly the set that can run these templates.
+ENHANCE_SCHEDULING_TOKEN = "gen_image_control_canny.json"
+
+# A 2x or 4x enlargement is the whole point here, so these are not held to the
+# 2048 px render ceiling that keeps ordinary generation inside 8 GB.
+ENHANCE_MAX_SIDE = 4096
+
 # Canonical LTX2 animation names advertised by workers; runtime file comes from
 # the worker's workflow_overrides (RenderWorkflowRouting.ResolveRuntimeWorkflow).
 CANONICAL_ANIMATION_WORKFLOWS = {
@@ -50,6 +78,8 @@ def scheduling_token(prompt: RenderPrompt) -> str:
     ptype = (prompt.type or "").strip().lower()
     if ptype in {"control_pose", "control_depth", "control_canny"}:
         return "gen_" + ptype + ".json"
+    if ptype in ENHANCE_TYPES:
+        return ENHANCE_SCHEDULING_TOKEN
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
     if is_image_request(prompt):
@@ -78,6 +108,8 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
 
     if ptype in {"control_pose", "control_depth", "control_canny"}:
         return "gen_" + ptype + ".json", None
+    if ptype in ENHANCE_WORKFLOWS:
+        return ENHANCE_WORKFLOWS[ptype], None
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D, None
     if ptype == "z_depth":
@@ -129,6 +161,19 @@ def clamp_image_dims(width: int, height: int) -> Tuple[int, int]:
             v = default
         v = max(64, min(2048, v))
         return v
+
+    return one(width, 960), one(height, 540)
+
+
+def clamp_enhance_dims(width: int, height: int) -> Tuple[int, int]:
+    """Delivery size for an enhancement: the source size times the factor asked
+    for, kept whole up to ENHANCE_MAX_SIDE rather than the 2048 render ceiling."""
+
+    def one(v: int, default: int) -> int:
+        v = int(v or 0)
+        if v <= 0:
+            v = default
+        return max(64, min(ENHANCE_MAX_SIDE, v))
 
     return one(width, 960), one(height, 540)
 

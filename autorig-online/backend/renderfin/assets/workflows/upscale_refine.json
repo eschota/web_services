@@ -1,0 +1,34 @@
+{
+  "1": {"class_type": "LoadImage", "inputs": {"image": "$image"}},
+  "2": {"class_type": "UpscaleModelLoader", "inputs": {"model_name": "$upscale_model"}},
+  "3": {"class_type": "ImageUpscaleWithModel", "inputs": {"upscale_model": ["2", 0], "image": ["1", 0]}},
+  "4": {
+    "class_type": "ImageScale",
+    "inputs": {"image": ["3", 0], "upscale_method": "lanczos", "width": $width, "height": $height, "crop": "disabled"},
+    "_meta": {"title": "delivery"}
+  },
+  "10": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+  "11": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {"clip_name1": "t5xxl_fp8_e4m3fn.safetensors", "clip_name2": "clip_l.safetensors", "type": "flux", "device": "default"}
+  },
+  "12": {"class_type": "UNETLoader", "inputs": {"unet_name": "flux1-schnell.safetensors", "weight_dtype": "default"}},
+  "13": {
+    "class_type": "TiledDiffusion",
+    "inputs": {"model": ["12", 0], "method": "Mixture of Diffusers", "tile_width": 768, "tile_height": 768, "tile_overlap": 64, "tile_batch_size": 2}
+  },
+  "14": {"class_type": "CLIPTextEncode", "inputs": {"text": "$prompt", "clip": ["11", 0]}},
+  "15": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["14", 0]}},
+  "16": {"class_type": "VAEEncode", "inputs": {"pixels": ["4", 0], "vae": ["10", 0]}},
+  "17": {"class_type": "easy cleanGpuUsed", "inputs": {"anything": ["16", 0]}},
+  "18": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["13", 0], "positive": ["14", 0], "negative": ["15", 0], "latent_image": ["17", 0],
+      "seed": 123456789, "steps": 6, "cfg": 1, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 0.35
+    }
+  },
+  "19": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["18", 0], "vae": ["10", 0], "tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}},
+  "20": {"class_type": "easy cleanGpuUsed", "inputs": {"anything": ["19", 0]}},
+  "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "$output_url", "images": ["20", 0]}}
+}
