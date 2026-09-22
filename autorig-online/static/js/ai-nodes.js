@@ -414,7 +414,7 @@
     return `
       <div class="nhead"><b>${escapeHtml(entry.title)}</b>${slow}</div>
       <div class="nports">
-        ${inputs.map(item => `<div class="prow pin">${typeIcon(item.type)} ${escapeHtml(item.title || item.field)}${item.required ? '' : ' <i>optional</i>'}</div>`).join('')}
+        ${inputs.map(inputRowHtml).join('')}
         ${outputs.map(item => `<div class="prow pout">${escapeHtml(item.title || item.field)} ${typeIcon(item.type)}</div>`).join('')}
       </div>
       ${params.length ? `<details class="nparams"><summary>Settings</summary>${params.map(paramControl).join('')}</details>` : ''}
@@ -422,6 +422,113 @@
       <div class="nstate"></div>
       <div class="nprog task-prog"></div>
       <div class="nout"></div>`;
+  }
+
+  /* --------------------------------------------------- reference sockets */
+
+  // A multi-reference node (FLUX.2 klein, Qwen-Image-Edit) numbers its
+  // picture sockets 1..N because the prompt counts them ("the jacket from
+  // image 2"). Socket 1 is the node's ordinary `image`; the rest appear one at
+  // a time as the previous one is wired. Each also takes a video, which the
+  // server reads as its first frame.
+  const REFERENCE_FIELD = /^reference_(\d+)$/;
+  const MULTIREF_CHECKPOINT = 'flux-2-klein-4b.safetensors';
+
+  function inputRowHtml(item) {
+    const video = (item.also_accepts || []).includes('video');
+    if (item.ref_index) {
+      const tip = `Image ${item.ref_index}` + (video ? ' — picture, or a video (its first frame)' : '');
+      return `<div class="prow pin pref" data-ref="${item.ref_index}" title="${escapeAttr(tip)}">`
+        + `${typeIcon(item.type)}<b class="refn">${item.ref_index}</b>`
+        + (video ? `<span class="refvid" aria-label="video: first frame">${typeIcon('video')}</span>` : '')
+        + '</div>';
+    }
+    return `<div class="prow pin">${typeIcon(item.type)} ${escapeHtml(item.title || item.field)}${item.required ? '' : ' <i>optional</i>'}</div>`;
+  }
+
+  function referenceIndex(field) {
+    if (field === 'image') return 1;
+    const match = REFERENCE_FIELD.exec(String(field || ''));
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  /** Which reference sockets to show: every wired one, and the next free one. */
+  function visibleReferenceSockets(entries, connected) {
+    let last = 0;
+    entries.forEach(item => {
+      if (item.ref_index && connected[item.field]) last = Math.max(last, item.ref_index);
+    });
+    const shown = {};
+    entries.forEach(item => {
+      if (!item.ref_index) return;
+      shown[item.field] = item.ref_index <= 1 || !!connected[item.field] || item.ref_index <= last + 1;
+    });
+    return shown;
+  }
+
+  /** Extra reference fields in socket order, for the request's list. */
+  function referenceList(resolved) {
+    return Object.keys(resolved || {})
+      .map(field => ({field, index: referenceIndex(field)}))
+      .filter(item => item.index >= 2 && resolved[item.field])
+      .sort((a, b) => a.index - b.index)
+      .map(item => resolved[item.field]);
+  }
+
+  function refreshReferenceSockets(id) {
+    const node = meta(id);
+    const element = nodeElement(id);
+    if (!node || node.kind !== KIND_SERVICE || !element) return;
+    const entries = (serviceById(node.service) || {}).inputs || [];
+    if (!entries.some(item => item.ref_index >= 2)) return;
+    const data = editor.getNodeFromId(id);
+    const connected = {};
+    node.inFields.forEach((field, index) => {
+      connected[field] = !!(((data && data.inputs || {})['input_' + (index + 1)] || {}).connections || []).length;
+    });
+    const shown = visibleReferenceSockets(entries, connected);
+    const rows = element.querySelectorAll('.nports .prow.pin');
+    let visible = 0;
+    node.inFields.forEach((field, index) => {
+      const entry = entries.find(item => item.field === field) || {};
+      const show = entry.ref_index ? shown[field] !== false : true;
+      const port = element.querySelector('.inputs .input_' + (index + 1));
+      if (port) {
+        port.style.display = show ? '' : 'none';
+        if ((entry.also_accepts || []).includes('video')) {
+          port.classList.add('accepts-video');
+          port.title = `Image ${entry.ref_index || ''} · picture or video (first frame)`.replace('  ', ' ');
+        }
+      }
+      if (rows[index]) rows[index].style.display = show ? '' : 'none';
+      if (show) visible += 1;
+    });
+    alignPorts(id, visible, node.outFields.length);
+    try { editor.updateConnectionNodes('node-' + id); } catch (error) { /* not drawn yet */ }
+  }
+
+  /**
+   * A second picture wired into an Image node needs a model that composes
+   * several: FLUX.2 klein. Switching for the person is kinder than refusing
+   * the wire, and the toast says what changed.
+   */
+  function ensureMultiReferenceModel(id, inField) {
+    const node = meta(id);
+    if (!node || node.service !== 'image' || referenceIndex(inField) < 2) return;
+    const element = nodeElement(id);
+    const hidden = element && element.querySelector('[data-param="checkpoint"]');
+    if (!hidden) return;
+    const picker = element.querySelector('[data-model-param="checkpoint"]')?._picker;
+    const family = picker && picker.entry && picker.entry.family;
+    if (family === 'flux2' || (!family && /klein/i.test(hidden.value || ''))) return;
+    if (picker) picker.value = MULTIREF_CHECKPOINT;
+    const entry = picker && picker.entry;
+    if (entry) {
+      applySamplingPolicy(id, entry.sampling_policy_object || entry.sampling_policy || {});
+      refreshModeOptions(id, entry);
+    }
+    commitModelValue(hidden, MULTIREF_CHECKPOINT, true);
+    toast('Several pictures → FLUX.2 klein 4B');
   }
 
   function inputNodeHtml(entityType) {
@@ -480,6 +587,7 @@
     });
     applySystemPromptMarker(id);
     alignPorts(id, inputs.length, outputs.length);
+    refreshReferenceSockets(id);
     mountModelPickers(id, serviceId);
     if (params) applyParams(id, params);
     if (params && params._disabled) applyBypass(id, true);
@@ -1204,13 +1312,15 @@
     const produced = from.kind === KIND_INPUT
       ? from.entityType
       : (serviceById(from.service).outputs.find(o => o.field === outField) || {}).type;
-    const accepted = (serviceById(to.service).inputs.find(i => i.field === inField) || {}).type;
-    return { outField, inField, produced, accepted };
+    const input = serviceById(to.service).inputs.find(i => i.field === inField) || {};
+    const accepted = input.type;
+    const alsoAccepts = input.also_accepts || [];
+    return { outField, inField, produced, accepted, alsoAccepts };
   }
 
   function onConnectionCreated(connection) {
     const info = linkTypes(connection);
-    if (info && info.produced === info.accepted) {
+    if (info && (info.produced === info.accepted || (info.produced && info.alsoAccepts.includes(info.produced)))) {
       if (info.produced.startsWith('control_')) {
         const channel = info.produced.slice(8);
         const element = nodeElement(connection.input_id);
@@ -1230,6 +1340,8 @@
         }
       }
       replaceOlderInput(connection);
+      ensureMultiReferenceModel(connection.input_id, info.inField);
+      refreshReferenceSockets(connection.input_id);
       invalidateNodeAndDownstream(connection.input_id);
       return;
     }
@@ -1580,8 +1692,17 @@
       // so it is left out rather than sent as an override.
       if (value !== '' && (value !== 0 || name.startsWith('control_')) && value !== null && value !== undefined) body[name] = value;
     });
+    // Pictures 2..N of a multi-reference node travel as one ordered list; the
+    // socket number is the order the prompt counts them in.
+    const references = Object.keys(resolved)
+      .map(field => ({field, match: /^reference_(\d+)$/.exec(field)}))
+      .filter(item => item.match && resolved[item.field])
+      .sort((a, b) => Number(a.match[1]) - Number(b.match[1]))
+      .map(item => resolved[item.field]);
+    if (references.length) body.reference_image_urls = references;
     Object.keys(resolved).forEach(field => {
       const value = resolved[field];
+      if (/^reference_\d+$/.test(field)) return;
       if (field === 'image' || field === 'image_url_end') {
         const key = field === 'image' ? 'image_url' : 'image_url_end';
         const inline = field === 'image' ? 'image_base64' : 'image_base64_end';
@@ -2860,6 +2981,7 @@
     editor.on('connectionCreated', onConnectionCreated);
     editor.on('connectionRemoved', connection => {
       if (connection && connection.input_id != null) {
+        refreshReferenceSockets(connection.input_id);
         invalidateNodeAndDownstream(connection.input_id);
       }
     });

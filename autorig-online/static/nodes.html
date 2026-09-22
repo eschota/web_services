@@ -25,7 +25,7 @@
     <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-nodes.js?v=20260922-qwenimage1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260923-multiref1"></script>
     <style>
         .ai-page {
             background:
@@ -230,6 +230,13 @@
         }
         .prow.pout { justify-content: flex-end; color: #c7b9ff; }
         .prow i { font-style: normal; opacity: .55; margin-left: 4px; }
+        /* Numbered picture sockets of a multi-reference node; the film mark
+           says a video also fits here (its first frame is used). */
+        .prow.pref { gap: 5px; cursor: help; }
+        .prow.pref .refn { display:inline-grid; place-items:center; min-width:17px; height:17px; border-radius:50%;
+            font-size:10.5px; font-weight:700; color:#0f1020; background:#38bdf8; font-variant-numeric: tabular-nums; }
+        .prow.pref .refvid { font-size: 10px; opacity: .6; }
+        .drawflow .drawflow-node .input.accepts-video { border-style: dashed; }
 
         .nparams { margin: 6px 12px 4px; }
         .nparams summary {

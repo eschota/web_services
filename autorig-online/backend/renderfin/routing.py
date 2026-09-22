@@ -5,6 +5,7 @@ import re
 from typing import Optional, Tuple
 
 from .models import RenderPrompt, RenderServer
+from .multiref import MULTIREF_TYPES, MULTIREF_WORKFLOWS
 
 SAFE_WORKFLOW_RE = re.compile(r"^[A-Za-z0-9_.-]+\.json$")
 
@@ -64,6 +65,13 @@ QWEN_IMAGE_TYPES = frozenset(QWEN_IMAGE_WORKFLOWS)
 # worker's own /object_info and fail-closed.
 QWEN_IMAGE_SCHEDULING_TOKEN = ENHANCE_SCHEDULING_TOKEN
 
+# ------------------------------------------------------- multi-reference edit
+# Several pictures composed into one (renderfin.multiref). Scheduled on the
+# same token as Qwen-Image for the same reason: it names exactly the image
+# boxes (f5, f15, Raptor) and not worker-4090, and model_eligibility then
+# keeps the job on a box that holds the named checkpoint.
+MULTIREF_SCHEDULING_TOKEN = ENHANCE_SCHEDULING_TOKEN
+
 # Canonical LTX2 animation names advertised by workers; runtime file comes from
 # the worker's workflow_overrides (RenderWorkflowRouting.ResolveRuntimeWorkflow).
 CANONICAL_ANIMATION_WORKFLOWS = {
@@ -101,6 +109,8 @@ def scheduling_token(prompt: RenderPrompt) -> str:
         return ENHANCE_SCHEDULING_TOKEN
     if ptype in QWEN_IMAGE_TYPES:
         return QWEN_IMAGE_SCHEDULING_TOKEN
+    if ptype in MULTIREF_TYPES:
+        return MULTIREF_SCHEDULING_TOKEN
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
     if is_image_request(prompt):
@@ -133,6 +143,8 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
         return ENHANCE_WORKFLOWS[ptype], None
     if ptype in QWEN_IMAGE_WORKFLOWS:
         return QWEN_IMAGE_WORKFLOWS[ptype], None
+    if ptype in MULTIREF_WORKFLOWS:
+        return MULTIREF_WORKFLOWS[ptype], None
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D, None
     if ptype == "z_depth":

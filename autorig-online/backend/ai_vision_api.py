@@ -1423,6 +1423,62 @@ class ImageRequest(BaseModel):
     control_strength: float = Field(0.8, ge=0, le=2)
     control_start: float = Field(0.0, ge=0, le=1)
     control_end: float = Field(1.0, ge=0, le=1)
+    reference_image_urls: Optional[List[str]] = Field(
+        None, description=("More pictures after image_url, in order: image 1 is image_url, "
+                           "image 2 the first entry here. FLUX.2 klein only; 4 in all. "
+                           "A video URL stands for its first frame"))
+
+
+# Several pictures composed into one (renderfin.multiref). Only FLUX.2 klein
+# takes them natively on this node; Qwen-Image-Edit 2511 has its own node.
+MULTIREF_TYPE = "image_multiref"
+MULTIREF_WORKFLOW = "gen_image_flux2_klein_multiref.json"
+MULTIREF_FAMILIES = frozenset({"flux2"})
+MULTIREF_MAX_IMAGES = 4
+
+
+def _multiref_inputs(body: "ImageRequest") -> List[str]:
+    """The extra pictures, validated before anything is published or rendered."""
+    extras = [str(item or "").strip() for item in (body.reference_image_urls or [])]
+    if not extras:
+        return []
+    if any(not item for item in extras):
+        raise HTTPException(status_code=400, detail={
+            "error_string": "empty_reference_image",
+            "message_string": "reference_image_urls has an empty entry"})
+    for item in extras:
+        if not item.startswith(("http://", "https://", "data:")):
+            raise HTTPException(status_code=400, detail={
+                "error_string": "bad_reference_image",
+                "message_string": "Reference pictures must be http(s) URLs or data URLs"})
+    total = len(extras) + (1 if (body.image_url or body.image_base64) else 0)
+    if total > MULTIREF_MAX_IMAGES:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "too_many_reference_images",
+            "message_string": (f"FLUX.2 klein takes at most {MULTIREF_MAX_IMAGES} pictures; "
+                               f"{total} were wired in"),
+            "max_int": MULTIREF_MAX_IMAGES})
+    if body.control_pose or body.control_depth or body.control_canny or body.mode:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "multi_reference_exclusive",
+            "message_string": ("Several reference pictures cannot be combined with a "
+                               "ControlNet map or an image mode")})
+    return extras
+
+
+def _multiref_default_checkpoint() -> str:
+    """The installed checkpoint that composes several pictures."""
+    import ai_model_catalogue
+    import ai_model_defaults
+
+    for entry in ai_model_catalogue.entries():
+        if (entry.get("kind") == "checkpoint" and entry.get("usable")
+                and "image" in (entry.get("services") or [])
+                and ai_model_defaults.model_family(entry) in MULTIREF_FAMILIES):
+            return str(entry.get("file") or "")
+    raise HTTPException(status_code=503, detail={
+        "error_string": "multi_reference_model_missing",
+        "message_string": "No FLUX.2 klein checkpoint is installed on the image boxes"})
 
 
 # Renderfin runs on the same host and owns the image farm; the public service
@@ -1444,7 +1500,14 @@ async def api_image_docs():
                                   "creativity", "seed", "checkpoint", "lora",
                                   "lora_strength", "loras", "clip_skip",
                                   "control_pose", "control_depth",
-                                  "control_canny"],
+                                  "control_canny", "reference_image_urls"],
+        "multi_reference_object": {
+            "max_images_int": MULTIREF_MAX_IMAGES,
+            "families_array": sorted(MULTIREF_FAMILIES),
+            "note_string": ("image_url is image 1, reference_image_urls follow in order; "
+                            "refer to them as image 1, image 2... in the prompt. "
+                            "A video URL stands for its first frame"),
+        },
         "produces_string": "image",
         "example_request_object": {"prompt": "a black lamp post on magenta", "wait_seconds": 120},
         "server_time_unix_int": int(time.time()),
@@ -1481,6 +1544,9 @@ async def _uncached_api_image(body: ImageRequest):
     stack_checkpoint = body.checkpoint
     if lora_stack and not body.checkpoint and not body.lora:
         stack_checkpoint = _stack_default_checkpoint("image", lora_stack)
+    extra_references = _multiref_inputs(body)
+    if extra_references and not stack_checkpoint and not body.lora:
+        stack_checkpoint = _multiref_default_checkpoint()
     controls = [(name, str(value or "").strip()) for name, value in (
         ("pose", body.control_pose), ("depth", body.control_depth),
         ("canny", body.control_canny)) if str(value or "").strip()]
@@ -1489,7 +1555,9 @@ async def _uncached_api_image(body: ImageRequest):
             "error_string": "multiple_control_channels_unsupported",
             "message_string": "Choose one of control_pose, control_depth or control_canny"})
     async with httpx.AsyncClient() as client:
-        reference = str(body.image_url or "").strip()
+        import ai_multiref
+        # A video wired into the picture socket stands for its first frame.
+        reference = await ai_multiref.as_picture(str(body.image_url or "").strip(), client)
         if not reference and body.image_base64:
             reference = await _publish_inline_image(
                 client, _decode_inline_image(body.image_base64)
@@ -1557,6 +1625,29 @@ async def _uncached_api_image(body: ImageRequest):
             payload["type"] = f"image_control_{channel}"
             payload["work_flow"] = control_workflow
             payload.update(control_strength=body.control_strength, control_start=body.control_start, control_end=body.control_end)
+        if extra_references:
+            import ai_model_catalogue
+            import ai_model_defaults
+            selected = (ai_model_catalogue.known_file(
+                str(model_payload.get("checkpoint") or ""), "checkpoint")
+                or ai_model_catalogue.known_file(str(model_payload.get("lora") or ""), "lora"))
+            if ai_model_defaults.model_family(selected) not in MULTIREF_FAMILIES:
+                name = (selected or {}).get("base") or model_payload.get("checkpoint") or "This model"
+                raise HTTPException(status_code=400, detail={
+                    "error_string": "model_takes_no_references",
+                    "message_string": (f"{name} cannot take several pictures; choose FLUX.2 "
+                                       "klein 4B, or use the Qwen-Image node (up to 3)")})
+            pictures = [reference] if reference else []
+            for item in extra_references:
+                if item.startswith("data:"):
+                    item = await _publish_inline_image(client, _decode_inline_image(item))
+                else:
+                    item = await ai_multiref.as_picture(item, client)
+                pictures.append(item)
+            payload.pop("image_url", None)
+            payload["type"] = MULTIREF_TYPE
+            payload["work_flow"] = MULTIREF_WORKFLOW
+            payload["reference_image_urls"] = pictures
         if body.creativity is not None:
             payload["creativity"] = float(body.creativity)
         if body.seed:
@@ -1605,7 +1696,7 @@ async def _uncached_api_image(body: ImageRequest):
             "effective_params_object": {k: payload[k] for k in (
                 "main_size_width", "main_size_height", "steps", "cfg", "sampler",
                 "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "loras",
-                "work_flow", "prompt", "noise_seed")
+                "work_flow", "prompt", "noise_seed", "reference_image_urls")
                 if k in payload},
             "server_time_unix_int": int(time.time()),
         }

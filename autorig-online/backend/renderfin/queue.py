@@ -21,6 +21,7 @@ from . import (
     errors,
     image_quality,
     model_eligibility,
+    multiref,
     routing,
     templating,
     workload_lease,
@@ -1470,15 +1471,22 @@ class RenderQueue:
         image_filename = ""
         reference_urls = list(getattr(prompt, "reference_image_urls", []) or [])
         is_avatar_workflow = workflow_file == _AVATAR_WORKFLOW
+        is_multiref_workflow = multiref.is_multiref_workflow(workflow_file)
         if is_avatar_workflow and not reference_urls:
             raise comfy_adapter.ComfyRequestError(
                 "Avatar workflow requires 1 to 4 reference images"
             )
-        if reference_urls and not is_avatar_workflow:
+        if is_multiref_workflow:
+            try:
+                multiref.check_reference_count(workflow_file, len(reference_urls))
+            except ValueError as exc:
+                raise comfy_adapter.ComfyRequestError(str(exc)) from None
+        if reference_urls and not (is_avatar_workflow or is_multiref_workflow):
             raise comfy_adapter.ComfyRequestError(
-                "reference_image_urls require gen_image_flux2_avatar.json"
+                "reference_image_urls require gen_image_flux2_avatar.json "
+                "or a multi-reference workflow"
             )
-        if not is_avatar_workflow and (prompt.image_url or "").strip():
+        if not (is_avatar_workflow or is_multiref_workflow) and (prompt.image_url or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url)
             image_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         image_end_filename = ""
@@ -1541,6 +1549,8 @@ class RenderQueue:
         )
         if is_avatar_workflow:
             _inject_avatar_reference_images(workflow, reference_filenames)
+        elif is_multiref_workflow:
+            multiref.inject_references(workflow_file, workflow, reference_filenames)
         apply_runtime_settings(workflow, prompt, width, height)
         prompt_id = task.comfy_prompt_id or str(uuid.uuid4())
         task.comfy_prompt_id = prompt_id

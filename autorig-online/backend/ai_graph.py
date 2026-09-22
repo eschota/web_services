@@ -393,7 +393,8 @@ def validate(graph: Graph) -> None:
                 "message_string": "An input node takes nothing; it only produces"})
         produced = _output_type(source, link.output)
         accepted = _input_type(target, link.input)
-        if produced is None or accepted is None or produced != accepted:
+        if produced is None or accepted is None or (
+                produced != accepted and produced not in _input_also_accepts(target, link.input)):
             raise HTTPException(status_code=400, detail={
                 "error_string": "type_mismatch",
                 "message_string": (
@@ -419,6 +420,15 @@ def _input_type(node: GraphNode, field: str) -> Optional[str]:
         if str(item["field"]) == field:
             return str(item["type"])
     return None
+
+
+def _input_also_accepts(node: GraphNode, field: str) -> List[str]:
+    """Other types a socket takes; a reference socket reads a video's first frame."""
+    entry = ai_services.service(str(node.service or "")) or {}
+    for item in entry.get("inputs") or []:
+        if str(item["field"]) == field:
+            return [str(value) for value in (item.get("also_accepts") or [])]
+    return []
 
 
 def _reject_cycles(graph: Graph, by_id: Dict[str, GraphNode]) -> None:

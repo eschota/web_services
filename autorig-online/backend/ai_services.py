@@ -84,6 +84,18 @@ SYSTEM_PROMPT_DEFAULT = (
 # `status` is either "live" (wired end to end) or "planned" (declared so the
 # handoff UI can show where a result could go, but not yet callable). A page
 # shows a planned service greyed out instead of pretending it works.
+def MULTIREF_INPUTS(total: int) -> List[Dict[str, object]]:
+    """Reference sockets 2..total for a node whose `image` socket is picture 1.
+
+    Each takes a picture or a video; a video stands for its first frame. The
+    runner sends them as `reference_image_urls` in socket order, which is the
+    order the prompt counts them in ("image 2", "image 3").
+    """
+    return [{"type": IMAGE, "field": f"reference_{index}", "required": False,
+             "title": f"Image {index}", "ref_index": index, "also_accepts": [VIDEO]}
+            for index in range(2, total + 1)]
+
+
 SERVICES: List[Dict[str, object]] = [
     {
         "id": "video_frame", "title": "Video first frame", "path": "/nodes",
@@ -199,10 +211,13 @@ SERVICES: List[Dict[str, object]] = [
             {"type": TEXT, "field": "prompt", "required": True,
              "title": "What to draw"},
             {"type": IMAGE, "field": "image", "required": False,
-             "title": "Reference image"},
+             "title": "Reference image", "ref_index": 1, "also_accepts": [VIDEO]},
             {"type": CONTROL_POSE, "field": "control_pose", "required": False, "title": "Pose control"},
             {"type": CONTROL_DEPTH, "field": "control_depth", "required": False, "title": "Depth control"},
             {"type": CONTROL_CANNY, "field": "control_canny", "required": False, "title": "Canny control"},
+            # More pictures composed into one (FLUX.2 klein, 4 in all). Kept
+            # after every older socket so saved graphs keep their wiring.
+            *MULTIREF_INPUTS(4),
         ],
         "outputs": [
             {"type": IMAGE, "field": "image_url_string", "title": "Picture"},
@@ -355,7 +370,9 @@ SERVICES.append({
         {"type": TEXT, "field": "prompt", "required": True,
          "title": "What to draw, or what to change"},
         {"type": IMAGE, "field": "image", "required": False,
-         "title": "Picture to edit"},
+         "title": "Picture to edit", "ref_index": 1, "also_accepts": [VIDEO]},
+        # Qwen-Image-Edit 2511 reads up to three pictures (image1..image3).
+        *MULTIREF_INPUTS(3),
     ],
     "outputs": [
         {"type": IMAGE, "field": "image_url_string", "title": "Picture"},

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 
 import ai_model_catalogue
 from ai_enhance_api import _resolve_source, _run, _source_size
-from ai_vision_api import MAX_WAIT_SECONDS
+from ai_vision_api import MAX_WAIT_SECONDS, _decode_inline_image, _publish_inline_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,6 +38,10 @@ SERVICE_ID = "qwen_image"
 # the backend and renderfin are separate processes and only share HTTP.
 TYPE_GENERATE = "qwen_image"
 TYPE_EDIT = "qwen_image_edit"
+# Several pictures in one edit (renderfin.multiref): image1..image3 of
+# TextEncodeQwenImageEditPlus, which is the node's own ceiling.
+TYPE_EDIT_MULTI = "qwen_image_edit_multi"
+MAX_REFERENCE_IMAGES = 3
 MODES = ("auto", "generate", "edit")
 
 # renderfin clamps an image render to 2048 on either side; asking for more
@@ -180,6 +184,28 @@ class QwenImageRequest(BaseModel):
     seed: Optional[int] = Field(None, ge=0, le=9007199254740991)
     checkpoint: Optional[str] = Field(None, description="Installed GGUF quantisation")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+    reference_image_urls: Optional[List[str]] = Field(
+        None, description=("More pictures after image_url, in order (image 2, image 3); "
+                           "3 in all. A video URL stands for its first frame"))
+
+
+def extra_references(body: "QwenImageRequest") -> List[str]:
+    """The pictures after the first, checked before anything is fetched."""
+    extras = [str(item or "").strip() for item in (body.reference_image_urls or [])]
+    if not extras:
+        return []
+    if any(not item.startswith(("http://", "https://", "data:")) for item in extras):
+        raise HTTPException(status_code=400, detail={
+            "error_string": "bad_reference_image",
+            "message_string": "Reference pictures must be http(s) URLs or data URLs"})
+    total = len(extras) + (1 if (body.image_url or body.image_base64) else 0)
+    if total > MAX_REFERENCE_IMAGES:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "too_many_reference_images",
+            "message_string": (f"Qwen-Image-Edit takes at most {MAX_REFERENCE_IMAGES} "
+                               f"pictures; {total} were wired in"),
+            "max_int": MAX_REFERENCE_IMAGES})
+    return extras
 
 
 @router.get("/api/qwen-image")
@@ -196,6 +222,7 @@ async def api_qwen_image_docs():
         },
         "max_side_int": MAX_SIDE,
         "min_side_int": MIN_SIDE,
+        "max_reference_images_int": MAX_REFERENCE_IMAGES,
         "server_time_unix_int": int(time.time()),
     }
 
@@ -209,8 +236,12 @@ async def api_qwen_image(body: QwenImageRequest):
 
 
 async def _uncached_qwen_image(body: QwenImageRequest):
-    has_image = bool(str(body.image_url or "").strip() or str(body.image_base64 or "").strip())
+    extras = extra_references(body)
+    has_image = bool(str(body.image_url or "").strip() or str(body.image_base64 or "").strip()
+                     or extras)
     mode = resolve_mode(body.mode, has_image)
+    if mode == "generate":
+        extras = []
     checkpoint = validate_checkpoint(body.checkpoint, mode)
     if not checkpoint:
         # The model is named even when nobody picked one, and that is what
@@ -229,9 +260,22 @@ async def _uncached_qwen_image(body: QwenImageRequest):
     else:
         width, height = DEFAULT_SIZE
 
+    pictures: List[str] = []
     if mode == "edit":
+        import ai_multiref
         async with httpx.AsyncClient() as client:
-            source = await _resolve_source(client, body.image_url, body.image_base64)
+            if body.image_url or body.image_base64:
+                source = await _resolve_source(
+                    client, await ai_multiref.as_picture(str(body.image_url or ""), client),
+                    body.image_base64)
+                pictures.append(source)
+            for item in extras:
+                if item.startswith("data:"):
+                    item = await _publish_inline_image(client, _decode_inline_image(item))
+                else:
+                    item = await ai_multiref.as_picture(item, client)
+                pictures.append(item)
+            source = pictures[0]
             if not explicit_size:
                 # The output follows the picture that came in. A fixed default
                 # would reframe every edit, and the node downstream would then
@@ -245,7 +289,12 @@ async def _uncached_qwen_image(body: QwenImageRequest):
         "main_size_width": width,
         "main_size_height": height,
     }
-    if source:
+    if len(pictures) > 1:
+        # The output follows image 1, the one the prompt edits; the others are
+        # what it borrows from.
+        payload["type"] = TYPE_EDIT_MULTI
+        payload["reference_image_urls"] = pictures
+    elif source:
         payload["image_url"] = source
     if checkpoint:
         payload["checkpoint"] = checkpoint
