@@ -74,7 +74,11 @@ if (-not $process) {
         $launcher,'--listen','127.0.0.1','--port','8988',
         '--base-directory',$base,'--input-directory',"$base\input",'--output-directory',"$base\output",
         '--temp-directory',"$base\temp",'--user-directory',"$base\user",
-        '--extra-model-paths-config',"$runtime\extra_model_paths.yaml"
+        '--extra-model-paths-config',"$runtime\extra_model_paths.yaml",
+        # The desktop keeps ~2 GB of this card. Without a reserve ComfyUI fills
+        # the rest and WDDM spills into shared system memory: H3 went from
+        # 17 s/it to 567 s for one step (2026-09-23).
+        '--reserve-vram','3'
     )
     Start-Process -FilePath $python -WindowStyle Hidden -WorkingDirectory 'R:\autorig' -ArgumentList $arguments -RedirectStandardOutput "$base\worker.log" -RedirectStandardError "$base\worker.err.log"
     for ($attempt=0; $attempt -lt 90 -and -not (Get-Comfy); $attempt++) { Start-Sleep -Seconds 2 }
