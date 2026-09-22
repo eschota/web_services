@@ -13,13 +13,16 @@
 # Install (as an administrator):  lora-sync.ps1 -Install
 #   needs C:\ProgramData\AutoRig\lora-sync\sync.key and box.txt
 #   registers the scheduled task "AutoRig LoRA Sync" (SYSTEM, every 5 minutes).
-param([switch]$Install, [string]$Box = '', [string]$ComfyRoot = '')
+param([switch]$Install, [switch]$UserTask, [string]$Box = '', [string]$ComfyRoot = '',
+      [string]$LorasDir = '', [string]$HomeDir = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $AgentVersion = 'lora-sync/2026-09-23'
 $Api = 'https://autorig.online/api/ai/loras/sync'
-$Home_ = 'C:\ProgramData\AutoRig\lora-sync'
+# -HomeDir: a box without an elevated installer (worker-4090, the owner's
+# desktop) keeps its state under %LOCALAPPDATA% instead of ProgramData.
+$Home_ = if ($HomeDir) { $HomeDir } else { 'C:\ProgramData\AutoRig\lora-sync' }
 $LogFile = Join-Path $Home_ 'sync.log'
 $HashFile = Join-Path $Home_ 'hashes.json'
 $TaskName = 'AutoRig LoRA Sync'
@@ -58,11 +61,23 @@ if ($Install) {
     }
     if ($Box) { Set-Content -Path (Join-Path $Home_ 'box.txt') -Value $Box -Encoding ascii }
     if ($ComfyRoot) { Set-Content -Path (Join-Path $Home_ 'comfy_root.txt') -Value $ComfyRoot -Encoding ascii }
-    # The key authenticates this box to the VPS: SYSTEM and administrators only.
+    if ($LorasDir) { Set-Content -Path (Join-Path $Home_ 'loras_dir.txt') -Value $LorasDir -Encoding ascii }
     $key = Join-Path $Home_ 'sync.key'
-    if (Test-Path $key) { icacls $key /inheritance:r /grant:r 'SYSTEM:F' '*S-1-5-32-544:F' | Out-Null }
-    $tr = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $self + '"'
-    schtasks /create /tn $TaskName /tr $tr /sc minute /mo 5 /ru SYSTEM /rl HIGHEST /f | Out-Null
+    if ($UserTask) {
+        # No elevation: the task runs as the signed-in user, hidden through a
+        # VBScript launcher so no console window flashes every five minutes.
+        # The key stays readable by that user only.
+        if (Test-Path $key) { icacls $key /inheritance:r /grant:r ($env:USERNAME + ':F') | Out-Null }
+        $vbs = Join-Path $Home_ 'lora-sync-hidden.vbs'
+        $cmd = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""' + $self + '"" -HomeDir ""' + $Home_ + '""'
+        Set-Content -Path $vbs -Encoding ascii -Value ('CreateObject("WScript.Shell").Run "' + $cmd + '", 0, True')
+        schtasks /create /tn $TaskName /tr ('wscript.exe "' + $vbs + '"') /sc minute /mo 5 /f | Out-Null
+    } else {
+        # The key authenticates this box to the VPS: SYSTEM and administrators only.
+        if (Test-Path $key) { icacls $key /inheritance:r /grant:r 'SYSTEM:F' '*S-1-5-32-544:F' | Out-Null }
+        $tr = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $self + '"'
+        schtasks /create /tn $TaskName /tr $tr /sc minute /mo 5 /ru SYSTEM /rl HIGHEST /f | Out-Null
+    }
     SetNormalPriority
     Log ('installed scheduled task ' + $TaskName)
     schtasks /run /tn $TaskName | Out-Null
@@ -70,7 +85,9 @@ if ($Install) {
 }
 
 # One run at a time: a scheduled run and an SSH nudge can overlap.
-$mutex = New-Object System.Threading.Mutex($false, 'Global\AutoRigLoraSync')
+# Global\ needs SeCreateGlobalPrivilege, which a non-elevated user task lacks.
+try { $mutex = New-Object System.Threading.Mutex($false, 'Global\AutoRigLoraSync') }
+catch { $mutex = New-Object System.Threading.Mutex($false, 'Local\AutoRigLoraSync') }
 # A run that was killed leaves the mutex abandoned; taking it over is fine.
 $owned = $false
 try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
@@ -114,15 +131,32 @@ try {
         }
     }
     if (-not $ComfyRoot) { Log 'ComfyUI root not found'; exit 1 }
-    $Loras = Join-Path $ComfyRoot 'ComfyUI\models\loras'
-    $Tmp = Join-Path $ComfyRoot 'autorig_lora_tmp'
-    $Trash = Join-Path $ComfyRoot 'autorig_lora_trash'
+    if (-not $LorasDir) {
+        $dirFile = Join-Path $Home_ 'loras_dir.txt'
+        if (Test-Path $dirFile) { $LorasDir = (Get-Content $dirFile -TotalCount 1).Trim() }
+    }
+    function Norm($p) { try { return [IO.Path]::GetFullPath($p).TrimEnd([char]92) } catch { return $p } }
+    if ($LorasDir) {
+        # A box whose ComfyUI reads LoRAs from an extra_model_paths folder
+        # (worker-4090: C:\AIModels\loras). Temp and trash stay on the same
+        # volume so a finished download is a rename.
+        $Loras = Norm $LorasDir
+        $Tmp = Join-Path (Split-Path $Loras -Parent) 'autorig_lora_tmp'
+        $Trash = Join-Path (Split-Path $Loras -Parent) 'autorig_lora_trash'
+    } else {
+        $Loras = Join-Path $ComfyRoot 'ComfyUI\models\loras'
+        $Tmp = Join-Path $ComfyRoot 'autorig_lora_tmp'
+        $Trash = Join-Path $ComfyRoot 'autorig_lora_trash'
+    }
     New-Item -ItemType Directory -Force $Loras, $Tmp | Out-Null
 
     # Other folders ComfyUI reads LoRAs from (extra_model_paths.yaml), listed
     # for the inventory only; downloads always go to the main loras folder.
     $ExtraDirs = @()
+    $default = Join-Path $ComfyRoot 'ComfyUI\models\loras'
+    if ((Norm $default) -ne $Loras) { $ExtraDirs += $default }
     $yaml = Join-Path $ComfyRoot 'ComfyUI\extra_model_paths.yaml'
+    if (-not (Test-Path $yaml)) { $yaml = Join-Path $ComfyRoot 'extra_model_paths.yaml' }
     if (Test-Path $yaml) {
         $basePath = ''; $inLoras = $false
         foreach ($raw in Get-Content $yaml) {
@@ -136,7 +170,8 @@ try {
             if ($line -match '^\s{2,4}\S') { $inLoras = $false }
         }
     }
-    $ExtraDirs = @($ExtraDirs | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
+    $ExtraDirs = @($ExtraDirs | Where-Object { $_ -and (Test-Path $_) } | ForEach-Object { Norm $_ } |
+                   Where-Object { $_ -ne $Loras } | Select-Object -Unique)
 
     # SHA-256 cache keyed by path, size and write time: hashing a 7 GB file on
     # every run would make the agent the busiest thing on the disk.
@@ -286,7 +321,8 @@ try {
         if ($ok) {
             Move-Item -Force -LiteralPath $part -Destination $target
             $items[$it.id] = @{ state = 'ready' }
-            Log ('installed ' + $it.file + ' from ' + $from)
+            # Never log a presigned link's query: it is a short-lived credential.
+            Log ('installed ' + $it.file + ' from ' + ($from -replace '\?.*$', ''))
         } elseif (Test-Path $part) { Remove-Item -Force $part }
     }
 

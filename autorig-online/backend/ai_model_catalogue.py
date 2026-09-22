@@ -134,6 +134,20 @@ async def api_model_catalogue(service: Optional[str] = None):
     else:
         checkpoints = [e for e in all_entries if e.get("kind") == "checkpoint"]
         loras = [e for e in all_entries if e.get("kind") == "lora"]
+    # Which computers can run each checkpoint right now (they advertise its
+    # workflow). The picker intersects this with a LoRA's `ready_workers`, so
+    # a LoRA that is only on computers without the chosen model reads as
+    # still downloading instead of looking selectable.
+    try:
+        import ai_lora_manager
+        annotated = []
+        for entry in checkpoints:
+            runners = ai_lora_manager.workflow_boxes(str(entry.get("workflow") or ""))
+            annotated.append(dict(entry, runnable_workers=sorted(runners))
+                             if runners is not None else entry)
+        checkpoints = annotated
+    except Exception:
+        logger.exception("Could not read which computers run each checkpoint")
     return {
         "success_bool": True,
         "service_string": service or "",

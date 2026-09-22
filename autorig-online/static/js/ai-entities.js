@@ -787,8 +787,17 @@
       const field = scope.querySelector('[data-param="checkpoint"], [name="checkpoint"], #checkpoint');
       const base = state.checkpoints.find(item => item.file === field?.value);
       const left = base?.family, right = entry?.family;
-      if (!left || !right || left === right || (['pony','sdxl'].includes(left) && ['pony','sdxl'].includes(right))) return '';
-      return 'This LoRA requires ' + (entry.base || right) + '. Choose a compatible checkpoint first.';
+      if (left && right && left !== right && !(['pony','sdxl'].includes(left) && ['pony','sdxl'].includes(right))) {
+        return 'This LoRA requires ' + (entry.base || right) + '. Choose a compatible checkpoint first.';
+      }
+      // A LoRA installed through /lora is usable only where it has arrived:
+      // it must be on at least one computer that also runs this checkpoint.
+      const runners = Array.isArray(base?.runnable_workers) ? base.runnable_workers : null;
+      const ready = Array.isArray(entry?.ready_workers) ? entry.ready_workers : null;
+      if (runners && ready && !ready.some(box => runners.includes(box))) {
+        return 'Waiting for the render computers to download it';
+      }
+      return '';
     }
 
     function choose(value, materialized = false) {

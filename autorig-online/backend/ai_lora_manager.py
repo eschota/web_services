@@ -605,15 +605,92 @@ def _box_files(report: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+# ------------------------------------------------ who can run what
+
+_servers_cache: Dict[str, Any] = {"at": -1e9, "servers": None}
+SERVERS_TTL_SECONDS = 20.0
+
+
+def renderfin_servers() -> Optional[List[Dict[str, Any]]]:
+    """Renderfin's server registry: name, status, advertised workflows.
+
+    None when renderfin cannot be read, so callers can tell "nobody runs it"
+    from "we do not know" and fall back to the old everyone-gets-everything.
+    """
+    if time.monotonic() - _servers_cache["at"] < SERVERS_TTL_SECONDS:
+        return _servers_cache["servers"]
+    base = os.getenv("RENDERFIN_INTERNAL_URL", "http://127.0.0.1:8210").rstrip("/")
+    servers = None
+    for path in ("/renderfin/api-render", "/api-render"):
+        try:
+            response = httpx.get(base + path, timeout=3.0)
+            if response.status_code == 200 and isinstance(response.json().get("servers"), list):
+                servers = [{"name": str(s.get("render_server_name") or ""),
+                            "status": str(s.get("status") or ""),
+                            "workflows": set(s.get("available_workflows") or [])}
+                           for s in response.json()["servers"]]
+                break
+        except Exception:
+            continue
+    if servers is None and _servers_cache["servers"] is not None:
+        servers = _servers_cache["servers"]  # keep the last good answer
+    _servers_cache.update(at=time.monotonic(), servers=servers)
+    return servers
+
+
+def workflow_boxes(workflow: str) -> Optional[set]:
+    servers = renderfin_servers()
+    if servers is None or not workflow:
+        return None
+    return {s["name"] for s in servers if workflow in s["workflows"]}
+
+
+def family_workflows(family: str, base: str = "") -> set:
+    """Workflows of the usable catalogue checkpoints a LoRA family loads onto."""
+    import ai_model_catalogue
+    import ai_model_defaults
+
+    probe = {"kind": "lora", "family": family, "base": base}
+    out = set()
+    for entry in ai_model_catalogue.raw_entries():
+        if entry.get("kind") != "checkpoint" or not entry.get("usable"):
+            continue
+        if not ai_model_defaults.model_family(entry) or not ai_model_defaults.compatible(entry, probe):
+            continue
+        if entry.get("workflow"):
+            out.add(str(entry["workflow"]))
+    return out
+
+
+def target_boxes(entry: Dict[str, Any], data: Optional[Dict[str, Any]] = None) -> set:
+    """Boxes a LoRA is sent to.
+
+    An explicit per-LoRA list wins. Otherwise only boxes that advertise a
+    workflow of a checkpoint in the LoRA's family: an H3 LoRA on a box without
+    H3 is disk used for nothing. A box that starts advertising the family
+    later is picked up by its next sync. Unknown registry -> every box.
+    """
+    known = set(boxes(data))
+    if entry.get("boxes"):
+        return {b for b in entry["boxes"] if b in known}
+    servers = renderfin_servers()
+    if servers is None:
+        return known
+    workflows = family_workflows(str(entry.get("family") or ""), str(entry.get("base") or ""))
+    return {s["name"] for s in servers if s["name"] in known and workflows & s["workflows"]}
+
+
 def lora_box_state(entry: Dict[str, Any], box: str, cfg: Dict[str, Any],
-                   report: Dict[str, Any]) -> Dict[str, Any]:
-    allowed = entry.get("boxes")
-    if allowed and box not in allowed:
-        return {"state": "excluded"}
+                   report: Dict[str, Any], targets: Optional[set] = None) -> Dict[str, Any]:
     files = _box_files(report)
     have = files.get(entry["file"])
     if have and str(have.get("sha256") or "").lower() == entry["sha256"]:
         return {"state": "ready"}
+    allowed = entry.get("boxes")
+    if allowed and box not in allowed:
+        return {"state": "excluded"}
+    if targets is not None and box not in targets:
+        return {"state": "not_needed"}
     if not report:
         return {"state": "no_agent"}
     reported = (report.get("items") or {}).get(entry["id"]) or {}
@@ -676,7 +753,7 @@ def catalogue_entries() -> List[Dict[str, Any]]:
             "triggers": [], "trained_words": entry.get("trained_words") or [],
             "page": entry.get("page") or "", "preview": entry.get("preview") or "",
             "services": entry.get("services") or [], "usable": bool(ready),
-            "unusable_reason": reason, "validated_workers": ready,
+            "unusable_reason": reason, "validated_workers": ready, "ready_workers": ready,
             "sha256": entry["sha256"], "size_mb": round((entry.get("size_bytes") or 0) / 1048576, 1),
             "source_version_id": (entry.get("source") or {}).get("version_id"),
             "aliases": entry.get("aliases") or [], "managed": True, "id": entry["file"],
@@ -753,7 +830,7 @@ async def api_sync_manifest(request: Request):
     for entry in data["loras"]:
         if entry.get("state") == "removed":
             continue
-        if entry.get("boxes") and box not in entry["boxes"]:
+        if box not in target_boxes(entry, data):
             continue
         if (entry.get("mirror") or {}).get("state") != "ready":
             continue
@@ -909,13 +986,15 @@ async def _lookup_unknown_hashes(hashes: List[str]) -> None:
 
 def _entry_view(entry: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
     states = {}
+    targets = target_boxes(entry, data)
     for box, cfg in boxes(data).items():
-        states[box] = lora_box_state(entry, box, cfg, box_report(box))
+        states[box] = lora_box_state(entry, box, cfg, box_report(box), targets)
     view = {k: entry.get(k) for k in (
         "id", "file", "sha256", "size_bytes", "family", "base", "services", "title", "version",
         "page", "nsfw", "trained_words", "recommended_strength", "preview", "added_at",
         "state", "mirror", "boxes", "aliases")}
     view["box_states_object"] = states
+    view["target_boxes_array"] = sorted(target_boxes(entry, data))
     view["tag_string"] = f"<lora:{entry['file'].rsplit('.', 1)[0]}:{entry.get('recommended_strength') or 1:g}>"
     return view
 
@@ -1442,3 +1521,35 @@ def _cli(argv: List[str]) -> int:
 if __name__ == "__main__":
     import sys
     raise SystemExit(_cli(sys.argv[1:]))
+
+
+def dispatch_check(workflow: str, lora_files: List[str]) -> Tuple[bool, str, List[str]]:
+    """Can any box that runs `workflow` load every one of these LoRAs?
+
+    Returns (ok, reason, boxes). Only LoRAs installed through /lora are
+    checked: their per-box presence is known from the sync reports. A render
+    no box can take is refused with the reason instead of waiting in the
+    queue forever.
+    """
+    runners = workflow_boxes(workflow)
+    if runners is None:
+        return True, "", []
+    data = load_registry()
+    managed = {e["file"]: e for e in data["loras"] if e.get("state") != "removed"}
+    candidates = set(runners)
+    waiting = []
+    for name in lora_files:
+        entry = managed.get(name)
+        if not entry:
+            continue
+        ready = set(ready_boxes(entry, data))
+        if not ready & candidates:
+            waiting.append(name)
+        candidates &= ready
+    if candidates:
+        return True, "", sorted(candidates)
+    if not runners:
+        return False, f"No render computer advertises {workflow}", []
+    return False, ("Waiting for the render computers to download it: "
+                   f"{', '.join(waiting) or ', '.join(lora_files)} is not yet on "
+                   f"{', '.join(sorted(runners))}, the computers that run {workflow}"), []

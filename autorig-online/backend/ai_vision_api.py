@@ -1355,6 +1355,29 @@ def _lora_stack_request(service_id: str, prompt: Optional[str], stack_value: obj
     return clean, stack, override
 
 
+def _lora_dispatch_gate(payload: Dict[str, object]) -> None:
+    """Refuse a LoRA render no render computer can take yet.
+
+    Renderfin only dispatches to a box that advertises the workflow and holds
+    every LoRA; with no such box the task would sit in Pending with nobody
+    told. The usual case is a LoRA still downloading to the one box that runs
+    its model, and the caller is told exactly that.
+    """
+    names = [str(payload.get("lora") or "")]
+    names += [str(item.get("name") or "") for item in (payload.get("loras") or [])
+              if isinstance(item, dict)]
+    names = [name for name in names if name]
+    workflow = payload.get("work_flow")
+    if not names or not isinstance(workflow, str) or not workflow:
+        return
+    import ai_lora_manager
+    ok, reason, _boxes = ai_lora_manager.dispatch_check(workflow, names)
+    if not ok:
+        raise HTTPException(status_code=409, detail={
+            "error_string": "lora_not_on_render_computer",
+            "message_string": reason, "work_flow_string": workflow})
+
+
 def _stack_default_checkpoint(service_id: str, stack) -> Optional[str]:
     """The family default checkpoint for a stack given without one."""
     import ai_model_catalogue
@@ -1654,6 +1677,7 @@ async def _uncached_api_image(body: ImageRequest):
             payload["creativity"] = float(body.creativity)
         if body.seed:
             payload["noise_seed"] = int(body.seed)
+        _lora_dispatch_gate(payload)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
@@ -1867,6 +1891,7 @@ async def _uncached_api_video(body: VideoRequest):
             payload["creativity"] = float(body.creativity)
         if body.seed:
             payload["noise_seed"] = int(body.seed)
+        _lora_dispatch_gate(payload)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload,

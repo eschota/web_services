@@ -60,8 +60,13 @@ class Base(unittest.TestCase):
         self.root = root
         self.env = mock.patch.dict(os.environ, {"AUTORIG_LORA_DIR": ""})
         self.env.start()
+        # Renderfin's registry is stubbed: None means "unknown", the old
+        # every-box behaviour; tests that need servers set them.
+        self.servers = mock.patch.object(lm, "renderfin_servers", return_value=None)
+        self.servers_mock = self.servers.start()
 
     def tearDown(self):
+        self.servers.stop()
         self.env.stop()
         (ai_model_catalogue.CATALOGUE_DIR, ai_model_catalogue.CATALOGUE_FILE,
          ai_model_catalogue.PREVIEW_DIR, lm.SYNC_KEYS_FILE) = self._old
@@ -209,6 +214,73 @@ class SyncProtocolTests(Base):
         self.assertEqual(self.client.get(f"/api/ai/loras/sync/blob/{SHA_A}").status_code, 401)
 
 
+H3_CATALOGUE = CATALOGUE + [
+    {"kind": "checkpoint", "family": "minimax_h3", "file": "minimax_h3.safetensors",
+     "base": "MiniMax H3", "usable": True, "services": ["video"],
+     "workflow": "gen_video_minimax_h3_by_url.json"},
+]
+SERVERS = [
+    {"name": "worker-4090", "status": "online", "workflows": {"gen_video_minimax_h3_by_url.json"}},
+    {"name": "f5", "status": "online", "workflows": {"gen_image.json"}},
+    {"name": "Raptor", "status": "online", "workflows": {"gen_image.json"}},
+]
+SHA_H3 = "c" * 64
+
+
+class FamilyTargetTests(Base):
+    def setUp(self):
+        super().setUp()
+        (self.root / "model_catalogue.json").write_text(json.dumps(H3_CATALOGUE), encoding="utf-8")
+        ai_model_catalogue._cache = []
+        self.servers_mock.return_value = SERVERS
+        self.h3 = entry("civitai-3220766", "VBVR_H3_attn_only.safetensors", SHA_H3,
+                        family="minimax_h3", base="MiniMax H3", services=["video"])
+
+    def test_an_h3_lora_goes_only_to_boxes_that_run_h3(self):
+        self.registry([self.h3])
+        self.assertEqual(lm.target_boxes(self.h3), {"worker-4090"})
+        states = {b: lm.lora_box_state(self.h3, b, {}, lm.box_report(b), lm.target_boxes(self.h3))["state"]
+                  for b in ("f5", "worker-4090")}
+        self.assertEqual(states, {"f5": "not_needed", "worker-4090": "no_agent"})
+
+    def test_an_explicit_box_list_wins(self):
+        pinned = dict(self.h3, boxes=["f12"])
+        self.assertEqual(lm.target_boxes(pinned), {"f12"})
+
+    def test_unknown_registry_falls_back_to_every_box(self):
+        self.servers_mock.return_value = None
+        self.assertEqual(lm.target_boxes(self.h3), set(lm.boxes()))
+
+    def test_manifest_skips_boxes_without_the_family(self):
+        self.registry([self.h3])
+        app = FastAPI(); app.include_router(lm.router)
+        with mock.patch.object(lm, "_presigned_url", new=mock.AsyncMock(return_value="")):
+            body = TestClient(app).get("/api/ai/loras/sync/manifest",
+                                       headers={"X-AutoRig-Box": "f5", "Authorization": "Bearer k5"}).json()
+        self.assertEqual(body["items_array"], [])
+
+    def test_dispatch_needs_a_box_that_runs_the_workflow_and_holds_the_lora(self):
+        self.registry([self.h3])
+        # On f5 (no H3) only: the render could never start.
+        self.report("f5", [{"name": "VBVR_H3_attn_only.safetensors", "sha256": SHA_H3}])
+        ok, reason, _ = lm.dispatch_check("gen_video_minimax_h3_by_url.json", ["VBVR_H3_attn_only.safetensors"])
+        self.assertFalse(ok)
+        self.assertIn("Waiting for the render computers to download it", reason)
+        self.assertIn("worker-4090", reason)
+        self.report("worker-4090", [{"name": "VBVR_H3_attn_only.safetensors", "sha256": SHA_H3}])
+        self.assertEqual(lm.dispatch_check("gen_video_minimax_h3_by_url.json",
+                                           ["VBVR_H3_attn_only.safetensors"]),
+                         (True, "", ["worker-4090"]))
+        # LoRAs from the curated catalogue are not tracked per box: no veto.
+        self.assertTrue(lm.dispatch_check("gen_image.json", ["NSFW_master.safetensors"])[0])
+
+    def test_catalogue_lists_ready_workers(self):
+        self.registry([self.h3])
+        self.report("f5", [{"name": "VBVR_H3_attn_only.safetensors", "sha256": SHA_H3}])
+        managed = [x for x in ai_model_catalogue.entries() if x.get("managed")][0]
+        self.assertEqual(managed["ready_workers"], ["f5"])
+
+
 class PresignedTests(Base):
     def test_the_api_token_is_never_the_url_handed_out(self):
         import asyncio
@@ -239,7 +311,12 @@ class PresignedTests(Base):
 class ProtectedFileTests(Base):
     def test_template_and_curated_loras_are_protected(self):
         protected = lm.protected_files()
-        self.assertIn("ltx-2-19b-lora-camera-control-static.safetensors", protected)
+        import re
+        in_templates = set()
+        for path in lm.WORKFLOWS_DIR.glob("*.json"):
+            in_templates.update(re.findall(r'"lora_name"\s*:\s*"([^"$]+)"', path.read_text(encoding="utf-8")))
+        self.assertTrue(in_templates, "some template should load a fixed LoRA")
+        self.assertTrue(in_templates <= protected)
         self.assertIn("NSFW_master.safetensors", protected)
 
 

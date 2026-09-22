@@ -74,8 +74,10 @@ audio on). "cold" includes loading the weights.
 | worker-4090 | | LTX-2.5 HQ | 63 s | 23.6 GB | 38 GB |
 | worker-4090 | | LTX-2.5 pose control (prod) | 140 s wall | | |
 | worker-4090 | | MiniMax H3 (107 f) | 578 s cold, 41 s warm | 23.6 GB | 48 GB |
-| f5, f15 | 3070 Ti 8 GB / 32 GB | LTX-2.5 | pending (weights still downloading) | | |
-| Raptor | 3080 Ti 12 GB / 64 GB | LTX-2.5, H3 | pending (weights still downloading) | | |
+| f15 | 3070 Ti 8 GB / 32 GB | LTX-2.5 standard, **49** frames | 811 s | 8.1 GB (full) | 32 GB — **252 MB free at worst** |
+| Raptor | 3080 Ti 12 GB / 64 GB | LTX-2.5 standard | 181 s cold, 196 s next run (PCIe gen3, busy card) | 11.9 GB | 59.7 GB (6.0 GB free at worst) |
+| worker-4090 | | MiniMax H3 **pruned** int8, `--reserve-vram 3` only | step 1 160 s/it (WDDM sysmem spill 2.4 GB shared) | 21.3 GB | |
+| worker-4090 | | MiniMax H3 pruned, `--reserve-vram 3 --vram-headroom 3` | 12.4-16.6 s/it, 4 steps 50 s | 15-18 GB (+5-7 GB shared) | |
 
 ## 4. Production proof (public `POST /api/video`)
 
@@ -88,10 +90,28 @@ audio on). "cold" includes loading the weights.
 | 5438a8db-14f2-4c50-9d09-0615bd153cdc | worker-4090 | gen_video_minimax_h3_by_url.json | 115 s |
 | 620f0ba5-804e-4975-9646-349f4201429b | worker-4090 | gen_animation_ltx25_by_url.json | 85 s |
 | 10c0c506-a313-40bd-aa6a-ca0861243e0a | f12 | gen_animation_ltx25_hq_by_url.json | 210 s |
+| 4cb7fafd-1442-4af8-83fb-d1c825ca5e4f | f12 | request named ltxv-13b-0.9.8 (retired) -> rendered LTX-2.5 | queued behind others |
+| 5d76c591-274e-42f4-aef0-38b650893689 | Raptor | gen_animation_ltx25_by_url.json | 335 s |
+| 7f8f406b-e1de-4810-ae52-662fa3a2ecae | worker-4090 | request named the unpruned H3 file -> pruned build | |
 
 Quality (contact sheets): LTX-2.5 follows the motion part of the prompt more
 fully than 2.3 (the push-in and the smile both happen); face identity drifts
 in both. H3 holds the face identity clearly better than either LTX.
+
+## 4b. Where each box stands
+
+* **f12, Raptor, worker-4090** serve LTX-2.5 (all video tokens). worker-4090 also serves
+  MiniMax H3 on `minimax_h3_fl2va_pruned_int8_convrot.safetensors` (20970379616 bytes,
+  sha256 e889202c...) and runs ComfyUI with `--reserve-vram 3 --vram-headroom 3`.
+* **f5, f15** hold the LTX-2.5 files but every video token is in
+  `C:\ProgramData\AutoRigleet-ltx23dvertise_block.txt`: at 49 frames an 8 GB / 32 GB box
+  ran out of system RAM (252 MB left) and took 811 s. They stay image-only.
+* Pose / depth / canny control runs only on worker-4090: on f12 a 97-frame pose job took
+  the box down (reboot, RAM exhaustion suspected).
+* Farm LAN distribution: f15 (192.168.0.115) and Raptor (192.168.0.108) serve their
+  `models` dir read-only on :18998, bound to the LAN address only, from the boot-time
+  scheduled task `AutoRig Models LAN Server` (`C:\ProgramData\AutoRig\models_lan_server.ps1`).
+  Other farm boxes pull with `pull_ltx25_lan.ps1 -Peer http://<ip>:18998` (sha256 checked).
 
 ## 5. Deletion candidates (NOT deleted — owner decides)
 
@@ -123,5 +143,7 @@ their base with the migration: `ltx-2-19b-lora-camera-control-static`,
 `DreamLTXV` (LTXV 0.9.x, already marked obsolete). The LTX 2.3 style LoRAs
 (Crisp Enhance, Amateur Hour, Pixar Toon, Dual-Character, EditAnything,
 mvmt_lora_v2) are now applied on LTX-2.5 and need a visual re-check.
-Wan-Animate-2 (worker-4090) is a deletion candidate once LTX-2.5 pose control
+`C:\AIModels\diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors` (34038892334 bytes,
+sha256 7ad4c73e..., Comfy-Org/MiniMax-H3) is replaced by the pruned build and is a deletion
+candidate on worker-4090. Wan-Animate-2 (worker-4090) is a deletion candidate once LTX-2.5 pose control
 (or H3) is accepted as its replacement.
