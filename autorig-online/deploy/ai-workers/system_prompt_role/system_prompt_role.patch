@@ -1,0 +1,50 @@
+--- a/bonsai_adapter.py
++++ b/bonsai_adapter.py
+@@ BonsaiAdapter.status
+             "loaded_model": self.loaded_model_id(),
++            "system_prompt_supported": True,
++            "system_prompt_models": ["bonsai2-27b"],
+             "base_url": self.config.base_url,
+@@ each model status
+                     "context_tokens": int(entry.context_tokens),
++                    "system_prompt_supported": entry.id == "bonsai2-27b",
+@@ BonsaiAdapter.run_completion
+         prompt: str,
+         *,
++        system_prompt: str = "",
+         model_id: Optional[str] = None,
+@@ request body
+-        body = {
+-            "messages": [{"role": "user", "content": content}],
++        messages = []
++        clean_system_prompt = str(system_prompt or "").strip()
++        if clean_system_prompt:
++            messages.append({"role": "system", "content": clean_system_prompt})
++        messages.append({"role": "user", "content": content})
++        body = {
++            "messages": messages,
+
+--- a/webserver_converter_glb.py
++++ b/webserver_converter_glb.py
+@@ imports
+     MAX_IMAGE_BYTES as BONSAI_MAX_IMAGE_BYTES,
++    MAX_PROMPT_CHARS as BONSAI_MAX_PROMPT_CHARS,
+@@ AiVisionTask
+     prompt: str
++    system_prompt: str = ""
+@@ AiVisionTask.to_dict
+         payload = asdict(self)
++        payload.pop("system_prompt", None)
+@@ _submit_ai_task validation
+         prompt = validate_prompt(raw_payload.get("prompt"))
++        system_prompt = str(raw_payload.get("system_prompt") or "").strip()
++        if len(system_prompt) + len(prompt) > BONSAI_MAX_PROMPT_CHARS:
++            raise BonsaiRequestError(
++                f"system_prompt and prompt exceed {BONSAI_MAX_PROMPT_CHARS} characters"
++            )
+@@ task construction
+         prompt=prompt,
++        system_prompt=system_prompt,
+@@ process_ai_vision_task
+         task.prompt,
++        system_prompt=task.system_prompt,

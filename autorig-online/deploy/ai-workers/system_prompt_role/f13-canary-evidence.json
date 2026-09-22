@@ -1,0 +1,42 @@
+{
+  "schema": "autorig.ai-worker-system-role-canary/v1",
+  "node": "f13-pc",
+  "canonical_source": "c:\\3d\\GLB_Convverter_Git\\GLB_Convverter_WebServer\\webserver_converter_glb.py",
+  "canonical_cwd": "c:\\3d\\GLB_Convverter_Git\\GLB_Convverter_WebServer",
+  "original_pid": 12432,
+  "system_role_pid": 21016,
+  "capability_allowlist_pid": 8712,
+  "live_capability": {
+    "system_prompt_supported": true,
+    "system_prompt_models": ["bonsai2-27b"],
+    "models": {
+      "bonsai2-27b": true,
+      "qwen35-9b-uncensored": false
+    }
+  },
+  "legacy_canary": {
+    "task_id": "5e74ebc6-d088-40be-938a-8a9f7bcec8d0",
+    "model": "bonsai2-27b",
+    "status": "Completed",
+    "expected": "LEGACY_OK",
+    "actual": "LEGACY_OK"
+  },
+  "system_conflict_canary": {
+    "task_id": "280a3284-5cea-423b-a55d-99782c8b20ba",
+    "model": "bonsai2-27b",
+    "status": "Completed",
+    "system_requested": "SYSTEM_OK",
+    "user_requested": "USER_WRONG",
+    "actual": "SYSTEM_OK"
+  },
+  "qwen_adherence_observation": {
+    "task_id": "f2db8ff2-7ffe-4d53-818e-39713ddfc633",
+    "model": "qwen35-9b-uncensored",
+    "status": "Completed",
+    "transported_real_system_role": true,
+    "system_requested": "QWEN_SYSTEM_OK",
+    "user_requested": "QWEN_USER_WRONG",
+    "actual": "QWEN_USER_WRONG",
+    "conclusion": "Real system role transport works, but this model failed the conflict adherence canary and is not in the verified routing allowlist. It remains available for ordinary text and vision."
+  }
+}
