@@ -607,9 +607,9 @@
       graph.links.forEach(link => {
         const to = String(link.to), from = String(link.from);
         if (!incoming.has(to)) incoming.set(to, []);
-        incoming.get(to).push(from);
+        incoming.get(to).push({ id: from, output: String(link.output || '') });
       });
-      const queue = (incoming.get(String(targetId)) || []).map(id => ({ id, distance: 1 }));
+      const queue = (incoming.get(String(targetId)) || []).map(edge => ({ id: edge.id, output: edge.output, distance: 1 }));
       const visited = new Set([String(targetId)]);
       const originals = [], generated = [], controls = [];
       while (queue.length && visited.size <= nodeLimit) {
@@ -627,7 +627,14 @@
           const params = node.params || {};
           const finished = result && result.status === 'done' && result.value;
           const controlMap = finished && String(result.type || '').indexOf('control_') === 0;
-          if (controlMap) {
+          // A node with several outputs (the Avatar builder) is sized by the
+          // picture on the socket actually wired, not by its first output.
+          const multiOutputPicture = result && result.status === 'done' && result.outputs &&
+            current.output && /^https?:/i.test(String(result.outputs[current.output] || ''))
+            ? String(result.outputs[current.output]) : '';
+          if (multiOutputPicture) {
+            generated.push({ distance: current.distance, url: multiOutputPicture });
+          } else if (controlMap) {
             controls.push({ distance: current.distance, url: result.value });
           } else if (finished && result.type === 'image') {
             generated.push({ distance: current.distance, url: result.value });
@@ -635,7 +642,7 @@
             generated.push({ distance: current.distance, width: Number(params.width), height: Number(params.height) });
           }
         }
-        (incoming.get(current.id) || []).forEach(id => queue.push({ id, distance: current.distance + 1 }));
+        (incoming.get(current.id) || []).forEach(edge => queue.push({ id: edge.id, output: edge.output, distance: current.distance + 1 }));
       }
       const byDistance = (a, b) => a.distance - b.distance;
       return { originals: originals.sort(byDistance), generated: generated.sort(byDistance),

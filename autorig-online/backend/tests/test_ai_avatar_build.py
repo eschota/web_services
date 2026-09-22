@@ -237,6 +237,65 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(build.parse_views("back, front")[0], build.ANCHOR_SLOT)
 
 
+class ExternalSourceTests(unittest.TestCase):
+    def test_external_addresses_are_checked(self):
+        ok = build.validate_external_url("https://image.civitai.com/x/original=true/a.mp4")
+        self.assertTrue(ok.endswith("a.mp4"))
+        for bad in ("http://example.com/a.png", "https://user:pw@example.com/a.png",
+                    "https://example.com:8443/a.png", "https://127.0.0.1/a.png",
+                    "https://10.0.0.5/a.png", "https://localhost/a.png", "https://example.com/"):
+            with self.assertRaises(ValueError, msg=bad):
+                build.validate_external_url(bad)
+        self.assertEqual(build.guess_kind("https://x.test/v/clip.MP4"), "video")
+        self.assertEqual(build.guess_kind("https://x.test/p.webp"), "image")
+        self.assertEqual(build.guess_kind("https://x.test/p"), "auto")
+
+
+class PrivacyTests(unittest.TestCase):
+    def test_explicit_build_marks_assets_private_and_graphs_drop_them(self):
+        import os
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            assets = AvatarAssetStore(root / "assets", max_assets_per_owner=500)
+            farm = FakeFarm(assets)
+            original = DESCRIPTION.copy()
+            DESCRIPTION["explicit"] = True
+            detect, box = build.detect_face_kind, build.face_box
+            build.detect_face_kind = lambda data: "unknown"
+            build.face_box = lambda data: [10, 10, 30, 32]
+            try:
+                builder = build.AvatarBuilder(
+                    avatar_store=AvatarStore(root / "avatars"), asset_store=assets,
+                    job_store=build.BuildJobStore(root / "build"),
+                    http_client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(farm.handler)),
+                    api_base="http://internal", poll_seconds=0)
+                source = root / "source.png"
+                source.write_bytes(png())
+                identity = build._identity("image", "sha-private", build.BuildRequest(views="back"), None)
+                identity["local_file"] = str(source)
+                job, _ = builder.jobs.create(ALICE, identity)
+                job = asyncio.run(builder.run(job["job_id"]))
+            finally:
+                DESCRIPTION.clear()
+                DESCRIPTION.update(original)
+                build.detect_face_kind, build.face_box = detect, box
+            self.assertTrue(job["private"])
+            self.assertTrue(build.public_status(job)["private_bool"])
+            for asset_id in job["asset_ids"]:
+                self.assertTrue(assets.get_metadata(asset_id)["private"], asset_id)
+            back = job["views"]["back"]["final"]["canonical_url"]
+            os.environ["AUTORIG_AI_AVATAR_ASSET_DIR"] = str(root / "assets")
+            try:
+                from ai_graph import NodeResult
+                record = NodeResult.model_validate({
+                    "status": "done", "type": "avatar", "value": job["avatar_string"],
+                    "outputs": {"avatar_string": job["avatar_string"], "back_url_string": back}})
+            finally:
+                os.environ.pop("AUTORIG_AI_AVATAR_ASSET_DIR")
+            self.assertEqual(record.outputs["back_url_string"], "")
+            self.assertEqual(record.value, job["avatar_string"])
+
+
 class CropTests(unittest.TestCase):
     def test_crops_have_the_view_size_and_fall_back_without_a_face(self):
         tall = png((120, 130, 140), size=(832, 1216))
@@ -292,9 +351,19 @@ class RouterTests(unittest.TestCase):
             async def scenario():
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                              base_url="https://test") as client:
-                    refused = await client.post("/api/ai/avatar-build", json={
-                        "image_url": "https://evil.example/x.png"}, headers={"X-Test-Owner": "a"})
-                    self.assertEqual(refused.status_code, 400)
+                    for bad in ("http://evil.example/x.png", "https://10.0.0.1/x.png",
+                                "https://evil.example:8080/x.png"):
+                        refused = await client.post("/api/ai/avatar-build", json={
+                            "image_url": bad}, headers={"X-Test-Owner": "a"})
+                        self.assertEqual(refused.status_code, 400, bad)
+                    outside = await client.post("/api/ai/avatar-build", json={
+                        "image_url": "https://images.example.org/people/p.jpg"},
+                        headers={"X-Test-Owner": "a"})
+                    self.assertEqual(outside.status_code, 202)
+                    job = builder.jobs.read(outside.json()["task_id_string"],
+                                            AvatarOwner(owner_type="user", owner_id="a"))
+                    self.assertTrue(job["request"]["external"])
+                    self.assertEqual(job["request"]["kind"], "image")
                     accepted = await client.post("/api/ai/avatar-build", json={
                         "image_url": "https://autorig.online/dev/api/scratch/x.png"},
                         headers={"X-Test-Owner": "a"})

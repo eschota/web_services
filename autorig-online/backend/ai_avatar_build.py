@@ -178,7 +178,9 @@ DESCRIBE_INSTRUCTION = (
     '"body":"body type, height impression and proportions",'
     '"wardrobe":"visible clothing, shoes and accessories only; empty if unclear",'
     '"negative_identity_prompt":"traits that would contradict this identity",'
-    '"production_notes":"occlusions, crop, anything the views will have to invent"}. '
+    '"production_notes":"occlusions, crop, anything the views will have to invent",'
+    '"explicit": true if any nudity, exposed breasts or genitals, or sexual activity is '
+    'visible anywhere in the picture, otherwise false}. '
     "Describe visible evidence only. Never name or identify a real person. Exclude pose, "
     "action, camera, lighting, background and other people. No markdown."
 )
@@ -218,6 +220,8 @@ class BuildRequest(BaseModel):
     qa: Optional[bool] = True
     seed: Optional[int] = Field(default=None, ge=0, le=2**31 - 1)
     engine: Optional[str] = Field(default=None, max_length=12)
+    # Keep every derived picture out of saved graphs whatever the classifier says.
+    private: Optional[bool] = None
 
 
 def _now() -> float:
@@ -349,6 +353,8 @@ def clean_description(raw: Dict[str, Any]) -> Dict[str, str]:
     limits = {"display_name": 120, "identity_prompt": 4000, "appearance": 4000, "body": 2000,
               "wardrobe": 4000, "negative_identity_prompt": 2000, "production_notes": 1000}
     out = {key: str(raw.get(key) or "").strip()[:limit] for key, limit in limits.items()}
+    explicit = raw.get("explicit")
+    out["explicit"] = explicit is True or str(explicit).strip().lower() in ("true", "yes", "1")
     if not out["identity_prompt"]:
         raise ValueError("Vision returned no identity description")
     if not out["display_name"]:
@@ -437,6 +443,143 @@ def _rank(item: Dict[str, Any]) -> Tuple[int, float]:
 
 
 # -------------------------------------------------------- image analysis (cv2)
+
+
+# ------------------------------------------------------ external sources
+#
+# A /nodes input may hold any public address (the owner pastes Civitai and
+# Pexels links). It is fetched here, on the server, under the same rules as
+# the video-reference reader: HTTPS only, no credentials or custom ports, every
+# hop's DNS must be public, at most four redirects each re-checked, the
+# Civitai bearer only ever sent to Civitai's own hosts, a size cap, and the
+# answer must be a picture or a video. Nothing else is fetched.
+
+EXTERNAL_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".m4v", ".mkv")
+EXTERNAL_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def validate_external_url(value: str) -> str:
+    from urllib.parse import urlsplit as _split
+    url = str(value or "").strip()
+    try:
+        parsed = _split(url)
+        port = parsed.port
+    except ValueError:
+        raise ValueError("not a valid address") from None
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if parsed.scheme.lower() != "https" or not host:
+        raise ValueError("the address must use HTTPS")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("credentials are not allowed in the address")
+    if port not in (None, 443):
+        raise ValueError("custom ports are not allowed")
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("local hosts are not allowed")
+    import ipaddress as _ip
+    try:
+        literal = _ip.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None and not literal.is_global:
+        raise ValueError("private addresses are not allowed")
+    if not parsed.path or parsed.path.endswith("/"):
+        raise ValueError("the address must name a file")
+    return url
+
+
+def guess_kind(url: str) -> str:
+    path = urlsplit(str(url or "")).path.lower()
+    if path.endswith(EXTERNAL_VIDEO_EXTENSIONS):
+        return "video"
+    if path.endswith(EXTERNAL_IMAGE_EXTENSIONS):
+        return "image"
+    return "auto"
+
+
+async def fetch_external(client: httpx.AsyncClient, url: str, target: Path) -> Tuple[str, int]:
+    """Download a public picture or video to `target`; returns (kind, bytes)."""
+    from urllib.parse import urljoin
+    from renderfin.video_input import VideoInputError, _assert_public_dns, _civitai_headers
+    current = validate_external_url(url)
+    for _ in range(5):
+        try:
+            await _assert_public_dns(current)
+        except VideoInputError as error:
+            raise BuildError(f"the source address is not allowed: {error}") from None
+        try:
+            headers = {"User-Agent": "AutoRigAvatarBuilder/1.0 (+https://autorig.online/avatars)",
+                       **_civitai_headers(current)}
+            async with client.stream("GET", current, headers=headers,
+                                     timeout=120.0, follow_redirects=False) as response:
+                if 300 <= response.status_code < 400:
+                    location = str(response.headers.get("location") or "").strip()
+                    if not location:
+                        raise BuildError("the source redirected nowhere")
+                    try:
+                        current = validate_external_url(urljoin(current, location))
+                    except ValueError as error:
+                        raise BuildError(f"the source redirected to a refused address: {error}") from None
+                    continue
+                if response.status_code != 200:
+                    raise BuildError(f"the source answered HTTP {response.status_code}")
+                content_type = str(response.headers.get("content-type") or "").split(";")[0].strip().lower()
+                if content_type.startswith("video/"):
+                    kind = "video"
+                elif content_type.startswith("image/"):
+                    kind = "image"
+                elif content_type in ("", "application/octet-stream", "binary/octet-stream"):
+                    kind = guess_kind(current)
+                else:
+                    kind = "auto"
+                if kind == "auto":
+                    raise BuildError(f"the source is not a picture or a video ({content_type or 'unknown type'})")
+                limit = MAX_VIDEO_BYTES if kind == "video" else MAX_IMAGE_BYTES
+                size = 0
+                with open(target, "wb") as output:
+                    async for chunk in response.aiter_bytes(1024 * 1024):
+                        size += len(chunk)
+                        if size > limit:
+                            raise BuildError("the source is larger than allowed")
+                        output.write(chunk)
+                if not size:
+                    raise BuildError("the source is empty")
+                return kind, size
+        except httpx.HTTPError as error:
+            # Never echo the exception: it may quote a signed URL or a header.
+            raise BuildError(f"the source could not be downloaded ({type(error).__name__})") from None
+    raise BuildError("the source redirected too many times")
+
+
+# ------------------------------------------------------------- privacy
+#
+# The graph library and scratch uploads are public (an auth fix is pending),
+# so an Avatar built from explicit material must not leak into a saved
+# graph. Its assets are marked private in their metadata; ai_graph drops
+# private Avatar-asset addresses from stored results; the page still shows
+# them live to whoever ran the build.
+
+def nsfw_rating(paths: List[Path]) -> str:
+    """Worst NudeNet rating over a few pictures: safe, suggestive or adult."""
+    try:
+        from nudenet import NudeDetector
+    except Exception:
+        return "unknown"
+    explicit = {"FEMALE_GENITALIA_EXPOSED", "MALE_GENITALIA_EXPOSED", "ANUS_EXPOSED"}
+    suggestive = {"FEMALE_BREAST_EXPOSED", "BUTTOCKS_EXPOSED", "FEMALE_GENITALIA_COVERED"}
+    detector = NudeDetector()
+    worst = "safe"
+    for path in paths:
+        try:
+            found = detector.detect(str(path))
+        except Exception:
+            continue
+        for item in found or []:
+            label, score = item.get("class"), float(item.get("score") or 0)
+            if label in explicit and score >= 0.35:
+                return "adult"
+            if (label in suggestive and score >= 0.35) or (label in explicit and score >= 0.2):
+                worst = "suggestive"
+    return worst
 
 
 def _cv2():
@@ -865,11 +1008,34 @@ class AvatarBuilder:
                 raise BuildError(f"Vision failed: {data.get('error_string') or 'no answer'}")
         raise BuildError("Vision did not answer in time")
 
-    def _store_bytes(self, owner: AvatarOwner, data: bytes, name: str, source_url: Optional[str] = None) -> Dict[str, Any]:
+    def _store_bytes(self, owner: AvatarOwner, data: bytes, name: str, source_url: Optional[str] = None,
+                     job: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         try:
-            return self.assets.put_bytes(owner, data, filename=name, content_type=None, source_url=source_url)
+            asset = self.assets.put_bytes(owner, data, filename=name, content_type=None, source_url=source_url)
         except HTTPException as error:
             raise BuildError(f"could not store {name}: {error.detail}") from None
+        if job is not None:
+            job.setdefault("asset_ids", [])
+            if asset.get("asset_id") and asset["asset_id"] not in job["asset_ids"]:
+                job["asset_ids"].append(asset["asset_id"])
+            if job.get("private"):
+                self._mark_private([asset.get("asset_id")])
+        return asset
+
+    def _mark_private(self, asset_ids) -> None:
+        for asset_id in asset_ids or []:
+            meta = self.assets.get_metadata(str(asset_id or ""))
+            if not meta or meta.get("private"):
+                continue
+            meta["private"] = True
+            self.assets._atomic_json(self.assets.assets_dir / str(asset_id) / "metadata.json", meta)
+
+    def _set_private(self, job: Dict[str, Any], reason: str) -> None:
+        if not job.get("private"):
+            job["private"] = True
+            job["private_reason"] = reason
+            _log(job, f"private: {reason}")
+        self._mark_private(job.get("asset_ids"))
 
     # ---- stage 1: source
 
@@ -883,6 +1049,13 @@ class AvatarBuilder:
             if not path.is_file():
                 raise BuildError("the uploaded source is gone; upload it again")
             data = path.read_bytes() if kind == "image" else b""
+        elif request.get("external"):
+            path = work / "source.download"
+            async with httpx.AsyncClient() as outside:
+                kind, _size = await fetch_external(outside, request["source_url"], path)
+            request["kind"] = kind
+            if kind == "image":
+                data = path.read_bytes()
         else:
             url = request["source_url"]
             limit = MAX_VIDEO_BYTES if kind == "video" else MAX_IMAGE_BYTES
@@ -891,7 +1064,7 @@ class AvatarBuilder:
                 path = work / "source.video"
                 path.write_bytes(data)
         if kind == "image":
-            asset = self._store_bytes(owner, data, "source.png", request.get("source_url"))
+            asset = self._store_bytes(owner, data, "source.png", request.get("source_url"), job=job)
             job["source"] = {"kind": "image", "sha256": asset["sha256"],
                              "url": request.get("source_url") or None,
                              "width": asset["width"], "height": asset["height"],
@@ -905,13 +1078,17 @@ class AvatarBuilder:
             if face and face[0].get("box"):
                 job["source"]["frame_box"] = face[0]["box"]
                 job["source"]["frame_score"] = face[0]["score"]
+            rating = await asyncio.to_thread(nsfw_rating, [self._tmp_image(work, data)])
+            job["source"]["nsfw_rating"] = rating
+            if request.get("private") or rating in ("adult", "suggestive"):
+                self._set_private(job, "requested" if request.get("private") else f"source rated {rating}")
             _log(job, "source picture stored")
             return
         video_sha = hashlib.sha256(path.read_bytes()).hexdigest()
         picked = await asyncio.to_thread(pick_best_frame, path, work / "frames")
         best = picked["best"]
         frame_bytes = Path(best["path"]).read_bytes()
-        asset = self._store_bytes(owner, frame_bytes, "frame.png")
+        asset = self._store_bytes(owner, frame_bytes, "frame.png", job=job)
         job["source"] = {"kind": "video", "sha256": video_sha,
                          "url": request.get("source_url") or None,
                          "width": picked["meta"]["width"], "height": picked["meta"]["height"],
@@ -922,6 +1099,14 @@ class AvatarBuilder:
                          "frame_box": best.get("box"),
                          "frames_scored": len(picked["rows"]),
                          "frames_with_face": sum(1 for row in picked["rows"] if row["faces"])}
+        # A few frames across the clip, not only the chosen one: a clip can be
+        # explicit where the face is not.
+        rows = picked["rows"]
+        sample = [Path(row["path"]) for row in rows[:: max(1, len(rows) // 8)]][:9] + [Path(best["path"])]
+        rating = await asyncio.to_thread(nsfw_rating, sample)
+        job["source"]["nsfw_rating"] = rating
+        if request.get("private") or rating in ("adult", "suggestive"):
+            self._set_private(job, "requested" if request.get("private") else f"source rated {rating}")
         _log(job, f"best frame at {best['time']}s (score {best['score']}, "
                   f"{job['source']['frames_with_face']}/{len(picked['rows'])} frames with a face)")
 
@@ -940,6 +1125,8 @@ class AvatarBuilder:
                                         image_url=job["source"]["frame_url"], budget=1200)
             try:
                 job["description"] = clean_description(_extract_json(answer))
+                if job["description"].get("explicit"):
+                    self._set_private(job, "Vision saw nudity or sexual content")
                 job["description_raw"] = answer[:6000]
                 _log(job, f"described as '{job['description']['display_name']}'")
                 return
@@ -961,7 +1148,7 @@ class AvatarBuilder:
         data = await self._fetch(client, self._anchor_url(job))
         width, height = VIEW_SPECS[slot]["size"]
         cropped = await asyncio.to_thread(crop_to_framing, data, VIEW_SPECS[slot]["crop"], width, height)
-        asset = self._store_bytes(owner, cropped, f"{slot}_crop.png")
+        asset = self._store_bytes(owner, cropped, f"{slot}_crop.png", job=job)
         state["crop_url"] = asset["canonical_url"]
         self.jobs.write(job)
         return state["crop_url"]
@@ -1023,7 +1210,7 @@ class AvatarBuilder:
             if attempt["task_id"]:
                 url, worker = await self._wait_render(client, attempt["task_id"], attempt["render_url"])
             data = await self._fetch(client, url)
-            asset = self._store_bytes(owner, data, f"{slot}.png")
+            asset = self._store_bytes(owner, data, f"{slot}.png", job=job)
             attempt.update(asset=asset, worker=worker, render_url=url,
                            seconds=round(time.monotonic() - began, 1), finished_at=_now())
             self.jobs.write(job)
@@ -1099,7 +1286,7 @@ class AvatarBuilder:
             # the checked identity and the right framing, which a zoomed-out
             # or drifted render is not.
             data = await self._fetch(client, state["crop_url"])
-            asset = self._store_bytes(owner, data, f"{slot}_cropped.png")
+            asset = self._store_bytes(owner, data, f"{slot}_cropped.png", job=job)
             tried.append({"engine": "crop", "seed": 0, "prompt": "anchor crop", "reference_slots": [ANCHOR_SLOT],
                           "asset": asset, "workflow": "anchor_crop", "checkpoint": "",
                           "qa": {"status": "accepted_with_warnings", "identity_score": None,
@@ -1177,7 +1364,7 @@ class AvatarBuilder:
         if not tiles:
             raise BuildError("no view was made")
         data = await asyncio.to_thread(compose_sheet, tiles)
-        asset = self._store_bytes(owner, data, "sheet.jpg")
+        asset = self._store_bytes(owner, data, "sheet.jpg", job=job)
         job["sheet"] = {"canonical_url": asset["canonical_url"], "sha256": asset["sha256"],
                         "asset_id": asset.get("asset_id"), "width": asset["width"],
                         "height": asset["height"], "framing": "other",
@@ -1229,6 +1416,7 @@ class AvatarBuilder:
                                     f" | views passed {passed}/{len(views)}")[:1000]},
             "extensions": {"avatar_build": {
                 "job_id": job["job_id"], "pipeline": PIPELINE_VERSION,
+                "private": bool(job.get("private")),
                 "timings": job.get("timings", {}),
                 "identity_threshold": IDENTITY_PASS,
             }},
@@ -1281,6 +1469,7 @@ def public_status(job: Dict[str, Any]) -> Dict[str, Any]:
         "source_frame_time_seconds_float": source.get("frame_time_seconds"),
         "sheet_url_string": str((job.get("sheet") or {}).get("canonical_url") or ""),
         "log_array": list(job.get("log") or [])[-12:],
+        "private_bool": bool(job.get("private")),
         "timings_object": job.get("timings") or {},
     }
     requested = (job.get("request") or {}).get("views") or DEFAULT_VIEWS
@@ -1327,6 +1516,7 @@ def _identity(kind: str, source_sha_or_url: str, body: BuildRequest, avatar_id: 
     return {"kind": kind, "source": source_sha_or_url, "views": views, "engine": engine,
             "outfit": str(body.outfit or "").strip(), "display_name": str(body.display_name or "").strip(),
             "qa": body.qa is not False, "seed": seed, "avatar_id": avatar_id,
+            "private": bool(body.private),
             "pipeline": PIPELINE_VERSION}
 
 
@@ -1410,14 +1600,24 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
             return respond(job, hit)
         if not url:
             raise HTTPException(400, detail="Wire a picture or a video into the node")
+        external = False
         try:
             validate_import_url(url)
         except ValueError:
-            raise HTTPException(400, detail="Use an AutoRig upload, render or Avatar asset address") from None
-        kind = "video" if body.video_url else await _source_kind(url)
+            try:
+                validate_external_url(url)
+            except ValueError as error:
+                raise HTTPException(400, detail=f"This source address cannot be used: {error}") from None
+            external = True
+        if external:
+            kind = "video" if body.video_url else guess_kind(url)
+        else:
+            kind = "video" if body.video_url else await _source_kind(url)
         avatar_id = _split_avatar(body.avatar)
         identity = _identity(kind, url, body, avatar_id)
         identity["source_url"] = url
+        if external:
+            identity["external"] = True
         job, hit = get_builder().jobs.create(owner, identity)
         return respond(job, hit)
 

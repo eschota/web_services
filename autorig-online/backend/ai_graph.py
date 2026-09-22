@@ -92,6 +92,23 @@ class HistoryEntry(BaseModel):
 
 MAX_RESULT_OUTPUTS = 24
 
+# Avatar builds from explicit sources mark their assets private
+# (ai_avatar_build). Saved graphs are public, so those addresses are never
+# stored in results: the page that ran the build still shows them live.
+_AVATAR_ASSET_RE = re.compile(r"/api/ai/avatar-assets/([a-f0-9]{32})/")
+
+
+def _private_asset_url(value: object) -> bool:
+    match = _AVATAR_ASSET_RE.search(str(value or ""))
+    if not match:
+        return False
+    root = pathlib.Path(os.getenv("AUTORIG_AI_AVATAR_ASSET_DIR", "/srv/autorig/data/var/ai-avatar-assets"))
+    try:
+        meta = json.loads((root / "assets" / match.group(1) / "metadata.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return bool(isinstance(meta, dict) and meta.get("private"))
+
 
 class NodeResult(BaseModel):
     """What one node produced, or is still producing.
@@ -121,6 +138,16 @@ class NodeResult(BaseModel):
         if value and not value.startswith(("http://", "https://")):
             raise ValueError("input_reference_url must be a public http(s) URL")
         return value
+
+    @model_validator(mode="after")
+    def drop_private_media(self):
+        if _private_asset_url(self.value):
+            self.value = ""
+        if _private_asset_url(self.input_reference_url):
+            self.input_reference_url = ""
+        self.outputs = {key: ("" if _private_asset_url(item) else item) for key, item in self.outputs.items()}
+        self.history = [entry for entry in self.history if not _private_asset_url(entry.value)]
+        return self
 
     @field_validator("outputs")
     @classmethod

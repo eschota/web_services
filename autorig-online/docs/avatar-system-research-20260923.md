@@ -313,3 +313,25 @@ Impact-Pack и FaceAnalysis.
 - LoRA-базы: [mesmer.tools — six base models](https://mesmer.tools/blog/best-base-model-for-lora-training-2026)
 - Лица и кадры: [OpenCV DNN face (YuNet/SFace)](https://docs.opencv.org/4.13.0/d0/dd4/tutorial_dnn_face.html), [opencv_zoo YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet), [InsightFace thresholds issue](https://github.com/deepinsight/insightface/issues/2239), [ComfyUI_FaceAnalysis](https://github.com/cubiq/ComfyUI_FaceAnalysis)
 - Форматы: [Character Card V2](https://github.com/malfoyslastname/character-card-spec-v2), [Character Card V3](https://github.com/kwaroran/character-card-spec-v3), [VRM spec](https://github.com/vrm-c/vrm-specification)
+
+---
+
+## 7. Что получилось на практике (23.09, после внедрения)
+
+Реализация: `backend/ai_avatar_build.py` (сервис/нода `avatar_build`, 12 выходов), формат v2 в `ai_avatars.py`,
+страница `/avatars`, мульти-выход нод на `/nodes`. Релизы `avatar-build-20260923-a…f`.
+
+- **klein 4B держит композицию картинки 1.** Просьба «waist up» / «close-up» к полному росту возвращает полный рост.
+  Поэтому якорь — `full_body` (из исходника), а `front`/`face_closeup` — кроп якоря по лицу (Haar) + klein-рефайн;
+  упоминание «same shoes» и полноростовый исходник вторым референсом снова отдаляли кадр — убраны. Гейт кадрирования:
+  доля лица по высоте < 50 % от ожидаемой → `failed`, после двух движков — сам кроп якоря.
+- **Ракурсы 3/4, профили, спина — klein 4B справляется лучше ожиданий** (≈20–60 с чистого рендера на f5/Raptor/f15,
+  при очереди 1–8 мин). Qwen-Edit-2511 — движок повтора (сработал на спине приватного теста, 456 с на f15).
+- **Судья Vision (Qwen3.5 9B) без инструкций ставит 10/10 почти всему.** Помогло: сравнивать с лицом якоря
+  (та же студия/одежда), игнорировать одежду/позу/макияж, сначала перечислить отличия, потом балл. Остаётся
+  путаница L/R у профилей — сигнал слабый, для отбраковки нужен эмбеддинг (см. решения).
+- **Эмбеддинга лиц на ферме нет** (проверено f5/f15/Raptor/f13/VPS: только `inswapper_128.onnx`, IP-Adapter FaceID,
+  mediapipe/facexlib без весов). Предложение **[DL, ждёт одобрения]**: YuNet (~230 КБ) + SFace (~37 МБ) через уже
+  установленный `cv2.FaceDetectorYN/FaceRecognizerSF` на VPS (CPU, без GPU фермы), либо antelopev2/buffalo_l.
+- **Видео:** LTX-2.5 i2v из студийного `front` делает наплыв из студии в сцену; из кадра `Avatar scene` — чисто.
+  Правильная цепочка: Avatar → Avatar scene → Video.

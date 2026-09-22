@@ -88,3 +88,24 @@ test('the node wiring uses the helpers on every path', () => {
   assert.match(source, /resolved\[link\.input\] = outputValue\(upstream, link\.output\)/);
   assert.match(source, /showResult\(outBox, record\.type, record\.value, record\.outputs\)/);
 });
+
+test('follow-size reads the picture on the wired socket of a multi-output node', () => {
+  const groupsSource = fs.readFileSync(path.resolve(here, '..', 'ai-node-groups.js'), 'utf8');
+  const start = groupsSource.indexOf('    function upstreamCandidates(graph, targetId) {');
+  const end = groupsSource.indexOf('    async function resolveInputDimensions(', start);
+  assert.ok(start > 0 && end > start, 'upstreamCandidates must stay sliceable');
+  const upstreamCandidates = vm.runInNewContext(groupsSource.slice(start, end) + '; upstreamCandidates', {
+    nodeLimit: 50, selected: new Set(), nodeElement: () => null, String, Number, Map, Set});
+  const graph = {
+    nodes: [{id: '1', kind: 'input', entity_type: 'image', value: 'https://x/source.png'},
+            {id: '2', kind: 'service', service: 'avatar_build', params: {}},
+            {id: '6', kind: 'service', service: 'video', params: {width: 704, height: 1024}}],
+    links: [{from: '1', output: 'value', to: '2', input: 'image'},
+            {from: '2', output: 'front_url_string', to: '6', input: 'image'}],
+    results: {'2': {status: 'done', type: 'avatar', value: 'av_x@1',
+                    outputs: {avatar_string: 'av_x@1', front_url_string: 'https://x/front.png'}}},
+  };
+  const found = upstreamCandidates(graph, '6');
+  assert.equal(found.generated[0].url, 'https://x/front.png');
+  assert.equal(found.generated[0].distance, 1);
+});
