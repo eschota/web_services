@@ -1,5 +1,15 @@
-param([ValidateSet('Start','Stop','Status')][string]$Mode = 'Status')
+param(
+    [ValidateSet('Start','Stop','Status')][string]$Mode = 'Status',
+    [switch]$Legacy
+)
 $ErrorActionPreference = 'Stop'
+$promotionRoot = 'R:\autorig\.runtime\onlyrender'
+$promotedController = 'R:\autorig\autorig-online\deploy\onlyrender\worker-4090-v037.ps1'
+if (-not $Legacy -and (Test-Path "$promotionRoot\WAN2_PROMOTED")) {
+    if (-not (Test-Path $promotedController)) { throw 'Promoted OnlyRender controller is missing' }
+    & $promotedController -Mode $Mode
+    exit $LASTEXITCODE
+}
 $root = 'R:\ComfyUI_windows_portable'
 $env:CIVITAI_API_TOKEN = [Environment]::GetEnvironmentVariable('CIVITAI_API_TOKEN', 'User')
 $comfyUrl = 'http://127.0.0.1:8988'

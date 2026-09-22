@@ -18,6 +18,13 @@ overlay before startup. Its Stop action only terminates a port 8988 listener
 whose executable, launcher path, and port all match this runtime. The old
 controller and ComfyUI 0.21.1 installation remain intact for rollback.
 
+The stable `worker-4090.ps1` entrypoint delegates Start, Stop, and Status to the
+v0.37 controller whenever `WAN2_PROMOTED` exists. This keeps the user's normal
+GPU release command aligned with the promoted listener. Pass `-Legacy`
+explicitly to bypass delegation and operate the preserved 0.21.1 runtime during
+a rollback. Both controllers load `CIVITAI_API_TOKEN` from the per-user Windows
+environment without printing it.
+
 `WAN2_PROMOTED` was created only after the promoted listener passed the native
 Wan2 node, queue, and reverse-tunnel health checks. The worker now advertises
 `gen_video_wan_animate2_by_url.json` alongside its previous capabilities.

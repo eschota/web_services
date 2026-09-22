@@ -2,6 +2,7 @@ param([ValidateSet('Start','Stop','Status')][string]$Mode = 'Status')
 $ErrorActionPreference = 'Stop'
 $runtime = 'R:\autorig\.runtime\onlyrender'
 $python = 'R:\ComfyUI_windows_portable\python_embeded\python.exe'
+$env:CIVITAI_API_TOKEN = [Environment]::GetEnvironmentVariable('CIVITAI_API_TOKEN', 'User')
 $launcher = "$runtime\launch.py"
 $base = "$runtime\runtime"
 $comfyUrl = 'http://127.0.0.1:8988'
@@ -33,7 +34,17 @@ if ((& git.exe -C "$runtime\ComfyUI" rev-parse HEAD).Trim() -ne $expectedCommit)
 if (-not (Test-Path "$runtime\python-overlay\comfy_kitchen") -or -not (Test-Path "$runtime\python-overlay\comfy_aimdo")) { throw 'OnlyRender dependency overlay is incomplete' }
 
 if ($Mode -eq 'Status') {
-    [pscustomobject]@{Comfy=(Get-Comfy);Process=(Get-ListenerProcess);ReadyFlag=(Test-Path "$runtime\WAN2_PROMOTED")}|ConvertTo-Json -Depth 8
+    $comfy = Get-Comfy
+    $process = Get-ListenerProcess
+    $queue = if ($comfy) { Invoke-RestMethod "$comfyUrl/queue" -TimeoutSec 10 } else { $null }
+    [pscustomobject]@{
+        ComfyVersion = $comfy.system.comfyui_version
+        ProcessId = $process.ProcessId
+        CommandLine = $process.CommandLine
+        QueueRunning = @($queue.queue_running).Count
+        QueuePending = @($queue.queue_pending).Count
+        ReadyFlag = (Test-Path "$runtime\WAN2_PROMOTED")
+    } | ConvertTo-Json -Depth 3
     & nvidia-smi --query-gpu=memory.used,memory.free --format=csv
     exit
 }
