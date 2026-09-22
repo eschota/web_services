@@ -486,6 +486,21 @@ def _path_for(graph_id: str) -> pathlib.Path:
     return GRAPH_DIR / f"{graph_id}.json"
 
 
+# Superseded copies are moved here rather than deleted: the library no longer
+# lists them, but a link somebody already shared keeps opening.
+ARCHIVE_SUBDIR = "archive"
+
+
+def _stored_path(graph_id: str) -> pathlib.Path:
+    """Where a saved graph lives now: the store, else its archive."""
+    path = _path_for(graph_id)
+    if not path.exists():
+        archived = GRAPH_DIR / ARCHIVE_SUBDIR / path.name
+        if archived.exists():
+            return archived
+    return path
+
+
 def _new_id(payload: str) -> str:
     """Short, content-derived, and stable: saving the same graph twice gives
     the same link instead of littering the store with copies."""
@@ -568,11 +583,26 @@ async def api_graph_save(graph: Graph):
             "error_string": "graph_too_large",
             "message_string": "The graph is larger than the store accepts"})
     graph_id = _new_id(identity)
+    now = int(time.time())
+    saved_at = now
+    existing = _read_stored(_path_for(graph_id))
+    if existing is not None:
+        # The id is derived from content, but a document that has since been
+        # edited in place (PUT below) no longer holds that content. Landing on
+        # it again would silently replace somebody's newer graph, so this
+        # snapshot gets an id of its own instead.
+        if _identity_payload(existing.get("graph") or {}) != identity:
+            graph_id = _new_id(identity + "|" + uuid.uuid4().hex)
+            existing = None
+        else:
+            saved_at = int(existing.get("saved_at_unix_int") or now)
     try:
         GRAPH_DIR.mkdir(parents=True, exist_ok=True)
+        stored = {"id": graph_id, "saved_at_unix_int": saved_at, "graph": body}
+        if existing is not None:
+            stored["updated_at_unix_int"] = now
         _path_for(graph_id).write_text(
-            json.dumps({"id": graph_id, "saved_at_unix_int": int(time.time()),
-                        "graph": body}, ensure_ascii=False, indent=2),
+            json.dumps(stored, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
     except HTTPException:
@@ -587,6 +617,96 @@ async def api_graph_save(graph: Graph):
         "graph_id_string": graph_id,
         "deep_link_string": f"/nodes?g={graph_id}",
         "server_time_unix_int": int(time.time()),
+    }
+
+
+def _read_stored(path: pathlib.Path) -> Optional[Dict[str, object]]:
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception:
+        logger.exception("Could not read graph %s", path.name)
+        raise HTTPException(status_code=500, detail={
+            "error_string": "graph_unreadable",
+            "message_string": "The stored graph could not be read"}) from None
+    return stored if isinstance(stored, dict) else None
+
+
+def _node_signature(node: Dict[str, object]) -> str:
+    """Everything that makes a node's result valid, minus where it is drawn."""
+    return json.dumps({key: value for key, value in node.items() if key not in {"x", "y"}},
+                      ensure_ascii=False, sort_keys=True)
+
+
+def _carry_results(previous: Dict[str, object], body: Dict[str, object]) -> Dict[str, object]:
+    """Results the stored copy has and the incoming one does not, kept safely.
+
+    Another tab may have finished a node since this one last looked. Drawflow
+    renumbers nodes on reload, so a stored result is carried over only onto a
+    node that is the same in every respect but its position; anything else
+    belongs to a node that no longer exists.
+    """
+    incoming = dict(body.get("results") or {})
+    old_graph = previous.get("graph") or {}
+    old_results = old_graph.get("results") or {}
+    old_nodes = {str(node.get("id")): node for node in old_graph.get("nodes") or []
+                 if isinstance(node, dict)}
+    for node in body.get("nodes") or []:
+        key = str(node.get("id"))
+        if key in incoming or key not in old_results or key not in old_nodes:
+            continue
+        if _node_signature(old_nodes[key]) == _node_signature(node):
+            incoming[key] = old_results[key]
+    return incoming
+
+
+@router.put("/api/ai/graphs/{graph_id}")
+async def api_graph_update(graph_id: str, graph: Graph):
+    """Save an edited graph under the link it already has.
+
+    Ordinary saving is an edit of one document, not a new library entry: the
+    content-derived id only names a graph the first time it is stored, and a
+    legacy link carries on under the id it was shared with. Last write wins
+    between two tabs, except that results the other tab finished are kept.
+    Only /duplicate makes a copy.
+    """
+    for template in templates():
+        if str(template["id"]) == graph_id:
+            raise HTTPException(status_code=409, detail={
+                "error_string": "template_is_read_only",
+                "message_string": "A built-in composition is saved as a new graph"})
+    validate(graph)
+    path = _stored_path(graph_id)
+    previous = _read_stored(path)
+    if previous is None:
+        raise HTTPException(status_code=404, detail={
+            "error_string": "graph_not_found",
+            "message_string": f"No graph saved as '{graph_id}'"})
+    body = graph.model_dump(by_alias=True)
+    body["results"] = _carry_results(previous, body)
+    payload = json.dumps(body, ensure_ascii=False, sort_keys=True)
+    if len(payload.encode("utf-8")) > MAX_GRAPH_BYTES:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "graph_too_large",
+            "message_string": "The graph is larger than the store accepts"})
+    now = int(time.time())
+    stored = {key: value for key, value in previous.items() if key != "graph"}
+    stored.update({"id": graph_id, "graph": body, "updated_at_unix_int": now})
+    stored.setdefault("saved_at_unix_int", now)
+    try:
+        path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("Could not update graph %s", graph_id)
+        raise HTTPException(status_code=500, detail={
+            "error_string": "graph_not_saved",
+            "message_string": "The graph store did not accept the file"}) from None
+    return {
+        "success_bool": True,
+        "graph_id_string": graph_id,
+        "deep_link_string": f"/nodes?g={graph_id}",
+        "updated_bool": True,
+        "server_time_unix_int": now,
     }
 
 
@@ -620,7 +740,7 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
     Written as the run goes rather than once at the end: a clip takes minutes,
     and a link shared while it renders should show it arriving.
     """
-    path = _path_for(graph_id)
+    path = _stored_path(graph_id)
     try:
         stored = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -936,12 +1056,17 @@ def _summarize(path: pathlib.Path) -> Optional[Dict[str, object]]:
         results_at = int(stored.get("results_at_unix_int") or 0)
     except (TypeError, ValueError):
         results_at = 0
+    try:
+        updated_at = int(stored.get("updated_at_unix_int") or 0)
+    except (TypeError, ValueError):
+        updated_at = 0
     return {
         "graph_id_string": graph_id,
         "name_string": str(graph.get("name") or "Untitled"),
         "deep_link_string": f"/nodes?g={graph_id}",
         "saved_at_unix_int": saved_at,
         "results_at_unix_int": results_at,
+        "updated_at_unix_int": updated_at,
         "node_count_int": len(nodes),
         "link_count_int": len(links),
         "services_object": services,
@@ -972,7 +1097,9 @@ def _library_rows() -> List[Dict[str, object]]:
         rows.append(row)
     rows.sort(
         key=lambda row: (
-            int(row["results_at_unix_int"] or row["saved_at_unix_int"] or 0),
+            max(int(row["results_at_unix_int"] or 0),
+                int(row.get("updated_at_unix_int") or 0),
+                int(row["saved_at_unix_int"] or 0)),
             str(row["graph_id_string"]),
         ),
         reverse=True,
@@ -1016,7 +1143,7 @@ async def api_graph_load(graph_id: str):
                     "graph_object": template["graph"],
                     "template_bool": True,
                     "server_time_unix_int": int(time.time())}
-    path = _path_for(graph_id)
+    path = _stored_path(graph_id)
     try:
         stored = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:

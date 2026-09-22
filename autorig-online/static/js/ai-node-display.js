@@ -63,6 +63,33 @@
     );
   }
 
+  /**
+   * The node a double-click should resize, or null.
+   *
+   * Anywhere on a node's body counts — header, labels, the empty space — so
+   * the settings open and close like the S/M/A button. Not on anything that
+   * has a double-click of its own: form controls and the model picker (text
+   * selection), sockets (wiring), a preview (it opens full size), a text
+   * answer (selecting words), links, and anything editable.
+   */
+  const DOUBLE_CLICK_IGNORE = [
+    'button', 'input', 'select', 'textarea', 'option', 'a', 'summary',
+    '[contenteditable]', '.input', '.output', '.mpick', '.mpick-panel',
+    '.ntext', 'img', 'video', '.preview-expandable', '.lstack-add'
+  ].join(',');
+
+  function doubleClickTarget(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+    if (target.closest(DOUBLE_CLICK_IGNORE)) return null;
+    // A label wraps its control: a double-click on the label text is still
+    // aimed at the node, but not while that control is being edited.
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (active && active !== document.body && active.matches &&
+        active.matches('input,textarea,[contenteditable]') && target.contains && target.contains(active)) return null;
+    const element = target.closest('.drawflow-node[id^="node-"]');
+    return element || null;
+  }
+
   function installStyles() {
     if (document.getElementById('ai-node-display-style')) return;
     const style = document.createElement('style');
@@ -128,7 +155,7 @@
     const button = element.querySelector('.node-display-mode');
     if (!button) return;
     button.textContent = LABELS[mode];
-    button.title = TITLES[mode] + '. Click or double-click the header to change mode; ' +
+    button.title = TITLES[mode] + '. Click, or double-click the node, to change mode; ' +
       'hold Shift to change every node in the graph.';
     button.setAttribute('aria-label', TITLES[mode] +
       '. Activate to use the next display mode, or hold Shift to apply it to every node.');
@@ -253,11 +280,12 @@
     }
 
     function onDoubleClick(event) {
-      if (event.target.closest('button,input,select,textarea,a,label')) return;
-      const header = event.target.closest('.nhead');
-      const element = header && header.closest('.drawflow-node[id^="node-"]');
+      const element = doubleClickTarget(event.target);
       if (!element || !canvas.contains(element)) return;
       event.preventDefault(); event.stopPropagation();
+      // A double-click also selects the word under it; that is noise here.
+      const selection = typeof getSelection === 'function' ? getSelection() : null;
+      if (selection && selection.removeAllRanges) selection.removeAllRanges();
       cycle(element, true);
     }
     canvas.addEventListener('dblclick', onDoubleClick, true);
@@ -306,6 +334,7 @@
     MODES: MODES,
     BASIC_PARAMS: BASIC_PARAMS,
     normalizeMode: normalizeMode,
+    doubleClickTarget: doubleClickTarget,
     applyMode: applyMode,
     install: install
   });

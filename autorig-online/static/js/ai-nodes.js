@@ -1319,6 +1319,46 @@
     return { outField, inField, produced, accepted, alsoAccepts };
   }
 
+  /**
+   * What each socket of a node carries, for the typed socket colours and the
+   * drag highlighting (ai-node-sockets.js).
+   */
+  function socketTypes(id) {
+    const node = meta(id);
+    if (!node) return null;
+    if (node.kind === KIND_INPUT) return {inputs: [], outputs: [node.entityType]};
+    const entry = serviceById(node.service) || {};
+    return {
+      inputs: node.inFields.map(field => {
+        const item = (entry.inputs || []).find(value => value.field === field) || {};
+        return {type: item.type || '', also: item.also_accepts || [], title: item.title || field};
+      }),
+      outputs: node.outFields.map(field =>
+        ((entry.outputs || []).find(value => value.field === field) || {}).type || '')
+    };
+  }
+
+  /**
+   * Whether a wire would be kept: the same checks onConnectionCreated makes
+   * after the fact (type or also_accepts, then the ControlNet family rule),
+   * asked before the drop so incompatible sockets can grey out.
+   */
+  function linkAllowed(connection) {
+    if (String(connection.output_id) === String(connection.input_id)) return false;
+    if ((meta(connection.input_id) || {}).kind !== KIND_SERVICE) return false;
+    const info = linkTypes(connection);
+    if (!info || !info.produced) return false;
+    if (!(info.produced === info.accepted || info.alsoAccepts.includes(info.produced))) return false;
+    if (info.produced.startsWith('control_')) {
+      const element = nodeElement(connection.input_id);
+      const slot = element && element.querySelector('[data-model-param="checkpoint"]');
+      const entry = slot && slot._picker && slot._picker.entry;
+      const sourceService = serviceById((meta(connection.output_id) || {}).service || info.produced);
+      return controlChannelAccepted(info.produced.slice(8), entry, sourceService);
+    }
+    return true;
+  }
+
   function onConnectionCreated(connection) {
     const info = linkTypes(connection);
     if (info && (info.produced === info.accepted || (info.produced && info.alsoAccepts.includes(info.produced)))) {
@@ -2281,19 +2321,51 @@
     state.className = className;
   }
 
+  /**
+   * Save the canvas as one document.
+   *
+   * A graph that already has a link is updated under it (PUT), so editing and
+   * rendering never add library entries; the link in the address bar stays
+   * the same. Only the first save creates a document, and it gets a fresh
+   * instance id so two people starting from the same template do not share
+   * one. The server refuses an unknown id (404) — then this is a new
+   * document after all. Only "Duplicate graph" makes a copy.
+   */
+  async function persistGraph() {
+    const graph = graphFromCanvas();
+    if (graphId) {
+      const response = await fetch('/api/ai/graphs/' + encodeURIComponent(graphId), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(graph)
+      });
+      if (response.status !== 404 && response.status !== 409) {
+        return { response, data: await response.json().catch(() => ({})), created: false };
+      }
+    }
+    if (!graphInstanceId) {
+      graphInstanceId = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      graph.instance_id = graphInstanceId;
+    }
+    const response = await fetch('/api/ai/graphs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(graph)
+    });
+    return { response, data: await response.json().catch(() => ({})), created: true };
+  }
+
+  function adoptSavedId(data) {
+    graphId = data.graph_id_string;
+    history.replaceState(null, '', data.deep_link_string);
+    document.dispatchEvent(new CustomEvent('ai-graph-saved', {detail:{graphId}}));
+  }
+
   /** A run needs a link to publish its progress to, so one is made up front. */
   async function ensureSaved() {
     try {
-      const response = await fetch('/api/ai/graphs', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(graphFromCanvas())
-      });
-      const data = await response.json();
-      if (response.ok) {
-        graphId = data.graph_id_string;
-        history.replaceState(null, '', data.deep_link_string);
-        document.dispatchEvent(new CustomEvent('ai-graph-saved', {detail:{graphId}}));
-      }
+      const { response, data } = await persistGraph();
+      if (response.ok) adoptSavedId(data);
     } catch (error) { /* a run is still worth doing without a link */ }
   }
 
@@ -2688,23 +2760,15 @@
       const copied = await copyText(known);
       toast(copied ? 'Deep link copied: ' + known : 'Deep link: ' + known);
     }
-    const graph = graphFromCanvas();
-    const response = await fetch('/api/ai/graphs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(graph)
-    });
-    const data = await response.json();
+    const { response, data } = await persistGraph();
     if (!response.ok) {
       const detail = data.detail || {};
       toast(detail.message_string || 'The graph was not saved.');
       return;
     }
     const changed = graphId !== data.graph_id_string;
-    graphId = data.graph_id_string;
+    adoptSavedId(data);
     const link = location.origin + data.deep_link_string;
-    history.replaceState(null, '', data.deep_link_string);
-    document.dispatchEvent(new CustomEvent('ai-graph-saved', {detail:{graphId}}));
     if (!changed) return;
     const copied = await copyText(link);
     toast(copied ? 'Deep link copied: ' + link : 'Deep link (copy it): ' + link);
@@ -3041,6 +3105,8 @@
       canvas:document.getElementById('canvas'), getMeta:meta, defaultMode:'medium',
       onModeChange:(id, mode) => { const value=meta(id); if(value) value.displayMode=mode; if(nodeCompare) nodeCompare.refresh(id); }});
     if (window.AINodeShare) window.AINodeShare.install({canvas:document.getElementById('canvas'), getMeta:meta, toast});
+    if (window.AINodeSockets) window.AINodeSockets.install({editor, canvas:document.getElementById('canvas'),
+      socketTypes, linkAllowed, entityTypes:catalogue.entity_types_array || []});
     installWheelZoom();
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
@@ -3160,6 +3226,10 @@
       button.className = 'tmpl';
       button.innerHTML = `<b>${escapeHtml(template.title)}</b><i>${escapeHtml(template.summary)}</i>`;
       button.addEventListener('click', () => {
+        // A template starts a new document; saving it must not overwrite
+        // the graph that was open before.
+        graphId = null;
+        history.replaceState(null, '', '/nodes');
         loadGraph(template.graph);
         const drop = document.getElementById('compositions');
         if (drop) drop.open = false;

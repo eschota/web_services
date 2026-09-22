@@ -17,7 +17,8 @@
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-groups.js?v=20260922-sysprompt1"></script>
-    <script src="/static/js/ai-node-display.js?v=20260922-ui6d"></script>
+    <script src="/static/js/ai-node-display.js?v=20260923-sockets1"></script>
+    <script src="/static/js/ai-node-sockets.js?v=20260923-sockets1"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
     <script src="/static/js/ai-node-compare.js?v=20260922-nodesui5"></script>
     <script src="/static/js/ai-graph-bridge.js?v=20260922-sysprompt1"></script>
@@ -25,7 +26,7 @@
     <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-nodes.js?v=20260923-avatarbuild1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260923-sockets1"></script>
     <style>
         .ai-page {
             background:
@@ -183,9 +184,90 @@
         .drawflow .drawflow-node .input:hover, .drawflow .drawflow-node .output:hover { background:#38bdf8; box-shadow:0 0 0 3px rgba(56,189,248,.2); }
         .drawflow .connection .main-path { stroke: #7b5cff; stroke-width: 2.6px; }
         .drawflow .connection .main-path:hover { stroke: #38bdf8; }
+
+        /* ---- typed sockets and wires (ai-node-sockets.js) ------------------
+           One colour per thing a socket carries, used for the input dot, the
+           output dot and the wire alike. A socket that also takes a second
+           type (a picture socket that reads a video's first frame) is split
+           between the two colours. */
+        #canvas, .socket-legend {
+            --t-text: #4ade80; --t-image: #facc15; --t-video: #fb7185;
+            --t-avatar: #38bdf8; --t-model3d: #fb923c; --t-audio: #2dd4bf;
+            --t-control_pose: #c084fc; --t-control_depth: #818cf8; --t-control_canny: #f0abfc;
+            --t-none: #94a3b8;
+        }
+        .drawflow .drawflow-node .input[data-socket-type], .drawflow .drawflow-node .output[data-socket-type] {
+            border-color: var(--sock-c, var(--t-none)); border-style: solid;
+            box-shadow: 0 0 calc(7px * var(--socket-zoom-scale, 1)) color-mix(in srgb, var(--sock-c, var(--t-none)) 45%, transparent);
+            transition: transform .12s, opacity .12s, box-shadow .12s, background-color .12s;
+        }
+        [data-socket-type="text"] { --sock-c: var(--t-text); }
+        [data-socket-type="image"] { --sock-c: var(--t-image); }
+        [data-socket-type="video"] { --sock-c: var(--t-video); }
+        [data-socket-type="avatar"] { --sock-c: var(--t-avatar); }
+        [data-socket-type="model3d"] { --sock-c: var(--t-model3d); }
+        [data-socket-type="audio"] { --sock-c: var(--t-audio); }
+        [data-socket-type="control_pose"] { --sock-c: var(--t-control_pose); }
+        [data-socket-type="control_depth"] { --sock-c: var(--t-control_depth); }
+        [data-socket-type="control_canny"] { --sock-c: var(--t-control_canny); }
+        .drawflow .drawflow-node .input[data-socket-type][data-socket-also="video"] {
+            border-color: var(--sock-c) var(--t-video) var(--t-video) var(--sock-c);
+        }
+        .drawflow .drawflow-node .input[data-socket-type]:hover, .drawflow .drawflow-node .output[data-socket-type]:hover {
+            background: var(--sock-c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sock-c) 30%, transparent), 0 0 12px var(--sock-c);
+        }
+        .drawflow .connection[data-wire-type="text"] .main-path { stroke: var(--t-text); }
+        .drawflow .connection[data-wire-type="image"] .main-path { stroke: var(--t-image); }
+        .drawflow .connection[data-wire-type="video"] .main-path { stroke: var(--t-video); }
+        .drawflow .connection[data-wire-type="avatar"] .main-path { stroke: var(--t-avatar); }
+        .drawflow .connection[data-wire-type="model3d"] .main-path { stroke: var(--t-model3d); }
+        .drawflow .connection[data-wire-type="audio"] .main-path { stroke: var(--t-audio); }
+        .drawflow .connection[data-wire-type="control_pose"] .main-path { stroke: var(--t-control_pose); }
+        .drawflow .connection[data-wire-type="control_depth"] .main-path { stroke: var(--t-control_depth); }
+        .drawflow .connection[data-wire-type="control_canny"] .main-path { stroke: var(--t-control_canny); }
+        .drawflow .connection[data-wire-type] .main-path:hover { stroke: #fff; }
+
+        /* While a wire is dragged: what fits glows, the rest greys out. */
+        #canvas.wiring .drawflow-node .input.sock-ok {
+            background: var(--sock-c); transform: scale(1.18);
+            box-shadow: 0 0 0 calc(5px * var(--socket-zoom-scale, 1)) color-mix(in srgb, var(--sock-c) 35%, transparent),
+                        0 0 calc(22px * var(--socket-zoom-scale, 1)) var(--sock-c);
+            animation: sock-pulse 1s ease-in-out infinite alternate;
+        }
+        /* A bigger target than the dot itself: the ring belongs to the socket. */
+        #canvas.wiring .drawflow-node .input.sock-ok::after {
+            content: ''; position: absolute; border-radius: 50%;
+            inset: calc(-16px * var(--socket-zoom-scale, 1));
+        }
+        #canvas.wiring .drawflow-node .input.sock-target { transform: scale(1.5); animation: none; }
+        #canvas.wiring .drawflow-node .input.sock-no {
+            opacity: .28; filter: grayscale(1); box-shadow: none; cursor: not-allowed;
+        }
+        #canvas.wiring .drawflow-node.wire-none { opacity: .55; }
+        .drawflow .drawflow-node .input.sock-refused { animation: sock-shake .4s; opacity: 1; filter: none; border-color: #f87171; }
+        @keyframes sock-pulse { to { box-shadow: 0 0 0 calc(9px * var(--socket-zoom-scale, 1)) color-mix(in srgb, var(--sock-c) 22%, transparent), 0 0 calc(28px * var(--socket-zoom-scale, 1)) var(--sock-c); } }
+        @keyframes sock-shake { 0%,100% { translate: 0 } 25% { translate: -4px 0 } 75% { translate: 4px 0 } }
+        @media (prefers-reduced-motion: reduce) {
+            #canvas.wiring .drawflow-node .input.sock-ok { animation: none; }
+        }
+
+        /* Legend: coloured dots, names in the tooltips. */
+        .socket-legend {
+            position: absolute; z-index: 5; right: 10px; top: 10px;
+            display: flex; gap: 3px; padding: 4px 6px; border-radius: 10px;
+            border: 1px solid rgba(255,255,255,.1); background: rgba(12,13,26,.82);
+            backdrop-filter: blur(8px);
+        }
+        .socket-legend span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px; border-radius: 6px; cursor: help; }
+        .socket-legend span:hover { background: rgba(255,255,255,.08); }
+        .socket-legend i { width: 9px; height: 9px; border-radius: 50%; display: block;
+            background: var(--sock-c); box-shadow: 0 0 6px var(--sock-c); }
+        .socket-legend b { font-size: 12px; font-weight: 400; line-height: 1; }
+
         /* Wires into a node that is rendering right now run green; wires between finished nodes fade. */
         .drawflow .connection.wire-running .main-path { stroke: #4ade80; stroke-width: 3.2px; stroke-dasharray: 10 7; animation: wire-flow .9s linear infinite; }
-        .drawflow .connection.wire-done .main-path { stroke: rgba(74,222,128,.55); }
+        .drawflow .connection.wire-done .main-path { stroke-opacity: .55; }
+        .drawflow .connection.wire-done:not([data-wire-type]) .main-path { stroke: rgba(74,222,128,.55); stroke-opacity: 1; }
         @keyframes wire-flow { to { stroke-dashoffset: -17; } }
 
         .nhead {
@@ -245,7 +327,20 @@
         }
         .nparams summary::before { content: '⚙ '; }
         .nparam { display: flex; align-items: center; gap: 7px; margin: 5px 0; font-size: 11.5px; }
-        .nparam > span { flex: 0 0 82px; color: var(--text-secondary, #9aa0b5); }
+        /* A row never grows wider than its node: the label keeps its column
+           and ellipsizes, the control takes what is left and ellipsizes too
+           (the full name is in its tooltip), and a policy note wraps below. */
+        .nparam { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+        .nparam > span:not(.mpick-slot) {
+            flex: 0 0 82px; min-width: 0; color: var(--text-secondary, #9aa0b5);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .nparam > .mpick-slot { flex: 1 1 0; min-width: 0; width: auto; }
+        .nparam .mpick-button { box-sizing: border-box; min-width: 0; max-width: 100%; }
+        .nparam .mpick-panel { max-width: min(330px, calc(100vw - 32px)); }
+        .nparam select { max-width: 100%; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+        .nparam-wide > span:not(.mpick-slot) { white-space: normal; }
+        .ninput select, .ninput input[type=text] { max-width: 100%; box-sizing: border-box; }
         .nparam select, .nparam input[type=text], .nparam input[type=number] {
             flex: 1; min-width: 0; background: rgba(10,11,22,.85);
             border: 1px solid rgba(255,255,255,.14); border-radius: 7px;
@@ -382,7 +477,7 @@
                 Select with left-drag or Shift-click. Right-drag pans. Ctrl+C/V copies and
                 pastes; Ctrl+D duplicates; Delete removes selected nodes; Ctrl+P takes them
                 out of the run and puts them back. Shift-click a wire to delete it.
-                Double-click a header for S/M/A views, and Shift-click the S/M/A button to
+                Double-click a node for S/M/A views, and Shift-click the S/M/A button to
                 change every node. Right-click a picture node for Functions.
             </p>
         </div>
