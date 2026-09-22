@@ -145,6 +145,37 @@ class ApplyOperationsTests(unittest.TestCase):
         self.assertEqual((edited.nodes[1].params["width"], edited.nodes[1].params["height"]),
                          (383, 686))
 
+    def test_numeric_select_strings_are_normalized_for_existing_and_updated_nodes(self):
+        payload = _payload()
+        payload["nodes"][1]["params"] = {"width": "960", "height": "540"}
+        graph = ai_graph.Graph(**payload)
+
+        unchanged, _, _ = ai_graph_edits.apply_operations(
+            graph, [{"op": "rename_graph", "name": "Bonsai edit"}],
+        )
+        self.assertEqual(unchanged.nodes[1].params["width"], 960)
+        self.assertEqual(unchanged.nodes[1].params["height"], 540)
+        self.assertIsInstance(unchanged.nodes[1].params["width"], int)
+
+        edited, _, _ = ai_graph_edits.apply_operations(graph, [{
+            "op": "update_params", "id": "image1",
+            "values": {"width": "832", "height": "1216"},
+        }])
+        self.assertEqual(
+            (edited.nodes[1].params["width"], edited.nodes[1].params["height"]),
+            (832, 1216),
+        )
+
+    def test_add_node_normalizes_numeric_strings_before_final_validation(self):
+        graph = ai_graph.Graph(**_payload())
+        edited, _, _ = ai_graph_edits.apply_operations(graph, [{
+            "op": "add_node",
+            "node": {"id": "image2", "kind": "service", "service": "image",
+                     "params": {"width": "832", "height": "1216"}},
+        }])
+        added = next(node for node in edited.nodes if node.id == "image2")
+        self.assertEqual((added.params["width"], added.params["height"]), (832, 1216))
+
     def test_wrong_port_type_is_rejected(self):
         graph = ai_graph.Graph(**_payload())
         with self.assertRaises(Exception) as caught:

@@ -80,13 +80,66 @@ def _declared_param_names(service_id: str) -> Set[str]:
     return {str(item.get("name")) for item in ai_services.params_for(service_id)} | DISPLAY_PARAM_KEYS
 
 
+def _param_declaration(service_id: str, name: str) -> Mapping[str, Any] | None:
+    return next((item for item in ai_services.params_for(service_id)
+                 if str(item.get("name")) == name), None)
+
+
+def _finite_number(name: str, value: Any) -> int | float:
+    if isinstance(value, bool):
+        _reject("bad_parameter_value", f"Parameter '{name}' must be a finite number")
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            _reject("bad_parameter_value", f"Parameter '{name}' must be a finite number")
+        try:
+            value = float(stripped)
+        except ValueError:
+            _reject("bad_parameter_value", f"Parameter '{name}' must be a finite number")
+    if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        _reject("bad_parameter_value", f"Parameter '{name}' must be a finite number")
+    return int(value) if float(value).is_integer() else float(value)
+
+
+def _normalize_param_value(service_id: str, name: str, value: Any) -> Any:
+    """Coerce browser/model numeric strings without weakening declarations."""
+    if name in DISPLAY_PARAM_KEYS:
+        return value
+    declaration = _param_declaration(service_id, name)
+    if not declaration:
+        return value
+    kind = str(declaration.get("type") or "")
+    if kind in {"number", "range"} or name in {"width", "height"}:
+        return _finite_number(name, value)
+    if kind == "select" and isinstance(value, str):
+        options = declaration.get("options") or []
+        allowed = [item.get("value") for item in options if isinstance(item, Mapping)]
+        numeric = [item for item in allowed
+                   if isinstance(item, (int, float)) and not isinstance(item, bool)]
+        if allowed and len(numeric) == len(allowed):
+            parsed = _finite_number(name, value)
+            for option in numeric:
+                if float(option) == float(parsed):
+                    return option
+    return value
+
+
+def _normalize_node_params(node: ai_graph.GraphNode) -> None:
+    if node.kind != ai_graph.NODE_SERVICE:
+        return
+    service_id = str(node.service or "")
+    node.params = {
+        str(name): _normalize_param_value(service_id, str(name), value)
+        for name, value in node.params.items()
+    }
+
+
 def _validate_param_value(service_id: str, name: str, value: Any) -> None:
     if name in DISPLAY_PARAM_KEYS:
         if not isinstance(value, str):
             _reject("bad_parameter_value", f"Parameter '{name}' must be text")
         return
-    declaration = next((item for item in ai_services.params_for(service_id)
-                        if str(item.get("name")) == name), None)
+    declaration = _param_declaration(service_id, name)
     if not declaration:
         _reject("unknown_parameter", f"Service '{service_id}' does not declare parameter '{name}'")
     kind = str(declaration.get("type") or "")
@@ -239,6 +292,8 @@ def apply_operations(original: ai_graph.Graph,
     if len(operations) > MAX_OPERATIONS:
         _reject("too_many_operations", f"At most {MAX_OPERATIONS} operations are accepted")
     graph = ai_graph.Graph.model_validate(copy.deepcopy(original.model_dump(by_alias=True)))
+    for existing in graph.nodes:
+        _normalize_node_params(existing)
     invalidated: Set[str] = set()
     summary: Dict[str, Any] = {
         "operation_count_int": len(operations),
@@ -261,6 +316,14 @@ def apply_operations(original: ai_graph.Graph,
                 _reject("bad_node", f"The new node is invalid: {exc}", index)
             if not added.id.strip() or added.id in _node_map(graph):
                 _reject("duplicate_node_id", f"Node id '{added.id}' is empty or already used", index)
+            try:
+                _normalize_node_params(added)
+                for name, value in added.params.items():
+                    _validate_param_value(str(added.service or ""), str(name), value)
+            except HTTPException as exc:
+                if isinstance(exc.detail, dict):
+                    exc.detail.setdefault("operation_index_int", index)
+                raise
             graph.nodes.append(added)
             invalidated.add(added.id)
             summary["added_node_ids_array"].append(added.id)
@@ -285,14 +348,18 @@ def apply_operations(original: ai_graph.Graph,
             if unknown:
                 _reject("unknown_parameter",
                         f"Node '{target.id}' does not declare parameter '{sorted(unknown)[0]}'", index)
-            for name, value in values.items():
+            normalized_values = {
+                str(name): _normalize_param_value(str(target.service or ""), str(name), value)
+                for name, value in values.items()
+            }
+            for name, value in normalized_values.items():
                 try:
                     _validate_param_value(str(target.service or ""), str(name), value)
                 except HTTPException as exc:
                     if isinstance(exc.detail, dict):
                         exc.detail.setdefault("operation_index_int", index)
                     raise
-            target.params.update(copy.deepcopy(dict(values)))
+            target.params.update(copy.deepcopy(normalized_values))
             invalidated.update(_descendants(graph, {target.id}))
             summary["updated_node_ids_array"].append(target.id)
         elif op == "set_input":
