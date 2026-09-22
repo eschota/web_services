@@ -222,7 +222,9 @@
     "validated_workers": [
       "Raptor",
       "f5",
-      "f15"
+      "f15",
+      "f12",
+      "worker-4090"
     ]
   },
   {
@@ -276,7 +278,9 @@
     "sampling_note": "Quality tier with the largest live realism/3D LoRA ecosystem on Civitai. Text encoder qwen3vl_4b_fp8_scaled.safetensors, VAE qwen_image_vae.safetensors. No local ControlNet: pose/depth/canny stay on Z-Image.",
     "sampling_audit_at": "2026-09-23",
     "validated_workers": [
-      "Raptor"
+      "Raptor",
+      "f12",
+      "worker-4090"
     ]
   },
   {
