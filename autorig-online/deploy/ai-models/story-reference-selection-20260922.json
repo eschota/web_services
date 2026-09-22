@@ -1,0 +1,180 @@
+{
+  "schema_version_int": 1,
+  "story_id_string": "the-lost-note-maya-leo",
+  "created_at_string": "2026-09-22",
+  "purpose_string": "Four observed QwertyStock motion references for a coherent Maya and Leo story. This is source selection only; no GPU generation or paid download was performed.",
+  "avatars_object": {
+    "maya_object": {
+      "wardrobe_string": "mustard jacket",
+      "role_string": "finds the clue and asks Leo to meet"
+    },
+    "leo_object": {
+      "wardrobe_string": "teal shirt",
+      "role_string": "joins Maya and helps interpret the clue"
+    }
+  },
+  "existing_keyframes_object": {
+    "cafe_string": "lost_note_maya_leo_cafe.png",
+    "station_string": "Maya_station",
+    "note_string": "These are existing identity/scene keyframes, not proof of accepted video identity."
+  },
+  "search_contract_object": {
+    "method_string": "GET",
+    "endpoint_string": "https://qwertystock.com/api/v1/search",
+    "fixed_query_params_object": {"type": "video"},
+    "authentication_string": "none for public search and watermarked preview URLs",
+    "license_string": "Public watermarked previews are selected only for evaluation/sample use. Purchase the chosen production formats before commercial production use under the applicable Qwertystock Royalty-Free End User License.",
+    "terms_url_string": "https://qwertystock.com/html/pages/terms_of_service.html",
+    "license_url_string": "https://qwertystock.com/html/pages/royalty_free_license.html",
+    "source_sha256_note_string": "The public search response does not expose an original-source SHA-256. No paid/original asset was downloaded. Each locally reviewed four-second preview segment has its own SHA-256 below; URL path hashes are recorded only as URL provenance and are not claimed to be file hashes."
+  },
+  "selection_policy_object": {
+    "output_width_int": 960,
+    "output_height_int": 540,
+    "segment_duration_seconds_float": 4.0,
+    "requirements_array": [
+      "adult people only",
+      "landscape framing compatible with 960x540 without a portrait crop",
+      "one simple observable action per shot",
+      "stable or gently tracking camera",
+      "faces and principal hands visible enough for continuous review",
+      "moderate motion and bounded occlusion",
+      "story prompt must describe only action visible in the selected preview window"
+    ]
+  },
+  "sources_array": [
+    {
+      "shot_order_int": 1,
+      "shot_id_string": "maya-reads-message",
+      "qwertystock_id_int": 3691140,
+      "search_query_string": "adult woman holding phone reading message",
+      "catalog_title_string": "Digital Focus in Nature's Gentle Embrace",
+      "item_url_string": "https://qwertystock.com/item?id=3691140",
+      "thumbnail_url_string": "https://pvs3.microstock.plus/67fd018065e7de5f44659cb2d15d0fe40ca241e631ed8fc56d183c6304d8be0d/6a/6a09dcb9b00b141ddad22466/9dSbfvitNliO5tCH1yh32kEW9CsUPwTN_qs.jpg",
+      "preview_url_string": "https://pvs3.microstock.plus/67fd018065e7de5f44659cb2d15d0fe40ca241e631ed8fc56d183c6304d8be0d/6a/6a09dcb9b00b141ddad22466/8syxFmLHf4UmXTh7myMn2JlAxfv11vOI_qsv.mp4",
+      "preview_url_path_hash_string": "67fd018065e7de5f44659cb2d15d0fe40ca241e631ed8fc56d183c6304d8be0d",
+      "source_sha256_string": null,
+      "catalog_width_int": 3840,
+      "catalog_height_int": 2160,
+      "catalog_duration_seconds_float": 8.0,
+      "window_start_seconds_float": 1.0,
+      "window_duration_seconds_float": 4.0,
+      "review_segment_sha256_string": "d78c5f0afa45499e46b8cac9b0d0aca7a4f4e5611741ed4942a22a132df455d7",
+      "review_segment_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/woman-phone-nature.mp4",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/woman-phone-nature-contact.jpg",
+      "observed_people_count_int": 1,
+      "observed_action_string": "A hooded adult woman stands outdoors against soft green foliage, holds a black smartphone in one hand, and reads its screen with a focused expression.",
+      "observed_camera_string": "locked landscape medium close-up",
+      "story_action_string": "Maya reads a message containing a clue on her phone and decides to contact Leo.",
+      "generation_prompt_string": "Maya, an adult woman in her consistent mustard jacket, stands outdoors against softly blurred green foliage and reads a black smartphone held in one hand. Her face remains fully visible and focused. Locked landscape medium close-up, natural daylight, subtle breathing and eye movement, one person, anatomically correct hand and phone.",
+      "quality_rationale_string": "One stable frontal/three-quarter face, one visible phone hand, no camera motion, no other people, and little occlusion."
+    },
+    {
+      "shot_order_int": 2,
+      "shot_id_string": "leo-walks-to-meeting",
+      "qwertystock_id_int": 2903267,
+      "search_query_string": "adult man walking city approaching camera",
+      "catalog_title_string": "Confident young adult businessman walking outside close to office building",
+      "item_url_string": "https://qwertystock.com/item?id=2903267",
+      "thumbnail_url_string": "https://pvs1.microstock.plus/ca1432fc21ef1547e98c20ebbf08a187eb0759308e46ea9d36807b271cb814f4/69/693b1e516eaff87ffa5440e4/Nhvw6Vnu2sWCxZZqVtv1U8G9VmVTmUPU_qs.jpg",
+      "preview_url_string": "https://pvs1.microstock.plus/ca1432fc21ef1547e98c20ebbf08a187eb0759308e46ea9d36807b271cb814f4/69/693b1e516eaff87ffa5440e4/Z2WpAY4vZKUa5qyt1SiKlyEIPCAVNMQ8_qsv.mp4",
+      "preview_url_path_hash_string": "ca1432fc21ef1547e98c20ebbf08a187eb0759308e46ea9d36807b271cb814f4",
+      "source_sha256_string": null,
+      "catalog_width_int": 3840,
+      "catalog_height_int": 2160,
+      "catalog_duration_seconds_float": 14.08,
+      "window_start_seconds_float": 4.0,
+      "window_duration_seconds_float": 4.0,
+      "review_segment_sha256_string": "153705633cf07606345e2483bd0a03bf85fdbb2d919a8b5f770ddcbf847e7e95",
+      "review_segment_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/man-walk-office.mp4",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/man-walk-office-contact.jpg",
+      "observed_people_count_int": 1,
+      "observed_action_string": "An adult man walks steadily from left to right through a bright modern concourse; his side-profile face remains visible and his upper body stays centered.",
+      "observed_camera_string": "gentle side-tracking landscape medium shot",
+      "story_action_string": "Leo walks through the station concourse toward Maya's meeting place.",
+      "generation_prompt_string": "Leo, an adult man in his consistent teal shirt, walks steadily through a bright modern station concourse toward the meeting point. Keep his side-profile face recognizable and his full upper body stable. Gentle side-tracking landscape medium shot, restrained natural gait, one person, straight background architecture, realistic anatomy.",
+      "quality_rationale_string": "Single unobstructed adult, continuously visible face and torso, simple gait, gentle predictable tracking, and no hand-object interaction."
+    },
+    {
+      "shot_order_int": 3,
+      "shot_id_string": "maya-leo-study-plan",
+      "qwertystock_id_int": 3260310,
+      "search_query_string": "adult man woman greeting each other",
+      "catalog_title_string": "Adult man and woman colleagues discussing building plan in office",
+      "item_url_string": "https://qwertystock.com/item?id=3260310",
+      "thumbnail_url_string": "https://pvs1.microstock.plus/5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d/69/69f6845cdc68754eea96673d/gguFkwikcNVplywxZjrLUCqmuL6ZeHFT_qs.jpg",
+      "preview_url_string": "https://pvs1.microstock.plus/5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d/69/69f6845cdc68754eea96673d/JzbS7od3P0UfT14ErtHj7wliJ6WBhvp1_qsv.mp4",
+      "preview_url_path_hash_string": "5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d",
+      "source_sha256_string": null,
+      "catalog_width_int": 3840,
+      "catalog_height_int": 2160,
+      "catalog_duration_seconds_float": 17.72,
+      "window_start_seconds_float": 4.0,
+      "window_duration_seconds_float": 4.0,
+      "review_segment_sha256_string": "76940f3553176dad49607837ff8e69f02d1ef93d36ccb3dbf472c15b678cba8e",
+      "review_segment_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/couple-building-plan.mp4",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/couple-building-plan-contact.jpg",
+      "observed_people_count_int": 2,
+      "observed_action_string": "An adult woman and man stand side by side, lean over a large paper plan on a table, and point or trace details while discussing it. A laptop stays open beside the plan.",
+      "observed_camera_string": "locked landscape medium-wide shot",
+      "story_action_string": "Maya and Leo meet and compare the clue with a large paper map, tracing the marked location together.",
+      "generation_prompt_string": "Maya in her consistent mustard jacket and Leo in his consistent teal shirt stand side by side at a table, lean over one large paper map, and calmly trace a marked location together. Keep exactly two distinct adult identities, both faces visible in three-quarter view, four anatomically correct hands, one stable paper map, and one open laptop. Locked landscape medium-wide shot, moderate gestures, no extra people.",
+      "quality_rationale_string": "Exactly two adults, stable locked camera, both faces persist in frame, and the shared paper action directly supports the clue beat. Hands and paper contact remain a deliberate acceptance gate."
+    },
+    {
+      "shot_order_int": 4,
+      "shot_id_string": "maya-leo-cafe-resolution",
+      "qwertystock_id_int": 3088859,
+      "search_query_string": "adult man woman meet smile cafe",
+      "catalog_title_string": "Young man and woman enjoy a lively conversation at a cozy cafe, surrounded by warm lights and a relaxed atmosphere. Smiling faces create a sense of connection and happiness",
+      "item_url_string": "https://qwertystock.com/item?id=3088859",
+      "thumbnail_url_string": "https://pvs3.microstock.plus/63b6720d4ef1f1583fe9cac4f49054a11745473c82ac57f479db6d1338b44608/68/68e56e7e91089d6534fc81d9/l3u1RrLrhUXizcMSK0SznkfeViGNNYli_qs.jpg",
+      "preview_url_string": "https://pvs3.microstock.plus/63b6720d4ef1f1583fe9cac4f49054a11745473c82ac57f479db6d1338b44608/68/68e56e7e91089d6534fc81d9/YG7ZXgje0sGCfOPMbcU1cvdN1dowJa6V_qsv.mp4",
+      "preview_url_path_hash_string": "63b6720d4ef1f1583fe9cac4f49054a11745473c82ac57f479db6d1338b44608",
+      "source_sha256_string": null,
+      "catalog_width_int": 3840,
+      "catalog_height_int": 2160,
+      "catalog_duration_seconds_float": 10.07,
+      "window_start_seconds_float": 2.0,
+      "window_duration_seconds_float": 4.0,
+      "review_segment_sha256_string": "1f200ae1e5b98d351538577afa0bbe12e682fa2a83ef1ed8d9aafdc27dfc66b2",
+      "review_segment_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/couple-cafe-smile.mp4",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/story-reference-review/couple-cafe-smile-contact.jpg",
+      "observed_people_count_int": 2,
+      "observed_action_string": "A seated adult man faces camera and smiles while speaking to an adult woman seen from behind across a cafe table. Their movement is restrained and conversational.",
+      "observed_camera_string": "locked landscape over-the-shoulder medium shot",
+      "story_action_string": "Back at the cafe, Maya and Leo smile and talk after understanding where the clue leads.",
+      "generation_prompt_string": "Maya in her consistent mustard jacket and Leo in his consistent teal shirt sit across a small cafe table and share a relieved smile while talking quietly. Use the existing Maya-and-Leo cafe keyframe for identity and composition. Keep exactly two adults, Leo's face visible toward camera, Maya in stable over-the-shoulder view, correct hands, warm cafe lights, and a locked landscape medium shot.",
+      "quality_rationale_string": "Very stable camera and moderate expressions; one face is fully reviewable while the second identity is intentionally over-the-shoulder, matching the observed source instead of inventing a two-face frontal shot."
+    }
+  ],
+  "story_outline_array": [
+    {
+      "order_int": 1,
+      "beat_string": "Message",
+      "description_string": "Maya reads a phone message containing a location clue."
+    },
+    {
+      "order_int": 2,
+      "beat_string": "Approach",
+      "description_string": "Leo walks through a station-like concourse toward Maya."
+    },
+    {
+      "order_int": 3,
+      "beat_string": "Decode",
+      "description_string": "Together they trace the clue on a large paper map."
+    },
+    {
+      "order_int": 4,
+      "beat_string": "Resolution",
+      "description_string": "They return to the cafe, smile, and discuss what they found."
+    }
+  ],
+  "acceptance_notes_array": [
+    "The four references define motion and framing only; source actors must not replace Maya or Leo identity.",
+    "Shot 3 must be rejected if identities blend, swap, or hands merge with the map.",
+    "Shot 4 intentionally shows Maya mainly from behind; it cannot alone prove Maya facial identity.",
+    "Every generated shot still requires continuous playback review for faces, hands/anatomy, people count, action, camera, and temporal coherence.",
+    "No selected preview or contact sheet is a production license or a completed story render."
+  ]
+}

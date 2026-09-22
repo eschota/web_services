@@ -1,0 +1,163 @@
+{
+  "schema_version_int": 1,
+  "benchmark_id_string": "adult-human-reenactment-ltx23-baseline-20260922",
+  "evidence_scope_string": "Prompts and source difficulty annotations were written from five-frame contact sheets sampled from each declared four-second segment. This is motion-limited sample evidence, not full-video visual QA.",
+  "local_review_root_string": ".codex_tmp/avatar-video-20260922/reference-review",
+  "sources_array": [
+    {
+      "id_string": "walk-and-address-camera",
+      "catalog_id_int": 3655235,
+      "url_string": "https://pvs1.microstock.plus/5c16102b843cebf9d09692291cf805b365c7252d1076ce2ce3d2972b0435bf73/6a/6a01c690947a4c39f5d62ca8/vY4O7Ok3eZqGqgjiGrBmbsuzxpGoVqFq_qsv.mp4",
+      "segment_start_seconds_float": 3.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Vertical low-angle handheld selfie shot of one adult man outdoors under a vivid blue sky and palm leaves. He wears a dark bucket hat, black sunglasses, a short beard, and a muted red T-shirt. He faces the camera at close range and raises one hand to gesture while speaking. Preserve one person, the hat, sunglasses, beard, hand anatomy, bright sunlight, and the low camera angle.",
+      "observed_people_count_int": 1,
+      "observed_action_string": "The man remains close to camera and makes a small speaking hand gesture; walking is not visible in this sampled window.",
+      "observed_camera_string": "vertical close-up, low angle, handheld/selfie framing",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/walk-and-address-camera-contact.jpg",
+      "sample_limitations_string": "Metadata says walking and talking, but the sampled 3-7 second window only proves close-up gesturing/talking."
+    },
+    {
+      "id_string": "seated-speaking",
+      "catalog_id_int": 2853833,
+      "url_string": "https://pvs1.microstock.plus/ca1432fc21ef1547e98c20ebbf08a187eb0759308e46ea9d36807b271cb814f4/69/692045db6eaff87ffa2c512d/457UP7NFrGuWcDG7dAygIa0yXrgtBYJh_qsv.mp4",
+      "segment_start_seconds_float": 4.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Locked medium shot of one adult woman seated indoors against a plain light wall. She has short curly brown hair and wears a black-and-white striped shirt. She speaks with an expressive friendly face, raises both open hands, then brings her hands toward her chest. Preserve her face, two anatomically correct hands, striped clothing, seated posture, and clean static background.",
+      "observed_people_count_int": 1,
+      "observed_action_string": "Seated woman speaks and performs a two-hand explanatory gesture.",
+      "observed_camera_string": "landscape medium shot, frontal, locked camera",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/seated-speaking-contact.jpg"
+    },
+    {
+      "id_string": "single-hand-gesture",
+      "catalog_id_int": 2453773,
+      "url_string": "https://pvs3.microstock.plus/7bc499dfed0b626eee870f053c5959b552e80d440c2ffbf25fea4320d9eaae2f/68/685eb852ac4dce61a9b78760/TKZAD5RTB1m5w8cnnTJ0pewMDbgv8Otw_qsv.mp4",
+      "segment_start_seconds_float": 1.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Locked close-up of one adult person's bare forearm and hand against a neutral pale gray background. The hand holds a clear thumbs-down gesture with four curled fingers and one downward thumb, making only subtle natural movement. Preserve exactly one arm, one anatomically correct hand, five digits, and the thumbs-down silhouette.",
+      "observed_people_count_int": 1,
+      "observed_action_string": "Only an adult forearm and hand are visible; the hand sustains a thumbs-down gesture.",
+      "observed_camera_string": "landscape extreme close-up, side view, locked camera",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/single-hand-gesture-contact.jpg",
+      "sample_limitations_string": "No face or complete body is visible; use only as a hand-anatomy stress case."
+    },
+    {
+      "id_string": "face-object-interaction",
+      "catalog_id_int": 3431477,
+      "url_string": "https://pvs1.microstock.plus/136c814522408dca193d4a64fc6d628f7444b941d388e35671d83044c4e86879/6a/6a099007b00b141ddac5cb83/KsucJHs4AKueewqIAPjb8BGt5A8WQnLa_qsv.mp4",
+      "segment_start_seconds_float": 3.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Locked frontal close-up of one adult woman with dark hair pulled back, wearing a white top against a dark green background. She holds a silver aluminum can in one hand, drinks from it with the can covering her mouth, then lowers it enough to reveal her face. Preserve her identity, one correct hand, the cylindrical can, realistic mouth contact, and stable background.",
+      "observed_people_count_int": 1,
+      "observed_action_string": "Woman drinks from a silver can and begins lowering it.",
+      "observed_camera_string": "landscape frontal close-up, locked camera",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/face-object-interaction-contact.jpg"
+    },
+    {
+      "id_string": "rear-view-walk",
+      "catalog_id_int": 3008978,
+      "url_string": "https://pvs1.microstock.plus/0e1bba0698854c80a125a0e64e9057e6e2e487d8187e008de6c75fa3efc8673b/69/69765884ae5a12285c456d6d/gbKCVJBPpv9G5Lxzu77tcVSeoI05x95R_qsv.mp4",
+      "segment_start_seconds_float": 2.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Vertical urban travel shot beginning behind one adult man in a tan jacket with a dark shoulder strap as he walks away along a path. The handheld camera tilts steeply upward past a tall modern building with a planted green wall to reveal a slender observation tower under an overcast sky. Preserve one briefly visible walker, the upward camera tilt, straight architecture, greenery, tower, and cloudy weather.",
+      "observed_people_count_int": 1,
+      "observed_action_string": "A rear-view man is visible only at the beginning; the camera then tilts up and he leaves frame while a tower fills the view.",
+      "observed_camera_string": "vertical wide shot with strong handheld upward tilt",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/rear-view-walk-contact.jpg",
+      "sample_limitations_string": "Poor identity benchmark because the person exits almost immediately; primarily a camera-motion and architecture stress case."
+    },
+    {
+      "id_string": "two-person-cafe-conversation",
+      "catalog_id_int": 3247191,
+      "url_string": "https://pvs3.microstock.plus/5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d/69/69ec481edc68754eea1d6c6e/sPCsTx6aIq0EYYNuyqJBlHVvoz5lDKgR_qsv.mp4",
+      "segment_start_seconds_float": 5.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Locked over-the-shoulder cafe shot of two adults seated across a small table. A curly-haired man in a dark sweater faces camera and speaks with restrained hand gestures. A dark-haired woman in a gray top is seen from behind in the foreground and gestures back. White coffee cups remain on the table; softly blurred customers and shelves fill the background. Preserve exactly two principal people, their separate identities, correct hands, eyelines, cups, and table occlusion.",
+      "observed_people_count_int": 2,
+      "observed_action_string": "Seated man and woman converse and gesture across a cafe table.",
+      "observed_camera_string": "landscape medium over-the-shoulder two-shot, locked camera",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/two-person-cafe-conversation-contact.jpg"
+    },
+    {
+      "id_string": "two-person-walk",
+      "catalog_id_int": 3004918,
+      "url_string": "https://pvs1.microstock.plus/2ef97c2a5940a254453fe2eadbe3c1871813753be8521f8f1347a255a6f71fbe/69/698087f1ae5a12285cb64dcc/OpbaSbEzgFxpOJQns6F1jPnqWUIlXiVC_qsv.mp4",
+      "segment_start_seconds_float": 1.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Vertical high-angle close tracking shot of two adults walking side by side outdoors. A woman dominates the foreground in a very wide frayed straw sunhat, white top, blue shorts, black sandals, and woven shoulder bag. A man in a black shirt walks beside her carrying a large blue-and-white inflatable ring. Preserve exactly two people, normal gait, the woman's hat and bag, the man's inflatable ring, and their distinct non-overlapping bodies.",
+      "observed_people_count_int": 2,
+      "observed_action_string": "Two adults walk closely together while the large hat and inflatable ring repeatedly occlude their upper bodies.",
+      "observed_camera_string": "vertical high-angle close tracking shot",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/two-person-walk-contact.jpg",
+      "sample_limitations_string": "Faces are mostly hidden by the top-down angle and large hat; suitable for gait, occlusion, and prop persistence, not facial identity scoring."
+    },
+    {
+      "id_string": "seated-couple-object-action",
+      "catalog_id_int": 2959942,
+      "url_string": "https://pvs1.microstock.plus/e323c46fb295509583afbbc7ccf477c16e1399fb08e91ce204721bd5549fd0e9/69/6946cd4b5740640cc23c12ad/Bdg0YWGjQ9ifPSElqCWG1R3dse9gjLfW_qsv.mp4",
+      "segment_start_seconds_float": 8.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Locked wide kitchen shot of two adults seated side by side at a wooden dining table. A man in a black T-shirt carefully cuts and serves a round white cake while a woman in a white blouse watches and smiles. Two mugs, plates, a bowl, and a vase of bright flowers remain stable on the table. Preserve exactly two people, their identities, anatomically correct hands, knife and cake contact, tableware, and static kitchen background.",
+      "observed_people_count_int": 2,
+      "observed_action_string": "The man cuts or serves cake while the seated woman watches; their hands approach the cake and plates.",
+      "observed_camera_string": "landscape wide two-shot, frontal, locked camera",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/seated-couple-object-action-contact.jpg"
+    },
+    {
+      "id_string": "user-meeting",
+      "catalog_id_int": null,
+      "url_string": "https://pvs1.microstock.plus/5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d/6a/6a07fdc5947a4c39f532f836/Ri7VaPUCy8mFW3ZM6gHms1mmX4ytPlGJ_qsv.mp4",
+      "segment_start_seconds_float": 0.0,
+      "segment_duration_seconds_float": 4.0,
+      "prompt_string": "Locked wide shot of a bright office meeting with about nine adults gathered around a white conference table. Two women and one man stand at the center demonstrating a long white measuring ruler or sample strip while seated colleagues watch, point, and discuss papers. A laptop, documents, glasses, and a water carafe remain on the table. Preserve the crowded group composition, the three standing presenters, seated audience, long white strip, realistic hands, and stable daylight office background.",
+      "observed_people_count_int": 9,
+      "observed_action_string": "Three standing adults present a long white strip while roughly six seated adults discuss and gesture around the table.",
+      "observed_camera_string": "landscape wide group shot, locked camera",
+      "contact_sheet_path_string": ".codex_tmp/avatar-video-20260922/reference-review/user-meeting-contact.jpg",
+      "sample_limitations_string": "People count is approximately nine because foreground occlusion makes an exact count uncertain; this is an extreme multi-person stress case and should not be used to qualify a two-avatar pipeline."
+    }
+  ],
+  "pipelines_array": [
+    {
+      "id_string": "ltx23-first-frame-baseline",
+      "enabled_bool": true,
+      "endpoint_string": "/api/video",
+      "request_object": {
+        "frame_count": 97,
+        "width": 960,
+        "height": 540,
+        "seed": 9221001,
+        "quality": "standard",
+        "checkpoint": "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+        "steps": 8,
+        "cfg": 1.0,
+        "sampler": "euler_ancestral_cfg_pp"
+      }
+    }
+  ],
+  "cases_array": [
+    {"source_id_string": "walk-and-address-camera", "pipeline_id_string": "ltx23-first-frame-baseline", "request_object": {"width": 540, "height": 960}},
+    {"source_id_string": "seated-speaking", "pipeline_id_string": "ltx23-first-frame-baseline"},
+    {"source_id_string": "single-hand-gesture", "pipeline_id_string": "ltx23-first-frame-baseline"},
+    {"source_id_string": "face-object-interaction", "pipeline_id_string": "ltx23-first-frame-baseline"},
+    {"source_id_string": "rear-view-walk", "pipeline_id_string": "ltx23-first-frame-baseline", "request_object": {"width": 540, "height": 960}},
+    {"source_id_string": "two-person-cafe-conversation", "pipeline_id_string": "ltx23-first-frame-baseline"},
+    {"source_id_string": "two-person-walk", "pipeline_id_string": "ltx23-first-frame-baseline", "request_object": {"width": 540, "height": 960}},
+    {"source_id_string": "seated-couple-object-action", "pipeline_id_string": "ltx23-first-frame-baseline"},
+    {"source_id_string": "user-meeting", "pipeline_id_string": "ltx23-first-frame-baseline"}
+  ],
+  "review_policy_object": {
+    "source_evidence_string": "Five frames per declared four-second segment, visually reviewed from contact sheets.",
+    "portrait_dimensions_string": "Portrait sources use 540x960 case overrides to preserve composition. Landscape sources retain the product default 960x540.",
+    "reject_if_array": [
+      "principal person count changes",
+      "face identity or facial anatomy drifts materially",
+      "extra, fused, or disappearing fingers or limbs appear",
+      "people, props, or furniture interpenetrate",
+      "the requested action is absent or reverses",
+      "camera motion differs materially from the observed source",
+      "background geometry melts or flickers across frames"
+    ]
+  }
+}

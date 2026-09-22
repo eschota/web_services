@@ -1,0 +1,287 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-22",
+  "purpose": "Safe adult-human motion references for image-to-video/avatar reenactment benchmarking and a later two-avatar story.",
+  "selection_policy": {
+    "people": "Clearly described adults only; no children or ambiguous ages.",
+    "content": "Safe everyday actions with bounded motion and no violence or sexual content.",
+    "benchmark_clip_seconds": "Use one simple 3-5 second action window from each preview; do not ask a generator to reproduce the entire source clip in one pass.",
+    "quality_gate": [
+      "Reject face identity drift, eye/mouth deformation, extra or fused fingers, limb duplication, joint inversion, body/prop interpenetration, temporal flicker, background melting, and action reversal.",
+      "Keep camera motion and occlusion low for the first comparison pass.",
+      "Compare identity, pose/action, temporal coherence, anatomy, and scene similarity separately."
+    ]
+  },
+  "research_basis": [
+    {
+      "title": "Face Consistency Benchmark for GenAI Video",
+      "url": "https://arxiv.org/abs/2505.11425",
+      "use_here": "Treat facial identity consistency as its own evaluation dimension rather than hiding it inside a single aesthetic score."
+    },
+    {
+      "title": "From Large Angles to Consistent Faces: Identity-Preserving Video Generation via Mixture of Facial Experts",
+      "url": "https://arxiv.org/abs/2508.09476",
+      "use_here": "Include both frontal close-ups and pose/view changes because face angle and identity stability fail differently."
+    },
+    {
+      "title": "Human Video Generation from a Single Image with 3D Pose and View Control",
+      "url": "https://arxiv.org/abs/2602.21188",
+      "use_here": "Score articulated pose, self-occlusion, view alignment, and temporal stability explicitly in human reenactment tests."
+    }
+  ],
+  "qwertystock_api": {
+    "source_of_truth": "R:/M_plus_front/qwertystock/src/qwertystock.ts and https://qwertystock.com/openapi.json",
+    "search": {
+      "method": "GET",
+      "url": "https://qwertystock.com/api/v1/search",
+      "query_parameters": {
+        "q": "natural-language query",
+        "type": "video",
+        "limit": "1..80",
+        "page": "optional one-based page",
+        "min_keywords": "optional minimum keyword count"
+      },
+      "authentication": "Not required for search or watermarked previews.",
+      "response_fields_used": [
+        "id",
+        "title",
+        "description",
+        "keywords",
+        "thumbnail_url",
+        "video_preview_url",
+        "width",
+        "height",
+        "duration",
+        "formats"
+      ]
+    },
+    "preview_delivery": {
+      "method": "POST",
+      "url": "https://qwertystock.com/api/v1/download",
+      "body_example": {
+        "item_id": 3247191,
+        "format": "preview"
+      },
+      "note": "The search response already exposes the free watermarked video_preview_url. Paid formats require a user-owned Bearer API key."
+    },
+    "license": {
+      "preview_status": "Watermarked previews are free for evaluation/sample use under the Qwertystock terms; they are not production masters.",
+      "production_status": "Purchase the chosen output format before production use; the applicable Royalty-Free End User License then governs use.",
+      "terms_url": "https://qwertystock.com/html/pages/terms_of_service.html",
+      "royalty_free_license_url": "https://qwertystock.com/html/pages/royalty_free_license.html",
+      "item_specific_release_metadata": "not exposed by the public search response"
+    }
+  },
+  "user_reference": {
+    "video_preview_url": "https://pvs1.microstock.plus/5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d/6a/6a07fdc5947a4c39f532f836/Ri7VaPUCy8mFW3ZM6gHms1mmX4ytPlGJ_qsv.mp4",
+    "validation": "HTTP 206, Content-Type video/mp4, 1024-byte Range request succeeded on 2026-09-22",
+    "catalog_id": null,
+    "note": "Provided directly by the user; the public URL alone does not expose its catalog ID or license metadata."
+  },
+  "references": [
+    {
+      "benchmark_id": "walk-and-address-camera",
+      "search_query": "adult man walking outdoors",
+      "qwertystock_id": 3655235,
+      "title": "A man walking on touristic warm town found camera and starts talking with palm tree on background",
+      "source_url": "https://qwertystock.com/item?id=3655235",
+      "thumbnail_url": "https://pvs1.microstock.plus/5c16102b843cebf9d09692291cf805b365c7252d1076ce2ce3d2972b0435bf73/6a/6a01c690947a4c39f5d62ca8/6vKknGWNGZWNb4VxGq744122KaD3mZp5_qs.jpg",
+      "video_preview_url": "https://pvs1.microstock.plus/5c16102b843cebf9d09692291cf805b365c7252d1076ce2ce3d2972b0435bf73/6a/6a01c690947a4c39f5d62ca8/vY4O7Ok3eZqGqgjiGrBmbsuzxpGoVqFq_qsv.mp4",
+      "width": 2160,
+      "height": 3840,
+      "duration_seconds": 12.33,
+      "recommended_window_seconds": [3.0, 7.0],
+      "role": "walking plus transition into direct-to-camera speech",
+      "difficulty": "medium",
+      "rationale": "Useful combined body-motion and face/lip benchmark in a vertical social-video composition."
+    },
+    {
+      "benchmark_id": "seated-speaking",
+      "search_query": "adult person seated talking",
+      "qwertystock_id": 2853833,
+      "title": "POV of young adult pretty woman talking on laptop computer video call at home",
+      "source_url": "https://qwertystock.com/item?id=2853833",
+      "thumbnail_url": "https://pvs1.microstock.plus/ca1432fc21ef1547e98c20ebbf08a187eb0759308e46ea9d36807b271cb814f4/69/692045db6eaff87ffa2c512d/JJc8RAIPXZAg0ADlPiQoQxmtVQhrGZWi_qs.jpg",
+      "video_preview_url": "https://pvs1.microstock.plus/ca1432fc21ef1547e98c20ebbf08a187eb0759308e46ea9d36807b271cb814f4/69/692045db6eaff87ffa2c512d/457UP7NFrGuWcDG7dAygIa0yXrgtBYJh_qsv.mp4",
+      "width": 3840,
+      "height": 2160,
+      "duration_seconds": 16.4,
+      "recommended_window_seconds": [4.0, 8.0],
+      "role": "seated close/medium speaking and restrained hand gestures",
+      "difficulty": "medium",
+      "rationale": "Stable camera and visible face make identity, mouth, eye, and hand stability easy to score."
+    },
+    {
+      "benchmark_id": "single-hand-gesture",
+      "search_query": "adult person gesturing hands",
+      "qwertystock_id": 2453773,
+      "title": "Thumbs Down Gesture, Hand Showing Dislike Sign, Negative Hand Signal, Disapproval with Thumbs Down",
+      "source_url": "https://qwertystock.com/item?id=2453773",
+      "thumbnail_url": "https://pvs3.microstock.plus/7bc499dfed0b626eee870f053c5959b552e80d440c2ffbf25fea4320d9eaae2f/68/685eb852ac4dce61a9b78760/SQ1bnvnzunkY1nLU8JppDfOLeHtNla9F_qs.jpg",
+      "video_preview_url": "https://pvs3.microstock.plus/7bc499dfed0b626eee870f053c5959b552e80d440c2ffbf25fea4320d9eaae2f/68/685eb852ac4dce61a9b78760/TKZAD5RTB1m5w8cnnTJ0pewMDbgv8Otw_qsv.mp4",
+      "width": 3840,
+      "height": 2160,
+      "duration_seconds": 6.53,
+      "recommended_window_seconds": [1.0, 5.0],
+      "role": "clear arm and thumb gesture",
+      "difficulty": "medium",
+      "rationale": "Short isolated gesture exposes hand anatomy and temporal consistency failures."
+    },
+    {
+      "benchmark_id": "face-object-interaction",
+      "search_query": "adult person close up speaking to camera",
+      "qwertystock_id": 3431477,
+      "title": "Woman drinking a refreshing beverage from aluminum can",
+      "source_url": "https://qwertystock.com/item?id=3431477",
+      "thumbnail_url": "https://pvs1.microstock.plus/136c814522408dca193d4a64fc6d628f7444b941d388e35671d83044c4e86879/6a/6a099007b00b141ddac5cb83/uIPVNaGodhHZKZql1LbDSpHbGobHt8IK_qs.jpg",
+      "video_preview_url": "https://pvs1.microstock.plus/136c814522408dca193d4a64fc6d628f7444b941d388e35671d83044c4e86879/6a/6a099007b00b141ddac5cb83/KsucJHs4AKueewqIAPjb8BGt5A8WQnLa_qsv.mp4",
+      "width": 3840,
+      "height": 2160,
+      "duration_seconds": 11.88,
+      "recommended_window_seconds": [3.0, 7.0],
+      "role": "hand-to-mouth object interaction",
+      "difficulty": "hard",
+      "rationale": "Tests fingers, face occlusion, mouth/object contact, and prop persistence."
+    },
+    {
+      "benchmark_id": "rear-view-walk",
+      "search_query": "adult man walking outdoors",
+      "qwertystock_id": 3008978,
+      "title": "A man wearing a tan jacket and blue jeans walks away from the camera on a grey stone sidewalk beside a large modern office building",
+      "source_url": "https://qwertystock.com/item?id=3008978",
+      "thumbnail_url": "https://pvs1.microstock.plus/0e1bba0698854c80a125a0e64e9057e6e2e487d8187e008de6c75fa3efc8673b/69/69765884ae5a12285c456d6d/9w6ziKGgNWoMWRSV7KHPCZnEFijYtpoD_qs.jpg",
+      "video_preview_url": "https://pvs1.microstock.plus/0e1bba0698854c80a125a0e64e9057e6e2e487d8187e008de6c75fa3efc8673b/69/69765884ae5a12285c456d6d/gbKCVJBPpv9G5Lxzu77tcVSeoI05x95R_qsv.mp4",
+      "width": 1080,
+      "height": 1920,
+      "duration_seconds": 8.0,
+      "recommended_window_seconds": [2.0, 6.0],
+      "role": "full-body rear-view walking cycle",
+      "difficulty": "easy",
+      "rationale": "Low facial burden establishes whether the pipeline can reproduce gait and global body proportions."
+    },
+    {
+      "benchmark_id": "two-person-cafe-conversation",
+      "search_query": "adult man and woman conversation",
+      "qwertystock_id": 3247191,
+      "title": "Adult couple is sitting at a table in a coffee shop, drinking coffee and chatting",
+      "source_url": "https://qwertystock.com/item?id=3247191",
+      "thumbnail_url": "https://pvs3.microstock.plus/5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d/69/69ec481edc68754eea1d6c6e/VeAiNmECYtL0nWf8tqORu5olxRSa3Yzc_qs.jpg",
+      "video_preview_url": "https://pvs3.microstock.plus/5021b90a8d7d6aa74767440b799cd6b3982f0c877f7113ffe1ec69b844e1977d/69/69ec481edc68754eea1d6c6e/sPCsTx6aIq0EYYNuyqJBlHVvoz5lDKgR_qsv.mp4",
+      "width": 3840,
+      "height": 2160,
+      "duration_seconds": 20.24,
+      "recommended_window_seconds": [5.0, 9.0],
+      "role": "two seated adults speaking across a table",
+      "difficulty": "hard",
+      "rationale": "Primary dual-avatar benchmark for identity separation, eyelines, hands, cups, and table occlusion."
+    },
+    {
+      "benchmark_id": "two-person-walk",
+      "search_query": "adult man walking outdoors",
+      "qwertystock_id": 3004918,
+      "title": "Top view of couple woman in straw hat with bag and man holding bright inflatable ring walking on sandy beach",
+      "source_url": "https://qwertystock.com/item?id=3004918",
+      "thumbnail_url": "https://pvs1.microstock.plus/2ef97c2a5940a254453fe2eadbe3c1871813753be8521f8f1347a255a6f71fbe/69/698087f1ae5a12285cb64dcc/3YllMOT8ieYDjkYoJwIKASl6rpDyWokF_qs.jpg",
+      "video_preview_url": "https://pvs1.microstock.plus/2ef97c2a5940a254453fe2eadbe3c1871813753be8521f8f1347a255a6f71fbe/69/698087f1ae5a12285cb64dcc/OpbaSbEzgFxpOJQns6F1jPnqWUIlXiVC_qsv.mp4",
+      "width": 2160,
+      "height": 3840,
+      "duration_seconds": 7.04,
+      "recommended_window_seconds": [1.0, 5.0],
+      "role": "two adults walking with props from a high angle",
+      "difficulty": "hard",
+      "rationale": "Tests two-body separation, gait, occlusion, hat, bag, and ring persistence with reduced face emphasis."
+    },
+    {
+      "benchmark_id": "seated-couple-object-action",
+      "search_query": "adult couple sitting together",
+      "qwertystock_id": 2959942,
+      "title": "A man cuts a cake at home in the kitchen, sitting at the dining table with his wife",
+      "source_url": "https://qwertystock.com/item?id=2959942",
+      "thumbnail_url": "https://pvs1.microstock.plus/e323c46fb295509583afbbc7ccf477c16e1399fb08e91ce204721bd5549fd0e9/69/6946cd4b5740640cc23c12ad/VFnglM0UajacaqFhAS00UyRvdH1ZJRYK_qs.jpg",
+      "video_preview_url": "https://pvs1.microstock.plus/e323c46fb295509583afbbc7ccf477c16e1399fb08e91ce204721bd5549fd0e9/69/6946cd4b5740640cc23c12ad/Bdg0YWGjQ9ifPSElqCWG1R3dse9gjLfW_qsv.mp4",
+      "width": 3840,
+      "height": 2160,
+      "duration_seconds": 24.84,
+      "recommended_window_seconds": [8.0, 12.0],
+      "role": "two seated adults plus knife/cake interaction",
+      "difficulty": "very hard",
+      "rationale": "A deliberate rejection test: hands, utensil, food, occlusion, and two persistent identities."
+    }
+  ],
+  "url_validation": {
+    "checked_at": "2026-09-22",
+    "method": "HTTP Range bytes=0-1023",
+    "result": "All eight selected video_preview_url values returned HTTP 206, Content-Type video/mp4, and exactly 1024 bytes. The user-provided reference passed the same check."
+  },
+  "two_avatar_story": {
+    "working_title": "The Lost Note",
+    "avatars": [
+      {
+        "id": "avatar-woman-01",
+        "description": "adult woman, recurring lead"
+      },
+      {
+        "id": "avatar-man-01",
+        "description": "adult man, recurring lead"
+      }
+    ],
+    "continuity_rules": [
+      "Lock immutable avatar identity references before rendering the story.",
+      "Keep wardrobe palettes stable across adjacent shots.",
+      "Use one simple primary action per 3-5 second shot.",
+      "Render single-avatar shots first; admit dual-avatar shots only after both identities pass independently."
+    ],
+    "shots": [
+      {
+        "order": 1,
+        "reference_benchmark_id": "seated-speaking",
+        "avatars": ["avatar-woman-01"],
+        "action": "At a cafe table, the woman records a short message saying she found a handwritten note.",
+        "duration_seconds": 4
+      },
+      {
+        "order": 2,
+        "reference_benchmark_id": "walk-and-address-camera",
+        "avatars": ["avatar-man-01"],
+        "action": "The man walks through town, notices the message, stops, and looks toward camera.",
+        "duration_seconds": 4
+      },
+      {
+        "order": 3,
+        "reference_benchmark_id": "rear-view-walk",
+        "avatars": ["avatar-man-01"],
+        "action": "He walks toward the meeting place, carrying the same small envelope as a continuity prop.",
+        "duration_seconds": 4
+      },
+      {
+        "order": 4,
+        "reference_benchmark_id": "single-hand-gesture",
+        "avatars": ["avatar-woman-01"],
+        "action": "She sees the wrong cafe sign and gestures no, then points off screen toward the correct entrance.",
+        "duration_seconds": 4
+      },
+      {
+        "order": 5,
+        "reference_benchmark_id": "two-person-cafe-conversation",
+        "avatars": ["avatar-woman-01", "avatar-man-01"],
+        "action": "They meet at the cafe table; he passes her the envelope and they compare the note with a phone photo.",
+        "duration_seconds": 4
+      },
+      {
+        "order": 6,
+        "reference_benchmark_id": "two-person-walk",
+        "avatars": ["avatar-woman-01", "avatar-man-01"],
+        "action": "They leave together and walk toward the location revealed by the note.",
+        "duration_seconds": 4
+      },
+      {
+        "order": 7,
+        "reference_benchmark_id": "seated-couple-object-action",
+        "avatars": ["avatar-woman-01", "avatar-man-01"],
+        "action": "At home they open a small celebration cake box containing the final clue and smile.",
+        "duration_seconds": 4,
+        "gate": "Optional ending; reject if utensil, fingers, or cake interaction fails anatomy/temporal QA."
+      }
+    ]
+  }
+}
