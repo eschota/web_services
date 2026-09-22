@@ -32,6 +32,16 @@ def _app() -> TestClient:
 
 
 class ModelCatalogueTests(unittest.TestCase):
+    def test_polled_status_reports_the_worker_model_not_default_bonsai(self):
+        worker = {"name": "f13", "physical_node": "f13", "url": "http://example.test", "token": "test"}
+        async def fake_status(client, selected, task_id):
+            return {"status": "Completed", "mode": "text", "model": "qwen35-9b-uncensored", "answer": "neutral"}
+        with mock.patch.object(ai_vision_api, "_worker_by_key", return_value=worker), \
+             mock.patch.object(ai_vision_api, "_fetch_status", fake_status):
+            response = _app().get("/api/ai/status/f13.test-task")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model_string"], "qwen35-9b-uncensored")
+
     def test_an_uncensored_model_is_offered_and_flagged(self):
         body = _app().get("/api/ai/models").json()
         wild = [m for m in body["models_array"] if m.get("uncensored")]
@@ -400,8 +410,8 @@ class DispatchTests(unittest.TestCase):
         )
 
     def test_a_submitted_task_id_carries_its_node(self):
-        async def fake_pick(client, model_id=None):
-            return WORKER
+        async def fake_pick(client, model_id=None, **kwargs):
+            return WORKER, {"models": [model_id or ""], "load": 0}
 
         async def fake_submit(client, worker, path, payload):
             self.assertEqual(path, "/text2text")
@@ -416,10 +426,12 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(body["task_id_string"], "f1-pc.abc-123")
         self.assertEqual(body["status_url_string"], "/api/ai/status/f1-pc.abc-123")
         self.assertFalse(body["finished_bool"])
+        # The accept response says what the node serves, not merely what was asked.
+        self.assertEqual(body["served_model_string"], ai_vision_api.DEFAULT_MODEL_ID)
 
     def test_wait_returns_the_finished_answer(self):
-        async def fake_pick(client, model_id=None):
-            return WORKER
+        async def fake_pick(client, model_id=None, **kwargs):
+            return WORKER, {"models": [model_id or ""], "load": 0}
 
         async def fake_submit(client, worker, path, payload):
             return "abc-123"
@@ -445,8 +457,8 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(body["elapsed_seconds_float"], 6.2)
 
     def test_a_failed_task_is_reported_as_unsuccessful(self):
-        async def fake_pick(client, model_id=None):
-            return WORKER
+        async def fake_pick(client, model_id=None, **kwargs):
+            return WORKER, {"models": [model_id or ""], "load": 0}
 
         async def fake_submit(client, worker, path, payload):
             return "abc-123"
@@ -532,7 +544,55 @@ class WorkerChoiceTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as caught:
             self._pick([WORKER], probe, model="qwen35-9b-uncensored")
         self.assertEqual(caught.exception.status_code, 503)
-        self.assertEqual(caught.exception.detail["error_string"], "model_not_on_any_node")
+        self.assertEqual(caught.exception.detail["error_string"], "model_unavailable")
+        self.assertEqual(caught.exception.detail["served_models_array"], ["bonsai2-27b"])
+
+    def test_a_busy_node_that_serves_the_model_beats_a_free_node_that_does_not(self):
+        """Queue on the right model rather than answer fast with the wrong one."""
+        busy = dict(WORKER, physical_node="busy", name="busy")
+        free = dict(WORKER, physical_node="free", name="free")
+
+        async def probe(client, worker):
+            if worker["physical_node"] == "busy":
+                return True, {"load": 9, "models": ["qwen35-9b-uncensored"], "loaded": ""}
+            return True, {"load": 0, "models": ["bonsai2-27b"], "loaded": "bonsai2-27b"}
+
+        chosen = self._pick([busy, free], probe, model="qwen35-9b-uncensored")
+        self.assertEqual(chosen["physical_node"], "busy")
+
+    def test_a_node_without_a_catalogue_is_not_guessed_at_for_a_named_model(self):
+        """f2 answering Bonsai to a Qwen request is the defect this closes."""
+        async def probe(client, worker):
+            return True, {"load": 0, "models": [], "loaded": ""}
+
+        with self.assertRaises(HTTPException) as caught:
+            self._pick([WORKER], probe, model="qwen35-9b-uncensored")
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.detail["error_string"], "model_unavailable")
+        self.assertEqual(caught.exception.detail["served_models_array"], [])
+
+    def test_a_node_without_a_catalogue_still_serves_the_farm_default(self):
+        async def probe(client, worker):
+            return True, {"load": 0, "models": [], "loaded": ""}
+
+        chosen = self._pick([WORKER], probe, model=ai_vision_api.DEFAULT_MODEL_ID)
+        self.assertEqual(chosen["physical_node"], "f1-pc")
+        self.assertEqual(self._pick([WORKER], probe)["physical_node"], "f1-pc")
+
+    def test_the_chosen_node_can_report_what_it_serves(self):
+        import asyncio
+
+        async def probe(client, worker):
+            return True, {"load": 0, "models": ["qwen35-9b-uncensored"], "loaded": ""}
+
+        async def run():
+            with mock.patch.object(ai_vision_api, "_load_ai_workers", return_value=[WORKER]),                  mock.patch.object(ai_vision_api, "_node_is_free", probe):
+                return await ai_vision_api._pick_worker(
+                    None, "qwen35-9b-uncensored", with_info=True)
+
+        worker, info = asyncio.run(run())
+        self.assertEqual(worker["physical_node"], "f1-pc")
+        self.assertIn("qwen35-9b-uncensored", info["models"])
 
     def test_a_free_node_beats_a_warm_but_busy_one(self):
         """A weight swap costs seconds; a queue behind a conversion costs minutes."""
@@ -556,12 +616,15 @@ class WorkerChoiceTests(unittest.TestCase):
 
         self.assertEqual(self._pick([cold, warm], probe, model="m")["physical_node"], "warm")
 
-    def test_a_node_that_publishes_no_catalogue_is_still_tried(self):
+    def test_a_node_that_publishes_no_catalogue_is_tried_for_the_default_only(self):
+        """It used to be tried for anything, and answered Bonsai to Qwen."""
         async def probe(client, worker):
             return True, {"load": 0, "models": [], "loaded": ""}
 
-        chosen = self._pick([WORKER], probe, model="qwen35-9b-uncensored")
+        chosen = self._pick([WORKER], probe, model=ai_vision_api.DEFAULT_MODEL_ID)
         self.assertEqual(chosen["physical_node"], "f1-pc")
+        with self.assertRaises(HTTPException):
+            self._pick([WORKER], probe, model="qwen35-9b-uncensored")
 
 
 if __name__ == "__main__":

@@ -422,8 +422,14 @@ def _activities(payload: Dict[str, object]) -> List[str]:
 async def _pick_worker(
     client: httpx.AsyncClient, model_id: Optional[str] = None,
     *, require_system_prompt: bool = False, require_unlimited_output: bool = False,
-) -> Dict[str, object]:
-    """The least loaded reachable node that carries the requested model."""
+    with_info: bool = False,
+):
+    """The least loaded reachable node that actually serves the requested model.
+
+    With `with_info` the node's probe record comes back alongside it, so the
+    caller can say which model the node really serves instead of echoing what
+    was asked for.
+    """
     workers = _load_ai_workers()
     if not workers:
         raise HTTPException(
@@ -465,13 +471,26 @@ async def _pick_worker(
                 "message_string": f"No available text worker has verified system instructions for '{wanted}'"})
     carrying = [(w, i) for w, i in reachable if not wanted or wanted in (i.get("models") or [])]
     if not carrying:
-        # Older nodes publish no catalogue at all; treat that as "unknown, try it"
-        # rather than refusing work a node may well be able to do.
-        silent = [(w, i) for w, i in reachable if not (i.get("models") or [])]
+        # A node that publishes no catalogue at all is only worth guessing at
+        # for the farm default, which every build carries. Guessing for any
+        # other model is how a request for Qwen came back as Bonsai: the node
+        # answers with whatever weights it happens to hold, the caller is told
+        # it got what it asked for, and a 10-second turn becomes a 50-second
+        # one in the wrong voice. A busy node that really serves the model is
+        # the better answer, and there is a queue for exactly that.
+        silent = ([(w, i) for w, i in reachable if not (i.get("models") or [])]
+                  if (not wanted or wanted == DEFAULT_MODEL_ID) else [])
         if not silent:
+            served: List[str] = []
+            for _, info in reachable:
+                for name in info.get("models") or []:
+                    if name not in served:
+                        served.append(str(name))
             raise HTTPException(status_code=503, detail={
-                "error_string": "model_not_on_any_node",
-                "message_string": f"No reachable node carries '{wanted}'",
+                "error_string": "model_unavailable",
+                "message_string": f"No reachable node serves '{wanted}'",
+                "requested_model_string": wanted,
+                "served_models_array": sorted(served),
                 "nodes_checked_int": len(reachable)})
         carrying = silent
     # Load first, warmth only as a tie-break: swapping weights costs seconds,
@@ -480,7 +499,10 @@ async def _pick_worker(
         int(item[1].get("load") or 0),
         0 if wanted and item[1].get("loaded") == wanted else 1,
     ))
-    return carrying[0][0]
+    worker, info = carrying[0]
+    if with_info:
+        return worker, info
+    return worker
 
 
 def _worker_by_key(key: str) -> Optional[Dict[str, object]]:
@@ -943,7 +965,8 @@ async def _fetch_status(
 
 
 def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
-                   service_id: str = "") -> Dict[str, object]:
+                   service_id: str = "", *,
+                   served_model: str = "") -> Dict[str, object]:
     status = str(raw.get("status") or "")
     finished = status in ("Completed", "Failed")
     if status == "Completed" and service_id:
@@ -962,6 +985,10 @@ def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
         "finished_bool": finished,
         "mode_string": str(raw.get("mode") or ""),
         "model_string": model_id,
+        # What the node really ran, when that is known: the accept response
+        # knows it from the node's catalogue, a poll from the node's own
+        # report. Empty means "not established yet", never "the default".
+        "served_model_string": str(served_model or raw.get("model") or ""),
         "answer_string": output_text,
         "raw_answer_string": answer,
         "structured_answer_bool": was_structured,
@@ -1011,14 +1038,19 @@ async def _run(
         if payload.get("max_output_tokens") == -1:
             requirements["require_unlimited_output"] = True
         try:
-            worker = await _pick_worker(client, model_id, **requirements)
+            picked = await _pick_worker(client, model_id, with_info=True, **requirements)
         except HTTPException as exc:
             folded = _folded_system_prompt(payload, exc)
             if folded is None:
                 raise
             payload = folded
             requirements.pop("require_system_prompt", None)
-            worker = await _pick_worker(client, model_id, **requirements)
+            picked = await _pick_worker(client, model_id, with_info=True, **requirements)
+        # A test double, or any caller predating `with_info`, hands back the
+        # bare node; then the served model is simply not known yet and the
+        # status poll reports it.
+        worker, node_info = picked if isinstance(picked, tuple) else (picked, {})
+        served_model = model_id if model_id in (node_info.get("models") or []) else ""
         worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
         task_id = f"{_node_key(worker)}.{worker_task_id}"
         raw: Dict[str, object] = {"status": "Pending"}
@@ -1029,7 +1061,8 @@ async def _run(
                 raw = await _fetch_status(client, worker, worker_task_id)
                 if str(raw.get("status")) in ("Completed", "Failed"):
                     break
-        result = _public_status(task_id, model_id, raw, service_id)
+        result = _public_status(task_id, model_id, raw, service_id,
+                                served_model=served_model)
         result["status_url_string"] = f"/api/ai/status/{task_id}"
         result["node_string"] = _node_key(worker)
         return result
@@ -1206,7 +1239,8 @@ async def api_ai_status(task_id: str):
     async with httpx.AsyncClient() as client:
         raw = await _fetch_status(client, worker, worker_task_id)
     mode = str(raw.get("mode") or "")
-    result = _public_status(task_id, DEFAULT_MODEL_ID, raw,
+    actual_model = str(raw.get("model") or raw.get("requested_model") or "")
+    result = _public_status(task_id, actual_model, raw,
                             "vision" if mode == "vision" else "text")
     result["node_string"] = node_key
     import ai_request_cache
