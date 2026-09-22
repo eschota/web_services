@@ -53,7 +53,8 @@ class FakeFarm:
                 return httpx.Response(400, json={"detail": {"message_string": "no box"}})
             self.counter += 1
             task = f"00000000-0000-0000-0000-{self.counter:012d}"
-            slot = next((name for name, spec in build.VIEW_SPECS.items() if spec["text"] in body["prompt"]), "?")
+            prompt = body["prompt"].replace("picture 1", "image 1")
+            slot = next((name for name, spec in build.VIEW_SPECS.items() if spec["text"] in prompt), "?")
             self.renders[task] = (slot, engine)
             return httpx.Response(200, json={"task_id_string": task,
                                              "image_url_string": f"https://farm.test/render/{task}.png",
@@ -112,10 +113,14 @@ class BuilderTests(unittest.TestCase):
         self.root = root
         # Flat test pictures have no face; the detector is tested on its own.
         self._detect = build.detect_face_kind
+        self._box = build.face_box
         build.detect_face_kind = lambda data: "unknown"
+        # A face a third of the picture tall: every crop view keeps its framing.
+        build.face_box = lambda data: [10, 10, 30, 32]
 
     def tearDown(self):
         build.detect_face_kind = self._detect
+        build.face_box = self._box
         self.temp.cleanup()
 
     def builder(self, farm):
@@ -173,6 +178,7 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(profile["image_url"], anchor)
         # The close-up starts from a crop of the anchor, with the source for the face.
         face = next(body for _, body in engines if build.VIEW_SPECS["face_closeup"]["text"] in body["prompt"])
+        self.assertNotIn("shoes", face["prompt"])  # a clause that pulled klein back to full length
         self.assertEqual(face["image_url"], job["views"]["face_closeup"]["crop_url"])
         self.assertNotEqual(face["image_url"], anchor)
         self.assertEqual(face["reference_image_urls"], [job["source"]["frame_url"]])
@@ -212,6 +218,18 @@ class BuilderTests(unittest.TestCase):
         job = self.start(self.builder(farm), views="front")
         self.assertEqual(job["status"], "failed")
         self.assertIn("anchor", job["error"])
+
+    def test_a_zoomed_out_close_up_falls_back_to_the_anchor_crop(self):
+        farm = FakeFarm(self.assets)
+        # Every render comes back with a face 1/40 of the height: klein zoomed out.
+        build.face_box = lambda data: [10, 10, 2, 2]
+        job = self.start(self.builder(farm), views="face_closeup")
+        state = job["views"]["face_closeup"]
+        self.assertEqual([item["engine"] for item in state["attempts"]], ["klein", "qwen", "crop"])
+        final = state["final"]
+        self.assertEqual(final["provenance"]["engine"], "crop")
+        self.assertEqual(final["qa"]["status"], "accepted_with_warnings")
+        self.assertIn("framing drifted", state["attempts"][0]["qa"]["notes"])
 
     def test_unknown_view_is_refused(self):
         with self.assertRaises(Exception):

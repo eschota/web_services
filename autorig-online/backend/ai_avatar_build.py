@@ -356,8 +356,21 @@ def clean_description(raw: Dict[str, Any]) -> Dict[str, str]:
     return out
 
 
+_CROP_PREFIX = (
+    "Same person as in image 1: identical face, facial features, hairstyle, hair color, skin "
+    "tone and age, same clothing as visible in image 1. Plain light grey seamless studio "
+    "background, soft even lighting, photorealistic, sharp focus, exactly one person. "
+)
+# Face height / picture height a crop view is cut to; an answer far below it
+# means the model zoomed back out.
+CROP_FACE_FRACTION = {"upper": 1 / 6.2, "face": 1 / 2.6}
+
+
 def view_prompt(slot: str, description: Dict[str, str], outfit: str) -> str:
     spec = VIEW_SPECS[slot]
+    if spec.get("crop"):
+        identity = description.get("identity_prompt", "")
+        return (_CROP_PREFIX + spec["text"] + f" Character: {identity}")[:5800]
     wear = str(outfit or description.get("wardrobe") or "").strip()
     outfit_clause = (f", wearing exactly the same outfit ({wear}), same shoes and accessories"
                      if wear else ", wearing the same outfit, shoes and accessories")
@@ -959,8 +972,10 @@ class AvatarBuilder:
         anchor = self._anchor_url(job)
         if slot == ANCHOR_SLOT or not anchor:
             return [source], ["source"]
-        if VIEW_SPECS[slot].get("crop"):
+        if VIEW_SPECS[slot].get("crop") == "face":
             return [await self._crop_reference(client, job, owner, slot), source], ["anchor_crop", "source"]
+        if VIEW_SPECS[slot].get("crop"):
+            return [await self._crop_reference(client, job, owner, slot)], ["anchor_crop"]
         if slot == "back":
             return [anchor], [ANCHOR_SLOT]
         return [anchor, source], [ANCHOR_SLOT, "source"]
@@ -1033,6 +1048,20 @@ class AvatarBuilder:
         except (BuildError, ValueError) as error:
             verdict = {"status": "unchecked", "face_detected": haar,
                        "notes": f"judge unavailable: {error}"[:500]}
+        crop = VIEW_SPECS[slot].get("crop")
+        if crop and verdict.get("status") != "unchecked":
+            box = await asyncio.to_thread(face_box, data)
+            try:
+                from PIL import Image
+                with Image.open(io.BytesIO(data)) as image:
+                    height = image.height
+            except Exception:
+                height = 0
+            fraction = (box[3] / height) if box and height else 0.0
+            if fraction < 0.5 * CROP_FACE_FRACTION[crop]:
+                verdict["status"] = "failed"
+                verdict["notes"] = (f"framing drifted: face is {fraction:.2f} of the height, "
+                                    f"wanted ~{CROP_FACE_FRACTION[crop]:.2f}; " + verdict.get("notes", ""))[:1000]
         attempt["qa"] = verdict
         self.jobs.write(job)
 
@@ -1063,9 +1092,26 @@ class AvatarBuilder:
                       f"(identity {(attempt.get('qa') or {}).get('identity_score')})")
             if status in ("passed", "accepted_with_warnings", "unchecked"):
                 break
-        if not tried:
+        if VIEW_SPECS[slot].get("crop") and state.get("crop_url") and not any(
+                (item.get("qa") or {}).get("status") in ("passed", "accepted_with_warnings", "unchecked")
+                for item in tried):
+            # The anchor's own pixels, cut to this framing: softer, but it is
+            # the checked identity and the right framing, which a zoomed-out
+            # or drifted render is not.
+            data = await self._fetch(client, state["crop_url"])
+            asset = self._store_bytes(owner, data, f"{slot}_cropped.png")
+            tried.append({"engine": "crop", "seed": 0, "prompt": "anchor crop", "reference_slots": [ANCHOR_SLOT],
+                          "asset": asset, "workflow": "anchor_crop", "checkpoint": "",
+                          "qa": {"status": "accepted_with_warnings", "identity_score": None,
+                                 "identity_method": "anchor_crop", "angle_ok": True,
+                                 "face_detected": "frontal", "notes": "rendered views drifted; anchor crop used"}})
+            state["attempts"].append(tried[-1])
+            _log(job, f"{slot}: using the anchor crop")
+            best = tried[-1]
+        elif not tried:
             raise BuildError(f"no picture could be made for {slot}")
-        best = max(tried, key=_rank)
+        else:
+            best = max(tried, key=_rank)
         spec = VIEW_SPECS[slot]
         asset = best["asset"]
         qa = dict(best.get("qa") or {})
@@ -1073,7 +1119,8 @@ class AvatarBuilder:
             "canonical_url": asset["canonical_url"], "sha256": asset["sha256"],
             "asset_id": asset.get("asset_id"), "width": asset["width"], "height": asset["height"],
             "yaw_deg": spec["yaw"], "framing": spec["framing"], "expression": "neutral",
-            "provenance": {"engine": "flux2-klein-4b" if best["engine"] == "klein" else "qwen-image-edit-2511",
+            "provenance": {"engine": {"klein": "flux2-klein-4b", "qwen": "qwen-image-edit-2511"}.get(
+                               best["engine"], best["engine"]),
                            "workflow": best.get("workflow", ""), "checkpoint": best.get("checkpoint", ""),
                            "prompt": best["prompt"][:6000], "seed": best["seed"],
                            "task_id": best.get("task_id", ""), "reference_slots": best["reference_slots"],
