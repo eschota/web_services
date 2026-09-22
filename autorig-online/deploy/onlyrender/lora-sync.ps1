@@ -56,7 +56,10 @@ if ($Install) {
 
 # One run at a time: a scheduled run and an SSH nudge can overlap.
 $mutex = New-Object System.Threading.Mutex($false, 'Global\AutoRigLoraSync')
-if (-not $mutex.WaitOne(0)) { Write-Output 'another sync is running'; exit 0 }
+# A run that was killed leaves the mutex abandoned; taking it over is fine.
+$owned = $false
+try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { Write-Output 'another sync is running'; exit 0 }
 
 try {
     if (-not $Box) {
@@ -128,6 +131,7 @@ try {
     function HashOf($file) {
         $k = $file.FullName + '|' + $file.Length + '|' + $file.LastWriteTimeUtc.Ticks
         if ($cache.ContainsKey($k)) { return $cache[$k] }
+        if ($file.Length -gt 1GB) { Log ('hashing ' + $file.FullName + ' (' + [math]::Round($file.Length / 1GB, 1) + ' GB)') }
         $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLower()
         $cache[$k] = $h
         return $h
@@ -140,9 +144,14 @@ try {
               Where-Object { $_.Extension -in '.safetensors', '.pt', '.ckpt', '.bin', '.pth' } |
               ForEach-Object {
                 $rel = $_.FullName.Substring($d.Length).TrimStart('\')
+                # Folders from extra_model_paths.yaml are listed for the
+                # inventory only; their big files (a slow storage pool on
+                # Raptor) are not worth reading end to end every new file.
+                $sha = ''
+                if ($d -eq $Loras -or $_.Length -lt 1GB) { $sha = (HashOf $_) }
                 $out += [pscustomobject]@{ name = $rel; dir = $d; size = $_.Length;
                     mtime = [int64](($_.LastWriteTimeUtc - [datetime]'1970-01-01').TotalSeconds);
-                    sha256 = (HashOf $_); full = $_.FullName }
+                    sha256 = $sha; full = $_.FullName }
               }
         }
         return $out
@@ -170,7 +179,7 @@ try {
         # 5.1 would turn that into a terminating error.
         $ErrorActionPreference = 'Continue'
         if (Test-Path $dest) { Remove-Item -Force $dest }
-        $args_ = @('-sS', '-f', '-L', '--connect-timeout', '8', '--retry', '2', '-o', $dest)
+        $args_ = @('-sS', '-f', '-L', '--connect-timeout', '8', '--retry', '2', '--speed-time', '60', '--speed-limit', '2048', '-o', $dest)
         if ($useAuth) { $args_ += @('-H', ('Authorization: Bearer ' + $Key), '-H', ('X-AutoRig-Box: ' + $Box)) }
         $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
         if (Test-Path $curl) {
@@ -184,8 +193,15 @@ try {
         } catch { return $false }
     }
 
+    function SaveHashes() {
+        try { $cache | ConvertTo-Json -Depth 3 -Compress | Set-Content -Path $HashFile -Encoding utf8 } catch {}
+    }
+    Log ('manifest from ' + $Api)
     $manifest = Invoke-RestMethod -Uri ($Api + '/manifest') -Headers $Headers -TimeoutSec 60
+    Log ('manifest: ' + @($manifest.items_array).Count + ' items; hashing ' + (@($Loras) + $ExtraDirs -join ', '))
     $inv = @(Inventory)
+    SaveHashes
+    Log ('inventory: ' + $inv.Count + ' files')
     $protected = @($manifest.protected_array)
     $items = @{}
 
@@ -259,7 +275,8 @@ try {
     }
 
     $inv = @(Inventory)
-    try { $cache | ConvertTo-Json -Depth 3 -Compress | Set-Content -Path $HashFile -Encoding utf8 } catch {}
+    SaveHashes
+    Log 'reporting'
     Report $items $inv
     Log ($Box + ': ' + @($manifest.items_array).Count + ' wanted, ' + $todo.Count + ' fetched, ' + $inv.Count + ' files listed')
 } catch {

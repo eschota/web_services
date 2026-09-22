@@ -89,18 +89,21 @@ SYNC_INTERVAL_SECONDS = 300
 # names. `peers` are LAN URLs (folder listings of another box's loras dir)
 # tried before the VPS mirror; the file is always verified by SHA-256, so a
 # stale or wrong peer only costs a retry.
+# f15 serves its models folder on the LAN (python -m http.server 18998), and
+# f5, Raptor and f12 share that LAN (192.168.0.x).
+F15_LAN_PEER = "http://192.168.0.115:18998/loras/"
 DEFAULT_BOXES: Dict[str, Dict[str, Any]] = {
-    "f5": {"ssh_port": 48488, "ssh_user": "user",
-           "peers": ["http://192.168.0.115:18998/loras/"]},
+    "f5": {"ssh_port": 48488, "ssh_user": "user", "peers": [F15_LAN_PEER]},
     "f15": {"ssh_port": 48588, "ssh_user": "user"},
-    "Raptor": {"ssh_port": 48288, "ssh_user": "\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440"},
-    "f12": {},
+    "Raptor": {"ssh_port": 48288, "ssh_user": "\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440",
+               "peers": [F15_LAN_PEER]},
+    "f12": {"peers": [F15_LAN_PEER]},
     "worker-4090": {},
 }
 
 IMAGE_FAMILIES = {"pony", "sdxl", "illustrious", "noobai", "flux", "flux2",
                   "flux2_9b", "flux2_dev", "zimage", "krea2", "sd15"}
-VIDEO_FAMILIES = {"ltx", "ltx2", "ltx23", "ltx25", "ltx098", "wan22_i2v_a14b",
+VIDEO_FAMILIES = {"ltx", "ltx2", "ltx23", "ltx25", "ltx098", "minimax_h3", "wan22_i2v_a14b",
                   "wan22_t2v_a14b", "wan22_5b", "wan21_14b", "wan21_1b"}
 
 _lock = asyncio.Lock()
@@ -197,6 +200,8 @@ def family_for_base(base: str) -> str:
         if "13b" in b or "0.9.8" in b:
             return "ltx098"
         return "ltx"
+    if "minimax" in b or b in ("h3", "hailuo 3"):
+        return "minimax_h3"
     if "qwen" in b:
         return "qwen_image"
     if "wan" in b:
@@ -752,12 +757,16 @@ async def api_sync_manifest(request: Request):
             continue
         if (entry.get("mirror") or {}).get("state") != "ready":
             continue
+        # The farm reaches Civitai's CDN about four times faster than it
+        # reaches this VPS, so a short-lived presigned CDN link goes after the
+        # LAN peers. It authorises that one file only; the API token stays here.
+        cdn = await _presigned_url(entry)
         items.append({
             "id": entry["id"], "file": entry["file"], "sha256": entry["sha256"],
             "size_bytes": entry.get("size_bytes") or 0,
             "url": f"{PUBLIC_BASE}/api/ai/loras/sync/blob/{entry['sha256']}",
             "peers": [peer.rstrip("/") + "/" + urllib.parse.quote(entry["file"])
-                      for peer in cfg.get("peers") or []],
+                      for peer in cfg.get("peers") or []] + ([cdn] if cdn else []),
         })
     remove = [{"file": e["file"], "sha256": e["sha256"]} for e in data["loras"]
               if e.get("state") == "removed"
@@ -769,15 +778,45 @@ async def api_sync_manifest(request: Request):
             "interval_seconds_int": SYNC_INTERVAL_SECONDS, "server_time_unix_int": _now()}
 
 
+_presigned: Dict[str, Tuple[float, str]] = {}
+PRESIGNED_TTL_SECONDS = 15 * 60
+
+
+async def _presigned_url(entry: Dict[str, Any]) -> str:
+    """Civitai's redirect target for this file, cached for a quarter hour."""
+    source = entry.get("source") or {}
+    if source.get("kind") != "civitai" or not os.getenv("CIVITAI_API_TOKEN"):
+        return ""
+    cached = _presigned.get(entry["id"])
+    if cached and time.monotonic() - cached[0] < PRESIGNED_TTL_SECONDS:
+        return cached[1]
+    url = str(source.get("download_url") or
+              f"https://civitai.com/api/download/models/{source.get('version_id')}")
+    try:
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            response = await client.get(url, headers=_civitai_headers(), timeout=20.0)
+        location = response.headers.get("location", "") if response.is_redirect else ""
+    except httpx.HTTPError:
+        location = ""
+    if not location.startswith("https://") or "civitai.com/api/" in location:
+        return ""
+    _presigned[entry["id"]] = (time.monotonic(), location)
+    return location
+
+
 AGENT_SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "deploy" / "onlyrender" / "lora-sync.ps1"
 
 
 @router.get("/api/ai/loras/sync/agent.ps1")
 async def api_sync_agent():
     """The box-side agent itself; it holds no secret, the key stays on the box."""
-    if not AGENT_SCRIPT.is_file():
+    # Read through the live release link, like _static_html_response: a
+    # script-only release must reach the boxes without restarting the API.
+    live = pathlib.Path("/srv/autorig/current/autorig-online/deploy/onlyrender/lora-sync.ps1")
+    script = live if live.is_file() else AGENT_SCRIPT
+    if not script.is_file():
         raise HTTPException(status_code=404, detail="agent script not deployed")
-    return FileResponse(AGENT_SCRIPT, media_type="text/plain; charset=utf-8",
+    return FileResponse(script, media_type="text/plain; charset=utf-8",
                         headers={"Cache-Control": "no-store"})
 
 

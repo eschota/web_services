@@ -48,12 +48,14 @@ FAMILY_WORKFLOWS = {
 # recognise, and an undeclared family is an empty family, which `compatible`
 # reads as "no opinion" and would let a FLUX or LTX LoRA onto a Qwen model.
 DECLARED_FAMILIES = frozenset({"ltx2", "ltx098", "qwen_image", "ltx25", "zimage",
-                               "flux2_9b", "flux2_dev", "krea2", "wan22_i2v_a14b",
+                               "flux2_9b", "flux2_dev", "krea2", "minimax_h3", "wan22_i2v_a14b",
                                "wan22_t2v_a14b", "wan22_5b", "wan21_14b", "wan21_1b"})
 # Families built on the SDXL UNet and text encoders. Their LoRAs load onto one
 # another's checkpoints (Civitai's own generator mixes them); whether a Pony
 # LoRA looks right on an Illustrious model is a matter of taste, not of shape.
 SDXL_FAMILIES = frozenset({"pony", "sdxl", "illustrious", "noobai"})
+# (checkpoint family, LoRA family) pairs that load although they differ.
+FORWARD_COMPATIBLE_LORAS = frozenset({("ltx25", "ltx23")})
 
 
 def canonical_file(name: object) -> str:
@@ -96,6 +98,8 @@ def model_family(entry: Optional[Mapping[str, object]]) -> str:
         return family
     if "krea 2" in base or "krea2" in base:
         return "krea2"
+    if "minimax" in base:
+        return "minimax_h3"
     if "z-image" in base or "zimage" in base or "z image" in base:
         return "zimage"
     if "wan" in base and ("2.2" in base or "2.1" in base or "14b" in base or "wan video" in base):
@@ -139,6 +143,11 @@ def compatible(checkpoint: Optional[Mapping[str, object]],
     if not left or not right:
         return True
     if {left, right} <= SDXL_FAMILIES:
+        return True
+    # Lightricks: LTX-2.5 keeps the 2.3 layout, and 2.3 LoRAs and IC-LoRAs
+    # load onto it unchanged (the official 2.5 Union-Control workflow ships
+    # the 2.3 adapter). The reverse is not promised, so it stays refused.
+    if (left, right) in FORWARD_COMPATIBLE_LORAS:
         return True
     return left == right
 

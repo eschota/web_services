@@ -89,7 +89,7 @@ class FamilyAndUrlTests(unittest.TestCase):
                  "Flux.1 D": "flux", "Flux.2 Klein 4B": "flux2", "Flux.2 Klein 9B": "flux2_9b",
                  "ZImageTurbo": "zimage", "Krea 2": "krea2", "LTXV 2.3": "ltx23",
                  "LTXV 2.5": "ltx25", "Wan Video 2.2 I2V-A14B": "wan22_i2v_a14b",
-                 "Wan Video 14B": "wan21_14b", "Qwen": "qwen_image", "SD 1.5": "sd15"}
+                 "Wan Video 14B": "wan21_14b", "MiniMax H3": "minimax_h3", "Qwen": "qwen_image", "SD 1.5": "sd15"}
         for base, family in cases.items():
             with self.subTest(base=base):
                 self.assertEqual(lm.family_for_base(base), family)
@@ -174,12 +174,15 @@ class SyncProtocolTests(Base):
                        entry("civitai-4", "only-raptor.safetensors", "c" * 64, boxes=["Raptor"]),
                        entry("civitai-5", "gone.safetensors", "d" * 64, state="removed")],
                       cleanup={"f5": [{"file": "old.safetensors", "sha256": ""}]})
-        body = self.client.get("/api/ai/loras/sync/manifest",
-                               headers={"X-AutoRig-Box": "f5", "Authorization": "Bearer k5"}).json()
+        cdn = "https://b2.civitai.com/file/x/add-detail-xl.safetensors?Authorization=file-scoped"
+        with mock.patch.object(lm, "_presigned_url", new=mock.AsyncMock(return_value=cdn)):
+            body = self.client.get("/api/ai/loras/sync/manifest",
+                                   headers={"X-AutoRig-Box": "f5", "Authorization": "Bearer k5"}).json()
         self.assertEqual([i["file"] for i in body["items_array"]], ["add-detail-xl.safetensors"])
         item = body["items_array"][0]
         self.assertTrue(item["url"].endswith("/api/ai/loras/sync/blob/" + SHA_A))
-        self.assertEqual(item["peers"], ["http://192.168.0.115:18998/loras/add-detail-xl.safetensors"])
+        # LAN first, then the CDN; the VPS mirror (`url`) is the last resort.
+        self.assertEqual(item["peers"], ["http://192.168.0.115:18998/loras/add-detail-xl.safetensors", cdn])
         self.assertEqual(body["remove_array"], [{"file": "gone.safetensors", "sha256": "d" * 64}])
         self.assertEqual(body["cleanup_array"][0]["file"], "old.safetensors")
 
@@ -204,6 +207,33 @@ class SyncProtocolTests(Base):
         self.assertEqual(self.client.get(f"/api/ai/loras/sync/blob/{SHA_A}", headers=headers).content, b"lora")
         self.assertEqual(self.client.get(f"/api/ai/loras/sync/blob/{SHA_B}", headers=headers).status_code, 404)
         self.assertEqual(self.client.get(f"/api/ai/loras/sync/blob/{SHA_A}").status_code, 401)
+
+
+class PresignedTests(Base):
+    def test_the_api_token_is_never_the_url_handed_out(self):
+        import asyncio
+        e = entry("civitai-135867", "add-detail-xl.safetensors", SHA_A)
+
+        class Resp:
+            is_redirect = True
+            headers = {"location": "https://b2.civitai.com/file/x?Authorization=file-scoped"}
+
+        class Client:
+            def __init__(self, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, url, headers=None, timeout=None):
+                self.headers = headers
+                return Resp()
+
+        lm._presigned.clear()
+        with mock.patch.dict(os.environ, {"CIVITAI_API_TOKEN": "secret-token"}),                 mock.patch.object(lm.httpx, "AsyncClient", Client):
+            url = asyncio.run(lm._presigned_url(e))
+        self.assertEqual(url, "https://b2.civitai.com/file/x?Authorization=file-scoped")
+        self.assertNotIn("secret-token", url)
+        lm._presigned.clear()
+        with mock.patch.dict(os.environ, {"CIVITAI_API_TOKEN": ""}):
+            self.assertEqual(asyncio.run(lm._presigned_url(e)), "")
 
 
 class ProtectedFileTests(Base):
