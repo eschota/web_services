@@ -657,18 +657,35 @@
       throw lastError || new Error('No upstream image was found for this node.');
     }
 
+    /**
+     * Write a followed size into a control without it being read as an edit.
+     *
+     * Two rules, both learned from the same accident. A value that is already
+     * in the box is not news, so nothing is announced for it: announcing it on
+     * every load made the canvas invalidate every node that follows its input,
+     * which turned finished pictures stale and dropped the watch on a run that
+     * was still going. And a value that genuinely changed is still not a
+     * *person* changing it, so the control is marked while the events go out;
+     * the canvas skips invalidation for a marked control and only refreshes
+     * what it draws.
+     */
     function setDimensionControl(control, value) {
       const previous = control.value;
       if (control.tagName === 'SELECT' && !Array.from(control.options).some(option => option.value === String(value))) {
         control.add(new Option(String(value), String(value)));
       }
+      if (String(previous) === String(value)) return true;
       control.value = String(value);
       if (!control.checkValidity()) { control.value = previous; return false; }
       internalDimensionControls.add(control);
+      if (control.dataset) control.dataset.silentUpdate = 'yes';
       try {
         control.dispatchEvent(new Event('input', { bubbles: true }));
         control.dispatchEvent(new Event('change', { bubbles: true }));
-      } finally { internalDimensionControls.delete(control); }
+      } finally {
+        if (control.dataset) delete control.dataset.silentUpdate;
+        internalDimensionControls.delete(control);
+      }
       return true;
     }
 

@@ -134,6 +134,22 @@
     refreshRunningControls();
   }
 
+  /**
+   * Did the page write this value, or did the person?
+   *
+   * Follow-input-size rewrites width and height whenever a graph is loaded or
+   * rewired, and it announces those writes with the same events a typed value
+   * fires. The canvas answers such an event by invalidating the node and
+   * everything downstream of it, so merely opening a saved composition threw
+   * away every finished picture in it and stopped following a run that was
+   * still in flight. A control marked by its own code is still read and
+   * redrawn; it is simply not treated as an edit.
+   */
+  function programmaticParamEvent(event) {
+    const target = event && event.target;
+    return !!(target && target.dataset && target.dataset.silentUpdate === 'yes');
+  }
+
   function invalidateNodeAndDownstream(startId) {
     if (!editor) return;
     const graph = graphFromCanvas();
@@ -1211,10 +1227,16 @@
         (String(accepted.task_id_string || '').includes('.') ? accepted.task_id_string.split('.')[0] : '');
       const active = ['rendering', 'processing', 'running', 'in_progress', 'generating', 'converting'].includes(status);
       const phase = data.stage_string || data.stage || (active ? 'rendering' : 'queued');
+      // "waiting for a worker" is what we used to say because it was all we
+      // knew; the farm now says where in the line the job actually is.
+      const place = !active && window.AIEntities
+        ? window.AIEntities.queuePlaceLabel(data.queue_position_int, data.queue_length_int) : '';
       element.textContent = (active ? phase : status === 'completed' ? 'completed' : 'queued') +
-        (worker ? ' · ' + worker : ' — waiting for a worker');
+        (place ? ' · ' + place : '') +
+        (worker ? ' · ' + worker : place ? '' : ' — waiting for a worker');
       if (tracker && tracker.setState) tracker.setState({active, worker, phase,
-        startedAt: data.started_at_unix_float || 0});
+        startedAt: data.started_at_unix_float || 0,
+        queuePosition: data.queue_position_int, queueLength: data.queue_length_int});
       document.dispatchEvent(new CustomEvent('ai-task-status', {detail: {worker, status}}));
     };
   }
@@ -1606,10 +1628,60 @@
     if (type === 'video') media.play().catch(() => {});
   }
 
+  /**
+   * How large a socket should be drawn, as a fraction of its unzoomed size.
+   *
+   * A socket is a target for the mouse rather than part of the picture, so its
+   * size on screen should not follow the camera. Pulling back, it grows — as
+   * the square root, which is what the display modes did before this became
+   * one function — or a dot on a distant node is unclickable. Closing in, it
+   * shrinks toward a constant size on screen, because at full size it covers
+   * the node's own text. Both ends are clamped and the halves meet at 1. The
+   * result is rounded, because a wheel that moves the zoom by a hair must not
+   * force every connection in the graph to be recomputed.
+   */
+  const SOCKET_SCALE_MIN = 0.55;
+  const SOCKET_SCALE_MAX = 1.8;
+
+  function socketScaleForZoom(zoom) {
+    const value = Number(zoom);
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    const wanted = value < 1 ? 1 / Math.sqrt(value) : 1 / value;
+    const clamped = Math.min(SOCKET_SCALE_MAX, Math.max(SOCKET_SCALE_MIN, wanted));
+    return Math.round(clamped * 100) / 100;
+  }
+
+  let socketScaleApplied = null;
+
+  /**
+   * Resize the sockets and tell Drawflow where the wires now end.
+   *
+   * The size is a layout size, not a transform, so `offsetWidth` moves with it
+   * and the wire ends exactly on the dot at every zoom — but Drawflow only
+   * recomputes a connection when its node moves, and this moves the sockets
+   * without moving anything else, so the graph is asked to catch up.
+   */
+  function applySocketScale(zoom) {
+    const scale = socketScaleForZoom(zoom);
+    if (scale === socketScaleApplied) return scale;
+    socketScaleApplied = scale;
+    // On the canvas, not the document: that is where this has always been set
+    // from, and a value on the document root would lose to it.
+    const canvas = document.getElementById('canvas');
+    if (canvas) canvas.style.setProperty('--socket-zoom-scale', String(scale));
+    if (editor) {
+      document.querySelectorAll('#canvas .drawflow-node').forEach(node => {
+        try { editor.updateConnectionNodes(node.id); } catch (_) {}
+      });
+    }
+    return scale;
+  }
+
   function installWheelZoom() {
     const canvas = document.getElementById('canvas');
     editor.zoom_min = 0.15;
     editor.zoom_max = 2.5;
+    applySocketScale(editor.zoom);
     canvas.addEventListener('wheel', event => {
       if (event.target.closest('input, textarea, select, .mpick-panel, .ntext')) return;
       event.preventDefault();
@@ -1624,6 +1696,7 @@
       editor.zoom = nextZoom;
       editor.zoom_last_value = nextZoom;
       editor.precanvas.style.transform = `translate(${editor.canvas_x}px, ${editor.canvas_y}px) scale(${nextZoom})`;
+      applySocketScale(nextZoom);
       editor.dispatch('zoom', nextZoom);
     }, { passive: false, capture: true });
   }
@@ -2081,6 +2154,9 @@
     comparisonAnchorId = String(mapping.get(graph.comparison_anchor_id) || '');
     restoreResults(graph.results, mapping);
     refreshRunningControls();
+    // A graph that opens half off-screen looks empty. The canvas has just been
+    // replaced wholesale, so there is no pan of anyone's to preserve.
+    scheduleFitView();
   }
 
   /**
@@ -2247,7 +2323,21 @@
     host.appendChild(document.createElement('hr'));
     host.appendChild(actionButton('Arrange', '▦',
       'Lay the selected nodes out in columns by depth, or the whole graph when nothing is selected.',
-      () => nodePipelines && nodePipelines.arrange(Array.from(nodeGroups?.selected || []))));
+      () => arrangeNodes(Array.from(nodeGroups?.selected || []))));
+    host.appendChild(actionButton('Fit view', '⤢',
+      'Frame the whole composition: zoom and pan so every node is on screen.',
+      () => {
+        if (!document.querySelector('#canvas .drawflow-node')) {
+          toast('There is nothing on the canvas to frame yet.');
+        } else fitView();
+      }));
+  }
+
+  /** Lay the graph out, then frame what the layout produced. */
+  function arrangeNodes(ids) {
+    if (!nodePipelines) return;
+    nodePipelines.arrange(ids);
+    scheduleFitView();
   }
 
   function toolButton(title, icon, help) {
@@ -2306,6 +2396,127 @@
    * at startup, costs nothing and stops the first thing a person sees from
    * being half-hidden; a graph already framed somewhere else is left alone.
    */
+  /**
+   * Where the camera has to sit for a whole graph to be on screen.
+   *
+   * Plain arithmetic over boxes in graph coordinates, so the framing can be
+   * checked without a canvas. The tool strip floats over the top-left of the
+   * stage, so the band it occupies is taken out of the picture rather than
+   * drawn over; and nothing is ever magnified past its natural size, because a
+   * two-node composition blown up to fill a monitor reads as a mistake rather
+   * than as a fit.
+   */
+  function fitTransform(boxes, viewport) {
+    const list = (boxes || []).filter(box =>
+      Number.isFinite(Number(box.x)) && Number.isFinite(Number(box.y)));
+    if (!list.length) return null;
+    const options = viewport || {};
+    const pad = Number(options.padding) > 0 ? Number(options.padding) : 40;
+    const top = Math.max(0, Number(options.top) || 0);
+    const minZoom = Number(options.minZoom) > 0 ? Number(options.minZoom) : 0.15;
+    const maxZoom = Number(options.maxZoom) > 0 ? Number(options.maxZoom) : 1;
+    const left = Math.min(...list.map(box => Number(box.x)));
+    const upper = Math.min(...list.map(box => Number(box.y)));
+    const right = Math.max(...list.map(box => Number(box.x) + (Number(box.width) || 0)));
+    const lower = Math.max(...list.map(box => Number(box.y) + (Number(box.height) || 0)));
+    const width = Math.max(1, right - left);
+    const height = Math.max(1, lower - upper);
+    const roomX = Math.max(1, (Number(options.width) || 0) - pad * 2);
+    const roomY = Math.max(1, (Number(options.height) || 0) - top - pad * 2);
+    const zoom = Math.min(maxZoom, Math.max(minZoom, Math.min(roomX / width, roomY / height)));
+    return {
+      zoom,
+      x: pad + (roomX - width * zoom) / 2 - left * zoom,
+      y: top + pad + (roomY - height * zoom) / 2 - upper * zoom
+    };
+  }
+
+  /** Every node's box in graph coordinates, which is what `offset*` reports. */
+  function nodeBoxes() {
+    const module = editor && editor.drawflow.drawflow[editor.module];
+    const data = (module && module.data) || {};
+    return Object.keys(data).map(id => {
+      const element = nodeElement(id);
+      return {
+        x: Number(data[id].pos_x) || 0,
+        y: Number(data[id].pos_y) || 0,
+        width: (element && element.offsetWidth) || 244,
+        height: (element && element.offsetHeight) || 120
+      };
+    });
+  }
+
+  /** How much of the stage the floating tool strip is sitting on. */
+  function toolStripHeight() {
+    const tools = document.getElementById('palette');
+    if (!tools) return 0;
+    // Measured before the strip has finished wrapping, this comes back as one
+    // icon per row — a 800px band that would push the graph off the bottom of
+    // the screen. Two rows of icons is about 90px, so anything past a quarter
+    // of the window is a measurement, not a toolbar.
+    return Math.min(Math.round(tools.getBoundingClientRect().height) + 20,
+                    Math.round(window.innerHeight / 4) || 140);
+  }
+
+  /**
+   * Put the whole graph on screen, clear of the tools.
+   *
+   * Only ever on demand or when the canvas is replaced wholesale; a view that
+   * re-framed itself would fight whoever is panning it.
+   */
+  function fitView() {
+    if (!editor) return false;
+    const stage = document.getElementById('canvas');
+    if (!stage) return false;
+    const bounds = stage.getBoundingClientRect();
+    // A tab that has never been painted has no layout: every rectangle comes
+    // back as zero, and a camera computed from zeros frames nothing at all.
+    // Opening a graph in a background tab did exactly that.
+    if (bounds.width < 2 || bounds.height < 2) return false;
+    const boxes = nodeBoxes();
+    if (!boxes.length) { offsetViewBelowTools(); return true; }
+    const view = fitTransform(boxes, {
+      width: bounds.width, height: bounds.height, top: toolStripHeight(),
+      padding: 36, minZoom: editor.zoom_min || 0.15, maxZoom: 1
+    });
+    if (!view) return false;
+    editor.canvas_x = view.x;
+    editor.canvas_y = view.y;
+    editor.zoom = view.zoom;
+    editor.zoom_last_value = view.zoom;
+    editor.precanvas.style.transform =
+      `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`;
+    applySocketScale(view.zoom);
+    editor.dispatch('zoom', view.zoom);
+    return true;
+  }
+
+  let fitViewFrame = 0;
+  let fitViewTimer = null;
+  let fitViewTries = 0;
+
+  /**
+   * A node's height is only known a frame after it is built, and a tab that is
+   * not on screen never gets that frame — nor any layout to measure — so a
+   * timer runs the same step, and keeps running it until there is something
+   * to measure. Whichever gets there first cancels the other, and fitting
+   * twice would in any case land in exactly the same place.
+   */
+  function attemptFitView() {
+    clearTimeout(fitViewTimer);
+    fitViewTimer = null;
+    if (fitView() || fitViewTries++ > 20) return;
+    fitViewTimer = setTimeout(attemptFitView, 150);
+  }
+
+  function scheduleFitView() {
+    cancelAnimationFrame(fitViewFrame);
+    clearTimeout(fitViewTimer);
+    fitViewTries = 0;
+    fitViewFrame = requestAnimationFrame(attemptFitView);
+    fitViewTimer = setTimeout(attemptFitView, 140);
+  }
+
   function offsetViewBelowTools() {
     const tools = document.getElementById('palette');
     if (!tools || !editor || editor.canvas_x || editor.canvas_y) return;
@@ -2348,7 +2559,7 @@
       addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200,
       onNodesRemoved:forgetNodes,
       nodeFunctions:id => nodePipelines ? nodePipelines.functionsFor(id) : [],
-      onArrange:ids => nodePipelines && nodePipelines.arrange(ids),
+      onArrange:ids => arrangeNodes(ids),
       onToggleBypass:toggleBypass,
       onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
     document.addEventListener('paste', event => {
@@ -2369,6 +2580,7 @@
     editor.on('nodeRemoved', id => forgetNodes([id]));
     // A range's number is only useful if it is shown next to the slider.
     document.getElementById('canvas').addEventListener('change', event => {
+      if (programmaticParamEvent(event)) return;
       if (event.target.dataset && event.target.dataset.param) {
         event.target.dataset.touched = 'yes';
       }
@@ -2378,11 +2590,12 @@
       }
     });
     document.getElementById('canvas').addEventListener('input', event => {
-      if (event.target.dataset && event.target.dataset.param) {
+      const silent = programmaticParamEvent(event);
+      if (!silent && event.target.dataset && event.target.dataset.param) {
         event.target.dataset.touched = 'yes';
       }
       const node = event.target.closest && event.target.closest('.drawflow-node');
-      if (node && (event.target.dataset?.param || event.target.dataset?.value !== undefined)) {
+      if (!silent && node && (event.target.dataset?.param || event.target.dataset?.value !== undefined)) {
         invalidateNodeAndDownstream(node.id.replace(/^node-/, ''));
       }
       if (event.target.type !== 'range') return;
@@ -2455,7 +2668,7 @@
     } else if ((templates.templates_array || []).length) {
       loadGraph(templates.templates_array[0].graph);
     }
-    offsetViewBelowTools();
+    scheduleFitView();
     if (window.AINodeCompare) nodeCompare = window.AINodeCompare.install({
       canvas:document.getElementById('canvas'), getMeta:meta, getGraph:graphFromCanvas,
       getResult:id => runState.get(String(id)), getAnchorId:() => comparisonAnchorId,

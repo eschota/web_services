@@ -54,7 +54,11 @@ async def api_render_task_status(task_id: str):
             "output_url_string": row.get("output_url_string") or row.get("output_url") or "",
             "error_string": row.get("error_string") or row.get("error") or "",
             "started_at_unix_float": row.get("started_at") or 0,
-            "created_at_unix_float": row.get("created_at") or 0}
+            "created_at_unix_float": row.get("created_at") or 0,
+            # Where in the line this job is, so "queued" can say how long a
+            # wait it is. Zero while it is not waiting: running, or finished.
+            "queue_position_int": int(row.get("queue_position_int") or 0),
+            "queue_length_int": int(row.get("queue_length_int") or 0)}
     import ai_request_cache
     await ai_request_cache.anote_result(task_id, state, result)
     return result

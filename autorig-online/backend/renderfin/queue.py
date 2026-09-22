@@ -286,6 +286,28 @@ def _host_managed_progress(
         "stale_at": stale_at,
     }
 
+def pending_queue_position(tasks, task_id: str) -> Dict[str, int]:
+    """1-based rank of a waiting task among everything else that is waiting.
+
+    Order is by submission time, which is the order the pump dispatches in, so
+    the rank is the number somebody waiting actually wants: not "queued", but
+    seventh of twenty-one. A task that is rendering, done or failed has no
+    place in the queue and gets position 0 — the caller then shows nothing
+    rather than a stale number that only ever counted down to a lie.
+    """
+    waiting = sorted(
+        (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
+        key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
+    )
+    wanted = str(task_id or "")
+    position = 0
+    for index, task in enumerate(waiting):
+        if str(task.id) == wanted:
+            position = index + 1
+            break
+    return {"queue_position_int": position, "queue_length_int": len(waiting)}
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS render_tasks (
     id TEXT PRIMARY KEY,
@@ -567,6 +589,40 @@ class RenderQueue:
 
     def all_tasks(self) -> List[RenderTask]:
         return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
+
+    def queue_position(self, task_id: str) -> Dict[str, int]:
+        """Where this task is in the line, and how long the line is.
+
+        Only a task that is still waiting has a place in it; one already on a
+        card is not queued behind anything.
+        """
+        return pending_queue_position(self._tasks.values(), task_id)
+
+    async def cancel_all_pending(
+        self, *, reason: str = "queue cleared by an administrator"
+    ) -> Dict[str, int]:
+        """Stand down everything that has not started; touch nothing that has.
+
+        A render already on a card has spent real GPU minutes and its output is
+        usually still wanted, so clearing the queue means clearing the *queue*.
+        The list is taken before anything is cancelled, because the pump is
+        free to start one of these while this runs; a task that begins in the
+        meantime simply fails the Pending check and is left alone.
+        """
+        waiting = [task.id for task in self._tasks.values() if task.status == TASK_PENDING]
+        cancelled = 0
+        for task_id in waiting:
+            task = self._tasks.get(task_id)
+            if task is None or task.status != TASK_PENDING:
+                continue
+            if await self.cancel(task_id, reason=reason):
+                cancelled += 1
+        running = sum(1 for task in self._tasks.values() if task.status == TASK_RENDERING)
+        return {
+            "cancelled_int": cancelled,
+            "running_untouched_int": running,
+            "pending_seen_int": len(waiting),
+        }
 
     async def cancel(self, task_id: str, *, reason: str = "cancelled") -> bool:
         """Stop a queued/running task and best-effort interrupt the worker."""

@@ -18,7 +18,7 @@ import time
 from typing import Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 import ai_vision_api
 
@@ -447,15 +447,33 @@ async def _build_snapshot() -> Dict[str, object]:
     }
 
 
+async def _viewer_admin_flag(request) -> Dict[str, bool]:
+    """Whether this browser may stand the queue down.
+
+    Deliberately outside the snapshot: the snapshot is one object shared by
+    every reader for a few seconds, and who is asking is not a property of the
+    farm. Imported late so the fleet stays importable on its own.
+    """
+    if request is None:
+        return {}
+    try:
+        from ai_queue_admin import viewer_is_admin
+
+        return {"admin_bool": await viewer_is_admin(request)}
+    except Exception:
+        logger.exception("Could not resolve the viewer's admin status")
+        return {"admin_bool": False}
+
+
 @router.get("/api/ai/fleet")
-async def api_ai_fleet():
+async def api_ai_fleet(request: Request):
     """Who is up, who is busy, and how long each service has been taking."""
     global _snapshot, _snapshot_at
     if _snapshot and (time.monotonic() - _snapshot_at) < SNAPSHOT_TTL_SECONDS:
-        return _snapshot
+        return {**_snapshot, **await _viewer_admin_flag(request)}
     async with _lock:
         if _snapshot and (time.monotonic() - _snapshot_at) < SNAPSHOT_TTL_SECONDS:
-            return _snapshot
+            return {**_snapshot, **await _viewer_admin_flag(request)}
         try:
             _snapshot = await _build_snapshot()
         except Exception:
@@ -483,4 +501,4 @@ async def api_ai_fleet():
                 "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,
             }
         _snapshot_at = time.monotonic()
-        return _snapshot
+        return {**_snapshot, **await _viewer_admin_flag(request)}

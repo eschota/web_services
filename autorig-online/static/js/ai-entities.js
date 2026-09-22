@@ -194,6 +194,43 @@
   }
 
   /**
+   * Where a job sits in the farm's queue, when the farm can say.
+   *
+   * "Queued" on its own answers none of the question somebody waiting is
+   * actually asking. A rank does: seventh of twenty-one is a wait worth going
+   * away from, second of two is not.
+   */
+  function queuePlaceLabel(position, length) {
+    const place = Number(position) || 0;
+    const total = Number(length) || 0;
+    if (place <= 0) return '';
+    return '#' + place + (total >= place ? ' of ' + total : '');
+  }
+
+  /**
+   * The one control in the strip that changes anything.
+   *
+   * Only an admin is offered it, because it stands down work that belongs to
+   * everybody; the server checks that again and is the one that decides. On
+   * the editor page a signed-out owner is told where the button went, because
+   * "there is no button" and "you are not signed in" look identical.
+   */
+  function queueAdminMarkup(data) {
+    if (data && data.admin_bool === true) {
+      const waiting = Number((data.queue_object || {}).queued_int) || 0;
+      return '<div class="fleet-admin">' +
+        '<button type="button" class="fleet-clear"' + (waiting ? '' : ' disabled') + '>' +
+        'Clear queue' + (waiting ? ' (' + waiting + ')' : '') + '</button>' +
+        '<i>Cancels everything that has not started. Jobs already on a card finish.</i></div>';
+    }
+    if (global.location && global.location.pathname === '/nodes') {
+      return '<div class="fleet-admin"><a href="/auth/login?next=%2Fnodes">' +
+        'Sign in as admin to clear the queue</a></div>';
+    }
+    return '';
+  }
+
+  /**
    * What each kind of work looks like in the strip. A busy dot says which
    * kind of job is on that card, because "something is running" is not worth
    * a colour of its own when six different things can be running.
@@ -301,7 +338,38 @@
           ? '<div class="fleet-key">' + seen.map(id =>
               '<span><i style="background:' + ACTIVITY[id].colour + '"></i>' +
               ACTIVITY[id].title + '</span>').join('') + '</div>'
-          : '');
+          : '') +
+        queueAdminMarkup(data);
+
+      const clear = pop.querySelector('.fleet-clear');
+      if (clear) clear.addEventListener('click', event => {
+        // The strip itself toggles pinning on click; a button inside it means
+        // the button, not the strip.
+        event.stopPropagation();
+        clearQueue(clear).catch(() => {});
+      });
+    }
+
+    async function clearQueue(button) {
+      const waiting = Number(((fleet || {}).queue_object || {}).queued_int) || 0;
+      if (!global.confirm('Cancel every job on the farm that has not started yet' +
+          (waiting ? ' (' + waiting + ' waiting)' : '') +
+          '?\n\nAnything already rendering is left to finish.')) return;
+      button.disabled = true;
+      button.textContent = 'Clearing…';
+      try {
+        const response = await fetch('/api/ai/queue/clear', {method: 'POST'});
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.success_bool === false) {
+          throw new Error(data.detail || data.error_string || ('HTTP ' + response.status));
+        }
+        button.textContent = (Number(data.cancelled_int) || 0) + ' stood down · ' +
+          (Number(data.running_untouched_int) || 0) + ' still rendering';
+      } catch (error) {
+        button.textContent = 'Could not clear: ' + (error.message || error);
+      }
+      // Long enough to read what happened before the strip repaints itself.
+      setTimeout(() => { getFleet(true).then(paint).catch(() => {}); }, 2500);
     }
 
     paint();
@@ -342,14 +410,20 @@
     const eta = host.querySelector('.task-eta');
     const started = Date.now();
     let typical = 0;
+    // How many jobs of this kind the farm is getting through at once, so a
+    // rank in the queue can be turned into a wait rather than a number.
+    let parallel = 1;
     let stopped = false;
     let active = false;
     let worker = '';
     let activeSince = 0;
+    let queuePosition = 0;
+    let queueLength = 0;
 
     getFleet().then(data => {
       const service = (data.services_object || {})[timingService] || {};
       typical = service.median_seconds_float || 0;
+      parallel = Math.max(1, Number(service.running_int) || 0);
     }).catch(() => {});
 
     function tick() {
@@ -357,7 +431,14 @@
       const elapsed = (Date.now() - started) / 1000;
       if (!active) {
         fill.style.width = '3%';
-        eta.textContent = 'Queued' + (worker ? ' · ' + worker : '') + ' · ' + human(elapsed);
+        const place = queuePlaceLabel(queuePosition, queueLength);
+        // With a rank and a measured median, the wait is worth more than the
+        // stopwatch; without one, the stopwatch is all there is to show.
+        const wait = place && typical
+          ? '~' + human(queuePosition * typical / parallel)
+          : human(elapsed);
+        eta.textContent = 'Queued' + (worker ? ' · ' + worker : '') +
+          (place ? ' · ' + place : '') + ' · ' + wait;
         setTimeout(tick, 500);
         return;
       }
@@ -379,6 +460,8 @@
         if (info.active && !active) activeSince = info.startedAt ? info.startedAt * 1000 : Date.now();
         active = !!info.active;
         worker = info.worker || '';
+        queuePosition = Number(info.queuePosition) || 0;
+        queueLength = Number(info.queueLength) || 0;
         setPhase(active ? 'running' : 'queued');
       },
       async pollRender(taskId) {
@@ -386,7 +469,8 @@
         if (!response.ok) return null;
         const data = await response.json();
         this.setState({active: data.status_string === 'rendering', worker: data.node_string,
-          startedAt: data.started_at_unix_float});
+          startedAt: data.started_at_unix_float,
+          queuePosition: data.queue_position_int, queueLength: data.queue_length_int});
         document.dispatchEvent(new CustomEvent('ai-task-status', {detail: data}));
         if (['failed', 'cancelled'].includes(data.status_string)) throw new Error(data.error_string || data.status_string);
         return data;
@@ -491,7 +575,17 @@
                    min-width:210px; padding:12px 14px; border-radius:12px; z-index:40;
                    background:rgba(12,13,26,.97); border:1px solid rgba(255,255,255,.14);
                    opacity:0; pointer-events:none; transition:opacity .12s; text-align:left; }
-      .fleet:hover .fleet-pop, .fleet.pinned .fleet-pop { opacity:1; }
+      .fleet:hover .fleet-pop, .fleet.pinned .fleet-pop { opacity:1; pointer-events:auto; }
+      .fleet-admin { margin-top:10px; padding-top:9px; display:grid; gap:5px;
+                     border-top:1px solid rgba(255,255,255,.12); }
+      .fleet-admin a { font-size:11px; color:#8ab4ff; }
+      .fleet-admin i { font-style:normal; font-size:10.5px; line-height:1.35;
+                       color:var(--text-secondary,#9aa0b5); }
+      .fleet-clear { font:inherit; font-size:11.5px; padding:5px 9px; border-radius:7px;
+                     cursor:pointer; color:#fda4af; background:rgba(251,113,133,.12);
+                     border:1px solid rgba(251,113,133,.45); }
+      .fleet-clear:hover:not(:disabled) { background:rgba(251,113,133,.24); }
+      .fleet-clear:disabled { opacity:.45; cursor:not-allowed; }
       .fleet-dot.busy { outline:1px solid currentColor; outline-offset:2px; animation:fleet-working 1s infinite alternate; }
       @keyframes fleet-working { to { opacity:.45; } }
       .fleet-pop-head { font-size:13px; margin-bottom:8px; }
@@ -813,6 +907,8 @@
 
   global.AIEntities = {
     TEXT: 'text', IMAGE: 'image', VIDEO: 'video', MODEL3D: 'model3d',
+    queuePlaceLabel: queuePlaceLabel,
+    queueAdminMarkup: queueAdminMarkup,
     entity: entity,
     loadCatalogue: loadCatalogue,
     send: send,

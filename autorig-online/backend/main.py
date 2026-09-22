@@ -1557,6 +1557,11 @@ async def require_login_user(
     return user
 
 
+from ai_queue_admin import build_queue_admin_router
+
+app.include_router(build_queue_admin_router(require_admin))
+
+
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
     "face_rig_animation",
     "animals_rig_animation",

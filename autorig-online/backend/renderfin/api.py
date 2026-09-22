@@ -67,10 +67,13 @@ async def health(request: Request) -> Dict[str, Any]:
 
 @router.get("/api-render/tasks/{task_id}")
 async def api_render_task(request: Request, task_id: str) -> Dict[str, Any]:
-    task = _queue(request).get(task_id)
+    queue = _queue(request)
+    task = queue.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="render task not found")
-    return task.public_dict()
+    # A waiting caller is told where in the line it is, not merely that there
+    # is a line. Zero means "not waiting": rendering, finished or failed.
+    return {**task.public_dict(), **queue.queue_position(task_id)}
 
 
 @router.get("/api-render")
@@ -105,6 +108,18 @@ async def api_render_cancel_if_pending(request: Request) -> Dict[str, Any]:
                 "reason": "already started or finished"}
     cancelled = await queue.cancel(task_id, reason="cancelled by the composition")
     return {"cancelled": bool(cancelled), "status": TASK_PENDING}
+
+
+@router.post("/api-render/cancel-pending")
+async def api_render_cancel_pending(request: Request) -> Dict[str, Any]:
+    """Clear the whole queue, leaving every running render alone.
+
+    Deliberately takes no task list: whoever asks for this wants the farm
+    free, and enumerating ids from outside would race the pump. Access is the
+    caller's business - this port is bound to localhost, and the public site
+    only reaches it through an endpoint that requires an administrator.
+    """
+    return await _queue(request).cancel_all_pending()
 
 
 @router.post("/api-render")

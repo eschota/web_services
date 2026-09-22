@@ -276,10 +276,12 @@
     // so defer one frame and let storedMode read the final meta object.
     const onCreated = id => soon(() => prepare(nodeElement(canvas, id)));
     if (typeof editor.on === 'function') editor.on('nodeCreated', onCreated);
-    const scaleSockets = () => canvas.style.setProperty('--socket-zoom-scale',
-      String(Math.max(1, Math.min(1.8, 1 / Math.sqrt(Number(editor.zoom) || 1)))));
-    if (typeof editor.on === 'function') editor.on('zoom', scaleSockets);
-    scaleSockets();
+    // Socket size used to be set here, growing the dots as the camera pulled
+    // back so they stayed clickable. It now has a second job — shrinking them
+    // as the camera closes in, where a full-size dot covers the node's own
+    // text — and one variable cannot have two owners writing it on every zoom.
+    // The editor owns it: `socketScaleForZoom` in ai-nodes.js does both halves,
+    // and it also tells Drawflow to move the wire ends to match.
     refresh();
 
     return {

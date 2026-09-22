@@ -15,17 +15,17 @@
     <link rel="stylesheet" href="/static/css/styles.css">
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
-    <script src="/static/js/ai-entities.js?v=20260922-queue-types"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260922-nodesui5"></script>
-    <script src="/static/js/ai-node-display.js?v=20260922-toolbar2"></script>
+    <script src="/static/js/ai-entities.js?v=20260922-ui6d"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260922-ui6d"></script>
+    <script src="/static/js/ai-node-display.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
     <script src="/static/js/ai-node-compare.js?v=20260922-nodesui5"></script>
     <script src="/static/js/ai-graph-bridge.js?v=20260922-nodesui5"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
-    <script src="/static/js/ai-node-placement.js?v=20260922-toolbar2"></script>
+    <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-nodes.js?v=20260922-enhance1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260922-ui6d"></script>
     <style>
         .ai-page {
             background:
@@ -146,6 +146,14 @@
 
         #canvas { height: 100%; min-height: 620px; background:
             radial-gradient(rgba(255,255,255,.055) 1px, transparent 1px) 0 0 / 22px 22px; }
+        /* Every piece of arithmetic that turns a screen point into a graph
+           point — Drawflow's own zoom and pan, the wheel handler, the tool
+           that drops a node where the cursor is — assumes the canvas scales
+           about its top-left corner. The stylesheet left the origin in the
+           middle, so at any zoom but 1 the two disagreed by half a viewport:
+           a dropped node landed nowhere near the pointer and the wheel zoomed
+           somewhere other than where it was aimed. */
+        #canvas > .drawflow { transform-origin: 0 0; }
 
         /* ---- nodes ------------------------------------------------------- */
         .drawflow .drawflow-node {
@@ -154,15 +162,24 @@
             color: var(--text-primary, #eef); box-shadow: 0 12px 30px rgba(0,0,0,.4);
         }
         .drawflow .drawflow-node.selected { background: rgba(21,22,42,.97); border-color: #38bdf8; }
+        /* A socket is a target for the mouse, not part of the picture, so it
+           keeps a roughly constant size on screen: the editor writes
+           --socket-zoom-scale from the current zoom. What shrinks is the box
+           itself and not a transform — Drawflow anchors a wire at
+           offsetWidth/2, which a transform leaves untouched, so a scaled
+           socket would have its wire ending beside it instead of on it. The
+           row still occupies its 26px at any scale, so nothing else moves. */
         .drawflow .drawflow-node .input, .drawflow .drawflow-node .output {
-            width: 26px; height: 26px; margin-bottom: 0;
+            --socket-size: calc(26px * var(--socket-zoom-scale, 1));
+            width: var(--socket-size); height: var(--socket-size);
+            margin-bottom: calc(26px - var(--socket-size));
+            top: calc(2px + (26px - var(--socket-size)) / 2);
             background: #0f1020; border: 2px solid #7b5cff;
-            transform: scale(var(--socket-zoom-scale, 1)); transform-origin: center;
             cursor: crosshair; z-index: 3;
         }
         .drawflow .drawflow-node > .inputs, .drawflow .drawflow-node > .outputs { transform: translateY(-6.5px); }
-        .drawflow .drawflow-node .input { left: -13px; background: #0f1020; border-color: #38bdf8; }
-        .drawflow .drawflow-node .output { right: -13px; }
+        .drawflow .drawflow-node .input { left: calc(var(--socket-size) / -2); background: #0f1020; border-color: #38bdf8; }
+        .drawflow .drawflow-node .output { right: calc(var(--socket-size) / -2); }
         .drawflow .drawflow-node .input:hover, .drawflow .drawflow-node .output:hover { background:#38bdf8; box-shadow:0 0 0 3px rgba(56,189,248,.2); }
         .drawflow .connection .main-path { stroke: #7b5cff; stroke-width: 2.6px; }
         .drawflow .connection .main-path:hover { stroke: #38bdf8; }
