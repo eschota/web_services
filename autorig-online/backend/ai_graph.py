@@ -219,19 +219,24 @@ def _template_avatar_video_motion() -> Dict[str, object]:
     """A private saved Avatar reenacts the action from a user-owned video.
 
     The source person's identity is deliberately excluded by the Vision
-    instruction. The first frame supplies scene geometry, while the storyboard
-    supplies only count, pose, action and camera motion. Nothing in this built-
+    instruction. The first frame supplies scene geometry and exact frame-zero
+    pose, while the storyboard supplies only chronological motion verbs. Nothing in this built-
     in graph identifies a real Avatar or embeds a private source URL.
     """
     action_prompt = (
-        "Analyze this storyboard only for reusable motion and staging. Return "
-        "one concise generator prompt with the accurate number of visible "
-        "people, their positions, body poses, interactions, direction and "
-        "sequence of actions, camera movement, framing, and scene geometry. "
-        "Do not describe or preserve any source person's identity, face, age, "
-        "hair, skin, body appearance, clothing, wardrobe, accessories, "
-        "ethnicity, or distinctive personal traits. Refer to people only as "
-        "character 1, character 2, and so on. No preamble."
+        "Read the storyboard chronologically. Output ONLY short chronological "
+        "verb phrases separated by semicolons, for example: opens mouth; tilts "
+        "head; raises both hands. Describe actions, pose transitions, movement "
+        "direction, and camera movement only. Do not describe any subject, "
+        "identity, face, hair, body, clothing, appearance, scene, mood, style, "
+        "lighting, or cinematic qualities. Do not write a caption, generator "
+        "prompt, sentence, introduction, or explanation."
+    )
+    first_frame_instruction = (
+        "Replace the principal actor in the scene reference with the saved "
+        "Avatar. Preserve the exact first-frame body pose, head angle, hand and "
+        "finger positions, framing, camera angle, and background. This is frame "
+        "zero: do not anticipate, begin, or advance any later action."
     )
     return {
         "id": "SavedAvatarVideoMotion",
@@ -247,6 +252,9 @@ def _template_avatar_video_motion() -> Dict[str, object]:
                  "entity_type": ai_services.VIDEO, "value": "", "x": 40, "y": 180},
                 {"id": "saved_avatar", "kind": NODE_INPUT,
                  "entity_type": ai_services.AVATAR, "value": "", "x": 40, "y": 500},
+                {"id": "first_frame_instruction", "kind": NODE_INPUT,
+                 "entity_type": ai_services.TEXT, "value": first_frame_instruction,
+                 "x": 680, "y": 40},
                 {"id": "first_frame", "kind": NODE_SERVICE,
                  "service": "video_frame", "x": 350, "y": 40, "params": {}},
                 {"id": "storyboard", "kind": NODE_SERVICE,
@@ -275,7 +283,7 @@ def _template_avatar_video_motion() -> Dict[str, object]:
                  "to": "avatar_scene", "input": "avatar"},
                 {"from": "first_frame", "output": "image_url_string",
                  "to": "avatar_scene", "input": "image"},
-                {"from": "action_vision", "output": "answer_string",
+                {"from": "first_frame_instruction", "output": "value",
                  "to": "avatar_scene", "input": "prompt"},
                 {"from": "avatar_scene", "output": "image_url_string",
                  "to": "motion_video", "input": "image"},

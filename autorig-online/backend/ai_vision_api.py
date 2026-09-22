@@ -1209,6 +1209,7 @@ async def api_video_docs():
     }
 
 
+@router.post("/api/ai/video", include_in_schema=False)
 @router.post("/api/video")
 async def api_video(body: VideoRequest):
     import ai_request_cache

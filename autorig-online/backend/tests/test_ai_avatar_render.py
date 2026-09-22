@@ -182,8 +182,16 @@ class AvatarRenderTests(unittest.TestCase):
                         self.assertNotIn("Mira v2", payload["prompt"])
                         self.assertLess(payload["prompt"].find("character 1"),
                                         payload["prompt"].find("character 2"))
-                        self.assertLess(payload["prompt"].find("character 2"),
-                                        payload["prompt"].find("defines the scene"))
+                        final = payload["prompt"].find("FINAL CANONICAL CHARACTER CONSTRAINTS")
+                        self.assertGreater(final, payload["prompt"].find("Scene instruction:"))
+                        self.assertIn("scene reference controls only pose, composition, camera, and background",
+                                      payload["prompt"])
+                        self.assertIn("Never borrow or blend the source actor's face, hair, skin",
+                                      payload["prompt"])
+                        self.assertIn("Canonical identity: Mira v1", payload["prompt"][final:])
+                        self.assertIn("Canonical face, hair, and appearance: Mira appearance",
+                                      payload["prompt"][final:])
+                        self.assertIn("Canonical wardrobe: Mira wardrobe", payload["prompt"][final:])
 
                         denied = await client.post(
                             "/api/ai/avatar-image", json=body,

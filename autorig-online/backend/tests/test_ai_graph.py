@@ -123,10 +123,20 @@ class AvatarVideoTemplateTests(unittest.TestCase):
         inputs = [node for node in self.graph["nodes"]
                   if node["kind"] == ai_graph.NODE_INPUT]
         self.assertEqual(
-            [(node["id"], node["entity_type"], node["value"]) for node in inputs],
+            [(node["id"], node["entity_type"], node["value"]) for node in inputs[:2]],
             [("source_video", ai_services.VIDEO, ""),
              ("saved_avatar", ai_services.AVATAR, "")],
         )
+        self.assertEqual(len([node for node in inputs
+                              if node["entity_type"] == ai_services.AVATAR]), 1)
+
+    def test_avatar_keyframe_has_a_fixed_frame_zero_instruction(self):
+        instruction = next(node for node in self.graph["nodes"]
+                           if node["id"] == "first_frame_instruction")
+        self.assertEqual(instruction["entity_type"], ai_services.TEXT)
+        for phrase in ("exact first-frame body pose", "head angle",
+                       "hand and finger positions", "do not anticipate"):
+            self.assertIn(phrase, instruction["value"])
 
     def test_scene_action_and_motion_links_are_exact(self):
         expected = {
@@ -135,7 +145,7 @@ class AvatarVideoTemplateTests(unittest.TestCase):
             ("storyboard", "image_url_string", "action_vision", "image"),
             ("saved_avatar", "value", "avatar_scene", "avatar"),
             ("first_frame", "image_url_string", "avatar_scene", "image"),
-            ("action_vision", "answer_string", "avatar_scene", "prompt"),
+            ("first_frame_instruction", "value", "avatar_scene", "prompt"),
             ("avatar_scene", "image_url_string", "motion_video", "image"),
             ("source_video", "value", "motion_video", "control_video_url"),
             ("action_vision", "answer_string", "motion_video", "prompt"),
@@ -144,13 +154,14 @@ class AvatarVideoTemplateTests(unittest.TestCase):
                   for link in self.graph["links"]}
         self.assertEqual(actual, expected)
 
-    def test_vision_prompt_extracts_action_without_source_identity(self):
+    def test_vision_prompt_is_only_chronological_verbs_without_subject_description(self):
         vision = next(node for node in self.graph["nodes"]
                       if node["id"] == "action_vision")
         prompt = vision["params"]["prompt"]
-        for required in ("accurate number", "body poses", "sequence of actions",
-                         "camera movement", "Do not describe or preserve",
-                         "clothing", "distinctive personal traits"):
+        for required in ("ONLY short chronological", "separated by semicolons",
+                         "opens mouth; tilts head; raises both hands",
+                         "pose transitions", "camera movement only",
+                         "Do not describe any subject", "Do not write a caption"):
             self.assertIn(required, prompt)
         self.assertEqual(vision["params"]["model"], "qwen35-9b-uncensored")
 
@@ -294,7 +305,7 @@ class EndpointTests(unittest.TestCase):
     def test_avatar_video_template_id_opens_without_being_saved(self):
         body = self.client.get("/api/ai/graphs/SavedAvatarVideoMotion").json()
         self.assertTrue(body["template_bool"])
-        self.assertEqual(len(body["graph_object"]["nodes"]), 7)
+        self.assertEqual(len(body["graph_object"]["nodes"]), 8)
         self.assertEqual(len(body["graph_object"]["links"]), 9)
 
     def test_saving_returns_a_link_that_opens_the_same_graph(self):

@@ -66,6 +66,11 @@ class ModelCatalogueTests(unittest.TestCase):
 
 
 class EffectiveRenderModelTests(unittest.TestCase):
+    def test_legacy_motion_video_url_reaches_validation_without_404(self):
+        response = _app().post('/api/ai/video', json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['detail']['error_string'], 'image_required')
+
     def _entries(self, include_family_default=True):
         entries = [
             {"kind": "checkpoint", "family": "flux2",

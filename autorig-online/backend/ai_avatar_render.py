@@ -48,7 +48,7 @@ def build_avatar_render_router(owner_dependency: Callable, *, store=None):
             except AvatarStoreError as error:
                 raise HTTPException(error.status_code, detail={"error_string": error.code,
                                       "message_string": error.message}) from None
-        references, instructions, receipts = [], [], []
+        references, instructions, identity_constraints, receipts = [], [], [], []
         for index, profile in enumerate(profiles, 1):
             images = [r for r in profile.references if r.media_type == "image"]
             if not images:
@@ -59,11 +59,11 @@ def build_avatar_render_router(owner_dependency: Callable, *, store=None):
             except ValueError:
                 raise HTTPException(400, detail="Import the Avatar reference into AutoRig before rendering") from None
             references.append(primary.canonical_url)
-            instructions.append(
+            identity_constraints.append(
                 f"Reference image {len(references)} defines character {index}, {profile.display_name}. "
-                f"Preserve this person's facial structure, age, hair and identity. "
-                f"Identity: {profile.identity_prompt}. Appearance: {profile.appearance}. "
-                f"Wardrobe: {profile.wardrobe}."
+                f"Canonical identity: {profile.identity_prompt}. "
+                f"Canonical face, hair, and appearance: {profile.appearance}. "
+                f"Canonical wardrobe: {profile.wardrobe}."
             )
             receipts.append({"avatar_id": profile.avatar_id, "version": profile.version,
                              "reference_sha256": primary.sha256})
@@ -74,10 +74,18 @@ def build_avatar_render_router(owner_dependency: Callable, *, store=None):
                 raise HTTPException(400, detail="Upload the scene reference to AutoRig first") from None
             references.append(body.image_url)
             instructions.append(f"Reference image {len(references)} defines the scene, composition, "
-                                "camera and action. Replace its principal subject(s) with the "
+                                "camera and exact current pose. Replace its principal subject(s) with the "
                                 "specified characters while preserving their separate identities.")
         instructions.append("Create one coherent photograph, not a collage or character sheet. "
                             "Scene instruction: " + body.prompt)
+        instructions.append(
+            "FINAL CANONICAL CHARACTER CONSTRAINTS: the saved Avatar references "
+            "are authoritative for identity, facial structure, hair, appearance, "
+            "and wardrobe. The scene reference controls only pose, composition, "
+            "camera, and background. Never borrow or blend the source actor's "
+            "face, hair, skin, body appearance, clothing, or accessories into a "
+            "saved character. " + " ".join(identity_constraints)
+        )
         payload = {"type": "image", "work_flow": "gen_image_flux2_avatar.json",
                    "prompt": "\n".join(instructions), "reference_image_urls": references,
                    "main_size_width": body.width, "main_size_height": body.height,
