@@ -1263,6 +1263,20 @@ VIDEO_CONTROL_CHECKPOINTS = (VIDEO_CONTROL_CHECKPOINT, "ltx-2.3-22b-distilled-1.
 LTX25_HQ_WORKFLOW = "gen_animation_ltx25_hq_by_url.json"
 
 
+def clamp_video_frames(entry, frames: int) -> int:
+    """Snap a requested length into the checkpoint's trained frame range.
+
+    MiniMax H3 is trained on 124-362 frames (about 5-15 s at 24 fps); 393
+    frames ran 7x slower per step on the 4090 and is outside what the model
+    has seen. The catalogue entry's `frame_range` carries the limits.
+    """
+    limits = (entry or {}).get("frame_range")
+    if not (isinstance(limits, (list, tuple)) and len(limits) == 2):
+        return frames
+    low, high = int(limits[0]), int(limits[1])
+    return max(low, min(high, int(frames)))
+
+
 def _video_quality_workflow(quality: str, family: str,
                             model_workflow: str = "") -> str:
     """Which template a quality label may substitute, if any.
@@ -1867,6 +1881,8 @@ async def _uncached_api_video(body: VideoRequest):
             ai_model_catalogue.known_file(str(payload.get("checkpoint") or ""), "checkpoint")
             or ai_model_catalogue.known_file(str(payload.get("lora") or ""), "lora"))
         video_family = ai_model_defaults.model_family(selected_video_model)
+        payload["frame_count"] = clamp_video_frames(
+            selected_video_model, int(payload.get("frame_count") or 97))
         quality_workflow = _video_quality_workflow(
             quality, video_family, str(payload.get("work_flow") or ""))
         if quality_workflow:

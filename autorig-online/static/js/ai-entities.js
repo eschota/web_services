@@ -739,6 +739,7 @@
       // lists those names in `legacy_files` and the backend renders them on it.
       const entry = state.entries.find(e => e.file === state.value) ||
         state.entries.find(e => (e.legacy_files || []).includes(state.value));
+      if (kind !== 'loras') applyFrameRange(entry);
       if (!entry) {
         thumb.style.backgroundImage = '';
         thumb.className = 'mpick-thumb empty';
@@ -798,6 +799,29 @@
         return 'Waiting for the render computers to download it';
       }
       return '';
+    }
+
+    // A checkpoint may only run a frame range it was trained for (MiniMax H3:
+    // 124-362). The node's Frames control follows the chosen model and gets
+    // its own limits back when another model is chosen.
+    function applyFrameRange(entry) {
+      const scope = host.closest('.drawflow-node, .ai-card');
+      const input = scope && scope.querySelector('[data-param="frame_count"]');
+      if (!input) return;
+      if (!input.dataset.baseMin) {
+        input.dataset.baseMin = input.min;
+        input.dataset.baseMax = input.max;
+      }
+      const range = entry && Array.isArray(entry.frame_range) ? entry.frame_range : null;
+      input.min = range ? String(range[0]) : input.dataset.baseMin;
+      input.max = range ? String(range[1]) : input.dataset.baseMax;
+      const value = Number(input.value);
+      const clamped = Math.min(Number(input.max), Math.max(Number(input.min), value));
+      if (Number.isFinite(value) && clamped !== value) {
+        input.value = String(clamped);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
 
     function choose(value, materialized = false) {

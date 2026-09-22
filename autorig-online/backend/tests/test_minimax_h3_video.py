@@ -83,5 +83,31 @@ class LegacyNameTests(unittest.TestCase):
         self.assertIn("minimax_h3_fl2va_int8_convrot.safetensors", entry.get("legacy_files") or [])
 
 
+class FrameRangeTests(unittest.TestCase):
+    def test_h3_lengths_snap_into_the_trained_range(self):
+        import ai_vision_api
+        entry = {"frame_range": [124, 362]}
+        self.assertEqual(ai_vision_api.clamp_video_frames(entry, 393), 362)
+        self.assertEqual(ai_vision_api.clamp_video_frames(entry, 97), 124)
+        self.assertEqual(ai_vision_api.clamp_video_frames(entry, 150), 150)
+        self.assertEqual(ai_vision_api.clamp_video_frames({}, 393), 393)
+
+    def test_the_catalogue_declares_the_h3_range(self):
+        import json
+        catalogue = BACKEND.parent / "deploy" / "ai-models" / "model_catalogue.json"
+        entry = next(e for e in json.loads(catalogue.read_text(encoding="utf-8"))
+                     if e.get("file") == "minimax_h3_fl2va_pruned_int8_convrot.safetensors")
+        self.assertEqual(entry.get("frame_range"), [124, 362])
+
+    def test_both_ends_survive_renderfins_8k_plus_1_rounding(self):
+        # renderfin rounds to 8k+1 (124 -> 121, 362 -> 361); the H3 node then
+        # snaps up to its 17k+5 grid, which lands back on 124 and 362.
+        from renderfin.templating import _ltxv_frames
+        for requested, expected in ((124, 124), (362, 362)):
+            rounded = _ltxv_frames(requested)
+            snapped = rounded + (5 - rounded % 17) % 17
+            self.assertEqual(snapped, expected)
+
+
 if __name__ == "__main__":
     unittest.main()
