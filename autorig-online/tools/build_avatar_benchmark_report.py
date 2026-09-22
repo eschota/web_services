@@ -29,6 +29,18 @@ REVIEW_LABELS = {
     "rejected": ("Отклонено", "rejected"),
 }
 
+SOURCE_TITLES_RU = {
+    "walk-and-address-camera": "Мужчина говорит и жестикулирует в камеру",
+    "seated-speaking": "Сидящая женщина объясняет руками",
+    "single-hand-gesture": "Жест одной рукой крупным планом",
+    "face-object-interaction": "Женщина пьёт из банки",
+    "rear-view-walk": "Человек уходит, камера поднимается к башне",
+    "two-person-cafe-conversation": "Разговор двух людей в кафе",
+    "two-person-walk": "Двое идут рядом с крупными аксессуарами",
+    "seated-couple-object-action": "Пара за столом разрезает торт",
+    "user-meeting": "Групповая презентация в офисе",
+}
+
 
 def read_json(path: Optional[Path]) -> Dict[str, Any]:
     if not path:
@@ -260,7 +272,10 @@ def case_html(
     defects = review.get("defects_array") or []
     notes = str(review.get("notes_string") or "")
     limitations = str(source.get("sample_limitations_string") or "")
-    start = float(source.get("segment_start_seconds_float") or 0)
+    # source_url points at benchmark/sources/<id>/segment.mp4 (or its uploaded
+    # copy), which is already trimmed. Original-video offsets remain provenance
+    # in the manifest and must not be applied a second time during playback.
+    start = 0.0
     duration = float(source.get("segment_duration_seconds_float") or 4)
     settings = case.get("submitted_request_object") or {}
     video_source = (f'<video controls loop muted playsinline preload="metadata" '
@@ -275,15 +290,15 @@ def case_html(
     )
     return f"""
     <article class="case" id="{esc(case_id)}">
-      <header><div><h2>{esc(source.get('id_string') or case_id)}</h2><code>{esc(case_id)}</code></div>
+      <header><div><h2>{esc(SOURCE_TITLES_RU.get(str(source.get('id_string')), source.get('id_string') or case_id))}</h2><code>{esc(case_id)}</code></div>
       <span class="verdict {esc(status['css'])}">{esc(status['label'])}</span></header>
       <div class="pair" data-pair>
         <section><h3>Исходный фрагмент · {duration:g} с</h3>{video_source}</section>
         <section><h3>Сгенерированное видео</h3>{video_result}</section>
         <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
       </div>
-      <details><summary>Промпт и настройки</summary>
-        <h3>Промпт</h3><p class="prompt">{esc(settings.get('prompt') or source.get('prompt_string') or '')}</p>
+      <details><summary>Provenance: исходный промпт и точные настройки</summary>
+        <h3>Исходный английский промпт</h3><p class="prompt">{esc(settings.get('prompt') or source.get('prompt_string') or '')}</p>
         <h3>Фактический запрос</h3><pre>{json_block(settings)}</pre>
       </details>
       <details><summary>Ручная оценка</summary>{review_details}</details>
@@ -298,6 +313,7 @@ def build_report(
     source_urls: Mapping[str, Any],
     baseline_review: Mapping[str, Any],
     story_receipt: Mapping[str, Any],
+    story_final_receipt: Mapping[str, Any],
     story_review: Mapping[str, Any],
     graph_links: List[str],
 ) -> str:
@@ -315,10 +331,24 @@ def build_report(
                                   review_for(case_id, source_id, case, state_root, baseline_review)))
 
     clips = story_clips(story_receipt)
-    story_url = find_final_story_url(story_review, story_receipt)
+    shot_reviews = story_review.get("shots_object") or story_review.get("shots") or {}
+    for index, clip in enumerate(clips):
+        review = (shot_reviews.get(clip["id"]) or shot_reviews.get(f"shot-{index + 1}")
+                  or shot_reviews.get(str(index + 1)) or {}) if isinstance(shot_reviews, dict) else {}
+        caption = (review.get("caption_ru") or review.get("title_ru") or
+                   review.get("story_caption_ru") or review.get("caption"))
+        if caption:
+            clip["label"] = str(caption)
+    assembled_shots = story_final_receipt.get("shots") or []
+    for index, clip in enumerate(clips):
+        if index < len(assembled_shots) and assembled_shots[index].get("caption"):
+            clip["label"] = str(assembled_shots[index]["caption"])
+    story_url = find_final_story_url(story_review, story_final_receipt, story_receipt)
     story_disposition = str(story_review.get("pipeline_disposition_string") or
                             story_review.get("disposition") or "").lower()
     story_label = REVIEW_LABELS.get(story_disposition, ("Требует проверки", "review"))
+    story_scope = str(story_review.get("evidence_scope_string") or
+                      story_review.get("evidence_scope") or "")
     clip_cards = "".join(
         f'<article class="story-clip"><h3>{esc(item["label"])}</h3>'
         + (f'<video controls loop muted playsinline preload="metadata" src="{esc(item["url"])}"></video>'
@@ -332,6 +362,9 @@ def build_report(
         "Wan template=https://autorig.online/nodes?g=SavedAvatarWanMotion",
         "LTX template=https://autorig.online/nodes?g=SavedAvatarVideoMotion",
     ] + graph_links
+    receipt_graph_url = str(story_final_receipt.get("graph_url_string") or "")
+    if receipt_graph_url.startswith(("http://", "https://")):
+        links.append("Полный граф истории=" + receipt_graph_url)
     graph_html = "".join(
         f'<a href="{esc(item.split("=", 1)[1])}">{esc(item.split("=", 1)[0])}</a>'
         for item in links if "=" in item
@@ -340,7 +373,7 @@ def build_report(
     evidence = manifest.get("evidence_scope_string") or ""
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Avatar Video · производственный review</title>
+<title>Видео: исходники и результаты</title>
 <style>
 :root{{--bg:#0e1020;--card:#17192d;--line:#303452;--text:#edf0ff;--muted:#a6acc5;--cyan:#38bdf8}}
 *{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 15% 0,#20264b 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.5 Inter,Segoe UI,sans-serif}}
@@ -352,15 +385,17 @@ main{{width:min(1320px,calc(100% - 28px));margin:auto;padding:42px 0 80px}}h1{{f
 details{{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}}summary{{cursor:pointer;color:#c8d1ff}}pre,.prompt{{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a0c18;padding:12px;border-radius:9px;color:#cbd5e1}}.limitation{{color:#fcd34d}}.no-media{{display:grid;place-items:center;min-height:180px;background:#0a0c18;color:var(--muted);border-radius:10px;padding:18px;text-align:center}}
 .story-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}}.story-clip{{background:#101326;padding:10px;border-radius:11px}}.graphs{{display:flex;gap:10px;flex-wrap:wrap}}.graphs a,a{{color:#67e8f9}}@media(max-width:760px){{.pair{{grid-template-columns:1fr}}}}
 </style></head><body><main>
-<h1>Avatar Video · производственный review</h1>
-<p class="lead">{esc(evidence)}</p>
-<div class="summary"><span><b>{count}</b><br>baseline-кейсов</span><span><b>{len(clips[:4])}</b><br>story-клипов в receipt</span><span><b>{sum(1 for key in case_order(manifest, cases) if verdict(cases[key], review_for(key, str(cases[key].get('source_id_string') or key.split('--', 1)[0]), cases[key], state_root, baseline_review))["css"] == "review")}</b><br>требуют ручной проверки</span></div>
+<h1>Видео: исходники и результаты</h1>
+<p class="lead">Здесь исходные четырёхсекундные движения стоят рядом с результатами генерации. Наличие видео означает, что рендер завершён; вывод о качестве приводится только для случаев с зафиксированной ручной оценкой. Объём и границы каждой оценки сохранены рядом с её verdict.</p>
+<details class="summary"><summary>Технический scope набора</summary><p>{esc(evidence)}</p></details>
+<div class="summary"><span><b>{count}</b><br>Тестов</span><span><b>{len(clips[:4])}</b><br>Сцен истории</span><span><b>{sum(1 for key in case_order(manifest, cases) if verdict(cases[key], review_for(key, str(cases[key].get('source_id_string') or key.split('--', 1)[0]), cases[key], state_root, baseline_review))["css"] == "review")}</b><br>Ожидают оценки</span></div>
 {''.join(sections)}
-<section class="story"><header><h2>Сквозной сюжет · Maya и Leo</h2><span class="verdict {esc(story_label[1])}">{esc(story_label[0])}</span></header>
+<section class="story"><header><h2>{esc(story_final_receipt.get('title') or story_review.get('title_string') or 'План на двоих')}</h2><span class="verdict {esc(story_label[1])}">{esc(story_label[0])}</span></header>
+{f'<p class="lead"><b>Границы оценки:</b> {esc(story_scope)}</p>' if story_scope else ''}
 <div class="story-grid">{clip_cards or '<p>Story receipt не приложен.</p>'}</div><h3>Итоговый ролик</h3>{final_story}</section>
 <section class="story"><h2>Повторно используемые графы</h2><div class="graphs">{graph_html}</div></section>
 </main><script>
-document.querySelectorAll('[data-pair]').forEach(pair=>{{const button=pair.querySelector('[data-sync]');const source=pair.querySelector('[data-role="source"]');const generated=pair.querySelector('[data-role="generated"]');if(!source||!generated){{button.disabled=true;return}}button.addEventListener('click',async()=>{{const start=Number(source.dataset.start||0);source.currentTime=start;generated.currentTime=0;source.muted=true;generated.muted=true;try{{await Promise.all([source.play(),generated.play()]);button.textContent='❚❚ Пауза'}}catch(e){{button.textContent='Не удалось запустить'}}}});[source,generated].forEach(v=>v.addEventListener('pause',()=>{{if(source.paused&&generated.paused)button.textContent='▶ Синхронно воспроизвести'}}));source.addEventListener('timeupdate',()=>{{const end=Number(source.dataset.start||0)+Number(source.dataset.duration||4);if(source.currentTime>=end){{source.currentTime=Number(source.dataset.start||0);generated.currentTime=0}}}})}});
+document.querySelectorAll('[data-pair]').forEach(pair=>{{const button=pair.querySelector('[data-sync]');const source=pair.querySelector('[data-role="source"]');const generated=pair.querySelector('[data-role="generated"]');if(!source||!generated){{button.disabled=true;return}}const playLabel='▶ Синхронно воспроизвести';let lastSourceTime=0;button.addEventListener('click',async()=>{{if(!source.paused||!generated.paused){{source.pause();generated.pause();button.textContent=playLabel;return}}const start=Number(source.dataset.start||0);source.currentTime=start;generated.currentTime=0;lastSourceTime=start;source.muted=true;generated.muted=true;try{{await Promise.all([source.play(),generated.play()]);button.textContent='❚❚ Пауза'}}catch(e){{source.pause();generated.pause();button.textContent='Не удалось запустить'}}}});[source,generated].forEach(v=>v.addEventListener('pause',()=>{{if(source.paused&&generated.paused)button.textContent=playLabel}}));source.addEventListener('timeupdate',()=>{{const start=Number(source.dataset.start||0);const duration=Number(source.dataset.duration||4);const wrapped=source.currentTime+.2<lastSourceTime;let sourceElapsed=Math.max(0,source.currentTime-start);if(wrapped||sourceElapsed>=duration){{sourceElapsed=0;generated.currentTime=0;if(source.currentTime<start||source.currentTime>=start+duration)source.currentTime=start}}else if(!generated.paused&&Math.abs(generated.currentTime-sourceElapsed)>.12){{generated.currentTime=Math.min(sourceElapsed,Number.isFinite(generated.duration)?generated.duration:sourceElapsed)}}lastSourceTime=source.currentTime}})}});
 </script></body></html>"""
 
 
@@ -375,6 +410,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--upload-timeout", type=int, default=120)
     parser.add_argument("--baseline-review", type=Path)
     parser.add_argument("--story-receipt", type=Path)
+    parser.add_argument("--story-final-receipt", type=Path)
     parser.add_argument("--story-review", type=Path)
     parser.add_argument("--graph-link", action="append", default=[], metavar="LABEL=URL")
     parser.add_argument("--output", type=Path, required=True)
@@ -398,16 +434,17 @@ def main() -> int:
                                              max(5, args.upload_timeout))
     baseline_review = read_json(args.baseline_review)
     story_receipt = read_json(args.story_receipt)
+    story_final_receipt = read_json(args.story_final_receipt)
     story_review = read_json(args.story_review)
     report = build_report(state, manifest, args.state.resolve(), source_urls, baseline_review,
-                          story_receipt, story_review, args.graph_link)
+                          story_receipt, story_final_receipt, story_review, args.graph_link)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(report, encoding="utf-8", newline="\n")
     print(json.dumps({
         "output": str(args.output.resolve()),
         "baseline_cases": len(state.get("cases_object") or {}),
         "story_clips": len(story_clips(story_receipt)),
-        "final_story": bool(find_final_story_url(story_review, story_receipt)),
+        "final_story": bool(find_final_story_url(story_review, story_final_receipt, story_receipt)),
     }, ensure_ascii=False))
     return 0
 
