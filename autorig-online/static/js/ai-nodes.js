@@ -527,7 +527,8 @@
       applySamplingPolicy(id, entry.sampling_policy_object || entry.sampling_policy || {});
       refreshModeOptions(id, entry);
     }
-    commitModelValue(hidden, MULTIREF_CHECKPOINT, true);
+    hidden.value = MULTIREF_CHECKPOINT;
+    hidden.dispatchEvent(new Event('change', {bubbles:true}));
     toast('Several pictures → FLUX.2 klein 4B');
   }
 
