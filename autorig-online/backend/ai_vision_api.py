@@ -73,6 +73,7 @@ async def api_clear_request_cache():
 AI_MODELS: List[Dict[str, object]] = [
     {
         "id": "bonsai2-27b",
+        "graph_agent_supported": True,
         "title": "Bonsai 2 27B",
         "description": (
             "Ternary 27B vision-language model running on the farm's own GPUs. "
@@ -92,6 +93,7 @@ AI_MODELS: List[Dict[str, object]] = [
     },
     {
         "id": "qwen35-9b-uncensored",
+        "graph_agent_supported": False,
         "title": "Qwen3.5 9B Defiant Fable",
         "description": (
             "Uncensored 9B vision-language model on the farm's own GPUs. "
@@ -148,6 +150,9 @@ class VisionRequest(BaseModel):
 
 class TextRequest(BaseModel):
     prompt: str = Field("", description="What to do; may be empty if `input` is given")
+    system_prompt: Optional[str] = Field(
+        None, max_length=4000,
+        description="Standing instructions sent as a separate system-role message")
     # The text to work on, kept apart from the instruction. Sending the two
     # already glued together works, but then a caller who has a document and a
     # standing instruction has to do the gluing, and every caller does it
@@ -301,6 +306,10 @@ async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) ->
             if isinstance(entry, dict) and entry.get("id"):
                 models.append(str(entry["id"]))
     return True, {"load": queued + active_count, "models": models, "loaded": loaded,
+                  "system_prompt_supported": bool(isinstance(catalogue, dict) and
+                                                   catalogue.get("system_prompt_supported") is True),
+                  "system_prompt_models": (catalogue.get("system_prompt_models") or [])
+                                           if isinstance(catalogue, dict) else [],
                   "activities": _activities(payload)}
 
 
@@ -341,7 +350,8 @@ def _activities(payload: Dict[str, object]) -> List[str]:
 
 
 async def _pick_worker(
-    client: httpx.AsyncClient, model_id: Optional[str] = None
+    client: httpx.AsyncClient, model_id: Optional[str] = None,
+    *, require_system_prompt: bool = False,
 ) -> Dict[str, object]:
     """The least loaded reachable node that carries the requested model."""
     workers = _load_ai_workers()
@@ -368,6 +378,14 @@ async def _pick_worker(
                     "message_string": "No farm node answered; try again shortly"},
         )
     wanted = str(model_id or "").strip()
+    if require_system_prompt:
+        reachable = [(worker, info) for worker, info in reachable
+                     if info.get("system_prompt_supported") is True and
+                     (not wanted or wanted in (info.get("system_prompt_models") or []))]
+        if not reachable:
+            raise HTTPException(status_code=503, detail={
+                "error_string": "system_prompt_not_supported",
+                "message_string": f"No available text worker has verified system instructions for '{wanted}'"})
     carrying = [(w, i) for w, i in reachable if not wanted or wanted in (i.get("models") or [])]
     if not carrying:
         # Older nodes publish no catalogue at all; treat that as "unknown, try it"
@@ -783,7 +801,8 @@ async def _run(
 ) -> Dict[str, object]:
     model_id = str(request_model["id"])
     async with httpx.AsyncClient() as client:
-        worker = await _pick_worker(client, model_id)
+        worker = (await _pick_worker(client, model_id, require_system_prompt=True)
+                  if payload.get("system_prompt") else await _pick_worker(client, model_id))
         worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
         task_id = f"{_node_key(worker)}.{worker_task_id}"
         raw: Dict[str, object] = {"status": "Pending"}
@@ -917,6 +936,12 @@ async def api_text2text(request: Request, body: TextRequest):
 async def _uncached_api_text2text(request: Request, body: TextRequest):
     model = _model_entry(body.model)
     payload: Dict[str, object] = {"prompt": _validate_prompt(body.combined_prompt())}
+    system_prompt = str(body.system_prompt or "").strip()
+    if system_prompt:
+        # Keep the same total request bound, but never concatenate the system
+        # instructions into user data on their way to the inference worker.
+        _validate_prompt(system_prompt + "\n" + str(payload["prompt"]))
+        payload["system_prompt"] = system_prompt
     payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
     return await _run(model, "/text2text", payload, body.wait_seconds, "text")
 

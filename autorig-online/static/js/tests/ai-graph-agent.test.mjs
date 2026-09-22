@@ -12,7 +12,7 @@ function load() {
   let source = fs.readFileSync(sourcePath, 'utf8');
   source = source.replace(
     '  window.AIGraphAgent = {install};',
-    '  window.AIGraphAgent = {install}; window.__agentTest = {compactGraph, compactCatalogue, parseProposal, buildAgentInput, modelBudget, reasoningRetryBudget, systemPrompt:SYSTEM_PROMPT};');
+    '  window.AIGraphAgent = {install}; window.__agentTest = {compactGraph, compactCatalogue, parseProposal, buildAgentInput, modelBudget, reasoningRetryBudget, modelRequest, systemPrompt:SYSTEM_PROMPT};');
   const context = {window:{}, URL, URLSearchParams, console};
   vm.runInNewContext(source, context, {filename:sourcePath});
   return context.window.__agentTest;
@@ -47,6 +47,16 @@ test('proposal accepts only the operation JSON contract', () => {
   assert.throws(() => api.parseProposal(JSON.stringify({
     message:'bad', operations:[], javascript:'alert(1)'
   }), graph), /unsupported fields/);
+});
+
+test('standing graph instructions stay in the system role, separate from graph data', () => {
+  const api = load();
+  const input = JSON.stringify({graph:{nodes:[]}, user_request:'Add an image node'});
+  const request = api.modelRequest(api.systemPrompt, input, {id:'bonsai2-27b'}, 2048);
+  assert.equal(request.system_prompt, api.systemPrompt);
+  assert.equal(request.input, input);
+  assert.equal(request.prompt, undefined);
+  assert.equal(request.model, 'bonsai2-27b');
 });
 
 test('proposal rejects invented URLs and unsafe schemes but permits an existing graph URL', () => {
