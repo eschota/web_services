@@ -14,9 +14,9 @@ be conflated:
    model/workflow. A product preset may deliberately differ from an author's
    minimum, but that difference must be identified and validated.
 
-The policy described below is the target policy under review. It must not be
-described as deployed until the corresponding API validation, UI locks, Auto
-sentinels, catalogue data, and runtime behavior are updated and tested.
+Deployed as immutable release `ai-defaults-20260922-l` (source commit
+`cedf26ef`). API policy validation, UI locks, true Auto persistence, catalogue
+metadata, and runtime sampler application are verified. See production evidence below.
 
 ## Guidance, CFG, and embedded guidance
 
@@ -38,9 +38,8 @@ not interchangeable controls.
 
 An unsupported CFG or generic scheduler must be rejected early. It must not be
 returned as an “effective” parameter when the selected native graph cannot
-apply it. UI controls should be locked to the model contract. Work to enforce
-these rules, and to distinguish a true Auto sentinel from numeric zero, is
-pending until the root implementation is updated and verified.
+apply it. UI controls should be locked to the model contract. These rules are enforced before dispatch; the UI represents Auto with zero/empty
+sentinels and resolves their actual values without saving them as manual overrides.
 
 ## Checkpoint policy
 
@@ -51,7 +50,7 @@ pending until the root implementation is updated and verified.
 | FLUX.1 Schnell FP8 checkpoint | Same BFL sources; quantized file page: [AiAF FP8](https://huggingface.co/AiAF/flux1-schnell-fp8.safetensors/blob/main/AiAF/flux1-schnell-fp8.safetensors) | `gen_image_flux1_schnell.json`: Euler, simple, four, `BasicGuider`. | Same as BF16 Schnell. | Correct. Quantization changes memory/quality risk, not the trained sampling schedule. |
 | LTX 2.3 distilled 1.1 | [Lightricks model card](https://huggingface.co/Lightricks/LTX-2.3), [official single-stage distilled workflow](https://github.com/Lightricks/ComfyUI-LTXVideo/blob/master/example_workflows/2.3/LTX-2.3_T2V_I2V_Single_Stage_Distilled_Full.json) | Eight-step manual sigma schedule, CFG 1, Euler ancestral CFG++. | **Fixed 8 steps**, CFG 1, `euler_ancestral_cfg_pp`; native/manual schedule locked. | Correct. Runtime must refuse a different step count rather than invent a new sigma schedule. |
 | LTX 10Eros v1.4 | [author model/version](https://civitai.com/models/2447875?modelVersionId=3109610), [author V5 DMD workflow](https://huggingface.co/TenStrip/LTX2.3-10Eros_Workflows/blob/main/10Eros_10SNodes_I2V_Basic_DMD_V5.json) | Nine-step author sigma schedule, CFG 1, Euler ancestral. | **Fixed 9 steps**, CFG 1, Euler ancestral; manual schedule locked. | Correct after the full model/workflow validation. Example metadata also consistently shows nine steps, Euler A, CFG 1. |
-| CyberRealistic Pony v18 CoreShift | [author model/version](https://civitai.com/models/443821?modelVersionId=2884631), [version API](https://civitai.com/api/v1/model-versions/2884631) | SDXL KSampler, DPM++ 2M SDE, Karras, CFG 5, Clip Skip 2. | **Product Auto 50 steps**, CFG 5, DPM++ 2M SDE/Karras, Clip Skip 2. UI maximum 60. | Author says 30+ steps and publishes no upper bound; all captured v18 examples use 30. Auto 50 is therefore a product quality preset requested toward the upper part of the UI range, not an author preset. It remains pending validation before being claimed as current behavior. |
+| CyberRealistic Pony V18.0 FP16 | [author model/version](https://civitai.com/models/443821?modelVersionId=2884631), [version API](https://civitai.com/api/v1/model-versions/2884631) | SDXL KSampler, DPM++ 2M SDE, Karras, CFG 5, Clip Skip 2. | **Product Auto 50 steps**, CFG 5, DPM++ 2M SDE/Karras, Clip Skip 2. UI maximum 60. | Author says 30+ steps and publishes no upper bound; all captured v18 examples use 30. Auto 50 is therefore a product quality preset requested toward the upper part of the UI range, not an author preset. The production canary below confirms the Auto 50 path. |
 
 For step-distilled models, “choose Auto near the upper recommended bound” means
 four for Schnell/Klein, eight for distilled LTX 2.3, and nine for 10Eros. It
@@ -113,17 +112,15 @@ sigma schedule.
 | IC-LoRA Dual Character | [model/version](https://civitai.com/models/2500098?modelVersionId=2810376) | Author strength range 0.6–1.0; product midpoint 0.8. Sampling remains fixed Auto 8. |
 | EditAnything | [model/version](https://civitai.com/models/2553102?modelVersionId=2869279) | Example CFG 1 and author instruction triggers. Sampling remains fixed Auto 8. This LoRA still requires its compatible edit-conditioning graph; a file being present is insufficient proof. |
 | Better Human Motion v2 LTX23 | [model/version](https://civitai.com/models/2734359?modelVersionId=3087364) | Author weight 0.4–0.8 and 15–30 steps; product midpoint strength 0.6. The 15–30 range belongs to a separate non-distilled path and is suppressed on the fixed distilled workflow. Inherit Auto 8; do not expose 30 as effective until that separate workflow is validated. |
-| Pixar CGI Toon | [model/version](https://civitai.com/models/2536130?modelVersionId=2850271) | Trigger `P1x4r` is required. No numeric sampling or strength recommendation is published. Inherit Auto 8. |
-| DreamLTXV | [model/version](https://civitai.com/models/1264762?modelVersionId=1426312) | Legacy LTXV base, author weight range 0.5–1.0; product midpoint 0.75. Keep its legacy `gen_animation_by_url` schedule. Do not silently route it through LTX 2.3 Auto 8. |
+| Pixar CGI Toon | [model/version](https://civitai.com/models/2536130?modelVersionId=2850271) | Author names `P1x4r` as the main trigger; it is now supplied automatically (author notes the LoRA can also work without it). No numeric sampling or strength recommendation is published. Inherit Auto 8. |
+| DreamLTXV | [model/version](https://civitai.com/models/1264762?modelVersionId=1426312) | Legacy LTXV base, author weight range 0.5–1.0; product midpoint 0.75. Marked obsolete and unusable in the current catalogue. It is not offered on the LTX 2.3 workflow. |
 
-## Required implementation gates
+## Verified implementation rules
 
-These items are policy conclusions, not deployment claims:
-
-- Auto must be a true sentinel distinct from numeric zero.
+- Auto remains the zero/empty sentinel, distinct from resolved numeric recommendations.
 - Schnell and distilled Klein must lock Auto/max steps to 4.
 - Distilled LTX 2.3 must lock steps to 8; 10Eros must lock to 9.
-- Pony Auto 50 is a product preset pending validation; the UI may expose up to
+- Pony Auto 50 is a verified product preset; the UI may expose up to
   60, while clearly showing the author's documented baseline is 30+.
 - Unsupported CFG and scheduler controls must fail validation before enqueue.
   They must not be echoed as effective while being ignored by the graph.
@@ -134,3 +131,32 @@ These items are policy conclusions, not deployment claims:
   labeled compatibility fallbacks. No FLUX Dev download is part of this plan.
 - Every new model/LoRA route still requires worker file eligibility and a real
   canary of the exact workflow before the UI calls it supported.
+
+
+## Production evidence
+
+- Backend: **254 tests passed**, including actual rendered workflow templates
+  for all six usable checkpoints, all five Pony variants, explicit manual
+  steps, fixed native schedules, and independent T-pose refinement.
+- Frontend: **25 tests passed**. Live browser verified Pony Auto remains
+  steps `0`, CFG `0`, sampler/scheduler empty after Save, while labels show
+  50 / 5 / DPM++ 2M SDE / Karras. A copied graph preserved manual 37 steps
+  and user size 832×1216 after reload. Changing to Klein locked 4/1/native
+  while preserving that exact size.
+- All six checkpoint `/api/ai/model-settings` responses matched their declared
+  Auto policies. Invalid Klein CFG/scheduler, Schnell 20 steps, and LTX 30
+  steps returned JSON400 `invalid_sampling_settings` before farm submission.
+- Real public Pony canary `c472204f-e09c-4b75-9e43-a3be2e16d9bc` completed on
+  worker-4090 with steps50, CFG5, DPM++2M SDE, Karras, ClipSkip2. Browser
+  verified the delivered PNG is exactly960×540 and visibly correct.
+  [Result](https://autorig.online/renderfin/render/default_user/c472204f-e09c-4b75-9e43-a3be2e16d9bc.png) ·
+  [Saved Auto graph](https://autorig.online/nodes?g=c4bdeccca6ee).
+- This is a sampling-contract audit and execution proof, not a claim that 50
+  universally improves every prompt or that all LoRA quality is validated.
+
+Legacy mode correction: z_depth/open_pose/t_pose require FLUX.1, not Klein;
+T-pose's separately authored six-step refinement keeps its own DPM++2M/Karras
+settings. Generic Inpaint requires a different Fill model and is unavailable
+in this model catalogue. The obsolete generic video HQ selector was removed
+from the modern checkpoint UI; its old legacy template is not interchangeable
+with LTX2.3.

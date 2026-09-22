@@ -571,6 +571,11 @@
     }
     if (policy.scheduler_mode === 'native') parts.push(policy.scheduler_label || 'Native scheduler');
     const recommended = entry && entry.recommended || {};
+    if (kind === 'checkpoints' && Object.keys(policy).length) {
+      if (policy.cfg_mode !== 'fixed' && recommended.cfg != null) parts.push('CFG ' + recommended.cfg);
+      if (recommended.sampler) parts.push('sampler ' + recommended.sampler);
+      if (policy.scheduler_mode !== 'native' && recommended.scheduler) parts.push('scheduler ' + recommended.scheduler);
+    }
     const compatible = !entry || entry.sampling_recommendations_compatible !== false;
     const visibleRecommended = {};
     const authorSampling = [];

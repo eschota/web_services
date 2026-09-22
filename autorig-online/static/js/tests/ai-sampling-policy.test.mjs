@@ -22,9 +22,9 @@ const entities = sandbox.window.AIEntities;
 test('runtime sampling policy labels Auto separately from a fixed workflow', () => {
   const pony = entities.samplingPresentation({
     sampling_policy: { auto_steps: 50, steps_min: 1, steps_max: 60 },
-    recommended: { steps: 30, cfg: 5 },
+    recommended: { steps: 30, cfg: 5, sampler: 'DPM++ 2M SDE', scheduler: 'karras' },
   }, 'checkpoints');
-  assert.equal(pony.policy_text, 'Auto preset · 50 steps');
+  assert.equal(pony.policy_text, 'Auto preset · 50 steps · CFG 5 · sampler DPM++ 2M SDE · scheduler karras');
   assert.equal(pony.recommended.steps, undefined);
   assert.match(pony.author_sampling_text, /steps 30/);
 

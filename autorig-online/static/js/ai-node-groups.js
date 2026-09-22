@@ -483,7 +483,7 @@
         if (!node) return;
         node.querySelectorAll('[data-param]').forEach(control => {
           const name = String(control.dataset.param || '');
-          if (!name || control.type === 'hidden' || control.type === 'file' || /prompt|model|checkpoint|lora/i.test(name)) return;
+          if (!name || control.disabled || control.type === 'hidden' || control.type === 'file' || /prompt|model|checkpoint|lora/i.test(name)) return;
           if (!['number', 'range', 'select-one'].includes(control.type)) return;
           if (!records.has(name)) records.set(name, []);
           records.get(name).push(control);
@@ -666,14 +666,18 @@
           control = document.createElement('select');
           const blank = document.createElement('option'); blank.value = ''; blank.textContent = 'Mixed / unchanged';
           control.appendChild(blank);
-          Array.from(source.options).filter(option => field.controls.every(target =>
-            target.tagName !== 'SELECT' || Array.from(target.options).some(item => item.value === option.value))).forEach(option => {
+          Array.from(source.options).filter(option => !option.disabled && field.controls.every(target =>
+            target.tagName !== 'SELECT' || Array.from(target.options).some(item => !item.disabled && item.value === option.value))).forEach(option => {
             const copy = document.createElement('option'); copy.value = option.value; copy.textContent = option.textContent;
             control.appendChild(copy);
           });
         } else {
           control = document.createElement('input'); control.type = 'number';
           ['min', 'max', 'step'].forEach(name => { if (source[name] !== '') control[name] = source[name]; });
+          const minima = field.controls.filter(item => item.min !== '').map(item => Number(item.min)).filter(Number.isFinite);
+          const maxima = field.controls.filter(item => item.max !== '').map(item => Number(item.max)).filter(Number.isFinite);
+          if (minima.length) control.min = String(Math.max(...minima));
+          if (maxima.length) control.max = String(Math.min(...maxima));
           if (['width','height'].includes(field.name)) { control.min='256'; control.max='2048'; control.step='1'; }
           control.placeholder = 'Mixed';
         }
@@ -714,6 +718,7 @@
           const value = menu.querySelector('[data-bulk-param="' + CSS.escape(field.name) + '"]').value;
           if (value === '') return;
           field.controls.forEach(control => {
+            if (control.disabled) return;
             const previous = control.value;
             if (control.tagName === 'SELECT' && ['width','height'].includes(field.name) &&
                 !Array.from(control.options).some(option => option.value === value)) {
