@@ -24,6 +24,7 @@
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
     <script src="/static/js/ai-node-placement.js?v=20260922-toolbar2"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
+    <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
     <script src="/static/js/ai-nodes.js?v=20260922-toolbar3"></script>
     <style>
         .ai-page {
@@ -165,6 +166,10 @@
         .drawflow .drawflow-node .input:hover, .drawflow .drawflow-node .output:hover { background:#38bdf8; box-shadow:0 0 0 3px rgba(56,189,248,.2); }
         .drawflow .connection .main-path { stroke: #7b5cff; stroke-width: 2.6px; }
         .drawflow .connection .main-path:hover { stroke: #38bdf8; }
+        /* Wires into a node that is rendering right now run green; wires between finished nodes fade. */
+        .drawflow .connection.wire-running .main-path { stroke: #4ade80; stroke-width: 3.2px; stroke-dasharray: 10 7; animation: wire-flow .9s linear infinite; }
+        .drawflow .connection.wire-done .main-path { stroke: rgba(74,222,128,.55); }
+        @keyframes wire-flow { to { stroke-dashoffset: -17; } }
 
         .nhead {
             height: 46px; box-sizing: border-box; display: flex; align-items: center; gap: 8px;
