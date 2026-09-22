@@ -157,12 +157,20 @@ class WorkflowModelChoiceTests(unittest.TestCase):
         self.assertEqual(entry["strength"], 0.8)
         self.assertTrue(entry["on"])
 
-    def test_a_plain_lora_loader_is_repointed(self):
-        wf = {"7": {"class_type": "LoraLoaderModelOnly",
-                    "inputs": {"lora_name": "old.safetensors", "strength_model": 1.0}}}
-        self.templating.apply_model_choice(wf, lora="new.safetensors", lora_strength=0.5)
-        self.assertEqual(wf["7"]["inputs"]["lora_name"], "new.safetensors")
-        self.assertEqual(wf["7"]["inputs"]["strength_model"], 0.5)
+    def test_a_baked_lora_is_kept_and_the_chosen_one_is_added(self):
+        # H3's template bakes its 4-step turbo LoRA; the user's LoRA must be
+        # chained on, not swapped in (that ran H3 without its turbo weights).
+        wf = {"model": {"class_type": "UNETLoader", "inputs": {"unet_name": "h3.safetensors"}},
+              "turbo": {"class_type": "LoraLoaderModelOnly",
+                        "inputs": {"lora_name": "turbo.safetensors", "strength_model": 1.0,
+                                   "model": ["model", 0]}},
+              "sampler": {"class_type": "KSampler", "inputs": {"model": ["turbo", 0]}}}
+        changed = self.templating.apply_model_choice(wf, lora="new.safetensors", lora_strength=0.5)
+        self.assertEqual(wf["turbo"]["inputs"]["lora_name"], "turbo.safetensors")
+        added = changed["lora"][0]
+        self.assertEqual(wf[added]["inputs"], {"lora_name": "new.safetensors",
+                                               "strength_model": 0.5, "model": ["model", 0]})
+        self.assertEqual(wf["turbo"]["inputs"]["model"], [added, 0])
 
     def test_asking_for_nothing_changes_nothing(self):
         wf = {"4": {"class_type": "CheckpointLoaderSimple",

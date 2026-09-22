@@ -60,10 +60,17 @@ class SdxlStackTests(unittest.TestCase):
 
     def test_legacy_single_lora_still_works_and_combines_with_a_stack(self):
         single = render("gen_image_sdxl.json", lora="style.safetensors", lora_strength=0.5)
-        self.assertEqual(single["autorig_selected_lora"]["inputs"]["model"], ["1", 0])
+        self.assertEqual(single["autorig_lora_1_0"]["inputs"]["lora_name"], "style.safetensors")
+        self.assertEqual(single["autorig_lora_1_0"]["inputs"]["model"], ["1", 0])
+        self.assertEqual(single["5"]["inputs"]["model"], ["autorig_lora_1_0", 0])
         both = render("gen_image_sdxl.json", lora="style.safetensors", lora_strength=0.5, loras=STACK)
-        self.assertEqual(both["autorig_selected_lora"]["inputs"]["model"], ["autorig_lora_1_1", 0])
-        self.assertEqual(both["5"]["inputs"]["model"], ["autorig_selected_lora", 0])
+        names = sorted(n["inputs"]["lora_name"] for n in both.values() if n.get("class_type") == "LoraLoader")
+        self.assertEqual(names, ["add-detail-xl.safetensors", "darth-vader-pxl.safetensors", "style.safetensors"])
+        # One chain from the checkpoint to the sampler, every LoRA on it once.
+        seen, ref = [], both["5"]["inputs"]["model"]
+        while ref[0] != "1":
+            seen.append(both[ref[0]]["inputs"]["lora_name"]); ref = both[ref[0]]["inputs"]["model"]
+        self.assertEqual(sorted(seen), names)
 
     def test_no_stack_changes_nothing(self):
         self.assertEqual(render("gen_image_sdxl.json"), render("gen_image_sdxl.json", loras=[]))
@@ -88,6 +95,20 @@ class UnetStackTests(unittest.TestCase):
     def test_a_workflow_without_a_loader_refuses(self):
         with self.assertRaises(ValueError):
             templating.apply_lora_stack({"1": {"class_type": "SaveImage", "inputs": {}}}, STACK)
+
+
+class BakedDistillLoraTests(unittest.TestCase):
+    def test_h3_keeps_its_turbo_lora_when_a_lora_is_chosen(self):
+        """The owner's VBVR job ran H3 without its 4-step turbo LoRA: the
+        chosen LoRA used to be written over the template's turbo_lora node."""
+        wf = render("gen_video_minimax_h3_by_url.json", lora="VBVR_H3_attn_only.safetensors",
+                    lora_strength=1.0, image_filename="in.png", frames=121)
+        names = [n["inputs"]["lora_name"] for n in wf.values()
+                 if isinstance(n, dict) and str(n.get("class_type", "")).startswith("LoraLoader")]
+        self.assertIn("minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors", names)
+        self.assertIn("VBVR_H3_attn_only.safetensors", names)
+        self.assertEqual(wf["turbo_lora"]["inputs"]["lora_name"],
+                         "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors")
 
 
 class PromptModelTests(unittest.TestCase):

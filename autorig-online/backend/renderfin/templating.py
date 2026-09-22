@@ -244,8 +244,10 @@ def apply_model_choice(
     Done after parsing rather than by substituting a placeholder, because the
     templates were exported from ComfyUI with real file names already in them
     and adding placeholders to every one of them would be a bigger change than
-    this. Returns what was actually swapped so a caller can tell the difference
+    this. Returns what was actually changed so a caller can tell the difference
     between "not asked for" and "asked for but this workflow has no such node".
+    A chosen LoRA is chained onto the model loader (see apply_lora_stack);
+    only rgthree's Power Lora Loader, a slot meant for user LoRAs, is steered.
     """
     changed: Dict[str, list] = {"checkpoint": [], "lora": []}
     if not checkpoint and not lora and lora_strength is None:
@@ -265,14 +267,6 @@ def apply_model_choice(
                 inputs[slot] = checkpoint
                 changed["checkpoint"].append(node_id)
 
-        if lora and class_type in LORA_SLOTS:
-            slot = LORA_SLOTS[class_type]
-            if slot in inputs:
-                inputs[slot] = lora
-                if lora_strength is not None and "strength_model" in inputs:
-                    inputs["strength_model"] = float(lora_strength)
-                changed["lora"].append(node_id)
-
         if class_type == POWER_LORA_LOADER:
             # rgthree keeps each LoRA as its own dict rather than a flat input.
             # Only the first slot is steered; the rest of the stack the workflow
@@ -286,32 +280,14 @@ def apply_model_choice(
                 if lora_strength is not None:
                     entry["strength"] = float(lora_strength)
     if lora and not changed["lora"]:
-        checkpoint_node = next((node_id for node_id, node in workflow.items()
-                                if isinstance(node, dict)
-                                and node.get("class_type") == "CheckpointLoaderSimple"), None)
-        if checkpoint_node is not None:
-            node_id = "autorig_selected_lora"
-            while node_id in workflow:
-                node_id += "_"
-            strength = float(lora_strength) if lora_strength is not None else 1.0
-            workflow[node_id] = {
-                "class_type": "LoraLoader",
-                "inputs": {"lora_name": lora, "strength_model": strength,
-                           "strength_clip": strength, "model": [checkpoint_node, 0],
-                           "clip": [checkpoint_node, 1]},
-            }
-            for target_id, target in workflow.items():
-                if target_id == node_id or not isinstance(target, dict):
-                    continue
-                inputs = target.get("inputs")
-                if not isinstance(inputs, dict):
-                    continue
-                for key, value in list(inputs.items()):
-                    if value == [checkpoint_node, 0]:
-                        inputs[key] = [node_id, 0]
-                    elif value == [checkpoint_node, 1]:
-                        inputs[key] = [node_id, 1]
-            changed["lora"].append(node_id)
+        # The chosen LoRA is added to the model, never swapped into a loader
+        # the template already has: every LoRA baked into today's templates is
+        # a step-distill adapter the fixed schedule depends on (the H3 turbo
+        # 4-step LoRA, Wan's lightx2v). Replacing one ran H3 at four steps
+        # without its turbo weights. It joins the same chain as a stack.
+        strength = float(lora_strength) if lora_strength is not None else 1.0
+        changed["lora"].extend(apply_lora_stack(workflow, [
+            {"name": lora, "strength_model": strength, "strength_clip": strength}]))
     return changed
 
 
