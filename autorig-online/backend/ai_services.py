@@ -408,7 +408,7 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
     ],
     "vision": [
         {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
-         "default": "bonsai2-27b"},
+         "default": "qwen35-9b-uncensored"},
         # Typed on the node when nothing is wired in; a wired question wins.
         {"name": "prompt", "title": "Question", "type": "textarea",
          "default": "Describe this picture.",
@@ -432,7 +432,7 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
     ],
     "text": [
         {"name": "model", "title": "Model", "type": "select", "source": "ai_models",
-         "default": "bonsai2-27b"},
+         "default": "qwen35-9b-uncensored"},
         # The instruction can be typed here instead of needing a node of its
         # own; a wired instruction wins over this one when both are present.
         {"name": "prompt", "title": "Instruction", "type": "textarea", "default": "",

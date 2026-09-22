@@ -257,7 +257,7 @@
     "base": "LTX-2 19B distilled",
     "file": "ltx-2-19b-distilled-fp8.safetensors",
     "id": "ltx2-19b-distilled-fp8",
-    "title": "LTX-2 19B distilled · fast tier (3080 Ti)",
+    "title": "LTX-2 19B distilled",
     "version": "19B distilled FP8",
     "services": [
       "video"
@@ -303,7 +303,7 @@
     "base": "LTXV 13B 0.9.8",
     "file": "ltxv-13b-0.9.8-distilled-fp8.safetensors",
     "id": "ltxv-13b-098-distilled-fp8",
-    "title": "LTXV 13B 0.9.8 · fastest tier (3070 Ti+)",
+    "title": "LTXV 13B 0.9.8 distilled",
     "version": "0.9.8 distilled FP8",
     "services": [
       "video"
