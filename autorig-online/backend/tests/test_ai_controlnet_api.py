@@ -19,6 +19,39 @@ def test_control_channels_route_to_separate_workflow_types():
         assert payload["main_size_height"] == 540
 
 
+def test_control_map_takes_the_source_image_size():
+    payload = ai_controlnet_api.renderfin_payload(
+        "depth", "https://example.test/input.png", (832, 1216))
+    assert (payload["main_size_width"], payload["main_size_height"]) == (832, 1216)
+
+
+def test_probe_image_size_reads_real_pixels_and_clamps():
+    import asyncio
+    from io import BytesIO
+    from PIL import Image
+
+    class FakeResponse:
+        def __init__(self, status, content):
+            self.status_code, self.content = status, content
+
+    class FakeClient:
+        def __init__(self, response):
+            self.response = response
+
+        async def get(self, url, timeout=None, follow_redirects=False):
+            return self.response
+
+    buffer = BytesIO()
+    Image.new("RGB", (3000, 700)).save(buffer, format="PNG")
+    size = asyncio.run(ai_controlnet_api.probe_image_size(
+        FakeClient(FakeResponse(200, buffer.getvalue())), "https://example.test/a.png"))
+    assert size == (2048, 700)
+    assert asyncio.run(ai_controlnet_api.probe_image_size(
+        FakeClient(FakeResponse(404, b"")), "https://example.test/missing.png")) is None
+    assert asyncio.run(ai_controlnet_api.probe_image_size(
+        FakeClient(FakeResponse(200, b"not an image")), "https://example.test/junk.png")) is None
+
+
 def test_control_channel_rejects_unknown_value():
     with pytest.raises(HTTPException) as caught:
         ai_controlnet_api.renderfin_payload("normal", "https://example.test/input.png")

@@ -91,8 +91,14 @@
             font-size: 11.5px; color: #6b7392; text-align: center; padding: 0 10px; overflow-wrap: anywhere;
         }
         .wf-tile .wf-none .big { display: block; font-size: 22px; margin-bottom: 5px; opacity: .8; }
+        .wf-res {
+            position: absolute; top: 6px; left: 6px; z-index: 2; font-size: 10px; font-weight: 600;
+            font-variant-numeric: tabular-nums; padding: 3px 6px; border-radius: 6px; color: #f1f5ff;
+            background: rgba(8,10,22,.76); border: 1px solid rgba(255,255,255,.14);
+        }
+        .wf-res:empty { display: none; }
         .wf-badge {
-            position: absolute; top: 6px; left: 6px; z-index: 2;
+            position: absolute; top: 6px; right: 6px; z-index: 2;
             font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600;
             padding: 3px 6px; border-radius: 6px; color: #cfe9ff;
             background: rgba(8,10,22,.76); border: 1px solid rgba(255,255,255,.14);
@@ -271,7 +277,27 @@
     } else {
       inner = '<div class="wf-quote">' + escapeHtml(value) + '</div>';
     }
-    return '<figure class="wf-tile">' + badge + inner + '</figure>';
+    return '<figure class="wf-tile"><span class="wf-res"></span>' + badge + inner + '</figure>';
+  }
+
+  // The pixel size sits in the top-left corner of every preview once the
+  // browser knows it; it is read from the media itself, never guessed.
+  function annotateResolutions(root) {
+    root.querySelectorAll('.wf-tile').forEach(function (tile) {
+      var label = tile.querySelector('.wf-res');
+      var media = tile.querySelector('img, video');
+      if (!label || !media || label.textContent) { return; }
+      function show(width, height) {
+        if (width > 0 && height > 0) { label.textContent = width + '×' + height; }
+      }
+      if (media.tagName === 'IMG') {
+        if (media.complete && media.naturalWidth) { show(media.naturalWidth, media.naturalHeight); }
+        else { media.addEventListener('load', function () { show(media.naturalWidth, media.naturalHeight); }, { once: true }); }
+      } else {
+        if (media.readyState >= 1 && media.videoWidth) { show(media.videoWidth, media.videoHeight); }
+        else { media.addEventListener('loadedmetadata', function () { show(media.videoWidth, media.videoHeight); }, { once: true }); }
+      }
+    });
   }
 
   function card(row) {
@@ -345,6 +371,7 @@
         var markup = rows.map(card).join('');
         if (append) { grid.insertAdjacentHTML('beforeend', markup); }
         else { grid.innerHTML = markup; }
+        annotateResolutions(grid);
         state.shown += rows.length;
         state.offset += rows.length;
         describe();

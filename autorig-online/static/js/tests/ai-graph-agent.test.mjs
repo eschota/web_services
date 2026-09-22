@@ -234,6 +234,12 @@ test('a ten-variant video request on a chain fits the 4k window with room to ans
   assert.ok(api.modelBudget(QWEN).inputChars > api.modelBudget(BONSAI).inputChars);
 });
 
+test('the standing instructions name the single output socket of input nodes', () => {
+  const api = load();
+  assert.match(api.systemPrompt, /output socket named "value"/);
+  assert.ok(api.systemPrompt.length < 2000);
+});
+
 test('reasoning exhaustion gets one larger budget and never loops', () => {
   const api = load();
   assert.equal(api.reasoningRetryBudget(

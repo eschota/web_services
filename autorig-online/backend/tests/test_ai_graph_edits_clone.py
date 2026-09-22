@@ -156,6 +156,18 @@ class CloneNodesTests(unittest.TestCase):
             ai_graph_edits.apply_operations(graph, operations)
         self.assertEqual(limit.exception.detail["error_string"], "graph_too_large")
 
+    def test_input_node_output_socket_is_normalised_to_value(self):
+        graph = ai_graph.Graph(**_payload())
+        edited, _, _ = ai_graph_edits.apply_operations(graph, [
+            {"op": "add_node", "node": {"id": "see2", "kind": "service", "service": "vision",
+                                        "x": 0, "y": 400, "params": {}}},
+            {"op": "connect", "from": "pic", "output": "image", "to": "see2", "input": "image"},
+            {"op": "disconnect", "from": "pic", "output": "image", "to": "see2", "input": "image"},
+            {"op": "connect", "from": "pic", "output": "image_url_string", "to": "see2", "input": "image"},
+        ])
+        self.assertIn(("pic", "value", "see2", "image"), _links(edited))
+        self.assertEqual(sum(1 for link in edited.links if link.to_node == "see2"), 1)
+
     def test_clones_can_be_edited_and_connected_in_the_same_patch(self):
         graph = ai_graph.Graph(**_payload())
         edited, summary, _ = ai_graph_edits.apply_operations(graph, [

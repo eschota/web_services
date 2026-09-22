@@ -505,8 +505,12 @@ def apply_operations(original: ai_graph.Graph,
             summary["updated_node_ids_array"].append(target.id)
         elif op in {"connect", "disconnect"}:
             source_id, output, target_id, input_name = _link_tuple(raw, index)
-            _node(graph, source_id, index)
+            source = _node(graph, source_id, index)
             _node(graph, target_id, index)
+            if source.kind == ai_graph.NODE_INPUT:
+                # An input node has exactly one output; a model naming it after
+                # the entity ("image", "text") means the same socket.
+                output = "value"
             wanted = (source_id, output, target_id, input_name)
             existing = [(link.from_node, link.output, link.to_node, link.input)
                         for link in graph.links]

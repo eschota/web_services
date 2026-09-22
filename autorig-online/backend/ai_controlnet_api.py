@@ -38,10 +38,44 @@ class ControlNetRequest(BaseModel):
     image_url: Optional[str] = Field(None, description="Source image, public http(s) URL")
     image_base64: Optional[str] = Field(None, description="Source image as base64 or data URL")
     channel: str = Field(..., description="pose, depth or canny")
+    width: Optional[int] = Field(None, ge=64, le=2048,
+        description="Map width; omitted = the source image's own width")
+    height: Optional[int] = Field(None, ge=64, le=2048,
+        description="Map height; omitted = the source image's own height")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
 
 
-def renderfin_payload(channel: str, image_url: str) -> Dict[str, object]:
+# A control map is only useful at the size of the picture it was taken from:
+# the image node that consumes it follows its dimensions, and a 960x540 map of
+# a portrait source used to leave every downstream node at the wrong size.
+DEFAULT_MAP_SIZE = (960, 540)
+MAX_PROBE_BYTES = 24 * 1024 * 1024
+
+
+def _clamp_map_side(value: int) -> int:
+    return max(64, min(2048, int(value)))
+
+
+async def probe_image_size(client: httpx.AsyncClient, url: str) -> Optional[tuple[int, int]]:
+    """(width, height) of a public image, or None when it cannot be read."""
+    try:
+        response = await client.get(url, timeout=20.0, follow_redirects=True)
+        if response.status_code != 200 or len(response.content) > MAX_PROBE_BYTES:
+            return None
+        from io import BytesIO
+        from PIL import Image
+        with Image.open(BytesIO(response.content)) as picture:
+            width, height = picture.size
+    except Exception:
+        logger.info("Could not read the size of %s; using the default map size", url)
+        return None
+    if width < 1 or height < 1:
+        return None
+    return _clamp_map_side(width), _clamp_map_side(height)
+
+
+def renderfin_payload(channel: str, image_url: str,
+                     size: Optional[tuple[int, int]] = None) -> Dict[str, object]:
     channel = str(channel or "").strip().lower()
     if channel not in CHANNEL_TYPES:
         raise HTTPException(status_code=400, detail={
@@ -58,8 +92,8 @@ def renderfin_payload(channel: str, image_url: str) -> Dict[str, object]:
         # Renderfin requires prompt or image; extraction uses only the image.
         "image_url": str(image_url).strip(),
         "type": CHANNEL_TYPES[channel],
-        "main_size_width": 960,
-        "main_size_height": 540,
+        "main_size_width": int((size or DEFAULT_MAP_SIZE)[0]),
+        "main_size_height": int((size or DEFAULT_MAP_SIZE)[1]),
     }
 
 
@@ -88,7 +122,12 @@ async def _uncached_api_controlnet(body: ControlNetRequest):
         source = str(body.image_url or "").strip()
         if not source and body.image_base64:
             source = await _publish_inline_image(client, _decode_inline_image(body.image_base64))
-        payload = renderfin_payload(body.channel, source)
+        size = None
+        if body.width and body.height:
+            size = (_clamp_map_side(body.width), _clamp_map_side(body.height))
+        else:
+            size = await probe_image_size(client, source)
+        payload = renderfin_payload(body.channel, source, size)
         try:
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
