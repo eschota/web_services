@@ -160,6 +160,45 @@ class UpscalePayloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sent[-1][1]["type"], "face_fix_skin")
 
 
+class SourceSizeTests(unittest.IsolatedAsyncioTestCase):
+    """The probe must report real pixels, not a control-map ceiling."""
+
+    class _Response:
+        def __init__(self, content):
+            self.status_code, self.content = 200, content
+
+    class _Client:
+        def __init__(self, content):
+            self.content = content
+
+        async def get(self, url, timeout=None, follow_redirects=False):
+            return SourceSizeTests._Response(self.content)
+
+    @staticmethod
+    def _png(width, height):
+        from io import BytesIO
+
+        from PIL import Image
+        buffer = BytesIO()
+        Image.new("RGB", (width, height)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    async def test_a_tall_picture_keeps_its_real_height(self):
+        # An upscale's own 1664x2432 output feeding a face fix used to be read
+        # as 1664x2048, and the delivery resize then squashed it.
+        client = self._Client(self._png(1664, 2432))
+        self.assertEqual(await ai_enhance_api._source_size(client, "https://x/y.png"),
+                         (1664, 2432))
+
+    async def test_an_unreadable_source_falls_back_rather_than_failing(self):
+        class Broken:
+            async def get(self, *args, **kwargs):
+                raise RuntimeError("no")
+
+        self.assertEqual(await ai_enhance_api._source_size(Broken(), "https://x/y.png"),
+                         ai_enhance_api.DEFAULT_SIZE)
+
+
 class WorkflowTemplateTests(unittest.TestCase):
     """Every template these services name must exist and render to valid JSON."""
 

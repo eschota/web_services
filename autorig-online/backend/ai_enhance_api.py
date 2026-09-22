@@ -46,7 +46,9 @@ RENDERFIN_BASE = os.getenv("RENDERFIN_INTERNAL_URL", "http://127.0.0.1:8210").rs
 # would silently change the aspect ratio.
 MAX_SIDE = 4096
 DEFAULT_SIZE = (960, 540)
-CACHE_NAMESPACE = "image-enhance-20260922-v1"
+# v2: v1 sized the job from a probe that clamped each side to 2048, so a
+# source taller than that was answered at the wrong aspect ratio.
+CACHE_NAMESPACE = "image-enhance-20260922-v2"
 
 # The one ESRGAN file present on every FLUX image box. RealESRGAN_x2/x4 exist
 # on f15 alone, so offering them would make the result depend on which card
@@ -71,11 +73,34 @@ def _fit(width: int, height: int, limit: int = MAX_SIDE) -> Tuple[int, int]:
     return max(64, min(limit, width)), max(64, min(limit, height))
 
 
-async def _source_size(client: httpx.AsyncClient, url: str) -> Tuple[int, int]:
-    from ai_controlnet_api import probe_image_size
+MAX_PROBE_BYTES = 48 * 1024 * 1024
 
-    size = await probe_image_size(client, url)
-    return size or DEFAULT_SIZE
+
+async def _source_size(client: httpx.AsyncClient, url: str) -> Tuple[int, int]:
+    """The picture's true pixel size.
+
+    Deliberately not ai_controlnet_api.probe_image_size, which clamps each
+    side to 2048 on its own: that is the right ceiling for a control map, and
+    the wrong one here. An already-enlarged 1664x2432 picture came back as
+    1664x2048, and the delivery resize then squashed the face fix that
+    followed an upscale in the same chain. Oversize sources are brought inside
+    the ceiling by _fit, which keeps the aspect ratio.
+    """
+    try:
+        response = await client.get(url, timeout=30.0, follow_redirects=True)
+        if response.status_code != 200 or len(response.content) > MAX_PROBE_BYTES:
+            return DEFAULT_SIZE
+        from io import BytesIO
+
+        from PIL import Image
+        with Image.open(BytesIO(response.content)) as picture:
+            width, height = picture.size
+    except Exception:
+        logger.info("Could not read the size of %s; using the default size", url)
+        return DEFAULT_SIZE
+    if width < 1 or height < 1:
+        return DEFAULT_SIZE
+    return int(width), int(height)
 
 
 async def _resolve_source(client: httpx.AsyncClient, image_url: Optional[str],
