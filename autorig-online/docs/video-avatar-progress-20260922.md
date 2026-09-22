@@ -20,17 +20,18 @@ This document records current evidence and open acceptance gates for the full Vi
 
 | Area | Current evidence | Status |
 |---|---|---|
-| Production | Release `P` is current. The tested node UI behavior introduced in `K1` is carried forward. Release `P` adds short-source video normalization and the repaired LTX guide/predecode path; deployment does not turn canary evidence into media-quality acceptance. | active, not full-goal acceptance |
+| Production | Static/report release `S1` is live. Renderfin release `R1` restores the production managed Comfy submit contract while selecting only `type=output` video artifacts. Wan-Animate-2 runs on the live ComfyUI 0.37 worker. | active, scoped acceptances recorded below |
 | Reference inputs | Nine four-second source segments and five-frame contact sheets exist under `.codex_tmp/avatar-video-20260922/reference-review`. Prompts were written from the observed frames. | prepared |
 | Benchmark manifest | Nine sources, one LTX 2.3 first-frame baseline, nine cases; fixed seed `9221001`; 97 frames; 960×540 landscape and 540×960 portrait cases. | validated structurally |
-| Benchmark batch | Six of nine baseline jobs completed. The first three are recorded in [the sampled baseline review](video-baseline-review-20260922.md). Cases 4–6 received an all-97-frame inspection in [the second-batch review](video-baseline-next3-review-20260922.md). Three cases remain prepared but unrendered. | six completed; no normal-speed continuous acceptance |
+| Benchmark batch | All nine baseline jobs completed. The first three retain their 24-frame sampled scope in [the initial review](video-baseline-review-20260922.md). Cases 4–6 and 7–9 received all-97-frame inspections in the [second](video-baseline-next3-review-20260922.md) and [final](video-baseline-final3-review-20260922.md) reviews. | nine completed; scope differs by review batch |
 | Avatar storage | Browser-created profiles persisted across reload: Maya `av_1c0510ac1ba21445555d2ab1@1` and Leo `av_465777c59b4ec81448c591c6@1`. | persistence demonstrated |
 | Avatar canonical images | Maya: `/renderfin/render/default_user/c50e5b12-fe98-4d9a-aee5-197ed4d972b6.png`; Leo: `/renderfin/render/default_user/b9651d0f-7fd7-4e22-82dd-ed87a3820579.png`. | stored inputs, not video acceptance |
 | Multi-reference image identity | Raptor canaries `0a56defa` and `015a049c`, plus 4090 canary `71fc1ec1`, passed qualitative still-image identity inspection. Evidence includes `.codex_tmp/avatar_identity_maya_cafe.png` and related artifacts. | image-only evidence; no video identity pass |
 | LTX controls | Pose, Depth, and Canny each completed a 25-frame execution canary. Pose also completed an exact 97-frame canary. Release `P` normalizes short sources before guide construction, and a repaired predecode/guide owner-graph run completed as task `2f83c954-dcce-4fd9-96fd-450f5d4c7cf5` from graph `6decd42fc85d`. | live executable path; quality remains capability- and scene-specific |
-| Wan Animate | The earlier 25-frame proof exposed tattoo-like driver leakage. A separate Wan-Animate-2 97-frame 960×540 isolated candidate completed in 310.12 seconds without OOM and passed all-frame candidate inspection. Its candidate process was stopped and no live capability was registered. | measured candidate; live promotion pending |
+| Wan Animate | An earlier 25-frame proof showed an unwanted tattoo-like detail; its cause was not established. Wan-Animate-2 then passed isolated 81/97-frame tests, was promoted to the live ComfyUI 0.37 worker, and produced the accepted four-shot story below. | live for the tested scoped workflow; no universal quality claim |
 | UI production | Incremental execution, exact-model display, ETA/status, per-node share, graph duplication, A/B anchor and bounded result history are deployed in `K1`. | deployed; bounded production QA recorded |
 | Review navigation | Production QA exercised output preview/overlay, current-result sharing, graph copy/reload, and saved-history recovery. | working for tested cases; complete benchmark navigation still open |
+| Four-shot story | Source graph `30cb8f68083f` produced four exact 960×540, 24 FPS, 97-frame Wan-Animate-2 clips. All 388 generated frames were inspected; actor assignment and cross-shot wardrobe identity are preserved. Final graph: `a7efd447a3f6`; assembled video: [План на двоих](https://autorig.online/renderfin/render/default_user/maya-leo-plan-for-two-20260922-7869863d.mp4). [Detailed review](lost-note-story-review-20260922.md). | accepted for this bounded story with documented limitations |
 
 ## Known render evidence
 
@@ -100,11 +101,11 @@ acceptance.
 | seated-speaking | null | null | null | null | null | null | null | sampled: strongest baseline candidate; continuous review pending |
 | single-hand-gesture | null | null | null | null | null | null | null | sampled reject for first-frame action fidelity; continuous review still unperformed |
 | face-object-interaction | 4 | 4 | 4 | 5 | 5 | 5 | 4 | all-frame candidate; normal-speed review pending |
-| rear-view-walk | null | null | null | null | null | null | null | pending render/review |
+| rear-view-walk | n/a | n/a | n/a | n/a | 5 | 5 | 4 | candidate for camera/architecture transition only |
 | two-person-cafe-conversation | 3 | 3 | 3 | 5 | 2 | 5 | 4 | rejected for action reenactment |
-| two-person-walk | null | null | null | null | null | null | null | pending render/review |
+| two-person-walk | n/a | n/a | n/a | 5 | 4 | 5 | 4 | candidate for occlusion/prop persistence and broad gait only |
 | seated-couple-object-action | 4 | 4 | 4 | 5 | 5 | 5 | 4 | all-frame candidate; normal-speed review pending |
-| user-meeting | null | null | null | null | null | null | null | pending render/review |
+| user-meeting | n/a | n/a | n/a | n/a | 4 | 5 | 4 | candidate for approximate group staging/strip continuity only |
 
 The review record must include defects and a final disposition of `candidate`, `accepted`, or `rejected`. A pipeline is rejected for the affected capability when any principal face becomes unrecognizable, limbs or digits appear/disappear/fuse, identities swap, principal people count changes, props interpenetrate bodies, the requested action is absent or reverses, camera behavior materially changes, or the scene flickers/melts.
 
@@ -162,7 +163,10 @@ The benchmark comparison is incomplete until at least the viable LTX first-frame
 
 ## Two-avatar story gate
 
-The proposed story is recorded in the reference manifest, but no final story shot has been rendered. Story production may start only after Maya and Leo each pass single-avatar video identity. Dual-character scenes then require additional proof that:
+The proposed story was executed as four short shots and assembled as **План на
+двоих**. The exact shots passed exhaustive frame review and the final montage
+passed production-browser playback. This closes the bounded story artifact,
+while the limitations below remain relevant to any new dual-character scene:
 
 - the two identities do not swap or blend;
 - both faces and bodies remain stable when one actor occludes the other;
@@ -171,16 +175,20 @@ The proposed story is recorded in the reference manifest, but no final story sho
 - each shot has an output MP4 link, source graph link, exact Avatar revisions, source video ID/URL, prompt, controls, seed, and model versions;
 - the final edit is watched continuously as one story, not accepted as isolated still frames.
 
-Current final-story status: **not rendered**.
+Current final-story status: **План на двоих is assembled and accepted for this
+bounded four-shot scope with documented limitations**. The final is 960×540,
+24 FPS, 388 frames and 16.166667 seconds. Production browser playback reported
+`readyState=4`, `loop=true`, `paused=false`, rate 1.0, and the lightbox opened.
+This does not turn the exact result into a universal model-quality claim.
 
-## Remaining work in execution order
+## Remaining publication work
 
-1. Watch the three completed baseline MP4s continuously beside their sources and record formal manual scores without replacing the existing sampled review.
-2. Render and review the remaining three reference cases with bounded concurrency.
-3. Continue the proven LTX Pose, Depth and Canny routes on applicable benchmark cases. Preserve the seated Pose result as a sampled candidate and exclude the current hand Canny result from quality-qualified choices.
-4. Compare the Wan Animate candidate against the applicable LTX results, with explicit checks for driver appearance leakage.
-5. Reject weak pipelines per capability rather than averaging hard failures into a cosmetic score.
-6. Exercise Maya and Leo independently across the accepted motion routes and record versioned Avatar evidence.
-7. Render the dual-avatar interaction shots, verify identity separation, and assemble the coherent story.
-8. Extend production browser QA from the already verified K1 interactions to complete benchmark navigation and longer-running active-task recovery.
-9. Close this ledger only after every manual field has evidence and the complete two-avatar story passes continuous review. The story has not been rendered.
+1. Publish the updated nine-case verdict matrix and План на двоих review in the
+   static report release.
+2. Preserve the exact graph, four shot receipts, final video SHA and scoped
+   limitations in the production report.
+3. Use appropriately licensed clean source media before commercial production;
+   the QwertyStock previews used here are watermarked evaluation references.
+4. Do not generalize the per-case candidates into a universal model claim.
+   Future scenes must reuse the same face, anatomy, action, count and temporal
+   rejection gates.
