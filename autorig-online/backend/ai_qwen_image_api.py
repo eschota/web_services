@@ -47,22 +47,20 @@ MIN_SIDE = 256
 # Qwen-Image's own training resolution, and a size both installed quants are
 # demonstrated at.
 DEFAULT_SIZE = (1024, 1024)
-# The VAE strides by 8 and the transformer patchifies 2x2, so a side that is
-# not a multiple of 16 is padded by the sampler and then cropped back, which
-# moves the framing of an edit by a few pixels.
-SIZE_STEP = 16
 
 CACHE_NAMESPACE = "qwen-image-20260922-v1"
 
 
 def _round_side(value: float) -> int:
-    """Nearest usable side: inside the ceiling and on the 16 px grid.
+    """The requested side, kept whole and inside the ceiling.
 
-    Half rounds up explicitly. Python's round() is half-to-even, which turns
-    1000 into 992 and 1016 into 1024 — a rule nobody reading a size wants to
-    have to remember.
+    Deliberately not snapped to the model's own 16 px grid: renderfin already
+    pads the latent to /32 and scales the result back to exactly the size that
+    was asked for, so snapping here would only move the answer away from the
+    request. It matters for an edit, where the size that was asked for is the
+    source picture's own and any nudge reframes it.
     """
-    side = int((float(value) + SIZE_STEP / 2) // SIZE_STEP) * SIZE_STEP
+    side = int(round(float(value)))
     return max(MIN_SIDE, min(MAX_SIDE, side))
 
 
@@ -197,7 +195,7 @@ async def api_qwen_image_docs():
             "edit": installed_checkpoints("edit"),
         },
         "max_side_int": MAX_SIDE,
-        "size_step_int": SIZE_STEP,
+        "min_side_int": MIN_SIDE,
         "server_time_unix_int": int(time.time()),
     }
 

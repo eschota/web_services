@@ -381,11 +381,16 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         # In edit mode these follow the picture that came in unless they are
         # set: an edit that silently reframed the source to 960x540 was the
         # single most confusing thing about the first version of this node.
+        # The step is one pixel on purpose. The editor's follow-the-input-size
+        # feature writes a source picture's exact dimensions into these two
+        # controls and drops the value when the control rejects it, so a
+        # coarser step left the node at a size half taken from the picture and
+        # half left over from the default.
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,
-         "step": 16, "default": 1024,
+         "step": 1, "default": 1024,
          "help": "Editing follows the source picture unless width and height are both set"},
         {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048,
-         "step": 16, "default": 1024,
+         "step": 1, "default": 1024,
          "help": "Editing follows the source picture unless width and height are both set"},
         {"name": "steps", "title": "Steps", "type": "range", "min": 0, "max": 60,
          "step": 1, "default": 0, "help": "0 leaves the workflow's own 20"},

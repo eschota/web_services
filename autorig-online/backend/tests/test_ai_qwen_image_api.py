@@ -75,13 +75,16 @@ class ModeTests(unittest.TestCase):
 
 
 class SizeTests(unittest.TestCase):
-    def test_sides_land_on_the_sixteen_pixel_grid(self):
-        self.assertEqual(ai_qwen_image_api._round_side(1024), 1024)
-        self.assertEqual(ai_qwen_image_api._round_side(1001), 1008)
-        # Half up, not Python's half-to-even, which sends 1000 down to 992
-        # and 1016 up to 1024 for reasons no size control explains.
-        self.assertEqual(ai_qwen_image_api._round_side(1000), 1008)
-        self.assertEqual(ai_qwen_image_api._round_side(1016), 1024)
+    def test_a_requested_side_is_answered_exactly(self):
+        # Not snapped to the model's 16 px grid: renderfin pads the latent and
+        # scales back to the requested size, so snapping here would only move
+        # the answer away from what was asked for.
+        for side in (1024, 1000, 540, 833):
+            self.assertEqual(ai_qwen_image_api._round_side(side), side)
+
+    def test_a_side_outside_the_range_is_brought_inside_it(self):
+        self.assertEqual(ai_qwen_image_api._round_side(4000), ai_qwen_image_api.MAX_SIDE)
+        self.assertEqual(ai_qwen_image_api._round_side(10), ai_qwen_image_api.MIN_SIDE)
 
     def test_an_oversize_source_keeps_its_aspect_ratio(self):
         width, height = ai_qwen_image_api._fit_source(3000, 4500)
@@ -90,6 +93,9 @@ class SizeTests(unittest.TestCase):
 
     def test_a_source_that_already_fits_is_left_alone(self):
         self.assertEqual(ai_qwen_image_api._fit_source(1024, 768), (1024, 768))
+        # Including one on no particular grid: an edit is delivered at the
+        # size of the picture it was made from, to the pixel.
+        self.assertEqual(ai_qwen_image_api._fit_source(833, 1211), (833, 1211))
 
     def test_a_tiny_source_is_raised_to_the_floor(self):
         self.assertEqual(ai_qwen_image_api._fit_source(8, 8),
@@ -439,6 +445,17 @@ class CatalogueContractTests(unittest.TestCase):
         accepted = set(ai_qwen_image_api.QwenImageRequest.model_fields)
         for param in ai_services.params_for("qwen_image"):
             self.assertIn(param["name"], accepted, param["name"])
+
+    def test_the_size_controls_accept_any_whole_pixel(self):
+        # The editor's follow-the-input-size feature writes a source picture's
+        # exact dimensions into these controls and silently keeps the old
+        # value when the control rejects one. A coarser step left a node at
+        # 960 wide and 1024 high, which is a size nobody chose.
+        sizes = {p["name"]: p for p in ai_services.params_for("qwen_image")}
+        for name in ("width", "height"):
+            self.assertEqual(sizes[name]["step"], 1, name)
+            self.assertEqual(sizes[name]["min"], ai_qwen_image_api.MIN_SIDE, name)
+            self.assertEqual(sizes[name]["max"], ai_qwen_image_api.MAX_SIDE, name)
 
     def test_the_mode_choices_are_the_ones_the_endpoint_knows(self):
         mode = [p for p in ai_services.params_for("qwen_image") if p["name"] == "mode"][0]
