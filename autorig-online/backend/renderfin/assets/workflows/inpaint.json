@@ -544,7 +544,8 @@
       "images": [
         "147",
         0
-      ]
+      ],
+      "create_path_if_missing": false
     },
     "class_type": "SaveEXR",
     "_meta": {

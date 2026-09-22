@@ -90,6 +90,10 @@ class PortedTemplateTests(unittest.TestCase):
         # the inpaint patch works from the cropped picture and its hole
         self.assertIn("inpaint_image", control[0]["inputs"])
         self.assertIn("mask", control[0]["inputs"])
+        # ComfyUI 0.37's SaveEXR made create_path_if_missing a required input;
+        # without it every box refused the whole inpaint graph.
+        exr = nodes(inpaint, "SaveEXR")
+        self.assertEqual([n["inputs"].get("create_path_if_missing") for n in exr], [False])
 
     def test_t_pose_delivers_the_task_owned_full_and_isolated_pair(self):
         workflow = render("t_pose.json", ptype="t_pose")
