@@ -231,6 +231,26 @@ curl -fsS 'http://127.0.0.1:8200/api/gallery?per_page=1&sort=date' >/dev/null
 curl -fsS https://autorig.online/gallery >/dev/null
 ```
 
+## worker-4090 Is This Computer
+
+The render worker `worker-4090` (RTX 4090) is the owner's local workstation,
+the same machine that holds `R:\autorig`. It is not a farm box and has no farm
+SSH port: operate it locally.
+
+* Runtime: ComfyUI 0.37.0 in `R:\autorig\.runtime\onlyrender`, listening on
+  `127.0.0.1:8988`, exposed to the VPS by a reverse tunnel
+  `ssh -R 19409:127.0.0.1:8988 autorig-vps` (renderfin sees it as
+  `http://127.0.0.1:19409`).
+* Controller: `autorig-online/deploy/onlyrender/worker-4090.ps1 -Mode
+  Start|Stop|Status` (delegates to `worker-4090-v037.ps1` while
+  `WAN2_PROMOTED` exists; `-Legacy` operates the old 0.21.1 runtime).
+* Owner's desktop shortcuts: `worker-4090 START.bat` and
+  `worker-4090 STOP.bat` on `C:\Users\user\Desktop`, calling the same
+  controller.
+* The GPU belongs to the owner first. After a reboot the worker is offline
+  until started; `Stop` marks it offline, drains accepted renders, then frees
+  the GPU. Do not start it without the owner's go-ahead.
+
 ## Other Custom VPS Services
 
 The same VPS also hosts these custom services:
