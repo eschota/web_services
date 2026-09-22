@@ -6,13 +6,30 @@
   "original_pid": 12432,
   "system_role_pid": 21016,
   "capability_allowlist_pid": 8712,
+  "unlimited_output_pid": 7132,
   "live_capability": {
     "system_prompt_supported": true,
     "system_prompt_models": ["bonsai2-27b"],
+    "unlimited_output_supported": true,
     "models": {
       "bonsai2-27b": true,
       "qwen35-9b-uncensored": false
+    },
+    "unlimited_output_models": {
+      "bonsai2-27b": true,
+      "qwen35-9b-uncensored": true
     }
+  },
+  "unlimited_output_canary": {
+    "task_id": "9dd717c8-d678-483f-b9f5-6f9f3adb6a17",
+    "model": "bonsai2-27b",
+    "status": "Completed",
+    "expected": "UNLIMITED_OK",
+    "actual": "UNLIMITED_OK",
+    "requested_max_tokens": -1,
+    "completion_tokens": 39,
+    "total_tokens": 105,
+    "proof": "The completed worker status returned model_usage.requested_max_tokens=-1 after llama inference."
   },
   "legacy_canary": {
     "task_id": "5e74ebc6-d088-40be-938a-8a9f7bcec8d0",

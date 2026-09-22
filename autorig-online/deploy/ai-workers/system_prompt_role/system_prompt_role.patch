@@ -4,10 +4,32 @@
              "loaded_model": self.loaded_model_id(),
 +            "system_prompt_supported": True,
 +            "system_prompt_models": ["bonsai2-27b"],
++            "unlimited_output_supported": True,
              "base_url": self.config.base_url,
 @@ each model status
                      "context_tokens": int(entry.context_tokens),
 +                    "system_prompt_supported": entry.id == "bonsai2-27b",
++                    "unlimited_output_supported": True,
+@@ validate_max_tokens
++    if value == -1:
++        return -1
+     if value < 1:
+-        raise BonsaiRequestError("max_output_tokens must be positive")
++        raise BonsaiRequestError("max_output_tokens must be positive or -1 for unlimited")
+@@ request body
++        requested_max_tokens = (
++            self.config.max_output_tokens if max_output_tokens is None
++            else int(max_output_tokens)
++        )
+         body = {
+-            "max_tokens": int(max_output_tokens or self.config.max_output_tokens),
++            "max_tokens": requested_max_tokens,
+@@ response usage
+-        usage = payload.get("usage")
+-        return answer, reasoning, usage if isinstance(usage, dict) else {}
++        usage = dict(payload.get("usage") or {})
++        usage["requested_max_tokens"] = requested_max_tokens
++        return answer, reasoning, usage
 @@ BonsaiAdapter.run_completion
          prompt: str,
          *,

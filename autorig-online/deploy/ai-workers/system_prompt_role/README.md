@@ -24,6 +24,13 @@ so routing must not present it as a verified system-prompt model.
 The same fact is available without scanning model rows as
 `ai_models.system_prompt_models: ["bonsai2-27b"]`.
 
+The same patch supports an explicit `max_output_tokens: -1` sentinel. Omitted
+values keep each model's legacy default; positive values keep their existing
+per-model ceiling. Only `-1` bypasses that ceiling and is forwarded unchanged as
+llama `max_tokens: -1`, so context length and EOS remain the real bounds. Both
+installed model rows advertise `unlimited_output_supported: true`, and completed
+task usage records `requested_max_tokens` for canary evidence.
+
 Audited f13 source hashes before the patch:
 
 - `bonsai_adapter.py`: `481e1ca9be4838b2c3fd920d61a021b8e0635bd1828ef1ec6b1e84d775d783b2`

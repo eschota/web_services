@@ -36,6 +36,27 @@ def patch_bonsai(source: str) -> str:
             '            "system_prompt_models": ["bonsai2-27b"],\n'
             '            "base_url": self.config.base_url,',
             "verified system prompt model list")
+    if '"unlimited_output_supported": True' not in source:
+        source = replace_once(source,
+            '            "system_prompt_models": ["bonsai2-27b"],\n            "base_url": self.config.base_url,',
+            '            "system_prompt_models": ["bonsai2-27b"],\n'
+            '            "unlimited_output_supported": True,\n'
+            '            "base_url": self.config.base_url,',
+            "unlimited output node capability")
+    if '"unlimited_output_supported": True,' not in source.split('"models": [', 1)[-1]:
+        source = replace_once(source,
+            '                    "system_prompt_supported": entry.id == "bonsai2-27b",',
+            '                    "system_prompt_supported": entry.id == "bonsai2-27b",\n'
+            '                    "unlimited_output_supported": True,',
+            "per-model unlimited output capability")
+    if 'if value == -1:' not in source:
+        source = replace_once(source,
+            '    if value < 1:\n        raise BonsaiRequestError("max_output_tokens must be positive")\n'
+            '    return min(value, int(ceiling))',
+            '    if value == -1:\n        return -1\n'
+            '    if value < 1:\n        raise BonsaiRequestError("max_output_tokens must be positive or -1 for unlimited")\n'
+            '    return min(value, int(ceiling))',
+            "unlimited max token sentinel")
     if '"system_prompt_supported": entry.id == "bonsai2-27b"' not in source:
         source = replace_once(source,
             '                    "context_tokens": int(entry.context_tokens),',
@@ -57,11 +78,30 @@ def patch_bonsai(source: str) -> str:
             "        messages.append({\"role\": \"user\", \"content\": content})\n"
             "        body = {\n            \"messages\": messages,",
             "Bonsai request messages")
+    if 'requested_max_tokens = (' not in source:
+        source = replace_once(source,
+            '        body = {\n            "messages": messages,\n'
+            '            "max_tokens": int(max_output_tokens or self.config.max_output_tokens),',
+            '        requested_max_tokens = (\n'
+            '            self.config.max_output_tokens if max_output_tokens is None\n'
+            '            else int(max_output_tokens)\n'
+            '        )\n'
+            '        body = {\n            "messages": messages,\n'
+            '            "max_tokens": requested_max_tokens,',
+            "exact llama max_tokens forwarding")
+        source = replace_once(source,
+            '        usage = payload.get("usage")\n        return answer, reasoning, usage if isinstance(usage, dict) else {}',
+            '        usage = dict(payload.get("usage") or {})\n'
+            '        usage["requested_max_tokens"] = requested_max_tokens\n'
+            '        return answer, reasoning, usage',
+            "max token inference evidence")
     return source
 
 
 def patch_server(source: str) -> str:
-    if "system_prompt=task.system_prompt" in source and 'payload.pop("system_prompt", None)' in source:
+    if ("system_prompt=task.system_prompt" in source
+            and 'payload.pop("system_prompt", None)' in source
+            and "validate_max_tokens" in source):
         return source
     source = replace_once(source,
         "    MAX_IMAGE_BYTES as BONSAI_MAX_IMAGE_BYTES,\n    BonsaiAdapter,",

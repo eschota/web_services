@@ -27,6 +27,11 @@ def main() -> int:
     require(bonsai, '"system_prompt_supported": True', "advertised capability")
     require(bonsai, '"system_prompt_models": ["bonsai2-27b"]',
             "verified model allowlist")
+    require(bonsai, '"unlimited_output_supported": True', "unlimited output capability")
+    require(bonsai, "if value == -1:", "unlimited sentinel validation")
+    require(bonsai, '"max_tokens": requested_max_tokens', "exact llama request value")
+    require(bonsai, 'usage["requested_max_tokens"] = requested_max_tokens',
+            "inference evidence")
     require(bonsai, '"system_prompt_supported": entry.id == "bonsai2-27b"',
             "honest per-model capability")
     require(bonsai, '{"role": "system", "content": clean_system_prompt}', "system role")
