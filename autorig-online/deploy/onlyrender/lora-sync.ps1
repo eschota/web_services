@@ -37,6 +37,20 @@ function Log($m) {
 
 New-Item -ItemType Directory -Force $Home_ | Out-Null
 
+# Task Scheduler's default priority 7 gives the task low I/O and memory
+# priority: on Raptor hashing a 2 GB LoRA crawled for minutes while the same
+# hash took 3 s interactively. Priority 5 is an ordinary process.
+function SetNormalPriority {
+    try {
+        $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        if ($t.Settings.Priority -ne 5) {
+            $t.Settings.Priority = 5
+            $t | Set-ScheduledTask | Out-Null
+            Log 'task priority set to 5 (takes effect next run)'
+        }
+    } catch { Log ('could not set task priority: ' + $_.Exception.Message) }
+}
+
 if ($Install) {
     $self = Join-Path $Home_ 'lora-sync.ps1'
     if ($MyInvocation.MyCommand.Path -and ($MyInvocation.MyCommand.Path -ne $self)) {
@@ -49,6 +63,7 @@ if ($Install) {
     if (Test-Path $key) { icacls $key /inheritance:r /grant:r 'SYSTEM:F' '*S-1-5-32-544:F' | Out-Null }
     $tr = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $self + '"'
     schtasks /create /tn $TaskName /tr $tr /sc minute /mo 5 /ru SYSTEM /rl HIGHEST /f | Out-Null
+    SetNormalPriority
     Log ('installed scheduled task ' + $TaskName)
     schtasks /run /tn $TaskName | Out-Null
     exit 0
@@ -67,6 +82,7 @@ try {
         if (Test-Path $boxFile) { $Box = (Get-Content $boxFile -TotalCount 1).Trim() }
     }
     if (-not $Box) { Log 'no box name (box.txt)'; exit 1 }
+    SetNormalPriority
     $keyFile = Join-Path $Home_ 'sync.key'
     if (-not (Test-Path $keyFile)) { Log 'no sync.key'; exit 1 }
     $Key = (Get-Content $keyFile -TotalCount 1).Trim()
