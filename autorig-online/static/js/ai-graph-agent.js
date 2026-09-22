@@ -34,7 +34,7 @@
 Operations (use only ids, services, parameters, socket names and model files that appear in the input):
 {"op":"add_node","node":{"id":"new id","kind":"service","service":"<service>","x":0,"y":0,"params":{}}}
 {"op":"add_node","node":{"id":"new id","kind":"input","entity_type":"text","value":"text","x":0,"y":0}}
-{"op":"clone_nodes","ids":["id"],"variants":[{"<id>":{"param":value}}]} copies the listed nodes once per variant, keeping links between them and their incoming links; each variant overrides parameters per source id ({} = plain copy). Use it for "N copies/variants of ..." requests.
+{"op":"clone_nodes","ids":["id"],"variants":[{"<id>":{"param":value}}]} copies the listed nodes once per variant, keeping links between them and their incoming links; each variant overrides parameters per source id ({} = plain copy). Use it for "N copies/variants of ..." requests; keep overrides compact (a prompt under 45 words).
 {"op":"update_params","id":"id","values":{"param":value}}
 {"op":"set_input","id":"input id","value":"text"}
 {"op":"connect","from":"id","output":"socket","to":"id","input":"socket"} / {"op":"disconnect",...same fields}
@@ -261,6 +261,27 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
     return urls;
   }
 
+  /** Append the closing brackets a cut-off answer lacks, if the last value is whole. */
+  function closeUnbalanced(text) {
+    if (!/[}\]]\s*$/.test(text)) return text;
+    const stack = [];
+    let inString = false;
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      if (inString) {
+        if (char === '\\') index += 1;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === '{') stack.push('}');
+      else if (char === '[') stack.push(']');
+      else if (char === '}' || char === ']') stack.pop();
+    }
+    if (inString || !stack.length || stack.length > 4) return text;
+    return text + stack.reverse().join('');
+  }
+
   function parseProposal(text, graph) {
     let candidate = String(text || '').trim();
     const fence = candidate.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -274,8 +295,13 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
     let value;
     try { value = JSON.parse(candidate); }
     catch (firstError) {
-      // Small models leave trailing commas; that alone should not cost a retry.
+      // Small models leave trailing commas, or stop a bracket or two short of
+      // the end; neither alone should cost a whole retry.
       try { value = JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')); } catch (error) { value = undefined; }
+      if (value === undefined) {
+        const closed = closeUnbalanced(candidate.replace(/,\s*$/, ''));
+        if (closed !== candidate) { try { value = JSON.parse(closed); } catch (error) { value = undefined; } }
+      }
     }
     if (value === undefined) {
       const failure = new Error('The model did not return valid JSON');

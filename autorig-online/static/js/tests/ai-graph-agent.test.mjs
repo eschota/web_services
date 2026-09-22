@@ -259,6 +259,18 @@ test('Russian requests select services by keyword and an empty graph gets the co
   assert.deepEqual(Object.keys(vague.catalogue.services).sort(), ['image', 'text', 'video', 'vision']);
 });
 
+test('an answer that stops a bracket or two short is closed when its last value is whole', () => {
+  const api = load();
+  const graph = {nodes:[{id:'a', kind:'input', entity_type:'text', value:'x'}], links:[]};
+  const cut = '{"message":"ok","operations":[{"op":"clone_nodes","ids":["a"],"variants":[{"a":{"value":"v1"}},{"a":{"value":"v2"}}]}';
+  const parsed = api.parseProposal(cut, graph);
+  assert.equal(parsed.operations[0].variants.length, 2);
+  let failure = null;
+  try { api.parseProposal('{"message":"ok","operations":[{"op":"clone_nodes","ids":["a"],"variants":[{"a":{"value":"v', graph); }
+  catch (error) { failure = error; }
+  assert.ok(failure && failure.truncated);
+});
+
 test('the standing instructions name the single output socket of input nodes', () => {
   const api = load();
   assert.match(api.systemPrompt, /output socket named "value"/);
