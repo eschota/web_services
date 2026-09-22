@@ -1,4 +1,5 @@
 import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -111,6 +112,19 @@ class _Env:
             patch.object(config, "HUNYUAN_WORKERS_FILE", root / "no-workers.json"),
             patch.object(config, "HUNYUAN_WORKERS", []),
             patch.object(config, "HUNYUAN_API_TOKEN", ""),
+            # The converter path serialises admission on a cross-process file
+            # lock that the live backend's scheduler also takes and holds for the
+            # whole of a farm probe. A test queued behind production for those
+            # seconds times out in _wait_stage: give the tests a lock of their own.
+            patch.dict(
+                os.environ,
+                {"AUTORIG_FLEET_ADMISSION_LOCK": str(root / "fleet-admission.lock")},
+            ),
+            # The ordinary-queue verdict is cached for a few seconds and comes from
+            # whatever queue database sits at the default path; neither the cache
+            # nor a live database may carry over from one test to the next.
+            patch.object(config, "AUTORIG_QUEUE_DB_PATH", root / "no-autorig-queue.db"),
+            patch.object(hunyuan_client, "_ORDINARY_QUEUE_CACHE", (0.0, False)),
         ]
 
     def __enter__(self):
