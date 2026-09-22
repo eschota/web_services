@@ -218,6 +218,10 @@ CHECKPOINT_SLOTS = {
     "CheckpointLoaderSimple": "ckpt_name",
     "UNETLoader": "unet_name",
     "ImageOnlyCheckpointLoader": "ckpt_name",
+    # ComfyUI-GGUF keeps its own loader rather than teaching UNETLoader about
+    # .gguf, so a quantised model chosen on the node reaches nothing unless
+    # that loader is named here too.
+    "UnetLoaderGGUF": "unet_name",
 }
 LORA_SLOTS = {
     "LoraLoaderModelOnly": "lora_name",

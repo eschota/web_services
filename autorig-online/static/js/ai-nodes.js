@@ -1274,6 +1274,9 @@
     upscale: { api: '/api/upscale', finish: pollForFile, field: 'image_url_string', type: 'image' },
     detail_enhance: { api: '/api/detail', finish: pollForFile, field: 'image_url_string', type: 'image' },
     face_fix: { api: '/api/facefix', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    // Draws or rewrites depending on whether a picture is wired in; the
+    // endpoint reads the wiring, so the runner is the ordinary picture shape.
+    qwen_image: { api: '/api/qwen-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
     '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
   };
   ['pose', 'depth', 'canny'].forEach(channel => {
@@ -2531,7 +2534,8 @@
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
-    upscale: '🔎', detail_enhance: '✨', face_fix: '🙂', upscale_video: '📺'
+    upscale: '🔎', detail_enhance: '✨', face_fix: '🙂', upscale_video: '📺',
+    qwen_image: '🖌️'
   };
 
   function toolIcon(key, fallbackType) {

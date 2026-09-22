@@ -900,5 +900,99 @@
       ]
     },
     "sampling_audit_at": "2026-09-22"
+  },
+  {
+    "kind": "checkpoint",
+    "family": "qwen_image",
+    "base": "Qwen-Image 2512",
+    "file": "qwen-image-2512-Q3_K_S.gguf",
+    "id": "qwen-image-2512-Q3_K_S.gguf",
+    "title": "Qwen-Image 2512 - Q3_K_S",
+    "version": "GGUF Q3_K_S",
+    "services": [
+      "qwen_image"
+    ],
+    "usable": true,
+    "qwen_image_modes": [
+      "generate"
+    ],
+    "default_for_families": [
+      "qwen_image"
+    ],
+    "workflow": "qwen_image_generate.json",
+    "recommended": {
+      "steps": 20,
+      "cfg": 2.5,
+      "sampler": "euler",
+      "scheduler": "simple"
+    },
+    "recommended_from": "ComfyUI's own Qwen-Image template: 20 steps, CFG 2.5, Euler with the simple scheduler and ModelSamplingAuraFlow shift 3.1.",
+    "recommendation_kind": "author_reference_implementation",
+    "page": "https://huggingface.co/unsloth/Qwen-Image-2512-GGUF",
+    "size_mb": 8796.7,
+    "preview": "",
+    "triggers": [],
+    "installed_on": [
+      "f5",
+      "f15"
+    ],
+    "notes": "A 20B MMDiT at three-bit weights: 9.2 GB, which streams on a 3070 Ti with the text encoder resident, so two boxes render at once.",
+    "sampling_audit_at": "2026-09-22"
+  },
+  {
+    "kind": "checkpoint",
+    "family": "qwen_image",
+    "base": "Qwen-Image-Edit 2511",
+    "file": "qwen-image-edit-2511-Q3_K_S.gguf",
+    "id": "qwen-image-edit-2511-Q3_K_S.gguf",
+    "title": "Qwen-Image-Edit 2511 - Q3_K_S",
+    "version": "GGUF Q3_K_S",
+    "services": [
+      "qwen_image"
+    ],
+    "usable": true,
+    "qwen_image_modes": [
+      "edit"
+    ],
+    "workflow": "qwen_image_edit.json",
+    "recommended": {
+      "steps": 20,
+      "cfg": 2.5,
+      "sampler": "euler",
+      "scheduler": "simple"
+    },
+    "recommended_from": "ComfyUI's own Qwen-Image-Edit template: 20 steps, CFG 2.5, Euler with the simple scheduler and ModelSamplingAuraFlow shift 3.1.",
+    "recommendation_kind": "author_reference_implementation",
+    "page": "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF",
+    "size_mb": 8796.7,
+    "preview": "",
+    "triggers": [],
+    "installed_on": [
+      "f5",
+      "f15"
+    ],
+    "notes": "The edit twin of the same architecture; chosen automatically when a picture is wired into the node.",
+    "sampling_audit_at": "2026-09-22"
+  },
+  {
+    "kind": "checkpoint",
+    "family": "qwen_image",
+    "base": "Qwen-Image 2.1",
+    "file": "qwen-image-2.1-Q4_K_M.gguf",
+    "id": "qwen-image-2.1-Q4_K_M.gguf",
+    "title": "Qwen-Image 2.1 - Q4_K_M",
+    "version": "GGUF Q4_K_M",
+    "services": [],
+    "usable": false,
+    "qwen_image_modes": [
+      "generate",
+      "edit"
+    ],
+    "unusable_reason": "Qwen-Image 2.1 is a different transformer from the Qwen-Image the farm runs: 32 single-stream blocks of 4096 with shared modulation, and a Qwen3-VL-8B text encoder. ComfyUI 0.21.1 on the image boxes only knows the 60-block dual-stream Qwen-Image with Qwen2.5-VL-7B, and detects it by a txt_norm.weight the 2.1 files do not contain. It also ships with no metadata at all, so ComfyUI-GGUF cannot read its architecture. Running it needs a ComfyUI core upgrade to a build with Qwen-Image 2.1 support plus the leejet/ComfyUI-GGUF fork - an upgrade of the farm's ComfyUI, which is the owner's call.",
+    "page": "https://huggingface.co/abenzerps/Qwen-Image-2.1-GGUF",
+    "size_mb": 4391.2,
+    "preview": "",
+    "triggers": [],
+    "sampling_audit_at": "2026-09-22"
   }
 ]

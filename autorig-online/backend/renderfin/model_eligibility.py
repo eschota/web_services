@@ -47,6 +47,25 @@ async def _slot(client: httpx.AsyncClient, server: RenderServer,
     return result
 
 
+async def _optional_slot(client: httpx.AsyncClient, server: RenderServer,
+                         class_name: str, input_name: str) -> Set[str]:
+    """Names from a loader a worker is allowed not to have at all.
+
+    ComfyUI-GGUF is a custom node package: on a box without it,
+    /object_info/UnetLoaderGGUF is a 404. That is a fact about that box's node
+    set, not an unreadable inventory, and treating it as a failure would
+    fail-close every ordinary checkpoint on every box that has no GGUF loader.
+    The empty answer is cached like any other so the 404 is asked for once per
+    TTL rather than once per dispatch pass.
+    """
+    key = (server.render_server_name, class_name)
+    try:
+        return await _slot(client, server, class_name, input_name)
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        _cache[key] = (time.monotonic(), set())
+        return set()
+
+
 async def can_load(client: httpx.AsyncClient, server: RenderServer,
                    prompt: RenderPrompt) -> bool:
     """Fail closed when a selected file is absent or inventory is unreadable."""
@@ -55,10 +74,15 @@ async def can_load(client: httpx.AsyncClient, server: RenderServer,
     if not checkpoint and not lora:
         return True
     try:
-        checkpoint_names, unet_names, lora_names, model_lora_names = await asyncio.gather(
+        checkpoint_names, unet_names, gguf_names, lora_names, model_lora_names = await asyncio.gather(
             _slot(client, server, "CheckpointLoaderSimple", "ckpt_name")
             if checkpoint else _empty(),
             _slot(client, server, "UNETLoader", "unet_name")
+            if checkpoint else _empty(),
+            # A .gguf quantisation is listed by ComfyUI-GGUF's own loader and
+            # by nothing else: UNETLoader filters the same folder by the
+            # extensions core ComfyUI can read.
+            _optional_slot(client, server, "UnetLoaderGGUF", "unet_name")
             if checkpoint else _empty(),
             _slot(client, server, "LoraLoader", "lora_name")
             if lora else _empty(),
@@ -67,7 +91,8 @@ async def can_load(client: httpx.AsyncClient, server: RenderServer,
         )
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return False
-    return ((not checkpoint or checkpoint in checkpoint_names | unet_names)
+    return ((not checkpoint
+             or checkpoint in checkpoint_names | unet_names | gguf_names)
             and (not lora or lora in lora_names | model_lora_names))
 
 

@@ -335,7 +335,67 @@ SERVICES.extend([
 ])
 
 
+# ------------------------------------------------------------- Qwen-Image
+#
+# One node, not two. Qwen-Image and Qwen-Image-Edit are the same architecture
+# and the same text encoder, and the only thing that decides which of them is
+# asked is whether a picture is wired into the node: text alone draws, text
+# plus a picture rewrites that picture. Splitting it into a generator and an
+# editor would make the person choose a node for a decision the graph already
+# states by its wiring.
+#
+# It runs as a GGUF quantisation through ComfyUI-GGUF, which is what lets a
+# 20B MMDiT onto the 8 GB and 12 GB image boxes rather than onto the single
+# 24 GB card, so two of these can render at the same time on two machines.
+SERVICES.append({
+    "id": "qwen_image", "title": "Qwen-Image", "path": "/nodes",
+    "api": "/api/qwen-image", "status": "live", "slow": True,
+    "summary": "Draw a picture from a prompt, or rewrite the picture wired in. One node does both.",
+    "inputs": [
+        {"type": TEXT, "field": "prompt", "required": True,
+         "title": "What to draw, or what to change"},
+        {"type": IMAGE, "field": "image", "required": False,
+         "title": "Picture to edit"},
+    ],
+    "outputs": [
+        {"type": IMAGE, "field": "image_url_string", "title": "Picture"},
+    ],
+})
+
+
 PARAMS: Dict[str, List[Dict[str, object]]] = {
+    "qwen_image": [
+        # Automatic is the honest default: the wiring already says which of
+        # the two models is meant. The explicit choices exist for the case
+        # where a picture is wired in as a style reference but the person
+        # wants a fresh composition anyway.
+        {"name": "mode", "title": "Mode", "type": "select", "default": "auto",
+         "options": [
+             {"value": "auto", "title": "Automatic — edit when a picture is wired in"},
+             {"value": "generate", "title": "Generate — ignore any picture"},
+             {"value": "edit", "title": "Edit — a picture is required"},
+         ]},
+        {"name": "checkpoint", "title": "Model", "type": "model",
+         "source": "checkpoints", "default": "",
+         "help": "Leave empty for the quantisation the workflow ships with"},
+        # In edit mode these follow the picture that came in unless they are
+        # set: an edit that silently reframed the source to 960x540 was the
+        # single most confusing thing about the first version of this node.
+        {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,
+         "step": 16, "default": 1024,
+         "help": "Editing follows the source picture unless width and height are both set"},
+        {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048,
+         "step": 16, "default": 1024,
+         "help": "Editing follows the source picture unless width and height are both set"},
+        {"name": "steps", "title": "Steps", "type": "range", "min": 0, "max": 60,
+         "step": 1, "default": 0, "help": "0 leaves the workflow's own 20"},
+        {"name": "cfg", "title": "CFG", "type": "number", "default": 0, "min": 0,
+         "max": 30, "step": 0.1, "help": "0 leaves the workflow's own 2.5"},
+        {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0,
+         "max": 9007199254740991, "step": 1, "default": 0,
+         "help": "0 gives a different picture each run"},
+    ],
     "upscale": [
         {"name": "scale", "title": "Factor", "type": "select", "default": "2",
          "options": [{"value": "2", "title": "2x"}, {"value": "4", "title": "4x"}],

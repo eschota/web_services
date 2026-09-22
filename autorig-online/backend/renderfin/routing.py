@@ -45,6 +45,25 @@ ENHANCE_SCHEDULING_TOKEN = "gen_image_control_canny.json"
 # 2048 px render ceiling that keeps ordinary generation inside 8 GB.
 ENHANCE_MAX_SIDE = 4096
 
+# ---------------------------------------------------------------- Qwen-Image
+# One product node, two templates: text alone gives a picture, a picture plus
+# text edits that picture. Both load a GGUF quantisation through ComfyUI-GGUF,
+# which is the only reason a 20B MMDiT runs on the 8 GB image boxes at all.
+QWEN_IMAGE_WORKFLOWS = {
+    "qwen_image": "qwen_image_generate.json",
+    "qwen_image_edit": "qwen_image_edit.json",
+}
+QWEN_IMAGE_TYPES = frozenset(QWEN_IMAGE_WORKFLOWS)
+
+# The boxes publish `available_workflows` themselves, so a file name invented
+# here matches no worker and the job would never be dispatched. The canny
+# control token names exactly the set allowed to run this: the four image
+# boxes, and not worker-4090 — a single 24 GB card would win every dispatch
+# and leave the parallel pair the owner asked for standing idle. Which of the
+# four actually holds the GGUF is then settled by model_eligibility, from the
+# worker's own /object_info and fail-closed.
+QWEN_IMAGE_SCHEDULING_TOKEN = ENHANCE_SCHEDULING_TOKEN
+
 # Canonical LTX2 animation names advertised by workers; runtime file comes from
 # the worker's workflow_overrides (RenderWorkflowRouting.ResolveRuntimeWorkflow).
 CANONICAL_ANIMATION_WORKFLOWS = {
@@ -80,6 +99,8 @@ def scheduling_token(prompt: RenderPrompt) -> str:
         return "gen_" + ptype + ".json"
     if ptype in ENHANCE_TYPES:
         return ENHANCE_SCHEDULING_TOKEN
+    if ptype in QWEN_IMAGE_TYPES:
+        return QWEN_IMAGE_SCHEDULING_TOKEN
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
     if is_image_request(prompt):
@@ -110,6 +131,8 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
         return "gen_" + ptype + ".json", None
     if ptype in ENHANCE_WORKFLOWS:
         return ENHANCE_WORKFLOWS[ptype], None
+    if ptype in QWEN_IMAGE_WORKFLOWS:
+        return QWEN_IMAGE_WORKFLOWS[ptype], None
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D, None
     if ptype == "z_depth":

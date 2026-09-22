@@ -185,3 +185,10 @@ async def _uncached_api_controlnet(body: ControlNetRequest):
 from ai_enhance_api import router as _enhance_router  # noqa: E402
 
 router.include_router(_enhance_router)
+
+# /api/qwen-image rides here for the same reason: it is the same shape again —
+# build a renderfin job, hand back the URL the picture will appear at — and it
+# is already reachable because this router is mounted.
+from ai_qwen_image_api import router as _qwen_image_router  # noqa: E402
+
+router.include_router(_qwen_image_router)

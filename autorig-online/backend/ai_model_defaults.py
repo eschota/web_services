@@ -41,7 +41,11 @@ FAMILY_WORKFLOWS = {
 # contain "ltx", which would collapse them into each other and into the legacy
 # 0.9.1 adapters. Keeping them apart is what stops an LTX 2.3 LoRA from being
 # accepted onto a checkpoint that was never trained with it.
-DECLARED_FAMILIES = frozenset({"ltx2", "ltx098"})
+# "qwen_image" is declared for the same reason from the other direction: the
+# base string of a Qwen-Image checkpoint says nothing the heuristics below
+# recognise, and an undeclared family is an empty family, which `compatible`
+# reads as "no opinion" and would let a FLUX or LTX LoRA onto a Qwen model.
+DECLARED_FAMILIES = frozenset({"ltx2", "ltx098", "qwen_image"})
 
 
 def canonical_file(name: object) -> str:
