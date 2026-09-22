@@ -31,7 +31,8 @@
     "preview": "",
     "size_mb": 7751,
     "validated_workers": [
-      "worker-4090"
+      "worker-4090",
+      "Raptor"
     ],
     "sampling_policy": {
       "auto_steps": 4,
@@ -186,7 +187,10 @@
     "preview": "",
     "size_mb": 25226,
     "validated_workers": [
-      "worker-4090"
+      "worker-4090",
+      "Raptor",
+      "f5",
+      "f15"
     ],
     "sampling_policy": {
       "auto_steps": 8,
@@ -278,7 +282,8 @@
     "preview": "",
     "size_mb": 27730,
     "validated_workers": [
-      "Raptor"
+      "Raptor",
+      "f5"
     ],
     "sampling_policy": {
       "auto_steps": 8,
