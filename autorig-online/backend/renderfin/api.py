@@ -12,6 +12,10 @@ from .models import TASK_PENDING, RenderPrompt, RenderServer
 
 router = APIRouter(prefix="/renderfin")
 
+# cancel-if-pending records its reason as the task's error text.
+CANCEL_REASON_DEFAULT = "cancelled by the composition"
+CANCEL_REASON_MAX_CHARS = 300
+
 
 def _queue(request: Request):
     return request.app.state.render_queue
@@ -99,6 +103,13 @@ async def api_render_cancel_if_pending(request: Request) -> Dict[str, Any]:
     task_id = str(body.get("task_id") or "").strip()
     if not task_id:
         raise HTTPException(status_code=400, detail="task_id is required")
+    # The reason becomes the task's error text, which is what a caller polling
+    # the task sees. An operator standing down a task no box can ever take
+    # says why, so the ledger and the poller are told the truth rather than
+    # the node editor's default wording.
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    if not reason:
+        reason = CANCEL_REASON_DEFAULT
     queue = _queue(request)
     task = queue.get(task_id)
     if task is None:
@@ -106,8 +117,8 @@ async def api_render_cancel_if_pending(request: Request) -> Dict[str, Any]:
     if task.status != TASK_PENDING:
         return {"cancelled": False, "status": task.status,
                 "reason": "already started or finished"}
-    cancelled = await queue.cancel(task_id, reason="cancelled by the composition")
-    return {"cancelled": bool(cancelled), "status": TASK_PENDING}
+    cancelled = await queue.cancel(task_id, reason=reason)
+    return {"cancelled": bool(cancelled), "status": TASK_PENDING, "reason": reason}
 
 
 @router.post("/api-render/cancel-pending")
