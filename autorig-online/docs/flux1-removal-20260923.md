@@ -106,14 +106,23 @@ hits in the SDXL graphs are `stop_at_clip_layer`, not the file).
 | worker-4090 | `R:\ComfyUI_windows_portable\ComfyUI\models\loras\microbikiniv12_FLUX.safetensors` | 0.15 GB | `f11f547ced215e152680cdba143d6553b178e910679469cf9c0a783d48e899a2` | https://civitai.com/models/122200?modelVersionId=1857758 (Flux.1 D) |
 | worker-4090 | `R:\ComfyUI_windows_portable\ComfyUI\models\loras\skin texture style v5.safetensors` | 0.67 GB | `8e429dc8232ea00d988d9502a7e9a68d4c6e2fa7405a8e02ac0976214d2e23b4` | https://civitai.com/models/580857?modelVersionId=1081450 (Flux.1 D) |
 
-### f12 (pending: not reachable from the operator PC during this work)
+### f12 (quarantined, not deleted)
 
-f12 held, under `C:/AI/ComfyUI_windows_portable/ComfyUI/models`: `unet/flux1-schnell.safetensors`
-(22.7 GB), `controlnet/FLUX.1-dev-ControlNet-Union-Pro-2.0-fp8.safetensors` (2.0 GB),
-`loras/aidmaMJ6.1-FLUX-v0.5.safetensors`, `clip/clip_l.safetensors` and
-`clip/t5xxl_fp16.safetensors` (9.3 GB). Its image tokens were withdrawn from the renderfin
-registry at the cutover (backup `f12.json.bak.zimage-*`), so no FLUX work reaches it.
-Hashes and deletion follow once f12 has the Z-Image files.
+f12 was reached after the owner fixed the home-LAN route. Agents may no longer hard-delete, so its
+FLUX.1 files were **moved** to `C:\_retired_20260923\models\<same relative path>` (the cleanup agent's
+quarantine convention), each only after its size matched. Log: `C:\ProgramData\AutoRig\flux1_retire.log`.
+`aidmaMJ6.1-FLUX-v0.5.safetensors` was already gone from f12 when it was scanned.
+
+| Box | Original path | Size | SHA-256 | Source |
+|---|---|---:|---|---|
+| f12 | `C:\AI\ComfyUI_windows_portable\ComfyUI\models\clip\clip_l.safetensors` | 0.25 GB | `660c6f5b1abae9dc498ac2d21e1347d2abdb0cf6c0c0c8576cd796491d9a6cdd` | https://huggingface.co/comfyanonymous/flux_text_encoders/blob/main/clip_l.safetensors |
+| f12 | `C:\AI\ComfyUI_windows_portable\ComfyUI\models\clip\t5xxl_fp16.safetensors` | 9.79 GB | `6e480b09fae049a72d2a8c5fbccb8d3e92febeb233bbe9dfe7256958a9167635` | https://huggingface.co/comfyanonymous/flux_text_encoders/blob/main/t5xxl_fp16.safetensors |
+| f12 | `C:\AI\ComfyUI_windows_portable\ComfyUI\models\controlnet\FLUX.1-dev-ControlNet-Union-Pro-2.0-fp8.safetensors` | 2.14 GB | `393fc2a298b93ffe39f2db3f0d2ce11dfba62d44b7aa3c1dd3380d4a1be04deb` | fp8 conversion of https://huggingface.co/Shakker-Labs/FLUX.1-dev-ControlNet-Union-Pro-2.0 |
+| f12 | `C:\AI\ComfyUI_windows_portable\ComfyUI\models\unet\flux1-schnell.safetensors` | 23.78 GB | `9403429e0052277ac2a87ad800adece5481eecefd9ed334e1f348723621d2a0a` | https://huggingface.co/black-forest-labs/FLUX.1-schnell/blob/main/flux1-schnell.safetensors |
+
+Total 35.96 GB in quarantine on f12. Before the move f12 received the Z-Image and Krea 2 files
+(sha256-verified), passed direct canaries (Z-Image 8.1 s, T-pose 20.7 s, Krea 2 16.6 s warm at 1024x1024)
+and ran production job `0667dacf-ef54-456f-b09b-65319d634f17`; it advertises the image tokens again.
 
 ## Deletion log
 
@@ -128,7 +137,7 @@ size matched the record above. Per-box log: `C:\ProgramData\AutoRig\zimage\flux1
 | Raptor (D: and the shared `X:\FleetModels\loras\flux`) | 25 | 59.56 GB |
 | worker-4090 (`R:\ComfyUI_windows_portable`) | 6 | 18.33 GB |
 | **Total** | **58** | **197.0 GB** |
-| f12 | pending | about 36 GB |
+| f12 | 4 (quarantined in `C:\_retired_20260923`, not deleted) | 35.96 GB |
 
 Also retired at the same time:
 
