@@ -37,6 +37,9 @@ hits in the SDXL graphs are `stop_at_clip_layer`, not the file).
   17/17 deliverables.
 - Enhance via the public APIs: facefix `b031d29e` (Raptor, 32 s), detail `5d220f90`
   (Raptor, 28 s), upscale refine `1e4ff292` (Raptor).
+- After the full Union 2.1 patch went live (release zimage-unionfull-20260923b): pose-controlled
+  image `98d35145` from the OpenPose map `a1f7ab03` of a Z-Image render `cbe3ffab` (Raptor, 33 s),
+  API T-pose mode `66a68cd5` (Raptor), background-extraction inpaint `b670f3f7` (f5).
 - Real user traffic after the cutover (2026-09-22 20:16Z) on f5, f15 and Raptor finished
   without a failure.
 
