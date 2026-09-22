@@ -140,13 +140,20 @@ SERVICE_EXTRA_TOKENS = {
               "gen_image_by_z_depth.json",
               "gen_image_control_pose.json", "gen_image_control_depth.json",
               "gen_image_control_canny.json",
-              "gen_image_sdxl_control_pose.json", "gen_image_sdxl_control_depth.json",
-              "gen_image_sdxl_control_canny.json", "gen_image_sdxl_edit.json",
               "gen_image_flux2_klein_edit.json"),
     "video_control": ("gen_video_ltx23_pose_by_url.json",
                       "gen_video_ltx23_depth_by_url.json"),
     "avatar_image": ("gen_image_flux2_avatar.json",),
 }
+
+# Templates of retired model families (Pony/SDXL, 2026-09-23). The files stay
+# in the tree so old code paths and tests still load, but no box advertises
+# them and the matrix should not list them as pipelines running nowhere.
+RETIRED_TOKENS = frozenset({
+    "gen_image_sdxl.json", "gen_image_sdxl_edit.json",
+    "gen_image_sdxl_control_pose.json", "gen_image_sdxl_control_depth.json",
+    "gen_image_sdxl_control_canny.json",
+})
 
 # Rows that are not workflows. They still belong on the matrix: a reader
 # wanting to know where 3D generation happens should not have to know that
@@ -735,7 +742,7 @@ def build_matrix(*, now: Optional[float] = None,
     for entry in catalogue:
         if entry.get("workflow"):
             tokens.add(str(entry["workflow"]))
-    tokens = {token for token in tokens if token}
+    tokens = {token for token in tokens if token and token not in RETIRED_TOKENS}
 
     # Which services can land on which token, so a row says what it is for.
     services_by_token: Dict[str, List[str]] = {}

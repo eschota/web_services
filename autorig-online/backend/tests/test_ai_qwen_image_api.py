@@ -133,28 +133,22 @@ class CheckpointTests(unittest.TestCase):
             ai_qwen_image_api.validate_checkpoint("flux1-schnell.safetensors", "generate")
         self.assertEqual(caught.exception.detail["error_string"], "unknown_checkpoint")
 
-    def test_the_uninstalled_two_point_one_build_explains_itself(self):
-        entry = ai_model_catalogue.known_file("qwen-image-2.1-Q4_K_M.gguf", "checkpoint")
-        self.assertIsNotNone(entry)
-        self.assertFalse(entry.get("usable"))
-        self.assertIn("ComfyUI", str(entry.get("unusable_reason")))
+    def test_the_retired_two_point_one_build_is_not_in_the_catalogue(self):
+        # Qwen-Image 2.1 never ran on the farm and left the catalogue in the
+        # 2026-09-23 model cleanup.
+        self.assertIsNone(
+            ai_model_catalogue.known_file("qwen-image-2.1-Q4_K_M.gguf", "checkpoint"))
 
     def test_one_installed_model_is_offered_per_mode(self):
         self.assertEqual(ai_qwen_image_api.installed_checkpoints("generate"), [GENERATE_GGUF])
         self.assertEqual(ai_qwen_image_api.installed_checkpoints("edit"), [EDIT_GGUF])
 
-    def test_a_model_the_farm_cannot_run_is_never_offered_as_installed(self):
-        # It stays in the catalogue so the picker can grey it out with its
-        # reason, which is not the same as being a name a caller may send.
+    def test_a_retired_model_is_never_offered_as_installed(self):
         self.assertNotIn("qwen-image-2.1-Q4_K_M.gguf",
                          ai_qwen_image_api.installed_checkpoints())
         with self.assertRaises(HTTPException) as caught:
             ai_qwen_image_api.validate_checkpoint("qwen-image-2.1-Q4_K_M.gguf", "generate")
-        detail = caught.exception.detail
-        self.assertEqual(detail["error_string"], "checkpoint_not_usable")
-        # Naming a model the farm has on record deserves the reason, not the
-        # same "never heard of it" a typo gets.
-        self.assertIn("ComfyUI", detail["message_string"])
+        self.assertEqual(caught.exception.detail["error_string"], "unknown_checkpoint")
 
 
 class PayloadTests(unittest.IsolatedAsyncioTestCase):

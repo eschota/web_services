@@ -696,7 +696,9 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
     if service_id == "image" and mode in LEGACY_IMAGE_MODES:
         required_default_family = LEGACY_IMAGE_MODE_FAMILY
     elif service_id == "image" and control_channel and not checkpoint and not lora:
-        required_default_family = "pony"
+        # Pony/SDXL left the farm on 2026-09-23; Z-Image's Fun ControlNet
+        # Union patch carries pose/depth/canny now.
+        required_default_family = LEGACY_IMAGE_MODE_FAMILY
 
     if required_default_family and not checkpoint and not lora:
         family_default = ai_model_defaults.family_default_checkpoint(
@@ -789,7 +791,7 @@ def _render_model_profile(service_id: str, checkpoint: Optional[str],
     if str(mode or "").strip().lower() in LEGACY_IMAGE_MODES:
         families.add(LEGACY_IMAGE_MODE_FAMILY)
     elif has_control and not checkpoint and not lora:
-        families.add("pony")
+        families.add(LEGACY_IMAGE_MODE_FAMILY)
     if lora:
         lora_entry = ai_model_catalogue.known_file(str(lora), "lora")
         family = ai_model_defaults.model_family(lora_entry)

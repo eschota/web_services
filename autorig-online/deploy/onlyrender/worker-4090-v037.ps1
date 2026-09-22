@@ -93,10 +93,10 @@ if ($LASTEXITCODE -ne 0) { throw 'The VPS cannot reach the v0.37 worker' }
 $workflows = @(
     'gen_animation_ltx23_by_url.json','gen_animation_ltx10eros_by_url.json',
     'gen_video_ltx23_control_by_url.json','gen_video_ltx23_pose_by_url.json','gen_video_ltx23_depth_by_url.json',
-    'gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json','gen_image_flux2_avatar.json',
-    'gen_image_sdxl.json','gen_image_sdxl_edit.json',
-    'gen_image_sdxl_control_pose.json','gen_image_sdxl_control_depth.json','gen_image_sdxl_control_canny.json'
+    'gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json','gen_image_flux2_avatar.json'
 )
+# Pony/SDXL (gen_image_sdxl*.json) retired 2026-09-23; the checkpoint and the
+# xinsir ControlNet moved to R:\_retired_20260923.
 # FLUX.1 left the farm on 2026-09-23. Z-Image Turbo and Krea 2 weights live on C:
 # (extra_model_paths.yaml maps C:\AIModels). gen_image.json is also the T-pose
 # and legacy-mode token, whose graphs need RMBG, and the canny token carries the

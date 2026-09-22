@@ -152,17 +152,17 @@ class ModelDefaultsTests(unittest.TestCase):
         self.assertNotIn("cfg", got)
         self.assertEqual(got["lora_strength"], 0.8)
 
-    def test_every_current_ltx23_lora_resolves_the_concrete_distilled_base(self):
+    def test_an_ltx23_lora_resolves_the_concrete_distilled_base(self):
+        # The curated LTX 2.3 LoRAs were retired on 2026-09-23; LoRAs added
+        # through /lora (e.g. the bounce test LoRA) still carry family ltx23.
         catalogue_path = (
             Path(__file__).resolve().parents[2]
             / "deploy" / "ai-models" / "model_catalogue.json"
         )
         entries = json.loads(catalogue_path.read_text(encoding="utf-8"))
-        loras = [entry for entry in entries
-                 if entry.get("kind") == "lora"
-                 and defaults.model_family(entry) == "ltx23"
-                 and entry.get("usable")]
-        self.assertEqual(len(loras), 6)
+        loras = [{"kind": "lora", "family": "ltx23", "base": "LTXV 2.3",
+                  "file": "bounceV2_5_LTX23_I2V.comfy.safetensors",
+                  "services": ["video"], "usable": True}]
         for lora in loras:
             checkpoint = defaults.family_default_checkpoint(entries, lora, "video")
             self.assertIsNotNone(checkpoint, lora["file"])
@@ -179,16 +179,19 @@ class ModelDefaultsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 defaults.resolve(checkpoint, lora, {"steps": 12})
 
-    def test_legacy_dream_ltxv_has_no_false_ltx23_fallback(self):
+    def test_retired_models_left_the_curated_catalogue(self):
         catalogue_path = (
             Path(__file__).resolve().parents[2]
             / "deploy" / "ai-models" / "model_catalogue.json"
         )
         entries = json.loads(catalogue_path.read_text(encoding="utf-8"))
-        dream = next(entry for entry in entries
-                     if entry.get("file") == "DreamLTXV.safetensors")
-        self.assertFalse(dream["usable"])
-        self.assertTrue(dream["obsolete"])
+        files = {entry.get("file") for entry in entries}
+        for retired in ("DreamLTXV.safetensors", "LTX2.3_Crisp_Enhance.safetensors",
+                        "CyberRealisticPony_V18.0_F16.safetensors",
+                        "flux1-schnell.safetensors"):
+            self.assertNotIn(retired, files)
+        dream = {"kind": "lora", "family": "ltx", "base": "LTXV",
+                 "file": "DreamLTXV.safetensors", "services": ["video"], "usable": False}
         self.assertIsNone(defaults.family_default_checkpoint(entries, dream, "video"))
 
 

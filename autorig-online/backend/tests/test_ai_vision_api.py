@@ -123,15 +123,17 @@ class EffectiveRenderModelTests(unittest.TestCase):
         self.assertEqual(effective["work_flow"], "gen_image.json")
         self.assertEqual(effective["steps"], 8)
 
-    def test_control_without_model_materializes_pony_and_reports_policy(self):
+    def test_control_without_model_materializes_zimage(self):
+        # Pony was retired on 2026-09-23: a control channel with no model
+        # chosen runs on the Z-Image family default, not on an SDXL base.
         entries = self._entries()
         with mock.patch("ai_model_catalogue.entries", return_value=entries), \
              mock.patch("ai_model_catalogue.known_file",
                         side_effect=lambda name, kind: self._known(entries, name, kind)):
             response = _app().get("/api/ai/model-settings?service=image&control_channel=pose")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["checkpoint_string"], "pony.safetensors")
-        self.assertEqual(response.json()["sampling_policy_object"], {"cfg": "ksampler"})
+        self.assertEqual(response.json()["checkpoint_string"],
+                         "z_image_turbo_fp8_e4m3fn.safetensors")
 
     def test_legacy_mode_uses_zimage_without_flattening_template_auto_sampling(self):
         entries = self._entries()

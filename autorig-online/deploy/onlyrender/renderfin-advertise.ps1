@@ -53,13 +53,8 @@ if ((Has 'diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors') -and
 if ((Has 'diffusion_models\flux-2-klein-4b.safetensors') -and
     (Has 'text_encoders\qwen_3_4b_fp4_flux2.safetensors') -and
     (Has 'vae\flux2-vae.safetensors')) { $tokens += @('gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json') }
-# SDXL/Pony text-to-image (CyberRealistic Pony v18). Civitai and Hugging Face
-# name the same file differently and renderfin accepts either name; Raptor
-# keeps it in the fleet store that extra_model_paths.yaml adds.
-$sdxl = @('CyberRealisticPony_V18.0_F16.safetensors', 'cyberrealisticPony_v180Coreshift_2764472.safetensors')
-if (@($sdxl | Where-Object { (Has ('checkpoints\' + $_)) -or (Test-Path ('X:\FleetModels\checkpoints\' + $_)) }).Count -gt 0) {
-    $tokens += 'gen_image_sdxl.json'
-}
+# SDXL/Pony (CyberRealistic Pony) was retired on 2026-09-23: gen_image_sdxl.json
+# is no longer advertised; list it in advertise_block.txt to strip an old entry.
 # Z-Image Turbo is the fast image tier: plain text-to-image, the T-pose render
 # and legacy typed modes all schedule as gen_image.json, and the Fun ControlNet
 # Union patch serves pose/depth/canny/inpaint. The enhancement and Qwen-Image

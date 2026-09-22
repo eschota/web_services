@@ -372,5 +372,19 @@ class CapacityTests(unittest.TestCase):
             self.assertEqual(capacity[service_id]["computers_array"], ["Raptor"])
 
 
+class RetiredTokenTests(unittest.TestCase):
+    def test_retired_sdxl_templates_are_not_matrix_rows(self):
+        matrix = pipelines.build_matrix(
+            now=time.time(), render_jobs=[], ai_jobs=[],
+            servers=[_server("Raptor", ["gen_image.json", "gen_image_sdxl.json"])],
+            converters=[], catalogue=[], node_state={},
+            workflow_files=["gen_image.json", "gen_image_sdxl.json",
+                            "gen_image_sdxl_control_pose.json"])
+        ids = {row["id"] for row in matrix["pipelines_array"]}
+        self.assertIn("gen_image.json", ids)
+        self.assertNotIn("gen_image_sdxl.json", ids)
+        self.assertNotIn("gen_image_sdxl_control_pose.json", ids)
+
+
 if __name__ == "__main__":
     unittest.main()
