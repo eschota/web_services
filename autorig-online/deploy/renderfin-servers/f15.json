@@ -6,8 +6,14 @@
   "available_workflows": [
     "gen_image.json",
     "gen_animation_by_url.json",
+    "gen_image_control_pose.json",
+    "gen_image_control_depth.json",
+    "gen_image_control_canny.json",
     "gen_image_flux2_klein.json",
-    "gen_image_flux2_klein_edit.json"
+    "gen_image_flux2_klein_edit.json",
+    "gen_animation_hq_by_url.json",
+    "gen_animation_ltx23_by_url.json",
+    "gen_animation_ltx10eros_by_url.json"
   ],
   "workflow_overrides": {},
   "basic_auth": false

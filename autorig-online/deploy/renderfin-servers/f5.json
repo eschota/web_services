@@ -1,13 +1,19 @@
 {
   "render_server_name": "f5",
   "render_server_url": "http://5.129.157.224:8488",
-  "gpu_name": "RTX 3080 Ti",
+  "gpu_name": "RTX 3070 Ti",
   "status": "online",
   "available_workflows": [
     "gen_image.json",
     "gen_animation_by_url.json",
+    "gen_image_control_pose.json",
+    "gen_image_control_depth.json",
+    "gen_image_control_canny.json",
     "gen_image_flux2_klein.json",
-    "gen_image_flux2_klein_edit.json"
+    "gen_image_flux2_klein_edit.json",
+    "gen_animation_hq_by_url.json",
+    "gen_animation_ltx23_by_url.json",
+    "gen_animation_ltx10eros_by_url.json"
   ],
   "workflow_overrides": {},
   "basic_auth": false
