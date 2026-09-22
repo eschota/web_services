@@ -19,10 +19,11 @@ import os
 import pathlib
 import re
 import time
+import uuid
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 import ai_services
 
@@ -64,6 +65,31 @@ class GraphLink(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class HistoryEntry(BaseModel):
+    """One prior completed value, deliberately without farm task metadata."""
+
+    type: str = Field(..., min_length=1, max_length=32)
+    value: str = Field(..., min_length=1, max_length=65536)
+    input_reference_url: str = Field("", max_length=4096)
+    created_at: float = Field(0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_media(self):
+        allowed = {str(item["id"]) for item in ai_services.ENTITY_TYPES}
+        if self.type not in allowed:
+            raise ValueError(f"unknown history entity type '{self.type}'")
+        if self.value.startswith(("data:", "blob:")):
+            raise ValueError("history cannot contain inline or temporary media")
+        if self.type != ai_services.TEXT:
+            if len(self.value) > 4096 or not self.value.startswith(("http://", "https://")):
+                raise ValueError("media history values must be public http(s) URLs")
+        if self.input_reference_url and not self.input_reference_url.startswith(
+            ("http://", "https://")
+        ):
+            raise ValueError("history input_reference_url must be a public http(s) URL")
+        return self
+
+
 class NodeResult(BaseModel):
     """What one node produced, or is still producing.
 
@@ -78,15 +104,52 @@ class NodeResult(BaseModel):
     task_id: str = ""
     error: str = ""
     started_at: float = 0
+    input_reference_url: str = Field("", max_length=4096)
+    history: List[HistoryEntry] = Field(default_factory=list, max_length=5)
+
+    @field_validator("input_reference_url")
+    @classmethod
+    def validate_input_reference_url(cls, value: str) -> str:
+        value = str(value or "")
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError("input_reference_url must be a public http(s) URL")
+        return value
 
 
 class Graph(BaseModel):
     name: str = "Untitled"
+    # Empty keeps every legacy graph's content-derived id unchanged. A
+    # duplicate receives a fresh value so its otherwise identical snapshot has
+    # an independent deep link and subsequent result updates stay on it.
+    instance_id: str = Field("", max_length=64)
+    comparison_anchor_id: str = Field("", max_length=64)
     nodes: List[GraphNode] = Field(default_factory=list)
     links: List[GraphLink] = Field(default_factory=list)
     # Keyed by node id. Never part of what makes a graph's identity: a rerun
     # must update the same link, not mint a new one.
     results: Dict[str, NodeResult] = Field(default_factory=dict)
+
+    @field_validator("instance_id")
+    @classmethod
+    def validate_instance_id(cls, value: str) -> str:
+        value = str(value or "")
+        if value and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+            raise ValueError("instance_id may contain letters, digits, - and _")
+        return value
+
+    @field_validator("comparison_anchor_id")
+    @classmethod
+    def validate_comparison_anchor_id(cls, value: str) -> str:
+        value = str(value or "")
+        if value and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+            raise ValueError("comparison_anchor_id may contain letters, digits, - and _")
+        return value
+
+
+class DuplicateGraphRequest(BaseModel):
+    current_graph: Graph = Field(..., alias="currentGraph")
+
+    model_config = {"populate_by_name": True}
 
 
 # ----------------------------------------------------------------- templates
@@ -197,6 +260,14 @@ def validate(graph: Graph) -> None:
                 "error_string": "unknown_node_kind",
                 "message_string": f"A node is either '{NODE_SERVICE}' or '{NODE_INPUT}'"})
 
+    if graph.comparison_anchor_id and graph.comparison_anchor_id not in by_id:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unknown_comparison_anchor",
+            "message_string": (
+                f"The comparison anchor '{graph.comparison_anchor_id}' is not a graph node"
+            ),
+        })
+
     for link in graph.links:
         source = by_id.get(link.from_node)
         target = by_id.get(link.to_node)
@@ -278,6 +349,57 @@ def _new_id(payload: str) -> str:
     return digest[:12]
 
 
+def _identity_payload(body: Dict[str, object]) -> str:
+    """Serialize graph identity without results or an empty legacy instance.
+
+    ``Graph.model_dump`` includes default fields. Excluding the empty instance
+    explicitly prevents introducing this feature from changing every existing
+    graph id on its next save.
+    """
+    identity = {
+        key: value
+        for key, value in body.items()
+        if key != "results" and not (
+            key in {"instance_id", "comparison_anchor_id"} and not value
+        )
+    }
+    # Pydantic preserves an incoming integer ``0`` for a float field on the
+    # first model dump, while JSON load + revalidation emits ``0.0``. New
+    # instance-aware graphs normalize only their canvas coordinates so opening
+    # and saving the same copy cannot move its link. Legacy identity remains
+    # byte-for-byte compatible with the pre-instance serializer above.
+    if identity.get("instance_id"):
+        nodes = identity.get("nodes") or []
+        node_ids = {
+            str(node.get("id")): f"node-{index}"
+            for index, node in enumerate(nodes)
+            if isinstance(node, dict)
+        }
+        identity["nodes"] = [
+            {
+                **node,
+                "id": node_ids.get(str(node.get("id")), str(node.get("id"))),
+                "x": float(node.get("x") or 0),
+                "y": float(node.get("y") or 0),
+            }
+            if isinstance(node, dict) else node
+            for node in nodes
+        ]
+        identity["links"] = [
+            {
+                **link,
+                "from": node_ids.get(str(link.get("from")), str(link.get("from"))),
+                "to": node_ids.get(str(link.get("to")), str(link.get("to"))),
+            }
+            if isinstance(link, dict) else link
+            for link in (identity.get("links") or [])
+        ]
+        anchor = str(identity.get("comparison_anchor_id") or "")
+        if anchor:
+            identity["comparison_anchor_id"] = node_ids.get(anchor, anchor)
+    return json.dumps(identity, ensure_ascii=False, sort_keys=True)
+
+
 @router.get("/api/ai/graph/templates")
 async def api_graph_templates():
     """Compositions that ship with the editor."""
@@ -295,8 +417,7 @@ async def api_graph_save(graph: Graph):
     body = graph.model_dump(by_alias=True)
     # The link names the composition, not the run: saving after a render must
     # land on the same link so the one already shared stays the right one.
-    identity = json.dumps({key: value for key, value in body.items() if key != "results"},
-                          ensure_ascii=False, sort_keys=True)
+    identity = _identity_payload(body)
     payload = json.dumps(body, ensure_ascii=False, sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_GRAPH_BYTES:
         raise HTTPException(status_code=400, detail={
@@ -322,6 +443,29 @@ async def api_graph_save(graph: Graph):
         "graph_id_string": graph_id,
         "deep_link_string": f"/nodes?g={graph_id}",
         "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/ai/graphs/duplicate")
+async def api_graph_duplicate(body: DuplicateGraphRequest):
+    """Persist an independent snapshot without altering its source graph.
+
+    Results are intentionally retained. A copied running task therefore keeps
+    watching the already accepted farm task rather than submitting it again;
+    changing a node's parameters remains the browser runner's normal signal to
+    invalidate that node's previous result.
+    """
+    duplicate = body.current_graph.model_copy(deep=True)
+    previous_instance = duplicate.instance_id
+    while True:
+        duplicate.instance_id = str(uuid.uuid4())
+        if duplicate.instance_id != previous_instance:
+            break
+    saved = await api_graph_save(duplicate)
+    return {
+        **saved,
+        "graph_object": duplicate.model_dump(by_alias=True),
+        "source_unchanged_bool": True,
     }
 
 
@@ -351,7 +495,65 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
         raise HTTPException(status_code=400, detail={
             "error_string": "unknown_node",
             "message_string": f"The graph has no node called '{sorted(unknown)[0]}'"})
-    graph["results"] = {key: value.model_dump() for key, value in results.items()}
+    previous_results = graph.get("results") or {}
+    merged_results: Dict[str, object] = {}
+    for key, incoming in results.items():
+        previous_raw = previous_results.get(key) or {}
+        try:
+            previous = NodeResult.model_validate(previous_raw)
+        except Exception:
+            previous = NodeResult()
+
+        history: List[HistoryEntry] = []
+        seen_history = set()
+        for entry in [*previous.history, *incoming.history]:
+            signature = (
+                entry.type, entry.value, entry.input_reference_url, entry.created_at
+            )
+            if signature not in seen_history:
+                history.append(entry)
+                seen_history.add(signature)
+
+        previous_completed = previous.status.lower() in {"done", "completed"}
+        previous_changed = (
+            previous.type,
+            previous.value,
+            previous.input_reference_url,
+        ) != (
+            incoming.type,
+            incoming.value,
+            incoming.input_reference_url,
+        )
+        allowed_types = {str(item["id"]) for item in ai_services.ENTITY_TYPES}
+        if (
+            previous_completed
+            and previous_changed
+            and previous.type in allowed_types
+            and previous.value
+        ):
+            archived = HistoryEntry(
+                type=previous.type,
+                value=previous.value,
+                input_reference_url=previous.input_reference_url,
+                created_at=time.time(),
+            )
+            signature = (
+                archived.type,
+                archived.value,
+                archived.input_reference_url,
+                archived.created_at,
+            )
+            if signature not in seen_history:
+                history.append(archived)
+        incoming.history = history[-5:]
+        merged_results[key] = incoming.model_dump()
+    graph["results"] = merged_results
+    serialized_graph = json.dumps(graph, ensure_ascii=False, sort_keys=True)
+    if len(serialized_graph.encode("utf-8")) > MAX_GRAPH_BYTES:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "graph_too_large",
+            "message_string": "The graph and its result history are larger than the store accepts",
+        })
     stored["graph"] = graph
     stored["results_at_unix_int"] = int(time.time())
     try:

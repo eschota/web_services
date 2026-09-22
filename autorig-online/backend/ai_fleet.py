@@ -83,6 +83,98 @@ def _durations_from_renderfin(tasks: List[dict]) -> Dict[str, List[float]]:
     return durations
 
 
+def _workflow_durations(tasks: List[dict]) -> Dict[str, List[float]]:
+    durations: Dict[str, List[float]] = {}
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        workflow = str(task.get("workflow") or task.get("workflow_file") or "").strip()
+        started = float(task.get("started_at") or 0)
+        finished = float(task.get("finished_at") or 0)
+        if workflow and started > 0 and finished > started:
+            durations.setdefault(workflow, []).append(finished - started)
+    return durations
+
+
+def _queue_summary(tasks: List[dict], servers: List[dict],
+                   service_durations: Dict[str, List[float]],
+                   now: Optional[float] = None) -> Dict[str, object]:
+    """Conservative list-scheduling ETA over workflow-compatible workers."""
+    now = float(now if now is not None else time.time())
+    workflow_samples = _workflow_durations(tasks)
+    online = [server for server in servers if isinstance(server, dict)
+              and str(server.get("status") or "").lower() in ("online", "busy")]
+    availability = {str(server.get("render_server_name") or ""): 0.0
+                    for server in online if server.get("render_server_name")}
+    active = []
+    pending = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        state = str(task.get("status") or task.get("status_string") or "").lower()
+        if state in ("rendering", "running") and task.get("render_server_name"):
+            active.append(task)
+        elif state == "pending":
+            pending.append(task)
+
+    kinds = set()
+    used_samples = set()
+
+    def duration(task: dict) -> float:
+        workflow = str(task.get("workflow") or task.get("workflow_file") or "").strip()
+        samples = sorted(workflow_samples.get(workflow) or [])[-SAMPLE_LIMIT:]
+        if samples:
+            used_samples.update((workflow, index) for index in range(len(samples)))
+            kinds.add("measured")
+            return float(statistics.median(samples))
+        service = _service_of_workflow(workflow) or "video"
+        samples = sorted(service_durations.get(service) or [])[-SAMPLE_LIMIT:]
+        if samples:
+            used_samples.update((service, index) for index in range(len(samples)))
+            kinds.add("measured")
+            return float(statistics.median(samples))
+        kinds.add("fallback")
+        return float(FALLBACK_SECONDS.get(service) or 600.0)
+
+    for task in active:
+        worker = str(task.get("render_server_name") or "")
+        expected = duration(task)
+        elapsed = max(0.0, now - float(task.get("started_at") or now))
+        availability[worker] = max(availability.get(worker, 0.0),
+                                   max(0.0, expected - elapsed))
+
+    queued = 0
+    blocked = 0
+    for task in sorted(pending, key=lambda item: float(item.get("created_at") or 0)):
+        workflow = str(task.get("workflow") or task.get("workflow_file") or "").strip()
+        eligible = [str(server.get("render_server_name") or "") for server in online
+                    if workflow in (server.get("available_workflows") or [])]
+        eligible = [name for name in eligible if name]
+        if not eligible:
+            blocked += 1
+            continue
+        queued += 1
+        worker = min(eligible, key=lambda name: availability.get(name, 0.0))
+        availability[worker] = availability.get(worker, 0.0) + duration(task)
+
+    eta = max(availability.values(), default=0.0)
+    if not active and queued == 0:
+        eta_value = None
+        estimate_kind = "unknown" if blocked else "empty"
+    else:
+        # A coarse ten-second value is more honest than fake sub-second precision.
+        eta_value = float(max(0, round(eta / 10.0) * 10))
+        estimate_kind = "mixed" if len(kinds) > 1 else next(iter(kinds), "unknown")
+    return {
+        "running_int": len(active),
+        "queued_int": queued,
+        "blocked_int": blocked,
+        "eta_seconds_float": eta_value,
+        "estimate_kind_string": estimate_kind,
+        "sample_count_int": len(used_samples),
+    }
+
+
 def _running_from_renderfin(tasks: List[dict]) -> Dict[str, Dict[str, int]]:
     running: Dict[str, Dict[str, int]] = {}
     for task in tasks:
@@ -194,6 +286,8 @@ async def _renderfin_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
         "nodes": nodes,
         "durations": _durations_from_renderfin(tasks),
         "running": _running_from_renderfin(tasks),
+        "tasks": tasks,
+        "servers": servers,
     }
 
 
@@ -338,6 +432,8 @@ async def _build_snapshot() -> Dict[str, object]:
 
     online = [n for n in nodes if n.get("online")]
     busy = [n for n in online if n.get("busy")]
+    queue = _queue_summary(list(render.get("tasks") or []),
+                           list(render.get("servers") or []), durations)
     return {
         "success_bool": True,
         "nodes_array": nodes,
@@ -345,6 +441,7 @@ async def _build_snapshot() -> Dict[str, object]:
         "nodes_total_int": len(nodes),
         "nodes_busy_int": len(busy),
         "services_object": services,
+        "queue_object": queue,
         "server_time_unix_int": int(time.time()),
         "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,
     }
@@ -376,6 +473,11 @@ async def api_ai_fleet():
                           "running_int": 0, "queued_int": 0,
                           "measured_bool": False}
                     for key, value in FALLBACK_SECONDS.items()
+                },
+                "queue_object": {
+                    "running_int": 0, "queued_int": 0, "blocked_int": 0,
+                    "eta_seconds_float": None,
+                    "estimate_kind_string": "unknown", "sample_count_int": 0,
                 },
                 "server_time_unix_int": int(time.time()),
                 "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,

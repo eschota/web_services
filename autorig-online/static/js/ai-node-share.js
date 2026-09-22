@@ -54,10 +54,10 @@
       if (!host) return null;
       const text = host.querySelector('.ntext');
       if (text && text.textContent) return { kind: 'text', value: text.textContent, label: 'Output text' };
-      const video = host.querySelector('video');
+      const video = host.querySelector('video.preview-expandable');
       const videoUrl = video && httpUrl(video.currentSrc || video.src);
       if (videoUrl) return { kind: 'video', value: videoUrl, label: 'Output video' };
-      const image = host.querySelector('img');
+      const image = host.querySelector('img.preview-expandable');
       const imageUrl = image && httpUrl(image.currentSrc || image.src);
       if (imageUrl) return { kind: 'image', value: imageUrl, label: 'Output image' };
       const link = host.querySelector('a[href]');

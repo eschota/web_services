@@ -90,6 +90,13 @@ def apply_runtime_settings(workflow, prompt, width, height):
         source = inputs.get('images')
         if not isinstance(source, list):
             continue
+        if has_video_control and kind in {'CreateVideo', 'VHS_VideoCombine'}:
+            # Native IC guide cropping may leave extra tail frames. Keep the
+            # requested timeline from frame zero, never the appended guide tail.
+            trim_id = 'delivery_frames_' + node_id
+            workflow[trim_id] = {'class_type': 'ImageFromBatch', 'inputs': {
+                'image': source, 'batch_index': 0, 'length': frames}}
+            source = [trim_id, 0]
         resize_id = 'delivery_size_' + node_id
         workflow[resize_id] = {
             'class_type': 'ImageScale',

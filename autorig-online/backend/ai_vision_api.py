@@ -476,6 +476,27 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
     import ai_model_catalogue
     import ai_model_defaults
 
+    if not use_default and not checkpoint and not lora and service_id == "image":
+        legacy_base = ai_model_defaults.family_default_checkpoint(
+            ai_model_catalogue.entries(), {"family": "flux"}, "image")
+        checkpoint = str((legacy_base or {}).get("file") or "") or None
+    if not checkpoint and lora:
+        # Validate the adapter first, then resolve only a catalogue-declared
+        # base for its architecture. Falling through to a workflow's embedded
+        # loader made the same saved node run Schnell on one worker and another
+        # Flux.1 base on a different worker.
+        lora_choice = _validate_model_choice(service_id, None, lora)
+        lora_entry = ai_model_catalogue.known_file(
+            str(lora_choice.get("lora") or ""), "lora")
+        family_default = ai_model_defaults.family_default_checkpoint(
+            ai_model_catalogue.entries(), lora_entry, service_id)
+        if family_default is None:
+            raise HTTPException(status_code=400, detail={
+                "error_string": "checkpoint_required_for_lora",
+                "message_string": (
+                    "Select a compatible checkpoint for this LoRA; the catalogue "
+                    "does not declare an automatic base model for its family")})
+        checkpoint = str(family_default.get("file") or "") or None
     if use_default and not checkpoint and not lora:
         default_entry = next((entry for entry in ai_model_catalogue.entries()
                               if entry.get("kind") == "checkpoint"
@@ -499,7 +520,7 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
 
 @router.get("/api/ai/model-settings")
 async def api_ai_model_settings(service: str, checkpoint: Optional[str] = None,
-                                lora: Optional[str] = None):
+                                lora: Optional[str] = None, control_channel: str = "", mode: str = ""):
     """Resolved catalogue defaults used when a model selection changes."""
     service_id = str(service or "").strip().lower()
     if service_id not in ("image", "video"):
@@ -507,7 +528,8 @@ async def api_ai_model_settings(service: str, checkpoint: Optional[str] = None,
             "error_string": "unknown_service",
             "message_string": "service must be image or video"})
     effective, trigger_prefix = _effective_model_settings(
-        service_id, checkpoint, lora, {})
+        service_id, checkpoint, lora, {},
+        use_default=not (service_id == "image" and bool(control_channel or mode)))
     effective.setdefault("main_size_width", 960)
     effective.setdefault("main_size_height", 540)
     return {
@@ -911,7 +933,7 @@ async def api_image(body: ImageRequest):
                    if entry.get("file") in selected or "image" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("image", payload,
-        lambda: _uncached_api_image(body), namespace="ai-workflows-20260922-v2")
+        lambda: _uncached_api_image(body), namespace="ai-exact-models-20260922-v3")
 
 
 async def _uncached_api_image(body: ImageRequest):
@@ -1107,7 +1129,7 @@ async def api_video(body: VideoRequest):
                    if entry.get("file") in selected or "video" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("video", payload,
-        lambda: _uncached_api_video(body), namespace="ai-video-delivery-20260922-v3")
+        lambda: _uncached_api_video(body), namespace="ai-video-exact-models-20260922-v4")
 
 
 async def _uncached_api_video(body: VideoRequest):

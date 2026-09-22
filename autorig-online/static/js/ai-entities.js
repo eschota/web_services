@@ -255,6 +255,23 @@
       summary.textContent = online + '/' + (data.nodes_total_int || 0);
       dots.appendChild(summary);
 
+      const queue = data.queue_object || {};
+      if (Number.isFinite(Number(queue.running_int)) && Number.isFinite(Number(queue.queued_int))) {
+        const queueSummary = document.createElement('span');
+        queueSummary.className = 'fleet-queue';
+        const eta = queue.eta_seconds_float == null ? '' : ' · ~' + human(queue.eta_seconds_float);
+        queueSummary.textContent = Number(queue.running_int) + ' running · ' +
+          Number(queue.queued_int) + ' queued' + eta +
+          (queue.blocked_int ? ' · ' + Number(queue.blocked_int) + ' blocked' : '');
+        queueSummary.title = Number(queue.running_int) + ' running, ' +
+          Number(queue.queued_int) + ' queued, ' + Number(queue.blocked_int || 0) +
+          ' blocked' + (queue.eta_seconds_float == null ? '' :
+            '; estimated wait ' + human(queue.eta_seconds_float)) +
+          (queue.estimate_kind_string ? '; ' + queue.estimate_kind_string : '') +
+          (queue.sample_count_int ? '; ' + Number(queue.sample_count_int) + ' measured samples' : '');
+        dots.appendChild(queueSummary);
+      }
+
       pop.innerHTML =
         '<div class="fleet-pop-head">' + busy + ' of ' + online + ' busy</div>' +
         '<div class="fleet-pop-row"><span>typical ' + serviceId + '</span><b>' +
@@ -409,6 +426,8 @@
       .fleet-dot.off { background:#3a4050; }
       .fleet-dot.render { border-radius:2px; }
       .fleet-sum { font-size:11px; color:var(--text-secondary,#9aa0b5); margin-left:4px; }
+      .fleet-queue { font-size:11px; color:var(--text-secondary,#9aa0b5); margin-left:8px;
+                     white-space:nowrap; }
       .fleet-key { display:flex; flex-wrap:wrap; gap:10px; margin-top:9px; padding-top:8px;
                    border-top:1px solid rgba(255,255,255,.1); font-size:11px;
                    color:var(--text-secondary,#9aa0b5); }
@@ -427,8 +446,10 @@
         background:#1a1b30 center/cover no-repeat; display:block; }
       .mpick-thumb.empty { background:
         repeating-linear-gradient(45deg,#23243d 0 5px,#1a1b30 5px 10px); }
-      .mpick-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
-        white-space:nowrap; }
+      .mpick-choice { flex:1; min-width:0; display:block; overflow:hidden; }
+      .mpick-label, .mpick-file { display:block; min-width:0; overflow:hidden;
+        text-overflow:ellipsis; white-space:nowrap; }
+      .mpick-file { margin-top:1px; color:var(--text-secondary,#9aa0b5); font-size:10px; }
       .mpick-caret { opacity:.6; font-size:10px; }
       .mpick-panel { position:absolute; z-index:40; top:calc(100% + 5px); left:0;
         width:max(100%, 330px); max-width:calc(100vw - 32px); box-sizing:border-box;
@@ -545,7 +566,7 @@
 
   function modelPicker(host, serviceId, kind, options) {
     const settings = options || {};
-    const state = { value: settings.value || '', entries: [] };
+    const state = { value: settings.value || '', entries: [], checkpoints: [] };
     // Added, not assigned: the node editor marks its slots with `mpick-slot`
     // and looks them up again to restore a saved choice, so overwriting the
     // class list quietly broke reopening a graph with a model on it.
@@ -553,7 +574,8 @@
     host.innerHTML =
       '<button type="button" class="mpick-button">' +
         '<span class="mpick-thumb"></span>' +
-        '<span class="mpick-label">Loading…</span>' +
+        '<span class="mpick-choice"><span class="mpick-label">Loading…</span>' +
+          '<small class="mpick-file"></small></span>' +
         '<span class="mpick-caret">▾</span>' +
       '</button>' +
       '<div class="mpick-panel" hidden></div>';
@@ -562,18 +584,26 @@
     const panel = host.querySelector('.mpick-panel');
     const thumb = host.querySelector('.mpick-thumb');
     const label = host.querySelector('.mpick-label');
+    const fileLabel = host.querySelector('.mpick-file');
 
     function paintButton() {
       const entry = state.entries.find(e => e.file === state.value);
       if (!entry) {
         thumb.style.backgroundImage = '';
         thumb.className = 'mpick-thumb empty';
-        label.textContent = settings.emptyLabel || 'Workflow default';
+        label.textContent = state.value
+          ? state.value
+          : (kind === 'loras' ? 'No LoRA' : 'Choose a model');
+        fileLabel.textContent = state.value ? 'Selected file' :
+          (kind === 'loras' ? 'Optional adapter: none' : 'Select a checkpoint');
+        button.title = state.value || label.textContent;
         return;
       }
       thumb.className = 'mpick-thumb';
       thumb.style.backgroundImage = entry.preview ? 'url(' + entry.preview + ')' : '';
       label.textContent = entry.title || entry.file;
+      fileLabel.textContent = entry.file;
+      button.title = (entry.title || entry.file) + ' — ' + entry.file;
     }
 
     // The cards on these pages use `backdrop-filter`, which makes each one its
@@ -581,24 +611,49 @@
     // matter how high its z-index is. Lifting the card that owns the picker is
     // the only thing that actually works.
     function setOpen(open) {
+      if (open && kind === 'loras') {
+        panel.querySelectorAll('.mpick-item[data-model-file]').forEach(item => {
+          const entry = state.entries.find(value => value.file === item.dataset.modelFile);
+          if (!entry) return;
+          const reason = loraCompatibilityReason(entry);
+          item.disabled = entry.usable === false || !!reason;
+          item.classList.toggle('blocked', item.disabled);
+          item.title = reason || (entry.title || entry.file) + ' — ' + entry.file + '. ' + (entry.recommended_from || '');
+        });
+      }
       panel.hidden = !open;
       const card = host.closest('.ai-card') || host.closest('.drawflow-node');
       if (card) card.classList.toggle('mpick-open', open);
     }
 
-    function choose(value) {
+    function loraCompatibilityReason(entry) {
+      if (kind !== 'loras') return '';
+      const scope = host.closest('.drawflow-node, .ai-card') || document;
+      const field = scope.querySelector('[data-param="checkpoint"], [name="checkpoint"], #checkpoint');
+      const base = state.checkpoints.find(item => item.file === field?.value);
+      const left = base?.family, right = entry?.family;
+      if (!left || !right || left === right || (['pony','sdxl'].includes(left) && ['pony','sdxl'].includes(right))) return '';
+      return 'This LoRA requires ' + (entry.base || right) + '. Choose a compatible checkpoint first.';
+    }
+
+    function choose(value, materialized = false) {
+      const candidate = state.entries.find(entry => entry.file === value);
+      if (candidate && loraCompatibilityReason(candidate)) return;
       state.value = value;
+      panel.querySelectorAll('.mpick-item').forEach(item =>
+        item.classList.toggle('chosen', item.dataset.modelFile === value));
       paintButton();
       setOpen(false);
       // The entry goes with the value: the caller wants the model's own
       // recommended settings, and it should not have to fetch them again.
       const entry = state.entries.find(e => e.file === value) || null;
-      if (settings.onChange) settings.onChange(value, entry);
+      if (settings.onChange) settings.onChange(value, entry, { materialized: materialized === true });
     }
 
     function row(entry) {
       const item = document.createElement('button');
       item.type = 'button';
+      item.dataset.modelFile = entry.file;
       item.className = 'mpick-item' + (entry.usable === false ? ' blocked' : '') +
                        (entry.file === state.value ? ' chosen' : '');
       const triggers = (entry.triggers || []).slice(0, 2).join(', ');
@@ -606,13 +661,15 @@
       const recText = Object.keys(rec).length
         ? Object.keys(rec).sort().map(k => k + ' ' + rec[k]).join(' · ')
         : '';
-      item.title = entry.recommended_from || 'Workflow defaults; no author settings published';
+      item.title = (entry.title || entry.file) + ' — ' + entry.file + '. ' +
+        (entry.recommended_from || 'No author settings published.');
       item.innerHTML =
         '<span class="mpick-thumb"' +
           (entry.preview ? ' style="background-image:url(' + entry.preview + ')"' : '') + '></span>' +
         '<span class="mpick-text">' +
           '<b>' + escapeHtml(entry.title || entry.file) + '</b>' +
-          '<i>' + escapeHtml(entry.base || '') +
+          '<i>' + escapeHtml(entry.file) +
+            (entry.base ? ' · ' + escapeHtml(entry.base) : '') +
             (entry.size_mb ? ' · ' + Math.round(entry.size_mb) + ' MB' : '') +
             (entry.nsfw ? ' · 18+' : '') + '</i>' +
           (triggers ? '<u>' + escapeHtml(triggers) + '</u>' : '') +
@@ -629,17 +686,36 @@
     }
 
     loadModels(serviceId).then(data => {
+      state.checkpoints = data.checkpoints_array || [];
       state.entries = (kind === 'checkpoints' ? data.checkpoints_array : data.loras_array) || [];
       panel.innerHTML = '';
-      const none = document.createElement('button');
-      none.type = 'button';
-      none.className = 'mpick-item' + (state.value ? '' : ' chosen');
-      none.innerHTML = '<span class="mpick-thumb empty"></span><span class="mpick-text">' +
-                       '<b>' + escapeHtml(settings.emptyLabel || 'Workflow default') + '</b>' +
-                       '<i>whatever the workflow already uses</i></span>';
-      none.addEventListener('click', () => choose(''));
-      panel.appendChild(none);
+      if (kind === 'loras') {
+        const none = document.createElement('button');
+        none.type = 'button';
+        none.dataset.modelFile = '';
+        none.className = 'mpick-item' + (state.value ? '' : ' chosen');
+        none.title = 'Use the selected checkpoint without an optional LoRA adapter.';
+        none.innerHTML = '<span class="mpick-thumb empty"></span><span class="mpick-text">' +
+                         '<b>No LoRA</b><i>Optional adapter: none</i></span>';
+        none.addEventListener('click', () => choose(''));
+        panel.appendChild(none);
+      }
       state.entries.forEach(entry => panel.appendChild(row(entry)));
+      if (kind === 'checkpoints' && !state.value) {
+        // Saved graphs apply their hidden checkpoint and LoRA values in the
+        // same turn that mounts this picker, before this promise callback.
+        // A legacy blank checkpoint paired with a Flux1 LoRA must be resolved
+        // by the family-aware backend; choosing the image service's FLUX2
+        // default here would create an invalid pair.
+        const scope = host.closest('.drawflow-node, .ai-card') || document;
+        const siblingLora = scope.querySelector && scope.querySelector('[data-param="lora"]');
+        const hasExplicitLora = siblingLora && String(siblingLora.value || '').trim();
+        if (!hasExplicitLora) {
+          const defaultEntry = state.entries.find(entry => entry.usable !== false &&
+            ((entry.default_for_services || []).indexOf(serviceId) !== -1 || entry.default === true));
+          if (defaultEntry) choose(defaultEntry.file, true);
+        }
+      }
       paintButton();
     }).catch(() => { label.textContent = 'catalogue unavailable'; });
 
@@ -653,7 +729,11 @@
     return {
       get value() { return state.value; },
       get entry() { return state.entries.find(entry => entry.file === state.value) || null; },
-      set value(v) { state.value = v; paintButton(); }
+      set value(v) {
+        state.value = v;
+        panel.querySelectorAll('.mpick-item').forEach(item => item.classList.toggle('chosen', item.dataset.modelFile === v));
+        paintButton();
+      }
     };
   }
 

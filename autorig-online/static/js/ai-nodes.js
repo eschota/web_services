@@ -21,6 +21,12 @@
 
   let editor = null;
   let nodeDisplay = null;
+  let nodeGroups = null;
+  let graphAgent = null;
+  let graphBridge = null;
+  let graphInstanceId = '';
+  let comparisonAnchorId = '';
+  let nodeCompare = null;
   let catalogue = null;
   let models = [];
   // Drawflow addresses ports by index, the catalogue by field name. This holds
@@ -51,6 +57,7 @@
   let nextRunRequestId = 0;
   let canvasEpoch = 1;
   const pendingImageUploads = new Map();
+  const pendingModelSelections = new Map();
   let graphId = null;
   let resultsTimer = null;
   // Set by Cancel. It only stops work that has not been handed to the farm
@@ -71,8 +78,8 @@
   }
 
   function reusableCompleted(service, body) {
-    if (/vision|control|text/.test(service) ||
-        service === 'video_frame' || service === 'video_storyboard') return true;
+    if (['vision', 'text', 'video_frame', 'video_storyboard'].includes(service) ||
+        service.startsWith('control_')) return true;
     if (!/image|video|animation|render/.test(service)) return true;
     return ![undefined, null, '', 0, '0'].includes(body.seed);
   }
@@ -102,11 +109,13 @@
   }
 
   function forgetNodes(ids) {
+    let anchorCleared = false;
     (ids || []).map(String).forEach(id => {
       activeExecutions.forEach((execution, key) => {
         if (String(execution.id) === id) activeExecutions.delete(key);
       });
       nodeMeta.delete(id);
+      if (comparisonAnchorId === id) { comparisonAnchorId = ''; anchorCleared = true; }
       runState.delete(id);
       continuableResults.delete(id);
       const restored = restoredExecutions.get(id);
@@ -118,6 +127,7 @@
       latestPlannedRequests.delete(id);
       nodeRunVersions.set(id, (nodeRunVersions.get(id) || 0) + 1);
     });
+    if (anchorCleared && nodeCompare) requestAnimationFrame(() => nodeCompare.refresh());
     pushResults();
     refreshRunningControls();
   }
@@ -140,7 +150,13 @@
       desiredSignatures.delete(id);
       latestPlannedRequests.delete(id);
       nodeRunVersions.set(id, (nodeRunVersions.get(id) || 0) + 1);
-      runState.delete(id);
+      const prior = runState.get(id);
+      if (prior && ['done', 'stale'].includes(prior.status) && prior.value) {
+        runState.set(id, {...prior, status:'stale'});
+      } else if (prior?.history?.length) {
+        const last = prior.history[0];
+        runState.set(id, {...last, status:'stale', task_id:'', history:prior.history.slice(1)});
+      } else runState.delete(id);
       continuableResults.delete(id);
       const restored = restoredExecutions.get(id);
       if (restored) restored.invalidated = true;
@@ -169,7 +185,9 @@
   }
 
   function recordResult(id, record) {
+    if (nodeCompare) record = nodeCompare.enhanceRecord(record, runState.get(String(id)));
     runState.set(String(id), record);
+    if (nodeCompare) requestAnimationFrame(() => nodeCompare.refresh(String(id)));
     if (record.status === 'done' && record.value) {
       continuableResults.set(String(id), {type:record.type, value:record.value,
         task_id:record.task_id || ''});
@@ -322,6 +340,7 @@
     alignPorts(id, inputs.length, outputs.length);
     mountModelPickers(id, serviceId);
     if (params) applyParams(id, params);
+    materializeDefaultModel(id);
     return id;
   }
 
@@ -353,14 +372,27 @@
       const hidden = element.querySelector('input[data-param="' + CSS.escape(name) + '"]');
       const picker = window.AIEntities.modelPicker(slot, serviceId, slot.dataset.modelSource, {
         value: hidden ? hidden.value : '',
-        onChange: (value, entry) => {
+        onChange: (value, entry, reason) => {
           if (name === 'checkpoint' && value && !modelAcceptsConnectedControls(id, entry)) {
             picker.value = hidden ? hidden.value : '';
-            toast('This model has not been validated with the connected ControlNet channel. Use a compatible model or disconnect the control.');
+            if (!reason?.materialized) toast('This model has not been validated with the connected ControlNet channel. Use a compatible model or disconnect the control.');
             return;
           }
           if (hidden) hidden.value = value;
-          applyRecommended(id, entry);
+          if (reason && reason.materialized) return;
+          if (name === 'checkpoint') {
+            const loraField = element.querySelector('[data-param="lora"]');
+            const loraPicker = element.querySelector('[data-model-param="lora"]')?._picker;
+            const left = entry?.family, right = loraPicker?.entry?.family;
+            if (loraField?.value && left && right && left !== right &&
+                !(['pony','sdxl'].includes(left) && ['pony','sdxl'].includes(right))) {
+              loraField.value = ''; loraPicker.value = '';
+              toast('The previous LoRA belongs to another model family and was cleared.');
+            }
+          }
+          const pending = applyRecommended(id, entry);
+          pendingModelSelections.set(String(id), pending);
+          pending.finally(() => { if(pendingModelSelections.get(String(id))===pending) pendingModelSelections.delete(String(id)); });
         }
       });
       slot._picker = picker;
@@ -393,11 +425,18 @@
       const control = element.querySelector('[data-param="' + name + '"]');
       if (control && control.value) selection.set(name, control.value);
     });
+    addWorkflowSelectionContext(id, selection);
     try {
       const response = await fetch('/api/ai/model-settings?' + selection);
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail?.message_string || 'Settings unavailable');
       if (element._settingsGeneration !== generation) return;
+      const checkpointControl = element.querySelector('[data-param="checkpoint"]');
+      if (checkpointControl && !checkpointControl.value && data.checkpoint_string) {
+        checkpointControl.value = data.checkpoint_string;
+        const picker = element.querySelector('[data-model-param="checkpoint"]')?._picker;
+        if (picker) picker.value = data.checkpoint_string;
+      }
       const effective = data.effective_params_object || {};
       entry = { recommended: effective };
     } catch (error) {
@@ -770,6 +809,50 @@
     pumpSubmitQueue();
   }
 
+  function materializeDefaultModel(id) {
+    const element = nodeElement(id);
+    const checkpoint = element && element.querySelector('[data-param="checkpoint"]');
+    const serviceId = meta(id)?.service;
+    if (!checkpoint || checkpoint.value || !['image', 'video'].includes(serviceId)) return;
+    const lora = element.querySelector('[data-param="lora"]');
+    const expectedLora = lora ? lora.value : '';
+    const query = new URLSearchParams({service:serviceId});
+    if (expectedLora) query.set('lora', expectedLora);
+    const promise = Promise.resolve().then(() => {
+      addWorkflowSelectionContext(id, query);
+      return fetch('/api/ai/model-settings?' + query);
+    }).then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail?.message_string || 'Choose a compatible model');
+      if (!element.isConnected || checkpoint.value || (lora?.value || '') !== expectedLora) return;
+      if (data.checkpoint_string) {
+        checkpoint.value = data.checkpoint_string;
+        const picker = element.querySelector('[data-model-param="checkpoint"]')?._picker;
+        if (picker) picker.value = data.checkpoint_string;
+      }
+    }).catch(error => {
+      if (element.isConnected && !checkpoint.value) element.querySelector('.nrec').textContent = error.message;
+    }).finally(() => {
+      if (pendingModelSelections.get(String(id)) === promise) pendingModelSelections.delete(String(id));
+    });
+    pendingModelSelections.set(String(id), promise);
+  }
+
+  async function prepareGraphSnapshot() {
+    await Promise.all([...pendingImageUploads.values(), ...pendingModelSelections.values()]);
+  }
+
+  function addWorkflowSelectionContext(id, query) {
+    const data = editor.getNodeFromId(id);
+    const fields = meta(id)?.inFields || [];
+    fields.forEach((field, index) => {
+      if (field.startsWith('control_') && data?.inputs?.['input_' + (index + 1)]?.connections?.length)
+        query.set('control_channel', field.slice(8));
+    });
+    const mode = nodeElement(id)?.querySelector('[data-param="mode"]')?.value;
+    if (mode) query.set('mode', mode);
+  }
+
   function pacedSubmitFetch(url, options) {
     return new Promise((resolve, reject) => {
       submitQueue.push({start: () => fetch(url, options), resolve, reject});
@@ -957,7 +1040,7 @@
     if (executionIsCurrent(execution)) {
       state.textContent = 'sending…';
       state.className = 'nstate running';
-      outBox.innerHTML = '';
+      // Keep the last successful preview visible while its replacement renders.
     }
     let task = null;
     try {
@@ -979,6 +1062,7 @@
           status: 'running', type: runner.type,
           value: accepted[runner.field] || '',
           task_id: accepted.task_id_string || '',
+          input_reference_url: execution.inputReference || '',
           started_at: Date.now() / 1000
         });
       }
@@ -1005,6 +1089,7 @@
         state.className = 'nstate done';
         showResult(outBox, runner.type, value);
         recordResult(id, { status: 'done', type: runner.type, value: value,
+                           input_reference_url: execution.inputReference || '',
                            task_id: accepted.task_id_string || '' });
       }
       return { type: runner.type, value: value };
@@ -1172,6 +1257,7 @@
     const results = {};
     runState.forEach((value, key) => { results[key] = value; });
     return { name: document.getElementById('graph-name').value.trim() || 'Untitled',
+             instance_id: graphInstanceId, comparison_anchor_id: comparisonAnchorId,
              nodes, links, results };
   }
 
@@ -1228,11 +1314,12 @@
       if (response.ok) {
         graphId = data.graph_id_string;
         history.replaceState(null, '', data.deep_link_string);
+        document.dispatchEvent(new CustomEvent('ai-graph-saved', {detail:{graphId}}));
       }
     } catch (error) { /* a run is still worth doing without a link */ }
   }
 
-  function startIncrementalService(id, node, resolved, params, signature, epoch, keepDone) {
+  function startIncrementalService(id, node, resolved, params, signature, epoch, keepDone, graphSnapshot) {
     const idString = String(id);
     const key = executionKey(epoch, idString, signature);
     desiredSignatures.set(idString, signature);
@@ -1270,6 +1357,7 @@
         state.className = 'nstate done';
         showResult(element.querySelector('.nout'), completed.type, completed.value);
         recordResult(idString, {status:'done', type:completed.type, value:completed.value,
+          input_reference_url:completed.input_reference_url || (nodeCompare?.resolveReference(idString, graphSnapshot) || resolved.image || ''),
           task_id:completed.task_id || ''});
       }
       return Promise.resolve({type: completed.type, value: completed.value});
@@ -1278,12 +1366,13 @@
     const version = (nodeRunVersions.get(idString) || 0) + 1;
     nodeRunVersions.set(idString, version);
     continuableResults.delete(idString);
-    const execution = {id:idString, signature, epoch, version, taskId:''};
+    const execution = {id:idString, signature, epoch, version, taskId:'',
+      inputReference:nodeCompare?.resolveReference(idString, graphSnapshot) || resolved.image || ''};
     const promise = runServiceNode(idString, resolved, params, execution)
       .then(result => {
         if (epoch === canvasEpoch && reusableCompleted(node.service, requestBody)) {
           const bucket = completedExecutions.get(idString) || new Map();
-          bucket.set(signature, {...result, task_id:execution.taskId || ''});
+          bucket.set(signature, {...result, task_id:execution.taskId || '', input_reference_url:execution.inputReference || ''});
           // Keep a few useful variants without allowing a long editing session
           // to grow memory forever.
           while (bucket.size > 8) bucket.delete(bucket.keys().next().value);
@@ -1303,7 +1392,7 @@
 
   /** Add the current graph snapshot to the live queue. */
   async function runGraph(keepDone) {
-    await Promise.all([...pendingImageUploads.values()]);
+    await prepareGraphSnapshot();
     const graph = graphFromCanvas();
     const epoch = canvasEpoch;
     const order = executionOrder(graph);
@@ -1363,7 +1452,9 @@
           const signature = stableJson({service:node.service, body:requestBody});
           try {
             const result = await startIncrementalService(
-              id, node, resolved, params, signature, epoch, keepDone);
+              id, node, resolved, params, signature, epoch, keepDone, graph);
+            if (!graph.results) graph.results = {};
+            graph.results[id] = {status:'done', type:result.type, value:result.value};
             return {ok:true, result};
           } catch (error) {
             return {ok:false, error:String(error.message || error)};
@@ -1428,6 +1519,8 @@
       const response = await fetch('/api/ai/request-cache', {method:'DELETE'});
       const data = await response.json();
       if (!response.ok) throw new Error('The request cache could not be cleared');
+      completedExecutions.clear();
+      continuableResults.clear();
       toast(`Cleared ${data.entries_removed_int} cached request(s). Render will compute fresh results.`);
     } catch (error) { toast(error.message); }
   }
@@ -1451,11 +1544,11 @@
       const state = element.querySelector('.nstate');
       const outBox = element.querySelector('.nout');
       runState.set(String(id), record);
-      if (record.status === 'done' && record.value) {
-        continuableResults.set(String(id), {type:record.type, value:record.value,
+      if (['done', 'stale'].includes(record.status) && record.value) {
+        if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value,
           task_id:record.task_id || ''});
-        state.textContent = 'done';
-        state.className = 'nstate done';
+        state.textContent = record.status === 'stale' ? 'changed — render to update' : 'done';
+        state.className = record.status === 'stale' ? 'nstate' : 'nstate done';
         showResult(outBox, record.type, record.value);
         return;
       }
@@ -1509,6 +1602,7 @@
       if (task) task.finish(true);
       showResult(outBox, runner.type, value);
       recordResult(id, { status: 'done', type: runner.type, value: value,
+                         input_reference_url:record.input_reference_url || '', history:record.history || [],
                          task_id: record.task_id || '' });
       return {type:runner.type, value};
     } catch (error) {
@@ -1527,6 +1621,8 @@
     editor.clear();
     nodeMeta.clear();
     runState.clear();
+    graphInstanceId = graph.instance_id || '';
+    comparisonAnchorId = '';
     document.getElementById('graph-name').value = graph.name || 'Untitled';
     const mapping = new Map();
     (graph.nodes || []).forEach(node => {
@@ -1546,6 +1642,7 @@
       if (inIndex < 0) return;
       editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1));
     });
+    comparisonAnchorId = String(mapping.get(graph.comparison_anchor_id) || '');
     restoreResults(graph.results, mapping);
     refreshRunningControls();
   }
@@ -1579,7 +1676,7 @@
   }
 
   async function saveGraph() {
-    await Promise.all([...pendingImageUploads.values()]);
+    await prepareGraphSnapshot();
     // If the graph already has a link, the click copies it at once and the
     // save follows: the copy then happens while the gesture is still live.
     if (graphId) {
@@ -1603,9 +1700,30 @@
     graphId = data.graph_id_string;
     const link = location.origin + data.deep_link_string;
     history.replaceState(null, '', data.deep_link_string);
+    document.dispatchEvent(new CustomEvent('ai-graph-saved', {detail:{graphId}}));
     if (!changed) return;
     const copied = await copyText(link);
     toast(copied ? 'Deep link copied: ' + link : 'Deep link (copy it): ' + link);
+  }
+
+  async function duplicateGraph() {
+    const button = document.getElementById('duplicate-graph');
+    button.disabled = true;
+    try {
+      await prepareGraphSnapshot();
+      const response = await fetch('/api/ai/graphs/duplicate', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({currentGraph:graphFromCanvas()})});
+      const data = await response.json();
+      if (!response.ok || !data.graph_object) throw new Error(data.detail?.message_string || 'The graph copy was not saved');
+      // The copy contains this exact canvas. Keep its live nodes and running
+      // task subscriptions in place; only its independent identity changes.
+      graphInstanceId = data.graph_object.instance_id || '';
+      graphId = data.graph_id_string;
+      history.replaceState(null, '', data.deep_link_string);
+      document.dispatchEvent(new CustomEvent('ai-graph-saved', {detail:{graphId}}));
+      toast('Independent graph copy created: ' + location.origin + data.deep_link_string);
+    } catch (error) { toast(error.message); }
+    finally { button.disabled = false; }
   }
 
   /* ------------------------------------------------------------- the shell */
@@ -1667,13 +1785,14 @@
     editor.start();
     if (window.AINodeDisplay) nodeDisplay = window.AINodeDisplay.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, defaultMode:'medium',
-      onModeChange:(id, mode) => { const value=meta(id); if(value) value.displayMode=mode; }});
+      onModeChange:(id, mode) => { const value=meta(id); if(value) value.displayMode=mode; if(nodeCompare) nodeCompare.refresh(id); }});
     if (window.AINodeShare) window.AINodeShare.install({canvas:document.getElementById('canvas'), getMeta:meta, toast});
     installWheelZoom();
-    if (window.AINodeGroups) window.AINodeGroups.install({editor,
+    if (window.AINodeGroups) nodeGroups = window.AINodeGroups.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
       addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200,
-      onNodesRemoved:forgetNodes});
+      onNodesRemoved:forgetNodes,
+      onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
     document.addEventListener('paste', event => {
       const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
       if (!item) return;
@@ -1723,6 +1842,7 @@
     document.getElementById('run').addEventListener('click', () => runGraph(false));
     document.getElementById('continue').addEventListener('click', () => runGraph(true));
     document.getElementById('save').addEventListener('click', saveGraph);
+    document.getElementById('duplicate-graph').addEventListener('click', duplicateGraph);
     document.getElementById('cancel').addEventListener('click', cancelRun);
     document.getElementById('purge').addEventListener('click', purgeCache);
     document.getElementById('clear').addEventListener('click', () => {
@@ -1731,6 +1851,7 @@
       nodeMeta.clear();
       runState.clear();
       graphId = null;
+      graphInstanceId = ''; comparisonAnchorId = '';
       history.replaceState(null, '', '/nodes');
     });
     setRunning(false);
@@ -1765,6 +1886,19 @@
     } else if ((templates.templates_array || []).length) {
       loadGraph(templates.templates_array[0].graph);
     }
+    if (window.AINodeCompare) nodeCompare = window.AINodeCompare.install({
+      canvas:document.getElementById('canvas'), getMeta:meta, getGraph:graphFromCanvas,
+      getResult:id => runState.get(String(id)), getAnchorId:() => comparisonAnchorId,
+      setAnchorId:id => { comparisonAnchorId = String(id || ''); }, toast});
+    if (window.AIGraphBridge) graphBridge = window.AIGraphBridge.create({
+      editor, getGraph:graphFromCanvas, addServiceNode, addInputNode, applyParams, getMeta:meta,
+      forgetNodes, invalidateNodeAndDownstream, nodeDisplay, applyRecommended,
+      setGraphName:name => { document.getElementById('graph-name').value = name; }, toast});
+    if (window.AIGraphAgent && graphBridge) graphAgent = window.AIGraphAgent.install({
+      getGraph:graphFromCanvas, getCatalogue:() => catalogue,
+      getSelectedIds:() => Array.from(nodeGroups?.selected || []),
+      prepareGraph:prepareGraphSnapshot, applyGraph:graphBridge.applyGraph,
+      saveGraph:async () => { await prepareGraphSnapshot(); await ensureSaved(); return graphId; }});
   }
 
   window.addEventListener('DOMContentLoaded', () => {

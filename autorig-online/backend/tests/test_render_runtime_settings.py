@@ -14,6 +14,8 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(graph['latent']['inputs']['height'], 576)
         self.assertEqual(graph['control']['inputs']['strength'], 0.6)
         self.assertEqual(graph['delivery_size_video']['inputs']['height'], 540)
+        self.assertEqual(graph['delivery_frames_video']['inputs'],
+                         {'image': ['decode', 0], 'batch_index': 0, 'length': 97})
 
     def test_half_hd_is_padded_for_model_and_exact_for_saved_video(self):
         graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {'width': 1024, 'height': 1024}},

@@ -88,6 +88,34 @@ def compatible(checkpoint: Optional[Mapping[str, object]],
     return left == right
 
 
+def family_default_checkpoint(
+    entries: Iterable[Mapping[str, object]],
+    lora: Optional[Mapping[str, object]],
+    service: str,
+) -> Optional[Mapping[str, object]]:
+    """Return an explicitly declared base for a LoRA family.
+
+    A catalogue's first checkpoint is a display-order choice, not a model
+    compatibility rule. Only an entry marked for this family may resolve a
+    missing checkpoint, which keeps worker-specific workflow defaults from
+    silently changing the model.
+    """
+    family = model_family(lora)
+    service = str(service or "").strip().lower()
+    if not family or not service:
+        return None
+    for entry in entries:
+        if (
+            str(entry.get("kind") or "").strip().lower() == "checkpoint"
+            and bool(entry.get("usable"))
+            and service in (entry.get("services") or [])
+            and family in (entry.get("default_for_families") or [])
+            and compatible(entry, lora)
+        ):
+            return entry
+    return None
+
+
 def _normalise_recommended(raw: object) -> Dict[str, object]:
     if not isinstance(raw, Mapping):
         return {}
@@ -120,7 +148,15 @@ def resolve(checkpoint: Optional[Mapping[str, object]],
     effective: Dict[str, object] = {}
     for entry in (checkpoint, lora):
         if entry and entry.get("recommended_from"):
-            effective.update(_normalise_recommended(entry.get("recommended")))
+            recommended = _normalise_recommended(entry.get("recommended"))
+            if (str(entry.get("kind") or "").strip().lower() == "lora"
+                    and entry.get("sampling_recommendations_compatible") is False):
+                # The LoRA page's sampler/steps describe its training base
+                # (Flux Dev for our current Flux.1 adapters), not the installed
+                # four-step Schnell base. Strength still belongs to the LoRA.
+                recommended = {key: value for key, value in recommended.items()
+                               if key == "strength"}
+            effective.update(recommended)
     for key, value in explicit.items():
         if value is not None and value != "":
             effective[key] = value

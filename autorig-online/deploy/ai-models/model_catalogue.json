@@ -14,6 +14,9 @@
     "default_for_services": [
       "image"
     ],
+    "default_for_families": [
+      "flux2"
+    ],
     "workflow": "gen_image_flux2_klein.json",
     "recommended": {
       "steps": 4,
@@ -33,6 +36,82 @@
   },
   {
     "kind": "checkpoint",
+    "family": "flux",
+    "base": "FLUX.1 Schnell",
+    "file": "flux1-schnell.safetensors",
+    "id": "flux1-schnell.safetensors",
+    "title": "FLUX.1 Schnell",
+    "version": "farm UNET",
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "default_for_families": [
+      "flux"
+    ],
+    "workflow": "gen_image.json",
+    "recommended": {
+      "steps": 4,
+      "sampler": "euler",
+      "scheduler": "simple"
+    },
+    "recommended_from": "Black Forest Labs reference implementation: FLUX.1 Schnell defaults to four inference steps; the validated Comfy workflow uses Euler with the simple scheduler.",
+    "recommendation_kind": "author_reference_implementation",
+    "recommendation_sources": [
+      "https://github.com/black-forest-labs/flux/blob/main/docs/text-to-image.md",
+      "https://github.com/black-forest-labs/flux/blob/main/src/flux/cli.py"
+    ],
+    "page": "https://huggingface.co/black-forest-labs/FLUX.1-schnell",
+    "file_source": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/blob/main/flux1-schnell.safetensors",
+    "sha256": "9403429e0052277ac2a87ad800adece5481eecefd9ed334e1f348723621d2a0a",
+    "size_mb": 23782.5,
+    "source_checked_at": "2026-09-22",
+    "triggers": [],
+    "preview": "",
+    "validated_workers": [
+      "Raptor",
+      "f5",
+      "f15",
+      "f12"
+    ]
+  },
+  {
+    "kind": "checkpoint",
+    "family": "flux",
+    "base": "FLUX.1 Schnell",
+    "file": "flux1-schnell-fp8.safetensors",
+    "id": "flux1-schnell-fp8.safetensors",
+    "title": "FLUX.1 Schnell FP8 checkpoint",
+    "version": "AiAF FP8",
+    "services": [
+      "image"
+    ],
+    "usable": true,
+    "workflow": "gen_image_flux1_schnell.json",
+    "recommended": {
+      "steps": 4,
+      "sampler": "euler",
+      "scheduler": "simple"
+    },
+    "recommended_from": "Black Forest Labs reference implementation: FLUX.1 Schnell defaults to four inference steps; the validated Comfy workflow uses Euler with the simple scheduler.",
+    "recommendation_kind": "author_reference_implementation",
+    "recommendation_sources": [
+      "https://github.com/black-forest-labs/flux/blob/main/docs/text-to-image.md",
+      "https://github.com/black-forest-labs/flux/blob/main/src/flux/cli.py"
+    ],
+    "page": "https://huggingface.co/AiAF/flux1-schnell-fp8.safetensors/blob/main/AiAF/flux1-schnell-fp8.safetensors",
+    "file_source": "https://huggingface.co/AiAF/flux1-schnell-fp8.safetensors/resolve/main/AiAF/flux1-schnell-fp8.safetensors",
+    "sha256": "ead426278b49030e9da5df862994f25ce94ab2ee4df38b556ddddb3db093bf72",
+    "size_mb": 17236.3,
+    "source_checked_at": "2026-09-22",
+    "triggers": [],
+    "preview": "",
+    "validated_workers": [
+      "worker-4090"
+    ]
+  },
+  {
+    "kind": "checkpoint",
     "family": "ltx23",
     "base": "LTXV 2.3",
     "file": "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
@@ -45,6 +124,9 @@
     "usable": true,
     "default_for_services": [
       "video"
+    ],
+    "default_for_families": [
+      "ltx23"
     ],
     "workflow": "gen_animation_ltx23_by_url.json",
     "recommended": {
@@ -121,6 +203,10 @@
       "image"
     ],
     "usable": true,
+    "default_for_families": [
+      "pony",
+      "sdxl"
+    ],
     "id": "CyberRealisticPony_V18.0_F16.safetensors",
     "preview": "/api/ai/model-preview/cyberrealisticPony_v180Coreshift_2764472.safetensors.jpg",
     "recommended": {
@@ -161,6 +247,7 @@
     "title": "NSFW MASTER",
     "version": "v1.0",
     "base": "Flux.1 D",
+    "sampling_recommendations_compatible": false,
     "nsfw": false,
     "triggers": [],
     "downloads": 131046,
@@ -197,6 +284,7 @@
     "title": "XLabs Flux Realism LoRA",
     "version": "Converted for Comfyui",
     "base": "Flux.1 D",
+    "sampling_recommendations_compatible": false,
     "nsfw": false,
     "triggers": [],
     "downloads": 54034,
@@ -230,6 +318,7 @@
     "title": "Realistic Skin Texture style (Detailed Skin) XL + SD1.5 + F1D + Pony + Illu + ZIT + ZIB",
     "version": "Skin Texure F1D v2.5",
     "base": "Flux.1 D",
+    "sampling_recommendations_compatible": false,
     "nsfw": false,
     "triggers": [
       "skin texture style",
@@ -271,6 +360,7 @@
     "title": "Velvet's Mythic Fantasy Styles | Flux + Pony + illustrious + ZiT + Anima + Krea2",
     "version": "Flux Sharp Lines",
     "base": "Flux.1 D",
+    "sampling_recommendations_compatible": false,
     "nsfw": false,
     "triggers": [
       "SharpL1nes"
@@ -317,6 +407,7 @@
     "title": "Micro Bikini SD1.5/FLUX | olaz",
     "version": "v1.2 FLUX",
     "base": "Flux.1 D",
+    "sampling_recommendations_compatible": false,
     "nsfw": true,
     "triggers": [
       "micro bikini",
@@ -593,7 +684,9 @@
     "services": [
       "video"
     ],
-    "usable": true,
+    "usable": false,
+    "obsolete": true,
+    "unusable_reason": "Legacy LTXV LoRA is not compatible with the current LTX 2.3 base; keep the original file archived until a verified LTX 2.3 replacement is available.",
     "id": "DreamLTXV.safetensors",
     "preview": "/api/ai/model-preview/DreamLTXV.safetensors.jpg",
     "recommended": {

@@ -1527,11 +1527,13 @@ from ai_avatars import build_avatar_router
 from ai_avatar_assets import build_avatar_asset_router
 from ai_avatar_render import build_avatar_render_router
 from ai_video_reference import router as ai_video_reference_router
+from ai_graph_edits import router as ai_graph_edits_router
 
 app.include_router(build_avatar_router(get_avatar_owner))
 app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
+app.include_router(ai_graph_edits_router)
 
 
 async def require_admin(

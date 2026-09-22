@@ -73,6 +73,16 @@ if ((Test-Path "$root\ComfyUI\models\diffusion_models\ltx-2.3-22b-distilled-1.1_
     (Test-Path "$root\ComfyUI\models\vae\LTX23_audio_vae_bf16.safetensors")) { $workflows += 'gen_animation_ltx23_by_url.json' }
 if ((Test-Path "$root\ComfyUI\models\checkpoints\ltx10eros_v14_2989669.safetensors") -and
     (Test-Path "$root\ComfyUI\models\text_encoders\gemma_3_12B_it_fp4_mixed.safetensors")) { $workflows += 'gen_animation_ltx10eros_by_url.json' }
+if (($workflows -contains 'gen_animation_ltx23_by_url.json') -and
+    (Test-Path "$root\ComfyUI\models\loras\ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors") -and
+    (Test-ComfyNode 'LTXAddVideoICLoRAGuide')) {
+    $workflows += 'gen_video_ltx23_control_by_url.json'
+    if ((Test-ComfyNode 'DWPreprocessor') -and
+        (Test-Path "$root\ComfyUI\custom_nodes\comfyui_controlnet_aux\ckpts\yzd-v\DWPose\yolox_l.onnx") -and
+        (Test-Path "$root\ComfyUI\custom_nodes\comfyui_controlnet_aux\ckpts\hr16\DWPose-TorchScript-BatchSize5\dw-ll_ucoco_384_bs5.torchscript.pt")) { $workflows += 'gen_video_ltx23_pose_by_url.json' }
+    if ((Test-ComfyNode 'VideoDepthAnythingProcess') -and
+        (Test-Path "$root\ComfyUI\models\videodepthanything\video_depth_anything_vits.pth")) { $workflows += 'gen_video_ltx23_depth_by_url.json' }
+}
 if ((Test-Path "$root\ComfyUI\models\diffusion_models\flux-2-klein-4b.safetensors") -and
     (Test-Path "$root\ComfyUI\models\text_encoders\qwen_3_4b_fp4_flux2.safetensors") -and
     (Test-Path "$root\ComfyUI\models\vae\flux2-vae.safetensors")) {

@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 import ai_model_defaults as defaults
 
@@ -71,6 +73,90 @@ class ModelDefaultsTests(unittest.TestCase):
                          "gen_image_control_canny.json")
         with self.assertRaises(ValueError):
             defaults.control_workflow("flux2", "pose")
+
+    def test_lora_family_default_is_explicit_not_catalogue_order(self):
+        lora = {"kind": "lora", "family": "flux", "services": ["image"]}
+        entries = [
+            {"kind": "checkpoint", "family": "flux2", "usable": True,
+             "services": ["image"], "file": "modern-default.safetensors"},
+            {"kind": "checkpoint", "family": "flux", "usable": True,
+             "services": ["image"], "file": "unmarked.safetensors"},
+            {"kind": "checkpoint", "family": "flux", "usable": True,
+             "services": ["image"], "default_for_families": ["flux"],
+             "file": "flux1-schnell.safetensors"},
+        ]
+        chosen = defaults.family_default_checkpoint(entries, lora, "image")
+        self.assertEqual(chosen["file"], "flux1-schnell.safetensors")
+
+    def test_lora_family_without_declared_default_does_not_guess(self):
+        lora = {"kind": "lora", "family": "flux", "services": ["image"]}
+        entries = [{"kind": "checkpoint", "family": "flux", "usable": True,
+                    "services": ["image"], "file": "first-is-not-a-rule.safetensors"}]
+        self.assertIsNone(defaults.family_default_checkpoint(entries, lora, "image"))
+
+    def test_explicit_pony_default_may_cover_compatible_sdxl_lora(self):
+        lora = {"kind": "lora", "family": "sdxl", "services": ["image"]}
+        pony = {"kind": "checkpoint", "family": "pony", "usable": True,
+                "services": ["image"], "default_for_families": ["pony", "sdxl"],
+                "file": "pony.safetensors"}
+        self.assertIs(
+            defaults.family_default_checkpoint([pony], lora, "image"), pony)
+
+    def test_dev_lora_sampling_metadata_does_not_replace_schnell_defaults(self):
+        checkpoint = {
+            "kind": "checkpoint", "family": "flux", "base": "FLUX.1 Schnell",
+            "recommended": {"steps": 4, "sampler": "euler", "scheduler": "simple"},
+            "recommended_from": "BFL reference implementation",
+        }
+        lora = {
+            "kind": "lora", "family": "flux", "base": "Flux.1 D",
+            "recommended": {"steps": 30, "cfg": 5, "sampler": "DPM++ 2M",
+                            "strength": 0.8},
+            "recommended_from": "author examples on the training base",
+            "sampling_recommendations_compatible": False,
+        }
+        got = defaults.resolve(checkpoint, lora, {})
+        self.assertEqual(got["steps"], 4)
+        self.assertEqual(got["sampler"], "euler")
+        self.assertEqual(got["scheduler"], "simple")
+        self.assertNotIn("cfg", got)
+        self.assertEqual(got["lora_strength"], 0.8)
+
+    def test_every_current_ltx23_lora_resolves_the_concrete_distilled_base(self):
+        catalogue_path = (
+            Path(__file__).resolve().parents[2]
+            / "deploy" / "ai-models" / "model_catalogue.json"
+        )
+        entries = json.loads(catalogue_path.read_text(encoding="utf-8"))
+        loras = [entry for entry in entries
+                 if entry.get("kind") == "lora"
+                 and defaults.model_family(entry) == "ltx23"
+                 and entry.get("usable")]
+        self.assertEqual(len(loras), 6)
+        for lora in loras:
+            checkpoint = defaults.family_default_checkpoint(entries, lora, "video")
+            self.assertIsNotNone(checkpoint, lora["file"])
+            self.assertEqual(
+                checkpoint["file"],
+                "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+            )
+            effective = defaults.resolve(checkpoint, lora, {})
+            self.assertEqual(effective["work_flow"], "gen_animation_ltx23_by_url.json")
+            self.assertEqual(effective["steps"], 8)
+            explicit = defaults.resolve(checkpoint, lora, {"steps": 12, "cfg": 1.2})
+            self.assertEqual((explicit["steps"], explicit["cfg"]), (12, 1.2))
+
+    def test_legacy_dream_ltxv_has_no_false_ltx23_fallback(self):
+        catalogue_path = (
+            Path(__file__).resolve().parents[2]
+            / "deploy" / "ai-models" / "model_catalogue.json"
+        )
+        entries = json.loads(catalogue_path.read_text(encoding="utf-8"))
+        dream = next(entry for entry in entries
+                     if entry.get("file") == "DreamLTXV.safetensors")
+        self.assertFalse(dream["usable"])
+        self.assertTrue(dream["obsolete"])
+        self.assertIsNone(defaults.family_default_checkpoint(entries, dream, "video"))
 
 
 if __name__ == "__main__":

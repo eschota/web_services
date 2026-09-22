@@ -65,6 +65,87 @@ class ModelCatalogueTests(unittest.TestCase):
             self.assertEqual(body["url_string"], path)
 
 
+class EffectiveRenderModelTests(unittest.TestCase):
+    def _entries(self, include_family_default=True):
+        entries = [
+            {"kind": "checkpoint", "family": "flux2",
+             "file": "flux-2-klein-4b.safetensors", "usable": True,
+             "services": ["image"], "default_for_services": ["image"],
+             "workflow": "gen_image_flux2_klein.json"},
+            {"kind": "lora", "family": "flux",
+             "file": "flux-style.safetensors", "usable": True,
+             "services": ["image"], "workflow": "gen_image.json"},
+        ]
+        if include_family_default:
+            entries.append(
+                {"kind": "checkpoint", "family": "flux",
+                 "file": "flux1-schnell.safetensors", "usable": True,
+                 "services": ["image"], "default_for_families": ["flux"],
+                 "workflow": "gen_image.json", "recommended": {"steps": 4},
+                 "recommended_from": "author reference"})
+        return entries
+
+    def _known(self, entries, name, kind):
+        return next((entry for entry in entries
+                     if entry.get("file") == name and entry.get("kind") == kind), None)
+
+    def test_blank_checkpoint_with_flux_lora_resolves_concrete_schnell(self):
+        entries = self._entries()
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            effective, _ = ai_vision_api._effective_model_settings(
+                "image", None, "flux-style.safetensors", {})
+        self.assertEqual(effective["checkpoint"], "flux1-schnell.safetensors")
+        self.assertEqual(effective["lora"], "flux-style.safetensors")
+        self.assertEqual(effective["work_flow"], "gen_image.json")
+        self.assertEqual(effective["steps"], 4)
+
+    def test_legacy_control_without_model_materializes_schnell(self):
+        entries = self._entries()
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            response = _app().get("/api/ai/model-settings?service=image&control_channel=pose")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["checkpoint_string"], "flux1-schnell.safetensors")
+
+    def test_blank_checkpoint_and_lora_still_uses_modern_service_default(self):
+        entries = self._entries()
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            effective, _ = ai_vision_api._effective_model_settings(
+                "image", None, None, {})
+        self.assertEqual(effective["checkpoint"], "flux-2-klein-4b.safetensors")
+        self.assertEqual(effective["work_flow"], "gen_image_flux2_klein.json")
+
+    def test_lora_without_declared_family_base_is_actionable_error(self):
+        entries = self._entries(include_family_default=False)
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            with self.assertRaises(HTTPException) as caught:
+                ai_vision_api._effective_model_settings(
+                    "image", None, "flux-style.safetensors", {})
+        self.assertEqual(
+            caught.exception.detail["error_string"],
+            "checkpoint_required_for_lora",
+        )
+
+    def test_explicit_checkpoint_is_never_replaced_by_family_default(self):
+        entries = self._entries()
+        entries.append({"kind": "checkpoint", "family": "flux",
+                        "file": "explicit-flux.safetensors", "usable": True,
+                        "services": ["image"], "workflow": "gen_image.json"})
+        with mock.patch("ai_model_catalogue.entries", return_value=entries), \
+             mock.patch("ai_model_catalogue.known_file",
+                        side_effect=lambda name, kind: self._known(entries, name, kind)):
+            effective, _ = ai_vision_api._effective_model_settings(
+                "image", "explicit-flux.safetensors", "flux-style.safetensors", {})
+        self.assertEqual(effective["checkpoint"], "explicit-flux.safetensors")
+
+
 class WorkerFileTests(unittest.TestCase):
     """The node list is shared with Hunyuan; its parking reasons are not."""
 
@@ -199,6 +280,19 @@ class TaskIdRoutingTests(unittest.TestCase):
 
 
 class DispatchTests(unittest.TestCase):
+    def setUp(self):
+        # These cases exercise fresh dispatch under different worker mocks.
+        # Persistent cache behavior is covered by test_ai_request_cache.py.
+        import ai_request_cache
+        root = BACKEND.parents[1] / ".codex_tmp"
+        root.mkdir(parents=True, exist_ok=True)
+        folder = tempfile.TemporaryDirectory(prefix="vision-dispatch-", dir=root)
+        self.addCleanup(folder.cleanup)
+        patcher = mock.patch.object(ai_request_cache, "_default_cache",
+            ai_request_cache.AIRequestCache(Path(folder.name) / "cache.sqlite3"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_vision_requires_an_image(self):
         response = _app().post("/api/vision", json={"prompt": "what is this"})
         self.assertEqual(response.status_code, 400)

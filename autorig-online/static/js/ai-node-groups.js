@@ -40,6 +40,7 @@
     const addServiceNode = options.addServiceNode;
     const exportGraph = options.exportGraph;
     const onNodesRemoved = typeof options.onNodesRemoved === 'function' ? options.onNodesRemoved : function () {};
+    const onSetComparisonAnchor = typeof options.onSetComparisonAnchor === 'function' ? options.onSetComparisonAnchor : null;
     const toast = typeof options.toast === 'function' ? options.toast : function () {};
     const nodeLimit = clamp(Number(options.nodeLimit) || 200, 1, 1000);
     if (!editor || !canvas || !getMeta || !addInputNode || !addServiceNode || !exportGraph) {
@@ -619,7 +620,7 @@
       menu = null;
     }
 
-    function openMenu(event) {
+    function openMenu(event, contextNodeId) {
       closeMenu();
       const fields = parameterFields();
       menu = document.createElement('form');
@@ -649,6 +650,10 @@
         commandButton('Duplicate', 'Duplicate selected nodes and their internal wires (Ctrl/Cmd+D)', duplicateSelection),
         commandButton('Delete', 'Delete every selected node and its attached wires (Delete)', removeSelection, 'danger')
       );
+      if (onSetComparisonAnchor) {
+        commands.append(commandButton('Set as A', 'Use this node as the visual A/B comparison reference',
+          () => onSetComparisonAnchor(String(contextNodeId))));
+      }
       menu.appendChild(commands);
       const dirty = new Set();
       fields.forEach(field => {
@@ -736,7 +741,7 @@
       if (!node) return;
       const id = numericId(node);
       if (!selected.has(id)) selectOnly(id);
-      openMenu(event);
+      openMenu(event, id);
     }
 
     function onKeyDown(event) {

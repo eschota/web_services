@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -233,6 +234,191 @@ class EndpointTests(unittest.TestCase):
         first = self.client.post("/api/ai/graphs", json=self._payload()).json()
         second = self.client.post("/api/ai/graphs", json=self._payload()).json()
         self.assertEqual(first["graph_id_string"], second["graph_id_string"])
+
+    def test_empty_instance_keeps_the_legacy_graph_id(self):
+        payload = self._payload()
+        legacy_body = ai_graph.Graph(**payload).model_dump(by_alias=True)
+        legacy_body.pop("instance_id")
+        legacy_body.pop("comparison_anchor_id")
+        legacy_body.pop("results")
+        legacy_identity = json.dumps(legacy_body, ensure_ascii=False, sort_keys=True)
+        expected = ai_graph._new_id(legacy_identity)
+        absent = self.client.post("/api/ai/graphs", json=payload).json()
+        payload["instance_id"] = ""
+        explicit_empty = self.client.post("/api/ai/graphs", json=payload).json()
+        self.assertEqual(absent["graph_id_string"], expected)
+        self.assertEqual(explicit_empty["graph_id_string"], expected)
+
+    def test_nonempty_instance_is_stable_across_result_updates(self):
+        payload = self._payload()
+        payload["instance_id"] = "447f9714-3ddb-4edd-9202-79b89ec77e31"
+        first = self.client.post("/api/ai/graphs", json=payload).json()
+        self.client.put(
+            f"/api/ai/graphs/{first['graph_id_string']}/results",
+            json={"b": {"status": "done", "type": "image",
+                        "value": "https://x/result.png", "task_id": "task-1"}},
+        )
+        loaded = self.client.get(
+            f"/api/ai/graphs/{first['graph_id_string']}"
+        ).json()["graph_object"]
+        second = self.client.post("/api/ai/graphs", json=loaded).json()
+        self.assertEqual(first["graph_id_string"], second["graph_id_string"])
+        self.assertEqual(loaded["results"]["b"]["task_id"], "task-1")
+
+    def test_instance_identity_survives_drawflow_node_renumbering(self):
+        first = {
+            "name": "gapped",
+            "instance_id": "same-copy-instance",
+            "comparison_anchor_id": "7",
+            "nodes": [
+                {"id": "1", "kind": "input", "entity_type": "text", "value": "prompt"},
+                {"id": "7", "kind": "service", "service": "image"},
+            ],
+            "links": [{"from": "1", "output": "value", "to": "7", "input": "prompt"}],
+            "results": {"7": {"status": "done", "type": "image",
+                               "value": "https://x/current.png",
+                               "history": [{"type": "image", "value": "https://x/old.png"}]}},
+        }
+        compact = {
+            **first,
+            "comparison_anchor_id": "2",
+            "nodes": [
+                {**first["nodes"][0], "id": "1"},
+                {**first["nodes"][1], "id": "2"},
+            ],
+            "links": [{"from": "1", "output": "value", "to": "2", "input": "prompt"}],
+            "results": {"2": {"status": "done", "type": "image",
+                               "value": "https://x/different-result.png"}},
+        }
+        first_saved = self.client.post("/api/ai/graphs", json=first).json()
+        compact_saved = self.client.post("/api/ai/graphs", json=compact).json()
+        self.assertEqual(first_saved["graph_id_string"], compact_saved["graph_id_string"])
+
+        other_instance = {**compact, "instance_id": "different-copy-instance"}
+        other_saved = self.client.post("/api/ai/graphs", json=other_instance).json()
+        self.assertNotEqual(first_saved["graph_id_string"], other_saved["graph_id_string"])
+
+    def test_duplicate_always_creates_an_independent_snapshot(self):
+        original = self._payload()
+        original["comparison_anchor_id"] = "b"
+        original["results"] = {
+            "b": {"status": "running", "type": "image",
+                  "value": "https://x/pending.png", "task_id": "task-live",
+                  "input_reference_url": "https://x/reference.png",
+                  "history": [{"type": "image", "value": "https://x/older.png",
+                               "input_reference_url": "https://x/reference.png",
+                               "created_at": 10}]}
+        }
+        saved_original = self.client.post("/api/ai/graphs", json=original).json()
+        first = self.client.post(
+            "/api/ai/graphs/duplicate", json={"currentGraph": original}
+        )
+        second = self.client.post(
+            "/api/ai/graphs/duplicate", json={"currentGraph": original}
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        first_body, second_body = first.json(), second.json()
+        self.assertNotEqual(first_body["graph_id_string"], saved_original["graph_id_string"])
+        self.assertNotEqual(second_body["graph_id_string"], saved_original["graph_id_string"])
+        self.assertNotEqual(first_body["graph_id_string"], second_body["graph_id_string"])
+        self.assertNotEqual(
+            first_body["graph_object"]["instance_id"],
+            second_body["graph_object"]["instance_id"],
+        )
+        self.assertEqual(
+            first_body["graph_object"]["results"]["b"]["task_id"], "task-live"
+        )
+        self.assertEqual(
+            first_body["graph_object"]["results"]["b"]["history"],
+            original["results"]["b"]["history"],
+        )
+        self.assertEqual(first_body["graph_object"]["comparison_anchor_id"], "b")
+        self.assertTrue(first_body["source_unchanged_bool"])
+        loaded_original = self.client.get(
+            "/api/ai/graphs/" + saved_original["graph_id_string"]
+        ).json()["graph_object"]
+        self.assertEqual(loaded_original.get("instance_id"), "")
+        self.assertEqual(loaded_original["results"]["b"]["task_id"], "task-live")
+
+    def test_comparison_anchor_must_name_an_existing_node(self):
+        payload = self._payload()
+        payload["comparison_anchor_id"] = "removed-node"
+        response = self.client.post("/api/ai/graphs", json=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["error_string"], "unknown_comparison_anchor")
+
+    def test_completed_results_become_bounded_history_without_task_ids(self):
+        payload = self._payload()
+        payload["instance_id"] = "history-test"
+        saved = self.client.post("/api/ai/graphs", json=payload).json()
+        graph_id = saved["graph_id_string"]
+        first_result = {
+            "b": {"status": "done", "type": "image",
+                  "value": "https://x/first.png", "task_id": "secret-task-1",
+                  "input_reference_url": "https://x/reference.png"}
+        }
+        self.assertEqual(self.client.put(
+            f"/api/ai/graphs/{graph_id}/results", json=first_result
+        ).status_code, 200)
+        second_result = {
+            "b": {"status": "done", "type": "image",
+                  "value": "https://x/second.png", "task_id": "secret-task-2",
+                  "input_reference_url": "https://x/reference.png"}
+        }
+        self.assertEqual(self.client.put(
+            f"/api/ai/graphs/{graph_id}/results", json=second_result
+        ).status_code, 200)
+        loaded = self.client.get(f"/api/ai/graphs/{graph_id}").json()["graph_object"]
+        result = loaded["results"]["b"]
+        self.assertEqual(result["value"], "https://x/second.png")
+        self.assertEqual(len(result["history"]), 1)
+        self.assertEqual(result["history"][0]["value"], "https://x/first.png")
+        self.assertEqual(result["history"][0]["input_reference_url"], "https://x/reference.png")
+        self.assertNotIn("task_id", result["history"][0])
+        resaved = self.client.post("/api/ai/graphs", json=loaded).json()
+        self.assertEqual(resaved["graph_id_string"], graph_id)
+
+    def test_history_is_limited_to_five_typed_non_inline_entries(self):
+        saved = self.client.post("/api/ai/graphs", json=self._payload()).json()
+        graph_id = saved["graph_id_string"]
+        six = [
+            {"type": "image", "value": f"https://x/{index}.png", "created_at": index}
+            for index in range(6)
+        ]
+        response = self.client.put(
+            f"/api/ai/graphs/{graph_id}/results",
+            json={"b": {"status": "done", "type": "image",
+                        "value": "https://x/current.png", "history": six}},
+        )
+        self.assertEqual(response.status_code, 422)
+        inline = self.client.put(
+            f"/api/ai/graphs/{graph_id}/results",
+            json={"b": {"status": "done", "type": "image",
+                        "value": "https://x/current.png",
+                        "history": [{"type": "image", "value": "data:image/png;base64,AAAA"}]}},
+        )
+        self.assertEqual(inline.status_code, 422)
+
+    def test_automatic_history_keeps_only_the_five_most_recent_values(self):
+        payload = self._payload()
+        payload["instance_id"] = "bounded-history"
+        graph_id = self.client.post("/api/ai/graphs", json=payload).json()["graph_id_string"]
+        for index in range(7):
+            response = self.client.put(
+                f"/api/ai/graphs/{graph_id}/results",
+                json={"b": {"status": "done", "type": "image",
+                            "value": f"https://x/current-{index}.png"}},
+            )
+            self.assertEqual(response.status_code, 200)
+        result = self.client.get(
+            f"/api/ai/graphs/{graph_id}"
+        ).json()["graph_object"]["results"]["b"]
+        self.assertEqual(len(result["history"]), 5)
+        self.assertEqual(
+            [entry["value"] for entry in result["history"]],
+            [f"https://x/current-{index}.png" for index in range(1, 6)],
+        )
 
     def test_a_graph_that_could_not_run_is_not_saved(self):
         payload = self._payload()

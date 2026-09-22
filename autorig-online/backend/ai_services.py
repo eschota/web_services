@@ -85,7 +85,7 @@ SERVICES: List[Dict[str, object]] = [
     },
     {
         "id": "video_control", "title": "Video motion transfer", "path": "/nodes",
-        "api": "/api/video", "status": "planned", "slow": True,
+        "api": "/api/video", "status": "live", "slow": True,
         "summary": "Animate a character keyframe using motion from the source video.",
         "inputs": [
             {"type": IMAGE, "field": "image", "required": True, "title": "Character keyframe"},

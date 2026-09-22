@@ -53,6 +53,51 @@ class FleetStatusTests(unittest.TestCase):
         self.assertTrue(nodes[0]["busy"])
         self.assertEqual(nodes[0]["task_id"], "x")
 
+    def test_queue_eta_uses_only_compatible_workers(self):
+        tasks = [
+            {"id": "done", "status": "Done", "workflow": "image-a.json",
+             "started_at": 100, "finished_at": 200},
+            {"id": "active", "status": "Rendering", "workflow": "image-a.json",
+             "render_server_name": "a", "started_at": 160},
+            {"id": "q1", "status": "Pending", "workflow": "image-a.json", "created_at": 1},
+            {"id": "q2", "status": "Pending", "workflow": "image-a.json", "created_at": 2},
+            {"id": "old", "status": "Pending", "workflow": "does_not_exist.json", "created_at": 0},
+        ]
+        servers = [
+            {"render_server_name": "a", "status": "online",
+             "available_workflows": ["image-a.json"]},
+            {"render_server_name": "b", "status": "online",
+             "available_workflows": ["image-a.json"]},
+            {"render_server_name": "c", "status": "online",
+             "available_workflows": ["other.json"]},
+        ]
+        summary = ai_fleet._queue_summary(tasks, servers, {}, now=200)
+        self.assertEqual(summary["running_int"], 1)
+        self.assertEqual(summary["queued_int"], 2)
+        self.assertEqual(summary["blocked_int"], 1)
+        self.assertEqual(summary["eta_seconds_float"], 160.0)
+        self.assertEqual(summary["estimate_kind_string"], "measured")
+        self.assertEqual(summary["sample_count_int"], 1)
+
+    def test_only_blocked_work_has_unknown_eta(self):
+        summary = ai_fleet._queue_summary(
+            [{"status": "Pending", "workflow": "retired.json"}],
+            [{"render_server_name": "a", "status": "online",
+              "available_workflows": ["current.json"]}], {}, now=100)
+        self.assertEqual(summary["queued_int"], 0)
+        self.assertEqual(summary["blocked_int"], 1)
+        self.assertIsNone(summary["eta_seconds_float"])
+        self.assertEqual(summary["estimate_kind_string"], "unknown")
+
+    def test_fallback_eta_is_labelled_and_coarsely_rounded(self):
+        summary = ai_fleet._queue_summary(
+            [{"status": "Pending", "workflow": "gen_image_new.json"}],
+            [{"render_server_name": "a", "status": "online",
+              "available_workflows": ["gen_image_new.json"]}], {}, now=100)
+        self.assertEqual(summary["eta_seconds_float"], 100.0)
+        self.assertEqual(summary["estimate_kind_string"], "fallback")
+        self.assertEqual(summary["sample_count_int"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
