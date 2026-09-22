@@ -253,6 +253,101 @@
   },
   {
     "kind": "checkpoint",
+    "family": "ltx2",
+    "base": "LTX-2 19B distilled",
+    "file": "ltx-2-19b-distilled-fp8.safetensors",
+    "id": "ltx2-19b-distilled-fp8",
+    "title": "LTX-2 19B distilled · fast tier (3080 Ti)",
+    "version": "19B distilled FP8",
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "workflow": "gen_animation_hq_by_url.json",
+    "recommended": {
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler": "euler_ancestral_cfg_pp"
+    },
+    "recommended_from": "The deployed gen_animation_hq_by_url.json template: a nine-value ManualSigmas schedule (eight steps), CFGGuider at 1.0 and Euler ancestral CFG++, with the Gemma 3 12B text encoder.",
+    "recommendation_kind": "deployed_validated_workflow",
+    "page": "https://huggingface.co/Lightricks/LTX-2",
+    "file_source": "https://huggingface.co/Lightricks/LTX-2",
+    "source_checked_at": "2026-09-22",
+    "triggers": [],
+    "preview": "",
+    "size_mb": 27730,
+    "validated_workers": [
+      "Raptor"
+    ],
+    "sampling_policy": {
+      "auto_steps": 8,
+      "fixed_steps": 8,
+      "steps_min": 8,
+      "steps_max": 8,
+      "auto_reason": "Exact distilled sigma schedule of the deployed workflow. More steps require a different trained model and workflow.",
+      "cfg_mode": "tunable",
+      "scheduler_mode": "native",
+      "scheduler_label": "LTX-2 distilled sigmas"
+    },
+    "recommendation_sources": [
+      "https://huggingface.co/Lightricks/LTX-2",
+      "backend/renderfin/assets/workflows/gen_animation_hq_by_url.json"
+    ],
+    "author_notes": "Runs off the 4090: this is the 12 GB tier. The template bakes in ltx-2-19b-lora-camera-control-static and produces an audio track, so no separate LoRA is selectable for it. The checkpoint file is on Raptor, f12, f5 and f15, but only Raptor currently advertises gen_animation_hq_by_url.json, so this tier does not yet fan out. Measured on Raptor: 13/13 successful, median 445 s at 800x448.",
+    "sampling_audit_at": "2026-09-22"
+  },
+  {
+    "kind": "checkpoint",
+    "family": "ltx098",
+    "base": "LTXV 13B 0.9.8",
+    "file": "ltxv-13b-0.9.8-distilled-fp8.safetensors",
+    "id": "ltxv-13b-098-distilled-fp8",
+    "title": "LTXV 13B 0.9.8 · fastest tier (3070 Ti+)",
+    "version": "0.9.8 distilled FP8",
+    "services": [
+      "video"
+    ],
+    "usable": true,
+    "workflow": "gen_animation_by_url.json",
+    "recommended": {
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler": "euler_ancestral"
+    },
+    "recommended_from": "The deployed gen_animation_by_url.json template: a nine-value StringToFloatList sigma schedule (eight steps), STG guider with all CFG values at 1.0 and Euler ancestral, with the T5-XXL FP8 encoder.",
+    "recommendation_kind": "deployed_validated_workflow",
+    "page": "https://huggingface.co/Lightricks/LTX-Video",
+    "file_source": "https://huggingface.co/Lightricks/LTX-Video",
+    "source_checked_at": "2026-09-22",
+    "triggers": [],
+    "preview": "",
+    "size_mb": 16067,
+    "validated_workers": [
+      "f15",
+      "f5",
+      "f12",
+      "Raptor"
+    ],
+    "sampling_policy": {
+      "auto_steps": 8,
+      "fixed_steps": 8,
+      "steps_min": 8,
+      "steps_max": 8,
+      "auto_reason": "Exact distilled sigma schedule of the deployed workflow. More steps require a different trained model and workflow.",
+      "cfg_mode": "tunable",
+      "scheduler_mode": "native",
+      "scheduler_label": "LTXV 0.9.8 distilled sigmas"
+    },
+    "recommendation_sources": [
+      "https://huggingface.co/Lightricks/LTX-Video",
+      "backend/renderfin/assets/workflows/gen_animation_by_url.json"
+    ],
+    "author_notes": "The only video tier that fans out: all four image boxes (f15, f5, f12, Raptor) hold the file and advertise gen_animation_by_url.json, so three clips can render on three boxes at once. Silent video, no audio track, and no compatible LoRA in this catalogue — the LTX 2.3 adapters are a different architecture. Measured medians: f15 21 s, f12 40 s, f5 59 s, Raptor 100 s.",
+    "sampling_audit_at": "2026-09-22"
+  },
+  {
+    "kind": "checkpoint",
     "family": "pony",
     "file": "CyberRealisticPony_V18.0_F16.safetensors",
     "title": "CyberRealistic Pony",

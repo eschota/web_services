@@ -36,6 +36,12 @@ FAMILY_WORKFLOWS = {
     "flux": "gen_image.json",
     "flux2": "gen_image_flux2_klein.json",
 }
+# Video architectures whose catalogue entry names its own family because the
+# base string alone cannot separate them: "LTX-2 19B" and "LTXV 13B 0.9.8" both
+# contain "ltx", which would collapse them into each other and into the legacy
+# 0.9.1 adapters. Keeping them apart is what stops an LTX 2.3 LoRA from being
+# accepted onto a checkpoint that was never trained with it.
+DECLARED_FAMILIES = frozenset({"ltx2", "ltx098"})
 
 
 def canonical_file(name: object) -> str:
@@ -60,6 +66,8 @@ def model_family(entry: Optional[Mapping[str, object]]) -> str:
         return ""
     family = str(entry.get("family") or "").strip().lower()
     base = str(entry.get("base") or "").strip().lower()
+    if family in DECLARED_FAMILIES:
+        return family
     if "ltxv 2.3" in base or "ltx 2.3" in base:
         return "ltx23"
     if "ltx" in base:

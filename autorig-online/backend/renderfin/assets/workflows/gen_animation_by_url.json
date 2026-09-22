@@ -65,7 +65,7 @@
   },
   "1241": {
     "inputs": {
-      "frame_rate": 25.000000000000004,
+      "frame_rate": $fps,
       "positive": [
         "6",
         0
@@ -98,7 +98,7 @@
   },
   "1336": {
     "inputs": {
-      "frame_rate": 25,
+      "frame_rate": $fps,
       "loop_count": 0,
       "filename_prefix": "$output_url",
       "format": "video/h264-mp4",
@@ -107,7 +107,7 @@
       "save_metadata": true,
       "trim_to_audio": false,
       "pingpong": false,
-      "save_output": false,
+      "save_output": true,
       "images": [
         "1335",
         0
@@ -120,10 +120,10 @@
   },
   "1338": {
     "inputs": {
-      "width": 384,
-      "height": 224,
-      "num_frames": 49,
-      "optional_cond_indices": "0",
+      "width": $width,
+      "height": $height,
+      "num_frames": $frames,
+      "optional_cond_indices": "0,-1",
       "strength": 0.52,
       "crop": "center",
       "crf": 30,
@@ -153,7 +153,7 @@
         0
       ],
       "optional_cond_images": [
-        "1206",
+        "900011",
         0
       ]
     },
@@ -232,6 +232,31 @@
     "class_type": "STGGuiderAdvanced",
     "_meta": {
       "title": "🅛🅣🅧 STG Guider Advanced"
+    }
+  },
+  "900010": {
+    "inputs": {
+      "image": "$image_end"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load end frame"
+    }
+  },
+  "900011": {
+    "inputs": {
+      "image1": [
+        "1206",
+        0
+      ],
+      "image2": [
+        "900010",
+        0
+      ]
+    },
+    "class_type": "ImageBatch",
+    "_meta": {
+      "title": "AIGent optional end-frame guide"
     }
   }
 }

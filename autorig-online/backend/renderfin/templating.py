@@ -19,6 +19,11 @@ MAX_PROMPT_CHARS = 12000
 # The one ESRGAN model every FLUX image box carries. A template that asks for
 # an upscaler must still parse when nothing was chosen.
 DEFAULT_UPSCALE_MODEL = "4x_NMKD-Siax_200k.pth"
+# Every clip this product delivers is 24 fps, so `frame_count` frames are
+# `frame_count / 24` seconds of video wherever they were rendered. The LTXV
+# 0.9.8 template shipped with the 25 the C# exporter wrote into it, which made
+# the same 97 frames arrive 4% short of the length the caller asked for.
+VIDEO_FPS = 24
 
 
 def sanitize_prompt(text: str) -> str:
@@ -34,6 +39,15 @@ def _ltxv_frames(frames: int, default: int = 121) -> int:
     if count <= 0:
         return default
     return max(1, round((count - 1) / 8)) * 8 + 1
+
+
+def _video_fps(fps: object, default: int = VIDEO_FPS) -> int:
+    """The delivered frame rate; 0 or nonsense means the product's own 24."""
+    try:
+        rate = int(fps or 0)
+    except (TypeError, ValueError):
+        return default
+    return rate if 1 <= rate <= 120 else default
 
 
 def _json_escape(text: str) -> str:
@@ -53,6 +67,7 @@ def render_workflow_text(
     output_prefix: str,
     workflow_type: str = "",
     frames: int = 0,
+    fps: int = VIDEO_FPS,
     randomize_seeds: bool = True,
     seed: Optional[int] = None,
     checkpoint: str = "",
@@ -65,6 +80,9 @@ def render_workflow_text(
     ready for POST /prompt."""
     text = template_text
     text = text.replace("$frames", str(_ltxv_frames(frames)))
+    # Frame rate and frame count are one contract: a template that states its
+    # own rate turns a requested length into a different number of seconds.
+    text = text.replace("$fps", str(_video_fps(fps)))
     # The longer edge, for workflows that scale by it rather than by a
     # width and a height. Without this the template keeps a bare token
     # and does not parse.

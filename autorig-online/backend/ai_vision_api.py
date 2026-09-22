@@ -1024,16 +1024,37 @@ VIDEO_QUALITIES = {
 LEGACY_FLUX_IMAGE_MODES = {"z_depth", "t_pose", "open_pose"}
 
 
-def _video_quality_workflow(quality: str, family: str) -> str:
+def _video_quality_workflow(quality: str, family: str,
+                            model_workflow: str = "") -> str:
+    """Which template a quality label may substitute, if any.
+
+    `quality` predates model selection: it chose between the two animation
+    templates when nothing else could. A checkpoint that names its own
+    validated workflow is the stronger statement, so the label may no longer
+    swap the template under it — a Standard label is simply that model's
+    standard, and a label that asks for a *different* template is a conflict
+    the caller has to see rather than a silent model substitution.
+    """
     quality = str(quality or "").strip().lower()
     family = str(family or "").strip().lower()
+    model_workflow = str(model_workflow or "").strip()
     if quality == "hq" and family == "ltx23":
         raise HTTPException(status_code=400, detail={
             "error_string": "unsupported_video_quality",
             "message_string": (
                 "High quality is not a separate validated workflow for modern "
                 "LTX 2.3; use Standard, which keeps the selected model's workflow")})
-    return str(VIDEO_QUALITIES.get(quality) or "") if family != "ltx23" else ""
+    if not model_workflow:
+        return str(VIDEO_QUALITIES.get(quality) or "") if family != "ltx23" else ""
+    wanted = str(VIDEO_QUALITIES.get(quality) or "")
+    if wanted and wanted != model_workflow:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unsupported_video_quality",
+            "message_string": (
+                f"The selected checkpoint is validated on {model_workflow}; "
+                f"'{quality}' would run {wanted} instead. Choose the checkpoint "
+                "that belongs to that tier, or leave quality unset")})
+    return ""
 
 
 class ImageRequest(BaseModel):
@@ -1361,7 +1382,8 @@ async def _uncached_api_video(body: VideoRequest):
             ai_model_catalogue.known_file(str(payload.get("checkpoint") or ""), "checkpoint")
             or ai_model_catalogue.known_file(str(payload.get("lora") or ""), "lora"))
         video_family = ai_model_defaults.model_family(selected_video_model)
-        quality_workflow = _video_quality_workflow(quality, video_family)
+        quality_workflow = _video_quality_workflow(
+            quality, video_family, str(payload.get("work_flow") or ""))
         if quality_workflow:
             payload["work_flow"] = quality_workflow
         if body.negative_prompt and str(body.negative_prompt).strip():
