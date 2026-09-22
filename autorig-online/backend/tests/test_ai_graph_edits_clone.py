@@ -156,6 +156,32 @@ class CloneNodesTests(unittest.TestCase):
             ai_graph_edits.apply_operations(graph, operations)
         self.assertEqual(limit.exception.detail["error_string"], "graph_too_large")
 
+    def test_checkpoint_change_resets_inherited_sampling_to_auto(self):
+        payload = _payload()
+        payload["nodes"][3]["params"].update({"checkpoint": "a.safetensors", "steps": 8, "cfg": 1,
+                                              "sampler": "euler", "scheduler": "simple"})
+        graph = ai_graph.Graph(**payload)
+        checkpoints = [{"file": name, "kind": "checkpoint", "family": "ltx23",
+                        "services": ["video"], "usable": True}
+                       for name in ("a.safetensors", "b.safetensors", "c.safetensors")]
+        with patch.object(ai_model_catalogue, "entries", return_value=checkpoints):
+          edited, _, _ = ai_graph_edits.apply_operations(graph, [
+            {"op": "clone_nodes", "ids": ["clip"], "variants": [
+                {"clip": {"checkpoint": "b.safetensors"}},
+                {"clip": {"checkpoint": "b.safetensors", "steps": 9}},
+                {"clip": {"lora_strength": 0.5}},
+            ]},
+            {"op": "update_params", "id": "clip", "values": {"checkpoint": "c.safetensors"}},
+        ])
+        by_id = {node.id: node for node in edited.nodes}
+        self.assertEqual(by_id["clip_1"].params["steps"], 0)
+        self.assertEqual(by_id["clip_1"].params["sampler"], "")
+        self.assertEqual(by_id["clip_2"].params["steps"], 9)
+        self.assertEqual(by_id["clip_2"].params["cfg"], 0)
+        self.assertEqual(by_id["clip_3"].params["steps"], 8)
+        self.assertEqual(by_id["clip"].params["steps"], 0)
+        self.assertEqual(by_id["clip"].params["checkpoint"], "c.safetensors")
+
     def test_input_node_output_socket_is_normalised_to_value(self):
         graph = ai_graph.Graph(**_payload())
         edited, _, _ = ai_graph_edits.apply_operations(graph, [

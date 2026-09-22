@@ -287,6 +287,20 @@ def _validate_final(graph: ai_graph.Graph) -> None:
 
 
 MAX_CLONE_VARIANTS = 40
+# Sampling values belong to a checkpoint: a distilled model insists on its own
+# step count, so a copy or edit that swaps the checkpoint without saying what
+# the sampling should be goes back to automatic instead of inheriting the old
+# model's numbers and failing validation.
+SAMPLING_KEYS = {"steps": 0, "cfg": 0, "sampler": "", "scheduler": ""}
+
+
+def _reset_sampling_on_model_change(params: MutableMapping[str, Any],
+                                    changed: Mapping[str, Any]) -> None:
+    if "checkpoint" not in changed:
+        return
+    for name, automatic in SAMPLING_KEYS.items():
+        if name not in changed and name in params:
+            params[name] = automatic
 
 
 def _free_id(base: str, used: Set[str], start: int) -> str:
@@ -329,6 +343,7 @@ def _override_node(node: ai_graph.GraphNode, overrides: Mapping[str, Any],
                 exc.detail.setdefault("operation_index_int", operation_index)
             raise
     node.params.update(copy.deepcopy(normalized))
+    _reset_sampling_on_model_change(node.params, normalized)
     if (("width" in values or "height" in values) and "_follow_input_size" in DISPLAY_PARAM_KEYS
             and "_follow_input_size" not in values):
         node.params["_follow_input_size"] = False
@@ -491,6 +506,7 @@ def apply_operations(original: ai_graph.Graph,
                         exc.detail.setdefault("operation_index_int", index)
                     raise
             target.params.update(copy.deepcopy(normalized_values))
+            _reset_sampling_on_model_change(target.params, normalized_values)
             invalidated.update(_descendants(graph, {target.id}))
             summary["updated_node_ids_array"].append(target.id)
         elif op == "set_input":
