@@ -267,7 +267,11 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
     if (candidate.length > 60000) throw new Error('The model response is too large');
     let value;
     try { value = JSON.parse(candidate); }
-    catch (error) {
+    catch (firstError) {
+      // Small models leave trailing commas; that alone should not cost a retry.
+      try { value = JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')); } catch (error) { value = undefined; }
+    }
+    if (value === undefined) {
       const failure = new Error('The model did not return valid JSON');
       // An object that opens and never closes was cut off by the model's
       // output/context limit rather than malformed on purpose.
@@ -330,7 +334,7 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
     return request;
   }
 
-  function buildAgentInput(userText, entry, graph, rawCatalogue, selectedIds, history) {
+  function buildAgentInput(userText, entry, graph, rawCatalogue, selectedIds, history, attempt) {
     const budget = modelBudget(entry);
     let compact = compactGraph(graph, selectedIds, userText, null);
     const relevant = new Set(compact.nodes.map(node => node.type).filter(type => !type.startsWith('input/')));
@@ -354,6 +358,9 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
       recent_conversation:newest,
       user_request:cleanString(userText, 2000)
     };
+    // The text API deduplicates identical requests for a day; a retry of the
+    // same wording must reach the model again rather than replay its answer.
+    if (attempt) payload.attempt = String(attempt).slice(0, 24);
     let encoded = JSON.stringify(payload);
     const fits = () => encoded.length <= budget.inputChars;
     if (!fits()) { payload.recent_conversation = []; encoded = JSON.stringify(payload); }
@@ -499,7 +506,7 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
         ? options.getCatalogue() : {};
       return buildAgentInput(userText, entry, graph,
         Object.assign({}, serviceCatalogue, {models_array:catalogueModels}),
-        selected, conversation);
+        selected, conversation, Date.now().toString(36));
     }
 
     async function submitModel(prompt, input, entry, outputTokens, budgetRetried, label) {

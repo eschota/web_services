@@ -52,6 +52,28 @@ def test_probe_image_size_reads_real_pixels_and_clamps():
         FakeClient(FakeResponse(200, b"not an image")), "https://example.test/junk.png")) is None
 
 
+@pytest.mark.parametrize("channel", ["pose", "depth", "canny"])
+def test_control_preprocessor_resolution_follows_the_shorter_requested_side(channel):
+    from renderfin.runtime_settings import apply_runtime_settings
+
+    class Prompt:
+        type = "control_" + channel
+
+    path = WORKFLOWS / f"gen_control_{channel}.json"
+    workflow = templating.render_workflow_text(
+        path.read_text(encoding="utf-8"), width=832, height=1216,
+        prompt="", negative_prompt="", image_filename="input.png",
+        output_prefix="control/test",
+    )
+    settled = apply_runtime_settings(workflow, Prompt(), 832, 1216)
+    resolutions = [node["inputs"]["resolution"] for node in settled.values()
+                   if "resolution" in node.get("inputs", {})]
+    assert resolutions and all(value == 832 for value in resolutions)
+    landscape = apply_runtime_settings(workflow, Prompt(), 1216, 832)
+    assert all(node["inputs"]["resolution"] == 832 for node in landscape.values()
+               if "resolution" in node.get("inputs", {}))
+
+
 def test_control_channel_rejects_unknown_value():
     with pytest.raises(HTTPException) as caught:
         ai_controlnet_api.renderfin_payload("normal", "https://example.test/input.png")

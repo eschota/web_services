@@ -234,6 +234,19 @@ test('a ten-variant video request on a chain fits the 4k window with room to ans
   assert.ok(api.modelBudget(QWEN).inputChars > api.modelBudget(BONSAI).inputChars);
 });
 
+test('trailing commas are repaired and an attempt nonce defeats the request cache', () => {
+  const api = load();
+  const graph = {nodes:[{id:'a', kind:'input', entity_type:'text', value:'x'}], links:[]};
+  const fixed = api.parseProposal('{"message":"ok","operations":[{"op":"rename_graph","name":"n",},],}', graph);
+  assert.equal(fixed.operations.length, 1);
+  const catalogue = {entity_types_array:[], services_array:[]};
+  const first = api.buildAgentInput('rename it', QWEN, graph, catalogue, [], [], 'abc');
+  const second = api.buildAgentInput('rename it', QWEN, graph, catalogue, [], [], 'abd');
+  assert.notEqual(first.encoded, second.encoded);
+  assert.equal(JSON.parse(first.encoded).attempt, 'abc');
+  assert.equal(JSON.parse(api.buildAgentInput('rename it', QWEN, graph, catalogue, [], []).encoded).attempt, undefined);
+});
+
 test('the standing instructions name the single output socket of input nodes', () => {
   const api = load();
   assert.match(api.systemPrompt, /output socket named "value"/);
