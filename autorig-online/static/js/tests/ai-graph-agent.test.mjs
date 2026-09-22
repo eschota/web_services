@@ -110,13 +110,46 @@ test('two-node Canny edit keeps both nodes before compacting a large catalogue',
   assert.ok(canny);
   assert.ok((canny.params || []).some(param => param.name === 'low_threshold'));
   assert.ok(api.systemPrompt.length + 20 + built.encoded.length < 8000);
+  assert.equal(built.outputTokens, -1);
+});
+
+test('current model catalogue fits a two-node image graph with every usable image filename', () => {
+  const api = load();
+  const cataloguePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+    '..', '..', '..', 'deploy', 'ai-models', 'model_catalogue.json');
+  const currentModels = JSON.parse(fs.readFileSync(cataloguePath, 'utf8'));
+  const imageModels = currentModels.filter(item =>
+    item.usable && (item.services || []).includes('image'));
+  assert.equal(currentModels.length, 18);
+  assert.equal(imageModels.length, 9);
+  const graph = {name:'All image models', nodes:[
+    {id:'prompt', kind:'input', entity_type:'text', value:'A neutral studio scene', x:0, y:0, params:{}},
+    {id:'image', kind:'service', service:'image', x:360, y:0,
+     params:{width:960, height:540, steps:0, cfg:0, sampler:'', scheduler:''}}
+  ], links:[{from:'prompt', output:'value', to:'image', input:'prompt'}], results:{}};
+  const catalogue = {
+    entity_types_array:[{id:'text', title:'Text'}, {id:'image', title:'Image'}],
+    services_array:[{id:'image', title:'Image', status:'live',
+      inputs:[{field:'prompt', type:'text', required:true}],
+      outputs:[{field:'image_url_string', type:'image'}], params_array:[]}],
+    models_array:currentModels
+  };
+  const built = api.buildAgentInput('Add every available image model',
+    {context_tokens:4096}, graph, catalogue, [], []);
+  const payload = JSON.parse(built.encoded);
+  assert.deepEqual(Array.from(payload.graph.nodes, node => node.id), ['prompt', 'image']);
+  assert.deepEqual(new Set(payload.catalogue.models.map(item => item.file)),
+    new Set(imageModels.map(item => item.file)));
+  assert.ok(payload.catalogue.models.every(item => item.kind && item.family && item.title));
+  assert.ok(api.systemPrompt.length + 20 + built.encoded.length < 8000);
 });
 
 test('reasoning exhaustion gets one larger budget and never loops', () => {
   const api = load();
   assert.equal(api.reasoningRetryBudget(
-    'model_spent_its_budget_thinking: no answer', 2048, false), 4096);
+    'model_spent_its_budget_thinking: no answer', 2048, false), -1);
   assert.equal(api.reasoningRetryBudget(
     'model_spent_its_budget_thinking: no answer', 4096, true), null);
   assert.equal(api.reasoningRetryBudget('worker unavailable', 2048, false), null);
+  assert.equal(api.reasoningRetryBudget('model_spent_its_budget_thinking', -1, false), null);
 });

@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,7 @@ AI_MODELS: List[Dict[str, object]] = [
     {
         "id": "bonsai2-27b",
         "graph_agent_supported": True,
+        "unlimited_output_supported": True,
         "title": "Bonsai 2 27B",
         "description": (
             "Ternary 27B vision-language model running on the farm's own GPUs. "
@@ -94,6 +95,7 @@ AI_MODELS: List[Dict[str, object]] = [
     {
         "id": "qwen35-9b-uncensored",
         "graph_agent_supported": False,
+        "unlimited_output_supported": True,
         "title": "Qwen3.5 9B Defiant Fable",
         "description": (
             "Uncensored 9B vision-language model on the farm's own GPUs. "
@@ -141,7 +143,15 @@ class VisionRequest(BaseModel):
     image_url: Optional[str] = Field(None, description="Public http(s) URL of the image")
     image_base64: Optional[str] = Field(None, description="Inline image, base64 or data URL")
     model: Optional[str] = Field(None, description="Model id from /api/ai/models")
-    max_output_tokens: Optional[int] = Field(None, ge=1, le=8192)
+    max_output_tokens: Optional[int] = Field(None, ge=-1,
+        description="-1 removes the output-token cap; positive values request a budget")
+
+    @field_validator("max_output_tokens")
+    @classmethod
+    def validate_output_tokens(cls, value):
+        if value == 0:
+            raise ValueError("Use -1 for no output-token cap, or a positive budget")
+        return value
     wait_seconds: Optional[float] = Field(
         None, ge=0, le=MAX_WAIT_SECONDS,
         description="Hold the response until the answer is ready, up to this long",
@@ -159,8 +169,16 @@ class TextRequest(BaseModel):
     # slightly differently.
     input: Optional[str] = Field(None, description="Text the instruction applies to")
     model: Optional[str] = Field(None, description="Model id from /api/ai/models")
-    max_output_tokens: Optional[int] = Field(None, ge=1, le=8192)
+    max_output_tokens: Optional[int] = Field(None, ge=-1,
+        description="-1 removes the output-token cap; positive values request a budget")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+    @field_validator("max_output_tokens")
+    @classmethod
+    def validate_output_tokens(cls, value):
+        if value == 0:
+            raise ValueError("Use -1 for no output-token cap, or a positive budget")
+        return value
 
     def combined_prompt(self) -> str:
         """Instruction first, then the material, with a marker between them.
@@ -310,6 +328,8 @@ async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) ->
                                                    catalogue.get("system_prompt_supported") is True),
                   "system_prompt_models": (catalogue.get("system_prompt_models") or [])
                                            if isinstance(catalogue, dict) else [],
+                  "unlimited_output_supported": bool(isinstance(catalogue, dict) and
+                                                       catalogue.get("unlimited_output_supported") is True),
                   "activities": _activities(payload)}
 
 
@@ -351,7 +371,7 @@ def _activities(payload: Dict[str, object]) -> List[str]:
 
 async def _pick_worker(
     client: httpx.AsyncClient, model_id: Optional[str] = None,
-    *, require_system_prompt: bool = False,
+    *, require_system_prompt: bool = False, require_unlimited_output: bool = False,
 ) -> Dict[str, object]:
     """The least loaded reachable node that carries the requested model."""
     workers = _load_ai_workers()
@@ -378,6 +398,13 @@ async def _pick_worker(
                     "message_string": "No farm node answered; try again shortly"},
         )
     wanted = str(model_id or "").strip()
+    if require_unlimited_output:
+        reachable = [(worker, info) for worker, info in reachable
+                     if info.get("unlimited_output_supported") is True]
+        if not reachable:
+            raise HTTPException(status_code=503, detail={
+                "error_string": "unlimited_output_not_supported",
+                "message_string": "No available text worker supports uncapped output yet"})
     if require_system_prompt:
         reachable = [(worker, info) for worker, info in reachable
                      if info.get("system_prompt_supported") is True and
@@ -421,6 +448,8 @@ def _output_budget(model: Dict[str, object], asked: Optional[int]) -> int:
     budget on the reasoning, so the figure that suits a plain answer leaves
     nothing for the answer itself.
     """
+    if asked == -1:
+        return -1
     if asked and int(asked) > 0:
         return int(asked)
     return int(model.get("default_output_tokens") or 1024)
@@ -801,8 +830,12 @@ async def _run(
 ) -> Dict[str, object]:
     model_id = str(request_model["id"])
     async with httpx.AsyncClient() as client:
-        worker = (await _pick_worker(client, model_id, require_system_prompt=True)
-                  if payload.get("system_prompt") else await _pick_worker(client, model_id))
+        requirements = {}
+        if payload.get("system_prompt"):
+            requirements["require_system_prompt"] = True
+        if payload.get("max_output_tokens") == -1:
+            requirements["require_unlimited_output"] = True
+        worker = await _pick_worker(client, model_id, **requirements)
         worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
         task_id = f"{_node_key(worker)}.{worker_task_id}"
         raw: Dict[str, object] = {"status": "Pending"}

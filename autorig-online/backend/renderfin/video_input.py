@@ -8,16 +8,18 @@ the operation ends.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import math
 import os
 import re
 import shutil
+import socket
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -38,7 +40,11 @@ _AUTORIG_PATH_PREFIXES = (
     "/api/ai/avatar-assets/",
 )
 _PVS_HOST = re.compile(r"pvs[1-9]\.microstock\.plus", re.IGNORECASE)
+_CIVITAI_AUTH_HOSTS = {"civitai.com", "www.civitai.com", "image.civitai.com"}
+_CIVITAI_CDN_HOSTS = {"blobs-b2.civitai.com"}
+_CIVITAI_HOSTS = _CIVITAI_AUTH_HOSTS | _CIVITAI_CDN_HOSTS
 _MP4_FORMATS = {"mov", "mp4", "m4a", "3gp", "3g2", "mj2"}
+_SOURCE_VIDEO_FORMATS = _MP4_FORMATS | {"matroska", "webm"}
 
 
 class VideoInputError(RuntimeError):
@@ -64,7 +70,7 @@ def _validated_url(value: str) -> str:
     if hostname == "autorig.online":
         if not any(parsed.path.startswith(prefix) for prefix in _AUTORIG_PATH_PREFIXES):
             raise VideoInputError("autorig.online control video path is not allowed")
-    elif not _PVS_HOST.fullmatch(hostname):
+    elif not _PVS_HOST.fullmatch(hostname) and hostname not in _CIVITAI_HOSTS:
         raise VideoInputError("control video host is not allowed")
     if not parsed.path or parsed.path.endswith("/"):
         raise VideoInputError("control video URL must identify a file")
@@ -146,14 +152,16 @@ def _video_stream(probe: Dict[str, Any]) -> Dict[str, Any]:
     return stream
 
 
-def _validate_mp4_probe(probe: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_container_probe(
+    probe: Dict[str, Any], allowed_formats: set[str], error_message: str
+) -> Dict[str, Any]:
     stream = _video_stream(probe)
     format_row = probe.get("format")
     if not isinstance(format_row, dict):
         raise VideoInputError("ffprobe found no container")
     formats = {part.strip().lower() for part in str(format_row.get("format_name") or "").split(",")}
-    if not formats.intersection(_MP4_FORMATS):
-        raise VideoInputError("control input is not an MP4 container")
+    if not formats.intersection(allowed_formats):
+        raise VideoInputError(error_message)
     try:
         duration = float(format_row.get("duration") or 0)
     except (TypeError, ValueError) as exc:
@@ -163,39 +171,103 @@ def _validate_mp4_probe(probe: Dict[str, Any]) -> Dict[str, Any]:
     return stream
 
 
+def _validate_source_probe(probe: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_container_probe(
+        probe, _SOURCE_VIDEO_FORMATS, "control input is not a supported MP4 or WebM video"
+    )
+
+
+def _validate_mp4_probe(probe: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_container_probe(
+        probe, _MP4_FORMATS, "control input is not an MP4 container"
+    )
+
+
 async def _download(client: httpx.AsyncClient, url: str, target: Path) -> None:
+    current_url = _validated_url(url)
+    may_follow_redirect = (urlsplit(current_url).hostname or "").rstrip(".").lower() in _CIVITAI_HOSTS
     try:
-        async with client.stream("GET", url, timeout=60.0, follow_redirects=False) as response:
-            if 300 <= response.status_code < 400:
-                raise VideoInputError("redirects are not allowed for control videos")
-            if response.status_code != 200:
-                raise VideoInputError(
-                    f"control video download returned HTTP {response.status_code}"
-                )
-            declared = response.headers.get("content-length")
-            if declared:
-                try:
-                    declared_size = int(declared)
-                except ValueError as exc:
-                    raise VideoInputError("invalid control video Content-Length") from exc
-                if declared_size < 1 or declared_size > MAX_VIDEO_BYTES:
-                    raise VideoInputError("control video exceeds the 100 MB limit")
-            size = 0
-            with target.open("wb") as output:
-                async for chunk in response.aiter_bytes(DOWNLOAD_CHUNK_BYTES):
-                    size += len(chunk)
-                    if size > MAX_VIDEO_BYTES:
+        for redirect_count in range(4):
+            await _assert_public_dns(current_url)
+            async with client.stream(
+                "GET", current_url, headers=_civitai_headers(current_url),
+                timeout=60.0, follow_redirects=False,
+            ) as response:
+                if 300 <= response.status_code < 400:
+                    if not may_follow_redirect:
+                        raise VideoInputError("redirects are not allowed for control videos")
+                    location = str(response.headers.get("location") or "").strip()
+                    if not location:
+                        raise VideoInputError("control video redirect has no Location")
+                    current_url = _validated_url(urljoin(current_url, location))
+                    # Headers are rebuilt from the new URL on the next pass.
+                    # A redirect to PVS/autorig is therefore allowed but gets
+                    # no Civitai bearer; any other host fails the allowlist.
+                    continue
+                if response.status_code != 200:
+                    raise VideoInputError(
+                        f"control video download returned HTTP {response.status_code}"
+                    )
+                declared = response.headers.get("content-length")
+                if declared:
+                    try:
+                        declared_size = int(declared)
+                    except ValueError as exc:
+                        raise VideoInputError("invalid control video Content-Length") from exc
+                    if declared_size < 1 or declared_size > MAX_VIDEO_BYTES:
                         raise VideoInputError("control video exceeds the 100 MB limit")
-                    output.write(chunk)
-            if size == 0:
-                raise VideoInputError("control video download is empty")
+                size = 0
+                with target.open("wb") as output:
+                    async for chunk in response.aiter_bytes(DOWNLOAD_CHUNK_BYTES):
+                        size += len(chunk)
+                        if size > MAX_VIDEO_BYTES:
+                            raise VideoInputError("control video exceeds the 100 MB limit")
+                        output.write(chunk)
+                if size == 0:
+                    raise VideoInputError("control video download is empty")
+                return
+        raise VideoInputError("control video exceeded the redirect limit")
     except VideoInputError:
         raise
     except (httpx.HTTPError, OSError) as exc:
-        raise VideoInputError(f"control video download failed: {exc}") from exc
+        # Transport errors may quote invalid headers. Never echo a bearer
+        # value, a signed query string, or the original exception chain.
+        raise VideoInputError(f"control video download failed: {type(exc).__name__}") from None
 
 
 validate_video_url = _validated_url
+
+
+def _civitai_headers(url: str) -> Dict[str, str]:
+    """Bearer auth is server-only and never follows a URL outside Civitai."""
+    hostname = (urlsplit(url).hostname or "").rstrip(".").lower()
+    token = str(os.getenv("CIVITAI_API_TOKEN") or "").strip()
+    if hostname in _CIVITAI_AUTH_HOSTS and token:
+        if any(ord(char) < 33 or ord(char) > 126 for char in token):
+            raise VideoInputError("Civitai token configuration is invalid")
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+async def _assert_public_dns(url: str) -> None:
+    """Reject an allowlisted name if DNS points it at a non-public address."""
+    hostname = (urlsplit(url).hostname or "").rstrip(".").lower()
+    try:
+        rows = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+        )
+    except OSError as exc:
+        raise VideoInputError("control video host could not be resolved") from exc
+    addresses = {row[4][0].split("%", 1)[0] for row in rows if row and row[4]}
+    if not addresses:
+        raise VideoInputError("control video host could not be resolved")
+    for value in addresses:
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise VideoInputError("control video host resolved to an invalid address") from exc
+        if not address.is_global:
+            raise VideoInputError("control video host resolved to a non-public address")
 
 
 async def download_prepare_video(
@@ -230,7 +302,7 @@ async def download_prepare_video(
     try:
         await _download(client, admitted_url, source)
         source_probe = await _probe(source)
-        _validate_mp4_probe(source_probe)
+        _validate_source_probe(source_probe)
         source_duration = float((source_probe.get("format") or {}).get("duration") or 0)
         available_frames = max(1, int(math.floor(source_duration * fps + 1e-6)))
         held_tail_frames = 0 if allow_shorter else max(0, frame_count - available_frames)

@@ -26,6 +26,30 @@ class TextSystemPromptTests(unittest.TestCase):
         self.assertEqual(result["prompt"], "Summarize\n\n--- text ---\nMaterial")
         self.assertNotIn("system_prompt", result)
 
+    def test_unlimited_output_survives_public_request_and_dispatch_payload(self):
+        result = self.payload({"input": "Describe the graph", "max_output_tokens": -1})
+        self.assertEqual(result["max_output_tokens"], -1)
+        self.assertEqual(api.VisionRequest(prompt="Describe", max_output_tokens=-1).max_output_tokens, -1)
+        self.assertEqual(api._output_budget({"default_output_tokens": 2048}, -1), -1)
+        with self.assertRaises(ValueError):
+            api.TextRequest(prompt="test", max_output_tokens=0)
+
+    def test_unlimited_requests_cannot_silently_land_on_a_capped_worker(self):
+        old = {"name": "old", "url": "http://old", "token": "test"}
+        new = {"name": "new", "url": "http://new", "token": "test"}
+        async def probe(client, worker):
+            return True, {"load": 0, "models": ["bonsai2-27b"],
+                          "unlimited_output_supported": worker == new}
+        with patch.object(api, "_load_ai_workers", return_value=[old, new]), \
+             patch.object(api, "_node_is_free", probe):
+            self.assertEqual(asyncio.run(api._pick_worker(
+                None, "bonsai2-27b", require_unlimited_output=True)), new)
+        with patch.object(api, "_load_ai_workers", return_value=[old]), \
+             patch.object(api, "_node_is_free", probe):
+            with self.assertRaises(HTTPException) as caught:
+                asyncio.run(api._pick_worker(None, "bonsai2-27b", require_unlimited_output=True))
+            self.assertEqual(caught.exception.detail["error_string"], "unlimited_output_not_supported")
+
     def test_combined_system_and_user_budget_is_still_bounded(self):
         with self.assertRaises(HTTPException) as caught:
             self.payload({"system_prompt": "s" * 4000, "input": "u" * 4001})

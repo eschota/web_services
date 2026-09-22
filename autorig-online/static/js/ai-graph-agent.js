@@ -125,8 +125,27 @@ Use only service, entity, parameter and socket names present in the supplied cat
 
   function compactCatalogue(raw, relevantServiceIds, minimal) {
     const relevant = relevantServiceIds || new Set();
+    const modelRows = (raw.models_array || []).filter(item => {
+      if (!item || item.usable === false || !item.file) return false;
+      const services = Array.isArray(item.services) ? item.services.map(String) : [];
+      return !relevant.size || services.some(service => relevant.has(service));
+    }).map(item => {
+      const policy = item.sampling_policy || {};
+      return {
+        file:item.file, kind:item.kind, family:item.family,
+        services:Array.isArray(item.services) ? item.services : [],
+        title:item.title, base:item.base || undefined,
+        default_sampling:{
+          auto_steps:policy.auto_steps, fixed_steps:policy.fixed_steps,
+          cfg_mode:policy.cfg_mode, cfg_value:policy.cfg_value,
+          scheduler_mode:policy.scheduler_mode, scheduler_label:policy.scheduler_label
+        },
+        reference_note:cleanString(policy.auto_reason || item.unusable_reason || '', minimal ? 120 : 260)
+      };
+    });
     return {
       entity_types:(raw.entity_types_array || []).map(item => ({id:item.id, title:item.title})),
+      models:modelRows,
       services:(raw.services_array || []).map(service => {
         const current = relevant.has(String(service.id));
         const summary = {id:service.id, status:service.status};
@@ -195,18 +214,18 @@ Use only service, entity, parameter and socket names present in the supplied cat
 
   function modelBudget(entry) {
     const contextTokens = Math.max(2048, Number(entry?.context_tokens) || 4096);
-    const outputTokens = Math.min(2048, Number(entry?.max_output_tokens) || 2048);
+    const outputTokens = -1; // Native generation until EOS/context, no answer-token quota.
     const contextChars = Math.max(3000,
-      Math.floor((contextTokens - outputTokens - 700) * 3));
+      Math.floor((contextTokens - 2048 - 700) * 3));
     // TextRequest joins prompt and input, then enforces an 8000-char ceiling.
     const apiInputCeiling = Math.max(1800, 7800 - SYSTEM_PROMPT.length - 40);
     return {outputTokens, inputChars:Math.min(apiInputCeiling, contextChars)};
   }
 
   function reasoningRetryBudget(errorString, currentBudget, alreadyRetried) {
-    if (alreadyRetried ||
+    if (alreadyRetried || Number(currentBudget) === -1 ||
         !String(errorString || '').includes('model_spent_its_budget_thinking')) return null;
-    return Math.min(8192, Math.max(4096, Number(currentBudget || 0) * 2));
+    return -1;
   }
 
   function modelRequest(systemPrompt, input, entry, outputTokens) {
@@ -217,6 +236,11 @@ Use only service, entity, parameter and socket names present in the supplied cat
   function buildAgentInput(userText, entry, graph, rawCatalogue, selectedIds, history) {
     const compact = compactGraph(graph, selectedIds);
     const relevant = new Set(compact.nodes.map(node => node.service).filter(Boolean));
+    // A prompt-only starting graph is the normal entry point for requests such
+    // as "add every image model". Give it the image catalogue even before an
+    // image service node exists.
+    if (!relevant.size && compact.nodes.some(node =>
+      node.kind === 'input' && node.entity_type === 'text')) relevant.add('image');
     const budget = modelBudget(entry);
     const newest = [];
     let used = 0;
@@ -244,11 +268,25 @@ Use only service, entity, parameter and socket names present in the supplied cat
       encoded = JSON.stringify(payload);
     }
     if (encoded.length > budget.inputChars) {
+      // Preserve the complete graph before reducing model choices. Keep only
+      // models already selected by graph nodes and tell the agent how to ask
+      // for a narrower model context on its next request.
+      const selectedFiles = new Set(compact.nodes.flatMap(node => [
+        node.params?.checkpoint, node.params?.lora
+      ]).filter(Boolean).map(String));
+      payload.catalogue.models = (payload.catalogue.models || [])
+        .filter(item => selectedFiles.has(String(item.file)));
+      payload.catalogue.model_context = 'Model choices were truncated to selected graph models; ask for a selected subset if more choices are needed.';
+      encoded = JSON.stringify(payload);
+    }
+    if (encoded.length > budget.inputChars) {
       const relevantCatalogue = compactCatalogue(rawCatalogue, relevant, true);
       payload.catalogue = {
         entity_types:(rawCatalogue.entity_types_array || []).map(item => item.id),
         available_service_ids:(rawCatalogue.services_array || []).map(service => service.id),
-        services:relevantCatalogue.services.filter(service => relevant.has(String(service.id)))
+        services:relevantCatalogue.services.filter(service => relevant.has(String(service.id))),
+        models:payload.catalogue.models || [],
+        model_context:payload.catalogue.model_context
       };
       encoded = JSON.stringify(payload);
     }
@@ -277,6 +315,7 @@ Use only service, entity, parameter and socket names present in the supplied cat
     }
     let graphKey = graphIdFromLocation() || draftKey();
     let models = [];
+    let catalogueModels = [];
     let model = localStorage.getItem(MODEL_KEY) || '';
     let conversation = [];
     let busy = false;
@@ -363,8 +402,10 @@ Use only service, entity, parameter and socket names present in the supplied cat
     function buildInput(userText, entry, graph) {
       const selected = typeof options.getSelectedIds === 'function'
         ? options.getSelectedIds() : [];
+      const serviceCatalogue = typeof options.getCatalogue === 'function'
+        ? options.getCatalogue() : {};
       return buildAgentInput(userText, entry, graph,
-        typeof options.getCatalogue === 'function' ? options.getCatalogue() : {},
+        Object.assign({}, serviceCatalogue, {models_array:catalogueModels}),
         selected, conversation);
     }
 
@@ -379,7 +420,7 @@ Use only service, entity, parameter and socket names present in the supplied cat
       if (accepted.answer_string) return accepted.answer_string;
       const taskId = accepted.task_id_string;
       if (!taskId) throw new Error('The model accepted no trackable task');
-      for (let attempt = 0; attempt < 180; attempt += 1) {
+      for (let attempt = 0; outputTokens === -1 || attempt < 180; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const poll = await fetch('/api/ai/status/' + encodeURIComponent(taskId));
         const current = await safeParse(poll);
@@ -390,7 +431,7 @@ Use only service, entity, parameter and socket names present in the supplied cat
           if (data.answer_string) return data.answer_string;
           const larger = reasoningRetryBudget(data.error_string, outputTokens, budgetRetried);
           if (larger) {
-            setStatus('The model used its answer budget thinking · retrying once with ' + larger);
+            setStatus('Retrying without an output-token cap');
             return submitModel(prompt, input, entry, larger, true);
           }
           throw new Error(data.error_string || 'The model returned no answer');
@@ -433,7 +474,7 @@ Use only service, entity, parameter and socket names present in the supplied cat
             invalid_response:cleanString(answer, 2400), original_request:cleanString(userText, 1000)});
           answer = await submitModel(
             SYSTEM_PROMPT + '\nCorrect the previous response using the error below; do not invent extra operations.',
-            repairInput, entry, Math.min(1024, request.outputTokens));
+            repairInput, entry, request.outputTokens);
           proposal = parseProposal(answer, originalGraph);
         }
         if (!proposal.operations.length) {
@@ -479,10 +520,14 @@ Use only service, entity, parameter and socket names present in the supplied cat
     });
     document.addEventListener('ai-graph-saved', event => graphSaved(event.detail?.graphId || event.detail?.graph_id_string));
 
-    fetch('/api/ai/models').then(async response => {
+    Promise.all(['/api/ai/models', '/api/ai/graph-edits/schema'].map(async url => {
+      const response = await fetch(url);
       const parsed = await safeParse(response);
       if (!response.ok || !parsed.data) throw new Error(apiError(response, parsed));
-      const textModels = (parsed.data.models_array || []).filter(item => (item.modes || []).includes('text'));
+      return parsed.data;
+    })).then(([modelList, editSchema]) => {
+      catalogueModels = Array.isArray(editSchema.models_array) ? editSchema.models_array : [];
+      const textModels = (modelList.models_array || []).filter(item => (item.modes || []).includes('text'));
       models = textModels.filter(item => item.graph_agent_supported === true);
       select.innerHTML = '';
       textModels.forEach(item => {
