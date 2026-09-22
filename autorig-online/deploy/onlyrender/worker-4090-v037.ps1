@@ -127,7 +127,7 @@ if ((Test-Path "$ltx25\diffusion_models\ltx-2.5-22b-distilled-transformer-comfy-
     }
 }
 # MiniMax H3 (full int8-convrot transformer, nvfp4 Qwen3-VL encoder, 4-step turbo LoRA).
-if ((Test-Path "$ltx25\diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors") -and
+if ((Test-Path "$ltx25\diffusion_models\minimax_h3_fl2va_pruned_int8_convrot.safetensors") -and
     (Test-Path "$ltx25\text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors") -and
     (Test-Path "$ltx25\vae\minimax_h3_video_vae_fp16.safetensors") -and
     (Test-Path "$ltx25\vae\minimax_h3_audio_vae_fp32.safetensors") -and

@@ -76,6 +76,8 @@ RETIRED_MODEL_REPLACEMENTS = {
     "ltxv-13b-0.9.8-distilled-fp8.safetensors": LTX25_CHECKPOINT,
     "ltxv-13b-0.9.8-distilled.safetensors": LTX25_CHECKPOINT,
     "ltxv-13b-0.9.8-dev-fp8.safetensors": LTX25_CHECKPOINT,
+    # MiniMax H3 moved from the unpruned int8 build to the pruned one (fits 24 GB).
+    "minimax_h3_fl2va_int8_convrot.safetensors": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
 }
 
 

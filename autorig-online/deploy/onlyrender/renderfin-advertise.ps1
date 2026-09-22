@@ -44,7 +44,7 @@ if ((Has 'diffusion_models\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.
     }
 }
 # MiniMax H3 (full int8-convrot, nvfp4 encoder, turbo LoRA). Needs 64 GB RAM.
-if ((Has 'diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors') -and
+if ((Has 'diffusion_models\minimax_h3_fl2va_pruned_int8_convrot.safetensors') -and
     (Has 'text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors') -and
     (Has 'vae\minimax_h3_video_vae_fp16.safetensors') -and
     (Has 'vae\minimax_h3_audio_vae_fp32.safetensors') -and

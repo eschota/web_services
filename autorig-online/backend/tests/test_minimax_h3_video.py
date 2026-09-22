@@ -40,7 +40,7 @@ class MiniMaxH3TemplateTests(unittest.TestCase):
     def test_loaders_and_turbo_schedule(self):
         workflow = _render()
         self.assertEqual([n["inputs"]["unet_name"] for n in _of(workflow, "UNETLoader")],
-                         ["minimax_h3_fl2va_int8_convrot.safetensors"])
+                         ["minimax_h3_fl2va_pruned_int8_convrot.safetensors"])
         self.assertEqual([(n["inputs"]["type"]) for n in _of(workflow, "CLIPLoader")], ["minimax"])
         self.assertEqual([n["inputs"]["lora_name"] for n in _of(workflow, "LoraLoaderModelOnly")], [TURBO])
         self.assertEqual(_of(workflow, "BasicScheduler")[0]["inputs"]["steps"], 4)
@@ -67,6 +67,20 @@ class MiniMaxH3TemplateTests(unittest.TestCase):
         apply_lora_stack(workflow, [{"name": "style.safetensors", "strength_model": 0.8}])
         names = [n["inputs"]["lora_name"] for n in _of(workflow, "LoraLoaderModelOnly")]
         self.assertEqual(sorted(names), sorted([TURBO, "style.safetensors"]))
+
+
+class LegacyNameTests(unittest.TestCase):
+    def test_the_unpruned_file_name_renders_on_the_pruned_build(self):
+        import ai_model_defaults
+        self.assertEqual(ai_model_defaults.canonical_file("minimax_h3_fl2va_int8_convrot.safetensors"),
+                         "minimax_h3_fl2va_pruned_int8_convrot.safetensors")
+
+    def test_the_catalogue_lists_the_old_name_for_the_picker(self):
+        import json
+        catalogue = BACKEND.parent / "deploy" / "ai-models" / "model_catalogue.json"
+        entry = next(e for e in json.loads(catalogue.read_text(encoding="utf-8"))
+                     if e.get("file") == "minimax_h3_fl2va_pruned_int8_convrot.safetensors")
+        self.assertIn("minimax_h3_fl2va_int8_convrot.safetensors", entry.get("legacy_files") or [])
 
 
 if __name__ == "__main__":

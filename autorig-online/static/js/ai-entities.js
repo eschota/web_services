@@ -735,7 +735,10 @@
     const fileLabel = host.querySelector('.mpick-file');
 
     function paintButton() {
-      const entry = state.entries.find(e => e.file === state.value);
+      // A saved node may still name a file the catalogue replaced; the entry
+      // lists those names in `legacy_files` and the backend renders them on it.
+      const entry = state.entries.find(e => e.file === state.value) ||
+        state.entries.find(e => (e.legacy_files || []).includes(state.value));
       if (!entry) {
         thumb.style.backgroundImage = '';
         thumb.className = 'mpick-thumb empty';
