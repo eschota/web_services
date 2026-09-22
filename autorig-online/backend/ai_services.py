@@ -520,6 +520,10 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "lora_strength", "title": "Style strength", "type": "range",
          "min": 0, "max": 1.5, "step": 0.05, "default": 0,
          "help": "0 leaves the workflow's own strength"},
+        # A stack of LoRAs as Civitai-style tags, applied in order after the
+        # single style LoRA. The same tags also work inside the prompt.
+        {"name": "loras", "title": "LoRA stack", "type": "lora_stack", "default": "",
+         "help": "<lora:NAME:WEIGHT> tags, applied in order; also accepted in the prompt"},
         {"name": "mode", "title": "Mode", "type": "select", "default": "",
          "options": [
              {"value": "", "title": "Plain"},
@@ -571,6 +575,10 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "lora_strength", "title": "Style strength", "type": "range",
          "min": 0, "max": 1.5, "step": 0.05, "default": 0,
          "help": "0 leaves the workflow's own strength"},
+        # A stack of LoRAs as Civitai-style tags, applied in order after the
+        # single style LoRA. The same tags also work inside the prompt.
+        {"name": "loras", "title": "LoRA stack", "type": "lora_stack", "default": "",
+         "help": "<lora:NAME:WEIGHT> tags, applied in order; also accepted in the prompt"},
         {"name": "frame_count", "title": "Frames", "type": "range", "min": 9, "max": 393,
          "step": 8, "default": 97, "help": "LTX uses 8n+1 frames: 9, 17, 25... at 24 fps"},
         {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},

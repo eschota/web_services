@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Dict, Iterable, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import httpx
 
@@ -66,12 +66,72 @@ async def _optional_slot(client: httpx.AsyncClient, server: RenderServer,
         return set()
 
 
+def _aliases() -> Dict[str, str]:
+    try:
+        import ai_model_defaults  # the backend package, when importable
+        return dict(getattr(ai_model_defaults, "MODEL_FILE_ALIASES", {}) or {})
+    except Exception:
+        return {}
+
+
+def equivalent_names(name: str) -> List[str]:
+    """The same model file under every name a box may keep it as.
+
+    Civitai and Hugging Face publish identical bytes under different names
+    (CyberRealistic Pony v18 is `cyberrealisticPony_v180Coreshift_2764472` on
+    one and `CyberRealisticPony_V18.0_F16` on the other). A box holding either
+    can serve the request; `local_name` then picks the one it has.
+    """
+    name = str(name or "").strip()
+    if not name:
+        return []
+    names = [name]
+    for alias, canonical in _aliases().items():
+        if name == canonical and alias not in names:
+            names.append(alias)
+        elif name == alias and canonical not in names:
+            names.append(canonical)
+    return names
+
+
+def requested_loras(prompt: RenderPrompt) -> List[str]:
+    names: List[str] = []
+    single = str(getattr(prompt, "lora", "") or "").strip()
+    if single:
+        names.append(single)
+    for item in getattr(prompt, "loras", None) or []:
+        name = str(getattr(item, "name", None) or (item.get("name") if isinstance(item, dict) else "") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def local_name(server: RenderServer, kind: str, name: str) -> str:
+    """The name this server keeps `name` under, from the last inventory read."""
+    name = str(name or "").strip()
+    if not name or kind != "checkpoint":
+        return name
+    present: Set[str] = set()
+    for class_name in ("CheckpointLoaderSimple", "UNETLoader", "UnetLoaderGGUF"):
+        cached = _cache.get((server.render_server_name, class_name))
+        if cached:
+            present |= cached[1]
+    for candidate in equivalent_names(name):
+        if candidate in present:
+            return candidate
+    return name
+
+
 async def can_load(client: httpx.AsyncClient, server: RenderServer,
                    prompt: RenderPrompt) -> bool:
-    """Fail closed when a selected file is absent or inventory is unreadable."""
+    """Fail closed when a selected file is absent or inventory is unreadable.
+
+    Every LoRA of a stack must be on the box: a render that loaded some of
+    them would be a different picture, not a degraded one.
+    """
     checkpoint = str(prompt.checkpoint or "").strip()
-    lora = str(prompt.lora or "").strip()
-    if not checkpoint and not lora:
+    loras = requested_loras(prompt)
+    if not checkpoint and not loras:
         return True
     try:
         checkpoint_names, unet_names, gguf_names, lora_names, model_lora_names = await asyncio.gather(
@@ -85,15 +145,17 @@ async def can_load(client: httpx.AsyncClient, server: RenderServer,
             _optional_slot(client, server, "UnetLoaderGGUF", "unet_name")
             if checkpoint else _empty(),
             _slot(client, server, "LoraLoader", "lora_name")
-            if lora else _empty(),
+            if loras else _empty(),
             _slot(client, server, "LoraLoaderModelOnly", "lora_name")
-            if lora else _empty(),
+            if loras else _empty(),
         )
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return False
+    models = checkpoint_names | unet_names | gguf_names
+    available_loras = lora_names | model_lora_names
     return ((not checkpoint
-             or checkpoint in checkpoint_names | unet_names | gguf_names)
-            and (not lora or lora in lora_names | model_lora_names))
+             or any(name in models for name in equivalent_names(checkpoint)))
+            and all(name in available_loras for name in loras))
 
 
 async def eligible_names(client: httpx.AsyncClient,

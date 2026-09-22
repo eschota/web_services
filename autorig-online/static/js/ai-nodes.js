@@ -283,6 +283,12 @@
       control = `<span class="mpick-slot" data-model-param="${name}" `
               + `data-model-source="${escapeAttr(param.source || 'loras')}"></span>`
               + `<input type="hidden" data-param="${name}" value="">`;
+    } else if (param.type === 'lora_stack') {
+      // Civitai/A1111 tags, applied in order. The same tags also work inside
+      // the prompt; the server parses both the same way.
+      control = `<input type="text" data-param="${name}" value="${escapeAttr(param.default || '')}" `
+              + `placeholder="&lt;lora:name:0.8&gt;" spellcheck="false" autocomplete="off"${help}>`
+              + `<select class="lstack-add" title="Add a LoRA to the stack"><option value="">+</option></select>`;
     } else if (param.type === 'textarea') {
       control = `<textarea data-param="${name}" rows="3"${help}>${escapeHtml(param.default || '')}</textarea>`;
     } else {
@@ -947,6 +953,29 @@
       if (slot && slot._picker) slot._picker.value = params[name];
       const readout = element.querySelector('[data-for="' + CSS.escape(name) + '"]');
       if (readout) updateSamplingReadout(control);
+    });
+  }
+
+  const loraMenuCache = new Map();
+
+  function fillLoraStackMenu(select) {
+    const node = select.closest('.drawflow-node');
+    const service = node ? (meta(node.id.replace(/^node-/, '')) || {}).service : '';
+    select.dataset.filled = '1';
+    if (!loraMenuCache.has(service)) {
+      loraMenuCache.set(service, fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(service || 'image'))
+        .then(r => r.json()).then(body => (body.loras_array || []).filter(entry => entry.usable))
+        .catch(() => []));
+    }
+    loraMenuCache.get(service).then(loras => {
+      loras.forEach(entry => {
+        const stem = String(entry.file || '').replace(/\.[^.]+$/, '');
+        const weight = (entry.recommended || {}).strength || 1;
+        const option = new Option(`${entry.title || stem} · ${entry.base || entry.family || ''}`,
+                                  `<lora:${stem}:${weight}>`);
+        option.title = entry.file;
+        select.add(option);
+      });
     });
   }
 
@@ -2839,6 +2868,27 @@
       }
     });
     editor.on('nodeRemoved', id => forgetNodes([id]));
+    // LoRA stack "+" menu: filled on first open with the LoRAs this service
+    // can load right now; picking one appends its tag to the stack field.
+    document.getElementById('canvas').addEventListener('pointerdown', event => {
+      const select = event.target.closest && event.target.closest('select.lstack-add');
+      if (select && !select.dataset.filled) fillLoraStackMenu(select);
+    }, true);
+    document.getElementById('canvas').addEventListener('focusin', event => {
+      const select = event.target.closest && event.target.closest('select.lstack-add');
+      if (select && !select.dataset.filled) fillLoraStackMenu(select);
+    });
+    document.getElementById('canvas').addEventListener('change', event => {
+      const select = event.target.closest && event.target.closest('select.lstack-add');
+      if (!select || !select.value) return;
+      const field = select.parentElement.querySelector('input[data-param]');
+      if (field) {
+        field.value = (field.value.trim() + ' ' + select.value).trim();
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      select.value = '';
+    });
     // A range's number is only useful if it is shown next to the slider.
     document.getElementById('canvas').addEventListener('change', event => {
       if (programmaticParamEvent(event)) return;

@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoRA Manager — Render Farm | AutoRig</title>
+    <meta name="description" content="Install Civitai LoRAs on every render computer, see which computer holds which, and reproduce a Civitai image with its LoRA stack.">
+    <!-- Operational tool for the farm, like /models: not for search results. -->
+    <meta name="robots" content="noindex,nofollow">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 12% 4%, rgba(56, 189, 248, .13), transparent 34%),
+                radial-gradient(circle at 88% 10%, rgba(123, 92, 255, .17), transparent 38%),
+                linear-gradient(180deg, #101122 0%, #14152a 48%, #0f101c 100%);
+            background-attachment: fixed;
+            color: var(--text-primary, #eef); min-height: 100vh; margin: 0;
+        }
+        .ai-page, .ai-page input, .ai-page button, .ai-page select {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+        .ai-page [hidden] { display: none !important; }
+        .lr-wrap { max-width: 1500px; margin: 0 auto; padding: 22px 16px 56px; }
+        .lr-head { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+        .lr-head h1 {
+            margin: 0 8px 0 0; font-size: 26px; font-weight: 700; display: flex; align-items: center; gap: 10px;
+            background: linear-gradient(135deg, #38bdf8, #7b5cff); -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .lr-head h1 svg { width: 30px; height: 30px; }
+        .lr-add { display: flex; gap: 8px; flex: 1 1 420px; align-items: center; }
+        .lr-in {
+            flex: 1 1 auto; min-width: 0; background: rgba(12,13,28,.85); color: #e8ecff;
+            border: 1px solid rgba(255,255,255,.14); border-radius: 10px; padding: 9px 12px; font-size: 13.5px;
+        }
+        .lr-in:focus { outline: none; border-color: rgba(56,189,248,.6); }
+        select.lr-in { flex: 0 0 170px; }
+        .ib {
+            width: 38px; height: 38px; flex: 0 0 38px; display: inline-grid; place-items: center; cursor: pointer;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #dfe6ff;
+            border-radius: 10px; padding: 0; position: relative;
+        }
+        .ib:hover { background: rgba(255,255,255,.13); }
+        .ib.primary { background: linear-gradient(135deg, #2563eb, #7b5cff); border-color: transparent; }
+        .ib.danger:hover { background: rgba(239,68,68,.25); }
+        .ib svg { width: 19px; height: 19px; }
+        .ib.sm { width: 28px; height: 28px; flex-basis: 28px; border-radius: 8px; }
+        .ib.sm svg { width: 15px; height: 15px; }
+        .ib[disabled] { opacity: .45; cursor: default; }
+        .ib.busy svg { animation: spin 1s linear infinite; }
+        .lr-tabs { display: flex; gap: 6px; margin: 18px 0 12px; }
+        .lr-tab { composes: ib; }
+        .lr-tabs .ib { width: auto; padding: 0 12px; gap: 7px; display: inline-flex; align-items: center; font-size: 13px; }
+        .lr-tabs .ib.on { border-color: rgba(56,189,248,.65); background: rgba(56,189,248,.14); color: #bae6fd; }
+        .lr-tabs .count { font-variant-numeric: tabular-nums; color: #93a4c8; }
+        .lr-msg { font-size: 13px; margin: 8px 0; min-height: 18px; color: #9aa0b5; }
+        .lr-msg.err { color: #fca5a5; }
+        .lr-msg.ok { color: #86efac; }
+
+        .lr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+        .card {
+            display: grid; grid-template-columns: 84px 1fr; gap: 11px; padding: 10px;
+            border: 1px solid rgba(255,255,255,.1); border-radius: 14px; background: rgba(21,22,42,.78);
+        }
+        .card.pending { border-style: dashed; border-color: rgba(56,189,248,.5); }
+        .thumb { width: 84px; height: 108px; border-radius: 10px; object-fit: cover; background: #1b1d36; display: grid; place-items: center; color: #4b5578; }
+        .thumb svg { width: 30px; height: 30px; }
+        .c-title { font-size: 13.5px; font-weight: 600; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+        .c-title a { color: inherit; text-decoration: none; }
+        .c-title a:hover { text-decoration: underline; }
+        .chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+        .chip { font-size: 11px; border-radius: 999px; padding: 2px 8px; border: 1px solid rgba(255,255,255,.13); color: #c7d0ee; background: rgba(255,255,255,.04); font-variant-numeric: tabular-nums; }
+        .chip.fam { border-color: rgba(123,92,255,.55); color: #d6ccff; }
+        .chip.tag { font-family: ui-monospace, Consolas, monospace; cursor: copy; border-color: rgba(56,189,248,.45); color: #bae6fd; }
+        .chip.word { cursor: copy; }
+        .c-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .boxes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+        .bx { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: #aab3d4; border-radius: 7px; padding: 2px 5px 2px 3px; background: rgba(255,255,255,.04); cursor: default; }
+        .bx svg { width: 15px; height: 15px; }
+        .strength { width: 58px; background: rgba(12,13,28,.85); color: #e8ecff; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; padding: 3px 5px; font-size: 12px; }
+        .c-actions { margin-left: auto; display: flex; gap: 5px; }
+
+        .st-ready { color: #4ade80; } .st-downloading { color: #38bdf8; } .st-queued { color: #94a3b8; }
+        .st-failed, .st-hash_mismatch { color: #f87171; } .st-no_space { color: #fbbf24; }
+        .st-offline, .st-no_agent, .st-excluded { color: #5b6485; }
+        .st-downloading .arrow { animation: drop 1.1s ease-in-out infinite; }
+        .st-queued .hand { transform-origin: 12px 12px; animation: spin 3s linear infinite; }
+        .st-ready .tick { stroke-dasharray: 20; stroke-dashoffset: 20; animation: draw .6s ease-out forwards; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes drop { 0%,100% { transform: translateY(-2px); opacity: .6 } 50% { transform: translateY(2px); opacity: 1 } }
+        @keyframes draw { to { stroke-dashoffset: 0; } }
+
+        .boxcard { border: 1px solid rgba(255,255,255,.1); border-radius: 14px; background: rgba(21,22,42,.78); margin-bottom: 12px; }
+        .boxcard > header { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.07); }
+        .boxcard h3 { margin: 0; font-size: 15px; }
+        .files { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        .files td { padding: 5px 10px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
+        .files tr:last-child td { border-bottom: 0; }
+        .files .n { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+        .files .sz { color: #93a4c8; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+        .files .who a { color: #bae6fd; text-decoration: none; }
+        .files .act { width: 70px; text-align: right; white-space: nowrap; }
+        .ico-inline { width: 15px; height: 15px; vertical-align: -3px; }
+
+        .repro { display: grid; gap: 12px; }
+        .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+        .pane { border: 1px solid rgba(255,255,255,.1); border-radius: 12px; overflow: hidden; background: #0c0d1c; position: relative; }
+        .pane img, .pane canvas { display: block; width: 100%; height: auto; }
+        .pane .cap { position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; }
+        .pane .cap span { background: rgba(0,0,0,.6); border-radius: 7px; padding: 3px 7px; font-size: 11.5px; }
+        .kv { display: flex; flex-wrap: wrap; gap: 6px; }
+        .kv .chip b { color: #fff; font-weight: 600; }
+        .prompt-box { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #c7d0ee; white-space: pre-wrap; background: rgba(12,13,28,.7); border-radius: 10px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); max-height: 140px; overflow: auto; }
+        .seg { display: inline-flex; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; overflow: hidden; }
+        .seg button { background: transparent; color: #aab3d4; border: 0; padding: 0 10px; height: 36px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; }
+        .seg button.on { background: rgba(56,189,248,.18); color: #e0f2fe; }
+        .seg svg { width: 16px; height: 16px; }
+        .metric { font-size: 12.5px; }
+        @media (max-width: 640px) { .lr-add { flex-basis: 100%; } select.lr-in { flex-basis: 120px; } }
+    </style>
+</head>
+<body class="ai-page" data-layout-free3d-init="none">
+
+<div id="site-header"></div>
+
+<main class="lr-wrap">
+    <div class="lr-head">
+        <h1><svg viewBox="0 0 24 24" fill="none" stroke="url(#g1)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#7b5cff"/></linearGradient></defs><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 17l8 4 8-4"/></svg>LoRA</h1>
+        <div class="lr-add" id="lr-add" hidden>
+            <input class="lr-in" id="lr-url" type="url" autocomplete="off" spellcheck="false"
+                   placeholder="civitai.com/models/…  ·  huggingface.co/…/file.safetensors"
+                   title="Paste a Civitai model or version link (or a Hugging Face file link)">
+            <select class="lr-in" id="lr-base" title="Base model — needed for Hugging Face links" hidden>
+                <option value="">Base model…</option>
+                <option>SDXL 1.0</option><option>Pony</option><option>Illustrious</option>
+                <option>Krea 2</option><option>ZImageTurbo</option><option>Flux.2 Klein 4B</option>
+                <option>LTXV 2.5</option><option>LTXV 2.3</option><option>Qwen</option>
+                <option>Wan Video 2.2 I2V-A14B</option><option>Wan Video 2.2 T2V-A14B</option>
+            </select>
+            <button class="ib primary" id="lr-add-btn" title="Install on every render computer">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>
+            </button>
+            <button class="ib" id="lr-kick" title="Ask every reachable computer to sync now">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.7-4.4L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.7 4.4L20 16"/><path d="M20 20v-4h-4"/></svg>
+            </button>
+        </div>
+    </div>
+    <div class="lr-msg" id="lr-msg"></div>
+    <div id="lr-preview"></div>
+
+    <nav class="lr-tabs">
+        <button class="ib on" data-tab="loras" title="Installed LoRAs and which computer holds them">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/></svg><span class="count" id="n-loras">0</span></button>
+        <button class="ib" data-tab="boxes" title="Every file in each computer's LoRA folders">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span class="count" id="n-boxes">0</span></button>
+        <button class="ib" data-tab="repro" title="Reproduce a Civitai image with its LoRAs">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="8" height="14" rx="1.5"/><rect x="13.5" y="5" width="8" height="14" rx="1.5"/><path d="M10.5 12h3"/></svg></button>
+    </nav>
+
+    <section id="tab-loras"><div class="lr-grid" id="lr-grid"></div></section>
+    <section id="tab-boxes" hidden><div id="lr-boxes"></div></section>
+    <section id="tab-repro" hidden>
+        <div class="repro">
+            <div class="lr-add" style="flex-basis:auto">
+                <input class="lr-in" id="rp-url" type="url" placeholder="civitai.com/images/…" title="A Civitai image whose generation data should be reproduced">
+                <button class="ib" id="rp-read" title="Read its generation data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+            </div>
+            <div id="rp-out"></div>
+        </div>
+    </section>
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+<script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+<script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+<script src="/static/js/i18n.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { admin: false, data: null, tab: 'loras', prefill: null, mode: 'stack' };
+  var ICON = {
+    ready: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" stroke-width="1.6" opacity=".45"/><path class="tick" d="M7.5 12.5l3 3 6-6.5"/></svg>',
+    downloading: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><g class="arrow"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/></g><path d="M5 20h14"/></svg>',
+    queued: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path class="hand" d="M12 12V7"/></svg>',
+    failed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9" stroke-width="1.6" opacity=".5"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
+    hash_mismatch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></svg>',
+    no_space: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 14h10"/></svg>',
+    offline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></svg>',
+    no_agent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"><circle cx="12" cy="12" r="8.5"/></svg>',
+    excluded: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M6 18L18 6"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
+    broom: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6M17 7l-7 7"/><path d="M10 14l-5 1-1 5 5-1 1-5z"/></svg>',
+    lock: '<svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>',
+    link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
+    retry: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8"/><path d="M20 3v5h-5"/></svg>',
+    play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+    layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/></svg>',
+    tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>',
+    image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg>'
+  };
+  var LABEL = { ready: 'ready', downloading: 'downloading', queued: 'queued', failed: 'failed',
+    hash_mismatch: 'hash mismatch', no_space: 'no disk space', offline: 'computer offline',
+    no_agent: 'no sync agent installed', excluded: 'not sent to this computer' };
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function mb(bytes) { var m = (bytes || 0) / 1048576; return m >= 1024 ? (m / 1024).toFixed(1) + ' GB' : m.toFixed(m < 10 ? 1 : 0) + ' MB'; }
+  function ago(t) { if (!t) return 'never'; var s = Math.round(Date.now() / 1000 - t);
+    return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; }
+  function say(text, kind) { var m = $('lr-msg'); m.textContent = text || ''; m.className = 'lr-msg' + (kind ? ' ' + kind : ''); }
+  function copy(text) { (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(
+    function () { say('Copied ' + text, 'ok'); }, function () { window.prompt('Copy', text); }); }
+  function api(method, url, body) {
+    return fetch(url, { method: method, credentials: 'same-origin',
+      headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) { var d = j.detail || j; throw new Error((d && (d.message_string || d.message)) || (typeof d === 'string' ? d : 'HTTP ' + r.status)); }
+        return j; }); });
+  }
+
+  function boxDots(states) {
+    return Object.keys(states || {}).map(function (box) {
+      var st = states[box] || {}, key = st.state || 'no_agent';
+      var tip = box + ': ' + (LABEL[key] || key) + (st.error ? ' — ' + st.error : '') + (st.bytes ? ' (' + mb(st.bytes) + ')' : '');
+      return '<span class="bx st-' + esc(key) + '" title="' + esc(tip) + '">' + (ICON[key] || ICON.no_agent) + esc(box) + '</span>';
+    }).join('');
+  }
+
+  function card(l) {
+    var mirror = l.mirror || {};
+    var thumb = l.preview ? '<img class="thumb" loading="lazy" src="' + esc(l.preview) + '" alt="">' : '<div class="thumb">' + ICON.image + '</div>';
+    var words = (l.trained_words || []).slice(0, 6).map(function (w) {
+      return '<span class="chip word" data-copy="' + esc(w) + '" title="Trigger word — click to copy">' + esc(w) + '</span>'; }).join('');
+    var mirrorChip = mirror.state && mirror.state !== 'ready'
+      ? '<span class="bx st-' + esc(mirror.state === 'failed' ? 'failed' : 'downloading') + '" title="VPS mirror: ' + esc(mirror.state + (mirror.error ? ' — ' + mirror.error : '') + (mirror.bytes ? ' ' + mb(mirror.bytes) : '')) + '">'
+        + (mirror.state === 'failed' ? ICON.failed : ICON.downloading) + 'VPS</span>' : '';
+    var actions = state.admin
+      ? '<div class="c-actions">'
+        + (mirror.state === 'failed' ? '<button class="ib sm" data-retry="' + esc(l.id) + '" title="Download again">' + ICON.retry + '</button>' : '')
+        + '<button class="ib sm danger" data-remove="' + esc(l.id) + '" title="Remove from every computer (moved to their trash)">' + ICON.trash + '</button></div>'
+      : '';
+    var strength = state.admin
+      ? '<input class="strength" type="number" step="0.05" min="-4" max="4" data-strength="' + esc(l.id) + '" value="' + esc(l.recommended_strength || 1) + '" title="Default weight in the copied tag">'
+      : '';
+    return '<div class="card" data-id="' + esc(l.id) + '">' + thumb + '<div>'
+      + '<div class="c-title"><a href="' + esc(l.page) + '" target="_blank" rel="noopener" title="' + esc(l.file) + '">' + esc(l.title || l.file) + '</a></div>'
+      + '<div class="chips"><span class="chip fam" title="Base model">' + esc(l.base || l.family) + '</span>'
+      + '<span class="chip" title="Version">' + esc(l.version || '') + '</span><span class="chip" title="File size">' + mb(l.size_bytes) + '</span></div>'
+      + '<div class="c-row"><span class="chip tag" data-copy="' + esc(l.tag_string) + '" title="Prompt tag — click to copy">' + esc(l.tag_string) + '</span>' + strength + actions + '</div>'
+      + (words ? '<div class="chips">' + words + '</div>' : '')
+      + '<div class="boxes">' + mirrorChip + boxDots(l.box_states_object) + '</div>'
+      + '</div></div>';
+  }
+
+  function paintLoras() {
+    var list = (state.data && state.data.loras_array) || [];
+    $('n-loras').textContent = list.length;
+    $('lr-grid').innerHTML = list.length ? list.map(card).join('')
+      : '<div class="lr-msg">' + (state.admin ? 'Paste a Civitai link above.' : 'No LoRAs installed yet.') + '</div>';
+  }
+
+  function paintBoxes() {
+    var boxes = (state.data && state.data.boxes_object) || {};
+    var names = Object.keys(boxes);
+    $('n-boxes').textContent = names.filter(function (b) { return boxes[b].agent; }).length + '/' + names.length;
+    if (!state.admin) { $('lr-boxes').innerHTML = '<div class="lr-msg">Sign in as an administrator to see each computer’s folder.</div>'; return; }
+    $('lr-boxes').innerHTML = names.map(function (box) {
+      var b = boxes[box];
+      var status = !b.agent ? ICON.no_agent : b.stale ? ICON.offline : ICON.ready;
+      var cls = !b.agent ? 'st-no_agent' : b.stale ? 'st-offline' : 'st-ready';
+      var head = '<header><span class="bx ' + cls + '" title="' + esc(!b.agent ? 'No sync agent has reported from this computer' : 'Last report ' + ago(b.reported_at)) + '">' + status + '</span><h3>' + esc(box) + '</h3>'
+        + (b.agent ? '<span class="chip" title="Free space on the LoRA drive">' + mb(b.free_bytes) + ' free</span><span class="chip" title="Last report">' + ago(b.reported_at) + '</span><span class="chip" title="Files in its LoRA folders">' + (b.files || []).length + '</span>' : '')
+        + (!b.agent ? '<button class="ib sm" data-install="' + esc(box) + '" title="Copy the one-line installer for this computer">' + ICON.plus + '</button>' : '')
+        + '</header>';
+      var rows = (b.files || []).slice().sort(function (x, y) { return (y.size || 0) - (x.size || 0); }).map(function (f) {
+        var who = f.managed_id ? '<span class="chip fam" title="Installed through this page">managed</span>'
+          : f.civitai && f.civitai.found ? '<a href="' + esc(f.civitai.page) + '" target="_blank" rel="noopener" title="Identified on Civitai by its hash">' + esc(f.civitai.title) + '</a> <span class="chip">' + esc(f.civitai.base || '') + '</span>'
+          : f.civitai ? '<span class="chip" title="Civitai does not know this hash">unknown</span>' : '';
+        var act = f.protected ? '<span title="A workflow template or the curated catalogue uses it">' + ICON.lock + '</span>'
+          : f.cleanup_pending ? '<span class="bx st-queued" title="Moves to the trash on the next sync">' + ICON.queued + '</span>'
+          : f.managed_id ? ''
+          : '<button class="ib sm danger" data-clean="' + esc(box) + '" data-file="' + esc(f.name) + '" title="Move to this computer’s trash">' + ICON.broom + '</button>'
+            + (f.civitai && f.civitai.found ? ' <button class="ib sm" data-adopt="' + esc(f.civitai.page) + '" title="Manage it here: every computer gets it">' + ICON.link + '</button>' : '');
+        return '<tr><td class="n" title="' + esc(f.dir || '') + '">' + esc(f.name) + '</td><td class="who">' + who + '</td><td class="sz">' + mb(f.size) + '</td><td class="act">' + act + '</td></tr>';
+      }).join('');
+      return '<div class="boxcard">' + head + (rows ? '<table class="files">' + rows + '</table>' : '') + '</div>';
+    }).join('');
+  }
+
+  function load() {
+    return api('GET', '/api/ai/loras').then(function (data) {
+      state.data = data; state.admin = !!data.admin_bool;
+      $('lr-add').hidden = !state.admin;
+      paintLoras(); paintBoxes();
+    }).catch(function (e) { say('Could not read the LoRA list: ' + e.message, 'err'); });
+  }
+
+  // ---- adding
+  $('lr-url').addEventListener('input', function () {
+    $('lr-base').hidden = !/huggingface\.co|hf\.co/.test(this.value);
+  });
+  function add(url, force) {
+    var btn = $('lr-add-btn'); btn.classList.add('busy'); btn.disabled = true;
+    say('Resolving…');
+    return api('POST', '/api/ai/loras', { url: url, base: $('lr-base').value, force: !!force })
+      .then(function (r) { say((r.note_string || 'Installing') + ': ' + r.lora_object.file, 'ok'); $('lr-url').value = ''; return load(); })
+      .catch(function (e) {
+        if (/install anyway/.test(e.message) && window.confirm(e.message + '\n\nInstall anyway?')) return add(url, true);
+        say(e.message, 'err');
+      })
+      .then(function () { btn.classList.remove('busy'); btn.disabled = false; });
+  }
+  $('lr-add-btn').addEventListener('click', function () { var u = $('lr-url').value.trim(); if (u) add(u); });
+  $('lr-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('lr-add-btn').click(); });
+  $('lr-kick').addEventListener('click', function () {
+    var btn = this; btn.classList.add('busy');
+    api('POST', '/api/ai/loras/kick').then(function (r) {
+      say(Object.keys(r.boxes_object).map(function (b) { return b + ': ' + r.boxes_object[b]; }).join(' · '), 'ok');
+      setTimeout(load, 8000);
+    }).catch(function (e) { say(e.message, 'err'); }).then(function () { btn.classList.remove('busy'); });
+  });
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-copy],[data-remove],[data-retry],[data-clean],[data-adopt],[data-install],[data-tab],[data-mode],[data-install-lora]');
+    if (!t) return;
+    if (t.dataset.copy) copy(t.dataset.copy);
+    else if (t.dataset.remove) {
+      if (!window.confirm('Remove ' + t.dataset.remove + ' from every computer? Files go to each computer’s trash folder.')) return;
+      api('DELETE', '/api/ai/loras/' + encodeURIComponent(t.dataset.remove)).then(load).catch(function (x) { say(x.message, 'err'); });
+    } else if (t.dataset.retry) {
+      api('POST', '/api/ai/loras/' + encodeURIComponent(t.dataset.retry) + '/retry').then(function () { setTimeout(load, 3000); });
+    } else if (t.dataset.clean) {
+      if (!window.confirm('Move ' + t.dataset.file + ' on ' + t.dataset.clean + ' to its trash folder?')) return;
+      api('POST', '/api/ai/loras/cleanup', { box: t.dataset.clean, file: t.dataset.file }).then(function (r) { say(r.note_string, 'ok'); load(); })
+        .catch(function (x) { say(x.message, 'err'); });
+    } else if (t.dataset.adopt) { add(t.dataset.adopt); }
+    else if (t.dataset.installLora) { add(t.dataset.installLora).then(function () { readImage(); }); }
+    else if (t.dataset.install) {
+      api('GET', '/api/ai/loras/boxes/' + encodeURIComponent(t.dataset.install) + '/install').then(function (r) {
+        copy(r.command_string); say('Installer copied — run it in an administrator console on ' + t.dataset.install, 'ok'); })
+        .catch(function (x) { say(x.message, 'err'); });
+    } else if (t.dataset.tab) { setTab(t.dataset.tab); }
+    else if (t.dataset.mode) { state.mode = t.dataset.mode; paintPrefill(); }
+  });
+  document.addEventListener('change', function (e) {
+    if (!e.target.dataset.strength) return;
+    api('PATCH', '/api/ai/loras/' + encodeURIComponent(e.target.dataset.strength),
+        { recommended_strength: parseFloat(e.target.value) }).then(load).catch(function (x) { say(x.message, 'err'); });
+  });
+  function setTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll('.lr-tabs .ib').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); });
+    ['loras', 'boxes', 'repro'].forEach(function (t) { $('tab-' + t).hidden = t !== tab; });
+    try { history.replaceState(null, '', tab === 'loras' ? location.pathname + location.search : '#' + tab); } catch (x) {}
+  }
+
+  // ---- reproduce a Civitai image
+  function readImage() {
+    var url = $('rp-url').value.trim(); if (!url) return;
+    var btn = $('rp-read'); btn.classList.add('busy');
+    return api('POST', '/api/ai/loras/civitai-image', { url: url }).then(function (p) {
+      state.prefill = p; paintPrefill();
+    }).catch(function (e) { $('rp-out').innerHTML = '<div class="lr-msg err">' + esc(e.message) + '</div>'; })
+      .then(function () { btn.classList.remove('busy'); });
+  }
+  $('rp-read').addEventListener('click', readImage);
+  $('rp-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') readImage(); });
+
+  function requestBody(p) {
+    var loras = (p.loras_array || []).filter(function (l) { return l.name; });
+    var body = { prompt: p.prompt_string, negative_prompt: p.negative_prompt_string || undefined,
+      width: p.width || p.width_int, height: p.height || p.height_int, steps: p.steps || undefined,
+      cfg: p.cfg, sampler: p.sampler || undefined, scheduler: p.scheduler || undefined,
+      seed: p.seed || undefined, checkpoint: p.checkpoint_string || undefined,
+      clip_skip: p.clip_skip || undefined };
+    if (state.mode === 'tags') body.prompt = p.prompt_string + ' ' + p.lora_tags_string;
+    else body.loras = loras.map(function (l) { return { name: l.name, strength_model: l.strength_model, strength_clip: l.strength_clip }; });
+    return body;
+  }
+
+  function paintPrefill() {
+    var p = state.prefill; if (!p) return;
+    var missing = (p.loras_array || []).filter(function (l) { return !l.installed_bool; });
+    var kv = [['seed', p.seed], ['steps', p.steps], ['cfg', p.cfg], ['sampler', p.sampler], ['scheduler', p.scheduler],
+      ['size', (p.width || '?') + '×' + (p.height || '?')], ['clip skip', p.clip_skip || '—'], ['made with', p.source_string]]
+      .map(function (x) { return '<span class="chip">' + esc(x[0]) + ' <b>' + esc(x[1]) + '</b></span>'; }).join('');
+    var ck = p.checkpoint_string ? '<span class="chip fam" title="' + esc(p.checkpoint_name_string) + '">' + esc(p.checkpoint_string) + '</span>'
+      : '<span class="chip" style="color:#fca5a5" title="Not in our catalogue">' + esc(p.checkpoint_name_string || 'checkpoint?') + '</span>';
+    var loras = (p.loras_array || []).map(function (l) {
+      var st = l.installed_bool ? 'ready' : l.registered_bool ? 'downloading' : 'failed';
+      var install = !l.registered_bool && l.civitai_version_id && state.admin
+        ? '<button class="ib sm" data-install-lora="https://civitai.com/api/download/models/' + esc(l.civitai_version_id) + '" title="Install this LoRA">' + ICON.plus + '</button>' : '';
+      return '<span class="bx st-' + st + '" title="' + esc(l.installed_bool ? 'installed' : l.registered_bool ? 'still downloading' : 'not installed') + '">' + ICON[st] + esc((l.name || ('version ' + l.civitai_version_id)) + ' ' + l.strength_model) + '</span>' + install;
+    }).join(' ');
+    var notes = (p.notes_array || []).map(function (n) { return '<div class="lr-msg">' + esc(n) + '</div>'; }).join('');
+    var seg = '<span class="seg"><button data-mode="stack" class="' + (state.mode === 'stack' ? 'on' : '') + '" title="Send the LoRAs as the node’s stack">' + ICON.layers + 'stack</button>'
+      + '<button data-mode="tags" class="' + (state.mode === 'tags' ? 'on' : '') + '" title="Send the LoRAs as &lt;lora:…&gt; tags in the prompt">' + ICON.tag + 'tags</button></span>';
+    $('rp-out').innerHTML = '<div class="kv">' + ck + kv + '</div>'
+      + '<div class="kv" style="margin-top:6px">' + loras + '</div>' + notes
+      + '<div class="prompt-box" style="margin-top:8px">' + esc(state.mode === 'tags' ? p.prompt_string + ' ' + p.lora_tags_string : p.prompt_string) + '</div>'
+      + (p.negative_prompt_string ? '<div class="prompt-box" style="margin-top:6px;color:#fca5a5">' + esc(p.negative_prompt_string) + '</div>' : '')
+      + '<div class="c-row" style="margin-top:8px">' + seg + '<button class="ib primary" id="rp-go" title="Render on the farm with these settings"' + (missing.length || !p.checkpoint_string ? ' disabled' : '') + '>' + ICON.play + '</button><span class="lr-msg" id="rp-state"></span></div>'
+      + '<div class="pair" style="margin-top:10px"><div class="pane"><div class="cap"><span>Civitai</span></div><img id="rp-a" crossorigin="anonymous" src="/api/ai/loras/civitai-image/' + esc(p.image_id_int) + '/original" alt=""></div>'
+      + '<div class="pane"><div class="cap"><span>farm</span></div><img id="rp-b" crossorigin="anonymous" alt=""></div>'
+      + '<div class="pane"><div class="cap"><span>difference ×4</span></div><canvas id="rp-d"></canvas></div></div>'
+      + '<div class="kv" id="rp-metrics" style="margin-top:8px"></div>';
+    var go = $('rp-go'); if (go) go.addEventListener('click', render);
+  }
+
+  function render() {
+    var p = state.prefill, go = $('rp-go'); go.classList.add('busy'); go.disabled = true;
+    var st = $('rp-state'); st.textContent = 'queued';
+    var t0 = Date.now();
+    api('POST', '/api/image', requestBody(p)).then(function (r) {
+      var url = r.image_url_string;
+      (function poll() {
+        fetch(url, { method: 'HEAD', cache: 'no-store' }).then(function (h) {
+          if (h.ok) { st.textContent = Math.round((Date.now() - t0) / 1000) + ' s · ' + (r.effective_params_object.checkpoint || '');
+            $('rp-b').onload = compare; $('rp-b').src = url + '?t=' + Date.now(); go.classList.remove('busy'); go.disabled = false; return; }
+          st.textContent = 'rendering · ' + Math.round((Date.now() - t0) / 1000) + ' s';
+          setTimeout(poll, 4000);
+        }).catch(function () { setTimeout(poll, 6000); });
+      })();
+    }).catch(function (e) { st.textContent = e.message; go.classList.remove('busy'); go.disabled = false; });
+  }
+
+  function pixels(img, w, h) {
+    var c = document.createElement('canvas'); c.width = w; c.height = h;
+    var g = c.getContext('2d'); g.drawImage(img, 0, 0, w, h); return g.getImageData(0, 0, w, h).data;
+  }
+  function compare() {
+    var a = $('rp-a'), b = $('rp-b');
+    if (!a.complete || !a.naturalWidth) { a.onload = compare; return; }
+    var w = a.naturalWidth, h = a.naturalHeight;
+    var same = b.naturalWidth === w && b.naturalHeight === h;
+    var A = pixels(a, w, h), B = pixels(b, w, h);
+    var d = $('rp-d'); d.width = w; d.height = h; var g = d.getContext('2d'); var out = g.createImageData(w, h);
+    var n = w * h, sad = 0, sq = 0, exact = 0, ya = new Float32Array(n), yb = new Float32Array(n);
+    for (var i = 0, p = 0; i < n; i++, p += 4) {
+      var dr = A[p] - B[p], dg = A[p + 1] - B[p + 1], db = A[p + 2] - B[p + 2];
+      var m = (Math.abs(dr) + Math.abs(dg) + Math.abs(db)) / 3;
+      sad += m; sq += (dr * dr + dg * dg + db * db) / 3; if (!dr && !dg && !db) exact++;
+      var v = Math.min(255, m * 4); out.data[p] = v; out.data[p + 1] = v * .6; out.data[p + 2] = 255 - v; out.data[p + 3] = 255;
+      ya[i] = .299 * A[p] + .587 * A[p + 1] + .114 * A[p + 2]; yb[i] = .299 * B[p] + .587 * B[p + 1] + .114 * B[p + 2];
+    }
+    g.putImageData(out, 0, 0);
+    var mse = sq / n, psnr = mse ? 10 * Math.log10(255 * 255 / mse) : Infinity;
+    // Mean SSIM over 8x8 windows with stride 4 on luma.
+    var C1 = 6.5025, C2 = 58.5225, tot = 0, cnt = 0;
+    for (var y = 0; y + 8 <= h; y += 4) for (var x = 0; x + 8 <= w; x += 4) {
+      var ma = 0, mb2 = 0, va = 0, vb = 0, cv = 0, k, jj, idx;
+      for (jj = 0; jj < 8; jj++) for (k = 0; k < 8; k++) { idx = (y + jj) * w + x + k; ma += ya[idx]; mb2 += yb[idx]; }
+      ma /= 64; mb2 /= 64;
+      for (jj = 0; jj < 8; jj++) for (k = 0; k < 8; k++) { idx = (y + jj) * w + x + k; var da = ya[idx] - ma, dbb = yb[idx] - mb2; va += da * da; vb += dbb * dbb; cv += da * dbb; }
+      va /= 63; vb /= 63; cv /= 63;
+      tot += ((2 * ma * mb2 + C1) * (2 * cv + C2)) / ((ma * ma + mb2 * mb2 + C1) * (va + vb + C2)); cnt++;
+    }
+    $('rp-metrics').innerHTML = [['SSIM', (tot / cnt).toFixed(4)], ['PSNR', isFinite(psnr) ? psnr.toFixed(2) + ' dB' : '∞'],
+      ['mean |Δ|', (sad / n).toFixed(3)], ['identical px', (100 * exact / n).toFixed(2) + '%'], ['size', same ? 'same' : 'resized to compare']]
+      .map(function (x) { return '<span class="chip metric">' + esc(x[0]) + ' <b>' + esc(x[1]) + '</b></span>'; }).join('');
+  }
+
+  var hash = (location.hash || '').slice(1);
+  if (['boxes', 'repro'].indexOf(hash) >= 0) setTab(hash);
+  var q = new URLSearchParams(location.search).get('image');
+  if (q) { $('rp-url').value = q; setTab('repro'); }
+  load().then(function () { if (q) readImage(); });
+  setInterval(function () { if (!document.hidden && state.tab !== 'repro') load(); }, 15000);
+})();
+</script>
+</body>
+</html>

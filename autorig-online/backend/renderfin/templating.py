@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import random
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 SEED_MAX = 574131870028331  # C# random seed upper bound
 _GLASS_RE = re.compile(r"\bglass(?:es)?\b", re.IGNORECASE)
@@ -73,6 +73,7 @@ def render_workflow_text(
     checkpoint: str = "",
     lora: str = "",
     lora_strength: Optional[float] = None,
+    loras: Any = None,
     pose_prompt: str = "",
     upscale_model: str = "",
 ) -> Dict[str, Any]:
@@ -116,6 +117,7 @@ def render_workflow_text(
     # Last, so a chosen model is not undone by normalisation or pruning.
     apply_model_choice(workflow, checkpoint=checkpoint, lora=lora,
                        lora_strength=lora_strength)
+    apply_lora_stack(workflow, loras)
     return workflow
 
 
@@ -311,6 +313,96 @@ def apply_model_choice(
                         inputs[key] = [node_id, 1]
             changed["lora"].append(node_id)
     return changed
+
+
+# Loaders a LoRA stack attaches to. ImageOnlyCheckpointLoader is left out: it
+# loads an image-conditioned video model whose adapters are not LoRAs.
+STACK_LOADERS = ("CheckpointLoaderSimple", "CheckpointLoader", "UNETLoader", "UnetLoaderGGUF")
+
+
+def _stack_entries(loras: Any) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    for item in loras or []:
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        model = float(item.get("strength_model", 1.0))
+        clip = float(item.get("strength_clip", model))
+        entries.append({"name": name, "strength_model": model, "strength_clip": clip})
+    return entries
+
+
+def apply_lora_stack(workflow: Dict[str, Any], loras: Any) -> List[str]:
+    """Chain LoRA loaders directly onto every model loader, in stack order.
+
+    A checkpoint whose CLIP output feeds the graph gets `LoraLoader` nodes, so
+    each LoRA's text-encoder weights apply with their own strength (SD1.5/SDXL/
+    Pony LoRAs carry them). A diffusion-model-only loader - UNETLoader, GGUF,
+    or a checkpoint whose CLIP nobody reads - gets `LoraLoaderModelOnly`.
+    Every consumer of the loader's MODEL/CLIP outputs, including LoRA loaders
+    the template already had, is rewired to the end of the new chain. LoRAs
+    add their deltas, so the chain's position does not change the result
+    beyond float rounding; its order is kept anyway so a stack renders the
+    same way twice. Returns the ids of the inserted nodes.
+    """
+    entries = _stack_entries(loras)
+    if not entries:
+        return []
+    loaders = [node_id for node_id, node in workflow.items()
+               if isinstance(node, dict) and node.get("class_type") in STACK_LOADERS]
+    if not loaders:
+        raise ValueError("This workflow has no model loader to attach the LoRA stack to")
+    inserted: List[str] = []
+    for loader in loaders:
+        loader_class = workflow[loader].get("class_type")
+        consumers = [(node_id, key) for node_id, node in workflow.items()
+                     if isinstance(node, dict) and isinstance(node.get("inputs"), dict)
+                     for key, value in node["inputs"].items()
+                     if isinstance(value, list) and len(value) == 2 and value[0] == loader]
+        uses_clip = (loader_class in ("CheckpointLoaderSimple", "CheckpointLoader")
+                     and any(workflow[node_id]["inputs"][key][1] == 1
+                             for node_id, key in consumers))
+        model_src: List[Any] = [loader, 0]
+        clip_src: List[Any] = [loader, 1]
+        for index, entry in enumerate(entries):
+            node_id = f"autorig_lora_{loader}_{index}"
+            while node_id in workflow:
+                node_id += "_"
+            if uses_clip:
+                workflow[node_id] = {
+                    "class_type": "LoraLoader",
+                    "inputs": {"lora_name": entry["name"],
+                               "strength_model": entry["strength_model"],
+                               "strength_clip": entry["strength_clip"],
+                               "model": model_src, "clip": clip_src},
+                    "_meta": {"title": f"LoRA stack {index + 1}"},
+                }
+                clip_src = [node_id, 1]
+            else:
+                workflow[node_id] = {
+                    "class_type": "LoraLoaderModelOnly",
+                    "inputs": {"lora_name": entry["name"],
+                               "strength_model": entry["strength_model"],
+                               "model": model_src},
+                    "_meta": {"title": f"LoRA stack {index + 1}"},
+                }
+            model_src = [node_id, 0]
+            inserted.append(node_id)
+        for node_id, key in consumers:
+            output = workflow[node_id]["inputs"][key][1]
+            if output == 0:
+                workflow[node_id]["inputs"][key] = list(model_src)
+            elif output == 1 and uses_clip:
+                workflow[node_id]["inputs"][key] = list(clip_src)
+    return inserted
+
+
+def stack_file_names(loras: Any) -> List[str]:
+    return [entry["name"] for entry in _stack_entries(loras)]
 
 
 def workflow_placeholders(template_text: str) -> Tuple[str, ...]:

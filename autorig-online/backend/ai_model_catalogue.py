@@ -45,6 +45,22 @@ CACHE_TTL_SECONDS = 30.0
 
 
 def entries() -> List[Dict[str, object]]:
+    """The curated catalogue plus the LoRAs installed through /lora."""
+    curated = raw_entries()
+    try:
+        import ai_lora_manager
+        managed = ai_lora_manager.catalogue_entries()
+    except Exception:
+        logger.exception("Could not read the LoRA manager registry")
+        managed = []
+    if not managed:
+        return curated
+    files = {entry.get("file") for entry in curated}
+    return curated + [entry for entry in managed if entry.get("file") not in files]
+
+
+def raw_entries() -> List[Dict[str, object]]:
+    """The hand-curated model_catalogue.json only."""
     global _cache, _cache_at
     if _cache and (time.monotonic() - _cache_at) < CACHE_TTL_SECONDS:
         return _cache

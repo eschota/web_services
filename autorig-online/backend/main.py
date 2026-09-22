@@ -1561,6 +1561,11 @@ from ai_queue_admin import build_queue_admin_router
 
 app.include_router(build_queue_admin_router(require_admin))
 
+from ai_lora_manager import build_lora_admin_router, router as ai_lora_router
+
+app.include_router(ai_lora_router)
+app.include_router(build_lora_admin_router(require_admin))
+
 
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
     "face_rig_animation",
@@ -15823,6 +15828,9 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
     return candidates
 
 STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
+    # The farm's LoRA manager: operational, like /models, so it is left out
+    # of the sitemaps too.
+    "lora.html": "/lora",
     "index.html": "/",
     "gallery.html": "/gallery",
     "guides.html": "/guides",
@@ -16913,6 +16921,12 @@ async def model3d_page():
 async def nodes_page():
     """Wire the services together and render the whole composition at once."""
     return _static_html_response("nodes.html")
+
+
+@app.get("/lora")
+async def lora_page():
+    """The farm's LoRA manager: install from a Civitai link, see every box."""
+    return _static_html_response("lora.html")
 
 
 @app.get("/avatars")

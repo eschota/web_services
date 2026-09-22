@@ -28,7 +28,13 @@ def apply_runtime_settings(workflow, prompt, width, height):
     internal_width = math.ceil(width / grid) * grid
     internal_height = math.ceil(height / grid) * grid
     lora = getattr(prompt, 'lora', '')
-    if lora and not any(n.get('class_type') in {'LoraLoaderModelOnly', 'LoraLoader', 'Power Lora Loader (rgthree)'} for n in workflow.values()):
+    # The single LoRA counts as placed only when a loader names it: a LoRA
+    # stack's loaders must not stand in for it.
+    if lora and not any(
+            n.get('class_type') == 'Power Lora Loader (rgthree)'
+            or (n.get('class_type') in {'LoraLoaderModelOnly', 'LoraLoader'}
+                and n.get('inputs', {}).get('lora_name') == lora)
+            for n in workflow.values()):
         loader = next((nid for nid,n in workflow.items() if n.get('class_type') in {'UNETLoader', 'CheckpointLoaderSimple'}), None)
         if loader is None:
             raise ValueError('This workflow has no model input for the chosen LoRA')

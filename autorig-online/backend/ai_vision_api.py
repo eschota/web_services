@@ -20,7 +20,7 @@ import os
 import pathlib
 import time
 from collections import deque
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -1291,8 +1291,106 @@ def _video_quality_workflow(quality: str, family: str,
     return ""
 
 
+LoraStackValue = Union[str, List[Union[str, Dict[str, Any]]]]
+
+
+def _lora_error(code: str, message: str, **extra: object) -> HTTPException:
+    detail: Dict[str, object] = {"error_string": code, "message_string": message}
+    detail.update(extra)
+    return HTTPException(status_code=400, detail=detail)
+
+
+def _lora_stack_request(service_id: str, prompt: Optional[str], stack_value: object,
+                        single_lora: Optional[str]):
+    """Cut `<lora:...>` tags out of the prompt and resolve them with the stack.
+
+    Returns (clean prompt, resolved stack, strength override for the single
+    `lora`). Precedence and grammar are documented in ai_lora_prompt. An
+    unknown or not-yet-installed LoRA is a 400 that names it, never a render
+    that quietly left it out.
+    """
+    import ai_lora_prompt
+    import ai_model_catalogue
+
+    text = str(prompt or "")
+    try:
+        clean, prompt_refs = ai_lora_prompt.parse_prompt(text)
+        stack_refs = ai_lora_prompt.parse_stack(stack_value)
+    except ai_lora_prompt.LoraSyntaxError as exc:
+        raise _lora_error("lora_syntax", str(exc)) from None
+    if not prompt_refs and not stack_refs:
+        return text, [], None
+    loras = [entry for entry in ai_model_catalogue.entries() if entry.get("kind") == "lora"]
+    try:
+        stack, override = ai_lora_prompt.build_stack(
+            stack_refs=stack_refs, prompt_refs=prompt_refs, loras=loras,
+            single_lora=str(single_lora or "").strip())
+    except ai_lora_prompt.LoraResolutionError as exc:
+        raise _lora_error("unknown_lora", str(exc), lora_string=exc.name,
+                          suggestions_array=exc.suggestions) from None
+    except ai_lora_prompt.LoraSyntaxError as exc:
+        raise _lora_error("lora_syntax", str(exc)) from None
+    for item in stack:
+        entry = item.entry
+        if not entry.get("usable"):
+            raise _lora_error(
+                "lora_not_ready",
+                f"LoRA '{item.file}' is not on any render computer yet: "
+                f"{entry.get('unusable_reason') or 'still downloading'}",
+                lora_string=item.file)
+        if service_id not in (entry.get("services") or []):
+            raise _lora_error(
+                "lora_wrong_service",
+                f"LoRA '{item.file}' is for {', '.join(entry.get('services') or []) or 'nothing'}, "
+                f"not {service_id}", lora_string=item.file)
+    return clean, stack, override
+
+
+def _stack_default_checkpoint(service_id: str, stack) -> Optional[str]:
+    """The family default checkpoint for a stack given without one."""
+    import ai_model_catalogue
+    import ai_model_defaults
+
+    if not stack:
+        return None
+    entry = ai_model_defaults.family_default_checkpoint(
+        ai_model_catalogue.entries(), stack[0].entry, service_id)
+    if entry is None:
+        raise _lora_error(
+            "checkpoint_required_for_lora",
+            f"Select a checkpoint for LoRA '{stack[0].file}'; the catalogue declares "
+            "no automatic base model for its family")
+    return str(entry.get("file") or "") or None
+
+
+def _check_stack_family(stack, checkpoint_file: str) -> None:
+    import ai_model_catalogue
+    import ai_model_defaults
+
+    checkpoint = ai_model_catalogue.known_file(str(checkpoint_file or ""), "checkpoint")
+    for item in stack:
+        if not ai_model_defaults.compatible(checkpoint, item.entry):
+            raise _lora_error(
+                "incompatible_model_pair",
+                f"LoRA '{item.file}' ({item.entry.get('base') or item.entry.get('family')}) "
+                f"does not fit checkpoint '{checkpoint_file}' "
+                f"({(checkpoint or {}).get('base') or (checkpoint or {}).get('family')})",
+                lora_string=item.file)
+
+
+def _stack_profile(service_id: str, prompt: Optional[str], stack_value: object,
+                   single_lora: Optional[str]) -> List[Dict[str, object]]:
+    """Catalogue facts of the stacked LoRAs, for the request-cache key."""
+    try:
+        _clean, stack, _override = _lora_stack_request(service_id, prompt, stack_value, single_lora)
+    except HTTPException:
+        return []
+    return [{key: item.entry.get(key) for key in ("file", "sha256", "source_version_id")}
+            for item in stack]
+
+
 class ImageRequest(BaseModel):
-    prompt: str = Field(..., description="What to draw")
+    prompt: str = Field(..., description="What to draw; <lora:NAME:WEIGHT> tags pick LoRAs")
     image_url: Optional[str] = Field(None, description="Reference image URL")
     image_base64: Optional[str] = Field(None, description="Reference image, inline")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
@@ -1309,6 +1407,9 @@ class ImageRequest(BaseModel):
     checkpoint: Optional[str] = Field(None, description="Model file from /api/ai/model-catalogue")
     lora: Optional[str] = Field(None, description="LoRA file from /api/ai/model-catalogue")
     lora_strength: Optional[float] = Field(None, ge=0, le=2)
+    loras: Optional[LoraStackValue] = Field(
+        None, description="LoRA stack: [{name, strength, strength_clip}] or '<lora:NAME:W> ...'")
+    clip_skip: Optional[int] = Field(None, ge=1, le=12)
     control_pose: Optional[str] = Field(None, description="Precomputed pose control-map URL")
     control_depth: Optional[str] = Field(None, description="Precomputed depth control-map URL")
     control_canny: Optional[str] = Field(None, description="Precomputed canny control-map URL")
@@ -1334,7 +1435,8 @@ async def api_image_docs():
                                   "mode", "negative_prompt", "width", "height",
                                   "steps", "cfg", "sampler", "scheduler",
                                   "creativity", "seed", "checkpoint", "lora",
-                                  "lora_strength", "control_pose", "control_depth",
+                                  "lora_strength", "loras", "clip_skip",
+                                  "control_pose", "control_depth",
                                   "control_canny"],
         "produces_string": "image",
         "example_request_object": {"prompt": "a black lamp post on magenta", "wait_seconds": 120},
@@ -1357,6 +1459,7 @@ async def api_image(body: ImageRequest):
         profile = _render_model_profile(
             "image", body.checkpoint, body.lora, mode=str(body.mode or ""),
             has_control=bool(body.control_pose or body.control_depth or body.control_canny))
+        profile = profile + _stack_profile("image", body.prompt, body.loras, body.lora)
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("image", payload,
         lambda: _uncached_api_image(body), namespace="ai-exact-models-20260922-v4")
@@ -1365,6 +1468,12 @@ async def api_image(body: ImageRequest):
 async def _uncached_api_image(body: ImageRequest):
     """Prompt (and optionally a reference picture) into a generated image."""
     prompt = _validate_prompt(body.prompt)
+    prompt, lora_stack, single_strength = _lora_stack_request(
+        "image", prompt, body.loras, body.lora)
+    prompt = _validate_prompt(prompt)
+    stack_checkpoint = body.checkpoint
+    if lora_stack and not body.checkpoint and not body.lora:
+        stack_checkpoint = _stack_default_checkpoint("image", lora_stack)
     controls = [(name, str(value or "").strip()) for name, value in (
         ("pose", body.control_pose), ("depth", body.control_depth),
         ("canny", body.control_canny)) if str(value or "").strip()]
@@ -1380,12 +1489,17 @@ async def _uncached_api_image(body: ImageRequest):
             )
         mode = str(body.mode or "").strip().lower()
         model_payload, trigger_prefix = _effective_model_settings(
-            "image", body.checkpoint, body.lora, {
+            "image", stack_checkpoint, body.lora, {
                 "steps": body.steps, "cfg": body.cfg,
                 "sampler": body.sampler, "scheduler": body.scheduler,
-                "lora_strength": body.lora_strength,
+                "lora_strength": (single_strength if single_strength is not None
+                                  else body.lora_strength),
+                "clip_skip": body.clip_skip,
             }, use_default=not (controls or mode), mode=mode,
             control_channel=controls[0][0] if controls else "")
+        if lora_stack:
+            _check_stack_family(lora_stack, str(model_payload.get("checkpoint") or ""))
+            model_payload["loras"] = [item.as_payload() for item in lora_stack]
         control_workflow = ""
         if controls:
             import ai_model_catalogue
@@ -1483,7 +1597,8 @@ async def _uncached_api_image(body: ImageRequest):
             "poll_url_string": output_url,
             "effective_params_object": {k: payload[k] for k in (
                 "main_size_width", "main_size_height", "steps", "cfg", "sampler",
-                "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "work_flow")
+                "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "loras",
+                "work_flow", "prompt", "noise_seed")
                 if k in payload},
             "server_time_unix_int": int(time.time()),
         }
@@ -1508,6 +1623,8 @@ class VideoRequest(BaseModel):
     checkpoint: Optional[str] = Field(None, description="Model file from /api/ai/model-catalogue")
     lora: Optional[str] = Field(None, description="LoRA file from /api/ai/model-catalogue")
     lora_strength: Optional[float] = Field(None, ge=0, le=2)
+    loras: Optional[LoraStackValue] = Field(
+        None, description="LoRA stack: [{name, strength, strength_clip}] or '<lora:NAME:W> ...'")
     negative_prompt: Optional[str] = Field(None, description="What to avoid")
     steps: Optional[int] = Field(None, ge=1, le=100)
     cfg: Optional[float] = Field(None, ge=0, le=30)
@@ -1548,6 +1665,7 @@ async def api_video(body: VideoRequest):
         profile = _model_entry(body.model)
     else:
         profile = _render_model_profile("video", body.checkpoint, body.lora)
+        profile = profile + _stack_profile("video", body.prompt, body.loras, body.lora)
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     namespace = ("ai-video-control-latent-crop-20260922-v1"
                  if body.control_video_url else "ai-video-exact-models-20260922-v5")
@@ -1584,12 +1702,21 @@ async def _uncached_api_video(body: VideoRequest):
             frame = await _publish_inline_image(
                 client, _decode_inline_image(body.image_base64 or "")
             )
+        video_prompt, lora_stack, single_strength = _lora_stack_request(
+            "video", body.prompt, body.loras, body.lora)
+        video_checkpoint = body.checkpoint
+        if lora_stack and not body.checkpoint and not body.lora:
+            video_checkpoint = _stack_default_checkpoint("video", lora_stack)
         model_payload, trigger_prefix = _effective_model_settings(
-            "video", body.checkpoint, body.lora, {
+            "video", video_checkpoint, body.lora, {
                 "steps": body.steps, "cfg": body.cfg,
                 "sampler": body.sampler, "scheduler": body.scheduler,
-                "lora_strength": body.lora_strength,
+                "lora_strength": (single_strength if single_strength is not None
+                                  else body.lora_strength),
             })
+        if lora_stack:
+            _check_stack_family(lora_stack, str(model_payload.get("checkpoint") or ""))
+            model_payload["loras"] = [item.as_payload() for item in lora_stack]
         payload: Dict[str, object] = {
             "image_url": frame, "main_size_width": int(body.width or 960),
             "main_size_height": int(body.height or 540),
@@ -1602,8 +1729,8 @@ async def _uncached_api_video(body: VideoRequest):
             )
         if last_frame:
             payload["image_url_end"] = last_frame
-        if body.prompt and str(body.prompt).strip():
-            rendered_prompt = _validate_prompt(body.prompt)
+        if video_prompt and str(video_prompt).strip():
+            rendered_prompt = _validate_prompt(video_prompt)
             import ai_model_defaults
             payload["prompt"] = ai_model_defaults.add_triggers(rendered_prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
         if body.frame_count:
@@ -1667,7 +1794,8 @@ async def _uncached_api_video(body: VideoRequest):
             "end_image_url_string": last_frame,
             "effective_params_object": {k: payload[k] for k in (
                 "main_size_width", "main_size_height", "steps", "cfg", "sampler",
-                "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "work_flow")
+                "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "loras",
+                "work_flow", "prompt", "noise_seed")
                 if k in payload},
             "server_time_unix_int": int(time.time()),
         }

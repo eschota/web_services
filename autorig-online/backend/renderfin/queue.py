@@ -1532,10 +1532,12 @@ class RenderQueue:
             workflow_type=prompt.type,
             frames=prompt.frame_count,
             seed=prompt.noise_seed or None,
-            checkpoint=getattr(prompt, "checkpoint", "") or "",
+            checkpoint=model_eligibility.local_name(
+                server, "checkpoint", getattr(prompt, "checkpoint", "") or ""),
             upscale_model=getattr(prompt, "upscale_model", "") or "",
             lora=getattr(prompt, "lora", "") or "",
             lora_strength=(getattr(prompt, "lora_strength", 0) or None),
+            loras=list(getattr(prompt, "loras", None) or []),
         )
         if is_avatar_workflow:
             _inject_avatar_reference_images(workflow, reference_filenames)

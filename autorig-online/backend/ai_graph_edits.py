@@ -12,7 +12,7 @@ import copy
 import json
 import math
 import time
-from typing import Any, Dict, List, Mapping, MutableMapping, Set
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Set
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -212,14 +212,30 @@ def _catalogue_entry(name: object, kind: str, service_id: str) -> Mapping[str, A
 
 
 def _families_compatible(checkpoint: Mapping[str, Any], lora: Mapping[str, Any]) -> bool:
-    checkpoint_family = str(checkpoint.get("family") or "").lower()
-    lora_family = str(lora.get("family") or "").lower()
-    if checkpoint_family == lora_family:
-        return True
-    checkpoint_base = str(checkpoint.get("base") or "").lower()
-    lora_base = str(lora.get("base") or "").lower()
-    return bool(checkpoint_base and lora_base and
-                (checkpoint_base in lora_base or lora_base in checkpoint_base))
+    # One rule for the whole backend: the render API validates with the same
+    # function, so an edit the agent accepts is a request the farm accepts.
+    return ai_model_defaults.compatible(checkpoint, lora)
+
+
+def _validate_lora_stack(node: Any, service_id: str,
+                         checkpoint: Optional[Mapping[str, Any]]) -> None:
+    value = node.params.get("loras")
+    if not value:
+        return
+    import ai_lora_prompt
+    loras = [entry for entry in ai_model_catalogue.entries()
+             if entry.get("kind") == "lora" and entry.get("usable")
+             and service_id in (entry.get("services") or [])]
+    try:
+        stack, _ = ai_lora_prompt.build_stack(
+            stack_refs=ai_lora_prompt.parse_stack(value), prompt_refs=[],
+            loras=loras, single_lora=str(node.params.get("lora") or ""))
+    except ValueError as exc:
+        _reject("invalid_lora_stack", f"LoRA stack on '{node.id}': {exc}")
+    for item in stack:
+        if checkpoint and not _families_compatible(checkpoint, item.entry):
+            _reject("incompatible_model_family",
+                    f"LoRA '{item.file}' on '{node.id}' does not fit the checkpoint's family")
 
 
 def _validate_catalogue_and_controls(graph: ai_graph.Graph) -> None:
@@ -236,6 +252,7 @@ def _validate_catalogue_and_controls(graph: ai_graph.Graph) -> None:
         if checkpoint and lora and not _families_compatible(checkpoint, lora):
             _reject("incompatible_model_family",
                     f"Checkpoint and LoRA on '{node.id}' belong to incompatible families")
+        _validate_lora_stack(node, service_id, checkpoint)
         if checkpoint:
             explicit = {
                 key: value for key, value in node.params.items()

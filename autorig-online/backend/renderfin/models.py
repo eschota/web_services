@@ -8,6 +8,32 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+class LoraStackItem(BaseModel):
+    """One LoRA in a stack. The name is a file the worker loads off its own
+    disk, so it is restricted to a plain relative file name."""
+
+    name: str
+    strength_model: float = 1.0
+    strength_clip: float = 1.0
+
+    @field_validator("name")
+    @classmethod
+    def _safe_name(cls, v: str) -> str:
+        v = str(v or "").strip()
+        if (not v or len(v) > 255 or ".." in v or v.startswith(("/", "\\"))
+                or ":" in v or not v.lower().endswith((".safetensors", ".pt", ".ckpt"))):
+            raise ValueError(f"'{v}' is not a LoRA file name")
+        return v
+
+    @field_validator("strength_model", "strength_clip")
+    @classmethod
+    def _bounded_strength(cls, v: float) -> float:
+        v = float(v)
+        if not -4.0 <= v <= 4.0:
+            raise ValueError("LoRA strength must be within -4..4")
+        return v
+
+
 class RenderPrompt(BaseModel):
     """Port of C# RenderPrompt (Render.cs:1061)."""
 
@@ -48,6 +74,10 @@ class RenderPrompt(BaseModel):
     upscale_model: str = ""
     lora: str = ""
     lora_strength: float = 0
+    # An ordered LoRA stack applied after `lora`, first entry nearest the
+    # model loader. Each entry is {name, strength_model, strength_clip}; the
+    # public API has already resolved names against the catalogue.
+    loras: List["LoraStackItem"] = Field(default_factory=list)
     user_name: str = "default_user"
     render_mode: str = ""
 
@@ -72,6 +102,17 @@ class RenderPrompt(BaseModel):
                 raise ValueError("reference image URL must be 1 to 4096 characters")
             urls.append(url)
         return urls
+
+    @field_validator("loras", mode="before")
+    @classmethod
+    def _bounded_loras(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("loras must be a list")
+        if len(value) > 8:
+            raise ValueError("at most 8 LoRAs can be stacked")
+        return value
 
     @field_validator("user_name")
     @classmethod
