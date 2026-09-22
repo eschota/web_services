@@ -215,8 +215,81 @@ def _template_simple_text_to_video_by_vision() -> Dict[str, object]:
     }
 
 
+def _template_avatar_video_motion() -> Dict[str, object]:
+    """A private saved Avatar reenacts the action from a user-owned video.
+
+    The source person's identity is deliberately excluded by the Vision
+    instruction. The first frame supplies scene geometry, while the storyboard
+    supplies only count, pose, action and camera motion. Nothing in this built-
+    in graph identifies a real Avatar or embeds a private source URL.
+    """
+    action_prompt = (
+        "Analyze this storyboard only for reusable motion and staging. Return "
+        "one concise generator prompt with the accurate number of visible "
+        "people, their positions, body poses, interactions, direction and "
+        "sequence of actions, camera movement, framing, and scene geometry. "
+        "Do not describe or preserve any source person's identity, face, age, "
+        "hair, skin, body appearance, clothing, wardrobe, accessories, "
+        "ethnicity, or distinctive personal traits. Refer to people only as "
+        "character 1, character 2, and so on. No preamble."
+    )
+    return {
+        "id": "SavedAvatarVideoMotion",
+        "title": "Avatar reenacts a video",
+        "summary": (
+            "Choose a saved Avatar and a driving video. The scene and action "
+            "are reconstructed without copying the source person's identity."
+        ),
+        "graph": {
+            "name": "Saved Avatar video motion",
+            "nodes": [
+                {"id": "source_video", "kind": NODE_INPUT,
+                 "entity_type": ai_services.VIDEO, "value": "", "x": 40, "y": 180},
+                {"id": "saved_avatar", "kind": NODE_INPUT,
+                 "entity_type": ai_services.AVATAR, "value": "", "x": 40, "y": 500},
+                {"id": "first_frame", "kind": NODE_SERVICE,
+                 "service": "video_frame", "x": 350, "y": 40, "params": {}},
+                {"id": "storyboard", "kind": NODE_SERVICE,
+                 "service": "video_storyboard", "x": 350, "y": 300, "params": {}},
+                {"id": "action_vision", "kind": NODE_SERVICE,
+                 "service": "vision", "x": 680, "y": 300,
+                 "params": {"model": "qwen35-9b-uncensored", "prompt": action_prompt,
+                            "max_output_tokens": 1024}},
+                {"id": "avatar_scene", "kind": NODE_SERVICE,
+                 "service": "avatar_image", "x": 1010, "y": 100,
+                 "params": {"width": 960, "height": 540, "seed": 0}},
+                {"id": "motion_video", "kind": NODE_SERVICE,
+                 "service": "video_control", "x": 1360, "y": 180,
+                 "params": {"width": 960, "height": 540, "frame_count": 97,
+                            "control_channel": "pose", "control_strength": 0.85,
+                            "seed": 0}},
+            ],
+            "links": [
+                {"from": "source_video", "output": "value",
+                 "to": "first_frame", "input": "video_url"},
+                {"from": "source_video", "output": "value",
+                 "to": "storyboard", "input": "video_url"},
+                {"from": "storyboard", "output": "image_url_string",
+                 "to": "action_vision", "input": "image"},
+                {"from": "saved_avatar", "output": "value",
+                 "to": "avatar_scene", "input": "avatar"},
+                {"from": "first_frame", "output": "image_url_string",
+                 "to": "avatar_scene", "input": "image"},
+                {"from": "action_vision", "output": "answer_string",
+                 "to": "avatar_scene", "input": "prompt"},
+                {"from": "avatar_scene", "output": "image_url_string",
+                 "to": "motion_video", "input": "image"},
+                {"from": "source_video", "output": "value",
+                 "to": "motion_video", "input": "control_video_url"},
+                {"from": "action_vision", "output": "answer_string",
+                 "to": "motion_video", "input": "prompt"},
+            ],
+        },
+    }
+
+
 def templates() -> List[Dict[str, object]]:
-    return [_template_simple_text_to_video_by_vision()]
+    return [_template_simple_text_to_video_by_vision(), _template_avatar_video_motion()]
 
 
 # ------------------------------------------------------------------ validation

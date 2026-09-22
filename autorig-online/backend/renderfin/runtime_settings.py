@@ -30,6 +30,7 @@ def apply_runtime_settings(workflow, prompt, width, height):
         workflow['selected_lora'] = {'class_type': 'LoraLoaderModelOnly', 'inputs': {
             'model': [loader, 0], 'lora_name': lora,
             'strength_model': float(strength) if strength else 1.0}}
+    frames = max(1, round((getattr(prompt, 'frame_count', 97) - 1) / 8)) * 8 + 1
     for node in list(workflow.values()):
         inputs = node.get('inputs', {})
         kind = node.get('class_type', '')
@@ -44,7 +45,6 @@ def apply_runtime_settings(workflow, prompt, width, height):
             inputs.update(width=internal_width, height=internal_height)
         if kind == 'ImageScale' and node.get('_meta', {}).get('title') != 'delivery':
             inputs.update(width=internal_width, height=internal_height)
-        frames = max(1, round((getattr(prompt, 'frame_count', 97) - 1) / 8)) * 8 + 1
         if kind == 'EmptyLTXVLatentVideo':
             inputs['length'] = frames
         elif kind == 'LTXVEmptyLatentAudio':
@@ -85,6 +85,31 @@ def apply_runtime_settings(workflow, prompt, width, height):
                 continue
             if count > 0 and count != steps:
                 raise ValueError(f'This distilled workflow requires {count} steps; received {steps}')
+    # LTXVCropGuides counts unique guide time coordinates. An identity frame
+    # and an IC-LoRA video both beginning at frame zero therefore leave one
+    # appended identity latent behind. Slice to the requested generated latent
+    # count before temporal VAE decode; trimming decoded pixels is too late and
+    # lets the trailing frame-zero latent bleed into the last valid frames.
+    overlapping_first_frame = has_video_control and any(
+        node.get('class_type') == 'LTXVAddGuide'
+        and node.get('inputs', {}).get('frame_idx', 0) == 0
+        for node in workflow.values()
+    )
+    if overlapping_first_frame:
+        for node_id, node in list(workflow.items()):
+            if node.get('class_type') != 'LTXVTiledVAEDecode':
+                continue
+            source = node.get('inputs', {}).get('latents')
+            source_node = workflow.get(source[0]) if isinstance(source, list) and source else None
+            if not source_node or source_node.get('class_type') != 'LTXVCropGuides':
+                continue
+            select_id = 'delivery_latents_' + node_id
+            workflow[select_id] = {
+                'class_type': 'LTXVSelectLatents',
+                'inputs': {'samples': source, 'start_index': 0,
+                           'end_index': (frames - 1) // 8},
+            }
+            node['inputs']['latents'] = [select_id, 0]
     for node_id, node in list(workflow.items()):
         kind = node.get('class_type', '')
         if kind not in {'SaveImage', 'PreviewImage', 'VHS_VideoCombine', 'CreateVideo'}:

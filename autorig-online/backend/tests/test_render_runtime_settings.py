@@ -8,7 +8,10 @@ from renderfin.runtime_settings import apply_runtime_settings
 class RuntimeSettingsTests(unittest.TestCase):
     def test_video_union_control_uses_half_grid_and_exact_delivery(self):
         graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {}},
+                 'first': {'class_type': 'LTXVAddGuide', 'inputs': {'frame_idx': 0}},
                  'control': {'class_type': 'LTXAddVideoICLoRAGuide', 'inputs': {'strength': 1}},
+                 'crop': {'class_type': 'LTXVCropGuides', 'inputs': {}},
+                 'decode': {'class_type': 'LTXVTiledVAEDecode', 'inputs': {'latents': ['crop', 2]}},
                  'video': {'class_type': 'CreateVideo', 'inputs': {'images': ['decode', 0]}}}
         apply_runtime_settings(graph, SimpleNamespace(frame_count=97, control_strength=0.6), 960, 540)
         self.assertEqual(graph['latent']['inputs']['height'], 576)
@@ -16,6 +19,31 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(graph['delivery_size_video']['inputs']['height'], 540)
         self.assertEqual(graph['delivery_frames_video']['inputs'],
                          {'image': ['decode', 0], 'batch_index': 0, 'length': 97})
+        self.assertEqual(graph['delivery_latents_decode']['inputs'],
+                         {'samples': ['crop', 2], 'start_index': 0, 'end_index': 12})
+        self.assertEqual(graph['decode']['inputs']['latents'], ['delivery_latents_decode', 0])
+
+    def test_video_union_control_25_frames_crops_before_temporal_decode(self):
+        graph = {
+            'first': {'class_type': 'LTXVAddGuide', 'inputs': {'frame_idx': 0}},
+            'control': {'class_type': 'LTXAddVideoICLoRAGuide', 'inputs': {}},
+            'crop': {'class_type': 'LTXVCropGuides', 'inputs': {}},
+            'decode': {'class_type': 'LTXVTiledVAEDecode', 'inputs': {'latents': ['crop', 2]}},
+        }
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=25), 960, 540)
+        self.assertEqual(graph['delivery_latents_decode']['inputs'],
+                         {'samples': ['crop', 2], 'start_index': 0, 'end_index': 3})
+        self.assertEqual(graph['decode']['inputs']['latents'], ['delivery_latents_decode', 0])
+
+    def test_plain_image_to_video_does_not_insert_union_latent_crop(self):
+        graph = {
+            'first': {'class_type': 'LTXVAddGuide', 'inputs': {'frame_idx': 0}},
+            'crop': {'class_type': 'LTXVCropGuides', 'inputs': {}},
+            'decode': {'class_type': 'LTXVTiledVAEDecode', 'inputs': {'latents': ['crop', 2]}},
+        }
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=97), 960, 540)
+        self.assertNotIn('delivery_latents_decode', graph)
+        self.assertEqual(graph['decode']['inputs']['latents'], ['crop', 2])
 
     def test_half_hd_is_padded_for_model_and_exact_for_saved_video(self):
         graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {'width': 1024, 'height': 1024}},

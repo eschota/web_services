@@ -105,6 +105,73 @@ class TemplateTests(unittest.TestCase):
                             f"{node['id']} sets {set(node['params']) - declared}")
 
 
+class AvatarVideoTemplateTests(unittest.TestCase):
+    def setUp(self):
+        self.template = next(
+            item for item in ai_graph.templates()
+            if item["id"] == "SavedAvatarVideoMotion"
+        )
+        self.graph = self.template["graph"]
+
+    def test_template_is_valid_and_uses_only_live_services(self):
+        ai_graph.validate(ai_graph.Graph(**self.graph))
+        for node in self.graph["nodes"]:
+            if node["kind"] == ai_graph.NODE_SERVICE:
+                self.assertEqual(ai_services.service(node["service"])["status"], "live")
+
+    def test_private_inputs_are_blank_and_only_one_avatar_is_required(self):
+        inputs = [node for node in self.graph["nodes"]
+                  if node["kind"] == ai_graph.NODE_INPUT]
+        self.assertEqual(
+            [(node["id"], node["entity_type"], node["value"]) for node in inputs],
+            [("source_video", ai_services.VIDEO, ""),
+             ("saved_avatar", ai_services.AVATAR, "")],
+        )
+
+    def test_scene_action_and_motion_links_are_exact(self):
+        expected = {
+            ("source_video", "value", "first_frame", "video_url"),
+            ("source_video", "value", "storyboard", "video_url"),
+            ("storyboard", "image_url_string", "action_vision", "image"),
+            ("saved_avatar", "value", "avatar_scene", "avatar"),
+            ("first_frame", "image_url_string", "avatar_scene", "image"),
+            ("action_vision", "answer_string", "avatar_scene", "prompt"),
+            ("avatar_scene", "image_url_string", "motion_video", "image"),
+            ("source_video", "value", "motion_video", "control_video_url"),
+            ("action_vision", "answer_string", "motion_video", "prompt"),
+        }
+        actual = {(link["from"], link["output"], link["to"], link["input"])
+                  for link in self.graph["links"]}
+        self.assertEqual(actual, expected)
+
+    def test_vision_prompt_extracts_action_without_source_identity(self):
+        vision = next(node for node in self.graph["nodes"]
+                      if node["id"] == "action_vision")
+        prompt = vision["params"]["prompt"]
+        for required in ("accurate number", "body poses", "sequence of actions",
+                         "camera movement", "Do not describe or preserve",
+                         "clothing", "distinctive personal traits"):
+            self.assertIn(required, prompt)
+        self.assertEqual(vision["params"]["model"], "qwen35-9b-uncensored")
+
+    def test_generation_defaults_are_half_hd_pose_and_97_frames(self):
+        avatar = next(node for node in self.graph["nodes"] if node["id"] == "avatar_scene")
+        motion = next(node for node in self.graph["nodes"] if node["id"] == "motion_video")
+        self.assertEqual(avatar["params"], {"width": 960, "height": 540, "seed": 0})
+        self.assertEqual(motion["params"], {
+            "width": 960, "height": 540, "frame_count": 97,
+            "control_channel": "pose", "control_strength": 0.85, "seed": 0,
+        })
+
+    def test_every_parameter_is_declared_by_its_service(self):
+        for node in self.graph["nodes"]:
+            if node["kind"] != ai_graph.NODE_SERVICE:
+                continue
+            declared = {param["name"] for param in ai_services.params_for(node["service"])}
+            self.assertTrue(set(node["params"]) <= declared,
+                            f"{node['id']} sets {set(node['params']) - declared}")
+
+
 def links_of(graph):
     return graph["links"]
 
@@ -216,11 +283,19 @@ class EndpointTests(unittest.TestCase):
         body = self.client.get("/api/ai/graph/templates").json()
         self.assertTrue(body["success_bool"])
         self.assertEqual(body["templates_array"][0]["id"], "SimpleTextToVideoByVision")
+        self.assertIn("SavedAvatarVideoMotion",
+                      [item["id"] for item in body["templates_array"]])
 
     def test_a_template_id_opens_without_ever_being_saved(self):
         body = self.client.get("/api/ai/graphs/SimpleTextToVideoByVision").json()
         self.assertTrue(body["template_bool"])
         self.assertEqual(len(body["graph_object"]["nodes"]), 7)
+
+    def test_avatar_video_template_id_opens_without_being_saved(self):
+        body = self.client.get("/api/ai/graphs/SavedAvatarVideoMotion").json()
+        self.assertTrue(body["template_bool"])
+        self.assertEqual(len(body["graph_object"]["nodes"]), 7)
+        self.assertEqual(len(body["graph_object"]["links"]), 9)
 
     def test_saving_returns_a_link_that_opens_the_same_graph(self):
         saved = self.client.post("/api/ai/graphs", json=self._payload()).json()

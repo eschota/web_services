@@ -1223,8 +1223,10 @@ async def api_video(body: VideoRequest):
     else:
         profile = _render_model_profile("video", body.checkpoint, body.lora)
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
+    namespace = ("ai-video-control-latent-crop-20260922-v1"
+                 if body.control_video_url else "ai-video-exact-models-20260922-v5")
     return await ai_request_cache.run_cached("video", payload,
-        lambda: _uncached_api_video(body), namespace="ai-video-exact-models-20260922-v5")
+        lambda: _uncached_api_video(body), namespace=namespace)
 
 
 async def _uncached_api_video(body: VideoRequest):
