@@ -36,6 +36,14 @@ WORKER_BASIC_AUTH = os.getenv("RENDERFIN_WORKER_BASIC_AUTH", "")
 # A shared ComfyUI box can hold a submitted prompt behind other work for a long
 # time; the wall-clock ceiling has to cover the queue wait, not just the render.
 TASK_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_TASK_TIMEOUT_SECONDS", "5400"))
+# Managed farm prompts have an exact, idempotent host-side preemption contract.
+# A prompt which makes no observable progress for an hour is therefore recalled
+# and the same durable RenderTask is returned to Pending without charging an
+# attempt.  Unmanaged Comfy prompts retain the older wall-clock timeout above:
+# they cannot be safely requeued after an ambiguous process-wide interrupt.
+MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS = float(
+    os.getenv("RENDERFIN_MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS", "3600")
+)
 PUMP_TICK_SECONDS = float(os.getenv("RENDERFIN_PUMP_TICK_SECONDS", "1.5"))
 DISPATCH_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_DISPATCH_INTERVAL_SECONDS", "5"))
 STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
@@ -129,7 +137,11 @@ def hunyuan_workers() -> list[dict]:
                     )
                     continue
                 name = str(entry.get("name") or url)
-                physical_node = str(entry.get("physical_node") or name).strip().lower()
+                physical_node = str(
+                    entry.get("physical_resource_id_string")
+                    or entry.get("physical_node")
+                    or name
+                ).strip().lower()
                 if physical_node in physical_nodes:
                     notices.add(
                         f"[Renderfin] ignoring duplicate Hunyuan physical node "
@@ -156,6 +168,14 @@ def hunyuan_workers() -> list[dict]:
                                 or "full"
                             ),
                             "physical_node": physical_node,
+                            "physical_resource_id_string": str(
+                                entry.get("physical_resource_id_string") or ""
+                            ).strip().lower(),
+                            "workload_role": str(
+                                entry.get("workload_role")
+                                or entry.get("reserve_role_string")
+                                or ""
+                            ).strip().lower(),
                         }
                     )
     except Exception as exc:  # a broken file must not take the service down
@@ -189,6 +209,53 @@ def hunyuan_workers() -> list[dict]:
         )
     _emit_hunyuan_worker_notices(notices)
     return []
+
+
+def converter_control_workers() -> list[dict]:
+    """Return authenticated converter control routes, including parked Hunyuan nodes.
+
+    A node such as F11 can be deliberately disabled only for Hunyuan while it
+    remains a healthy full converter.  Preemption is a converter concern, so
+    resolving its control token through :func:`hunyuan_workers` incorrectly
+    makes that full-converter task impossible to recall.  Read the same
+    protected registry without applying Hunyuan admission gates.
+    """
+    workers: list[dict] = []
+    try:
+        if HUNYUAN_WORKERS_FILE.is_file():
+            data = json.loads(HUNYUAN_WORKERS_FILE.read_text(encoding="utf-8"))
+            entries = data.get("workers") if isinstance(data, dict) else data
+            for entry in entries or []:
+                if not isinstance(entry, dict):
+                    continue
+                url = str(entry.get("url") or "").strip().rstrip("/")
+                token = str(entry.get("token") or "").strip() or HUNYUAN_API_TOKEN
+                if not url or not token:
+                    continue
+                workers.append({
+                    "name": str(entry.get("name") or url),
+                    "url": url,
+                    "token": token,
+                    "capability_mode": str(
+                        entry.get("capability_mode")
+                        or entry.get("mode")
+                        or "full"
+                    ),
+                })
+    except Exception as exc:
+        print(f"[Renderfin] converter control registry unreadable: {exc}")
+        return []
+    if workers:
+        return workers
+    return [
+        {
+            "name": worker.get("name"),
+            "url": worker.get("url"),
+            "token": worker.get("token"),
+            "capability_mode": worker.get("capability_mode", "full"),
+        }
+        for worker in hunyuan_workers()
+    ]
 HUNYUAN_QUALITY = os.getenv("RENDERFIN_HUNYUAN_QUALITY", "standard").strip() or "standard"
 HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))
 # A standard-quality generation takes ~65 min on the farm's GTX 1080 Ti boxes

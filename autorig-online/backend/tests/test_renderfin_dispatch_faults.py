@@ -13,31 +13,12 @@ filter which emptied the candidate list.
 """
 import asyncio
 import contextlib
-import importlib
 import io
-import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-
-# renderfin/image_quality.py and renderfin/workload_lease.py ship with the
-# production release and are missing from this source checkout, so sibling
-# test modules install empty stubs under those names - and under `unittest
-# discover` whichever module is imported first wins for the whole process.
-# When the package really does carry them, load the real ones: the point of
-# this file is the dispatcher the service actually runs, and _pick_server
-# reads workload_lease on every candidate.
-_PACKAGE = Path(__file__).resolve().parents[1] / "renderfin"
-for _name in ("image_quality", "workload_lease"):
-    _dotted = f"renderfin.{_name}"
-    if (_PACKAGE / f"{_name}.py").is_file() and not getattr(
-        sys.modules.get(_dotted), "__file__", None
-    ):
-        sys.modules.pop(_dotted, None)
-        sys.modules.pop("renderfin.queue", None)
-        importlib.import_module(_dotted)
 
 from renderfin import comfy_adapter, config, errors, video_input
 from renderfin.models import (

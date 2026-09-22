@@ -3,7 +3,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from renderfin import comfy_adapter, config
 from renderfin.models import (
@@ -250,6 +250,10 @@ class QueueDispatchTests(unittest.TestCase):
 
                     with patch(
                         "renderfin.comfy_adapter.download_artifact", side_effect=fake_download
+                    ), patch.object(
+                        queue,
+                        "_validate_tpose_bundle_bytes",
+                        new=AsyncMock(return_value={"passed": True}),
                     ):
                         await queue._finish(task, server, entry)
 

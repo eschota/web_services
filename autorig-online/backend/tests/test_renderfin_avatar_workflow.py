@@ -1,25 +1,10 @@
 import json
-import sys
-import types
 import unittest
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from renderfin.models import RenderPrompt
-
-# The production render release supplies image_quality.py, while this source
-# checkout intentionally does not carry that runtime-only module. Queue tests
-# need only its import surface; the Avatar helper never calls it.
-if "renderfin.image_quality" not in sys.modules:
-    image_quality = types.ModuleType("renderfin.image_quality")
-    image_quality.RenderArtifactQualityError = RuntimeError
-    sys.modules["renderfin.image_quality"] = image_quality
-if "renderfin.workload_lease" not in sys.modules:
-    sys.modules["renderfin.workload_lease"] = types.ModuleType(
-        "renderfin.workload_lease"
-    )
-
 from renderfin.queue import _inject_avatar_reference_images
 from renderfin.templating import render_workflow_text
 

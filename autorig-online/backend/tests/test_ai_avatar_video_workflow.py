@@ -1,19 +1,8 @@
 import asyncio
 import json
-import sys
-import types
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
-
-# Production releases provide these modules. This source checkout omits their
-# runtime-only implementations; unmanaged queue submission does not call them.
-if "renderfin.image_quality" not in sys.modules:
-    image_quality = types.ModuleType("renderfin.image_quality")
-    image_quality.RenderArtifactQualityError = RuntimeError
-    sys.modules["renderfin.image_quality"] = image_quality
-if "renderfin.workload_lease" not in sys.modules:
-    sys.modules["renderfin.workload_lease"] = types.ModuleType("renderfin.workload_lease")
 
 from renderfin import comfy_adapter
 from renderfin.models import RenderPrompt, RenderServer, RenderTask
