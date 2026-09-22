@@ -220,8 +220,14 @@ def resolve_artifacts(
     outputs, order by preference (fragment match, then extension match)."""
     found: List[Dict[str, str]] = []
     _walk_filenames(history_entry.get("outputs") or {}, found)
-    # keep only real outputs (skip temp previews)
-    outputs = [f for f in found if f.get("type") != "temp"] or found
+    # Native ComfyUI nodes such as LoadVideo can echo their source file in
+    # history outputs with type=input.  It is never a generated artifact and
+    # must not be downloaded under the task's public output URL.  Prefer real
+    # outputs; retain the historical temp-preview fallback only when Comfy did
+    # not report any output files.  Unknown explicit types fail closed.
+    outputs = [f for f in found if f.get("type", "output").lower() == "output"]
+    if not outputs:
+        outputs = [f for f in found if f.get("type", "").lower() == "temp"]
 
     def rank(f: Dict[str, str]) -> Tuple[int, int]:
         name = f.get("filename", "").lower()
