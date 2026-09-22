@@ -261,10 +261,22 @@
         visual = document.createElement('img'); visual.src = media.value; visual.alt = label;
       }
       const badge = document.createElement('span'); badge.textContent = label;
+      // The same pixel-size badge the node's own preview carries, so hovering
+      // A against B compares two sizes as well as two pictures.
+      const size = document.createElement('span');
+      size.className = 'node-compare-res';
+      const showSize = () => {
+        const width = visual.naturalWidth || visual.videoWidth || 0;
+        const height = visual.naturalHeight || visual.videoHeight || 0;
+        size.textContent = width && height ? width + '×' + height : '';
+      };
+      visual.addEventListener('load', showSize);
+      visual.addEventListener('loadedmetadata', showSize);
+      showSize();
       Object.assign(overlay.style, {
         left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px'
       });
-      overlay.append(visual, badge); element.appendChild(overlay); hoverOverlay = overlay;
+      overlay.append(visual, badge, size); element.appendChild(overlay); hoverOverlay = overlay;
       if (visual.tagName === 'VIDEO') visual.play().catch(function () {});
     }
 
@@ -424,6 +436,8 @@
       '.node-compare-overlay{position:absolute;z-index:7;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:8px;background:#080914;pointer-events:none}',
       '.node-compare-overlay img,.node-compare-overlay video{display:block;width:100%;height:100%;max-height:none!important;object-fit:contain;background:#080914}',
       '.node-compare-overlay>span{position:absolute;right:6px;top:6px;padding:3px 6px;border-radius:5px;background:rgba(8,9,20,.82);color:#67e8f9;font:700 10px Inter,sans-serif}',
+      '.node-compare-overlay>span.node-compare-res{left:6px;right:auto;color:#f1f5ff;font-variant-numeric:tabular-nums;border:1px solid rgba(255,255,255,.14)}',
+      '.node-compare-overlay>span.node-compare-res:empty{display:none}',
       '.node-anchor-badge{flex:0 0 auto;width:22px;height:22px;margin-left:3px;padding:0;border:1px solid #38bdf8;border-radius:6px;background:rgba(56,189,248,.2);color:#67e8f9;font:800 11px/20px Inter,sans-serif;cursor:pointer}',
       '.node-anchor-badge:hover,.node-anchor-badge:focus-visible{background:rgba(56,189,248,.35);outline:none}'
     ].join('\n');

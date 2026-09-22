@@ -193,6 +193,9 @@
     if (record.status === 'done' && record.value) {
       continuableResults.set(String(id), {type:record.type, value:record.value,
         task_id:record.task_id || ''});
+      // A finished step is new information about size: a ControlNet map that
+      // has just landed is what the image below it must now be drawn at.
+      if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
     } else if (record.status === 'failed') {
       continuableResults.delete(String(id));
     }
@@ -447,12 +450,14 @@
       displayMode: params && params._display_mode,
       label: (params && params._label) || '',
       followInputSize: hasDimensions ? (!params || params._follow_input_size !== false) : undefined,
+      disabled: !!(params && params._disabled),
       inFields: inputs.map(i => i.field),
       outFields: outputs.map(o => o.field)
     });
     alignPorts(id, inputs.length, outputs.length);
     mountModelPickers(id, serviceId);
     if (params) applyParams(id, params);
+    if (params && params._disabled) applyBypass(id, true);
     materializeDefaultModel(id);
     return id;
   }
@@ -463,8 +468,10 @@
       'input-' + entityType, 0, 1, x, y,
       'ainode input-node', { entity_type: entityType }, inputNodeHtml(entityType)
     );
-    setMeta(id, { kind: KIND_INPUT, entityType: entityType, displayMode: params && params._display_mode, inFields: [], outFields: ['value'] });
+    setMeta(id, { kind: KIND_INPUT, entityType: entityType, displayMode: params && params._display_mode,
+                  disabled: !!(params && params._disabled), inFields: [], outFields: ['value'] });
     alignPorts(id, 0, 1);
+    if (params && params._disabled) applyBypass(id, true);
     if (value) {
       const field = nodeElement(id).querySelector('[data-value]');
       if (field) {
@@ -499,7 +506,7 @@
         onChange: (value, entry, reason) => {
           if (name === 'checkpoint' && value && !modelAcceptsConnectedControls(id, entry)) {
             picker.value = hidden ? hidden.value : '';
-            if (!reason?.materialized) toast('This model has not been validated with the connected ControlNet channel. Use a compatible model or disconnect the control.');
+            if (!reason?.materialized) toastControlRefusal(connectedControlChannel(id) || 'control', serviceId);
             return;
           }
           if (hidden) hidden.value = value;
@@ -682,6 +689,7 @@
           const ref = avatar.references.find(item => item.media_type === 'image' && item.role === 'face') || avatar.references.find(item => item.media_type === 'image');
           preview.hidden = !ref;
           if (ref) preview.src = ref.canonical_url;
+          markResolution(element.querySelector('.ninput'), preview);
           state.textContent = 'Saved character · version ' + avatar.version;
           state.className = 'nstate done';
         } catch (error) { state.textContent = error.message; state.className = 'nstate failed'; }
@@ -711,10 +719,13 @@
       event.stopPropagation();
       if (preview.src) openPreview(isVideo ? 'video' : 'image', preview.src);
     });
+    const previewHost = element.querySelector('.ninput');
+    markResolution(previewHost, preview);
     if (/^(https?:\/\/|data:image\/)/.test(text.value.trim())) {
       preview.src = text.value.trim();
       preview.hidden = false;
       if (isVideo) preview.play().catch(() => {});
+      markResolution(previewHost, preview);
     }
     pick.addEventListener('click', () => file.click());
     async function acceptMedia(chosen) {
@@ -736,6 +747,7 @@
         element._previewObjectUrl = URL.createObjectURL(chosen);
         preview.src = element._previewObjectUrl;
         preview.hidden = false;
+        markResolution(previewHost, preview);
         preview.play().catch(() => {});
       } else {
         const reader = new FileReader();
@@ -743,6 +755,7 @@
           if (element._uploadGeneration !== generation) return;
           preview.src = reader.result;
           preview.hidden = false;
+          markResolution(previewHost, preview);
         };
         reader.readAsDataURL(chosen);
       }
@@ -824,6 +837,7 @@
     if (typeof meta(id)?.followInputSize === 'boolean') {
       values._follow_input_size = meta(id).followInputSize;
     }
+    if (meta(id)?.disabled) values._disabled = true;
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
       const raw = control.value;
@@ -831,6 +845,64 @@
         (control.type === 'range' || control.type === 'number') ? Number(raw) : raw;
     });
     return values;
+  }
+
+  /* ------------------------------------------------------------- bypassing */
+
+  /**
+   * A node that stays on the canvas but is not run.
+   *
+   * Deleting a step to try the composition without it costs the wiring, and
+   * the wiring is the expensive part to rebuild. Bypass keeps the node, its
+   * settings and every wire attached to it, and takes it out of the run: the
+   * node is dimmed, and everything downstream of it is reported as skipped
+   * rather than started and failed, because a step whose input never arrives
+   * did not fail — it was never asked.
+   *
+   * The flag rides in `params._disabled` so it goes wherever the node goes:
+   * saved links, copy and paste, and the graph agent's edits.
+   */
+  function isBypassed(id) {
+    const item = meta(id);
+    return !!(item && item.disabled);
+  }
+
+  function applyBypass(id, disabled) {
+    const item = meta(id);
+    const element = nodeElement(id);
+    if (!item || !element) return false;
+    item.disabled = !!disabled;
+    element.classList.toggle('bypassed', !!disabled);
+    // Drawflow wraps the node body in `.drawflow_content_node`, so the header
+    // is a descendant of the node element rather than a child of it.
+    const head = element.querySelector('.nhead');
+    let tag = head && head.querySelector('.nbypass');
+    if (disabled && head && !tag) {
+      tag = document.createElement('em');
+      tag.className = 'nbypass';
+      tag.textContent = 'bypassed';
+      const heading = head.querySelector('b');
+      head.insertBefore(tag, heading ? heading.nextSibling : head.firstChild);
+    }
+    if (!disabled && tag) tag.remove();
+    return true;
+  }
+
+  /** Ctrl+P and the context menu both land here. */
+  function toggleBypass(ids) {
+    const list = [...new Set((ids || []).map(String))].filter(id => meta(id) && nodeElement(id));
+    if (!list.length) {
+      toast('Select a node first — Ctrl+P then takes it out of the run.');
+      return false;
+    }
+    // A mixed selection is bypassed as a whole; a fully bypassed one comes back.
+    const enable = list.every(isBypassed);
+    list.forEach(id => { applyBypass(id, !enable); invalidateNodeAndDownstream(id); });
+    const count = list.length + (list.length === 1 ? ' node' : ' nodes');
+    toast(enable
+      ? count + ' back in the run.'
+      : count + ' bypassed — Render will skip it and everything that needs it.');
+    return true;
   }
 
   /* -------------------------------------------------------- type-safe links */
@@ -856,17 +928,20 @@
     const info = linkTypes(connection);
     if (info && info.produced === info.accepted) {
       if (info.produced.startsWith('control_')) {
+        const channel = info.produced.slice(8);
         const element = nodeElement(connection.input_id);
         const slot = element && element.querySelector('[data-model-param="checkpoint"]');
         const entry = slot && slot._picker && slot._picker.entry;
-        const channels = (entry && entry.control_channels) || [];
         const node = editor.getNodeFromId(connection.input_id);
         const targetMeta = meta(connection.input_id);
+        const sourceService = serviceById((meta(connection.output_id) || {}).service || info.produced);
         const controlLinks = targetMeta.inFields.reduce((count, field, index) =>
           count + (field.startsWith('control_') ? ((node.inputs['input_' + (index + 1)] || {}).connections || []).length : 0), 0);
-        if ((entry && !channels.includes(info.produced.slice(8))) || controlLinks > 1) {
+        const accepted = controlChannelAccepted(channel, entry, sourceService);
+        if (!accepted || controlLinks > 1) {
           editor.removeSingleConnection(connection.output_id, connection.input_id, connection.output_class, connection.input_class);
-          toast(controlLinks > 1 ? 'Use a separate Image node for each ControlNet channel.' : 'Choose a model validated for this ControlNet channel first.');
+          if (controlLinks > 1) toast('Use a separate Image node for each ControlNet channel.');
+          else toastControlRefusal(channel, targetMeta.service);
           return;
         }
       }
@@ -1305,6 +1380,60 @@
     }
   }
 
+  /* ------------------------------------------------------ preview metadata */
+
+  /**
+   * The pixel size of a preview, in its top-left corner.
+   *
+   * Read off the media itself once the browser has it, never from the width
+   * and height parameters: those say what was asked for, and the interesting
+   * question — especially with a ControlNet map or a model that rounds to its
+   * own grid — is what actually came back. The gallery at /workflows shows the
+   * same badge in the same corner, so the two pages agree on what a size looks
+   * like. The badge never takes a click: the picture underneath it opens the
+   * full-size preview and must keep doing so at every pixel.
+   */
+  function markResolution(host, media) {
+    if (!host || !media) return null;
+    let badge = host.querySelector(':scope > .nres');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nres';
+      host.insertBefore(badge, host.firstChild);
+    }
+    const show = () => {
+      const width = media.naturalWidth || media.videoWidth || 0;
+      const height = media.naturalHeight || media.videoHeight || 0;
+      // `complete`/`readyState` go back to false the moment a new source is
+      // set, so a changed picture blanks the badge instead of showing the
+      // size of the one it replaced.
+      const ready = media.tagName === 'VIDEO' ? media.readyState >= 1 : media.complete;
+      badge.textContent = ready && width && height && !media.hidden
+        ? width + '×' + height : '';
+      // An input box holds the address field and the file button above its
+      // preview, so the corner of the box is not the corner of the picture.
+      // The badge is placed against the media itself, wherever that sits.
+      badge.style.top = (media.offsetTop + 6) + 'px';
+      badge.style.left = (media.offsetLeft + 6) + 'px';
+    };
+    // An input preview is re-marked every time its picture changes, so the
+    // listeners are bound once and read whichever badge is current.
+    media._resolutionShow = show;
+    if (!media._resolutionBound) {
+      media._resolutionBound = true;
+      ['load', 'loadedmetadata', 'emptied', 'error'].forEach(name =>
+        media.addEventListener(name, () => media._resolutionShow && media._resolutionShow()));
+      // Compact mode hides the address field, which moves the picture up.
+      if (typeof ResizeObserver === 'function') {
+        const watcher = new ResizeObserver(() => media._resolutionShow && media._resolutionShow());
+        watcher.observe(host);
+        watcher.observe(media);
+      }
+    }
+    show();
+    return badge;
+  }
+
   function showResult(host, type, value) {
     host.innerHTML = '';
     if (type === 'text') {
@@ -1319,6 +1448,7 @@
         picture.title = 'Click to enlarge';
         picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', value); });
       host.appendChild(picture);
+      markResolution(host, picture);
     } else if (type === 'video') {
       const clip = document.createElement('video');
       clip.src = value;
@@ -1335,6 +1465,7 @@
         });
         clip.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); openPreview('video', value); });
         host.appendChild(clip);
+        markResolution(host, clip);
         clip.play().catch(() => {});
     }
     const link = document.createElement('a');
@@ -1346,13 +1477,87 @@
     if (link.textContent) host.appendChild(link);
   }
 
+  /* --------------------------------------------- control-channel agreement */
+
+  /**
+   * Whether a checkpoint may be handed a control map of this channel.
+   *
+   * This is the server's rule, written out once so the page cannot be stricter
+   * than the thing that actually runs the job. The backend accepts the wire
+   * when the checkpoint names the channel itself *or* when its family is one
+   * the extractor says it has been validated against; the page used to demand
+   * the first alone, which is why Depth stopped attaching to every FLUX
+   * checkpoint even though the render behind it would have worked.
+   *
+   * No checkpoint chosen means no opinion: the service's own deployed default
+   * workflow decides, exactly as the validator does.
+   */
+  function controlChannelAccepted(channel, checkpoint, controlService) {
+    if (!checkpoint) return true;
+    const named = ((checkpoint.control_channels) || []).map(value => String(value));
+    if (named.includes(String(channel))) return true;
+    const families = (((controlService || {}).compatible_image_families) || [])
+      .map(value => String(value).toLowerCase());
+    return families.includes(String(checkpoint.family || '').toLowerCase());
+  }
+
+  /** The checkpoints this channel would have connected to, for the refusal. */
+  function controlChannelModels(channel, controlService, checkpoints) {
+    return (checkpoints || [])
+      .filter(item => item && item.usable !== false &&
+                      controlChannelAccepted(channel, item, controlService))
+      .map(item => String(item.title || item.base || item.file || item.id || ''))
+      .filter(Boolean);
+  }
+
+  function controlRefusalMessage(channel, names) {
+    const title = String(channel || '').charAt(0).toUpperCase() + String(channel || '').slice(1);
+    if (!names || !names.length) {
+      return title + ' control needs a model validated for it. Choose one of the '
+           + 'checkpoints the catalogue lists for this channel, or disconnect the control.';
+    }
+    return title + ' control needs a model validated for it: '
+         + names.slice(0, 4).join(', ') + (names.length > 4 ? '…' : '.');
+  }
+
+  /**
+   * Say no, and say what would have worked.
+   *
+   * The catalogue the picker reads is already cached by the time any node has
+   * a checkpoint on it, so the second toast normally lands in the same frame;
+   * the first one is there for the rare cold start.
+   */
+  function toastControlRefusal(channel, serviceId) {
+    const controlService = serviceById('control_' + channel);
+    toast(controlRefusalMessage(channel, null));
+    if (!(window.AIEntities && window.AIEntities.loadModels)) return;
+    window.AIEntities.loadModels(serviceId || 'image').then(data => {
+      const names = controlChannelModels(channel, controlService,
+                                         (data && data.checkpoints_array) || []);
+      if (names.length) toast(controlRefusalMessage(channel, names));
+    }).catch(() => {});
+  }
+
+  /** The first control channel actually wired into this node, if any. */
+  function connectedControlChannel(id) {
+    const node = editor.getNodeFromId(id);
+    const item = meta(id);
+    if (!node || !item) return '';
+    const field = item.inFields.find((name, index) => name.startsWith('control_') &&
+      ((node.inputs['input_' + (index + 1)] || {}).connections || []).length);
+    return field ? field.slice(8) : '';
+  }
+
   function modelAcceptsConnectedControls(id, entry) {
     const node = editor.getNodeFromId(id);
     const item = meta(id);
     if (!node || !item) return true;
     return item.inFields.every((field, index) => {
       const connected = ((node.inputs['input_' + (index + 1)] || {}).connections || []).length;
-      return !field.startsWith('control_') || !connected || ((entry || {}).control_channels || []).includes(field.slice(8));
+      if (!field.startsWith('control_') || !connected) return true;
+      // The input field and the extractor service share a name: `control_depth`
+      // is both the socket and the service whose families are consulted.
+      return controlChannelAccepted(field.slice(8), entry, serviceById(field));
     });
   }
 
@@ -1433,7 +1638,10 @@
           // A pasted data URL would bloat a shared link, so only an address is
           // carried; a file chosen by hand is deliberately not saved.
           value: field && !String(field.value).startsWith('data:') ? field.value : '',
-          x: raw.pos_x, y: raw.pos_y, params: {_display_mode: node.displayMode || 'medium'}
+          x: raw.pos_x, y: raw.pos_y,
+          params: node.disabled
+            ? {_display_mode: node.displayMode || 'medium', _disabled: true}
+            : {_display_mode: node.displayMode || 'medium'}
         });
       } else {
         nodes.push({
@@ -1621,6 +1829,12 @@
         const node = byId.get(id);
         const feeds = graph.links.filter(link => link.to === id);
         const start = (async () => {
+          // A bypassed node is treated as absent: it never starts, and every
+          // step that reads its output is reported as skipped rather than run.
+          if ((node.params || {})._disabled) {
+            if (epoch === canvasEpoch && meta(id)) markState(id, 'bypassed — not run', 'nstate');
+            return {ok:false, bypassed:true};
+          }
           const upstreamRecords = await Promise.all(feeds.map(link => pending.get(link.from)));
           const superseded = node.kind === KIND_SERVICE &&
             latestPlannedRequests.get(String(id)) !== token.id;
@@ -1632,10 +1846,13 @@
             return {ok:false, cancelled:true};
           }
           if (upstreamRecords.some(record => !record || !record.ok)) {
+            const bypassed = upstreamRecords.some(record => record && record.bypassed);
             if (epoch === canvasEpoch && meta(id)) {
-              markState(id, 'skipped — what it needed did not arrive', 'nstate failed');
+              markState(id, bypassed
+                ? 'skipped — something it needs is bypassed'
+                : 'skipped — what it needed did not arrive', bypassed ? 'nstate' : 'nstate failed');
             }
-            return {ok:false};
+            return {ok:false, bypassed:bypassed};
           }
           if (node.kind === KIND_INPUT) {
             const value = inputValues.get(id) || '';
@@ -1665,11 +1882,16 @@
       const settled = await Promise.all(pending.values());
       const serviceIds = order.filter(id => byId.get(id)?.kind === KIND_SERVICE);
       const produced = serviceIds.filter(id => settled[order.indexOf(id)]?.ok).length;
-      const failed = serviceIds.length - produced;
+      const skipped = serviceIds.filter(id => settled[order.indexOf(id)]?.bypassed).length;
+      const failed = serviceIds.length - produced - skipped;
       if (!settled.some(record => record?.superseded)) {
-        toast(failed
-          ? `${produced} of ${serviceIds.length} steps finished; ${failed} did not.`
-          : `All ${serviceIds.length} steps finished.`);
+        const asked = serviceIds.length - skipped;
+        const aside = skipped ? `; ${skipped} skipped as bypassed` : '';
+        toast(!asked
+          ? `Nothing to run — ${skipped} step${skipped === 1 ? ' is' : 's are'} bypassed.`
+          : failed
+            ? `${produced} of ${asked} steps finished; ${failed} did not${aside}.`
+            : `All ${asked} steps finished${aside}.`);
       }
     } finally {
       runRequests.delete(token);
@@ -2075,7 +2297,12 @@
     const tools = document.getElementById('palette');
     if (!tools || !editor || editor.canvas_x || editor.canvas_y) return;
     editor.canvas_x = 20;
-    editor.canvas_y = Math.round(tools.getBoundingClientRect().height) + 26;
+    // Measured before the strip has finished wrapping, this comes back as one
+    // icon per row — a 800px push that leaves the canvas looking empty on a
+    // graph that is simply above the fold. Two rows of icons is about 90px, so
+    // anything past a quarter of the window is a measurement, not a toolbar.
+    const measured = Math.round(tools.getBoundingClientRect().height) + 26;
+    editor.canvas_y = Math.min(measured, Math.round(window.innerHeight / 4) || 140);
     editor.precanvas.style.transform =
       `translate(${editor.canvas_x}px, ${editor.canvas_y}px) scale(${editor.zoom})`;
   }
@@ -2109,6 +2336,7 @@
       onNodesRemoved:forgetNodes,
       nodeFunctions:id => nodePipelines ? nodePipelines.functionsFor(id) : [],
       onArrange:ids => nodePipelines && nodePipelines.arrange(ids),
+      onToggleBypass:toggleBypass,
       onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
     document.addEventListener('paste', event => {
       const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
@@ -2221,7 +2449,7 @@
       setAnchorId:id => { comparisonAnchorId = String(id || ''); }, toast});
     if (window.AIGraphBridge) graphBridge = window.AIGraphBridge.create({
       editor, getGraph:graphFromCanvas, addServiceNode, addInputNode, applyParams, getMeta:meta,
-      forgetNodes, invalidateNodeAndDownstream, nodeDisplay, applyRecommended,
+      forgetNodes, invalidateNodeAndDownstream, nodeDisplay, applyRecommended, applyBypass,
       setGraphName:name => { document.getElementById('graph-name').value = name; }, toast});
     if (window.AIGraphAgent && graphBridge) graphAgent = window.AIGraphAgent.install({
       getGraph:graphFromCanvas, getCatalogue:() => catalogue,

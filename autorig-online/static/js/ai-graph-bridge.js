@@ -130,6 +130,7 @@
     const invalidateNodeAndDownstream = options.invalidateNodeAndDownstream || function () {};
     const nodeDisplay = options.nodeDisplay || null;
     const applyRecommended = options.applyRecommended || null;
+    const applyBypass = typeof options.applyBypass === 'function' ? options.applyBypass : null;
     const setGraphName = options.setGraphName || function () {};
     const toast = options.toast || function () {};
 
@@ -208,7 +209,13 @@
              ('width' in params && 'height' in params) || '_follow_input_size' in params)) {
           metadata.followInputSize = params._follow_input_size !== false;
         }
+        // The graph handed to the agent already carries the flag, and the
+        // server merges an edit into the params it was given, so what comes
+        // back is authoritative in both directions: present means bypassed,
+        // absent means the node is in the run again.
+        metadata.disabled = params._disabled === true;
       }
+      if (applyBypass) applyBypass(id, params._disabled === true);
       const element = nodeElement(id);
       const heading = element && element.querySelector('.nhead b');
       if (heading) {

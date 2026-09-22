@@ -26,7 +26,11 @@ import ai_services
 router = APIRouter()
 
 MAX_OPERATIONS = 200
-DISPLAY_PARAM_KEYS = {"_label", "_display_mode", "_follow_input_size"}
+# Editor-only parameters. They describe how a node is drawn and whether it takes
+# part in a run, never what is asked of a service, so they are accepted on every
+# node — an input node included — without appearing in any service declaration.
+BOOLEAN_DISPLAY_PARAM_KEYS = {"_follow_input_size", "_disabled"}
+DISPLAY_PARAM_KEYS = {"_label", "_display_mode"} | BOOLEAN_DISPLAY_PARAM_KEYS
 CONTROL_INPUTS = {"control_pose": "pose", "control_depth": "depth", "control_canny": "canny"}
 
 
@@ -135,9 +139,9 @@ def _normalize_node_params(node: ai_graph.GraphNode) -> None:
 
 
 def _validate_param_value(service_id: str, name: str, value: Any) -> None:
-    if name == "_follow_input_size":
+    if name in BOOLEAN_DISPLAY_PARAM_KEYS:
         if not isinstance(value, bool):
-            _reject("bad_parameter_value", "Parameter '_follow_input_size' must be boolean")
+            _reject("bad_parameter_value", f"Parameter '{name}' must be boolean")
         return
     if name in DISPLAY_PARAM_KEYS:
         if not isinstance(value, str):

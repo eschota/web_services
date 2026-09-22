@@ -21,6 +21,29 @@
     return Math.max(low, Math.min(high, value));
   }
 
+  /**
+   * The four things Drawflow needs to be told to drop one wire.
+   *
+   * It keeps them on the connection's own element as classes — the node at
+   * each end and the socket at each end — so a click on the line is enough to
+   * name the connection exactly, without searching the graph for it. They are
+   * read by prefix rather than by position so the order of the class list is
+   * not load-bearing.
+   */
+  function connectionParts(element) {
+    const classes = Array.from((element && element.classList) || []);
+    const inputNode = classes.find(name => name.indexOf('node_in_node-') === 0);
+    const outputNode = classes.find(name => name.indexOf('node_out_node-') === 0);
+    const outputClass = classes.find(name => /^output_\d+$/.test(name));
+    const inputClass = classes.find(name => /^input_\d+$/.test(name));
+    if (!inputNode || !outputNode || !outputClass || !inputClass) return null;
+    return {
+      inputId: inputNode.slice('node_in_node-'.length),
+      outputId: outputNode.slice('node_out_node-'.length),
+      outputClass: outputClass, inputClass: inputClass
+    };
+  }
+
   function safeJsonValue(value, depth) {
     if (depth > 5) return false;
     if (typeof value === 'number') return Number.isFinite(value);
@@ -62,6 +85,7 @@
     const onSetComparisonAnchor = typeof options.onSetComparisonAnchor === 'function' ? options.onSetComparisonAnchor : null;
     const nodeFunctions = typeof options.nodeFunctions === 'function' ? options.nodeFunctions : null;
     const onArrange = typeof options.onArrange === 'function' ? options.onArrange : null;
+    const onToggleBypass = typeof options.onToggleBypass === 'function' ? options.onToggleBypass : null;
     const toast = typeof options.toast === 'function' ? options.toast : function () {};
     const nodeLimit = clamp(Number(options.nodeLimit) || 200, 1, 1000);
     if (!editor || !canvas || !getMeta || !addInputNode || !addServiceNode || !exportGraph) {
@@ -234,6 +258,17 @@
         event.preventDefault(); event.stopImmediatePropagation(); return;
       }
       if (event.button !== 0) return;
+      // Shift on a wire means "remove this one". A plain click still hands the
+      // connection to Drawflow to select, and Shift on empty canvas still adds
+      // to the selection, so nothing already in the hands loses its meaning.
+      const wire = event.target.closest && event.target.closest('svg.connection');
+      if (wire && event.shiftKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeMenu();
+        removeConnectionElement(wire);
+        return;
+      }
       if (!node) {
         if (event.target.closest && event.target.closest('.connection, .main-path')) return;
         event.preventDefault();
@@ -261,6 +296,23 @@
       if (!selected.has(id) || selected.size !== 1) selectOnly(id);
     }
 
+    /**
+     * Drop one wire.
+     *
+     * `removeSingleConnection` is the only removal that fires Drawflow's
+     * `connectionRemoved`, which is what invalidates the node the wire fed and
+     * everything below it; tearing the element out of the DOM would leave the
+     * graph believing the link is still there.
+     */
+    function removeConnectionElement(wire) {
+      const parts = connectionParts(wire);
+      if (!parts) { toast('That wire could not be identified.'); return false; }
+      const removed = editor.removeSingleConnection(
+        parts.outputId, parts.inputId, parts.outputClass, parts.inputClass);
+      toast(removed ? 'Connection removed.' : 'That wire was already gone.');
+      return !!removed;
+    }
+
     function safeGraph() {
       const graph = exportGraph();
       return graph && Array.isArray(graph.nodes) && Array.isArray(graph.links) ? graph : null;
@@ -274,9 +326,13 @@
       const ids = new Set(Array.from(selected, String));
       const nodes = graph.nodes.filter(node => ids.has(String(node.id))).slice(0, nodeLimit).map(node => {
         if (node.kind === 'input') {
+          // A bypassed node is copied bypassed: the copy is a copy of the
+          // decision as well as of the wiring.
+          const presentation = {_display_mode: node.params && node.params._display_mode};
+          if (node.params && node.params._disabled === true) presentation._disabled = true;
           return { id: String(node.id), kind: 'input', entity_type: String(node.entity_type || ''),
             value: typeof node.value === 'string' && !node.value.startsWith('data:') ? node.value : '',
-            x: Number(node.x) || 0, y: Number(node.y) || 0, params: {_display_mode: node.params && node.params._display_mode} };
+            x: Number(node.x) || 0, y: Number(node.y) || 0, params: presentation };
         }
         return { id: String(node.id), kind: 'service', service: String(node.service || ''),
           x: Number(node.x) || 0, y: Number(node.y) || 0,
@@ -549,7 +605,7 @@
       });
       const queue = (incoming.get(String(targetId)) || []).map(id => ({ id, distance: 1 }));
       const visited = new Set([String(targetId)]);
-      const originals = [], generated = [];
+      const originals = [], generated = [], controls = [];
       while (queue.length && visited.size <= nodeLimit) {
         const current = queue.shift();
         if (visited.has(current.id)) continue;
@@ -563,7 +619,11 @@
         } else if (!selected.has(current.id)) {
           const result = graph.results && graph.results[current.id];
           const params = node.params || {};
-          if (result && result.status === 'done' && result.type === 'image' && result.value) {
+          const finished = result && result.status === 'done' && result.value;
+          const controlMap = finished && String(result.type || '').indexOf('control_') === 0;
+          if (controlMap) {
+            controls.push({ distance: current.distance, url: result.value });
+          } else if (finished && result.type === 'image') {
             generated.push({ distance: current.distance, url: result.value });
           } else if (Number.isFinite(Number(params.width)) && Number.isFinite(Number(params.height))) {
             generated.push({ distance: current.distance, width: Number(params.width), height: Number(params.height) });
@@ -571,14 +631,26 @@
         }
         (incoming.get(current.id) || []).forEach(id => queue.push({ id, distance: current.distance + 1 }));
       }
-      return { originals: originals.sort((a, b) => a.distance - b.distance),
-        generated: generated.sort((a, b) => a.distance - b.distance) };
+      const byDistance = (a, b) => a.distance - b.distance;
+      return { originals: originals.sort(byDistance), generated: generated.sort(byDistance),
+        controls: controls.sort(byDistance) };
     }
 
+    /**
+     * The size the node should be drawn at, from the nearest upstream picture.
+     *
+     * A finished ControlNet map wins over the original it was extracted from.
+     * The map is the one upstream image the sampler reads pixel for pixel, so
+     * if the two ever disagree it is the map that decides what comes out, and
+     * a node following the original would ask for a size the render cannot
+     * honour. A map that is only `stale` — its source has changed and it has
+     * not been re-extracted — is not in the list at all, so a changed input
+     * falls back to the new original until the new map lands.
+     */
     async function resolveInputDimensions(graph, targetId) {
       const candidates = upstreamCandidates(graph, targetId);
       let lastError = null;
-      for (const candidate of candidates.originals.concat(candidates.generated)) {
+      for (const candidate of candidates.controls.concat(candidates.originals, candidates.generated)) {
         if (candidate.width && candidate.height) return candidate;
         try { return await imageDimensions(candidate.url); } catch (error) { lastError = error; }
       }
@@ -730,6 +802,11 @@
         commandButton('Duplicate', 'Duplicate selected nodes and their internal wires (Ctrl/Cmd+D)', duplicateSelection),
         commandButton('Delete', 'Delete every selected node and its attached wires (Delete)', removeSelection, 'danger')
       );
+      if (onToggleBypass) {
+        commands.append(commandButton('Bypass / Enable',
+          'Take the selected nodes out of the run, or put them back (Ctrl/Cmd+P)',
+          () => onToggleBypass(Array.from(selected))));
+      }
       if (onSetComparisonAnchor) {
         commands.append(commandButton('Set as A', 'Use this node as the visual A/B comparison reference',
           () => onSetComparisonAnchor(String(contextNodeId))));
@@ -852,6 +929,15 @@
 
     function onKeyDown(event) {
       if (event.key === ' ') spaceDown = true;
+      // Before the editable-target guard on purpose: Ctrl+P must never reach
+      // the browser's print dialog on this page, whatever happens to have
+      // focus. A node editor has nothing worth printing.
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === 'p') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (onToggleBypass) onToggleBypass(Array.from(selected));
+        return;
+      }
       if (event.key === 'Escape') {
         closeMenu(); clearSelection();
         if (!editableTarget(event.target)) { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -907,6 +993,9 @@
       selectAll,
       duplicateSelection,
       removeSelection,
+      // A finished render is new size information; the host calls this so a
+      // node following its input catches up with what actually came back.
+      refreshSizes: scheduleFollowingRefresh,
       destroy: function () {
         closeMenu();
         canvas.removeEventListener('mousedown', onMouseDown, true);

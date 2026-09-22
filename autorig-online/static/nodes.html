@@ -16,16 +16,16 @@
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260922-queue-types"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260922-toolbar"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260922-nodesui5"></script>
     <script src="/static/js/ai-node-display.js?v=20260922-toolbar2"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
-    <script src="/static/js/ai-node-compare.js?v=20260922-history2"></script>
-    <script src="/static/js/ai-graph-bridge.js?v=20260922-follow-input"></script>
+    <script src="/static/js/ai-node-compare.js?v=20260922-nodesui5"></script>
+    <script src="/static/js/ai-graph-bridge.js?v=20260922-nodesui5"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
     <script src="/static/js/ai-node-placement.js?v=20260922-toolbar2"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-nodes.js?v=20260922-toolbar3"></script>
+    <script src="/static/js/ai-nodes.js?v=20260922-nodesui5c"></script>
     <style>
         .ai-page {
             background:
@@ -178,6 +178,15 @@
         }
         .nhead b { font-size: 13.5px; }
         .nslow { font-style: normal; font-size: 10.5px; color: #facc15; margin-left: auto; }
+        .nbypass {
+            font-style: normal; font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
+            color: #fbbf24; background: rgba(251,191,36,.14); border: 1px solid rgba(251,191,36,.35);
+            border-radius: 5px; padding: 2px 5px; flex: 0 0 auto;
+        }
+        /* A bypassed node stays legible — it is still being read and edited —
+           but is plainly not part of the run. */
+        .drawflow .drawflow-node.bypassed { opacity: .5; border-style: dashed; }
+        .drawflow .drawflow-node.bypassed .nbypass { opacity: 1; }
         .nports { padding: 6px 0 0; }
         .prow {
             height: 26px; display: flex; align-items: center; padding: 0 14px;
@@ -222,6 +231,24 @@
             border-radius: 8px; color: inherit; padding: 5px;
         }
         .ninput img, .ninput video { margin-top: 7px; width: 100%; border-radius: 8px; display: block; }
+
+        /* The real pixel size of whatever the preview is showing, in the same
+           corner and the same shape as the badges on the /workflows gallery.
+           It never takes a click: the picture under it opens full size. */
+        .ninput, .nout { position: relative; }
+        .nres {
+            position: absolute; top: 6px; left: 6px; z-index: 2; pointer-events: none;
+            font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
+            padding: 3px 6px; border-radius: 6px; color: #f1f5ff;
+            background: rgba(8,10,22,.76); border: 1px solid rgba(255,255,255,.14);
+        }
+        .nres:empty { display: none; }
+        /* The compact view hides everything in a preview box that is not the
+           media itself; the size badge is part of reading the media. */
+        .drawflow .drawflow-node[data-display-mode] .nout > .nres,
+        .drawflow .drawflow-node[data-display-mode] .ninput > .nres { display: block !important; }
+        .drawflow .drawflow-node[data-display-mode] .nout > .nres:empty,
+        .drawflow .drawflow-node[data-display-mode] .ninput > .nres:empty { display: none !important; }
 
         .nrec { padding: 0 14px 6px; font-size: 10.5px; color: #4ade80; line-height: 1.4; }
         .nstate { padding: 0 14px 8px; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); }
@@ -274,9 +301,10 @@
                 kind of thing will connect. Render runs the whole composition; steps that do
                 not depend on each other run at the same time.
                 Select with left-drag or Shift-click. Right-drag pans. Ctrl+C/V copies and
-                pastes; Ctrl+D duplicates; Delete removes selected nodes. Double-click a
-                header for S/M/A views, and Shift-click the S/M/A button to change every node.
-                Right-click a picture node for Functions.
+                pastes; Ctrl+D duplicates; Delete removes selected nodes; Ctrl+P takes them
+                out of the run and puts them back. Shift-click a wire to delete it.
+                Double-click a header for S/M/A views, and Shift-click the S/M/A button to
+                change every node. Right-click a picture node for Functions.
             </p>
         </div>
     </details>
