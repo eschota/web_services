@@ -1,6 +1,6 @@
 # OnlyRender ComfyUI 0.37 promotion gate
 
-Status: **ready for an operator-controlled cutover; not enabled in production**.
+Status: **promoted on worker-4090 after all gates passed**.
 
 ## Durable runtime
 
@@ -18,8 +18,9 @@ overlay before startup. Its Stop action only terminates a port 8988 listener
 whose executable, launcher path, and port all match this runtime. The old
 controller and ComfyUI 0.21.1 installation remain intact for rollback.
 
-`WAN2_PROMOTED` is deliberately absent. The v0.37 controller therefore does
-not advertise Wan Animate 2 until the production cutover is explicitly made.
+`WAN2_PROMOTED` was created only after the promoted listener passed the native
+Wan2 node, queue, and reverse-tunnel health checks. The worker now advertises
+`gen_video_wan_animate2_by_url.json` alongside its previous capabilities.
 
 ## Compatibility gate
 
@@ -50,6 +51,12 @@ frame 24. The graph used `LTXVSelectLatents` before tiled VAE decoding and
 limited delivery to exactly 25 frames.
 
 After the last terminal result, the candidate PID was verified and stopped.
-The old controller successfully restored ComfyUI 0.21.1 on port 8988, its queue
-was empty, and worker registration completed. No permanent runtime switch was
-made.
+The old controller successfully restored ComfyUI 0.21.1 on port 8988 and its
+queue was empty. The subsequent promotion drained that queue, stopped the old
+listener, and started the durable 0.37 runtime on port 8988. Live verification
+resolved `WanAnimate2ToVideo`, `WanAnimate2Cache`, `LTXAddVideoICLoRAGuide`,
+`LTXVSelectLatents`, `ReferenceLatent`, `Flux2Scheduler`,
+`CheckpointLoaderSimple`, and `DWPreprocessor`; the queue was empty and the VPS
+could reach `/system_stats` through port 19409. The Renderfin registry then
+reported worker-4090 online with the exact Wan2 workflow token. The old runtime
+and controller remain the rollback path.
