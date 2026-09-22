@@ -20,7 +20,7 @@ This document records delivery of the bounded Video Avatar goal and the limits o
 
 | Area | Current evidence | Status |
 |---|---|---|
-| Production | Static/report release `S1` is live. Renderfin release `R1` restores the production managed Comfy submit contract while selecting only `type=output` video artifacts. Wan-Animate-2 runs on the live ComfyUI 0.37 worker. | active, scoped acceptances recorded below |
+| Production | Static/report release `S2` is live. Renderfin release `R1` restores the production managed Comfy submit contract while selecting only `type=output` video artifacts. Wan-Animate-2 runs on the live ComfyUI 0.37 worker. | active, scoped acceptances recorded below |
 | Reference inputs | Nine four-second source segments and five-frame contact sheets exist under `.codex_tmp/avatar-video-20260922/reference-review`. Prompts were written from the observed frames. | prepared |
 | Benchmark manifest | Nine sources, one LTX 2.3 first-frame baseline, nine cases; fixed seed `9221001`; 97 frames; 960×540 landscape and 540×960 portrait cases. | validated structurally |
 | Benchmark batch | All nine baseline jobs completed. The first three retain their 24-frame sampled scope in [the initial review](video-baseline-review-20260922.md). Cases 4–6 and 7–9 received all-97-frame inspections in the [second](video-baseline-next3-review-20260922.md) and [final](video-baseline-final3-review-20260922.md) reviews. | nine completed; scope differs by review batch |
@@ -30,7 +30,7 @@ This document records delivery of the bounded Video Avatar goal and the limits o
 | LTX controls | Pose, Depth, and Canny each completed a 25-frame execution canary. Pose also completed an exact 97-frame canary. Release `P` normalizes short sources before guide construction, and a repaired predecode/guide owner-graph run completed as task `2f83c954-dcce-4fd9-96fd-450f5d4c7cf5` from graph `6decd42fc85d`. | live executable path; quality remains capability- and scene-specific |
 | Wan Animate | An earlier 25-frame proof showed an unwanted tattoo-like detail; its cause was not established. Wan-Animate-2 then passed isolated 81/97-frame tests, was promoted to the live ComfyUI 0.37 worker, and produced the accepted four-shot story below. | live for the tested scoped workflow; no universal quality claim |
 | UI production | Incremental execution, exact-model display, ETA/status, per-node share, graph duplication, A/B anchor and bounded result history are deployed in `K1`. | deployed; bounded production QA recorded |
-| Review navigation | Production QA exercised output preview/overlay, current-result sharing, graph copy/reload, and saved-history recovery. | working for tested cases; complete benchmark navigation still open |
+| Review navigation | Production QA exercised output preview/overlay, sharing, graph copy/reload and saved history. The final report loaded all 27 media elements without an error, displayed 9 tests / 4 story scenes / 0 awaiting review, and paired playback/pause worked at 1x with about 43 ms offset. | verified on production |
 | Four-shot story | Source graph `30cb8f68083f` produced four exact 960×540, 24 FPS, 97-frame Wan-Animate-2 clips. All 388 generated frames were inspected; actor assignment and cross-shot wardrobe identity are preserved. Final graph: `a7efd447a3f6`; assembled video: [План на двоих](https://autorig.online/renderfin/render/default_user/maya-leo-plan-for-two-20260922-7869863d.mp4). [Detailed review](lost-note-story-review-20260922.md). | accepted for this bounded story with documented limitations |
 
 ## Known render evidence
@@ -204,3 +204,19 @@ The first three baseline reviews are sampled; the next six and all four story
 shots cover every generated frame. The public source previews retain their
 watermarks. Fine hidden anatomy, lip-sync, fast dance and long continuous
 generation were not established by this test set.
+
+## Final publication verification
+
+The production report bytes match source SHA-256
+`7ade10a85b7487f93a44210e975a00d7d64694e196d4d24ba807d1a224995a48`.
+The final montage has 388 strictly increasing frame timestamps, each separated
+by 1/24 second within one microsecond; scene boundaries are at 4.041667,
+8.083333 and 12.125 seconds. Production browser playback reported exact
+960×540 dimensions and a 16.166667-second duration. The final graph persists
+all scene results and includes the assembled video as a shareable input.
+
+The final 10Eros regression after the runtime upgrade also passed: public
+task `e3b27e16-4b48-4c78-b110-597fe2b5e8b2`, actual nine-step author sigmas,
+CFG 1 / Euler ancestral, exact 25 frames at 960×540 / 24 fps. The live worker
+queue was empty after all accepted jobs completed. Sampling details and
+evidence limits remain in `model-sampling-audit-20260922.md`.
