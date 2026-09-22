@@ -247,6 +247,18 @@ test('trailing commas are repaired and an attempt nonce defeats the request cach
   assert.equal(JSON.parse(api.buildAgentInput('rename it', QWEN, graph, catalogue, [], []).encoded).attempt, undefined);
 });
 
+test('Russian requests select services by keyword and an empty graph gets the core services', () => {
+  const api = load();
+  const services = ['image', 'video', 'text', 'vision', '3dmodel', 'avatar_image', 'control_pose'].map(id => ({
+    id, title:id, status:'live', inputs:[], outputs:[], params_array:[{name:'p', type:'text'}]}));
+  const catalogue = {entity_types_array:[{id:'image'}], services_array:services, models_array:[]};
+  const empty = {name:'new', nodes:[], links:[]};
+  const russian = JSON.parse(api.buildAgentInput('сделай секвенцию с текстовой генерацией и видео приветствия персонажа', QWEN, empty, catalogue, [], []).encoded);
+  assert.ok(russian.catalogue.services.text && russian.catalogue.services.video && russian.catalogue.services.avatar_image);
+  const vague = JSON.parse(api.buildAgentInput('сделай что-нибудь красивое', QWEN, empty, catalogue, [], []).encoded);
+  assert.deepEqual(Object.keys(vague.catalogue.services).sort(), ['image', 'text', 'video', 'vision']);
+});
+
 test('the standing instructions name the single output socket of input nodes', () => {
   const api = load();
   assert.match(api.systemPrompt, /output socket named "value"/);

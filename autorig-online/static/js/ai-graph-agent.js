@@ -17,7 +17,9 @@
   'use strict';
 
   const STORAGE_PREFIX = 'aiGraphAgent.chat.v1:';
-  const MODEL_KEY = 'aiGraphAgent.model.v1';
+  // v2: the verified default moved to the fast 8k model; a stored v1 choice
+  // of the 4k model would otherwise keep failing large edits silently.
+  const MODEL_KEY = 'aiGraphAgent.model.v2';
   const DRAFT_KEY = 'aiGraphAgent.draft.v1';
   const MAX_MESSAGES = 60;
   const MAX_OPERATIONS = 64;
@@ -177,18 +179,22 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
     };
   }
 
+  // No  here: JavaScript word boundaries are ASCII-only, so a Cyrillic
+  // keyword after a space never matched and Russian requests got an empty
+  // catalogue.
   const SERVICE_WORDS = [
-    [/\b(video|clip|видео|ролик|анимаци)/i, 'video'],
-    [/\b(text|текст|llm|промпт|prompt)/i, 'text'],
-    [/\b(vision|вижн|вижен|описан|describe)/i, 'vision'],
-    [/\b(image|картин|изображен|picture|draw)/i, 'image'],
-    [/\b(3d|3dmodel|модел)/i, '3dmodel'],
-    [/\b(pose|поз)/i, 'control_pose'], [/\b(depth|глубин)/i, 'control_depth'],
-    [/\b(canny|контур|edge)/i, 'control_canny'],
-    [/\b(avatar|аватар)/i, 'avatar_image'],
-    [/\b(storyboard|раскадров)/i, 'video_storyboard'],
-    [/\b(first frame|первый кадр|кадр)/i, 'video_frame']
+    [/(video|clip|видео|ролик|анимаци|клип)/i, 'video'],
+    [/(text|текст|llm|промпт|prompt|описание)/i, 'text'],
+    [/(vision|вижн|вижен|описа|describe|распозна)/i, 'vision'],
+    [/(image|картин|изображен|picture|draw|рисун|генерац)/i, 'image'],
+    [/(3d|3д|3dmodel|модел|mesh|меш)/i, '3dmodel'],
+    [/(pose|поз)/i, 'control_pose'], [/(depth|глубин)/i, 'control_depth'],
+    [/(canny|контур|edge)/i, 'control_canny'],
+    [/(avatar|аватар|персонаж|character)/i, 'avatar_image'],
+    [/(storyboard|раскадров)/i, 'video_storyboard'],
+    [/(first frame|первый кадр|кадр)/i, 'video_frame']
   ];
+  const CORE_SERVICES = ['image', 'video', 'text', 'vision'];
 
   function servicesNamed(text) {
     const out = new Set();
@@ -343,6 +349,9 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
     // as "add every image model". Give it the image catalogue even before an
     // image service node exists.
     if (!relevant.size && compact.nodes.some(node => node.type === 'input/text')) relevant.add('image');
+    // An empty or input-only graph with a request naming nothing specific
+    // still needs something to build with.
+    if (!relevant.size) CORE_SERVICES.forEach(service => relevant.add(service));
     const newest = [];
     let used = 0;
     for (let index = history.length - 1; index >= 0 && newest.length < 2; index -= 1) {
