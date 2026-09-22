@@ -154,7 +154,42 @@ class VisionRequest(BaseModel):
     prompt: str = Field(..., description="Question about the image")
     image_url: Optional[str] = Field(None, description="Public http(s) URL of the image")
     image_base64: Optional[str] = Field(None, description="Inline image, base64 or data URL")
+    # A video is read by turning it into a picture first: either its opening
+    # frame or a labelled sheet of frames spanning the whole clip. The models
+    # on the farm read images, so this is what "the Vision node accepts video"
+    # means in practice — and doing it here keeps it one request for a caller.
+    video_url: Optional[str] = Field(
+        None, max_length=2048,
+        description="Public https URL of a video to read instead of an image")
+    video_mode: str = Field(
+        "storyboard",
+        description="storyboard (frames from start to end) or frame (first frame only)")
+    system_prompt: Optional[str] = Field(
+        None, max_length=4000,
+        description="Standing instructions for the model, kept out of the answer")
+    structured: bool = Field(
+        False,
+        description="Ask for one JSON object {\"output_text\": …} and return only its text")
     model: Optional[str] = Field(None, description="Model id from /api/ai/models")
+
+    @field_validator("video_url")
+    @classmethod
+    def validate_video_source(cls, value):
+        if value is None or not str(value).strip():
+            return None
+        from renderfin.video_input import VideoInputError, validate_video_url
+        try:
+            return validate_video_url(str(value))
+        except VideoInputError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("video_mode")
+    @classmethod
+    def validate_video_mode(cls, value):
+        mode = str(value or "storyboard").strip().lower()
+        if mode not in ("storyboard", "frame"):
+            raise ValueError("video_mode must be 'storyboard' or 'frame'")
+        return mode
     max_output_tokens: Optional[int] = Field(None, ge=-1,
         description="-1 removes the output-token cap; positive values request a budget")
 
@@ -175,6 +210,9 @@ class TextRequest(BaseModel):
     system_prompt: Optional[str] = Field(
         None, max_length=4000,
         description="Standing instructions sent as a separate system-role message")
+    structured: bool = Field(
+        False,
+        description="Ask for one JSON object {\"output_text\": …} and return only its text")
     # The text to work on, kept apart from the instruction. Sending the two
     # already glued together works, but then a caller who has a document and a
     # standing instruction has to do the gluing, and every caller does it
@@ -478,6 +516,99 @@ def _validate_prompt(raw: str) -> str:
             "error_string": "prompt_too_long",
             "message_string": f"prompt exceeds {MAX_PROMPT_CHARS} characters"})
     return prompt
+
+
+# --------------------------------------------------- standing instructions
+
+STRUCTURED_OUTPUT_INSTRUCTION = (
+    "Reply with exactly one JSON object and nothing else: "
+    '{"output_text": "..."}. '
+    "Put the whole answer inside output_text as plain text. "
+    "No markdown, no code fence, no explanation before or after the object."
+)
+
+
+def _default_system_prompt() -> str:
+    import ai_services
+    return ai_services.SYSTEM_PROMPT_DEFAULT
+
+
+def _standing_instruction(system_prompt: Optional[str], structured: bool) -> str:
+    """What the model is told before it is told what to do.
+
+    A structured request always carries an instruction, because the JSON shape
+    is the whole point of it; an unstructured one carries only what the caller
+    sent, so the plain /vision and /text pages behave exactly as before.
+    """
+    text = str(system_prompt or "").strip()
+    if not structured:
+        return text
+    return (text or _default_system_prompt()).strip() + "\n" + STRUCTURED_OUTPUT_INSTRUCTION
+
+
+def _instruction_role(model: Dict[str, object]) -> str:
+    """Where a model's standing instructions are actually obeyed.
+
+    Only a worker that passed the system-role canary is asked to carry them in
+    a system message. For the rest they go at the top of the prompt, which is
+    what the graph agent already does — and it matters more than losing an
+    instruction would: `_pick_worker(require_system_prompt=True)` refuses every
+    node that has not verified the role for that model, so sending a system
+    prompt for Qwen does not degrade the answer, it fails the request.
+    """
+    role = str(model.get("system_prompt_role")
+               or model.get("graph_agent_instruction_role")
+               or "system").strip().lower()
+    return "prompt" if role == "prompt" else "system"
+
+
+def _apply_standing_instruction(model: Dict[str, object],
+                                payload: Dict[str, object],
+                                instruction: str) -> Dict[str, object]:
+    if not instruction:
+        return payload
+    prompt = str(payload.get("prompt") or "")
+    # One bound on the whole request, whichever way the instruction travels.
+    _validate_prompt(instruction + "\n" + prompt)
+    if _instruction_role(model) == "system":
+        payload["system_prompt"] = instruction
+    else:
+        payload["prompt"] = instruction + "\n\n" + prompt
+    return payload
+
+
+def _extract_output_text(answer: str) -> Tuple[str, bool]:
+    """Unwrap one `{"output_text": …}` object, tolerating what models add.
+
+    Returns (text, was_structured). A model that answers in plain text, or
+    fences its JSON, or writes a sentence after it, all end up in the same
+    place: the caller gets the answer and never the wrapper. When nothing
+    parses the raw answer is returned unchanged, so a model that ignores the
+    instruction still produces a usable node result rather than an empty one.
+    """
+    text = str(answer or "")
+    candidate = text.strip()
+    if "```" in candidate:
+        parts = candidate.split("```")
+        if len(parts) >= 3:
+            inner = parts[1]
+            first, newline, rest = inner.partition("\n")
+            # ```json on its own line is a language tag, not content.
+            if newline and (not first.strip() or first.strip().isalnum()):
+                inner = rest
+            candidate = inner.strip() or candidate
+    decoder = json.JSONDecoder()
+    index = candidate.find("{")
+    while index >= 0:
+        try:
+            value, _end = decoder.raw_decode(candidate[index:])
+        except ValueError:
+            index = candidate.find("{", index + 1)
+            continue
+        if isinstance(value, dict) and isinstance(value.get("output_text"), str):
+            return value["output_text"].strip(), True
+        index = candidate.find("{", index + 1)
+    return text, False
 
 
 def _validate_model_choice(service_id: str, checkpoint: Optional[str],
@@ -817,6 +948,13 @@ def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
     finished = status in ("Completed", "Failed")
     if status == "Completed" and service_id:
         record_duration(service_id, float(raw.get("elapsed_seconds") or 0))
+    # Unwrapped here rather than at the endpoint that submitted the work: a
+    # graph node gets its task id back immediately and collects the answer from
+    # /api/ai/status, so unwrapping only on submission would hand the wrapper
+    # to every caller that does not block. Keyed on the shape, not on remembered
+    # state, so a restart between submit and poll changes nothing.
+    answer = str(raw.get("answer") or "")
+    output_text, was_structured = _extract_output_text(answer)
     return {
         "success_bool": status != "Failed",
         "task_id_string": task_id,
@@ -824,13 +962,38 @@ def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
         "finished_bool": finished,
         "mode_string": str(raw.get("mode") or ""),
         "model_string": model_id,
-        "answer_string": str(raw.get("answer") or ""),
+        "answer_string": output_text,
+        "raw_answer_string": answer,
+        "structured_answer_bool": was_structured,
         "reasoning_string": str(raw.get("reasoning") or ""),
         "error_string": str(raw.get("error") or ""),
         "elapsed_seconds_float": round(float(raw.get("elapsed_seconds") or 0.0), 2),
         "stage_string": str(raw.get("current_stage") or ""),
         "server_time_unix_int": int(time.time()),
     }
+
+
+def _folded_system_prompt(payload: Dict[str, object],
+                          refusal: HTTPException) -> Optional[Dict[str, object]]:
+    """Put the standing instruction at the top of the prompt instead.
+
+    One worker build on the farm has passed the system-role canary. When that
+    node is offline the choice is between an answer given the instruction the
+    way every other model on the farm gets it, and no answer at all — and a
+    node showing "no worker has verified system instructions" is the worse of
+    the two by a distance. Only that one refusal is caught: a missing model or
+    an unreachable farm still fails, because folding would not fix either.
+    """
+    detail = refusal.detail if isinstance(refusal.detail, dict) else {}
+    if str(detail.get("error_string") or "") != "system_prompt_not_supported":
+        return None
+    instruction = str(payload.get("system_prompt") or "")
+    if not instruction:
+        return None
+    folded = dict(payload)
+    folded.pop("system_prompt", None)
+    folded["prompt"] = instruction + "\n\n" + str(payload.get("prompt") or "")
+    return folded
 
 
 async def _run(
@@ -847,7 +1010,15 @@ async def _run(
             requirements["require_system_prompt"] = True
         if payload.get("max_output_tokens") == -1:
             requirements["require_unlimited_output"] = True
-        worker = await _pick_worker(client, model_id, **requirements)
+        try:
+            worker = await _pick_worker(client, model_id, **requirements)
+        except HTTPException as exc:
+            folded = _folded_system_prompt(payload, exc)
+            if folded is None:
+                raise
+            payload = folded
+            requirements.pop("require_system_prompt", None)
+            worker = await _pick_worker(client, model_id, **requirements)
         worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
         task_id = f"{_node_key(worker)}.{worker_task_id}"
         raw: Dict[str, object] = {"status": "Pending"}
@@ -882,8 +1053,14 @@ async def api_vision_docs():
         "status_string": "ok",
         "method_string": "POST",
         "url_string": "/api/vision",
-        "required_fields_array": ["prompt", "image_url or image_base64"],
-        "optional_fields_array": ["model", "max_output_tokens", "wait_seconds"],
+        "required_fields_array": ["prompt", "image_url, image_base64 or video_url"],
+        "optional_fields_array": ["model", "max_output_tokens", "wait_seconds",
+                                  "video_url", "video_mode", "system_prompt", "structured"],
+        "video_mode_array": ["storyboard", "frame"],
+        "structured_string": (
+            "true asks the model for one {\"output_text\": …} object and returns "
+            "its text as answer_string, with the model's own reply kept in "
+            "raw_answer_string"),
         "models_url_string": "/api/ai/models",
         "example_request_object": {
             "prompt": "What is in this picture?",
@@ -919,25 +1096,49 @@ async def api_vision(request: Request, body: VisionRequest):
                    for entry in ai_model_catalogue.entries()
                    if entry.get("file") in selected or "vision" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
+    # Namespace bumped with the structured answer: a cached reply from before
+    # the JSON contract is the wrapper text, and replaying it would put the
+    # model's preamble back into every node that asked for a clean prompt.
     return await ai_request_cache.run_cached("vision", payload,
-        lambda: _uncached_api_vision(request, body), namespace="ai-workflows-20260922-v1")
+        lambda: _uncached_api_vision(request, body), namespace="ai-structured-20260922-v1")
 
 
 async def _uncached_api_vision(request: Request, body: VisionRequest):
     model = _model_entry(body.model)
     prompt = _validate_prompt(body.prompt)
-    if not body.image_url and not body.image_base64:
+    if not body.image_url and not body.image_base64 and not body.video_url:
         raise HTTPException(status_code=400, detail={
             "error_string": "image_required",
-            "message_string": "Provide image_url or image_base64"})
+            "message_string": "Provide image_url, image_base64 or video_url"})
     image_url = str(body.image_url or "").strip()
-    if not image_url:
+    video_note = ""
+    if not image_url and not body.image_base64:
+        # A video reaches the model as a picture of the video. Which picture is
+        # the whole difference between "what is in this shot" and "what happens
+        # in this clip", so the mode is a node setting rather than a constant.
+        import ai_video_reference
+        view = "first_frame" if body.video_mode == "frame" else "contact_sheet"
+        reference = await ai_video_reference.reference_for_video(
+            str(body.video_url or ""), view)
+        image_url = str(reference.get("image_url_string") or "")
+        if not image_url:
+            raise HTTPException(status_code=502, detail={
+                "error_string": "video_reference_failed",
+                "message_string": "The video could not be turned into a picture"})
+        video_note = str(reference.get("prompt_prefix_string") or "")
+    elif not image_url:
         async with httpx.AsyncClient() as client:
             image_url = await _publish_inline_image(
                 client, _decode_inline_image(body.image_base64 or "")
             )
+    if video_note:
+        # Without this the model sees a collage and describes the tiles; with
+        # it, it sees one video and describes what happens over its length.
+        prompt = _validate_prompt(video_note + "\n\n" + prompt)
     payload: Dict[str, object] = {"prompt": prompt, "image_url": image_url}
     payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
+    _apply_standing_instruction(
+        model, payload, _standing_instruction(body.system_prompt, body.structured))
     return await _run(model, "/ai-vision", payload, body.wait_seconds, "vision")
 
 
@@ -949,7 +1150,8 @@ async def api_text2text_docs():
         "method_string": "POST",
         "url_string": "/api/text2text",
         "required_fields_array": ["prompt"],
-        "optional_fields_array": ["model", "max_output_tokens", "wait_seconds"],
+        "optional_fields_array": ["model", "max_output_tokens", "wait_seconds",
+                                  "input", "system_prompt", "structured"],
         "models_url_string": "/api/ai/models",
         "example_request_object": {"prompt": "Name three colours.", "wait_seconds": 60},
         "server_time_unix_int": int(time.time()),
@@ -975,18 +1177,16 @@ async def api_text2text(request: Request, body: TextRequest):
                    if entry.get("file") in selected or "text" in (entry.get("default_for_services") or [])]
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("text", payload,
-        lambda: _uncached_api_text2text(request, body), namespace="ai-workflows-20260922-v1")
+        lambda: _uncached_api_text2text(request, body), namespace="ai-structured-20260922-v1")
 
 
 async def _uncached_api_text2text(request: Request, body: TextRequest):
     model = _model_entry(body.model)
     payload: Dict[str, object] = {"prompt": _validate_prompt(body.combined_prompt())}
-    system_prompt = str(body.system_prompt or "").strip()
-    if system_prompt:
-        # Keep the same total request bound, but never concatenate the system
-        # instructions into user data on their way to the inference worker.
-        _validate_prompt(system_prompt + "\n" + str(payload["prompt"]))
-        payload["system_prompt"] = system_prompt
+    # Keep the same total request bound, and send the instructions by whichever
+    # route this model has actually been shown to obey.
+    _apply_standing_instruction(
+        model, payload, _standing_instruction(body.system_prompt, body.structured))
     payload["max_output_tokens"] = _output_budget(model, body.max_output_tokens)
     return await _run(model, "/text2text", payload, body.wait_seconds, "text")
 

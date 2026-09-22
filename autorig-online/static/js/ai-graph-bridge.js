@@ -131,6 +131,8 @@
     const nodeDisplay = options.nodeDisplay || null;
     const applyRecommended = options.applyRecommended || null;
     const applyBypass = typeof options.applyBypass === 'function' ? options.applyBypass : null;
+    const applySystemPrompt = typeof options.applySystemPrompt === 'function'
+      ? options.applySystemPrompt : null;
     const setGraphName = options.setGraphName || function () {};
     const toast = options.toast || function () {};
 
@@ -216,6 +218,13 @@
         metadata.disabled = params._disabled === true;
       }
       if (applyBypass) applyBypass(id, params._disabled === true);
+      // A standing instruction is presentation in the same sense a label is:
+      // it belongs to the node, the validator carries it through, and an edit
+      // that does not mention it must leave the node's own one alone.
+      if (applySystemPrompt && node.kind === 'service' &&
+          typeof params._system_prompt === 'string') {
+        applySystemPrompt(id, params._system_prompt);
+      }
       const element = nodeElement(id);
       const heading = element && element.querySelector('.nhead b');
       if (heading) {
@@ -238,7 +247,8 @@
       const element = nodeElement(id);
       if (!element) return;
       (names || []).forEach(name => {
-        if (name === 'checkpoint' || name === 'lora' || name === '_label' || name === '_display_mode') return;
+        if (name === 'checkpoint' || name === 'lora' || name === '_label' ||
+            name === '_display_mode' || name === '_system_prompt') return;
         let control = null;
         try { control = element.querySelector('[data-param="' + CSS.escape(name) + '"]'); }
         catch (_) { control = element.querySelector('[data-param="' + name.replace(/"/g, '') + '"]'); }

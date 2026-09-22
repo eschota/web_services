@@ -30,7 +30,11 @@ MAX_OPERATIONS = 200
 # part in a run, never what is asked of a service, so they are accepted on every
 # node — an input node included — without appearing in any service declaration.
 BOOLEAN_DISPLAY_PARAM_KEYS = {"_follow_input_size", "_disabled"}
-DISPLAY_PARAM_KEYS = {"_label", "_display_mode"} | BOOLEAN_DISPLAY_PARAM_KEYS
+# `_system_prompt` is the node's standing instruction to the model. It rides
+# with the node like a label — saved, copied, pasted and edited by the agent —
+# and is never part of the node's answer, which is why it lives here rather
+# than in a service's declared parameters.
+DISPLAY_PARAM_KEYS = {"_label", "_display_mode", "_system_prompt"} | BOOLEAN_DISPLAY_PARAM_KEYS
 CONTROL_INPUTS = {"control_pose": "pose", "control_depth": "depth", "control_canny": "canny"}
 
 

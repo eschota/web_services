@@ -238,6 +238,24 @@ async def _download(client: httpx.AsyncClient, url: str, target: Path) -> None:
 validate_video_url = _validated_url
 
 
+async def download_source_video(
+    client: httpx.AsyncClient, url: str, target: Path
+) -> Dict[str, Any]:
+    """Fetch a trusted public video unchanged and return its validated probe.
+
+    `download_prepare_video` normalises a clip for a ComfyUI workflow, which
+    means 24 fps and at most 16.4 seconds. A reader that has to describe a
+    whole video needs the whole video, so this keeps the bytes as served and
+    only applies the same admission checks: the host allow-list, the public-DNS
+    check, the Civitai bearer, the 100 MB cap and the container probe.
+    """
+    admitted_url = _validated_url(url)
+    await _download(client, admitted_url, target)
+    probe = await _probe(target)
+    _validate_source_probe(probe)
+    return probe
+
+
 def _civitai_headers(url: str) -> Dict[str, str]:
     """Bearer auth is server-only and never follows a URL outside Civitai."""
     hostname = (urlsplit(url).hostname or "").rstrip(".").lower()

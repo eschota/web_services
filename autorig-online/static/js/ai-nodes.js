@@ -467,9 +467,16 @@
       label: (params && params._label) || '',
       followInputSize: hasDimensions ? (!params || params._follow_input_size !== false) : undefined,
       disabled: !!(params && params._disabled),
+      // A node that can carry a standing instruction is born with the default
+      // one, so a graph saved before this existed opens with it too.
+      systemPrompt: entry.system_prompt_capable
+        ? (params && typeof params._system_prompt === 'string'
+          ? params._system_prompt : String(entry.system_prompt_default || ''))
+        : undefined,
       inFields: inputs.map(i => i.field),
       outFields: outputs.map(o => o.field)
     });
+    applySystemPromptMarker(id);
     alignPorts(id, inputs.length, outputs.length);
     mountModelPickers(id, serviceId);
     if (params) applyParams(id, params);
@@ -952,6 +959,7 @@
       values._follow_input_size = meta(id).followInputSize;
     }
     if (meta(id)?.disabled) values._disabled = true;
+    if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
       const raw = control.value;
@@ -1016,6 +1024,143 @@
     toast(enable
       ? count + ' back in the run.'
       : count + ' bypassed — Render will skip it and everything that needs it.');
+    return true;
+  }
+
+  /* ------------------------------------------------------- system prompts */
+
+  /**
+   * The standing instruction a node gives its model.
+   *
+   * It is not a question about this picture, it is how this node is to answer
+   * every question: plain text, English, prompt only. Kept on the node rather
+   * than in a global setting because two Vision nodes in the same graph
+   * routinely want different answers — one writing an image prompt, one
+   * describing a photo for a person to read.
+   *
+   * It rides in `params._system_prompt`, so it survives saving, reloading,
+   * duplicating, copy-and-paste and the graph agent's edits. It is never part
+   * of the node's output: what the next node reads is the answer alone.
+   */
+  function systemPromptService(id) {
+    const item = meta(id);
+    if (!item || item.kind !== KIND_SERVICE) return null;
+    const entry = serviceById(item.service);
+    return entry && entry.system_prompt_capable ? entry : null;
+  }
+
+  function defaultSystemPrompt(id) {
+    const entry = systemPromptService(id);
+    return entry ? String(entry.system_prompt_default || '') : '';
+  }
+
+  function systemPromptOf(id) {
+    const item = meta(id);
+    if (!item || !systemPromptService(id)) return '';
+    return typeof item.systemPrompt === 'string'
+      ? item.systemPrompt : defaultSystemPrompt(id);
+  }
+
+  /** A quiet "S" on the header when this node no longer says the usual thing. */
+  function applySystemPromptMarker(id) {
+    const element = nodeElement(id);
+    if (!element || !systemPromptService(id)) return;
+    const head = element.querySelector('.nhead');
+    if (!head) return;
+    const text = systemPromptOf(id);
+    const custom = text.trim() !== defaultSystemPrompt(id).trim();
+    let tag = head.querySelector('.nsysprompt');
+    if (custom && !tag) {
+      tag = document.createElement('em');
+      tag.className = 'nsysprompt';
+      tag.textContent = 'S';
+      const heading = head.querySelector('b');
+      head.insertBefore(tag, heading ? heading.nextSibling : head.firstChild);
+    }
+    if (!custom && tag) { tag.remove(); return; }
+    if (tag) {
+      const preview = text.trim().slice(0, 80);
+      tag.title = 'Custom system prompt: ' + preview + (text.trim().length > 80 ? '…' : '');
+    }
+  }
+
+  function setSystemPrompt(id, text) {
+    const item = meta(id);
+    if (!item || !systemPromptService(id)) return false;
+    const next = String(text == null ? '' : text);
+    if (systemPromptOf(id) === next) return false;
+    item.systemPrompt = next;
+    applySystemPromptMarker(id);
+    // A standing instruction is part of the request, so an answer produced
+    // under the old one is no longer this node's answer.
+    invalidateNodeAndDownstream(id);
+    return true;
+  }
+
+  /** The nodes in a selection this dialog can act on. */
+  function systemPromptTargets(ids) {
+    return [...new Set((ids || []).map(String))].filter(id => systemPromptService(id));
+  }
+
+  function openSystemPromptEditor(ids) {
+    const targets = systemPromptTargets(ids);
+    if (!targets.length) {
+      toast('Only Vision and Text nodes carry a system prompt.');
+      return false;
+    }
+    const first = targets[0];
+    const fallback = defaultSystemPrompt(first);
+    let dialog = document.getElementById('system-prompt-editor');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'system-prompt-editor';
+      dialog.setAttribute('aria-label', 'System prompt');
+      document.body.appendChild(dialog);
+    }
+    dialog.innerHTML = '';
+    const form = document.createElement('form');
+    form.method = 'dialog';
+    const title = document.createElement('strong');
+    title.textContent = targets.length === 1
+      ? 'System prompt · ' + (serviceById(meta(first).service) || {}).title
+      : 'System prompt · ' + targets.length + ' nodes';
+    const help = document.createElement('p');
+    help.className = 'sysprompt-help';
+    help.textContent = 'Standing instructions for the model. It is never part '
+      + 'of the answer this node passes on.';
+    const area = document.createElement('textarea');
+    area.rows = 7;
+    area.value = systemPromptOf(first);
+    area.setAttribute('aria-label', 'System prompt text');
+    const row = document.createElement('div');
+    row.className = 'sysprompt-buttons';
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'sysprompt-reset';
+    reset.textContent = 'Reset to default';
+    reset.addEventListener('click', () => { area.value = fallback; area.focus(); });
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => dialog.close());
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'sysprompt-save';
+    save.textContent = 'Save';
+    save.addEventListener('click', () => {
+      const changed = targets.filter(id => setSystemPrompt(id, area.value)).length;
+      dialog.close();
+      if (changed) {
+        toast(changed === 1 ? 'System prompt updated.'
+          : changed + ' nodes now share this system prompt.');
+      }
+    });
+    row.append(reset, cancel, save);
+    form.append(title, help, area, row);
+    dialog.appendChild(form);
+    dialog.showModal();
+    area.focus();
+    area.setSelectionRange(area.value.length, area.value.length);
     return true;
   }
 
@@ -1417,6 +1562,18 @@
         body[field] = value;
       }
     });
+    // A node that carries a standing instruction always asks for the answer
+    // alone: one JSON object in, `output_text` out. The instruction travels as
+    // its own field so it never lands in the text the next node reads, and it
+    // is part of the request signature, so editing it re-runs the node.
+    const declaration = catalogue ? serviceById(serviceId) : null;
+    if (declaration && declaration.system_prompt_capable) {
+      const standing = (params || {})._system_prompt;
+      const text = String(typeof standing === 'string'
+        ? standing : (declaration.system_prompt_default || ''));
+      if (text.trim()) body.system_prompt = text;
+      body.structured = true;
+    }
     return body;
   }
 
@@ -2659,6 +2816,8 @@
       nodeFunctions:id => nodePipelines ? nodePipelines.functionsFor(id) : [],
       onArrange:ids => arrangeNodes(ids),
       onToggleBypass:toggleBypass,
+      onEditSystemPrompt:ids => openSystemPromptEditor(ids),
+      systemPromptTargets,
       onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
     document.addEventListener('paste', event => {
       const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
@@ -2775,6 +2934,7 @@
     if (window.AIGraphBridge) graphBridge = window.AIGraphBridge.create({
       editor, getGraph:graphFromCanvas, addServiceNode, addInputNode, applyParams, getMeta:meta,
       forgetNodes, invalidateNodeAndDownstream, nodeDisplay, applyRecommended, applyBypass,
+      applySystemPrompt:setSystemPrompt,
       setGraphName:name => { document.getElementById('graph-name').value = name; }, toast});
     if (window.AIGraphAgent && graphBridge) graphAgent = window.AIGraphAgent.install({
       getGraph:graphFromCanvas, getCatalogue:() => catalogue,

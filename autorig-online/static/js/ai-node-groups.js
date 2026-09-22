@@ -86,6 +86,12 @@
     const nodeFunctions = typeof options.nodeFunctions === 'function' ? options.nodeFunctions : null;
     const onArrange = typeof options.onArrange === 'function' ? options.onArrange : null;
     const onToggleBypass = typeof options.onToggleBypass === 'function' ? options.onToggleBypass : null;
+    // Only some node kinds answer to a standing instruction, so the menu asks
+    // which of the ones in hand do before it offers to edit one.
+    const onEditSystemPrompt = typeof options.onEditSystemPrompt === 'function'
+      ? options.onEditSystemPrompt : null;
+    const systemPromptTargets = typeof options.systemPromptTargets === 'function'
+      ? options.systemPromptTargets : (() => []);
     const toast = typeof options.toast === 'function' ? options.toast : function () {};
     const nodeLimit = clamp(Number(options.nodeLimit) || 200, 1, 1000);
     if (!editor || !canvas || !getMeta || !addInputNode || !addServiceNode || !exportGraph) {
@@ -827,6 +833,16 @@
       if (onSetComparisonAnchor) {
         commands.append(commandButton('Set as A', 'Use this node as the visual A/B comparison reference',
           () => onSetComparisonAnchor(String(contextNodeId))));
+      }
+      // The node the menu was opened on comes first: right-clicking one node
+      // in a wide selection means that node, but a selection of Vision nodes
+      // being given one instruction is the other thing people do here.
+      const promptTargets = onEditSystemPrompt
+        ? systemPromptTargets([String(contextNodeId), ...Array.from(selected)]) : [];
+      if (promptTargets.length) {
+        commands.append(commandButton('System prompt…',
+          'Edit the standing instruction these nodes give the model',
+          () => onEditSystemPrompt(promptTargets)));
       }
       if (onArrange) {
         commands.append(commandButton('Arrange',

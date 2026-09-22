@@ -63,6 +63,22 @@ ENTITY_TYPES: List[Dict[str, object]] = [
     },
 ]
 
+# ------------------------------------------------------------- system prompts
+
+# The standing instruction a Vision or Text node carries unless somebody edits
+# it on that node. It exists because the commonest use of these two services in
+# a graph is to write a prompt for an image model, and a language model that is
+# not told so answers with its reasoning, a preamble, or both — which then
+# lands in the image prompt verbatim.
+#
+# The node keeps it in `params._system_prompt`, and it is never part of the
+# node's output: what flows on to the next node is the answer alone.
+SYSTEM_PROMPT_DEFAULT = (
+    "Always write only the output_text answer as plain text. "
+    "Always in English. "
+    "This prompt is for an AI image generation model."
+)
+
 # --------------------------------------------------------------------- services
 
 # `status` is either "live" (wired end to end) or "planned" (declared so the
@@ -124,11 +140,20 @@ SERVICES: List[Dict[str, object]] = [
         "title": "Vision",
         "path": "/vision",
         "api": "/api/vision",
-        "summary": "Ask a question about an image and get an answer in text.",
+        "summary": "Ask a question about an image or a video and get an answer in text.",
         "status": "live",
+        "system_prompt_capable": True,
+        "system_prompt_default": SYSTEM_PROMPT_DEFAULT,
         "inputs": [
+            # An image stays the declared requirement: it is what /vision is,
+            # and the plain page starts on its own when one arrives. A video
+            # substitutes for it — the service turns the clip into a picture
+            # first — so it is offered as the alternative, not as a second
+            # thing the node also needs.
             {"type": IMAGE, "field": "image", "required": True,
              "title": "Image to look at"},
+            {"type": VIDEO, "field": "video_url", "required": False,
+             "title": "Video to watch instead"},
             # Not required as a wire: the question is usually a fixed sentence,
             # and needing a whole node to hold it was the commonest way to end
             # up submitting a request with no prompt at all.
@@ -147,6 +172,8 @@ SERVICES: List[Dict[str, object]] = [
         "api": "/api/text2text",
         "summary": "Send a prompt to a language model and get text back.",
         "status": "live",
+        "system_prompt_capable": True,
+        "system_prompt_default": SYSTEM_PROMPT_DEFAULT,
         "inputs": [
             {"type": TEXT, "field": "prompt", "required": False,
              "title": "Instruction"},
@@ -386,6 +413,16 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "prompt", "title": "Question", "type": "textarea",
          "default": "Describe this picture.",
          "help": "What to ask about the image"},
+        # Only consulted when a video is wired in. A single frame answers
+        # "what is in this shot"; the storyboard is what answers "what
+        # happens", which is the question people actually ask of a video.
+        {"name": "video_mode", "title": "Video", "type": "select",
+         "default": "storyboard",
+         "options": [
+             {"value": "storyboard", "title": "Whole video (frames start to end)"},
+             {"value": "frame", "title": "First frame only"},
+         ],
+         "help": "Used when a video is connected instead of an image"},
         # Zero means automatic, and automatic is per model: a model that
         # reasons before answering needs a far bigger budget than one that
         # does not, and a single number for both starves one of them.

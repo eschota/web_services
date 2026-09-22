@@ -16,16 +16,16 @@
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260922-ui6d"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260922-ui6d"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260922-sysprompt1"></script>
     <script src="/static/js/ai-node-display.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
     <script src="/static/js/ai-node-compare.js?v=20260922-nodesui5"></script>
-    <script src="/static/js/ai-graph-bridge.js?v=20260922-nodesui5"></script>
+    <script src="/static/js/ai-graph-bridge.js?v=20260922-sysprompt1"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
     <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-nodes.js?v=20260922-cap1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260922-cap1-sysprompt1"></script>
     <style>
         .ai-page {
             background:
@@ -302,6 +302,41 @@
         #media-preview img, #media-preview video { display:block; width:auto; height:auto; max-width:calc(100vw - 48px); max-height:calc(100vh - 96px); object-fit:contain; margin:auto; border-radius:4px; }
         #media-preview video { cursor:default; }
         #media-preview .media-close { position:absolute; right:16px; top:12px; width:42px; height:42px; border:1px solid #777; border-radius:50%; background:#171923; color:white; font:30px/1 sans-serif; cursor:pointer; z-index:2; }
+        /* A node whose standing instruction is no longer the usual one says so
+           on its header, quietly: a single letter, with the text on hover. */
+        .nsysprompt {
+            font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
+            color: #a5b4fc; background: rgba(129,140,248,.16); border: 1px solid rgba(129,140,248,.4);
+            border-radius: 5px; padding: 2px 6px; flex: 0 0 auto; cursor: help;
+        }
+        #system-prompt-editor {
+            border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0;
+            background: #12131f; color: #e6e8f2; width: min(560px, 92vw); max-width: none;
+            box-shadow: 0 24px 60px rgba(0,0,0,.55);
+            /* This page zeroes dialog margins for the full-screen media preview,
+               which parks every other dialog in the top-left corner. Centre this
+               one back explicitly rather than relying on the browser default. */
+            position: fixed; inset: 0; margin: auto;
+            height: fit-content; max-height: 88vh; overflow: auto;
+        }
+        #system-prompt-editor::backdrop { background: rgba(4,5,10,.6); }
+        #system-prompt-editor form { display: flex; flex-direction: column; gap: 10px; padding: 18px; margin: 0; }
+        #system-prompt-editor strong { font-size: 14px; }
+        #system-prompt-editor .sysprompt-help { margin: 0; font-size: 11.5px; color: #9aa0b5; }
+        #system-prompt-editor textarea {
+            width: 100%; box-sizing: border-box; resize: vertical; min-height: 120px;
+            font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+            background: rgba(10,11,22,.8); color: #e6e8f2; padding: 10px;
+            border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
+        }
+        #system-prompt-editor .sysprompt-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+        #system-prompt-editor .sysprompt-buttons .sysprompt-reset { margin-right: auto; }
+        #system-prompt-editor button {
+            font-size: 12px; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+            border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: #e6e8f2;
+        }
+        #system-prompt-editor button.sysprompt-save { background: #2563eb; border-color: #2563eb; color: #fff; }
+        #system-prompt-editor button:hover { filter: brightness(1.15); }
         .ntext {
             font-size: 11.5px; line-height: 1.45; max-height: 130px; overflow-y: auto;
             background: rgba(10,11,22,.7); border-radius: 8px; padding: 8px;
