@@ -56,15 +56,16 @@ class VideoReferenceTests(unittest.TestCase):
                 source = Path(folder) / "source.mp4"
                 created = subprocess.run([
                     "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
-                    "-i", "testsrc=size=320x180:rate=24:duration=4.1",
+                    "-i", "testsrc=size=320x180:rate=24:duration=4.041667",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
                 ], capture_output=True, check=False)
                 self.assertEqual(created.returncode, 0, created.stderr.decode(errors="replace"))
                 source_bytes = source.read_bytes()
 
-                async def fake_prepare(_client, _url, frame_count, fps=24):
+                async def fake_prepare(_client, _url, frame_count, fps=24, *, allow_shorter=False):
                     self.assertEqual(frame_count, 97)
                     self.assertEqual(fps, 24)
+                    self.assertTrue(allow_shorter)
                     return "control.mp4", source_bytes
 
                 with patch.object(ai_video_reference, "download_prepare_video", fake_prepare):
@@ -111,7 +112,7 @@ class VideoReferenceTests(unittest.TestCase):
                 result = await ai_video_reference.api_video_reference(body)
             self.assertTrue(result["finished_bool"])
             self.assertEqual(captured["service"], "control")
-            self.assertEqual(captured["namespace"], "video-reference-v1")
+            self.assertEqual(captured["namespace"], "video-reference-v2")
             self.assertEqual(captured["payload"]["view"], "storyboard")
             self.assertEqual(captured["payload"]["frame_count"], 97)
             self.assertRegex(captured["payload"]["source_fingerprint_string"], r"^[a-f0-9]{64}$")
@@ -124,6 +125,38 @@ class VideoReferenceTests(unittest.TestCase):
             if row.path == "/api/ai/video-references/{asset_id}/{sha256}.png"
         )
         self.assertEqual(route.methods, {"GET", "HEAD"})
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg unavailable")
+    def test_first_frame_accepts_shorter_normalized_reference(self):
+        async def scenario():
+            with tempfile.TemporaryDirectory() as folder, patch.object(
+                ai_video_reference, "ASSET_DIR", Path(folder) / "assets-root"
+            ), patch.object(
+                ai_video_reference, "PUBLIC_BASE_URL", "https://autorig.online"
+            ):
+                source = Path(folder) / "short.mp4"
+                made = subprocess.run([
+                    "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                    "-i", "testsrc=size=320x180:rate=24:duration=1",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+                ], capture_output=True, check=False)
+                self.assertEqual(made.returncode, 0, made.stderr.decode(errors="replace"))
+
+                async def fake_prepare(_client, _url, frame_count, fps=24, *, allow_shorter=False):
+                    self.assertTrue(allow_shorter)
+                    return "short.mp4", source.read_bytes()
+
+                with patch.object(ai_video_reference, "download_prepare_video", fake_prepare):
+                    result = await ai_video_reference._derive_reference(
+                        ai_video_reference.VideoReferenceRequest(
+                            video_url="https://pvs1.microstock.plus/short.mp4",
+                            view="first_frame", frame_count=97,
+                        )
+                    )
+                self.assertTrue(result["finished_bool"])
+                self.assertEqual(result["duration_seconds_float"], 1.0)
+
+        asyncio.run(scenario())
 
 
 if __name__ == "__main__":

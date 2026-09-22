@@ -162,6 +162,67 @@ class VideoInputPolicyTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg unavailable")
+    def test_real_four_second_25fps_source_holds_tail_for_inclusive_97(self):
+        async def scenario():
+            with tempfile.TemporaryDirectory() as folder, patch.object(
+                config, "RENDER_DIR", Path(folder) / "render"
+            ):
+                source = Path(folder) / "four-seconds.mp4"
+                made = subprocess.run([
+                    "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                    "-i", "testsrc=size=320x180:rate=25:duration=4",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+                ], capture_output=True, check=False)
+                self.assertEqual(made.returncode, 0, made.stderr.decode(errors="replace"))
+
+                async def fake_download(_client, _url, target):
+                    shutil.copyfile(source, target)
+
+                with patch.object(video_input, "_download", fake_download):
+                    name, payload = await video_input.download_prepare_video(
+                        object(), "https://pvs1.microstock.plus/four.mp4", 97
+                    )
+                result = Path(folder) / name
+                result.write_bytes(payload)
+                probe = await video_input._probe(result, count_frames=True)
+                self.assertEqual(int(video_input._video_stream(probe)["nb_read_frames"]), 97)
+                self.assertIn("held final frame 1 time(s)",
+                              ((probe.get("format") or {}).get("tags") or {}).get("comment", ""))
+
+        asyncio.run(scenario())
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg unavailable")
+    def test_allow_shorter_reference_keeps_real_duration_without_padding(self):
+        async def scenario():
+            with tempfile.TemporaryDirectory() as folder, patch.object(
+                config, "RENDER_DIR", Path(folder) / "render"
+            ):
+                source = Path(folder) / "short.mp4"
+                made = subprocess.run([
+                    "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+                    "-i", "testsrc=size=320x180:rate=25:duration=1",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+                ], capture_output=True, check=False)
+                self.assertEqual(made.returncode, 0, made.stderr.decode(errors="replace"))
+
+                async def fake_download(_client, _url, target):
+                    shutil.copyfile(source, target)
+
+                with patch.object(video_input, "_download", fake_download):
+                    name, payload = await video_input.download_prepare_video(
+                        object(), "https://pvs1.microstock.plus/short.mp4", 97,
+                        allow_shorter=True,
+                    )
+                result = Path(folder) / name
+                result.write_bytes(payload)
+                probe = await video_input._probe(result, count_frames=True)
+                self.assertEqual(int(video_input._video_stream(probe)["nb_read_frames"]), 24)
+                self.assertIn("without tail padding",
+                              ((probe.get("format") or {}).get("tags") or {}).get("comment", ""))
+
+        asyncio.run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

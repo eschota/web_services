@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import shutil
@@ -109,7 +110,7 @@ async def _probe(path: Path, *, count_frames: bool = False) -> Dict[str, Any]:
     argv = [
         FFPROBE_BIN,
         "-v", "error",
-        "-show_entries", "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,nb_read_frames",
+        "-show_entries", "format=format_name,duration:format_tags=comment:stream=codec_type,codec_name,pix_fmt,width,height,nb_read_frames",
         "-of", "json",
     ]
     if count_frames:
@@ -202,12 +203,17 @@ async def download_prepare_video(
     url: str,
     frame_count: int,
     fps: int = 24,
+    *,
+    allow_shorter: bool = False,
 ) -> Tuple[str, bytes]:
     """Download and normalize a trusted control video.
 
     The returned filename is unique and safe to upload directly to ComfyUI.
     The source file is preserved byte-for-byte throughout processing, then the
-    function removes only its own unique working directory.
+    function removes only its own unique working directory. Render controls
+    hold the final source frame when needed to satisfy the inclusive 8k+1 frame
+    contract. Reference extraction may set ``allow_shorter`` to retain a real
+    shorter duration without inventing repeated storyboard frames.
     """
     admitted_url = _validated_url(url)
     frame_count, fps = _validated_frame_count(frame_count, fps)
@@ -225,10 +231,25 @@ async def download_prepare_video(
         await _download(client, admitted_url, source)
         source_probe = await _probe(source)
         _validate_mp4_probe(source_probe)
+        source_duration = float((source_probe.get("format") or {}).get("duration") or 0)
+        available_frames = max(1, int(math.floor(source_duration * fps + 1e-6)))
+        held_tail_frames = 0 if allow_shorter else max(0, frame_count - available_frames)
         video_filter = (
             f"fps={fps},"
             "scale=w='min(2048,iw)':h='min(2048,ih)':"
             "force_original_aspect_ratio=decrease:force_divisible_by=2"
+        )
+        if not allow_shorter:
+            # ``-frames:v`` cannot create an inclusive final frame. Hold the
+            # actual last frame before applying that cap; never loop the clip.
+            video_filter += (
+                f",tpad=stop_mode=clone:stop_duration={frame_count / fps:.6f}"
+            )
+        comment = (
+            f"AutoRig normalized control; held final frame {held_tail_frames} "
+            f"time(s) to reach {frame_count} frames"
+            if not allow_shorter else
+            "AutoRig normalized reference; source duration retained without tail padding"
         )
         await _run_process(
             FFMPEG_BIN,
@@ -241,7 +262,8 @@ async def download_prepare_video(
             "-frames:v", str(frame_count),
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
+            "-metadata", f"comment={comment}",
+            "-movflags", "+faststart+use_metadata_tags",
             str(output),
         )
         if not output.is_file():
@@ -266,9 +288,13 @@ async def download_prepare_video(
             decoded_frames = int(stream.get("nb_read_frames") or 0)
         except (TypeError, ValueError) as exc:
             raise VideoInputError("cannot verify prepared control video frame count") from exc
-        if decoded_frames != frame_count:
+        if not allow_shorter and decoded_frames != frame_count:
             raise VideoInputError(
                 f"prepared control video has {decoded_frames} frames; expected {frame_count}"
+            )
+        if allow_shorter and not (1 <= decoded_frames <= frame_count):
+            raise VideoInputError(
+                f"prepared reference video has invalid frame count {decoded_frames}"
             )
         return filename, output.read_bytes()
     finally:

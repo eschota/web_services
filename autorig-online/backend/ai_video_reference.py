@@ -97,7 +97,8 @@ async def _probe_video(path: Path) -> Dict[str, Any]:
     raw = await _run_process(
         FFPROBE_BIN,
         "-v", "error",
-        "-show_entries", "format=duration:stream=codec_type,width,height",
+        "-count_frames",
+        "-show_entries", "format=duration:stream=codec_type,width,height,nb_read_frames",
         "-of", "json",
         str(path),
     )
@@ -116,11 +117,13 @@ async def _probe_video(path: Path) -> Dict[str, Any]:
         width = int(stream.get("width") or 0)
         height = int(stream.get("height") or 0)
         duration = float((value.get("format") or {}).get("duration") or 0)
+        frame_count = int(stream.get("nb_read_frames") or 0)
     except (TypeError, ValueError) as exc:
         raise VideoReferenceError("prepared source metadata is invalid") from exc
-    if width < 1 or height < 1 or duration <= 0:
+    if width < 1 or height < 1 or duration <= 0 or frame_count < 1:
         raise VideoReferenceError("prepared source metadata is invalid")
-    return {"width": width, "height": height, "duration": duration}
+    return {"width": width, "height": height, "duration": duration,
+            "frame_count": frame_count}
 
 
 def _inspect_png(path: Path) -> tuple[int, int, bytes]:
@@ -199,7 +202,7 @@ async def _derive_reference(body: VideoReferenceRequest) -> Dict[str, Any]:
     try:
         async with httpx.AsyncClient(follow_redirects=False, timeout=60.0) as client:
             _name, video_bytes = await download_prepare_video(
-                client, body.video_url, body.frame_count, 24
+                client, body.video_url, body.frame_count, 24, allow_shorter=True
             )
         source.write_bytes(video_bytes)
         probe = await _probe_video(source)
@@ -210,7 +213,7 @@ async def _derive_reference(body: VideoReferenceRequest) -> Dict[str, Any]:
                 "-frames:v", "1", str(output),
             )
         else:
-            last = body.frame_count - 1
+            last = probe["frame_count"] - 1
             frame_indices = [round(last * part / 4) for part in range(5)]
             expression = "+".join(f"eq(n\\,{index})" for index in frame_indices)
             cell_height = min(
@@ -236,7 +239,7 @@ async def _derive_reference(body: VideoReferenceRequest) -> Dict[str, Any]:
             "source_width_int": probe["width"],
             "source_height_int": probe["height"],
             "source_duration_seconds_float": probe["duration"],
-            "frame_count_int": body.frame_count,
+            "frame_count_int": probe["frame_count"],
             "fps_int": 24,
             "frame_indices_int_array": frame_indices,
             "timepoints_seconds_float_array": timepoints,
@@ -313,7 +316,7 @@ async def api_video_reference(body: VideoReferenceRequest):
         "control",
         payload,
         lambda: _derive_with_deadline(body),
-        namespace="video-reference-v1",
+        namespace="video-reference-v2",
     )
 
 
