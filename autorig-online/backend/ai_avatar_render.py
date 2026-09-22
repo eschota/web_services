@@ -49,24 +49,41 @@ def build_avatar_render_router(owner_dependency: Callable, *, store=None):
                 raise HTTPException(error.status_code, detail={"error_string": error.code,
                                       "message_string": error.message}) from None
         references, instructions, identity_constraints, receipts = [], [], [], []
+        # klein takes four pictures. A lone v2 Avatar without a scene picture
+        # spends the spare slot on its face close-up; otherwise one each.
+        spare = 4 - len(profiles) - (1 if body.image_url else 0)
         for index, profile in enumerate(profiles, 1):
-            images = [r for r in profile.references if r.media_type == "image"]
-            if not images:
-                raise HTTPException(400, detail="This Avatar needs an image reference")
-            primary = next((r for r in images if r.role == "face"), images[0])
-            try:
-                validate_import_url(primary.canonical_url)
-            except ValueError:
-                raise HTTPException(400, detail="Import the Avatar reference into AutoRig before rendering") from None
-            references.append(primary.canonical_url)
+            picked = []
+            cover = profile.cover_view() if hasattr(profile, "cover_view") else None
+            if cover is not None:
+                picked.append((cover.canonical_url, cover.sha256))
+                closeup = profile.views.get("face_closeup")
+                if spare > 0 and closeup is not None and closeup.canonical_url != cover.canonical_url:
+                    picked.append((closeup.canonical_url, closeup.sha256))
+                    spare -= 1
+            else:
+                images = [r for r in profile.references if r.media_type == "image"]
+                if not images:
+                    raise HTTPException(400, detail="This Avatar needs an image reference")
+                primary = next((r for r in images if r.role == "face"), images[0])
+                picked.append((primary.canonical_url, primary.sha256))
+            for url, _sha in picked:
+                try:
+                    validate_import_url(url)
+                except ValueError:
+                    raise HTTPException(400, detail="Import the Avatar reference into AutoRig before rendering") from None
+            first = len(references) + 1
+            references.extend(url for url, _sha in picked)
+            numbers = (f"Reference image {first}" if len(picked) == 1
+                       else f"Reference images {first} to {len(references)}")
             identity_constraints.append(
-                f"Reference image {len(references)} defines character {index}, {profile.display_name}. "
+                f"{numbers} define{'s' if len(picked) == 1 else ''} character {index}, {profile.display_name}. "
                 f"Canonical identity: {profile.identity_prompt}. "
                 f"Canonical face, hair, and appearance: {profile.appearance}. "
                 f"Canonical wardrobe: {profile.wardrobe}."
             )
             receipts.append({"avatar_id": profile.avatar_id, "version": profile.version,
-                             "reference_sha256": primary.sha256})
+                             "reference_sha256": picked[0][1]})
         if body.image_url:
             try:
                 validate_import_url(body.image_url)

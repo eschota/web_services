@@ -1,321 +1,271 @@
-(function () {
+/* /avatars — drop one picture or video, get a reusable character.
+ *
+ * The page is a thin face over two APIs: POST /api/ai/avatar-build/upload
+ * (the source never becomes a public URL) with its status poll, and the
+ * owner-scoped Avatar library at /api/ai/avatars. Everything is icons with
+ * tooltips; the only words are the Avatar names.
+ */
+(() => {
   'use strict';
 
-  const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-  const state = { avatars: [], editing: null, references: [], upload: null };
   const $ = id => document.getElementById(id);
-  const form = $('avatar-form');
-  const library = $('avatar-library');
-  const message = $('form-message');
-  const preview = $('avatar-preview');
-  const drop = $('avatar-drop');
-  const fileInput = $('avatar-file');
-  const referenceInput = $('avatar-reference-url');
+  const SLOTS = ['front', 'face_closeup', 'full_body', 'three_quarter_left', 'three_quarter_right',
+                 'profile_left', 'profile_right', 'back'];
+  const SLOT_TIPS = {front: 'Front', face_closeup: 'Face', full_body: 'Full body',
+                     three_quarter_left: '3/4 left', three_quarter_right: '3/4 right',
+                     profile_left: 'Profile left', profile_right: 'Profile right', back: 'Back'};
+  const STAGES = [
+    ['source', 'Source', '<path d="M4 6h16v12H4z"/><path d="M10 9.5v5l4-2.5z"/>'],
+    ['describe', 'Describe', '<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>'],
+    ['front', 'Front view', '<circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/>'],
+    ['views', 'All views', '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
+    ['sheet', 'Sheet', '<path d="M4 4h16v16H4z"/><path d="M4 12h16M12 4v16"/>'],
+    ['save', 'Saved', '<path d="M5 12.5 10 17l9-10"/>'],
+  ];
+  const JOB_KEY = 'autorig.avatarBuild.job';
+  const state = {file: null, polling: null, avatars: [], current: null};
 
-  function text(value) { return value == null ? '' : String(value); }
+  const svg = (body, cls) => `<svg class="${cls || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+  const escapeHtml = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  const SLOT_ICON = svg('<circle cx="12" cy="8" r="3"/><path d="M6 20c.7-3.3 3.1-5 6-5s5.3 1.7 6 5"/>', 'slot-icon');
+  const QA_MARK = {passed: '✓', accepted_with_warnings: '!', failed: '✗', unchecked: '?'};
 
-  function setMessage(value, kind) {
-    message.textContent = value || '';
-    message.className = 'av-message' + (kind ? ' ' + kind : '');
+  function store(key, value) {
+    try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch (_) { /* private mode */ }
+  }
+  function recall(key) {
+    try { return localStorage.getItem(key); } catch (_) { return null; }
   }
 
-  function errorText(payload, fallback) {
-    const detail = payload && payload.detail;
-    if (typeof detail === 'string') return detail;
-    if (detail && typeof detail.message_string === 'string') return detail.message_string;
-    if (detail && typeof detail.message === 'string') return detail.message;
-    if (detail && typeof detail.error_string === 'string') return detail.error_string;
-    if (payload && typeof payload.message === 'string') return payload.message;
-    return fallback;
+  function message(text, error) {
+    const box = $('av-msg');
+    box.textContent = text || '';
+    box.className = 'av-msg' + (error ? ' error' : '');
   }
 
-  async function api(path, options) {
-    const response = await fetch(path, options);
-    let payload = null;
-    try { payload = await response.json(); } catch (_) {}
+  async function api(url, options) {
+    const response = await fetch(url, options);
+    let data = null;
+    try { data = await response.json(); } catch (_) { data = null; }
     if (!response.ok) {
-      const error = new Error(errorText(payload, 'Request failed (' + response.status + ')'));
-      error.status = response.status;
-      throw error;
+      const detail = data && data.detail;
+      const text = typeof detail === 'string' ? detail
+        : Array.isArray(detail) ? detail.map(item => item.msg).join('; ')
+        : (detail && (detail.message_string || detail.error_string)) || ('HTTP ' + response.status);
+      throw new Error(text);
     }
-    return payload || {};
+    return data || {};
   }
 
-  function listFrom(payload) {
-    if (Array.isArray(payload)) return payload;
-    return payload.avatars_array || payload.avatars || payload.items || [];
-  }
+  /* ------------------------------------------------------------- source */
 
-  function latestVersion(avatar) {
-    const value = avatar.latest_version || avatar.current_version || avatar.version || {};
-    if (typeof value === 'number' || typeof value === 'string') return { version: value };
-    return value || {};
-  }
-
-  function avatarView(avatar) {
-    const version = latestVersion(avatar);
-    const references = version.references || avatar.references || [];
-    const primary = references.find(item => item.role === 'face') || references.find(item => item.media_type === 'image') || {};
-    const provenance = version.provenance || avatar.provenance || {};
-    return {
-      id: avatar.id || avatar.avatar_id,
-      name: avatar.display_name || version.display_name || avatar.name || version.name || 'Untitled Avatar',
-      version: version.version || version.number || version.version_number || avatar.version_number || 1,
-      reference_url: primary.canonical_url || version.reference_url || version.image_url || avatar.reference_url || avatar.image_url || '',
-      reference: primary,
-      identity_prompt: version.identity_prompt || avatar.identity_prompt || '',
-      appearance: version.appearance || avatar.appearance || '',
-      wardrobe: version.wardrobe || avatar.wardrobe || '',
-      negative_identity_prompt: version.negative_identity_prompt || avatar.negative_identity_prompt || '',
-      notes: provenance.note || version.notes || avatar.notes || '',
-      provenance: provenance,
-      adapter: version.adapter || avatar.adapter || null
-    };
-  }
-
-  function showPreview(url) {
-    const value = text(url).trim();
-    if (!value) {
-      preview.hidden = true;
-      preview.removeAttribute('src');
+  function chooseFile(file) {
+    if (!file) return;
+    const video = /^video\//.test(file.type) || /\.(mp4|mov|webm|m4v|mkv)$/i.test(file.name || '');
+    if (!video && !/^image\/(png|jpeg|webp)$/.test(file.type)) {
+      message('PNG, JPEG, WebP, MP4, WebM or MOV', true);
       return;
     }
-    preview.classList.remove('broken');
-    preview.src = value;
-    preview.hidden = false;
+    state.file = file;
+    const drop = $('av-drop');
+    drop.querySelectorAll('img,video').forEach(node => node.remove());
+    const url = URL.createObjectURL(file);
+    const media = document.createElement(video ? 'video' : 'img');
+    media.src = url;
+    if (video) { media.muted = true; media.loop = true; media.autoplay = true; media.playsInline = true; }
+    drop.appendChild(media);
+    $('av-build').disabled = false;
+    message('');
   }
 
-  preview.addEventListener('error', () => {
-    preview.hidden = true;
-    setMessage('The reference image could not be displayed. Check that the URL points directly to an image.', 'error');
-  });
-
-  async function acceptFile(file) {
-    if (!file || !file.type.startsWith('image/')) {
-      setMessage('Choose a PNG, JPEG or WebP image.', 'error'); return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setMessage('The reference image must be 12 MB or smaller.', 'error'); return;
-    }
-    if (state.upload) return;
-    showPreview(URL.createObjectURL(file));
-    setMessage('Uploading reference image…');
-    const data = new FormData();
-    data.append('file', file, file.name || 'avatar-reference.png');
-    state.upload = api('/api/ai/avatar-assets', { method: 'POST', body: data });
-    try {
-      const uploaded = await state.upload;
-      const reference = uploaded.reference_object || uploaded.reference || uploaded;
-      if (!reference.canonical_url || !reference.sha256) throw new Error('The image upload returned no durable reference.');
-      state.references = [reference].concat(state.references.filter(item => item.role !== 'face'));
-      referenceInput.value = reference.canonical_url;
-      showPreview(reference.canonical_url);
-      setMessage('Reference image ready.', 'success');
-    } catch (error) {
-      showPreview('');
-      setMessage(error.message, 'error');
-    } finally {
-      state.upload = null;
-      fileInput.value = '';
-    }
-  }
-
-  drop.addEventListener('click', () => fileInput.click());
-  drop.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); fileInput.click(); }
-  });
-  fileInput.addEventListener('change', () => acceptFile(fileInput.files[0]));
-  drop.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('dragging'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('dragging'));
-  drop.addEventListener('drop', event => {
-    event.preventDefault(); drop.classList.remove('dragging');
-    acceptFile(Array.from(event.dataTransfer.files).find(file => file.type.startsWith('image/')));
-  });
-  document.addEventListener('paste', event => {
-    if (/^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName)) return;
-    const file = Array.from(event.clipboardData && event.clipboardData.files || []).find(item => item.type.startsWith('image/'));
-    if (file) { event.preventDefault(); acceptFile(file); }
-  });
-  referenceInput.addEventListener('input', () => {
-    const face = state.references.find(item => item.role === 'face');
-    if (face && referenceInput.value.trim() !== face.canonical_url) {
-      state.references = state.references.filter(item => item.role !== 'face');
-    }
-  });
-  $('preview-url').addEventListener('click', () => {
-    const url = referenceInput.value.trim();
-    if (!/^https?:\/\//i.test(url)) { setMessage('Enter a complete http:// or https:// image URL.', 'error'); return; }
-    importReference(url);
-  });
-
-  async function importReference(url) {
-    const button = $('preview-url');
-    button.disabled = true;
-    setMessage('Importing a durable copy of the reference…');
-    try {
-      const uploaded = await api('/api/ai/avatar-assets/import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url })
-      });
-      const reference = uploaded.reference_object || uploaded.reference || uploaded;
-      if (!reference.canonical_url || !reference.sha256) throw new Error('The import returned no durable reference.');
-      state.references = [reference].concat(state.references.filter(item => item.role !== 'face'));
-      referenceInput.value = reference.canonical_url;
-      showPreview(reference.canonical_url);
-      setMessage('Reference imported and ready.', 'success');
-    } catch (error) {
-      setMessage(error.status === 400 || error.status === 422
-        ? 'That URL cannot be imported. Download the image and upload the file here.'
-        : error.message, 'error');
-    } finally { button.disabled = false; }
-  }
-
-  function resetForm() {
-    state.editing = null;
-    state.references = [];
-    form.reset();
-    $('avatar-id').value = '';
-    $('editor-title').textContent = 'Create an Avatar';
-    $('editor-lead').textContent = 'Start with a clear reference image. Front-facing, even light and an unobstructed face usually transfer best.';
-    $('save-avatar').textContent = 'Save Avatar';
-    $('cancel-edit').hidden = true;
-    showPreview('');
-    setMessage('');
-  }
-
-  function editAvatar(avatar) {
-    const item = avatarView(avatar);
-    state.editing = avatar;
-    $('avatar-id').value = item.id;
-    $('avatar-name').value = item.name;
-    $('avatar-identity').value = item.identity_prompt;
-    referenceInput.value = item.reference_url;
-    $('avatar-appearance').value = item.appearance;
-    $('avatar-wardrobe').value = item.wardrobe;
-    $('avatar-negative').value = item.negative_identity_prompt;
-    $('avatar-notes').value = item.notes;
-    state.references = Array.isArray(state.editing.references) ? state.editing.references.slice() : (item.reference && item.reference.canonical_url ? [item.reference] : []);
-    showPreview(item.reference_url);
-    $('editor-title').textContent = 'Create a new version';
-    $('editor-lead').textContent = item.name + ' · current version v' + item.version + '. Saving preserves that version and creates the next one.';
-    $('save-avatar').textContent = 'Save new version';
-    $('cancel-edit').hidden = false;
-    setMessage('');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  $('cancel-edit').addEventListener('click', resetForm);
-
-  function fieldPayload() {
-    const existing = state.editing ? avatarView(state.editing) : null;
-    const sourceUrls = state.references.map(item => text(item.source_url || item.canonical_url));
-    const inferredKind = sourceUrls.some(url => /(?:renderfin|\/render\/|\/tasks\/)/i.test(url)) ? 'generated' : 'uploaded';
-    const sourceKind = state.references.length > 1 ? 'mixed' : ((existing && existing.provenance.source_kind) || inferredKind);
-    return {
-      display_name: $('avatar-name').value.trim(),
-      identity_prompt: $('avatar-identity').value.trim(),
-      appearance: $('avatar-appearance').value.trim(),
-      wardrobe: $('avatar-wardrobe').value.trim(),
-      negative_identity_prompt: $('avatar-negative').value.trim(),
-      references: state.references.slice(),
-      provenance: Object.assign({
-        source_kind: sourceKind, source_task_ids: [], source_model: '', source_workflow: '', parameters_sha256: null
-      }, (existing && existing.provenance) || {}, { note: $('avatar-notes').value.trim() }),
-      adapter: (existing && existing.adapter) || {
-        status: 'not_requested', pipeline_family: null, artifact_url: null,
-        sha256: null, trigger_token: null, note: ''
-      }
-    };
-  }
-
-  form.addEventListener('submit', async event => {
-    event.preventDefault();
-    if (state.upload) { setMessage('Wait for the reference image upload to finish.', 'error'); return; }
-    const payload = fieldPayload();
-    if (!payload.display_name) { $('avatar-name').focus(); setMessage('Give this Avatar a name.', 'error'); return; }
-    if (!payload.identity_prompt) { $('avatar-identity').focus(); setMessage('Describe the stable identity traits for this Avatar.', 'error'); return; }
-    if (!payload.references.length) { referenceInput.focus(); setMessage('Upload an image or import an AutoRig scratch/render URL first.', 'error'); return; }
-    const button = $('save-avatar');
-    button.disabled = true;
-    setMessage(state.editing ? 'Saving an immutable new version…' : 'Saving Avatar…');
-    try {
-      if (state.editing) {
-        const id = avatarView(state.editing).id;
-        await api('/api/ai/avatars/' + encodeURIComponent(id), {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-        });
-      } else {
-        await api('/api/ai/avatars', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-        });
-      }
-      resetForm();
-      await loadAvatars();
-    } catch (error) {
-      setMessage(error.status === 401 ? 'Sign in to save Avatars.' : error.message, 'error');
-    } finally { button.disabled = false; }
-  });
-
-  function emptyState(title, copy) {
-    library.innerHTML = '';
-    const box = document.createElement('div');
-    box.className = 'av-state';
-    const content = document.createElement('div');
-    const strong = document.createElement('strong'); strong.textContent = title;
-    const line = document.createElement('span'); line.textContent = copy;
-    content.append(strong, line); box.appendChild(content); library.appendChild(box);
-  }
-
-  function renderLibrary() {
-    $('avatar-count').textContent = state.avatars.length ? state.avatars.length + (state.avatars.length === 1 ? ' saved character' : ' saved characters') : '';
-    if (!state.avatars.length) {
-      emptyState('No Avatars yet', 'Create one from a reference image. It will appear here for reuse in Nodes.'); return;
-    }
-    library.innerHTML = '';
-    const grid = document.createElement('div'); grid.className = 'av-grid';
-    state.avatars.forEach(avatar => {
-      const item = avatarView(avatar);
-      const card = document.createElement('article'); card.className = 'av-card';
-      const media = document.createElement('div'); media.className = 'av-card-media';
-      if (item.reference_url) {
-        const image = document.createElement('img'); image.src = item.reference_url; image.alt = item.name + ' reference'; image.loading = 'lazy';
-        image.addEventListener('error', () => { image.classList.add('broken'); media.textContent = 'Reference unavailable'; });
-        media.appendChild(image);
-      } else media.textContent = 'No reference image';
-      const body = document.createElement('div'); body.className = 'av-card-body';
-      const title = document.createElement('div'); title.className = 'av-card-title';
-      const heading = document.createElement('h3'); heading.textContent = item.name;
-      const version = document.createElement('span'); version.className = 'av-version'; version.textContent = 'v' + item.version; version.title = 'Immutable Avatar version';
-      title.append(heading, version);
-      const notes = document.createElement('p'); notes.className = 'av-card-notes'; notes.textContent = item.appearance || item.wardrobe || item.notes || 'Reference profile ready for a production graph.';
-      const actions = document.createElement('div'); actions.className = 'av-card-actions';
-      const use = document.createElement('a'); use.className = 'av-primary'; use.textContent = 'Use in Nodes';
-      use.href = '/nodes?avatar=' + encodeURIComponent(item.id) + '@' + encodeURIComponent(item.version);
-      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'av-secondary'; edit.textContent = 'New version'; edit.addEventListener('click', () => editAvatar(avatar));
-      actions.append(use, edit); body.append(title, notes, actions); card.append(media, body); grid.appendChild(card);
+  function bindDrop() {
+    const drop = $('av-drop');
+    const input = $('av-file');
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); input.click(); } });
+    input.addEventListener('change', () => chooseFile(input.files && input.files[0]));
+    ['dragenter', 'dragover'].forEach(name => drop.addEventListener(name, event => { event.preventDefault(); drop.classList.add('dragging'); }));
+    ['dragleave', 'drop'].forEach(name => drop.addEventListener(name, event => { event.preventDefault(); drop.classList.remove('dragging'); }));
+    drop.addEventListener('drop', event => chooseFile(event.dataTransfer.files && event.dataTransfer.files[0]));
+    document.addEventListener('paste', event => {
+      const item = [...(event.clipboardData ? event.clipboardData.items : [])].find(entry => entry.kind === 'file');
+      if (item) chooseFile(item.getAsFile());
     });
-    library.appendChild(grid);
   }
 
-  async function loadAvatars() {
-    $('refresh-avatars').disabled = true;
+  /* -------------------------------------------------------------- build */
+
+  function renderStages(job) {
+    const host = $('av-stages');
+    const stage = job ? job.stage_string : '';
+    const failed = job && job.finished_bool && job.success_bool === false;
+    const index = job && job.finished_bool && !failed ? STAGES.length : STAGES.findIndex(item => item[0] === stage);
+    host.innerHTML = STAGES.map((item, number) => {
+      const cls = failed && number === index ? 'failed' : number < index ? 'done' : number === index ? 'active' : '';
+      return (number ? '<span class="av-stage-line"></span>' : '') +
+        `<span class="av-stage ${cls}" data-tip="${escapeHtml(item[1])}">${svg(item[2])}</span>`;
+    }).join('');
+  }
+
+  function slotHtml(slot, view, pending) {
+    const tip = SLOT_TIPS[slot] || slot;
+    if (!view || !view.url) {
+      return `<div class="av-slot ${pending ? 'pending' : ''}" data-tip="${escapeHtml(tip)}">${SLOT_ICON}</div>`;
+    }
+    const status = view.status || 'unchecked';
+    const score = view.score != null ? ' · ' + Math.round(view.score * 100) + '%' : '';
+    return `<div class="av-slot" data-tip="${escapeHtml(tip + score)}"><img src="${escapeHtml(view.url)}" alt="${escapeHtml(tip)}" loading="lazy" data-full="${escapeHtml(view.url)}">` +
+      `<span class="av-badge ${escapeHtml(status)}">${QA_MARK[status] || '?'}</span></div>`;
+  }
+
+  function renderLiveViews(job) {
+    const views = (job && job.views_object) || {};
+    const running = job && !job.finished_bool;
+    $('av-live-views').innerHTML = SLOTS.map(slot => {
+      const view = views[slot];
+      return slotHtml(slot, view ? {url: view.url_string, status: view.status_string, score: view.identity_score_float} : null, running);
+    }).join('');
+  }
+
+  async function build() {
+    if (!state.file) return;
+    const form = new FormData();
+    form.append('file', state.file);
+    form.append('outfit', $('av-outfit').value.trim());
+    form.append('display_name', $('av-name').value.trim());
+    $('av-build').disabled = true;
+    message('');
     try {
-      const payload = await api('/api/ai/avatars');
-      const summaries = listFrom(payload);
-      state.avatars = await Promise.all(summaries.map(async summary => {
-        const id = summary.avatar_id || summary.id;
-        const version = summary.current_version || summary.version || 1;
-        try {
-          const detail = await api('/api/ai/avatars/' + encodeURIComponent(id) + '?version=' + encodeURIComponent(version));
-          return detail.avatar_object || detail.avatar || detail;
-        } catch (_) { return summary; }
-      }));
-      renderLibrary();
+      const job = await api('/api/ai/avatar-build/upload', {method: 'POST', body: form});
+      store(JOB_KEY, job.task_id_string);
+      follow(job);
     } catch (error) {
-      if (error.status === 401) emptyState('Sign in to use Avatars', 'Your Avatar library is private to your account.');
-      else emptyState('Could not load the Avatar library', error.message);
-    } finally { $('refresh-avatars').disabled = false; }
+      message(error.message, true);
+      $('av-build').disabled = false;
+    }
   }
 
-  $('refresh-avatars').addEventListener('click', loadAvatars);
-  loadAvatars();
+  function follow(job) {
+    clearTimeout(state.polling);
+    renderStages(job);
+    renderLiveViews(job);
+    if (job.finished_bool) {
+      store(JOB_KEY, null);
+      $('av-build').disabled = !state.file;
+      if (job.success_bool === false) message(job.error_string || 'failed', true);
+      else { message(''); loadLibrary(); }
+      return;
+    }
+    state.polling = setTimeout(async () => {
+      try {
+        follow(await api('/api/ai/avatar-build/status/' + encodeURIComponent(job.task_id_string)));
+      } catch (error) {
+        message(error.message, true);
+        state.polling = setTimeout(() => follow(job), 8000);
+      }
+    }, Math.max(2, Math.min(10, Number(job.retry_after_seconds_float) || 4)) * 1000);
+  }
+
+  /* ------------------------------------------------------------ library */
+
+  async function loadLibrary() {
+    const host = $('av-library');
+    try {
+      const data = await api('/api/ai/avatars');
+      state.avatars = data.avatars_array || [];
+    } catch (error) {
+      host.innerHTML = `<div class="av-empty">${escapeHtml(error.message)}</div>`;
+      return;
+    }
+    if (!state.avatars.length) {
+      host.innerHTML = `<div class="av-empty" data-tip="No Avatars yet">${svg('<circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/>')}</div>`;
+      return;
+    }
+    host.innerHTML = state.avatars.map(item => `
+      <article class="av-card" data-id="${escapeHtml(item.avatar_id)}" tabindex="0">
+        <div class="av-card-media">${item.cover_url ? `<img src="${escapeHtml(item.cover_url)}" alt="" loading="lazy">` : SLOT_ICON}
+          <div class="av-card-meta">
+            <span class="av-pill" data-tip="Version">v${escapeHtml(item.current_version)}</span>
+            ${item.view_count ? `<span class="av-pill" data-tip="Views">${svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>')}${escapeHtml(item.view_count)}</span>` : ''}
+          </div>
+        </div>
+        <div class="av-card-name">${escapeHtml(item.display_name)}</div>
+      </article>`).join('');
+  }
+
+  async function openAvatar(id) {
+    let profile;
+    try {
+      profile = (await api('/api/ai/avatars/' + encodeURIComponent(id))).avatar_object;
+    } catch (error) {
+      message(error.message, true);
+      return;
+    }
+    state.current = profile;
+    $('av-modal-name').textContent = profile.display_name;
+    $('av-modal-version').textContent = 'v' + profile.version;
+    const info = [profile.identity_prompt, profile.appearance, profile.body, profile.wardrobe].filter(Boolean).join(' · ');
+    $('av-modal-info').dataset.tip = info.length > 140 ? info.slice(0, 137) + '…' : info;
+    $('av-modal-info').title = info;
+    const sheet = profile.sheet && profile.sheet.canonical_url;
+    $('av-modal-sheet').hidden = !sheet;
+    if (sheet) $('av-modal-sheet').href = sheet;
+    const views = profile.views || {};
+    const slots = SLOTS.filter(slot => views[slot]).concat(Object.keys(views).filter(slot => !SLOTS.includes(slot)));
+    const refs = (profile.references || []).filter(ref => ref.media_type === 'image');
+    $('av-modal-views').innerHTML = slots.length
+      ? slots.map(slot => slotHtml(slot, {url: views[slot].canonical_url, status: (views[slot].qa || {}).status,
+                                          score: (views[slot].qa || {}).identity_score})).join('')
+      : refs.map(ref => slotHtml(ref.role, {url: ref.canonical_url, status: 'unchecked'})).join('');
+    $('av-modal').hidden = false;
+  }
+
+  function bindLibrary() {
+    $('av-library').addEventListener('click', event => {
+      const card = event.target.closest('.av-card');
+      if (card) openAvatar(card.dataset.id);
+    });
+    $('av-library').addEventListener('keydown', event => {
+      const card = event.target.closest('.av-card');
+      if (card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openAvatar(card.dataset.id); }
+    });
+    $('av-refresh').addEventListener('click', loadLibrary);
+    $('av-modal-close').addEventListener('click', () => { $('av-modal').hidden = true; });
+    $('av-modal').addEventListener('click', event => { if (event.target === $('av-modal')) $('av-modal').hidden = true; });
+    $('av-modal-copy').addEventListener('click', async () => {
+      if (!state.current) return;
+      const value = state.current.avatar_id + '@' + state.current.version;
+      try { await navigator.clipboard.writeText(value); $('av-modal-copy').dataset.tip = 'Copied'; }
+      catch (_) { $('av-modal-copy').dataset.tip = value; }
+      setTimeout(() => { $('av-modal-copy').dataset.tip = 'Copy Avatar id'; }, 1600);
+    });
+    document.addEventListener('click', event => {
+      const picture = event.target.closest('img[data-full]');
+      if (!picture) return;
+      const box = $('av-lightbox');
+      box.querySelector('img').src = picture.dataset.full;
+      box.hidden = false;
+    });
+    $('av-lightbox').addEventListener('click', () => { $('av-lightbox').hidden = true; });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { $('av-lightbox').hidden = true; $('av-modal').hidden = true; }
+    });
+  }
+
+  async function resume() {
+    const id = recall(JOB_KEY);
+    renderStages(null);
+    renderLiveViews(null);
+    if (!id) return;
+    try { follow(await api('/api/ai/avatar-build/status/' + encodeURIComponent(id))); }
+    catch (_) { store(JOB_KEY, null); }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    bindDrop();
+    bindLibrary();
+    $('av-build').addEventListener('click', build);
+    resume();
+    loadLibrary();
+  });
 })();

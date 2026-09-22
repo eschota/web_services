@@ -208,7 +208,7 @@
     if (nodeCompare) requestAnimationFrame(() => nodeCompare.refresh(String(id)));
     if (record.status === 'done' && record.value) {
       continuableResults.set(String(id), {type:record.type, value:record.value,
-        task_id:record.task_id || ''});
+        task_id:record.task_id || '', outputs:record.outputs || null});
       // A finished step is new information about size: a ControlNet map that
       // has just landed is what the image below it must now be drawn at.
       if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
@@ -1398,6 +1398,8 @@
   // at once so the node can say it is running and the deep link can carry the
   // id; waiting on the submit would leave both blank for minutes.
   const RUNNERS = {
+    // One job, many answers: the Avatar plus every view it drew (ai_avatar_build).
+    avatar_build: { api: '/api/ai/avatar-build', finish: pollAvatarBuild, field: 'avatar_string', type: 'avatar', multi: true },
     avatar_image: { api: '/api/ai/avatar-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
     avatar_video: { api: '/api/ai/avatar-video', finish: pollForFile, field: 'video_url_string', type: 'video' },
     video_frame: { api: '/api/ai/video-reference', finish: pollForFile, field: 'image_url_string', type: 'image' },
@@ -1665,6 +1667,67 @@
     throw new Error('the render did not land in time; it may still be running');
   }
 
+  /**
+   * A node with several outputs finishes with {value, outputs}: `value` is its
+   * first output (what a single-socket reader gets), `outputs` every output by
+   * field. Everything else in the page still sees a plain value.
+   */
+  function splitMulti(finished) {
+    if (finished && typeof finished === 'object' && !Array.isArray(finished) &&
+        Object.prototype.hasOwnProperty.call(finished, 'outputs')) {
+      return {value: finished.value, outputs: finished.outputs || null};
+    }
+    return {value: finished, outputs: null};
+  }
+
+  /** What a wire carries: the named output when the node kept them apart. */
+  function outputValue(upstream, field) {
+    const outputs = upstream && upstream.outputs;
+    if (outputs && field && Object.prototype.hasOwnProperty.call(outputs, field)) return outputs[field];
+    return upstream ? upstream.value : '';
+  }
+
+  const AVATAR_BUILD_FIELDS = ['avatar_string', 'front_url_string', 'face_closeup_url_string',
+    'full_body_url_string', 'three_quarter_left_url_string', 'three_quarter_right_url_string',
+    'profile_left_url_string', 'profile_right_url_string', 'back_url_string', 'sheet_url_string',
+    'source_frame_url_string', 'description_string'];
+
+  function avatarBuildOutputs(data) {
+    const outputs = {};
+    AVATAR_BUILD_FIELDS.forEach(field => { if (data && data[field]) outputs[field] = String(data[field]); });
+    return outputs;
+  }
+
+  async function pollAvatarBuild(accepted, runner, report) {
+    const id = String(accepted.task_id_string || '');
+    if (!/^avb_[a-f0-9]{24}$/.test(id)) throw new Error('the Avatar builder returned no job');
+    let data = accepted;
+    for (let attempt = 0; attempt < 1500; attempt++) {
+      if (data && data.finished_bool) {
+        if (data.success_bool === false || String(data.status_string) === 'failed') {
+          throw new Error(data.error_string || 'the Avatar build failed');
+        }
+        if (!data.avatar_string) throw new Error('the Avatar build finished without saving');
+        return {value: data.avatar_string, outputs: avatarBuildOutputs(data)};
+      }
+      await sleep(Math.max(2, Math.min(10, Number(data && data.retry_after_seconds_float) || 4)) * 1000);
+      const response = await fetch('/api/ai/avatar-build/status/' + encodeURIComponent(id)).catch(() => null);
+      if (!response || response.status >= 500) continue;
+      const parsed = await readJsonResponse(response);
+      if (!response.ok) {
+        if (parsed.data) throw new Error(describeError(parsed.data, response.status));
+        throw new Error('HTTP ' + response.status);
+      }
+      data = parsed.data || {};
+      if (report && !data.finished_bool) {
+        const views = Object.keys(data.views_object || {}).length;
+        report({status_string: 'running', node_string: 'avatar',
+                stage_string: (data.stage_string || 'building') + (views ? ' · ' + views + ' views' : '')});
+      }
+    }
+    throw new Error('the Avatar build did not finish in time');
+  }
+
   async function poll3dStatus(accepted, runner, report) {
     const id = accepted.task_id_string;
     for (let attempt = 0; attempt < 400; attempt++) {
@@ -1774,9 +1837,10 @@
         });
       }
       let value;
+      let outputs = null;
       try {
-        value = await runner.finish(accepted, runner,
-          taskStateReporter(state, task, accepted, execution));
+        ({value, outputs} = splitMulti(await runner.finish(accepted, runner,
+          taskStateReporter(state, task, accepted, execution))));
       } catch (error) {
         if (!attempt && String(error.message || '').indexOf(BUDGET_EXHAUSTED) !== -1) {
           if (!executionIsCurrent(execution)) throw error;
@@ -1794,12 +1858,12 @@
       if (executionIsCurrent(execution)) {
         state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
         state.className = 'nstate done';
-        showResult(outBox, runner.type, value);
-        recordResult(id, { status: 'done', type: runner.type, value: value,
+        showResult(outBox, runner.type, value, outputs);
+        recordResult(id, Object.assign({ status: 'done', type: runner.type, value: value,
                            input_reference_url: execution.inputReference || '',
-                           task_id: accepted.task_id_string || '' });
+                           task_id: accepted.task_id_string || '' }, outputs ? {outputs} : {}));
       }
-      return { type: runner.type, value: value };
+      return outputs ? { type: runner.type, value: value, outputs } : { type: runner.type, value: value };
     } catch (error) {
       finishTaskTracker(task, false, execution, progress);
       if (executionIsCurrent(execution)) {
@@ -1866,7 +1930,29 @@
     return badge;
   }
 
-  function showResult(host, type, value) {
+  /** Every picture a multi-output node made, small, each opening full size. */
+  function showOutputs(host, outputs) {
+    const pictures = Object.keys(outputs || {}).filter(field =>
+      /_url_string$/.test(field) && /^https?:[/][/]/.test(String(outputs[field])));
+    if (!pictures.length) return;
+    const grid = document.createElement('div');
+    grid.className = 'nviews';
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-top:4px';
+    pictures.forEach(field => {
+      const url = String(outputs[field]);
+      const picture = document.createElement('img');
+      picture.src = url;
+      picture.loading = 'lazy';
+      picture.alt = picture.title = field.replace(/_url_string$/, '').replace(/_/g, ' ');
+      picture.style.cssText = 'width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:4px;cursor:zoom-in;background:#111';
+      picture.classList.add('preview-expandable');
+      picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', url); });
+      grid.appendChild(picture);
+    });
+    host.appendChild(grid);
+  }
+
+  function showResult(host, type, value, outputs) {
     host.innerHTML = '';
     if (type === 'text') {
       const block = document.createElement('div');
@@ -1900,6 +1986,7 @@
         markResolution(host, clip);
         clip.play().catch(() => {});
     }
+    if (outputs && typeof outputs === 'object') showOutputs(host, outputs);
     const link = document.createElement('a');
     link.href = value;
     link.target = '_blank';
@@ -2233,9 +2320,9 @@
         const state = element.querySelector('.nstate');
         state.textContent = 'continued';
         state.className = 'nstate done';
-        showResult(element.querySelector('.nout'), continued.type, continued.value);
+        showResult(element.querySelector('.nout'), continued.type, continued.value, continued.outputs);
       }
-      return Promise.resolve({type:continued.type, value:continued.value});
+      return Promise.resolve({type:continued.type, value:continued.value, outputs:continued.outputs || null});
     }
 
     const requestBody = bodyFor(node.service, resolved, params);
@@ -2246,12 +2333,12 @@
         const state = element.querySelector('.nstate');
         state.textContent = 'cached';
         state.className = 'nstate done';
-        showResult(element.querySelector('.nout'), completed.type, completed.value);
+        showResult(element.querySelector('.nout'), completed.type, completed.value, completed.outputs);
         recordResult(idString, {status:'done', type:completed.type, value:completed.value,
           input_reference_url:completed.input_reference_url || (nodeCompare?.resolveReference(idString, graphSnapshot) || resolved.image || ''),
-          task_id:completed.task_id || ''});
+          task_id:completed.task_id || '', outputs:completed.outputs || undefined});
       }
-      return Promise.resolve({type: completed.type, value: completed.value});
+      return Promise.resolve({type: completed.type, value: completed.value, outputs: completed.outputs || null});
     }
 
     const version = (nodeRunVersions.get(idString) || 0) + 1;
@@ -2345,7 +2432,7 @@
           const resolved = {};
           feeds.forEach((link, index) => {
             const upstream = upstreamRecords[index]?.result;
-            if (upstream) resolved[link.input] = upstream.value;
+            if (upstream) resolved[link.input] = outputValue(upstream, link.output);
           });
           const params = {...(node.params || {})};
           const requestBody = bodyFor(node.service, resolved, params);
@@ -2450,11 +2537,11 @@
       const outBox = element.querySelector('.nout');
       runState.set(String(id), record);
       if (['done', 'stale'].includes(record.status) && record.value) {
-        if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value,
+        if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value, outputs:record.outputs || null,
           task_id:record.task_id || ''});
         state.textContent = record.status === 'stale' ? 'changed — render to update' : 'done';
         state.className = record.status === 'stale' ? 'nstate' : 'nstate done';
-        showResult(outBox, record.type, record.value);
+        showResult(outBox, record.type, record.value, record.outputs);
         return;
       }
       if (record.status === 'failed') {
@@ -2507,18 +2594,18 @@
     accepted[runner.field] = record.value || '';
     try {
       const reporter = taskStateReporter(state, task, accepted);
-      const value = await runner.finish(accepted, runner, data => {
+      const {value, outputs} = splitMulti(await runner.finish(accepted, runner, data => {
         if (stillHere()) reporter(data);
-      });
+      }));
       if (!stillHere()) return;
       state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);
-      showResult(outBox, runner.type, value);
-      recordResult(id, { status: 'done', type: runner.type, value: value,
+      showResult(outBox, runner.type, value, outputs);
+      recordResult(id, Object.assign({ status: 'done', type: runner.type, value: value,
                          input_reference_url:record.input_reference_url || '', history:record.history || [],
-                         task_id: record.task_id || '' });
-      return {type:runner.type, value};
+                         task_id: record.task_id || '' }, outputs ? {outputs} : {}));
+      return outputs ? {type:runner.type, value, outputs} : {type:runner.type, value};
     } catch (error) {
       if (!stillHere()) throw error;
       state.textContent = String(error.message || error);

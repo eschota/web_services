@@ -135,6 +135,39 @@ SERVICES: List[Dict[str, object]] = [
         "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Character keyframe"}],
     },
     {
+        # One picture or one video in, a saved Avatar v2 out, with every view
+        # it made on its own socket so each can be wired on (ai_avatar_build).
+        "id": "avatar_build", "title": "Avatar builder", "path": "/avatars",
+        "api": "/api/ai/avatar-build", "status": "live", "slow": True,
+        "multi_output": True,
+        "summary": ("A picture or a video in; a saved Avatar with front, face, full body, "
+                    "three-quarter, profile and back views out, each checked against the source."),
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True,
+             "title": "Photo or video", "also_accepts": [VIDEO]},
+            {"type": AVATAR, "field": "avatar", "required": False,
+             "title": "Add a version to"},
+        ],
+        "outputs": [
+            {"type": AVATAR, "field": "avatar_string", "title": "Avatar"},
+            {"type": IMAGE, "field": "front_url_string", "title": "Front", "view": "front"},
+            {"type": IMAGE, "field": "face_closeup_url_string", "title": "Face", "view": "face_closeup"},
+            {"type": IMAGE, "field": "full_body_url_string", "title": "Full body", "view": "full_body"},
+            {"type": IMAGE, "field": "three_quarter_left_url_string", "title": "3/4 left",
+             "view": "three_quarter_left"},
+            {"type": IMAGE, "field": "three_quarter_right_url_string", "title": "3/4 right",
+             "view": "three_quarter_right"},
+            {"type": IMAGE, "field": "profile_left_url_string", "title": "Profile left",
+             "view": "profile_left"},
+            {"type": IMAGE, "field": "profile_right_url_string", "title": "Profile right",
+             "view": "profile_right"},
+            {"type": IMAGE, "field": "back_url_string", "title": "Back", "view": "back"},
+            {"type": IMAGE, "field": "sheet_url_string", "title": "Sheet"},
+            {"type": IMAGE, "field": "source_frame_url_string", "title": "Source frame"},
+            {"type": TEXT, "field": "description_string", "title": "Description"},
+        ],
+    },
+    {
         "id": "avatar_video", "title": "Avatar video · Wan-Animate-2", "path": "/nodes",
         "api": "/api/ai/avatar-video", "status": "live", "slow": True,
         "summary": "Transfer action from a driving video to one or two saved Avatar characters.",
@@ -459,6 +492,14 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
              {"value": "true", "title": "Face and bare skin (hands, neck)"},
          ],
          "help": "The wider region is slower and rewrites more of the picture"},
+    ],
+    "avatar_build": [
+        {"name": "outfit", "title": "Outfit", "type": "text", "default": "",
+         "help": "Blank keeps what the source wears"},
+        {"name": "display_name", "title": "Name", "type": "text", "default": "",
+         "help": "Blank lets Vision name it"},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 2147483647,
+         "step": 1, "default": 0, "help": "0 derives one from the source"},
     ],
     "avatar_video": [
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,

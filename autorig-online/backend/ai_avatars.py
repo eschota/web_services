@@ -36,7 +36,9 @@ AVATAR_DIR = pathlib.Path(
 AVATAR_ID_RE = re.compile(r"^av_[a-f0-9]{24}$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 MAX_AVATARS_PER_OWNER = 100
-MAX_PROFILE_BYTES = 256 * 1024
+# Every version is kept in the one document, and a v2 version carries eight
+# views with their prompts and checks (~12 KB), so the ceiling allows dozens.
+MAX_PROFILE_BYTES = 1024 * 1024
 
 
 class AvatarOwner(BaseModel):
@@ -203,6 +205,128 @@ class AvatarProvenance(BaseModel):
         return value
 
 
+# ------------------------------------------------------------ format v2
+#
+# Version 1 was a name, a few prompts and one to twelve reference pictures.
+# Version 2 keeps every one of those fields (so a v1 profile reads unchanged
+# and every consumer written for v1 still finds its references) and adds what
+# an automatically built Avatar produces: a set of *named views* of the same
+# character, where each picture came from and whether it passed the identity
+# check, the source media it was built from, optional LoRAs, and an open
+# `extensions` bag for whatever the format grows next (voice, rig, outfits).
+#
+# Slot names are data, not an enum: the canonical eight below are what the
+# builder makes, and anything matching SLOT_RE ("expr_smile", "outfit/red")
+# is accepted so a new kind of view never needs a schema migration.
+FORMAT_VERSION_LATEST = 2
+CANONICAL_VIEW_SLOTS = (
+    "front", "face_closeup", "full_body",
+    "three_quarter_left", "three_quarter_right",
+    "profile_left", "profile_right", "back",
+)
+SLOT_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}(?:/[a-z0-9_]{1,40})?$")
+MAX_VIEWS = 32
+MAX_EXTENSION_BYTES = 16 * 1024
+
+
+class AvatarViewQA(BaseModel):
+    """What the automatic check found; never claims more than it measured."""
+
+    status: Literal["passed", "failed", "unchecked", "accepted_with_warnings"] = "unchecked"
+    attempts: int = Field(default=1, ge=1, le=10)
+    # 0..1, higher is more alike. `identity_method` says what produced it:
+    # a Vision-model judgement is not an embedding distance and must not be
+    # compared with one.
+    identity_score: Optional[float] = Field(default=None, ge=0, le=1)
+    identity_method: str = Field(default="", max_length=100)
+    angle_ok: Optional[bool] = None
+    face_detected: Literal["frontal", "profile", "none", "unknown"] = "unknown"
+    notes: str = Field(default="", max_length=1000)
+
+
+class AvatarViewProvenance(BaseModel):
+    engine: str = Field(default="", max_length=100)
+    workflow: str = Field(default="", max_length=200)
+    checkpoint: str = Field(default="", max_length=200)
+    prompt: str = Field(default="", max_length=6000)
+    seed: int = Field(default=0, ge=0, le=9007199254740991)
+    task_id: str = Field(default="", max_length=200)
+    reference_slots: List[str] = Field(default_factory=list, max_length=8)
+    worker: str = Field(default="", max_length=100)
+    seconds: float = Field(default=0, ge=0, le=86400)
+
+
+class AvatarView(BaseModel):
+    """One picture of the character in a named slot."""
+
+    canonical_url: str
+    sha256: str
+    asset_id: Optional[str] = Field(default=None, max_length=128)
+    width: int = Field(ge=1, le=16384)
+    height: int = Field(ge=1, le=16384)
+    yaw_deg: Optional[float] = Field(default=None, ge=-180, le=180)
+    framing: Literal["face", "upper_body", "full_body", "other"] = "other"
+    expression: str = Field(default="neutral", max_length=60)
+    provenance: AvatarViewProvenance = Field(default_factory=AvatarViewProvenance)
+    qa: AvatarViewQA = Field(default_factory=AvatarViewQA)
+
+    @field_validator("canonical_url")
+    @classmethod
+    def validate_canonical_url(cls, value: str) -> str:
+        return str(_safe_https_url(value, field_name="view canonical_url"))
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not SHA256_RE.fullmatch(value):
+            raise ValueError("view sha256 must contain exactly 64 hexadecimal characters")
+        return value
+
+
+class AvatarSource(BaseModel):
+    """The media an Avatar was built from, and which frame was used."""
+
+    kind: Literal["image", "video"]
+    sha256: str
+    # Absent for a private source that never had a public address.
+    url: Optional[str] = None
+    width: Optional[int] = Field(default=None, ge=1, le=16384)
+    height: Optional[int] = Field(default=None, ge=1, le=16384)
+    duration_seconds: Optional[float] = Field(default=None, ge=0, le=36000)
+    frame_time_seconds: Optional[float] = Field(default=None, ge=0, le=36000)
+    frame_url: Optional[str] = None
+    frame_sha256: Optional[str] = None
+    frame_score: Optional[float] = None
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("url", "frame_url")
+    @classmethod
+    def validate_urls(cls, value: Optional[str]) -> Optional[str]:
+        return _safe_https_url(value, field_name="source url")
+
+    @field_validator("sha256", "frame_sha256")
+    @classmethod
+    def validate_sha(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip().lower()
+        if not SHA256_RE.fullmatch(value):
+            raise ValueError("source sha256 must contain exactly 64 hexadecimal characters")
+        return value
+
+
+class AvatarLora(BaseModel):
+    """A LoRA that carries this identity for one model family."""
+
+    name: str = Field(min_length=1, max_length=200)
+    pipeline_family: str = Field(default="", max_length=100)
+    strength: float = Field(default=1.0, ge=0, le=2)
+    trigger_token: str = Field(default="", max_length=100)
+    status: Literal["candidate", "training", "ready", "failed", "retired"] = "candidate"
+    note: str = Field(default="", max_length=500)
+
+
 class AvatarDraft(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     identity_prompt: str = Field(min_length=1, max_length=4000)
@@ -212,6 +336,43 @@ class AvatarDraft(BaseModel):
     references: List[AvatarReference] = Field(min_length=1, max_length=12)
     provenance: AvatarProvenance = Field(default_factory=AvatarProvenance)
     adapter: AvatarAdapter = Field(default_factory=AvatarAdapter)
+    # ---- v2 (all optional; a v1 draft validates unchanged)
+    format_version: int = Field(default=1, ge=1, le=FORMAT_VERSION_LATEST)
+    body: str = Field(default="", max_length=2000)
+    views: Dict[str, AvatarView] = Field(default_factory=dict)
+    expressions: Dict[str, AvatarView] = Field(default_factory=dict)
+    sheet: Optional[AvatarView] = None
+    sources: List[AvatarSource] = Field(default_factory=list, max_length=8)
+    loras: List[AvatarLora] = Field(default_factory=list, max_length=8)
+    extensions: Dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("views", "expressions")
+    @classmethod
+    def validate_slots(cls, value: Dict[str, AvatarView]) -> Dict[str, AvatarView]:
+        if len(value) > MAX_VIEWS:
+            raise ValueError(f"at most {MAX_VIEWS} views per slot family")
+        for slot in value:
+            if not SLOT_RE.fullmatch(str(slot)):
+                raise ValueError(f"'{slot}' is not a valid view slot name")
+        return value
+
+    @field_validator("extensions")
+    @classmethod
+    def validate_extensions(cls, value: Dict[str, object]) -> Dict[str, object]:
+        try:
+            size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+        except (TypeError, ValueError):
+            raise ValueError("extensions must be plain JSON") from None
+        if size > MAX_EXTENSION_BYTES:
+            raise ValueError("extensions are larger than 16 KB")
+        return value
+
+    def cover_view(self) -> Optional[AvatarView]:
+        """The picture that best stands for this character."""
+        for slot in ("front", "face_closeup", "full_body", "three_quarter_left"):
+            if slot in self.views:
+                return self.views[slot]
+        return next(iter(self.views.values()), None)
 
     @field_validator("display_name", "identity_prompt")
     @classmethod
@@ -246,6 +407,10 @@ class AvatarSummary(BaseModel):
     updated_at_unix_int: int
     adapter_status: str
     reference_count: int
+    format_version: int = 1
+    view_count: int = 0
+    view_slots: List[str] = Field(default_factory=list)
+    cover_url: str = ""
 
 
 class AvatarStoreError(Exception):
@@ -404,10 +569,31 @@ class AvatarStore:
                         updated_at_unix_int=int(document["updated_at_unix_int"]),
                         adapter_status=str((item.get("adapter") or {}).get("status") or "not_requested"),
                         reference_count=len(item.get("references") or []),
+                        **_summary_views(item),
                     ))
                 except Exception:
                     logger.warning("Skipping unreadable Avatar index entry %s", path)
         return sorted(summaries, key=lambda item: (-item.updated_at_unix_int, item.avatar_id))
+
+
+def _summary_views(item: Dict[str, object]) -> Dict[str, object]:
+    views = item.get("views") if isinstance(item.get("views"), dict) else {}
+    cover = ""
+    for slot in ("front", "face_closeup", "full_body", "three_quarter_left"):
+        if isinstance(views.get(slot), dict):
+            cover = str(views[slot].get("canonical_url") or "")
+            break
+    if not cover:
+        for ref in item.get("references") or []:
+            if isinstance(ref, dict) and ref.get("media_type") == "image":
+                cover = str(ref.get("canonical_url") or "")
+                break
+    return {
+        "format_version": int(item.get("format_version") or 1),
+        "view_count": len(views),
+        "view_slots": sorted(str(slot) for slot in views),
+        "cover_url": cover,
+    }
 
 
 def resolve_avatar_identity(

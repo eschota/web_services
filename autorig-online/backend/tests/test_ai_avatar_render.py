@@ -351,3 +351,40 @@ class AvatarRenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AvatarRenderV2Tests(unittest.TestCase):
+    def test_a_lone_v2_avatar_sends_its_front_and_face_views(self):
+        async def scenario():
+            with _temporary_directory() as folder:
+                store = AvatarStore(pathlib.Path(folder) / "avatars")
+                alice = AvatarOwner(owner_type="user", owner_id="alice@example.com")
+                view = lambda name, sha: {"canonical_url": f"https://autorig.online/api/ai/avatar-assets/{name}.png",
+                                          "sha256": sha * 64, "width": 832, "height": 1216}
+                draft = _draft("Ada", "Ada identity", [
+                    _reference("asset_ada_face", "https://autorig.online/dev/api/scratch/ada.png", "5" * 64)])
+                draft = AvatarDraft.model_validate({**draft.model_dump(), "format_version": 2, "views": {
+                    "front": view("front", "6"), "face_closeup": view("face", "7"), "back": view("back", "8")}})
+                ada = store.create(alice, draft)
+
+                async def owner(x_test_owner: str = Header(...)):
+                    return AvatarOwner(owner_type="user", owner_id=x_test_owner)
+
+                app = FastAPI()
+                app.include_router(build_avatar_render_router(owner, store=store))
+                farm, cache = _Farm(), _Cache()
+                with patch.object(ai_avatar_render, "httpx", farm.httpx_module), patch.object(
+                        ai_avatar_render.ai_request_cache, "run_cached", new=cache.run_cached):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                                 base_url="https://testserver") as client:
+                        result = await client.post("/api/ai/avatar-image", json={
+                            "avatar": f"{ada.avatar_id}@1", "prompt": "She reads in a cafe"},
+                            headers={"X-Test-Owner": "alice@example.com"})
+                self.assertEqual(result.status_code, 200, result.text)
+                payload = farm.payloads[0]["json"]
+                self.assertEqual(payload["reference_image_urls"], [
+                    "https://autorig.online/api/ai/avatar-assets/front.png",
+                    "https://autorig.online/api/ai/avatar-assets/face.png"])
+                self.assertIn("Reference images 1 to 2 define character 1, Ada", payload["prompt"])
+                self.assertEqual(result.json()["avatar_versions_array"][0]["reference_sha256"], "6" * 64)
+        asyncio.run(scenario())

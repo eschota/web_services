@@ -23,7 +23,7 @@ function runners() {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const body = slice(source, 'const RUNNERS = {', "['pose', 'depth', 'canny'].forEach");
   return vm.runInNewContext(body + '; RUNNERS', {
-    pollForFile() {}, pollAiStatus() {}, pollAvatarStatus() {}, poll3dStatus() {},
+    pollForFile() {}, pollAiStatus() {}, pollAvatarStatus() {}, pollAvatarBuild() {}, poll3dStatus() {},
   });
 }
 

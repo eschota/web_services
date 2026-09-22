@@ -15,7 +15,7 @@ function runners() {
   const start = source.indexOf('const RUNNERS = {');
   const end = source.indexOf("['pose', 'depth', 'canny'].forEach", start);
   return vm.runInNewContext(source.slice(start, end) + '; RUNNERS', {
-    pollForFile() {}, pollAiStatus() {}, pollAvatarStatus() {}, poll3dStatus() {},
+    pollForFile() {}, pollAiStatus() {}, pollAvatarStatus() {}, pollAvatarBuild() {}, poll3dStatus() {},
   });
 }
 

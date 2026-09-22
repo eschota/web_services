@@ -90,6 +90,9 @@ class HistoryEntry(BaseModel):
         return self
 
 
+MAX_RESULT_OUTPUTS = 24
+
+
 class NodeResult(BaseModel):
     """What one node produced, or is still producing.
 
@@ -106,6 +109,10 @@ class NodeResult(BaseModel):
     started_at: float = 0
     input_reference_url: str = Field("", max_length=4096)
     history: List[HistoryEntry] = Field(default_factory=list, max_length=5)
+    # A node with several outputs (the Avatar builder: the Avatar, eight
+    # views, a sheet, a description) keeps each one by its output field, so a
+    # reopened link can feed every socket and not only the first.
+    outputs: Dict[str, str] = Field(default_factory=dict)
 
     @field_validator("input_reference_url")
     @classmethod
@@ -114,6 +121,21 @@ class NodeResult(BaseModel):
         if value and not value.startswith(("http://", "https://")):
             raise ValueError("input_reference_url must be a public http(s) URL")
         return value
+
+    @field_validator("outputs")
+    @classmethod
+    def validate_outputs(cls, value: Dict[str, str]) -> Dict[str, str]:
+        if len(value) > MAX_RESULT_OUTPUTS:
+            raise ValueError(f"at most {MAX_RESULT_OUTPUTS} outputs per node")
+        clean: Dict[str, str] = {}
+        for key, item in value.items():
+            key, item = str(key), str(item or "")
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key):
+                raise ValueError(f"'{key}' is not an output field name")
+            if item.startswith(("data:", "blob:")) or len(item) > 8192:
+                raise ValueError("outputs hold addresses or short text, not inline media")
+            clean[key] = item
+        return clean
 
 
 class Graph(BaseModel):
