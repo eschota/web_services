@@ -24,6 +24,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from . import config
+from .errors import RequestFaultError
 
 
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
@@ -47,8 +48,15 @@ _MP4_FORMATS = {"mov", "mp4", "m4a", "3gp", "3g2", "mj2"}
 _SOURCE_VIDEO_FORMATS = _MP4_FORMATS | {"matroska", "webm"}
 
 
-class VideoInputError(RuntimeError):
-    """The control video cannot be admitted or prepared safely."""
+class VideoInputError(RequestFaultError):
+    """The control video cannot be admitted or prepared safely.
+
+    Always a property of the URL the caller supplied - rejected origin, wrong
+    fps, oversized clip, an origin that will not serve it - so the dispatcher
+    must never blame the render box it happened to be aiming at.  Still a
+    RuntimeError by inheritance, so the API handlers that catch it are
+    unaffected.
+    """
 
 
 def _validated_url(value: str) -> str:

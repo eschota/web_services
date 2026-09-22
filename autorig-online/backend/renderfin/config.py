@@ -42,6 +42,12 @@ STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
 SUBMIT_FAILURE_COOLDOWN_SECONDS = float(
     os.getenv("RENDERFIN_SUBMIT_FAILURE_COOLDOWN_SECONDS", "600")
 )
+# How often the same stalled-dispatch explanation may be repeated. A queue
+# that no box will take used to be completely silent; printing it per task per
+# pass would be a line every 5s per pending task instead.
+STARVATION_LOG_INTERVAL_SECONDS = float(
+    os.getenv("RENDERFIN_STARVATION_LOG_INTERVAL_SECONDS", "300")
+)
 
 # Hunyuan3D image-to-3D via converter workers (POST /api-converter-glb/generate-3d).
 # Each farm box provisions its OWN bearer token, so the authoritative source is a

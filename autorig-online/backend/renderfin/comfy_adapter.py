@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import httpx
 
 from . import config
+from .errors import RequestFaultError
 from .models import RenderServer
 
 CLIENT_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479"  # C# parity (Adapter_Comfy.cs:332)
@@ -25,7 +26,21 @@ MODEL_EXTENSIONS = (".glb", ".gltf", ".obj", ".fbx")
 
 
 class ComfyAdapterError(RuntimeError):
-    pass
+    """Talking to a ComfyUI worker failed.
+
+    Unless the subclass says otherwise this describes the box, so the
+    dispatcher is right to cool it down and try a peer.
+    """
+
+
+class ComfyRequestError(ComfyAdapterError, RequestFaultError):
+    """The worker refused, or we could not build, *this request*.
+
+    The next box would fail identically, so the task has to stop instead of
+    walking the fleet and quarantining it one machine at a time.  Kept a
+    subclass of ComfyAdapterError so every existing ``except
+    ComfyAdapterError`` still catches it.
+    """
 
 
 class ComfyCapacityWait(RuntimeError):
@@ -74,7 +89,7 @@ async def download_input_image(client: httpx.AsyncClient, image_url: str) -> Tup
     """Fetch the caller's image_url. Local mask URLs short-circuit to disk."""
     image_url = (image_url or "").strip()
     if not image_url:
-        raise ComfyAdapterError("empty image_url")
+        raise ComfyRequestError("empty image_url")
     marker = "/render/masks/"
     if marker in image_url:
         name = image_url.rsplit("/", 1)[-1]
@@ -91,7 +106,9 @@ async def download_input_image(client: httpx.AsyncClient, image_url: str) -> Tup
             return path.name, path.read_bytes()
     resp = await client.get(image_url, timeout=60.0, follow_redirects=True)
     if resp.status_code != 200:
-        raise ComfyAdapterError(f"failed to download image {image_url}: HTTP {resp.status_code}")
+        raise ComfyRequestError(
+            f"failed to download image {image_url}: HTTP {resp.status_code}"
+        )
     name = urlparse(image_url).path.rsplit("/", 1)[-1] or "input.png"
     return name, resp.content
 
@@ -197,7 +214,13 @@ async def submit(
     if _capacity_wait(resp):
         raise ComfyCapacityWait(f"Comfy GPU temporarily leased: HTTP {resp.status_code}")
     if resp.status_code != 200:
-        raise ComfyAdapterError(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
+        # ComfyUI answers /prompt with 400 for exactly one reason: the prompt
+        # it was handed does not validate (unknown node, missing checkpoint,
+        # a size the graph rejects).  That is the request, not the machine -
+        # every other worker parses the same JSON and says the same thing.
+        # Anything else (401/403 auth, 404 route, 5xx, proxy noise) is the box.
+        error = ComfyRequestError if resp.status_code == 400 else ComfyAdapterError
+        raise error(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
     payload = resp.json()
     node_errors = payload.get("node_errors")
     if isinstance(node_errors, dict) and node_errors:
@@ -206,7 +229,7 @@ async def submit(
         # and expose the uploaded control image as a temporary artifact.  A
         # render with rejected output nodes was never accepted successfully.
         summary = json.dumps(node_errors, ensure_ascii=True, sort_keys=True)
-        raise ComfyAdapterError(
+        raise ComfyRequestError(
             f"prompt validation failed: node_errors={summary[:1500]}"
         )
     returned_prompt_id = str(payload.get("prompt_id") or "")

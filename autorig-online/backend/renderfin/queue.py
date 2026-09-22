@@ -10,7 +10,7 @@ import os
 import time
 import uuid
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiosqlite
 import httpx
@@ -18,6 +18,7 @@ import httpx
 from . import (
     comfy_adapter,
     config,
+    errors,
     image_quality,
     model_eligibility,
     routing,
@@ -40,6 +41,47 @@ from .registry import ServerRegistry
 # finite, so it stays usable when every box is unreadable.
 _UNKNOWN_DEPTH = 10_000
 _AVATAR_WORKFLOW = "gen_image_flux2_avatar.json"
+
+
+def _utc_stamp(when: float) -> str:
+    """Absolute UTC for a journal line.
+
+    The journal stamps its own lines in the box's local time, so a cooldown
+    printed as "in 480s" has to be added to a clock the reader is converting
+    in their head. An absolute UTC instant can be compared to the next line
+    directly.
+    """
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when))
+
+
+def _exclusion_text(kind: str, detail: str) -> str:
+    """Human half of an _exclusion_reason pair."""
+    if kind == "offline":
+        return f"offline (status={detail})"
+    if kind == "cannot-run":
+        return f"does not advertise {detail}"
+    if kind == "missing-model":
+        return "does not have the requested checkpoint/lora"
+    if kind == "busy":
+        return f"busy with {detail}"
+    if kind == "cooling":
+        return f"cooling down until {detail}"
+    if kind == "unbound":
+        return f"not the GPU this task is leased to ({detail})"
+    return f"{kind} {detail}".strip()
+
+
+def _exclusion_key(kind: str, detail: str) -> str:
+    """Throttle half of an _exclusion_reason pair.
+
+    Deliberately drops the volatile detail (which task is occupying a box)
+    and keeps the actionable one (the status, the token, the cooldown
+    deadline), so ordinary task turnover does not re-print the same stall and
+    a genuinely new cooldown does.
+    """
+    if kind in ("offline", "cannot-run", "cooling"):
+        return f"{kind}:{detail}"
+    return kind
 
 
 def _inject_avatar_reference_images(
@@ -455,6 +497,8 @@ class RenderQueue:
         # Without a cooldown, one broken disk/proxy can spend all three task
         # attempts while healthy renderers sit unused.
         self._server_submit_cooldowns: Dict[str, float] = {}
+        # signature of a starved dispatch pass -> when it was last printed.
+        self._starvation_logged: Dict[str, float] = {}
 
     # ---------- lifecycle ----------
 
@@ -831,6 +875,33 @@ class RenderQueue:
                 busy[task.server_name] = task.id
         return busy
 
+    def _exclusion_reason(
+        self,
+        server: RenderServer,
+        token: str,
+        busy: Dict[str, str],
+        eligible_names: Optional[set[str]],
+        now: float,
+    ) -> Optional[Tuple[str, str]]:
+        """Why this box cannot take this token right now, or None if it can.
+
+        Single source of truth for the dispatch filters: _pick_server selects
+        on it and the starvation log explains with it, so the two can never
+        drift into saying different things about the same fleet.
+        """
+        if server.status != "online":
+            return ("offline", server.status or "unknown")
+        if not routing.server_can_run(server, token):
+            return ("cannot-run", token)
+        if eligible_names is not None and server.render_server_name not in eligible_names:
+            return ("missing-model", "")
+        if server.render_server_name in busy:
+            return ("busy", busy[server.render_server_name])
+        until = self._server_submit_cooldowns.get(server.render_server_name, 0)
+        if until > now:
+            return ("cooling", _utc_stamp(until))
+        return None
+
     def _pick_server(
         self,
         token: str,
@@ -861,11 +932,7 @@ class RenderQueue:
         candidates = [
             s
             for s in self.registry.all()
-            if s.status == "online"
-            and routing.server_can_run(s, token)
-            and (eligible_names is None or s.render_server_name in eligible_names)
-            and s.render_server_name not in busy
-            and self._server_submit_cooldowns.get(s.render_server_name, 0) <= now
+            if self._exclusion_reason(s, token, busy, eligible_names, now) is None
         ]
         if task is not None and task.workload_lease_id and task.workload_physical_resource_id:
             bound = [
@@ -890,6 +957,68 @@ class RenderQueue:
         )
         return candidates[0] if candidates else None
 
+    def _starvation_report(
+        self,
+        task: RenderTask,
+        eligible_names: Optional[set[str]] = None,
+    ) -> Tuple[str, str]:
+        """(throttle key, human text) for a task no box would take.
+
+        _pick_server answers None for five different reasons and used to say
+        nothing at all, so a fleet quarantined by one bad request looked
+        exactly like an empty queue: Pending tasks, idle boxes, not a single
+        journal line between the failure and the cooldown expiry.
+        """
+        token = task.workflow
+        servers = sorted(self.registry.all(), key=lambda s: s.render_server_name)
+        if not servers:
+            return (f"{token}|no-servers", "no render servers are registered")
+        busy = self._busy_servers()
+        now = time.time()
+        keys: List[str] = []
+        parts: List[str] = []
+        for server in servers:
+            reason = self._exclusion_reason(server, token, busy, eligible_names, now)
+            if reason is None:
+                # It passed every filter, so the only thing left that can have
+                # excluded it is the workload lease binding this task to one
+                # physical GPU.
+                reason = ("unbound", task.workload_physical_resource_id or "unknown")
+            kind, detail = reason
+            keys.append(f"{server.render_server_name}={_exclusion_key(kind, detail)}")
+            parts.append(
+                f"{server.render_server_name} {_exclusion_text(kind, detail)}"
+            )
+        return (f"{token}|" + ",".join(keys), "; ".join(parts))
+
+    def _log_starvation(self, stalls: Dict[str, Tuple[str, str, int]]) -> None:
+        """Print one throttled line per distinct stall, not per waiting task.
+
+        A thirty-task backlog stalled on the same four boxes is one fact, and
+        the journal is told it once. The key carries the cooldown deadlines,
+        so a new quarantine is a new fact and is printed immediately.
+        """
+        if not stalls:
+            return
+        now = time.time()
+        interval = config.STARVATION_LOG_INTERVAL_SECONDS
+        for key, (token, text, waiting) in stalls.items():
+            last = self._starvation_logged.get(key, 0.0)
+            if now - last < interval:
+                continue
+            self._starvation_logged[key] = now
+            print(
+                f"[Renderfin][Queue] no server for {waiting} pending task(s) "
+                f"on {token}: {text}"
+            )
+        # Forget stalls that have not recurred for two intervals, so the
+        # throttle map cannot grow with every cooldown the fleet ever had.
+        self._starvation_logged = {
+            key: when
+            for key, when in self._starvation_logged.items()
+            if now - when < interval * 2
+        }
+
     async def _queue_depths(self) -> Dict[str, int]:
         """Ask every online box how much work it is already sitting on."""
         servers = [s for s in self.registry.all() if s.status == "online"]
@@ -913,12 +1042,27 @@ class RenderQueue:
         if not pending:
             return False
         depths = await self._queue_depths()
+        stalls: Dict[str, Tuple[str, str, int]] = {}
+        try:
+            return await self._dispatch_pending(pending, depths, stalls)
+        finally:
+            self._log_starvation(stalls)
+
+    async def _dispatch_pending(
+        self,
+        pending: List[RenderTask],
+        depths: Dict[str, int],
+        stalls: Dict[str, Tuple[str, str, int]],
+    ) -> bool:
         for task in pending:
             eligible = await model_eligibility.eligible_names(
                 self._client, self.registry.all(), task.prompt
             )
             server = self._pick_server(task.workflow, depths, task, eligible)
             if server is None:
+                key, text = self._starvation_report(task, eligible)
+                token, _, waiting = stalls.get(key, (task.workflow, text, 0))
+                stalls[key] = (token, text, waiting + 1)
                 continue
             try:
                 await self._ensure_workload_lease(task, server)
@@ -961,15 +1105,35 @@ class RenderQueue:
                 await self._fail(task, f"invalid render request: {exc}")
                 continue
             except Exception as exc:
-                print(
-                    f"[Renderfin][Queue] submit {task.id} to "
-                    f"{server.render_server_name} failed: {exc}"
-                )
+                # Two completely different failures used to land here and were
+                # treated identically. A request the fleet cannot satisfy - an
+                # image_url that 404s, a control video that will not download,
+                # a prompt ComfyUI refuses to validate - is reproduced byte for
+                # byte by the next box, so quarantining the box it happened to
+                # hit punishes a healthy machine and, one attempt at a time,
+                # the whole fleet. Only a failure that describes the box earns
+                # a cooldown.
+                request_fault = errors.is_request_fault(exc)
                 await self._release_workload(task, outcome="released", retry=True)
                 task.submit_failures += 1
-                self._server_submit_cooldowns[server.render_server_name] = (
-                    time.time() + config.SUBMIT_FAILURE_COOLDOWN_SECONDS
+                if request_fault:
+                    print(
+                        f"[Renderfin][Queue] submit {task.id} to "
+                        f"{server.render_server_name} failed (bad request, "
+                        f"{server.render_server_name} stays in rotation): {exc}"
+                    )
+                    if task.submit_failures >= 3:
+                        await self._fail(task, f"bad render request 3x: {exc}")
+                    else:
+                        await self._persist(task)
+                    continue
+                until = time.time() + config.SUBMIT_FAILURE_COOLDOWN_SECONDS
+                print(
+                    f"[Renderfin][Queue] submit {task.id} to "
+                    f"{server.render_server_name} failed (worker fault, "
+                    f"cooling until {_utc_stamp(until)}): {exc}"
                 )
+                self._server_submit_cooldowns[server.render_server_name] = until
                 if task.submit_failures >= 3:
                     await self._fail(task, f"submit failed 3x: {exc}")
                 else:
@@ -1290,18 +1454,28 @@ class RenderQueue:
         runtime_name = routing.resolve_runtime_workflow(server, workflow_file)
         template_path = config.WORKFLOWS_DIR / runtime_name
         if not template_path.is_file():
-            raise comfy_adapter.ComfyAdapterError(f"workflow template missing: {runtime_name}")
+            # A missing template is the request's fault when the prompt named
+            # the file itself, and the box's fault when this worker's
+            # workflow_overrides rewrote a canonical name to something we do
+            # not ship - only then can a peer still run the same task.
+            overridden = (server.workflow_overrides or {}).get(workflow_file)
+            missing = (
+                comfy_adapter.ComfyAdapterError
+                if overridden and overridden != workflow_file
+                else comfy_adapter.ComfyRequestError
+            )
+            raise missing(f"workflow template missing: {runtime_name}")
         template_text = template_path.read_text(encoding="utf-8")
 
         image_filename = ""
         reference_urls = list(getattr(prompt, "reference_image_urls", []) or [])
         is_avatar_workflow = workflow_file == _AVATAR_WORKFLOW
         if is_avatar_workflow and not reference_urls:
-            raise comfy_adapter.ComfyAdapterError(
+            raise comfy_adapter.ComfyRequestError(
                 "Avatar workflow requires 1 to 4 reference images"
             )
         if reference_urls and not is_avatar_workflow:
-            raise comfy_adapter.ComfyAdapterError(
+            raise comfy_adapter.ComfyRequestError(
                 "reference_image_urls require gen_image_flux2_avatar.json"
             )
         if not is_avatar_workflow and (prompt.image_url or "").strip():
@@ -1314,7 +1488,9 @@ class RenderQueue:
             "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
             "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json"}
         if bool(control_url) != controlled_video:
-            raise comfy_adapter.ComfyAdapterError("A video control workflow requires its driving video")
+            raise comfy_adapter.ComfyRequestError(
+                "A video control workflow requires its driving video"
+            )
         if control_url:
             from .video_input import download_prepare_video
             name, data = await download_prepare_video(self._client, control_url, prompt.frame_count)
