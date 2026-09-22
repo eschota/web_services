@@ -68,7 +68,7 @@ test('the palette explains a planned node instead of a generic note', () => {
     entry: {title: 'Upscale video', status: 'planned',
             blocked_reason: 'worker-4090 has no ESRGAN weights.'},
     button: {
-      disabled: false, label: '',
+      disabled: false, draggable: true, label: '',
       setAttribute(_name, value) { this.label = value; },
       querySelector() { return scope.note; },
     },
@@ -76,6 +76,8 @@ test('the palette explains a planned node instead of a generic note', () => {
   };
   vm.runInNewContext(body, scope);
   assert.equal(scope.button.disabled, true);
+  // A disabled button still fires dragstart; dropping it made an uncallable node.
+  assert.equal(scope.button.draggable, false);
   assert.equal(scope.note.textContent, 'worker-4090 has no ESRGAN weights.');
   assert.match(scope.button.label, /no ESRGAN weights/);
 });

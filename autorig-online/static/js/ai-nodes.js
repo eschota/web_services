@@ -2235,6 +2235,9 @@
         // the question the greyed-out button actually raises.
         const why = entry.blocked_reason || 'Not wired up yet.';
         button.disabled = true;
+        // A disabled button still starts a drag, and dropping it on the canvas
+        // made a node no runner knows how to call.
+        button.draggable = false;
         button.setAttribute('aria-label', entry.title + '. ' + why);
         const note = button.querySelector('.ttip i');
         if (note) note.textContent = why;
