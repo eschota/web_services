@@ -303,6 +303,10 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
     nodes = []
     total_load = 0
     running: Dict[str, int] = {}
+    # Which language models each node carries. The strip does not need it, but
+    # the per-service capacity does: a node with no vision model cannot answer
+    # a Vision request however free it is.
+    models: Dict[str, List[str]] = {}
     for worker, probe in zip(workers, probes):
         node_id = ai_vision_api._node_key(worker)
         if isinstance(probe, Exception) or not isinstance(probe, tuple):
@@ -315,6 +319,8 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
         ok, info = probe
         load = int((info or {}).get("load") or 0) if isinstance(info, dict) else 0
         total_load += load
+        models[node_id] = [str(name) for name
+                           in ((info or {}).get("models") or [])] if isinstance(info, dict) else []
         activities = list((info or {}).get("activities") or []) if isinstance(info, dict) else []
         for activity in activities:
             service = str(activity or "")
@@ -337,7 +343,8 @@ async def _converter_snapshot(client: httpx.AsyncClient) -> Dict[str, object]:
             "workflow": activities[0] if activities else "",
             "assigned_worker": node_id,
         })
-    return {"nodes": nodes, "load": total_load, "running": running}
+    return {"nodes": nodes, "load": total_load, "running": running,
+            "models": models}
 
 
 def _canonical_node_id(node_id: object) -> str:
@@ -434,6 +441,19 @@ async def _build_snapshot() -> Dict[str, object]:
     busy = [n for n in online if n.get("busy")]
     queue = _queue_summary(list(render.get("tasks") or []),
                            list(render.get("servers") or []), durations)
+    # The node headers ask a different question from the strip: not who is
+    # busy, but how many computers could take this job at all. Shared with
+    # /api/ai/pipelines so the badge on a node and the column on the support
+    # matrix can never disagree about who can run what.
+    capacity: Dict[str, object] = {}
+    try:
+        import ai_pipelines_api
+
+        capacity = ai_pipelines_api.capacity_object(
+            nodes, list(render.get("servers") or []),
+            ai_models_by_node=dict(converter.get("models") or {}))
+    except Exception:
+        logger.exception("Could not work out what each service can run on")
     return {
         "success_bool": True,
         "nodes_array": nodes,
@@ -441,6 +461,7 @@ async def _build_snapshot() -> Dict[str, object]:
         "nodes_total_int": len(nodes),
         "nodes_busy_int": len(busy),
         "services_object": services,
+        "capacity_object": capacity,
         "queue_object": queue,
         "server_time_unix_int": int(time.time()),
         "snapshot_ttl_seconds_float": SNAPSHOT_TTL_SECONDS,
@@ -492,6 +513,7 @@ async def api_ai_fleet(request: Request):
                           "measured_bool": False}
                     for key, value in FALLBACK_SECONDS.items()
                 },
+                "capacity_object": {},
                 "queue_object": {
                     "running_int": 0, "queued_int": 0, "blocked_int": 0,
                     "eta_seconds_float": None,

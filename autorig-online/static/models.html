@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support Matrix — Pipelines × Computers | AutoRig</title>
+    <meta name="description" content="Which farm computer can run which pipeline, and what each one took over the last 24 hours.">
+    <!-- Operational detail about the farm: useful to anyone running work on
+         it, of no use in a search result. -->
+    <meta name="robots" content="noindex,nofollow">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 10% 6%, rgba(56, 189, 248, .14), transparent 34%),
+                radial-gradient(circle at 90% 10%, rgba(123, 92, 255, .18), transparent 38%),
+                linear-gradient(180deg, #101122 0%, #14152a 48%, #0f101c 100%);
+            background-attachment: fixed;
+            color: var(--text-primary, #eef);
+            min-height: 100vh; margin: 0;
+        }
+        .ai-page, .ai-page input, .ai-page button, .ai-page select {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+        .ai-page [hidden] { display: none !important; }
+
+        .mx-wrap { max-width: 1680px; margin: 0 auto; padding: 24px 18px 56px; }
+
+        .mx-head { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; }
+        .mx-head h1 {
+            margin: 0; font-size: 27px; line-height: 1.15; font-weight: 700;
+            background: linear-gradient(135deg, #38bdf8, #7b5cff);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .mx-head p {
+            margin: 6px 0 0; font-size: 13.5px; color: var(--text-secondary, #9aa0b5);
+            max-width: 74ch; line-height: 1.5;
+        }
+        .mx-head .grow { flex: 1 1 320px; }
+        .mx-btn {
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+            color: inherit; border-radius: 10px; padding: 8px 14px; font-size: 13px;
+            cursor: pointer; text-decoration: none; display: inline-block;
+        }
+        .mx-btn:hover { background: rgba(255,255,255,.12); color: inherit; }
+
+        .mx-bar {
+            display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+            margin: 16px 0 12px; font-size: 12.5px; color: var(--text-secondary, #9aa0b5);
+        }
+        .mx-chip {
+            border: 1px solid rgba(255,255,255,.13); background: rgba(21,22,42,.8);
+            border-radius: 999px; padding: 5px 11px; font-variant-numeric: tabular-nums;
+        }
+        .mx-chip b { color: #e8ecff; font-weight: 600; }
+        .mx-chip.window { border-color: rgba(56,189,248,.4); color: #7dd3fc; }
+        .mx-note { color: #fca5a5; }
+
+        .mx-scroll {
+            overflow: auto; max-height: calc(100vh - 220px);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 14px;
+            background: rgba(16,17,34,.92); box-shadow: 0 14px 34px rgba(0,0,0,.34);
+        }
+        table.mx { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12.5px; }
+
+        table.mx th, table.mx td {
+            border-bottom: 1px solid rgba(255,255,255,.07); padding: 7px 9px;
+            text-align: center; white-space: nowrap;
+        }
+        table.mx thead th {
+            position: sticky; top: 0; z-index: 3; background: #171932;
+            border-bottom: 1px solid rgba(255,255,255,.16); vertical-align: bottom;
+            font-weight: 600; font-size: 12px; padding-bottom: 9px;
+        }
+        table.mx th.rowhead, table.mx td.rowhead {
+            position: sticky; left: 0; z-index: 2; background: #141630;
+            text-align: left; min-width: 260px; max-width: 320px;
+            border-right: 1px solid rgba(255,255,255,.12);
+        }
+        table.mx thead th.rowhead { z-index: 4; background: #171932; }
+
+        .mx-group td {
+            background: rgba(56,189,248,.07); color: #7dd3fc; text-align: left;
+            font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+            font-weight: 700; padding: 6px 10px;
+        }
+        .mx-group td.rowhead { background: rgba(56,189,248,.1); }
+
+        .mx-name { display: block; color: #eaecff; font-weight: 600; overflow-wrap: anywhere;
+                   white-space: normal; }
+        .mx-name .file { font-weight: 400; color: #8b93ad; font-size: 11px; }
+        .mx-svc { display: block; margin-top: 2px; font-size: 10.5px; color: #7f87a2;
+                  white-space: normal; }
+        .mx-svc i { font-style: normal; color: #9db4ff; }
+
+        .mx-comp { display: block; color: #eaecff; font-weight: 600; }
+        .mx-gpu { display: block; font-size: 10px; color: #7f87a2; font-weight: 400; margin-top: 2px; }
+        .mx-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+                  margin-right: 5px; vertical-align: 1px; background: #3a4050; }
+        .mx-dot.idle { background: #38d996; }
+        .mx-dot.busy { background: #ffc857; }
+        .mx-dot.offline { background: #3a4050; }
+        th.off .mx-comp { color: #6b7392; }
+
+        td.cell { font-variant-numeric: tabular-nums; cursor: default; }
+        td.cell .t { font-weight: 600; color: #e6ebff; }
+        td.cell .n { display: block; font-size: 10px; color: #7f87a2; margin-top: 1px; }
+        td.none { color: #333a4d; }
+        td.ready { background: rgba(56,217,150,.07); color: #6ee7b7; font-size: 11px; }
+        td.waiting { color: #5b6480; font-size: 11px; }
+        td.ok { background: rgba(56,217,150,.13); }
+        td.ok.hot { background: rgba(56,217,150,.22); }
+        td.bad { background: rgba(248,113,113,.18); }
+        td.bad .t { color: #fecaca; }
+        td.stale { background: rgba(255,255,255,.05); }
+        td.stale .t { color: #cbd5f5; }
+        td.cell.nomodel .t::after {
+            content: '*'; color: #fbbf24; font-weight: 700; margin-left: 2px;
+        }
+        tbody tr:hover td { background-image: linear-gradient(rgba(255,255,255,.05), rgba(255,255,255,.05)); }
+
+        .mx-total { color: #cbd5f5; font-weight: 600; }
+        .mx-legend { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px 16px;
+                     font-size: 11.5px; color: #7f87a2; align-items: center; }
+        .mx-legend span.box { display: inline-block; width: 22px; height: 12px; border-radius: 4px;
+                              vertical-align: -1px; margin-right: 5px;
+                              border: 1px solid rgba(255,255,255,.12); }
+        .mx-legend .ok { background: rgba(56,217,150,.16); }
+        .mx-legend .ready { background: rgba(56,217,150,.07); }
+        .mx-legend .bad { background: rgba(248,113,113,.2); }
+        .mx-legend .stale { background: rgba(255,255,255,.06); }
+        .mx-legend .none { background: transparent; }
+
+        .mx-empty { padding: 40px 20px; text-align: center; color: #7f87a2; }
+        @media (max-width: 760px) {
+            table.mx th.rowhead, table.mx td.rowhead { min-width: 180px; }
+            .mx-scroll { max-height: none; }
+        }
+    </style>
+</head>
+<body class="ai-page" data-layout-free3d-init="none">
+
+<div id="site-header"></div>
+
+<main class="mx-wrap">
+    <div class="mx-head">
+        <div class="grow">
+            <h1>Support Matrix</h1>
+            <p>Every pipeline the farm can dispatch against every computer that could take it.
+               A cell is the average time that pipeline took on that computer over the last
+               24 hours — measured on the card, never estimated. A dash means the box does not
+               carry that template at all.</p>
+        </div>
+        <a class="mx-btn" href="/nodes">Node editor</a>
+        <a class="mx-btn" href="/workflows">Library</a>
+    </div>
+
+    <div class="mx-bar">
+        <span class="mx-chip window">last 24 h</span>
+        <span class="mx-chip" id="mx-computers">…</span>
+        <span class="mx-chip" id="mx-jobs">…</span>
+        <span class="mx-chip" id="mx-pipelines">…</span>
+        <span class="mx-chip" id="mx-updated">loading…</span>
+        <span class="mx-note" id="mx-note" hidden></span>
+    </div>
+
+    <div class="mx-scroll">
+        <table class="mx" id="mx-table">
+            <thead id="mx-head"></thead>
+            <tbody id="mx-body"><tr><td class="mx-empty">Reading the ledger…</td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="mx-legend">
+        <span><span class="box ok"></span>ran here, average time</span>
+        <span><span class="box ready"></span>can run it, nothing in 24 h</span>
+        <span><span class="box none"></span>offline — carries it, not answering</span>
+        <span><span class="box bad"></span>most jobs failed</span>
+        <span><span class="box stale"></span>ran here but no longer advertised</span>
+        <span><span class="box none"></span>— cannot run it</span>
+        <span><b style="color:#fbbf24">*</b> does not hold this pipeline's model</span>
+    </div>
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+<script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+<script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+<script src="/static/js/i18n.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var REFRESH_MS = 30000;
+  var head = document.getElementById('mx-head');
+  var body = document.getElementById('mx-body');
+  var note = document.getElementById('mx-note');
+  var state = { at: 0, timer: 0 };
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function escapeAttr(value) { return escapeHtml(value).replace(/"/g, '&quot;'); }
+
+  // Seconds as somebody would say them out loud. Sub-minute work keeps a
+  // digit because the difference between 7 s and 18 s is the whole story on
+  // the image boxes; anything longer is rounded to the nearest second.
+  function human(seconds) {
+    var value = Number(seconds);
+    if (!isFinite(value) || value <= 0) { return ''; }
+    if (value < 10) { return value.toFixed(1) + 's'; }
+    if (value < 90) { return Math.round(value) + 's'; }
+    var minutes = Math.floor(value / 60);
+    var rest = Math.round(value - minutes * 60);
+    if (rest === 60) { minutes += 1; rest = 0; }
+    return minutes + 'm' + (rest ? ' ' + rest + 's' : '');
+  }
+
+  function ago(unix) {
+    var seconds = Math.max(0, Math.round(Date.now() / 1000 - Number(unix || 0)));
+    if (!unix) { return 'never'; }
+    if (seconds < 90) { return seconds + ' s ago'; }
+    var minutes = Math.round(seconds / 60);
+    if (minutes < 90) { return minutes + ' min ago'; }
+    return Math.round(minutes / 60) + ' h ago';
+  }
+
+  function cellTitle(row, column, cell) {
+    var lines = [row.title + ' on ' + column.title];
+    if (cell && cell.jobs_int) {
+      lines.push(cell.jobs_int + ' job' + (cell.jobs_int === 1 ? '' : 's') +
+                 ' in 24 h · ' + (cell.ok_int || 0) + ' done' +
+                 (cell.failed_int ? ' · ' + cell.failed_int + ' failed' : ''));
+      if (cell.avg_seconds_float) {
+        lines.push('average ' + human(cell.avg_seconds_float) +
+                   ' · median ' + human(cell.median_seconds_float));
+      }
+      if (cell.last_ok_unix_int) { lines.push('last one ' + ago(cell.last_ok_unix_int)); }
+      if (cell.ran_checkpoints_array && cell.ran_checkpoints_array.length) {
+        lines.push('models used: ' + cell.ran_checkpoints_array.join(', '));
+      }
+    } else if (cell && cell.capable_bool) {
+      lines.push(cell.ready_bool
+        ? 'carries this template, no jobs in 24 h'
+        : 'carries this template but is not answering');
+    } else {
+      lines.push('does not advertise ' + (row.dispatch_token_string || row.id));
+    }
+    if (cell && cell.capable_bool === false && cell.jobs_int) {
+      lines.push('no longer advertises this template');
+    }
+    if (cell && cell.model_ready_bool === false) {
+      lines.push('does not hold ' + (row.checkpoints_array || []).join(', '));
+    }
+    return lines.join('\n');
+  }
+
+  function cellHtml(row, column) {
+    var cell = (row.computers_object || {})[column.id];
+    if (!cell) {
+      return '<td class="cell none" title="' +
+             escapeAttr(cellTitle(row, column, null)) + '">—</td>';
+    }
+    var classes = ['cell'];
+    var inner;
+    var jobs = Number(cell.jobs_int) || 0;
+    var failed = Number(cell.failed_int) || 0;
+    var running = Number(cell.running_int) || 0;
+    if (!jobs) {
+      // Carrying the template and being reachable are different facts, and
+      // only one of them means work can go there now.
+      classes.push(cell.ready_bool ? 'ready' : 'waiting');
+      inner = cell.ready_bool ? 'ready' : 'offline';
+    } else if (failed && failed >= jobs / 2) {
+      classes.push('bad');
+      inner = '<span class="t">' + failed + ' failed</span><span class="n">of ' + jobs + '</span>';
+    } else if (!cell.avg_seconds_float) {
+      // On the card or still queued: a job with no time yet is not a job that
+      // took no time, so it is counted and left without a number.
+      classes.push('ready');
+      inner = '<span class="t">' + (running ? running + ' running' : jobs + '×') +
+              '</span><span class="n">no time yet</span>';
+    } else {
+      classes.push(cell.capable_bool === false ? 'stale' : 'ok');
+      if (jobs >= 20) { classes.push('hot'); }
+      inner = '<span class="t">' + escapeHtml(human(cell.avg_seconds_float) || '·') +
+              '</span><span class="n">' + jobs + (failed ? ' · ' + failed + '✗' : '') + '</span>';
+    }
+    if (cell.model_ready_bool === false) { classes.push('nomodel'); }
+    return '<td class="' + classes.join(' ') + '" title="' +
+           escapeAttr(cellTitle(row, column, cell)) + '">' + inner + '</td>';
+  }
+
+  function headHtml(columns) {
+    var cells = columns.map(function (column) {
+      var state = column.state_string || 'offline';
+      var title = column.title + ' — ' + state +
+        (column.gpu_string ? ' · ' + column.gpu_string : '') +
+        (column.roles_array ? ' · ' + column.roles_array.join(', ') : '') +
+        (column.workflows_int ? ' · ' + column.workflows_int + ' templates' : '') +
+        (column.parked_reason_string ? '\n' + column.parked_reason_string : '');
+      return '<th class="' + (column.online_bool ? '' : 'off') + '" title="' +
+        escapeAttr(title) + '"><span class="mx-comp"><i class="mx-dot ' +
+        escapeAttr(state) + '"></i>' + escapeHtml(column.title) + '</span>' +
+        '<span class="mx-gpu">' + escapeHtml(column.gpu_string || state) + '</span></th>';
+    });
+    return '<tr><th class="rowhead">Pipeline<span class="mx-svc">' +
+      'average seconds per job, last 24 h</span></th>' + cells.join('') +
+      '<th>total</th></tr>';
+  }
+
+  function rowHtml(row, columns) {
+    var services = (row.services_array || []).map(function (id) {
+      return '<i>' + escapeHtml(id) + '</i>';
+    }).join(' · ');
+    var name = row.kind_string === 'comfy'
+      ? escapeHtml(row.title) + ' <span class="file">' + escapeHtml(row.id) + '</span>'
+      : escapeHtml(row.title);
+    var total = row.jobs_int
+      ? '<span class="t">' + escapeHtml(human(row.avg_seconds_float) || '·') +
+        '</span><span class="n">' + row.jobs_int + ' job' +
+        (row.jobs_int === 1 ? '' : 's') + '</span>'
+      : '<span class="n">no jobs in 24 h</span>';
+    var unassigned = row.unassigned_object
+      ? ' · ' + row.unassigned_object.jobs_int + ' never reached a box'
+      : '';
+    return '<tr><td class="rowhead"><span class="mx-name">' + name + '</span>' +
+      '<span class="mx-svc">' + (services || '<i>farm-internal</i>') +
+      escapeHtml(unassigned) + '</span></td>' +
+      columns.map(function (column) { return cellHtml(row, column); }).join('') +
+      '<td class="cell mx-total">' + total + '</td></tr>';
+  }
+
+  function paint(data) {
+    var columns = data.computers_array || [];
+    var rows = data.pipelines_array || [];
+    head.innerHTML = headHtml(columns);
+    if (!rows.length) {
+      body.innerHTML = '<tr><td class="mx-empty" colspan="' + (columns.length + 2) +
+                       '">Nothing to show — the render ledger is empty.</td></tr>';
+      return;
+    }
+    // Busiest first inside each group: the pipelines somebody is actually
+    // using should not be below a dozen templates nobody ran.
+    var groups = [];
+    var byGroup = {};
+    rows.forEach(function (row) {
+      var key = row.group_string || 'Other';
+      if (!byGroup[key]) { byGroup[key] = []; groups.push(key); }
+      byGroup[key].push(row);
+    });
+    var html = '';
+    groups.forEach(function (key) {
+      byGroup[key].sort(function (a, b) {
+        return (b.jobs_int || 0) - (a.jobs_int || 0) || a.id.localeCompare(b.id);
+      });
+      var jobs = byGroup[key].reduce(function (sum, row) { return sum + (row.jobs_int || 0); }, 0);
+      html += '<tr class="mx-group"><td class="rowhead">' + escapeHtml(key) + '</td>' +
+              '<td colspan="' + (columns.length + 1) + '">' + byGroup[key].length +
+              ' pipelines · ' + jobs + ' jobs</td></tr>';
+      byGroup[key].forEach(function (row) { html += rowHtml(row, columns); });
+    });
+    body.innerHTML = html;
+
+    var totals = data.totals_object || {};
+    document.getElementById('mx-computers').innerHTML =
+      '<b>' + (totals.computers_online_int || 0) + '</b> of ' +
+      (totals.computers_total_int || 0) + ' computers online · <b>' +
+      (totals.computers_busy_int || 0) + '</b> busy';
+    document.getElementById('mx-jobs').innerHTML =
+      '<b>' + (totals.jobs_int || 0) + '</b> jobs · ' + (totals.ok_int || 0) +
+      ' done · ' + (totals.failed_int || 0) + ' failed';
+    document.getElementById('mx-pipelines').innerHTML =
+      '<b>' + (totals.pipelines_int || 0) + '</b> pipelines';
+    var problems = data.notes_array || [];
+    note.hidden = !problems.length;
+    note.textContent = problems.join(' · ');
+  }
+
+  function stamp() {
+    var element = document.getElementById('mx-updated');
+    element.textContent = state.at ? 'updated ' + ago(state.at) : 'loading…';
+  }
+
+  function load() {
+    fetch('/api/ai/pipelines', { headers: { 'Accept': 'application/json' } })
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        state.at = Math.round(Date.now() / 1000);
+        paint(data);
+        stamp();
+      })
+      .catch(function (error) {
+        note.hidden = false;
+        note.textContent = 'Could not read the matrix: ' + (error.message || error);
+      });
+  }
+
+  // A page left open on a second monitor should not poll the farm forever;
+  // it catches up the moment somebody looks at it again.
+  function schedule() {
+    window.clearInterval(state.timer);
+    state.timer = window.setInterval(function () {
+      if (document.hidden) { return; }
+      load();
+    }, REFRESH_MS);
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { load(); }
+  });
+  window.setInterval(stamp, 5000);
+  load();
+  schedule();
+})();
+</script>
+</body>
+</html>

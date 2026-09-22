@@ -653,6 +653,104 @@
     return document.getElementById('node-' + id);
   }
 
+  /* ------------------------------------------ how many can run it right now */
+
+  /**
+   * The number in the top-right of a node's header.
+   *
+   * It is how many computers could take this job this moment, and it comes
+   * from the fleet's own `capacity_object`, which is computed from the same
+   * rules as the support matrix on /models: a box has to be reachable, carry
+   * the template, and — once a checkpoint is chosen — carry that model file.
+   * Choosing a video model is exactly the case this exists for: the same node
+   * goes from four computers to one the moment a 22B checkpoint is picked,
+   * and nothing on the node used to say so.
+   *
+   * A service with no farm behind it (frame extraction runs on this host)
+   * gets no badge at all rather than a "1" that means something else.
+   */
+  let fleetCapacity = null;
+  let capacityPaintTimer = 0;
+
+  function capacityFor(id) {
+    const item = meta(id);
+    if (!fleetCapacity || !item || item.kind !== KIND_SERVICE) return null;
+    const entry = fleetCapacity[item.service];
+    if (!entry || entry.kind_string === 'local') return null;
+    const element = nodeElement(id);
+    const picker = element && element.querySelector('[data-param="checkpoint"]');
+    const chosen = picker ? String(picker.value || '') : '';
+    const forModel = chosen && (entry.checkpoints_object || {})[chosen];
+    return forModel ? Object.assign({checkpoint: chosen}, forModel) : entry;
+  }
+
+  function capacityTitle(entry) {
+    const model = entry.checkpoint ? ' with ' + entry.checkpoint : '';
+    const total = Number(entry.total_int) || 0;
+    if (!total) return 'No computer can run this right now' + model + '.';
+    return total + ' computer' + (total === 1 ? '' : 's') + ' can run this now' +
+      model + ': ' + (entry.computers_array || []).join(', ') + '; ' +
+      (Number(entry.idle_int) || 0) + ' idle';
+  }
+
+  function applyCapacityBadge(id) {
+    const element = nodeElement(id);
+    const head = element && element.querySelector('.nhead');
+    if (!head) return false;
+    const entry = capacityFor(id);
+    let tag = head.querySelector('.ncap');
+    if (!entry) { if (tag) tag.remove(); return false; }
+    if (!tag) {
+      tag = document.createElement('em');
+      tag.className = 'ncap';
+      head.appendChild(tag);
+    }
+    const total = Number(entry.total_int) || 0;
+    tag.textContent = String(total);
+    tag.title = capacityTitle(entry);
+    tag.classList.toggle('none', !total);
+    tag.classList.toggle('free', total > 0 && (Number(entry.idle_int) || 0) > 0);
+    return true;
+  }
+
+  function paintCapacityBadges() {
+    nodeMeta.forEach((item, id) => {
+      if (item && item.kind === KIND_SERVICE) applyCapacityBadge(id);
+    });
+  }
+
+  function refreshCapacity() {
+    if (!window.AIEntities || !window.AIEntities.getFleet) return Promise.resolve();
+    return window.AIEntities.getFleet().then(data => {
+      fleetCapacity = (data && data.capacity_object) || null;
+      paintCapacityBadges();
+    }).catch(() => {});
+  }
+
+  function startCapacityBadges() {
+    refreshCapacity();
+    // The fleet strip already polls this and the answer is cached for five
+    // seconds, so riding along costs nothing on the wire.
+    setInterval(() => { if (!document.hidden) refreshCapacity(); }, 5000);
+    // A checkpoint is what moves a node from one set of computers to another,
+    // so the number follows the picker rather than the clock.
+    document.addEventListener('change', event => {
+      const target = event.target;
+      if (!target || !target.dataset || target.dataset.param !== 'checkpoint') return;
+      const node = target.closest && target.closest('.ainode');
+      if (node && node.id) applyCapacityBadge(node.id.replace(/^node-/, ''));
+    }, true);
+    // A node added, pasted or restored has a header the moment it is on the
+    // canvas; painting on the next frame beats waiting for the next poll.
+    const stage = document.getElementById('canvas');
+    if (stage && window.MutationObserver) {
+      new MutationObserver(() => {
+        clearTimeout(capacityPaintTimer);
+        capacityPaintTimer = setTimeout(paintCapacityBadges, 180);
+      }).observe(stage, {childList: true, subtree: true});
+    }
+  }
+
   /**
    * The socket on a node that hands out a picture, if it has one.
    *
@@ -2616,6 +2714,7 @@
     // a composition is waiting on several sorts of job at once.
     if (window.AIEntities) {
       window.AIEntities.mountFleet(document.getElementById('fleet'), 'image');
+      startCapacityBadges();
     }
     document.getElementById('run').addEventListener('click', () => runGraph(false));
     document.getElementById('continue').addEventListener('click', () => runGraph(true));
