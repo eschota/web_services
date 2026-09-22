@@ -35,6 +35,40 @@ class RuntimeSettingsTests(unittest.TestCase):
                          {'samples': ['crop', 2], 'start_index': 0, 'end_index': 3})
         self.assertEqual(graph['decode']['inputs']['latents'], ['delivery_latents_decode', 0])
 
+    def test_union_control_crops_latents_for_core_tiled_decode(self):
+        graph = {
+            'first': {'class_type': 'LTXVAddGuide', 'inputs': {'frame_idx': 0}},
+            'control': {'class_type': 'LTXAddVideoICLoRAGuide', 'inputs': {}},
+            'crop': {'class_type': 'LTXVCropGuides', 'inputs': {}},
+            'decode': {'class_type': 'VAEDecodeTiled', 'inputs': {'samples': ['crop', 2]}},
+        }
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=97), 960, 540)
+        self.assertEqual(graph['delivery_latents_decode']['inputs'],
+                         {'samples': ['crop', 2], 'start_index': 0, 'end_index': 12})
+        self.assertEqual(graph['decode']['inputs']['samples'], ['delivery_latents_decode', 0])
+
+    def test_video_at_model_size_skips_identity_delivery_resize(self):
+        graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {}},
+                 'decode': {'class_type': 'VAEDecodeTiled', 'inputs': {'samples': ['latent', 0]}},
+                 'video': {'class_type': 'CreateVideo', 'inputs': {'images': ['decode', 0]}}}
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=193), 1152, 2048)
+        self.assertEqual(graph['latent']['inputs']['width'], 1152)
+        self.assertEqual(graph['video']['inputs']['images'], ['decode', 0])
+        self.assertNotIn('delivery_size_video', graph)
+
+    def test_latent_upscaled_video_keeps_delivery_resize(self):
+        graph = {'latent': {'class_type': 'EmptyLTXVLatentVideo', 'inputs': {}},
+                 'upscale': {'class_type': 'LTXVLatentUpsampler', 'inputs': {}},
+                 'video': {'class_type': 'CreateVideo', 'inputs': {'images': ['decode', 0]}}}
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=97), 1152, 2048)
+        self.assertEqual(graph['video']['inputs']['images'], ['delivery_size_video', 0])
+
+    def test_images_keep_delivery_resize_at_model_size(self):
+        graph = {'latent': {'class_type': 'EmptyLatentImage', 'inputs': {}},
+                 'save': {'class_type': 'SaveImage', 'inputs': {'images': ['decode', 0]}}}
+        apply_runtime_settings(graph, SimpleNamespace(frame_count=1), 1024, 1024)
+        self.assertEqual(graph['save']['inputs']['images'], ['delivery_size_save', 0])
+
     def test_plain_image_to_video_does_not_insert_union_latent_crop(self):
         graph = {
             'first': {'class_type': 'LTXVAddGuide', 'inputs': {'frame_idx': 0}},

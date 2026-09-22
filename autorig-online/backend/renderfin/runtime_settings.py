@@ -3,6 +3,16 @@ from __future__ import annotations
 
 import math
 
+# Video VAE decode nodes and the input that carries their latent.
+_VIDEO_DECODER_LATENT_INPUT = {
+    'LTXVTiledVAEDecode': 'latents',
+    'LTXVSpatioTemporalTiledVAEDecode': 'latents',
+    'VAEDecodeTiled': 'samples',
+    'VAEDecode': 'samples',
+}
+# Nodes that change a latent's spatial size between sampling and decode.
+_LATENT_UPSCALERS = {'LTXVLatentUpsampler', 'LatentUpscale', 'LatentUpscaleBy'}
+
 
 def apply_runtime_settings(workflow, prompt, width, height):
     """Pad model dimensions to /32, then deliver the requested pixel dimensions.
@@ -120,9 +130,10 @@ def apply_runtime_settings(workflow, prompt, width, height):
     )
     if overlapping_first_frame:
         for node_id, node in list(workflow.items()):
-            if node.get('class_type') != 'LTXVTiledVAEDecode':
+            latent_key = _VIDEO_DECODER_LATENT_INPUT.get(node.get('class_type'))
+            if latent_key is None:
                 continue
-            source = node.get('inputs', {}).get('latents')
+            source = node.get('inputs', {}).get(latent_key)
             source_node = workflow.get(source[0]) if isinstance(source, list) and source else None
             if not source_node or source_node.get('class_type') != 'LTXVCropGuides':
                 continue
@@ -132,7 +143,16 @@ def apply_runtime_settings(workflow, prompt, width, height):
                 'inputs': {'samples': source, 'start_index': 0,
                            'end_index': (frames - 1) // 8},
             }
-            node['inputs']['latents'] = [select_id, 0]
+            node['inputs'][latent_key] = [select_id, 0]
+    # An LTX graph without a latent upscaler decodes frames at exactly the
+    # padded model size. When that already is the requested size, a delivery
+    # resize is an identity lanczos pass that costs a full extra float copy of
+    # the clip in RAM (5.5 GB for 193 frames at 1152x2048) and ~13 s of CPU.
+    decoded_at_model_size = (
+        any(n.get('class_type') == 'EmptyLTXVLatentVideo' for n in workflow.values())
+        and not any(n.get('class_type') in _LATENT_UPSCALERS for n in workflow.values())
+    )
+    identity_video_resize = decoded_at_model_size and (internal_width, internal_height) == (width, height)
     for node_id, node in list(workflow.items()):
         kind = node.get('class_type', '')
         if kind not in {'SaveImage', 'PreviewImage', 'VHS_VideoCombine', 'CreateVideo'}:
@@ -148,6 +168,9 @@ def apply_runtime_settings(workflow, prompt, width, height):
             workflow[trim_id] = {'class_type': 'ImageFromBatch', 'inputs': {
                 'image': source, 'batch_index': 0, 'length': frames}}
             source = [trim_id, 0]
+        if identity_video_resize and kind in {'CreateVideo', 'VHS_VideoCombine'}:
+            inputs['images'] = source
+            continue
         resize_id = 'delivery_size_' + node_id
         workflow[resize_id] = {
             'class_type': 'ImageScale',

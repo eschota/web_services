@@ -361,22 +361,23 @@
   }
  },
  "decode_video": {
-  "class_type": "LTXVTiledVAEDecode",
+  "class_type": "VAEDecodeTiled",
   "inputs": {
    "vae": [
     "video_vae",
     0
    ],
-   "latents": [
+   "samples": [
     "crop_guides",
     2
    ],
-   "vertical_tiles": 2,
-   "horizontal_tiles": 2,
-   "overlap": 6,
-   "last_frame_fix": false,
-   "working_device": "auto",
-   "working_dtype": "auto"
+   "tile_size": 512,
+   "overlap": 64,
+   "temporal_size": 64,
+   "temporal_overlap": 16
+  },
+  "_meta": {
+   "title": "AUTORIG_VIDEO_DECODE"
   }
  },
  "delivery_size": {
