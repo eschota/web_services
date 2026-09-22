@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Avatar Video · производственный review</title>
+<style>
+:root{--bg:#0e1020;--card:#17192d;--line:#303452;--text:#edf0ff;--muted:#a6acc5;--cyan:#38bdf8}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#20264b 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.5 Inter,Segoe UI,sans-serif}
+main{width:min(1320px,calc(100% - 28px));margin:auto;padding:42px 0 80px}h1{font-size:clamp(30px,5vw,54px);margin:0}.lead{color:var(--muted);max-width:900px}
+.summary,.case,.story{background:rgba(23,25,45,.9);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:20px}.summary{display:flex;gap:14px;flex-wrap:wrap}
+.summary b{font-size:22px}.case header{display:flex;justify-content:space-between;gap:15px;align-items:start}h2,h3{margin:.15em 0}code{color:var(--muted)}
+.verdict{padding:6px 10px;border-radius:999px;font-weight:700;white-space:nowrap}.accepted{background:#14532d}.candidate{background:#713f12}.rejected,.failed{background:#7f1d1d}.review{background:#164e63}.pending,.missing{background:#374151}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}.pair section{min-width:0}video{width:100%;max-height:470px;background:#080912;border-radius:10px;display:block}.sync{grid-column:1/-1;justify-self:center;border:1px solid #4d58a4;background:#29316b;color:white;padding:9px 15px;border-radius:9px;cursor:pointer}
+details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summary{cursor:pointer;color:#c8d1ff}pre,.prompt{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a0c18;padding:12px;border-radius:9px;color:#cbd5e1}.limitation{color:#fcd34d}.no-media{display:grid;place-items:center;min-height:180px;background:#0a0c18;color:var(--muted);border-radius:10px;padding:18px;text-align:center}
+.story-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}.story-clip{background:#101326;padding:10px;border-radius:11px}.graphs{display:flex;gap:10px;flex-wrap:wrap}.graphs a,a{color:#67e8f9}@media(max-width:760px){.pair{grid-template-columns:1fr}}
+</style></head><body><main>
+<h1>Avatar Video · производственный review</h1>
+<p class="lead">Prompts and source difficulty annotations were written from five-frame contact sheets sampled from each declared four-second segment. This is motion-limited sample evidence, not full-video visual QA.</p>
+<div class="summary"><span><b>9</b><br>baseline-кейсов</span><span><b>4</b><br>story-клипов в receipt</span><span><b>3</b><br>требуют ручной проверки</span></div>
+
+    <article class="case" id="walk-and-address-camera--ltx23-first-frame-baseline">
+      <header><div><h2>walk-and-address-camera</h2><code>walk-and-address-camera--ltx23-first-frame-baseline</code></div>
+      <span class="verdict candidate">Кандидат</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="3.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/1f8bce1e0713.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/8758e460-1470-4031-8431-50b30a25119c.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Vertical low-angle handheld selfie shot of one adult man outdoors under a vivid blue sky and palm leaves. He wears a dark bucket hat, black sunglasses, a short beard, and a muted red T-shirt. He faces the camera at close range and raises one hand to gesture while speaking. Preserve one person, the hat, sunglasses, beard, hand anatomy, bright sunlight, and the low camera angle.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 960,
+  &quot;prompt&quot;: &quot;Vertical low-angle handheld selfie shot of one adult man outdoors under a vivid blue sky and palm leaves. He wears a dark bucket hat, black sunglasses, a short beard, and a muted red T-shirt. He faces the camera at close range and raises one hand to gesture while speaking. Preserve one person, the hat, sunglasses, beard, hand anatomy, bright sunlight, and the low camera angle.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 540
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Внешность и композиция в целом сохранены, но траектория жеста и поведение камеры не повторяют источник достаточно точно.</p><ul><li>неточная траектория жеста</li><li>изменённое поведение камеры</li><li>watermark/QR из source</li></ul></details>
+      <p class="limitation"><b>Ограничение источника:</b> Metadata says walking and talking, but the sampled 3-7 second window only proves close-up gesturing/talking.</p>
+    </article>
+    <article class="case" id="seated-speaking--ltx23-first-frame-baseline">
+      <header><div><h2>seated-speaking</h2><code>seated-speaking--ltx23-first-frame-baseline</code></div>
+      <span class="verdict candidate">Кандидат</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="4.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/229b5ed9cb84.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/4cf7270f-5e8e-4d69-9f24-a951e514517f.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Locked medium shot of one adult woman seated indoors against a plain light wall. She has short curly brown hair and wears a black-and-white striped shirt. She speaks with an expressive friendly face, raises both open hands, then brings her hands toward her chest. Preserve her face, two anatomically correct hands, striped clothing, seated posture, and clean static background.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 540,
+  &quot;prompt&quot;: &quot;Locked medium shot of one adult woman seated indoors against a plain light wall. She has short curly brown hair and wears a black-and-white striped shirt. She speaks with an expressive friendly face, raises both open hands, then brings her hands toward her chest. Preserve her face, two anatomically correct hands, striped clothing, seated posture, and clean static background.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 960
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Лучший из первых трёх для свободно заданной речи и общих жестов, но порядок, тайминг и точные траектории рук отличаются от источника.</p><ul><li>тайминг выражения отличается</li><li>траектории рук отличаются</li><li>точный digit count не подтверждён</li></ul></details>
+      
+    </article>
+    <article class="case" id="single-hand-gesture--ltx23-first-frame-baseline">
+      <header><div><h2>single-hand-gesture</h2><code>single-hand-gesture--ltx23-first-frame-baseline</code></div>
+      <span class="verdict rejected">Отклонено</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="1.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/aa5e540317f7.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/1c42361c-3e40-407b-8438-a4e79438b134.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Locked close-up of one adult person&#x27;s bare forearm and hand against a neutral pale gray background. The hand holds a clear thumbs-down gesture with four curled fingers and one downward thumb, making only subtle natural movement. Preserve exactly one arm, one anatomically correct hand, five digits, and the thumbs-down silhouette.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 540,
+  &quot;prompt&quot;: &quot;Locked close-up of one adult person&#x27;s bare forearm and hand against a neutral pale gray background. The hand holds a clear thumbs-down gesture with four curled fingers and one downward thumb, making only subtle natural movement. Preserve exactly one arm, one anatomically correct hand, five digits, and the thumbs-down silhouette.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 960
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Требуемый thumbs-down был превращён в thumbs-up, поэтому смысл направленного жеста изменён на противоположный.</p><ul><li>направление жеста инвертировано</li><li>иная реконструкция и масштаб руки</li></ul></details>
+      <p class="limitation"><b>Ограничение источника:</b> No face or complete body is visible; use only as a hand-anatomy stress case.</p>
+    </article>
+    <article class="case" id="face-object-interaction--ltx23-first-frame-baseline">
+      <header><div><h2>face-object-interaction</h2><code>face-object-interaction--ltx23-first-frame-baseline</code></div>
+      <span class="verdict candidate">Кандидат</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="3.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/84d6452639f2.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/2c5663a1-61c7-4d32-b5ef-59f4ca71f2e5.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Locked frontal close-up of one adult woman with dark hair pulled back, wearing a white top against a dark green background. She holds one silver aluminum can in one hand and continuously drinks from it, keeping the rim in contact with her mouth while making a subtle swallow and small natural head movement. Preserve her face and identity around the can, one anatomically correct hand, the single cylindrical can, realistic fingers and mouth contact, fixed framing, and the stable dark green background.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 540,
+  &quot;prompt&quot;: &quot;Locked frontal close-up of one adult woman with dark hair pulled back, wearing a white top against a dark green background. She holds one silver aluminum can in one hand and continuously drinks from it, keeping the rim in contact with her mouth while making a subtle swallow and small natural head movement. Preserve her face and identity around the can, one anatomically correct hand, the single cylindrical can, realistic fingers and mouth contact, fixed framing, and the stable dark green background.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 960
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Во всех 97 кадрах сохранены лицо, одна банка, контакт у рта и прикреплённая рука; требуется просмотр на нормальной скорости и чистый лицензированный источник.</p><ul><li>watermark/QR из source</li><li>пальцы частично закрыты предметом</li><li>нет normal-speed review</li></ul></details>
+      
+    </article>
+    <article class="case" id="rear-view-walk--ltx23-first-frame-baseline">
+      <header><div><h2>rear-view-walk</h2><code>rear-view-walk--ltx23-first-frame-baseline</code></div>
+      <span class="verdict review">Требует проверки</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="2.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/230f59f695fe.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/48e915d5-f7cf-4c43-88e3-8c5914da9005.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Vertical urban travel shot beginning behind one adult man in a tan jacket with a dark shoulder strap as he walks away along a path. The handheld camera immediately tilts steeply upward; the man leaves the bottom of frame while a tall modern building with a planted green wall and a slender observation tower fill the view beneath an overcast sky. Preserve one briefly visible walker, the continuous upward camera tilt, straight architecture, greenery, tower silhouette, cloudy weather, and the exact transition from person to skyline.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 960,
+  &quot;prompt&quot;: &quot;Vertical urban travel shot beginning behind one adult man in a tan jacket with a dark shoulder strap as he walks away along a path. The handheld camera immediately tilts steeply upward; the man leaves the bottom of frame while a tall modern building with a planted green wall and a slender observation tower fill the view beneath an overcast sky. Preserve one briefly visible walker, the continuous upward camera tilt, straight architecture, greenery, tower silhouette, cloudy weather, and the exact transition from person to skyline.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 540
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Кейс не входит в шесть завершённых визуальных review; заключение не сформировано.</p><ul></ul></details>
+      <p class="limitation"><b>Ограничение источника:</b> Poor identity benchmark because the person exits almost immediately; primarily a camera-motion and architecture stress case.</p>
+    </article>
+    <article class="case" id="two-person-cafe-conversation--ltx23-first-frame-baseline">
+      <header><div><h2>two-person-cafe-conversation</h2><code>two-person-cafe-conversation--ltx23-first-frame-baseline</code></div>
+      <span class="verdict rejected">Отклонено</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="5.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/899e80c22efe.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/38dcf126-20bd-4e93-a4ec-28bc0db33dd3.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Locked over-the-shoulder cafe shot of exactly two principal adults seated across a small table. A curly-haired man in a dark sweater faces camera, listens, speaks, and makes restrained hand gestures. A dark-haired woman in a gray top remains seen from behind in the foreground and gestures back. White coffee cups stay on the table while softly blurred customers and shelves remain in the background. Preserve both separate identities, consistent eyelines, anatomically correct hands, both cups, table occlusion, and the fixed camera.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 540,
+  &quot;prompt&quot;: &quot;Locked over-the-shoulder cafe shot of exactly two principal adults seated across a small table. A curly-haired man in a dark sweater faces camera, listens, speaks, and makes restrained hand gestures. A dark-haired woman in a gray top remains seen from behind in the foreground and gestures back. White coffee cups stay on the table while softly blurred customers and shelves remain in the background. Preserve both separate identities, consistent eyelines, anatomically correct hands, both cups, table occlusion, and the fixed camera.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 960
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Два человека и сцена стабильны, но исполнитель основного жеста сменился: мужчина получил новую крупную жестикуляцию вместо исходной женской.</p><ul><li>gesture ownership изменён</li><li>умеренный lower-face drift</li><li>мягкие неоднозначные пальцы</li></ul></details>
+      
+    </article>
+    <article class="case" id="two-person-walk--ltx23-first-frame-baseline">
+      <header><div><h2>two-person-walk</h2><code>two-person-walk--ltx23-first-frame-baseline</code></div>
+      <span class="verdict review">Требует проверки</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="1.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/12c662987598.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/d37a9d4f-9baf-4c06-b11c-e30ab5da8f9a.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Vertical high-angle close tracking shot of exactly two adults walking side by side outdoors. A woman dominates the foreground in a very wide frayed straw sunhat, white top, blue shorts, black sandals, and woven shoulder bag. A man in a black shirt walks beside her carrying one large blue-and-white inflatable ring and briefly reaches toward the hat brim. Preserve two separate non-overlapping bodies, normal gait, the woman&#x27;s hat and bag, the man&#x27;s ring and hand, realistic limbs under heavy occlusion, and the moving top-down camera composition.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 960,
+  &quot;prompt&quot;: &quot;Vertical high-angle close tracking shot of exactly two adults walking side by side outdoors. A woman dominates the foreground in a very wide frayed straw sunhat, white top, blue shorts, black sandals, and woven shoulder bag. A man in a black shirt walks beside her carrying one large blue-and-white inflatable ring and briefly reaches toward the hat brim. Preserve two separate non-overlapping bodies, normal gait, the woman&#x27;s hat and bag, the man&#x27;s ring and hand, realistic limbs under heavy occlusion, and the moving top-down camera composition.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 540
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Кейс не входит в шесть завершённых визуальных review; заключение не сформировано.</p><ul></ul></details>
+      <p class="limitation"><b>Ограничение источника:</b> Faces are mostly hidden by the top-down angle and large hat; suitable for gait, occlusion, and prop persistence, not facial identity scoring.</p>
+    </article>
+    <article class="case" id="seated-couple-object-action--ltx23-first-frame-baseline">
+      <header><div><h2>seated-couple-object-action</h2><code>seated-couple-object-action--ltx23-first-frame-baseline</code></div>
+      <span class="verdict candidate">Кандидат</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="8.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/4e38883415b4.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/51bc45df-4b93-48a5-834c-ed869dba976b.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Locked wide kitchen shot of exactly two adults seated side by side at a wooden dining table. The man in a black T-shirt and the woman in a white blouse finish a brief kiss, separate naturally, then the man carefully cuts and serves the round white cake while the woman watches and smiles. Preserve both identities, anatomically correct hands, realistic knife and cake contact, two mugs, plates, bowl, vase of bright flowers, fixed camera, and stable kitchen background.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 540,
+  &quot;prompt&quot;: &quot;Locked wide kitchen shot of exactly two adults seated side by side at a wooden dining table. The man in a black T-shirt and the woman in a white blouse finish a brief kiss, separate naturally, then the man carefully cuts and serves the round white cake while the woman watches and smiles. Preserve both identities, anatomically correct hands, realistic knife and cake contact, two mugs, plates, bowl, vase of bright flowers, fixed camera, and stable kitchen background.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 960
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Сильнейший baseline: во всех 97 кадрах сохранены две личности, порядок kiss→separate→cake action и предметы, но Avatar replacement ещё не доказан.</p><ul><li>контакт пальцев и утвари частично скрыт</li><li>watermark из source</li><li>Avatar replacement не проверен</li></ul></details>
+      
+    </article>
+    <article class="case" id="user-meeting--ltx23-first-frame-baseline">
+      <header><div><h2>user-meeting</h2><code>user-meeting--ltx23-first-frame-baseline</code></div>
+      <span class="verdict review">Требует проверки</span></header>
+      <div class="pair" data-pair>
+        <section><h3>Исходный фрагмент · 4 с</h3><video controls loop muted playsinline preload="metadata" data-role="source" data-start="0.0" data-duration="4.0" src="https://autorig.online/dev/api/scratch/6caea32d8764.mp4"></video></section>
+        <section><h3>Сгенерированное видео</h3><video controls loop muted playsinline preload="metadata" data-role="generated" src="https://autorig.online/renderfin/render/default_user/e3e10325-0b65-44de-8912-00ccb2841f3b.mp4"></video></section>
+        <button type="button" class="sync" data-sync>▶ Синхронно воспроизвести</button>
+      </div>
+      <details><summary>Промпт и настройки</summary>
+        <h3>Промпт</h3><p class="prompt">Locked wide shot of a bright office meeting with approximately nine adults gathered around a white conference table. Two women and one man stand at the center demonstrating one long white measuring ruler or sample strip while roughly six seated colleagues watch, point, and discuss papers. A laptop, documents, drinking glasses, and a water carafe remain on the table. Preserve the crowded group composition, three standing presenters, seated audience, separate faces and bodies, realistic hands, the single long white strip, and the stable daylight office background.</p>
+        <h3>Фактический запрос</h3><pre>{
+  &quot;cfg&quot;: 1.0,
+  &quot;checkpoint&quot;: &quot;ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors&quot;,
+  &quot;frame_count&quot;: 97,
+  &quot;height&quot;: 540,
+  &quot;prompt&quot;: &quot;Locked wide shot of a bright office meeting with approximately nine adults gathered around a white conference table. Two women and one man stand at the center demonstrating one long white measuring ruler or sample strip while roughly six seated colleagues watch, point, and discuss papers. A laptop, documents, drinking glasses, and a water carafe remain on the table. Preserve the crowded group composition, three standing presenters, seated audience, separate faces and bodies, realistic hands, the single long white strip, and the stable daylight office background.&quot;,
+  &quot;quality&quot;: &quot;standard&quot;,
+  &quot;sampler&quot;: &quot;euler_ancestral_cfg_pp&quot;,
+  &quot;seed&quot;: 9221001,
+  &quot;steps&quot;: 8,
+  &quot;width&quot;: 960
+}</pre>
+      </details>
+      <details><summary>Ручная оценка</summary><p>Кейс не входит в шесть завершённых визуальных review; заключение не сформировано.</p><ul></ul></details>
+      <p class="limitation"><b>Ограничение источника:</b> People count is approximately nine because foreground occlusion makes an exact count uncertain; this is an extreme multi-person stress case and should not be used to qualify a two-avatar pipeline.</p>
+    </article>
+<section class="story"><header><h2>Сквозной сюжет · Maya и Leo</h2><span class="verdict accepted">Принято</span></header>
+<div class="story-grid"><article class="story-clip"><h3>Shot 1 · Avatar video</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/9ab7a533-51f1-4491-918b-6f0c5df1b697.mp4"></video></article><article class="story-clip"><h3>Shot 2 · Avatar video</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/2d96f091-ae43-41a3-a95d-a4a0a0e620a5.mp4"></video></article><article class="story-clip"><h3>Shot 3 · Avatar video</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/19215ab5-5964-4753-84b9-c089a312e6ca.mp4"></video></article><article class="story-clip"><h3>Shot 4 · Avatar video</h3><video controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/27804ff5-cf84-409f-bbe8-bbe5b51d1890.mp4"></video></article></div><h3>Итоговый ролик</h3><video class="final-story" controls loop muted playsinline preload="metadata" src="https://autorig.online/renderfin/render/default_user/maya-leo-plan-for-two-20260922-7869863d.mp4"></video><p><a href="https://autorig.online/renderfin/render/default_user/maya-leo-plan-for-two-20260922-7869863d.mp4">Открыть итоговый ролик</a></p></section>
+<section class="story"><h2>Повторно используемые графы</h2><div class="graphs"><a href="https://autorig.online/nodes?g=SavedAvatarWanMotion">Wan template</a><a href="https://autorig.online/nodes?g=SavedAvatarVideoMotion">LTX template</a><a href="https://autorig.online/nodes?g=a7efd447a3f6">Полный сюжет</a></div></section>
+</main><script>
+document.querySelectorAll('[data-pair]').forEach(pair=>{const button=pair.querySelector('[data-sync]');const source=pair.querySelector('[data-role="source"]');const generated=pair.querySelector('[data-role="generated"]');if(!source||!generated){button.disabled=true;return}button.addEventListener('click',async()=>{const start=Number(source.dataset.start||0);source.currentTime=start;generated.currentTime=0;source.muted=true;generated.muted=true;try{await Promise.all([source.play(),generated.play()]);button.textContent='❚❚ Пауза'}catch(e){button.textContent='Не удалось запустить'}});[source,generated].forEach(v=>v.addEventListener('pause',()=>{if(source.paused&&generated.paused)button.textContent='▶ Синхронно воспроизвести'}));source.addEventListener('timeupdate',()=>{const end=Number(source.dataset.start||0)+Number(source.dataset.duration||4);if(source.currentTime>=end){source.currentTime=Number(source.dataset.start||0);generated.currentTime=0}})});
+</script></body></html>
