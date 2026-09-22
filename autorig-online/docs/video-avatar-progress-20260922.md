@@ -23,7 +23,7 @@ This document records current evidence and open acceptance gates for the full Vi
 | Production | Release `K2` is current. The tested node UI behavior was introduced in `K1` and carried into `K2`; model/capability changes in `K2` do not turn the UI evidence into media-quality acceptance. | active, not full-goal acceptance |
 | Reference inputs | Nine four-second source segments and five-frame contact sheets exist under `.codex_tmp/avatar-video-20260922/reference-review`. Prompts were written from the observed frames. | prepared |
 | Benchmark manifest | Nine sources, one LTX 2.3 first-frame baseline, nine cases; fixed seed `9221001`; 97 frames; 960×540 landscape and 540×960 portrait cases. | validated structurally |
-| Benchmark batch | The first three baseline jobs completed: `8758e460…` (`walk-and-address-camera`), `4cf7270f…` (`seated-speaking`), and `1c42361c…` (`single-hand-gesture`). ffprobe and sampled visual findings are recorded in [the baseline review](video-baseline-review-20260922.md). Six cases remain prepared but unrendered. | three completed and sample-reviewed; no continuous acceptance |
+| Benchmark batch | Six of nine baseline jobs completed. The first three are recorded in [the sampled baseline review](video-baseline-review-20260922.md). Cases 4–6 received an all-97-frame inspection in [the second-batch review](video-baseline-next3-review-20260922.md). Three cases remain prepared but unrendered. | six completed; no normal-speed continuous acceptance |
 | Avatar storage | Browser-created profiles persisted across reload: Maya `av_1c0510ac1ba21445555d2ab1@1` and Leo `av_465777c59b4ec81448c591c6@1`. | persistence demonstrated |
 | Avatar canonical images | Maya: `/renderfin/render/default_user/c50e5b12-fe98-4d9a-aee5-197ed4d972b6.png`; Leo: `/renderfin/render/default_user/b9651d0f-7fd7-4e22-82dd-ed87a3820579.png`. | stored inputs, not video acceptance |
 | Multi-reference image identity | Raptor canaries `0a56defa` and `015a049c`, plus 4090 canary `71fc1ec1`, passed qualitative still-image identity inspection. Evidence includes `.codex_tmp/avatar_identity_maya_cafe.png` and related artifacts. | image-only evidence; no video identity pass |
@@ -87,18 +87,23 @@ These limitations are encoded in the run manifest and must remain visible in rep
 
 ## Manual acceptance ledger
 
-Formal acceptance fields remain `null` until continuous playback of the complete generated segment beside its source. The first three rows also carry a sampled disposition from the separate visual review; those labels guide the next experiment but do not close acceptance.
+Sparse five-frame evidence leaves quality fields `null`. An exhaustive review of
+all 97 output frames against the aligned source may record provisional numeric
+scores, as cases 4–6 now do, but normal-speed playback is still required for
+final temporal acceptance. The first three rows carry only their earlier
+sampled disposition; those labels guide the next experiment but do not close
+acceptance.
 
 | Case | Faces | Hands/anatomy | Identity | People count | Action | Camera | Temporal | Disposition |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
 | walk-and-address-camera | null | null | null | null | null | null | null | sampled: retune/control needed; continuous review pending |
 | seated-speaking | null | null | null | null | null | null | null | sampled: strongest baseline candidate; continuous review pending |
 | single-hand-gesture | null | null | null | null | null | null | null | sampled reject for first-frame action fidelity; continuous review still unperformed |
-| face-object-interaction | null | null | null | null | null | null | null | pending render/review |
+| face-object-interaction | 4 | 4 | 4 | 5 | 5 | 5 | 4 | all-frame candidate; normal-speed review pending |
 | rear-view-walk | null | null | null | null | null | null | null | pending render/review |
-| two-person-cafe-conversation | null | null | null | null | null | null | null | pending render/review |
+| two-person-cafe-conversation | 3 | 3 | 3 | 5 | 2 | 5 | 4 | rejected for action reenactment |
 | two-person-walk | null | null | null | null | null | null | null | pending render/review |
-| seated-couple-object-action | null | null | null | null | null | null | null | pending render/review |
+| seated-couple-object-action | 4 | 4 | 4 | 5 | 5 | 5 | 4 | all-frame candidate; normal-speed review pending |
 | user-meeting | null | null | null | null | null | null | null | pending render/review |
 
 The review record must include defects and a final disposition of `candidate`, `accepted`, or `rejected`. A pipeline is rejected for the affected capability when any principal face becomes unrecognizable, limbs or digits appear/disappear/fuse, identities swap, principal people count changes, props interpenetrate bodies, the requested action is absent or reverses, camera behavior materially changes, or the scene flickers/melts.
@@ -162,7 +167,7 @@ Current final-story status: **not rendered**.
 ## Remaining work in execution order
 
 1. Watch the three completed baseline MP4s continuously beside their sources and record formal manual scores without replacing the existing sampled review.
-2. Render and review the remaining six reference cases with bounded concurrency.
+2. Render and review the remaining three reference cases with bounded concurrency.
 3. Continue the proven LTX Pose, Depth and Canny routes on applicable benchmark cases. Preserve the seated Pose result as a sampled candidate and exclude the current hand Canny result from quality-qualified choices.
 4. Compare the Wan Animate candidate against the applicable LTX results, with explicit checks for driver appearance leakage.
 5. Reject weak pipelines per capability rather than averaging hard failures into a cosmetic score.
