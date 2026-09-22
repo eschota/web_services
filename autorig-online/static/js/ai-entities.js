@@ -260,15 +260,25 @@
         const queueSummary = document.createElement('span');
         queueSummary.className = 'fleet-queue';
         const eta = queue.eta_seconds_float == null ? '' : ' · ~' + human(queue.eta_seconds_float);
+        // The total alone hides which kind of work is waiting; one video queue
+        // can hold the whole farm while image and text are idle.
+        const perType = Object.entries(data.services_object || {})
+          .map(([id, row]) => [id, Number(row.running_int) || 0, Number(row.queued_int) || 0, row])
+          .filter(([, running, queued]) => running + queued > 0);
         queueSummary.textContent = Number(queue.running_int) + ' running · ' +
           Number(queue.queued_int) + ' queued' + eta +
-          (queue.blocked_int ? ' · ' + Number(queue.blocked_int) + ' blocked' : '');
+          (queue.blocked_int ? ' · ' + Number(queue.blocked_int) + ' blocked' : '') +
+          (perType.length ? ' · ' + perType.map(([id, running, queued]) =>
+            id + ' ' + running + '▶ ' + queued + '⏳').join(' · ') : '');
         queueSummary.title = Number(queue.running_int) + ' running, ' +
           Number(queue.queued_int) + ' queued, ' + Number(queue.blocked_int || 0) +
           ' blocked' + (queue.eta_seconds_float == null ? '' :
             '; estimated wait ' + human(queue.eta_seconds_float)) +
           (queue.estimate_kind_string ? '; ' + queue.estimate_kind_string : '') +
-          (queue.sample_count_int ? '; ' + Number(queue.sample_count_int) + ' measured samples' : '');
+          (queue.sample_count_int ? '; ' + Number(queue.sample_count_int) + ' measured samples' : '') +
+          (perType.length ? '\nBy type: ' + perType.map(([id, running, queued, row]) =>
+            id + ' — ' + running + ' running, ' + queued + ' queued' +
+            (row.median_seconds_float ? ', typical ' + human(row.median_seconds_float) : '')).join('; ') : '');
         dots.appendChild(queueSummary);
       }
 
