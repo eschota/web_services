@@ -117,6 +117,7 @@ function harness(graphs) {
     `  window.__aiNodesTest = {
       runGraph, cancelRun, resetCanvasExecutionState,
       submitJson,
+      bodyFor, RUNNERS,
       continuableResults, restoredExecutions, completedExecutions,
       activeExecutions, runRequests, setMeta
     };
@@ -232,6 +233,24 @@ test('canvas reset prevents an old completion entering the completed cache', asy
   h.jobs[0].resolve({type: 'image', value: 'https://result/old.png'});
   await run;
   assert.equal(h.api.completedExecutions.size, 0);
+});
+
+test('Avatar video runner and request body match the typed service contract', () => {
+  const h = harness([graph([input('a')])]);
+  assert.equal(h.api.RUNNERS.avatar_video.api, '/api/ai/avatar-video');
+  assert.equal(h.api.RUNNERS.avatar_video.field, 'video_url_string');
+  assert.equal(h.api.RUNNERS.avatar_video.type, 'video');
+  const body = h.api.bodyFor('avatar_video', {
+    avatar: 'av_main@3', avatar_secondary: 'av_second@2',
+    control_video_url: 'https://example.test/drive.mp4',
+    image: 'https://example.test/keyframe.png', prompt: 'turn and wave',
+  }, {width:960, height:540, frame_count:97, control_strength:1, seed:0});
+  assert.deepEqual(JSON.parse(JSON.stringify(body)), {
+    width:960, height:540, frame_count:97, control_strength:1,
+    avatar:'av_main@3', avatar_secondary:'av_second@2',
+    control_video_url:'https://example.test/drive.mp4',
+    image_url:'https://example.test/keyframe.png', prompt:'turn and wave',
+  });
 });
 
 

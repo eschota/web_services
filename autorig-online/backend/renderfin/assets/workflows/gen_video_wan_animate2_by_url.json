@@ -1,0 +1,358 @@
+{
+  "reference_image": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "$image"
+    }
+  },
+  "driving_video": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "$control_video"
+    }
+  },
+  "driving_components": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "driving_video",
+        0
+      ]
+    }
+  },
+  "reference_scale": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "reference_image",
+        0
+      ],
+      "upscale_method": "area",
+      "width": $width,
+      "height": $height,
+      "crop": "center"
+    }
+  },
+  "driving_scale": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "driving_components",
+        0
+      ],
+      "upscale_method": "area",
+      "width": $width,
+      "height": $height,
+      "crop": "center"
+    }
+  },
+  "driving_first": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "driving_scale",
+        0
+      ],
+      "batch_index": 0,
+      "length": 1
+    }
+  },
+  "model": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan_animate_2_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "distill_lora": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "model",
+        0
+      ],
+      "lora_name": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "context": {
+    "class_type": "ContextWindowsManual",
+    "inputs": {
+      "model": [
+        "distill_lora",
+        0
+      ],
+      "context_length": 21,
+      "context_overlap": 8,
+      "context_schedule": "standard_static",
+      "context_stride": 1,
+      "closed_loop": false,
+      "fuse_method": "pyramid",
+      "dim": 2,
+      "freenoise": true,
+      "cond_retain_index_list": "0",
+      "split_conds_to_windows": false,
+      "latent_retain_index_list": "",
+      "causal_window_fix": true
+    }
+  },
+  "cache": {
+    "class_type": "WanAnimate2Cache",
+    "inputs": {
+      "model": [
+        "context",
+        0
+      ],
+      "device": "cpu",
+      "dtype": "int8"
+    }
+  },
+  "sampling_model": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "cache",
+        0
+      ],
+      "shift": 5.0
+    }
+  },
+  "clip": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "cpu"
+    }
+  },
+  "positive": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "$prompt",
+      "clip": [
+        "clip",
+        0
+      ]
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "$negative_prompt",
+      "clip": [
+        "clip",
+        0
+      ]
+    }
+  },
+  "pose_prompt": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "$pose_prompt",
+      "clip": [
+        "clip",
+        0
+      ]
+    }
+  },
+  "clip_vision": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "clip_vision_h.safetensors"
+    }
+  },
+  "reference_vision": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "clip_vision",
+        0
+      ],
+      "image": [
+        "reference_scale",
+        0
+      ],
+      "crop": "none"
+    }
+  },
+  "pose_vision": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "clip_vision",
+        0
+      ],
+      "image": [
+        "driving_first",
+        0
+      ],
+      "crop": "none"
+    }
+  },
+  "vae": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "Wan2_1_VAE_bf16.safetensors"
+    }
+  },
+  "conditioning": {
+    "class_type": "WanAnimate2ToVideo",
+    "inputs": {
+      "positive": [
+        "positive",
+        0
+      ],
+      "negative": [
+        "negative",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ],
+      "width": $width,
+      "height": $height,
+      "length": $frames,
+      "batch_size": 1,
+      "video_frame_offset": 0,
+      "pose_strength": 1.0,
+      "pose_start_percent": 0.0,
+      "pose_end_percent": 1.0,
+      "reference_image_strength": 1.0,
+      "reference_image": [
+        "reference_scale",
+        0
+      ],
+      "pose_video": [
+        "driving_scale",
+        0
+      ],
+      "clip_vision_output": [
+        "reference_vision",
+        0
+      ],
+      "positive_pose": [
+        "pose_prompt",
+        0
+      ],
+      "clip_vision_output_pose": [
+        "pose_vision",
+        0
+      ]
+    }
+  },
+  "scheduler": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "cache",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 6,
+      "denoise": 1.0
+    }
+  },
+  "sampler": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "lcm"
+    }
+  },
+  "sample": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "sampling_model",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": 42,
+      "cfg": 1.0,
+      "positive": [
+        "conditioning",
+        0
+      ],
+      "negative": [
+        "conditioning",
+        1
+      ],
+      "sampler": [
+        "sampler",
+        0
+      ],
+      "sigmas": [
+        "scheduler",
+        0
+      ],
+      "latent_image": [
+        "conditioning",
+        2
+      ]
+    }
+  },
+  "trim": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "sample",
+        0
+      ],
+      "trim_amount": [
+        "conditioning",
+        3
+      ]
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "trim",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ]
+    }
+  },
+  "delivery": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "decode",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": $width,
+      "height": $height,
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "delivery"
+    }
+  },
+  "video": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "delivery",
+        0
+      ],
+      "fps": 24.0
+    }
+  },
+  "save": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "video",
+        0
+      ],
+      "filename_prefix": "$output_url",
+      "format": "mp4",
+      "codec": "h264"
+    }
+  }
+}

@@ -316,6 +316,11 @@
    * to be finished before it is.
    */
   function startTask(host, serviceId) {
+    const timingService = serviceId === 'avatar_video' || serviceId === 'video_control'
+      ? 'video'
+      : serviceId === 'avatar_image'
+        ? 'image'
+        : String(serviceId || '').startsWith('control_') ? 'control' : serviceId;
     function setPhase(phase) {
       host.classList.add('task-prog');
       host.classList.remove('running', 'queued', 'done', 'failed');
@@ -333,7 +338,7 @@
     let activeSince = 0;
 
     getFleet().then(data => {
-      const service = (data.services_object || {})[serviceId] || {};
+      const service = (data.services_object || {})[timingService] || {};
       typical = service.median_seconds_float || 0;
     }).catch(() => {});
 

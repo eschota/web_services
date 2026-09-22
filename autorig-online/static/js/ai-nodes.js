@@ -902,6 +902,7 @@
   // id; waiting on the submit would leave both blank for minutes.
   const RUNNERS = {
     avatar_image: { api: '/api/ai/avatar-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    avatar_video: { api: '/api/ai/avatar-video', finish: pollForFile, field: 'video_url_string', type: 'video' },
     video_frame: { api: '/api/ai/video-reference', finish: pollForFile, field: 'image_url_string', type: 'image' },
     video_storyboard: { api: '/api/ai/video-reference', finish: pollForFile, field: 'image_url_string', type: 'image' },
     video_control: { api: '/api/video', finish: pollForFile, field: 'video_url_string', type: 'video' },

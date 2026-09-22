@@ -12,6 +12,8 @@ class RenderPrompt(BaseModel):
     """Port of C# RenderPrompt (Render.cs:1061)."""
 
     prompt: str = ""
+    # Wan-Animate-2 keeps driver motion text separate from target appearance.
+    pose_prompt: str = ""
     negative_prompt: str = ""
     image_url: str = ""
     image_url_end: str = ""

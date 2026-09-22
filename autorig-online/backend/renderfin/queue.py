@@ -1256,7 +1256,7 @@ class RenderQueue:
         control_url = str(getattr(prompt, "control_video_url", "") or "").strip()
         controlled_video = workflow_file in {
             "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
-            "gen_video_ltx23_depth_by_url.json"}
+            "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json"}
         if bool(control_url) != controlled_video:
             raise comfy_adapter.ComfyAdapterError("A video control workflow requires its driving video")
         if control_url:
@@ -1289,6 +1289,7 @@ class RenderQueue:
             height=height,
             prompt=prompt.prompt,
             negative_prompt=prompt.negative_prompt,
+            pose_prompt=prompt.pose_prompt,
             image_filename=image_filename,
             image_end_filename=image_end_filename,
             control_video_filename=control_video_filename,

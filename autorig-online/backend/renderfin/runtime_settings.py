@@ -40,12 +40,14 @@ def apply_runtime_settings(workflow, prompt, width, height):
             inputs['strength'] = float(getattr(prompt, 'control_strength', 0.8))
             inputs['start_percent'] = float(getattr(prompt, 'control_start', 0.0))
             inputs['end_percent'] = float(getattr(prompt, 'control_end', 1.0))
+        if kind == 'WanAnimate2ToVideo':
+            inputs['pose_strength'] = float(getattr(prompt, 'control_strength', 1.0))
         if kind in {'EmptyLatentImage', 'EmptySD3LatentImage', 'EmptyFlux2LatentImage', 'Flux2Scheduler', 'EmptyLTXVLatentVideo',
-                    'LTXVBaseSampler', 'HelperNodes_WidthHeight'}:
+                    'LTXVBaseSampler', 'HelperNodes_WidthHeight', 'WanAnimate2ToVideo'}:
             inputs.update(width=internal_width, height=internal_height)
         if kind == 'ImageScale' and node.get('_meta', {}).get('title') != 'delivery':
             inputs.update(width=internal_width, height=internal_height)
-        if kind == 'EmptyLTXVLatentVideo':
+        if kind in {'EmptyLTXVLatentVideo', 'WanAnimate2ToVideo'}:
             inputs['length'] = frames
         elif kind == 'LTXVEmptyLatentAudio':
             inputs['frames_number'] = frames
@@ -62,7 +64,7 @@ def apply_runtime_settings(workflow, prompt, width, height):
             inputs['steps'] = int(steps)
         cfg = getattr(prompt, 'cfg', None)
         if cfg is not None and not preserve_sampling:
-            if kind in {'KSampler', 'KSamplerAdvanced', 'CFGGuider'}:
+            if kind in {'KSampler', 'KSamplerAdvanced', 'SamplerCustom', 'CFGGuider'}:
                 inputs['cfg'] = float(cfg)
             elif kind == 'STGGuiderAdvanced':
                 inputs['cfg_values'] = ','.join([str(cfg)] * len(inputs['cfg_values'].split(',')))

@@ -55,6 +55,7 @@ def render_workflow_text(
     checkpoint: str = "",
     lora: str = "",
     lora_strength: Optional[float] = None,
+    pose_prompt: str = "",
 ) -> Dict[str, Any]:
     """Substitute placeholders, parse, normalize. Returns the workflow dict
     ready for POST /prompt."""
@@ -67,6 +68,7 @@ def render_workflow_text(
     text = text.replace("$width", str(int(width)))
     text = text.replace("$height", str(int(height)))
     text = text.replace("$prompt", _json_escape(sanitize_prompt(prompt)))
+    text = text.replace("$pose_prompt", _json_escape(sanitize_prompt(pose_prompt)))
     text = text.replace("$negative_prompt", _json_escape(sanitize_prompt(negative_prompt)))
     # $image_end must go first: "$image" is a prefix of it.
     text = text.replace("$image_end", _json_escape(image_end_filename or ""))

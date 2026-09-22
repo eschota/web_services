@@ -107,6 +107,19 @@ SERVICES: List[Dict[str, object]] = [
         "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Character keyframe"}],
     },
     {
+        "id": "avatar_video", "title": "Avatar video · Wan-Animate-2", "path": "/nodes",
+        "api": "/api/ai/avatar-video", "status": "live", "slow": True,
+        "summary": "Transfer action from a driving video to one or two saved Avatar characters.",
+        "inputs": [
+            {"type": AVATAR, "field": "avatar", "required": True, "title": "Main character"},
+            {"type": AVATAR, "field": "avatar_secondary", "required": False, "title": "Second character"},
+            {"type": VIDEO, "field": "control_video_url", "required": True, "title": "Driving video"},
+            {"type": IMAGE, "field": "image", "required": False, "title": "Character keyframe"},
+            {"type": TEXT, "field": "prompt", "required": False, "title": "Motion verbs"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Avatar clip"}],
+    },
+    {
         "id": "vision",
         "title": "Vision",
         "path": "/vision",
@@ -237,6 +250,20 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
 
 
 PARAMS: Dict[str, List[Dict[str, object]]] = {
+    "avatar_video": [
+        {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,
+         "step": 1, "default": 960,
+         "help": "Custom size; width × height must not exceed the verified 524288 pixel area"},
+        {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048,
+         "step": 1, "default": 540,
+         "help": "Custom size; width × height must not exceed the verified 524288 pixel area"},
+        {"name": "frame_count", "title": "Frames", "type": "range", "min": 9, "max": 97,
+         "step": 8, "default": 97},
+        {"name": "control_strength", "title": "Control strength", "type": "range",
+         "min": 0, "max": 1, "step": 0.05, "default": 1},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0,
+         "max": 9007199254740991, "step": 1, "default": 0},
+    ],
     "video_control": [
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 960},
         {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 540},
