@@ -567,6 +567,15 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
       return parsed.data;
     }
 
+    const STRICT_JSON = '\nStrict JSON only: escape every double quote inside strings (\\"), no trailing commas, no comments, no text before or after the object.';
+    // The last raw model answer that could not be used, for debugging from
+    // the console: sessionStorage.getItem('aiGraphAgent.lastAnswer').
+    function rememberAnswer(answer, why) {
+      try {
+        sessionStorage.setItem('aiGraphAgent.lastAnswer', JSON.stringify({
+          why:String(why || ''), answer:String(answer || '').slice(0, 20000), at:Date.now()}));
+      } catch (error) { /* storage may be unavailable */ }
+    }
     const SMALLER_STEP = '\nThe previous answer did not fit the model limit. Answer again with a SMALLER first step: at most 3 operations or 4 clone variants, compact overrides only for parameters that change. State in message what still remains for a next request.';
 
     async function proposeWithRetries(userText, entry, originalGraph) {
@@ -582,7 +591,8 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
       if (!exhausted) {
         try { return {proposal:parseProposal(answer, originalGraph), scope:request.scope}; }
         catch (firstError) {
-          if (!firstError.truncated) {
+          rememberAnswer(answer, firstError.message);
+          if (!firstError.truncated && String(answer || '').length <= 2400) {
             setStatus('Repairing the JSON response once…');
             const repairInput = JSON.stringify({error:cleanString(firstError.message, 500),
               invalid_response:cleanString(answer, 2400), original_request:cleanString(userText, 1000)});
@@ -590,6 +600,16 @@ Rules: keep nodes and links you were not asked to change; an input node (kind in
               SYSTEM_PROMPT + '\nCorrect the previous response using the error below; do not invent extra operations.',
               repairInput, entry, request.outputTokens, false, 'Repairing');
             return {proposal:parseProposal(answer, originalGraph), scope:request.scope};
+          }
+          if (!firstError.truncated) {
+            // A long answer cannot be repaired from a 2400-character excerpt;
+            // a fresh attempt with a stricter reminder is the better bet.
+            setStatus('The answer was not valid JSON; asking again with strict JSON rules');
+            const fresh = buildInput(userText, entry, originalGraph);
+            answer = await submitModel(SYSTEM_PROMPT + STRICT_JSON, fresh.encoded, entry,
+              fresh.outputTokens, false, 'Second attempt');
+            try { return {proposal:parseProposal(answer, originalGraph), scope:request.scope}; }
+            catch (secondError) { rememberAnswer(answer, secondError.message); throw secondError; }
           }
         }
       }
