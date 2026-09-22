@@ -7,6 +7,7 @@ per-request templated workflows.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -119,22 +120,174 @@ async def upload_image(
     return f"{subfolder}/{name}" if subfolder else name
 
 
+def managed_submission_payload(
+    workflow: Dict[str, Any],
+    *,
+    managed_identity: Optional[Dict[str, str]] = None,
+    prompt_id: str = "",
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """Build the exact JSON body and identity headers for `/prompt`."""
+
+    body: Dict[str, Any] = {"prompt": workflow, "client_id": CLIENT_ID}
+    if prompt_id:
+        body["prompt_id"] = str(prompt_id)
+    headers: Dict[str, str] = {}
+    if isinstance(managed_identity, dict) and managed_identity.get("logical_task_id"):
+        identity = {
+            "logical_task_id": str(managed_identity.get("logical_task_id") or ""),
+            "lease_id": str(managed_identity.get("lease_id") or ""),
+            "request_id": str(managed_identity.get("request_id") or ""),
+            "preemption_mode": "central_requeue",
+        }
+        body["extra_data"] = {"autorig_workload": identity}
+        headers = {
+            "X-AutoRig-Managed-Task-Id": identity["logical_task_id"],
+            "X-AutoRig-Workload-Lease-Id": identity["lease_id"],
+            "X-AutoRig-Workload-Request-Id": identity["request_id"],
+            "X-AutoRig-Preemption-Mode": "central_requeue",
+        }
+    return body, headers
+
+
+def managed_submission_sha256(
+    workflow: Dict[str, Any],
+    *,
+    managed_identity: Dict[str, str],
+    prompt_id: str,
+) -> str:
+    """Bind central registration to the canonical full `/prompt` body."""
+
+    body, _headers = managed_submission_payload(
+        workflow,
+        managed_identity=managed_identity,
+        prompt_id=prompt_id,
+    )
+    canonical = json.dumps(
+        body,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 async def submit(
-    client: httpx.AsyncClient, server: RenderServer, workflow: Dict[str, Any]
+    client: httpx.AsyncClient,
+    server: RenderServer,
+    workflow: Dict[str, Any],
+    *,
+    managed_identity: Optional[Dict[str, str]] = None,
+    prompt_id: str = "",
 ) -> str:
     """POST /prompt. Returns prompt_id."""
     base = _validate_server_url(server.render_server_url)
-    body = {"prompt": workflow, "client_id": CLIENT_ID}
-    resp = await client.post(f"{base}/prompt", json=body, timeout=60.0, auth=_auth_for(server))
+    body, headers = managed_submission_payload(
+        workflow,
+        managed_identity=managed_identity,
+        prompt_id=prompt_id,
+    )
+    resp = await client.post(
+        f"{base}/prompt",
+        json=body,
+        headers=headers,
+        timeout=60.0,
+        auth=_auth_for(server),
+    )
     if _capacity_wait(resp):
         raise ComfyCapacityWait(f"Comfy GPU temporarily leased: HTTP {resp.status_code}")
     if resp.status_code != 200:
         raise ComfyAdapterError(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
     payload = resp.json()
-    prompt_id = str(payload.get("prompt_id") or "")
-    if not prompt_id:
+    node_errors = payload.get("node_errors")
+    if isinstance(node_errors, dict) and node_errors:
+        # Comfy can return HTTP 200 and a prompt id even when required model
+        # validation failed.  In that state PreviewImage nodes may still run
+        # and expose the uploaded control image as a temporary artifact.  A
+        # render with rejected output nodes was never accepted successfully.
+        summary = json.dumps(node_errors, ensure_ascii=True, sort_keys=True)
+        raise ComfyAdapterError(
+            f"prompt validation failed: node_errors={summary[:1500]}"
+        )
+    returned_prompt_id = str(payload.get("prompt_id") or "")
+    if not returned_prompt_id:
         raise ComfyAdapterError(f"prompt submit returned no prompt_id: {json.dumps(payload)[:300]}")
-    return prompt_id
+    if prompt_id and returned_prompt_id != str(prompt_id):
+        raise ComfyAdapterError(
+            f"prompt submit identity mismatch: expected {prompt_id}, got {returned_prompt_id}"
+        )
+    return returned_prompt_id
+
+
+def _queue_prompt_ids(payload: Dict[str, Any], bucket: str) -> List[str]:
+    result: List[str] = []
+    for entry in payload.get(bucket) or []:
+        if isinstance(entry, (list, tuple)):
+            for item in entry:
+                if isinstance(item, str):
+                    result.append(item)
+                    break
+        elif isinstance(entry, dict):
+            prompt_id = str(entry.get("prompt_id") or "")
+            if prompt_id:
+                result.append(prompt_id)
+    return result
+
+
+async def preempt_owned_prompt(
+    client: httpx.AsyncClient,
+    server: RenderServer,
+    prompt_id: str,
+    *,
+    logical_task_id: str = "",
+) -> bool:
+    """Remove/interrupt only the exact centrally-owned Comfy prompt.
+
+    The caller resets the same RenderTask to Pending and clears prompt_id after
+    this returns.  The host arbiter must not repost prompts carrying
+    ``preemption_mode=central_requeue``.
+    """
+    base = _validate_server_url(server.render_server_url)
+    response = await client.get(f"{base}/queue", timeout=15.0, auth=_auth_for(server))
+    if response.status_code != 200:
+        return False
+    payload = response.json()
+    running = _queue_prompt_ids(payload, "queue_running")
+    pending = _queue_prompt_ids(payload, "queue_pending")
+    headers = {"X-AutoRig-Managed-Task-Id": logical_task_id or prompt_id}
+    if prompt_id in pending:
+        deleted = await client.post(
+            f"{base}/queue",
+            json={"delete": [prompt_id]},
+            headers=headers,
+            timeout=15.0,
+            auth=_auth_for(server),
+        )
+        if deleted.status_code not in {200, 204}:
+            return False
+    elif prompt_id in running:
+        # Comfy interrupt is process-wide, therefore exact ownership is proved
+        # by requiring this to be the sole running prompt on the node.
+        if running != [prompt_id]:
+            return False
+        interrupted = await client.post(
+            f"{base}/interrupt",
+            json={},
+            headers=headers,
+            timeout=15.0,
+            auth=_auth_for(server),
+        )
+        if interrupted.status_code not in {200, 204}:
+            return False
+    else:
+        return True
+    for _ in range(20):
+        if not await queue_contains(client, server, prompt_id):
+            return True
+        import asyncio
+
+        await asyncio.sleep(0.25)
+    return False
 
 
 async def queue_contains(
@@ -220,14 +373,10 @@ def resolve_artifacts(
     outputs, order by preference (fragment match, then extension match)."""
     found: List[Dict[str, str]] = []
     _walk_filenames(history_entry.get("outputs") or {}, found)
-    # Native ComfyUI nodes such as LoadVideo can echo their source file in
-    # history outputs with type=input.  It is never a generated artifact and
-    # must not be downloaded under the task's public output URL.  Prefer real
-    # outputs; retain the historical temp-preview fallback only when Comfy did
-    # not report any output files.  Unknown explicit types fail closed.
+    # Temporary previews are not deliverables.  Falling back to them when all
+    # SaveImage nodes failed turns an uploaded pose/control image into an
+    # apparently successful result, which downstream 3D faithfully corrupts.
     outputs = [f for f in found if f.get("type", "output").lower() == "output"]
-    if not outputs:
-        outputs = [f for f in found if f.get("type", "").lower() == "temp"]
 
     def rank(f: Dict[str, str]) -> Tuple[int, int]:
         name = f.get("filename", "").lower()
@@ -255,6 +404,10 @@ async def download_artifact(
     resp = await client.get(
         f"{base}/view", params=params, timeout=300.0, auth=_auth_for(server)
     )
+    if _capacity_wait(resp):
+        raise ComfyCapacityWait(
+            f"Comfy artifact temporarily gated by GPU lease: HTTP {resp.status_code}"
+        )
     if resp.status_code != 200:
         raise ComfyAdapterError(
             f"artifact download failed: HTTP {resp.status_code} {params['filename']}"
