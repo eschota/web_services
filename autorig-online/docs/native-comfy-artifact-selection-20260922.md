@@ -12,17 +12,25 @@ The first two saved-Avatar jobs therefore completed their real GPU renders,
 but AutoRig initially published the 480×270 driving previews under the result
 URLs. This was an artifact transport failure, not a failed identity generation.
 
-Source commit `314ac452`, deployed in immutable release
-`ai-defaults-20260922-r`, changes artifact selection to:
+Source commit `f6f91e48`, deployed in immutable release
+`ai-defaults-20260922-r1`, changes artifact selection to:
 
 1. Return explicitly generated `output` files when available.
-2. Retain legacy `temp` preview fallback only when no generated output exists.
-3. Never return `input` or unknown file categories as generated artifacts.
+2. Preserve production's existing rejection of temporary previews.
+3. Never return `input`, `temp`, or unknown file categories as generated artifacts.
 
 Both normal queue completion and the managed artifact spool call this shared
-resolver. Three targeted tests reproduce the native LoadVideo/SaveVideo
-history, an input-only history, and output-versus-temp precedence. All three
-passed locally and in the production release before activation.
+resolver. Four targeted tests cover the native LoadVideo/SaveVideo history,
+an input-only history, rejection of temporary previews, and the managed
+queue submission contract. All four passed in the production release before
+activation.
+
+The initial R overlay exposed source drift: the local adapter was older than
+the live adapter and omitted its `managed_identity` submission argument. The
+next queued scene could not be submitted between 04:13 and 04:17 UTC. R1 was
+built from the exact working production Q2 adapter with a one-line artifact
+filter change; that full source was mirrored into local Git. The same fourth
+task was successfully dispatched at 04:17:45, without a duplicate GPU render.
 
 ## Recovery without duplicate rendering
 
