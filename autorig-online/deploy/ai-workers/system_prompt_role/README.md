@@ -1,5 +1,14 @@
 # AI worker system-role patch
 
+> **Superseded 2026-09-23.** This change is now committed to the converter
+> source of truth (`github.com/eschota/autorig.online`, `main` commit
+> `60101f4`, with tests in `tests/test_ai_vision_queue.py`) and ships through
+> the normal protocol-3 artifact deploy (`deploy_farm.bat`). f2, f11 and f13
+> run that build with `deploy_drift: clean`. Do not use
+> `apply_system_prompt_role.py` any more: it hot-patches the runtime (which
+> shows up as deploy drift), and its per-model anchors fail on a fresh
+> 27da548 tree. Kept for the audit trail and the f13 canary evidence only.
+
 This patch adds one backwards-compatible request field:
 
 ```json
