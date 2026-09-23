@@ -134,6 +134,22 @@ async def api_model_catalogue(service: Optional[str] = None):
     else:
         checkpoints = [e for e in all_entries if e.get("kind") == "checkpoint"]
         loras = [e for e in all_entries if e.get("kind") == "lora"]
+    # One fit rule for every picker: each LoRA lists the active checkpoints
+    # it loads onto (ai_model_defaults.compatible, the render API's own
+    # check). A LoRA no active checkpoint loads is not offered at all; /lora
+    # shows it under "no model" so it can be removed.
+    import ai_model_defaults
+    active = [e for e in all_entries if e.get("kind") == "checkpoint" and e.get("usable")]
+    fitted = []
+    for entry in loras:
+        services = set(entry.get("services") or [])
+        fits = sorted(str(c.get("file")) for c in active
+                      if (not services or services.intersection(c.get("services") or []))
+                      and ai_model_defaults.model_family(c)
+                      and ai_model_defaults.compatible(c, entry))
+        if fits:
+            fitted.append(dict(entry, fits_checkpoints=fits))
+    loras = fitted
     # Which computers can run each checkpoint right now (they advertise its
     # workflow). The picker intersects this with a LoRA's `ready_workers`, so
     # a LoRA that is only on computers without the chosen model reads as

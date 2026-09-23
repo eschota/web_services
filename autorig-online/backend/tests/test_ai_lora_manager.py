@@ -281,6 +281,53 @@ class FamilyTargetTests(Base):
         self.assertEqual(managed["ready_workers"], ["f5"])
 
 
+FIT_CATALOGUE = [
+    {"kind": "checkpoint", "family": "ltx25", "file": "ltx-2.5.safetensors", "base": "LTX-2.5",
+     "usable": True, "services": ["video"], "workflow": "gen_animation_ltx25_by_url.json"},
+    {"kind": "checkpoint", "family": "minimax_h3", "file": "h3.safetensors", "base": "MiniMax H3",
+     "usable": True, "services": ["video"], "workflow": "gen_video_minimax_h3_by_url.json"},
+]
+
+
+class OneFitRuleTests(Base):
+    """A LoRA is offered only where an active checkpoint loads it."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "model_catalogue.json").write_text(json.dumps(FIT_CATALOGUE), encoding="utf-8")
+        ai_model_catalogue._cache = []
+        self.ltx23 = entry("civitai-2864091", "bounceV2_5_LTX23_I2V.comfy.safetensors", "a" * 64,
+                           family="ltx23", base="LTXV 2.3", services=["video"])
+        self.sdxl = entry("civitai-135867", "add-detail-xl.safetensors", SHA_A)  # no SDXL model left
+        self.registry([self.ltx23, self.sdxl])
+        self.report("f12", [{"name": self.ltx23["file"], "sha256": "a" * 64},
+                            {"name": self.sdxl["file"], "sha256": SHA_A}])
+
+    def test_ltx23_loras_fit_ltx25_like_the_render_api_says(self):
+        import ai_model_defaults
+        self.assertEqual(lm.fitting_checkpoints(self.ltx23), ["ltx-2.5.safetensors"])
+        self.assertTrue(ai_model_defaults.compatible(FIT_CATALOGUE[0], self.ltx23))
+
+    def test_a_lora_without_a_model_is_offered_nowhere(self):
+        self.assertEqual(lm.fitting_checkpoints(self.sdxl), [])
+        self.assertEqual(lm.target_boxes(self.sdxl), set())
+        managed = {e["file"]: e for e in ai_model_catalogue.entries() if e.get("managed")}
+        self.assertTrue(managed["add-detail-xl.safetensors"]["no_model"])
+        self.assertFalse(managed["add-detail-xl.safetensors"]["usable"])
+        app = FastAPI(); app.include_router(ai_model_catalogue.router)
+        body = TestClient(app).get("/api/ai/model-catalogue?service=video").json()
+        self.assertEqual([(l["file"], l["fits_checkpoints"]) for l in body["loras_array"]],
+                         [("bounceV2_5_LTX23_I2V.comfy.safetensors", ["ltx-2.5.safetensors"])])
+        everything = TestClient(app).get("/api/ai/model-catalogue").json()
+        self.assertNotIn("add-detail-xl.safetensors", [l["file"] for l in everything["loras_array"]])
+
+    def test_the_render_api_names_the_missing_model(self):
+        import ai_vision_api
+        with self.assertRaises(HTTPException) as ctx:
+            ai_vision_api._lora_stack_request("image", "x <lora:add-detail-xl>", None, None)
+        self.assertEqual(ctx.exception.detail["error_string"], "lora_has_no_model")
+
+
 class PresignedTests(Base):
     def test_the_api_token_is_never_the_url_handed_out(self):
         import asyncio

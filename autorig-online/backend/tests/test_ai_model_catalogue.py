@@ -23,6 +23,11 @@ FIXTURE = [
     {"kind": "checkpoint", "family": "pony", "file": "cyberrealisticPony.safetensors",
      "title": "CyberRealistic Pony", "base": "Pony", "usable": False,
      "services": [], "unusable_reason": "The image workflow is Flux."},
+    # An active FLUX checkpoint: a LoRA is served only when some active
+    # checkpoint loads it (ai_model_defaults.compatible).
+    {"kind": "checkpoint", "family": "flux", "file": "flux1-schnell.safetensors",
+     "title": "FLUX.1 Schnell", "base": "FLUX.1 Schnell", "usable": True,
+     "services": ["image"], "preview": ""},
     {"kind": "lora", "family": "flux", "file": "NSFW_master.safetensors",
      "title": "NSFW MASTER", "base": "Flux.1 D", "usable": True,
      "services": ["image"], "preview": "/api/ai/model-preview/NSFW_master.jpg"},
@@ -62,7 +67,7 @@ class CatalogueTests(unittest.TestCase):
 
     def test_the_whole_catalogue_is_served(self):
         body = self.client.get("/api/ai/model-catalogue").json()
-        self.assertEqual(len(body["checkpoints_array"]), 2)
+        self.assertEqual(len(body["checkpoints_array"]), 3)
         self.assertEqual(len(body["loras_array"]), 2)
 
     def test_image_only_sees_flux_loras(self):

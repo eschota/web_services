@@ -645,6 +645,31 @@ def workflow_boxes(workflow: str) -> Optional[set]:
     return {s["name"] for s in servers if workflow in s["workflows"]}
 
 
+def fitting_checkpoints(entry: Dict[str, Any]) -> List[str]:
+    """Active catalogue checkpoints this LoRA loads onto.
+
+    The single fit rule: ai_model_defaults.compatible, the same function the
+    render API validates with (it carries the declared cross-family cases,
+    e.g. LTX 2.3 LoRAs on LTX-2.5). The registry, the sync manifest, the
+    pickers and the API all read this list; a LoRA whose list is empty has no
+    model on the farm and is left out of every picker.
+    """
+    import ai_model_catalogue
+    import ai_model_defaults
+
+    probe = {"kind": "lora", "family": entry.get("family") or "", "base": entry.get("base") or ""}
+    services = set(entry.get("services") or [])
+    out = []
+    for checkpoint in ai_model_catalogue.raw_entries():
+        if checkpoint.get("kind") != "checkpoint" or not checkpoint.get("usable"):
+            continue
+        if services and not services.intersection(checkpoint.get("services") or []):
+            continue
+        if ai_model_defaults.model_family(checkpoint) and ai_model_defaults.compatible(checkpoint, probe):
+            out.append(str(checkpoint.get("file")))
+    return sorted(out)
+
+
 def family_workflows(family: str, base: str = "") -> set:
     """Workflows of the usable catalogue checkpoints a LoRA family loads onto."""
     import ai_model_catalogue
@@ -671,6 +696,8 @@ def target_boxes(entry: Dict[str, Any], data: Optional[Dict[str, Any]] = None) -
     later is picked up by its next sync. Unknown registry -> every box.
     """
     known = set(boxes(data))
+    if not fitting_checkpoints(entry):
+        return set()  # no model on the farm loads it: nothing to send anywhere
     if entry.get("boxes"):
         return {b for b in entry["boxes"] if b in known}
     servers = renderfin_servers()
@@ -734,9 +761,13 @@ def catalogue_entries() -> List[Dict[str, Any]]:
         if entry.get("state") == "removed":
             continue
         ready = ready_boxes(entry, data)
+        fits = fitting_checkpoints(entry)
         mirror = entry.get("mirror") or {}
         reason = ""
-        if not ready:
+        if not fits:
+            reason = f"No model on the farm loads {entry.get('base') or entry.get('family')} LoRAs"
+            ready = []
+        elif not ready:
             reason = ("the VPS could not fetch it: " + str(mirror.get("error"))
                       if mirror.get("state") == "failed"
                       else "waiting for the render computers to download it")
@@ -754,6 +785,7 @@ def catalogue_entries() -> List[Dict[str, Any]]:
             "page": entry.get("page") or "", "preview": entry.get("preview") or "",
             "services": entry.get("services") or [], "usable": bool(ready),
             "unusable_reason": reason, "validated_workers": ready, "ready_workers": ready,
+            "fits_checkpoints": fits, "no_model": not fits,
             "sha256": entry["sha256"], "size_mb": round((entry.get("size_bytes") or 0) / 1048576, 1),
             "source_version_id": (entry.get("source") or {}).get("version_id"),
             "aliases": entry.get("aliases") or [], "managed": True, "id": entry["file"],
@@ -995,6 +1027,7 @@ def _entry_view(entry: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
         "state", "mirror", "boxes", "aliases")}
     view["box_states_object"] = states
     view["target_boxes_array"] = sorted(target_boxes(entry, data))
+    view["fits_checkpoints_array"] = fitting_checkpoints(entry)
     view["tag_string"] = f"<lora:{entry['file'].rsplit('.', 1)[0]}:{entry.get('recommended_strength') or 1:g}>"
     return view
 

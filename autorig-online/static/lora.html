@@ -58,6 +58,9 @@
         .lr-msg.err { color: #fca5a5; }
         .lr-msg.ok { color: #86efac; }
 
+        .lr-sub { display: flex; align-items: center; gap: 8px; margin: 22px 0 10px; font-size: 14px; font-weight: 600; color: #94a3b8; }
+        .lr-sub svg { width: 18px; height: 18px; }
+        #lr-orphan-grid .card { opacity: .62; }
         .lr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
         .card {
             display: grid; grid-template-columns: 84px 1fr; gap: 11px; padding: 10px;
@@ -158,7 +161,15 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="8" height="14" rx="1.5"/><rect x="13.5" y="5" width="8" height="14" rx="1.5"/><path d="M10.5 12h3"/></svg></button>
     </nav>
 
-    <section id="tab-loras"><div class="lr-grid" id="lr-grid"></div></section>
+    <section id="tab-loras">
+        <div class="lr-grid" id="lr-grid"></div>
+        <div id="lr-orphans" hidden>
+            <h2 class="lr-sub" title="No model on the farm loads these LoRAs: they are not offered in any node. Remove them, or keep them for a model that is coming.">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M6 18L18 6"/></svg>
+                no model <span class="count" id="n-orphans">0</span></h2>
+            <div class="lr-grid" id="lr-orphan-grid"></div>
+        </div>
+    </section>
     <section id="tab-boxes" hidden><div id="lr-boxes"></div></section>
     <section id="tab-repro" hidden>
         <div class="repro">
@@ -260,10 +271,17 @@
   }
 
   function paintLoras() {
-    var list = (state.data && state.data.loras_array) || [];
+    var all = (state.data && state.data.loras_array) || [];
+    // The same fit rule as every node picker: a LoRA no active model loads
+    // is listed apart, where it can be removed, and is offered nowhere.
+    var fits = function (l) { return !Array.isArray(l.fits_checkpoints_array) || l.fits_checkpoints_array.length > 0; };
+    var list = all.filter(fits), orphans = all.filter(function (l) { return !fits(l); });
     $('n-loras').textContent = list.length;
     $('lr-grid').innerHTML = list.length ? list.map(card).join('')
       : '<div class="lr-msg">' + (state.admin ? 'Paste a Civitai link above.' : 'No LoRAs installed yet.') + '</div>';
+    $('lr-orphans').hidden = !orphans.length;
+    $('n-orphans').textContent = orphans.length;
+    $('lr-orphan-grid').innerHTML = orphans.map(card).join('');
   }
 
   function paintBoxes() {

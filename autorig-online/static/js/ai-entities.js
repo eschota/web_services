@@ -721,6 +721,11 @@
    */
   const SDXL_FAMILIES = ['pony', 'sdxl', 'illustrious', 'noobai'];
   function loraFitsCheckpoint(checkpoint, lora) {
+    // The server's answer wins: /api/ai/model-catalogue lists, per LoRA, the
+    // active checkpoints it loads onto (ai_model_defaults.compatible).
+    if (lora && Array.isArray(lora.fits_checkpoints) && checkpoint && checkpoint.file) {
+      return lora.fits_checkpoints.includes(checkpoint.file);
+    }
     const left = checkpoint && checkpoint.family;
     const right = lora && lora.family;
     if (!left || !right || left === right) return true;

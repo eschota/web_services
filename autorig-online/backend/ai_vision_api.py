@@ -1355,6 +1355,11 @@ def _lora_stack_request(service_id: str, prompt: Optional[str], stack_value: obj
         raise _lora_error("lora_syntax", str(exc)) from None
     for item in stack:
         entry = item.entry
+        if entry.get("no_model"):
+            raise _lora_error(
+                "lora_has_no_model",
+                f"LoRA '{item.file}' is for {entry.get('base') or entry.get('family')}, "
+                "and no model on the farm loads it", lora_string=item.file)
         if not entry.get("usable"):
             raise _lora_error(
                 "lora_not_ready",
