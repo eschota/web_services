@@ -62,8 +62,7 @@ except ImportError:  # pragma: no cover - Windows
     fcntl = None
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_avatar_assets import AvatarAssetStore, validate_import_url
@@ -1622,11 +1621,18 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
             state["builder"] = AvatarBuilder()
         return state["builder"]
 
-    def respond(job: Dict[str, Any], hit: bool):
+    def respond(job: Dict[str, Any], hit: bool, response: Response):
+        """A plain dict, with the status code set on FastAPI's injected response.
+
+        The owner dependency writes a first-time visitor's anon_id cookie to
+        that same response. A returned JSONResponse would replace it and drop
+        the cookie, so the visitor's next status call would come from a new
+        anonymous owner and get 404 while the build kept running.
+        """
         if not job.get("finished"):
             get_builder().ensure_running(job["job_id"])
-        payload = {**public_status(job), "cache_hit_bool": hit}
-        return JSONResponse(status_code=200 if job.get("finished") else 202, content=payload)
+        response.status_code = 200 if job.get("finished") else 202
+        return {**public_status(job), "cache_hit_bool": hit}
 
     async def resume_unfinished() -> None:
         """A restart must not strand a build: pick up web jobs left running.
@@ -1656,7 +1662,7 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
             get_builder().ensure_running(str(job.get("job_id")))
 
     @router.post("/api/ai/avatar-build")
-    async def create(body: BuildRequest, owner: AvatarOwner = Depends(owner_dependency)):
+    async def create(body: BuildRequest, response: Response, owner: AvatarOwner = Depends(owner_dependency)):
         await resume_unfinished()
         url = str(body.video_url or body.image_url or "").strip()
         if not url and body.image_base64:
@@ -1671,7 +1677,7 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
             identity = _identity("image", final.stem, body, _split_avatar(body.avatar))
             identity["local_file"] = str(final)
             job, hit = get_builder().jobs.create(owner, identity)
-            return respond(job, hit)
+            return respond(job, hit, response)
         if not url:
             raise HTTPException(400, detail="Wire a picture or a video into the node")
         external = False
@@ -1693,11 +1699,11 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
         if external:
             identity["external"] = True
         job, hit = get_builder().jobs.create(owner, identity)
-        return respond(job, hit)
+        return respond(job, hit, response)
 
     @router.post("/api/ai/avatar-build/upload")
-    async def upload(file: UploadFile = File(...), display_name: str = Form(""), outfit: str = Form(""),
-                     views: str = Form(""), avatar: str = Form(""),
+    async def upload(response: Response, file: UploadFile = File(...), display_name: str = Form(""),
+                     outfit: str = Form(""), views: str = Form(""), avatar: str = Form(""),
                      owner: AvatarOwner = Depends(owner_dependency)):
         """A picture or video straight from the page; the video never becomes public."""
         await resume_unfinished()
@@ -1734,13 +1740,13 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
         identity = _identity(kind, sha, body, _split_avatar(body.avatar))
         identity["local_file"] = str(final)
         job, hit = jobs.create(owner, identity)
-        return respond(job, hit)
+        return respond(job, hit, response)
 
     @router.get("/api/ai/avatar-build/status/{job_id}")
-    async def status(job_id: str, owner: AvatarOwner = Depends(owner_dependency)):
+    async def status(job_id: str, response: Response, owner: AvatarOwner = Depends(owner_dependency)):
         await resume_unfinished()
         job = get_builder().jobs.read(job_id, owner)
-        return respond(job, False)
+        return respond(job, False, response)
 
     return router
 

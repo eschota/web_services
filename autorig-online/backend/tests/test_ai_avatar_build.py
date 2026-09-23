@@ -8,9 +8,10 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import uuid
 
 import httpx
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, Request, Response
 from PIL import Image
 
 import ai_avatar_build as build
@@ -441,6 +442,66 @@ class RouterTests(unittest.TestCase):
                     self.assertEqual(hidden.status_code, 404)
                     mine = await client.get(body["status_url_string"], headers={"X-Test-Owner": "a"})
                     self.assertEqual(mine.status_code, 202)
+            asyncio.run(scenario())
+
+    def test_a_first_time_visitor_gets_the_anon_cookie_that_owns_its_build(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            builder = build.AvatarBuilder(avatar_store=AvatarStore(root / "a"),
+                                          asset_store=AvatarAssetStore(root / "b"),
+                                          job_store=build.BuildJobStore(root / "c"))
+            builder.ensure_running = lambda job_id: None
+
+            # As main.get_avatar_owner -> get_anon_session: a visitor without a
+            # cookie is a new anonymous owner, minted on the injected Response.
+            async def owner(request: Request, response: Response):
+                anon_id = request.cookies.get("anon_id")
+                if not anon_id:
+                    anon_id = str(uuid.uuid4())
+                    response.set_cookie("anon_id", anon_id, max_age=365 * 24 * 60 * 60,
+                                        httponly=True, samesite="lax")
+                return AvatarOwner(owner_type="anon", owner_id=anon_id)
+
+            app = FastAPI()
+            app.include_router(build.build_avatar_build_router(owner, builder=builder))
+
+            def minted(reply):
+                cookies = [c for c in reply.headers.get_list("set-cookie") if c.startswith("anon_id=")]
+                self.assertEqual(len(cookies), 1, reply.headers)
+                return cookies[0].split(";", 1)[0].split("=", 1)[1]
+
+            async def scenario():
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                             base_url="https://test") as client:
+                    async def call(method, url, anon_id=None, **kwargs):
+                        client.cookies.clear()  # only the cookie the test sends
+                        headers = {"Cookie": f"anon_id={anon_id}"} if anon_id else {}
+                        return await client.request(method, url, headers=headers, **kwargs)
+
+                    created = await call("POST", "/api/ai/avatar-build", json={
+                        "image_url": "https://autorig.online/dev/api/scratch/x.png"})
+                    self.assertEqual(created.status_code, 202)
+                    anon_id = minted(created)
+                    status_url = created.json()["status_url_string"]
+                    self.assertEqual((await call("GET", status_url)).status_code, 404)
+                    mine = await call("GET", status_url, anon_id)
+                    self.assertEqual(mine.status_code, 202)
+                    self.assertNotIn("set-cookie", mine.headers)
+
+                    visitor = AvatarOwner(owner_type="anon", owner_id=anon_id)
+                    job = builder.jobs.read(created.json()["task_id_string"], visitor)
+                    builder.jobs.write({**job, "finished": True, "status": "completed"})
+                    done = await call("GET", status_url, anon_id)
+                    self.assertEqual(done.status_code, 200)
+                    self.assertTrue(done.json()["finished_bool"])
+
+                    uploaded = await call("POST", "/api/ai/avatar-build/upload",
+                                          files={"file": ("me.png", png(), "image/png")})
+                    self.assertEqual(uploaded.status_code, 202)
+                    uploader = minted(uploaded)
+                    self.assertNotEqual(uploader, anon_id)
+                    again = await call("GET", uploaded.json()["status_url_string"], uploader)
+                    self.assertEqual(again.status_code, 202)
             asyncio.run(scenario())
 
 
