@@ -93,10 +93,10 @@ queue watchdog and the VPS tunnel all came back within about 1 minute.
 | LTX-2.5 std, 97 f 960×540 | 46.0 s (ref) | ✅ 81 s · 1.7× | ✅ 43 s · 0.9× | ✅ 93 s · 2.0× | ❌ blocked: host RAM |
 | LTX-2.5 HQ (two-stage), 97 f | 22.9 s (ref) | ✅ 75 s · 3.3× | ✅ 47 s · 2.0× | ❌ 117 s · 5.1× | ❌ blocked |
 | Krea 2 Turbo 1024² | 7.7 s (ref) | ✅ 25 s · 3.2× | ✅ 17 s · 2.2× | — | — |
-| Z-Image Turbo 1024² | 5.0 s (ref) | ✅ 8.2 s · 1.6× | ✅ 8.6 s · 1.7× | ✅ 12.8 s · 2.6× | ⚠️ 23.5 s · 4.7× (1 of 2 runs tripped the guard) |
-| Z-Image + ControlNet pose 1024² | 8.1 s (ref) | ✅ 16 s · 2.0× | ✅ 14 s · 1.8× | ✅ 21 s · 2.6× | ❌ guard trip |
-| FLUX.2 klein 4B multi-ref (2 refs) | 5.5 s (ref) | — | ✅ 9.8 s · 1.8× | ✅ 14.8 s · 2.7× | ⚠️ 15.5 s · 2.8× (cold run tripped the guard) |
-| Qwen-Image-Edit-2511 Q3_K_S (2 refs, 20 steps) | — (no ComfyUI-GGUF) | — (no file, no GGUF node) | ✅ 305 s (no reference; the fastest box) | ❌ ~380 s, then the guard trips at step 16/20 (1.4 GB free) | ❌ guard trip |
+| Z-Image Turbo 1024² | 5.0 s (ref) | ✅ 8.2 s · 1.6× | ✅ 8.6 s · 1.7× | ✅ 12.8 s · 2.6× | ✅ 12.5 s · 2.5× (after reboot) |
+| Z-Image + ControlNet pose 1024² | 8.1 s (ref) | ✅ 16 s · 2.0× | ✅ 14 s · 1.8× | ✅ 21 s · 2.6× | ✅ 21 s · 2.6× (after reboot) |
+| FLUX.2 klein 4B multi-ref (2 refs) | 5.5 s (ref) | — | ✅ 9.8 s · 1.8× | ✅ 14.8 s · 2.7× | ✅ 15.2 s · 2.8× (after reboot) |
+| Qwen-Image-Edit-2511 Q3_K_S (2 refs, 20 steps) | — (no ComfyUI-GGUF) | — (no file, no GGUF node) | ✅ 305 s (no reference; the fastest box) | ❌ ~380 s, then the guard trips at step 16/20 (1.4 GB free) | ⚠️ 443 s, no guard trip (no reference; 1.5× Raptor) |
 
 Recommended advertisement (for the video agent, via the coordinator; nothing has
 been advertised by this map):
@@ -201,7 +201,8 @@ Earlier numbers by the video agent (`docs/ltx25-migration-20260923.md`) agree: f
 | Raptor (2.9.1) | 20.2 / 8.6 s | 1.7 | 33.7 / 14.4 s | 1.8 | 34.3 | 0.969 / 0.996 |
 | Raptor (2.7.1, before) | 74 / 9.8 s | 2.0 | – | – | 31.2 | |
 | f15 (2.9.1) | 26.0 / 12.8 s | 2.6 | 39.3 / 21.1 s | 2.6 | 2.8 | 0.975 / 0.994 |
-| f5 (2.9.1) | guard trip / 23.5 s | 4.7 | guard trip both | ❌ | 0.2-2.0 | |
+| f5 (before reboot) | guard trip / 23.5 s | 4.7 | guard trip both | ❌ | 0.2-2.0 | |
+| f5 (after reboot) | 21.4 / 12.5 s | 2.5 | 30.5 / 21.0 s | 2.6 | 11.4 | |
 
 ### FLUX.2 klein 4B multi-reference, 2 refs, 1024², 4 steps
 
@@ -210,7 +211,8 @@ Earlier numbers by the video agent (`docs/ltx25-migration-20260923.md`) agree: f
 | worker-4090 | 23.1 s | 5.5 s | 1.0 | 36.8 | ref |
 | Raptor (2.9.1) | 70.5 s | 9.8 s | 1.8 | 45.8 | 0.996 |
 | f15 (2.9.1) | 59.2 s | 14.8 s | 2.7 | 8.0 | 0.998 |
-| f5 (2.9.1) | guard trip | 15.5 s | 2.8 | 2.0 | |
+| f5 (before reboot) | guard trip | 15.5 s | 2.8 | 2.0 | |
+| f5 (after reboot) | 65.5 s | 15.2 s | 2.8 | 11.2 | |
 | f12 | — klein 4B, its fp4 Qwen3 encoder and the FLUX.2 VAE are not installed | | | | |
 
 ### Qwen-Image-Edit-2511 GGUF Q3_K_S, 2 refs, 1024², 20 steps, CFG 2.5
@@ -220,7 +222,8 @@ Earlier numbers by the video agent (`docs/ltx25-migration-20260923.md`) agree: f
 | Raptor (2.9.1) | 313 s | 305 s | 39.7 | ok (sampling 294 s; no Lightning LoRA in the template) |
 | f15 (2.9.1) | 159 s, guard trip at 0.6 GB | – | 0.6 | ❌ |
 | f15, `--cache-ram 6` | about 380 s, guard trip at step 16/20 (1.4 GB) | stopped by hand after 27 min at step 13/20 (VRAM thrash, 6 MB free) | 1.4 | ❌ |
-| f5 | guard trip | – | 0.2 | ❌ |
+| f5 (before reboot) | guard trip | – | 0.2 | ❌ |
+| f5 (after reboot) | 458 s | 443 s | 5.1 | ok but slow (1.5× Raptor); 7.6 GB VRAM peak |
 | worker-4090, f12 | — no `UnetLoaderGGUF` node (and no file on f12) | | | |
 
 With no 4090 reference, the rule cannot be applied as written. Raptor is the only box that
@@ -237,7 +240,7 @@ LTX-2.5 153 f warm 92 s (2.4×), both on the **default launcher** with at least 
 f5's LTX output is bit-identical to f15's, which is the same card.
 f15 only needs `--cache-ram 6` because of its own resident load: the Freestock embeddings
 worker, and more. The image rows for f5 are from before the reboot. Re-run them the next
-time f5 is idle.
+time f5 is idle. **Done 08:20-08:52Z:** Z-Image 2.5×, pose 2.6×, klein 2-ref 2.8×, all ✅. Qwen-Edit ran in 443 s without a guard trip. Warm pose and klein times come from back-to-back runs, because the first attempt was interleaved with production LTX/H3 jobs that evicted the models (pose 36.6 s, klein 64.8 s: the cost of switching models on an 8 GB card).
 
 ## Distribution done for this map (download once per site)
 
