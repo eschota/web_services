@@ -94,6 +94,7 @@ Decode time here is decode plus delivery resize plus encode. Free VRAM and RAM a
 | f12 3080 Ti 12 GB / 32 GB | 97 frames, 960x544 | 18.6 s; VRAM free 7.9 / 8.1 GB | 17.2 s | 15.4 s (t128/o32) |
 | f12 | 193 frames, 1152x2048 | 220 s (decode 186 s, out-of-memory retile on every tile, VRAM free 0.08 GB, RAM free 5.7 GB) | 111–133 s; VRAM free 6.6 GB | 118.5 s; VRAM free 6.7 GB; RAM does not drop during the decode |
 | f12 | 393 frames, 608x960, real task 50d003fe | hung for over 18 min; ComfyUI killed | Done in 254 s; RAM free 4.7 GB (whole run) | decode+save 70.8 s; RAM free 8.9 GB during decode+save (5.9 GB during sampling, from model weights) |
+| f12 | 193 frames, 1152x2048, full production graph | 700 s total (sampling 459, decode 186, resize 13, save 22); RAM free 5.7 GB (whole run) | — | 621 s total (sampling 468, decode+save 125); RAM free 13.7 GB during decode+save (5.5 GB during sampling, from model weights) |
 | f15 3070 Ti 8 GB | 97 frames, 960x544 | 510 s (sysmem spill) | — | — |
 | f5 3070 Ti 8 GB | 97 frames, 960x544 | — | 40 s | 58 s (384/96/32). 512/96 runs out of VRAM; 512/128 takes 194 s |
 
