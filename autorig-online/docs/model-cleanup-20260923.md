@@ -18,9 +18,9 @@ the box in `C:\ProgramData\AutoRig\model-cleanup-20260923.log`.
   (+ `qwen_3_4b_fp4_flux2`, `flux2-vae`), Qwen-Image-Edit-2511 GGUF + `qwen_2.5_vl_7b_fp8_scaled`
   + both Lightning LoRAs, Qwen-Image 2512 GGUF (still the `qwen_image_generate.json` template),
   Hunyuan3D / converter boxes (not touched), RMBG, DWPose, depth-anything, ESRGAN models.
-- LoRAs in the /lora registry: all eight kept (Z-Detail-Slider, skin texture v4.5,
-  AddMicroDetails Krea2, lenovo Krea2, add-detail-xl, darth-vader-pxl, the BTS LTX-2.5 and the
-  bounce LTX 2.3 test LoRAs).
+- LoRAs in the /lora registry: Z-Detail-Slider, skin texture v4.5, AddMicroDetails Krea2,
+  lenovo Krea2, the BTS LTX-2.5 and the bounce LTX 2.3 test LoRAs (plus H3 LoRAs other agents
+  add). The Pony-family add-detail-xl and darth-vader-pxl were removed in the second batch.
 
 "In use" was decided by grepping every template in `backend/renderfin/assets/workflows`
 (local and the live release), both catalogues, the LoRA registry, `backend/*.py`,
@@ -185,6 +185,74 @@ instead (listed separately below); they land in `<ComfyUI root>\autorig_lora_tra
 | `R:\ComfyUI_windows_portable\ComfyUI\models\vae\LTX23_video_vae_bf16.safetensors` | 1452258578 | 01ea62d09bc139f95c5dee7b5c062ad6a3e6cd8be910a1983ac02e7eb5b8ee3b | https://huggingface.co/Kijai/LTX2.3_comfy | moved |
 | `R:\ComfyUI_windows_portable\ComfyUI\models\vae\wan_2.1_vae.safetensors` | 253815318 | 2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b | https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged | moved |
 
+### f5 - second batch (owner-approved extras)
+
+13/13 moved, 18.27 GB listed.
+
+| Path (original) | Bytes | SHA-256 | Source | State |
+|---|---:|---|---|---|
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\config.json` | 1395 | 39e0f775d681c3d62f8cee5967c77147a09d201f67d4d8f36cf5c15abced929e |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\generation_config.json` | 124 | 78619a2126645647c540fa0b192fe291cc0bf5546deebf52a0736280a3b08eef |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model-00001-of-00003.safetensors` | 4938985248 | - |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model-00002-of-00003.safetensors` | 4947390768 | - |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model-00003-of-00003.safetensors` | 4239524472 | - |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model.safetensors.index.json` | 73152 | 3bcc82d6085573aaa02a02ad8c7973112d037fc8988699bb8d0e446a043364a2 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\special_tokens_map.json` | 552 | 4859e5dbde90e059988a0a2136d8df3f2773d4d2fc4c4543690028f0b2166e7f |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\tokenizer.model` | 499723 | 9e556afd44213b6bd1be2b850ebbbd98f5481437a8021afaf58ee7fb1818d347 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\tokenizer_config.json` | 936 | b9dbbc4e94fa11210a21800939bd17da1e91b43f083833fb031b394111de6a9a |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\random_mask_brushnet_ckpt\config.json` | 1384 | 8cc33f7680a934558d5566409d93fda237f28330219e70482b5a142fbdcebc20 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\random_mask_brushnet_ckpt\diffusion_pytorch_model.safetensors` | 2475354520 | 089f02196144dc2713d6d833355c1f11a73460155c9b33f86c9e2e73b4a77583 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\segmentation_mask_brushnet_ckpt\config.json` | 1381 | c3d8a4911c38c79a7b771b98daa1e279669766afd9cf39c1b6ba302c77922ebf |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\segmentation_mask_brushnet_ckpt\diffusion_pytorch_model.safetensors` | 1669734400 | 02f9849340d41f9e27b16facd0c1debf1504aedb590f73638b1d3711e8deb61d |  | moved |
+
+### f15 - second batch (owner-approved extras)
+
+30/30 moved, 27.78 GB listed.
+
+| Path (original) | Bytes | SHA-256 | Source | State |
+|---|---:|---|---|---|
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\config.json` | 1395 | 39e0f775d681c3d62f8cee5967c77147a09d201f67d4d8f36cf5c15abced929e |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\generation_config.json` | 124 | 78619a2126645647c540fa0b192fe291cc0bf5546deebf52a0736280a3b08eef |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model-00001-of-00003.safetensors` | 4938985248 | - |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model-00002-of-00003.safetensors` | 4947390768 | - |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model-00003-of-00003.safetensors` | 4239524472 | - |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\model.safetensors.index.json` | 73152 | 3bcc82d6085573aaa02a02ad8c7973112d037fc8988699bb8d0e446a043364a2 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\special_tokens_map.json` | 552 | 4859e5dbde90e059988a0a2136d8df3f2773d4d2fc4c4543690028f0b2166e7f |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\tokenizer.model` | 499723 | 9e556afd44213b6bd1be2b850ebbbd98f5481437a8021afaf58ee7fb1818d347 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\llava-v1.5-7b-finetune-clean\tokenizer_config.json` | 936 | b9dbbc4e94fa11210a21800939bd17da1e91b43f083833fb031b394111de6a9a |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\random_mask_brushnet_ckpt\config.json` | 1384 | 8cc33f7680a934558d5566409d93fda237f28330219e70482b5a142fbdcebc20 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\random_mask_brushnet_ckpt\diffusion_pytorch_model.safetensors` | 2475354520 | 089f02196144dc2713d6d833355c1f11a73460155c9b33f86c9e2e73b4a77583 |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\segmentation_mask_brushnet_ckpt\config.json` | 1381 | c3d8a4911c38c79a7b771b98daa1e279669766afd9cf39c1b6ba302c77922ebf |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\inpaint\brushnet\segmentation_mask_brushnet_ckpt\diffusion_pytorch_model.safetensors` | 1669734400 | 02f9849340d41f9e27b16facd0c1debf1504aedb590f73638b1d3711e8deb61d |  | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-faceid-plusv2_sd15.bin` | 156558509 | 26d0d86a1d60d6cc811d3b8862178b461e1eeb651e6fe2b72ba17aa95411e313 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-faceid-plusv2_sdxl.bin` | 1487555181 | c6945d82b543700cc3ccbb98d363b837e9c596281607857c74b713a876daf5fb | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-faceid-portrait-v11_sd15.bin` | 64586623 | a48cb4f89ed18e02c6000f65aa9efec452e87eaed4a1bc9fcf4a460c8d0e3bc6 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-faceid-portrait_sdxl.bin` | 749822515 | 5631ce7824cdafd2db37c5e85b985730a95ff59c5b4fc80c2b79b0bee5711512 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-faceid-portrait_sdxl_unnorm.bin` | 1009523411 | 220bb86e205393a3d0411631cb473caddbf35fd371be2905ca9008818170db55 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-faceid_sd15.bin` | 96740574 | 201344e22e6f55849cf07ca7a6e53d8c3b001327c66cb9710d69fd5da48a8da7 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-full-face_sd15.safetensors` | 43592352 | f4a17fb643bf876235a45a0e87a49da2855be6584b28ca04c62a97ab5ff1c6f3 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-plus-face_sdxl_vit-h.safetensors` | 847517512 | 677ad8860204f7d0bfba12d29e6c31ded9beefdf3e4bbd102518357d31a292c1 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-plus_sd15.safetensors` | 98183288 | a1c250be40455cc61a43da1201ec3f1edaea71214865fb47f57927e06cbe4996 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter-plus_sdxl_vit-h.safetensors` | 847517512 | 3f5062b8400c94b7159665b21ba5c62acdcd7682262743d7f2aefedef00e6581 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter_sd15.safetensors` | 44642768 | 289b45f16d043d0bf542e45831f971dcdaabe18b656f11e86d9dfba7e9ee3369 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter_sd15_light.safetensors` | 44642768 | 0747d08db670535bfa286452a77d93cebad5c677b46d038543f9f2de8690bb26 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter_sd15_light_v11.bin` | 44642977 | 350b63a57847c163e2e984b01090f85ffe60eaae20f32b2b2c9e1ccc7ddd972b | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter_sd15_vit-G.safetensors` | 46215640 | a26f736af07bb341a83dfea23713531d0575760e8ed947c68cb31a4c62d9c90b | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter_sdxl.safetensors` | 702585376 | ba1002529e783604c5f326d49f0122025392d1d20ac8d573b3eeb3e6dea4ebb6 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\ipadapter\ip-adapter_sdxl_vit-h.safetensors` | 698391064 | ebf05d918348aec7abb02a5e9ecef77e0aaea6914a5c4ea13f50d45eb1681831 | https://huggingface.co/h94/IP-Adapter / IP-Adapter-FaceID | moved |
+| `D:\ComfyUI_windows_portable\ComfyUI\models\clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` | 2528373448 | 6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030 | https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K | moved |
+
+### worker-4090 - second batch (owner-approved extras)
+
+4/4 moved, 45.53 GB listed.
+
+| Path (original) | Bytes | SHA-256 | Source | State |
+|---|---:|---|---|---|
+| `R:\ComfyUI_windows_portable\ComfyUI\models\foley\hunyuanvideo_foley.safetensors` | 10268151840 | - | https://huggingface.co/tencent/HunyuanVideo-Foley | moved |
+| `R:\ComfyUI_windows_portable\ComfyUI\models\foley\synchformer_state_dict_fp16.safetensors` | 474981066 | 4876e7dc86cd255bcf79540d93838362aed2e8a9d6f4574a92728c9fc699f511 | https://huggingface.co/tencent/HunyuanVideo-Foley | moved |
+| `R:\ComfyUI_windows_portable\ComfyUI\models\foley\vae_128d_48k_fp16.safetensors` | 743210820 | 216fdd5a4c9774417b209a5d1754db5326c9f47375b232cce1333c13b3f239ab | https://huggingface.co/tencent/HunyuanVideo-Foley | moved |
+| `C:\AIModels\diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors` | 34038892334 | 7ad4c73e6e378b822ffd1629f27f632d3787d95f5e468e3af958f98c58df96a5 (source) | https://huggingface.co/Comfy-Org/MiniMax-H3 (unpruned int8; pruned build kept) | moved |
+
 ### LoRAs moved by the /lora sync agent (cleanup queue)
 
 Queued in `registry.json` → `cleanup`, executed by each box's "AutoRig LoRA Sync" task,
@@ -229,37 +297,58 @@ All four queues drained by 23:00Z.
   LTX-2.5 video (image-to-video, 49 frames) `fd84d50f-ee66-48ed-ab54-cc6b4a599214`
   (f12, `gen_animation_ltx25_by_url.json`, 72 s) after f12's moves.
 
+## Second batch (owner: "да, удали всё", 2026-09-24)
+
+Moved the same way (queue idle before each file), tables above marked "second batch": LLaVA 1.5 7B
+and BrushNet on f5/f15; the 15 IP-Adapter files and the IP-Adapter image encoder
+`clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K` on f15; HunyuanVideo-Foley (3 files) on worker-4090 R:;
+the unpruned MiniMax H3 `C:\AIModels\diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors`
+(34.04 GB) to `C:\_retired_20260923` on worker-4090. Before that move: no template, catalogue entry or
+backend path loads the unpruned file (the catalogue lists it only under `legacy_files`, and
+`ai_model_defaults` maps the old name to the pruned build); `C:\LoraTraining\lensflare_h3
+un_train.ps1`
+already trains on the pruned base, and `C:\LoraTraining	ools\comfy_h3_eval.py` now defaults
+`--unet` to the pruned file (it defaulted to the unpruned one). worker-4090 re-checked after the move:
+all 17 advertised templates complete.
+
+The Pony-family LoRAs `darth-vader-pxl` (civitai-1071192) and `add-detail-xl` (civitai-135867) were
+removed from the /lora registry through the manager's remove flow (state `removed`, mirror blob
+deleted, boxes kicked); the sync agents on f5, f15, Raptor and f12 moved their copies to
+`autorig_lora_trash`. The registry now holds six LoRAs.
+
 ## Not moved: candidates for the owner
 
 | Box | File | Size | Why it was left |
 |---|---|---:|---|
-| f5, f15 | `models\llava-v1.5-7b-finetune-clean\*` (3 shards) | 14.1 GB each | Nothing in the repo names it; a caption/LLM custom node may. Owner's call. |
-| f5, f15 | `inpaint\brushnet\*` | 4.2 GB each | SD1.5-era BrushNet; unused by templates. |
-| f15 | `ipadapter\*` (15 SD1.5/SDXL IP-Adapter files), `clip_vision\CLIP-ViT-H-14-laion2B` | 8.7 GB | SD1.5/SDXL-era; unused by templates. |
 | f15 | `text_encoders\qwen_3_4b_fp4_flux2.safetensors.part.bad-*`, `vae\flux2-vae.safetensors.bad-*` | 4.3 GB | Broken downloads left by the image agent. |
 | Raptor | `vae\.previous\flux2-vae.d64f3a68.safetensors` | 0.3 GB | Image agent's backup. |
-| worker-4090 | `models\foley\*` (HunyuanVideo-Foley) | 10.7 GB | Not referenced, but not in the retire list either. |
-| worker-4090 | `C:\AIModels\diffusion_models\minimax_h3_fl2va_int8_convrot.safetensors` (full, 34 GB) | 34 GB | H3 file: untouched by rule; the pruned build is what the controller now checks for. |
-| all | registry LoRAs `darth-vader-pxl` (Pony) and `add-detail-xl` (SDXL) | 0.34 GB per box | Their base (Pony) is retired; remove them at /lora if the SDXL family is not coming back. |
 | code | `gen_image_sdxl*.json` templates, SDXL family routing in `ai_model_defaults.py` / `ai_vision_api.py`, `FORWARD_COMPATIBLE_LORAS` | - | Dormant; removing them touches ~14 test files. |
 
 ## Purge (owner, when satisfied)
 
 Nothing is deleted until these are run. One line per box; each frees the GB shown.
 
-Run in PowerShell on the box (farm boxes: from the VPS with
+Run on each box (farm boxes: from the VPS with
 `sudo -n ssh -i /srv/autorig/secrets/ssh/renderfin_farm_tunnel -p <48488 f5 | 48588 f15 | 48288 Raptor> <user>@5.129.157.224`,
 f12: `ssh f12` from the owner's PC; worker-4090 is the owner's PC). The `autorig_lora_trash`
-folders held only this cleanup's LoRAs on 2026-09-23; check them first if purging much later.
+folders hold only this cleanup's LoRAs (checked 2026-09-24 00:30Z). Sizes measured after the last move.
 
-| Box | Command | Frees |
+| Box | Folders | GB |
 |---|---|---:|
-| f5 | `Remove-Item -LiteralPath 'D:\_retired_20260923','D:\ComfyUI_windows_portable\autorig_lora_trash' -Recurse -Force` | 201.1 GB (198.9 + 2.2) |
-| f15 | `Remove-Item -LiteralPath 'D:\_retired_20260923','D:\ComfyUI_windows_portable\autorig_lora_trash' -Recurse -Force` | 403.0 GB (389.7 + 13.3) |
-| Raptor | `Remove-Item -LiteralPath 'D:\_retired_20260923','X:\_retired_20260923','D:\ComfyUI_windows_portable\autorig_lora_trash' -Recurse -Force` | 216.1 GB (170.1 D: + 43.8 X: + 2.2) |
-| f12 | `Remove-Item -LiteralPath 'C:\_retired_20260923','C:\AI\ComfyUI_windows_portable\autorig_lora_trash' -Recurse -Force` | 85.9 GB (47.7 this cleanup + 36.0 FLUX.1 leftovers the image agent parked there + 2.3) |
-| worker-4090 | `Remove-Item -LiteralPath 'R:\_retired_20260923' -Recurse -Force` | 111.8 GB |
-| **Total** | | **about 1018 GB** |
+| f5 | `D:\_retired_20260923` (217.16), `D:\ComfyUI_windows_portable\autorig_lora_trash` (2.73) | 219.88 |
+| f15 | `D:\_retired_20260923` (417.50), `D:\ComfyUI_windows_portable\autorig_lora_trash` (13.80) | 431.30 |
+| Raptor | `D:\_retired_20260923` (170.08), `X:\_retired_20260923` (43.75), `D:\ComfyUI_windows_portable\autorig_lora_trash` (2.75) | 216.58 |
+| f12 | `C:\_retired_20260923` (83.62, incl. 35.96 FLUX.1 leftovers the image agent parked there), `C:\AI\ComfyUI_windows_portable\autorig_lora_trash` (2.63) | 86.26 |
+| worker-4090 | `R:\_retired_20260923` (123.30), `C:\_retired_20260923` (34.04, the unpruned H3) | 157.33 |
+| **Total** | | **1111.35** |
 
-Restoring a file is the reverse move, e.g.
+One purge script works on every box: it removes whichever of these folders exist.
+
+```powershell
+foreach ($p in 'C:\_retired_20260923','D:\_retired_20260923','R:\_retired_20260923','X:\_retired_20260923',
+               'D:\ComfyUI_windows_portable\autorig_lora_trash','C:\AI\ComfyUI_windows_portable\autorig_lora_trash') {
+  if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force; "removed $p" } }
+```
+
+To restore a file, move it back, e.g.
 `Move-Item 'D:\_retired_20260923\ComfyUI_windows_portable\ComfyUI\models\<dir>\<file>' 'D:\ComfyUI_windows_portable\ComfyUI\models\<dir>\'`.
