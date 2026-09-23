@@ -266,3 +266,48 @@ re-run with the f15 settings, and the same hardware predicts f15's numbers.
    the 610.62 installer without `-clean` should restore it.
 5. f5: fix the AdGuard VPN memory use (owner), then re-run this map for f5.
 6. worker-4090: keep `--reserve-vram 3`, or set "Prefer No Sysmem Fallback".
+
+## GTX 1080 Ti converter boxes (f1, f2, f7, f11, f13): image generation, rejected
+
+Pilot on f11 (GTX 1080 Ti 11 GB, driver 576.80, 32 GB RAM) on 2026-09-23. It ran an
+isolated ComfyUI 0.37.0 (`C:\AI\ComfyUI1080`) on a copy of the Hunyuan runtime's Python
+(torch 2.8.0+cu126, which ships sm_61). Scripts: `deploy/onlyrender/comfy1080*` (commit
+e3dbedce). Tests: 1024², the approved files, warm runs, and the same `comfy1080_bench.py`
+run against worker-4090's ComfyUI as the reference.
+
+| Test (1024²) | f11 1080 Ti | worker-4090 | Ratio | ≤5× |
+|---|---|---|---|---|
+| Z-Image Turbo t2i, 8 steps | 89–92 s (100–165 s cold) | 5.3–6.1 s | ~15× | FAIL |
+| FLUX.2 klein 4B t2i, 4 steps | 64–66 s | 13.0–14.3 s | ~4.7× | borderline |
+| klein, 1 reference (edit) | 106 s | 15.0 s | ~7× | FAIL |
+| klein, 2 references | 130–166 s | 17.1 s | ~8–10× | FAIL |
+
+On f11, VRAM peaked at 9.5–10.8 GB, which is the whole card: an image job cannot share the
+GPU with the LLM (Bonsai takes ~9.3 GB) or with Hunyuan. RAM peaked at 8–13 GB. The images
+were correct (Z-Image, klein, and the 2-reference composite were checked).
+
+**Pascal finding: PyTorch SDPA and xformers inside ComfyUI reset the display driver.**
+With ComfyUI's default attention (PyTorch SDPA, or the xformers that ships in the Hunyuan
+Python), the first Z-Image sampling step aborts the process in `scaled_dot_product_attention`,
+and Windows logs nvlddmkm Xid 13 ("Graphics Exception") plus a TDR (Display 4101,
+LiveKernelEvent 141). This happened twice on f11 and does not depend on fp32/fp16 or on
+DynamicVRAM. The same SDPA calls run fine in a standalone script, so the root cause is not
+isolated. The stable set is `--use-quad-cross-attention --force-fp32 --disable-xformers
+--disable-cuda-graphs --disable-comfy-compiler --disable-async-offload`, with DynamicVRAM
+left on (without it Z-Image loads only half its weights and cold runs take ~165 s). fp16
+is no faster than fp32 on Pascal. Z-Image is compute-bound at ~10 s/step, so a GGUF or
+fp16 file would not bring it under 5×.
+
+**Decision (owner, 2026-09-23): no image generation on the 1080 Ti boxes.** Nothing was
+registered in renderfin and no tunnel was added. On f11 the worker cannot start: no
+scheduled task, a `C:\ProgramData\AutoRig\comfy1080\DISABLED` flag, no process. The
+converter is healthy (build 60101f4b, drift clean, idle, LLM installed and not resident).
+The GPU guard (`comfy1080_guard.py`: gate on converter idle, 423 `gpu_leased`, preempt +
+hidden history so renderfin requeues without spending an attempt) was verified live and
+stays in the repo for reference only.
+
+Removal candidate (34.3 GB on f11 C:), owner's call. Run on f11 as an administrator:
+
+```powershell
+Remove-Item -Recurse -Force C:\AI\ComfyUI1080, C:\ProgramData\AutoRig\comfy1080
+```
