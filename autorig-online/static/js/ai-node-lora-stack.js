@@ -88,10 +88,26 @@
     return '';
   }
 
+  const SDXL_FAMILIES = ['pony', 'sdxl', 'illustrious', 'noobai'];
+
   function familiesMatch(left, right) {
     if (!left || !right || left === right) return true;
-    const sdxl = ['pony', 'sdxl'];
-    return sdxl.includes(left) && sdxl.includes(right);
+    return SDXL_FAMILIES.includes(left) && SDXL_FAMILIES.includes(right);
+  }
+
+  /**
+   * Whether a LoRA loads onto a checkpoint: the rule the backend applies
+   * (ai_model_defaults.compatible), read from AIEntities when present so the
+   * picker and the slots agree; the checkpoint's declared
+   * `compatible_lora_families` / `default_for_families` (LTX-2.5 takes ltx23)
+   * extend plain family equality.
+   */
+  function loraFits(checkpoint, entry) {
+    const shared = global.AIEntities && global.AIEntities.loraFitsCheckpoint;
+    if (shared) return shared(checkpoint, entry);
+    if (!checkpoint || !entry || familiesMatch(checkpoint.family, entry.family)) return true;
+    const accepts = checkpoint.compatible_lora_families || checkpoint.default_for_families || [];
+    return accepts.map(String).includes(String(entry.family));
   }
 
   /** The Civitai model a LoRA version belongs to (from its page URL). */
@@ -109,7 +125,7 @@
 
   /** Why a LoRA cannot go with this checkpoint ('' when it can). */
   function familyMismatch(entry, checkpoint) {
-    if (!entry || !checkpoint || familiesMatch(checkpoint.family, entry.family)) return '';
+    if (!entry || !checkpoint || loraFits(checkpoint, entry)) return '';
     return 'not for ' + (checkpoint.base || checkpoint.title || checkpoint.family);
   }
 
@@ -118,7 +134,7 @@
     const model = civitaiModel(entry);
     if (!model || !checkpoint) return null;
     return (loras || []).find(other => other.file !== entry.file && civitaiModel(other) === model &&
-      familiesMatch(checkpoint.family, other.family) && other.family &&
+      loraFits(checkpoint, other) && other.family &&
       (!service || !other.services || other.services.includes(service)) && other.usable !== false) || null;
   }
 
@@ -410,14 +426,16 @@
       const panel = host.querySelector('.mpick-panel');
       if (!state || !panel || panel.hidden) return;
       const checkpoint = checkpointEntry(state);
-      const family = checkpoint && checkpoint.family;
       const taken = new Set([state.firstHidden.value].concat(state.slots.map(slot => slot.file)).filter(Boolean));
       const own = host.querySelector('.mpick-item.chosen');
       panel.querySelectorAll('.mpick-item[data-model-file]').forEach(item => {
         const file = item.dataset.modelFile;
         if (!file) return;
         const entry = loras(state).find(value => value.file === file);
-        const foreign = entry && !familiesMatch(family, entry.family);
+        // Another family is never listed, not even the one a slot still holds
+        // (that slot shows its own ⛔ mark); a LoRA already stacked is listed
+        // only in its own slot.
+        const foreign = entry && checkpoint && !loraFits(checkpoint, entry);
         const duplicate = taken.has(file) && item !== own;
         item.hidden = !!(foreign || duplicate);
       });
@@ -513,7 +531,7 @@
   }
 
   global.AINodeLoraStack = Object.freeze({
-    install, parseTags, toTags, resolveFile, readiness, familiesMatch, stem, clampWeight,
+    install, parseTags, toTags, resolveFile, readiness, familiesMatch, loraFits, stem, clampWeight,
     filterBody, familyMismatch, familySwap, civitaiModel, effectiveCheckpoint,
     _setCatalogue: (service, data) => catalogues.set(service, data),
     MAX_SLOTS, MIN_WEIGHT, MAX_WEIGHT, DEFAULT_WEIGHT

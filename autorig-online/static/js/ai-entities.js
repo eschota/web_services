@@ -712,6 +712,23 @@
     return data;
   }
 
+  /**
+   * Whether a LoRA loads onto a checkpoint — the backend's rule
+   * (ai_model_defaults.compatible): same family; any two SDXL-based families;
+   * or a family the checkpoint declares it takes (`compatible_lora_families`,
+   * else `default_for_families` from /api/ai/model-catalogue — LTX-2.5 lists
+   * ltx23 there because 2.3 LoRAs load onto it). No family means no opinion.
+   */
+  const SDXL_FAMILIES = ['pony', 'sdxl', 'illustrious', 'noobai'];
+  function loraFitsCheckpoint(checkpoint, lora) {
+    const left = checkpoint && checkpoint.family;
+    const right = lora && lora.family;
+    if (!left || !right || left === right) return true;
+    if (SDXL_FAMILIES.includes(left) && SDXL_FAMILIES.includes(right)) return true;
+    const accepts = (checkpoint.compatible_lora_families || checkpoint.default_for_families || []);
+    return accepts.map(String).includes(String(right));
+  }
+
   function modelPicker(host, serviceId, kind, options) {
     const settings = options || {};
     const state = { value: settings.value || '', entries: [], checkpoints: [] };
@@ -787,9 +804,8 @@
       const scope = host.closest('.drawflow-node, .ai-card') || document;
       const field = scope.querySelector('[data-param="checkpoint"], [name="checkpoint"], #checkpoint');
       const base = state.checkpoints.find(item => item.file === field?.value);
-      const left = base?.family, right = entry?.family;
-      if (left && right && left !== right && !(['pony','sdxl'].includes(left) && ['pony','sdxl'].includes(right))) {
-        return 'This LoRA requires ' + (entry.base || right) + '. Choose a compatible checkpoint first.';
+      if (!loraFitsCheckpoint(base, entry)) {
+        return 'This LoRA requires ' + (entry.base || entry.family) + '. Choose a compatible checkpoint first.';
       }
       // A LoRA installed through /lora is usable only where it has arrived:
       // it must be on at least one computer that also runs this checkpoint.
@@ -961,6 +977,7 @@
     canAutoStart: canAutoStart,
     autoStart: autoStart,
     modelPicker: modelPicker,
+    loraFitsCheckpoint: loraFitsCheckpoint,
     loadModels: loadModels,
     samplingPolicy: samplingPolicy,
     samplingPresentation: samplingPresentation

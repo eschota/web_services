@@ -131,3 +131,30 @@ test('without a checkpoint the service default decides; matching requests are un
   assert.equal(raw.loras, '<lora:bounceV2_5_LTX23_I2V.comfy:0.5:1>');
   assert.equal(stack.filterBody('image', {lora: 'x'}).length, 0);
 });
+
+test('the backend compatibility rule: LTX-2.5 takes ltx23 LoRAs, not the reverse; SDXL family mixes', () => {
+  const ltx25 = {family: 'ltx25', default_for_families: ['ltx25', 'ltx23']};
+  const ltx23 = {family: 'ltx23', default_for_families: ['ltx23']};
+  assert.equal(stack.loraFits(ltx25, {family: 'ltx23'}), true);
+  assert.equal(stack.loraFits(ltx23, {family: 'ltx25'}), false);
+  assert.equal(stack.loraFits({family: 'minimax_h3', default_for_families: ['minimax_h3']}, {family: 'ltx23'}), false);
+  assert.equal(stack.loraFits({family: 'illustrious'}, {family: 'pony'}), true);
+  assert.equal(stack.loraFits({family: 'krea2', compatible_lora_families: ['krea2', 'flux1']}, {family: 'flux1'}), true);
+  assert.equal(stack.loraFits(null, {family: 'x'}), true);
+  assert.equal(stack.familyMismatch({family: 'ltx23'}, ltx25), '');
+});
+
+test('ai-entities and the slots share one rule', () => {
+  const ctx = {document: {getElementById: () => ({}), createElement: () => ({}), head: {appendChild() {}}}};
+  ctx.globalThis = ctx; ctx.window = ctx;
+  const source = fs.readFileSync(path.resolve(here, '..', 'ai-entities.js'), 'utf8');
+  const start = source.indexOf('  const SDXL_FAMILIES');
+  const end = source.indexOf('  function modelPicker(', start);
+  const fits = vm.runInNewContext(source.slice(start, end) + '; loraFitsCheckpoint');
+  const cases = [
+    [{family: 'ltx25', default_for_families: ['ltx25', 'ltx23']}, {family: 'ltx23'}],
+    [{family: 'minimax_h3'}, {family: 'ltx23'}], [{family: 'sdxl'}, {family: 'noobai'}],
+    [{family: 'zimage'}, {family: 'krea2'}], [{family: 'flux2'}, {family: 'flux2'}]];
+  for (const [ck, lora] of cases) assert.equal(fits(ck, lora), stack.loraFits(ck, lora), JSON.stringify([ck, lora]));
+  assert.match(source, /if \(!loraFitsCheckpoint\(base, entry\)\) \{/);
+});
