@@ -8,6 +8,8 @@ surprising, how it shows up, and what to do about it.
 - [Blender exits 0 when its script raises](#blender-exits-0-when-its-script-raises)
 - [The vertex-PBR bake is 30x slower on Blender 5.1](#the-vertex-pbr-bake-is-30x-slower-on-blender-51)
 - [The converter serves from a process that outlives your deploy](#the-converter-serves-from-a-process-that-outlives-your-deploy)
+- [A box parked during a rollout rejoins with old code](#a-box-parked-during-a-rollout-rejoins-with-old-code)
+- [python -I ignores PYTHONUTF8](#python--i-ignores-pythonutf8)
 - [A Blender script must not import the server's package](#a-blender-script-must-not-import-the-servers-package)
 - [The negative prompt reaches no model](#the-negative-prompt-reaches-no-model)
 - [The words "glass" and "glasses" are deleted](#the-words-glass-and-glasses-are-deleted)
@@ -108,6 +110,42 @@ your change is not running, no matter what the file on disk says.
 but it returns 409 while any converter task is active — and on a busy farm that
 window is very hard to catch. Plan a restart for a quiet period rather than
 expecting to slip one in.
+
+## A box parked during a rollout rejoins with old code
+
+Converter deploys are file copies onto each box — the boxes have no `.git` —
+and a box parked in `renderfin-hunyuan.json` gets skipped by whoever is
+rolling out. Re-enabling it later does nothing to its files.
+
+f7 was parked when converter commit `aa63237` (repo `eschota/autorig.online`,
+2026-09-13) went to f1/f2/f11/f13. It was re-enabled on 2026-09-22 with its
+August `autorig_hunyuan\worker.py` and failed every Hunyuan job it took the
+next day (the entry below). Before re-enabling a box, hash
+`autorig_hunyuan\*.py` on it and on an active box, and copy over whatever
+differs.
+
+## python -I ignores PYTHONUTF8
+
+Tencent's `hy3dpaint/convert_utils.py:138` prints `PBR GLB文件已保存: <path>`
+right after the texture bake. The boxes run Windows with ANSI code page 1251
+and the Gradio server's stdout is a pipe, so Python encodes the line as cp1251
+and the five CJK characters raise:
+
+```text
+gradio_client.exceptions.AppError: 'charmap' codec can't encode characters in position 7-11: character maps to <undefined>
+```
+
+The job dies after the whole shape and texture run — about ten minutes on f7 —
+and renderfin retries it elsewhere. The box keeps the full traceback in
+`<HUNYUAN_WORK_ROOT>\failure_logs\<converter task id>.log`.
+
+The adapter already put `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` into the
+worker's environment, and it changed nothing: the worker and the Gradio server
+it starts both run under `python -I`, and isolated mode ignores every
+`PYTHON*` variable. Only the `-X utf8` command-line option survives `-I`.
+Commit `aa63237` adds it to both launches. To check a box, look for `-X utf8`
+on the command line of the Gradio child (`runtime_bootstrap.py`) while a job
+runs.
 
 ## A Blender script must not import the server's package
 
