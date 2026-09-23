@@ -1011,7 +1011,10 @@ class AvatarBuilder:
     def _store_bytes(self, owner: AvatarOwner, data: bytes, name: str, source_url: Optional[str] = None,
                      job: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         try:
-            asset = self.assets.put_bytes(owner, data, filename=name, content_type=None, source_url=source_url)
+            # The bytes decide the type: a JPEG from an outside source must not
+            # be refused for arriving under a .png working name.
+            asset = self.assets.put_bytes(owner, data, filename=Path(name).stem, content_type=None,
+                                          source_url=source_url)
         except HTTPException as error:
             raise BuildError(f"could not store {name}: {error.detail}") from None
         if job is not None:

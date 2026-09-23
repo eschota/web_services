@@ -231,6 +231,20 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(final["qa"]["status"], "accepted_with_warnings")
         self.assertIn("framing drifted", state["attempts"][0]["qa"]["notes"])
 
+    def test_a_jpeg_source_is_stored_whatever_its_working_name(self):
+        out = io.BytesIO()
+        Image.new("RGB", (64, 96), (10, 200, 30)).save(out, "JPEG")
+        farm = FakeFarm(self.assets)
+        builder = self.builder(farm)
+        source = self.root / "source.jpg"
+        source.write_bytes(out.getvalue())
+        identity = build._identity("image", "sha-jpeg", build.BuildRequest(views="full_body"), None)
+        identity["local_file"] = str(source)
+        job, _ = self.jobs.create(ALICE, identity)
+        job = asyncio.run(builder.run(job["job_id"]))
+        self.assertEqual(job["status"], "completed", job.get("error"))
+        self.assertTrue(job["source"]["frame_url"].endswith(".jpg"))
+
     def test_unknown_view_is_refused(self):
         with self.assertRaises(Exception):
             build.parse_views("front,left_ear")
