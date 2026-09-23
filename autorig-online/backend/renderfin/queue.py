@@ -23,6 +23,7 @@ from . import (
     model_eligibility,
     multiref,
     routing,
+    stream_decode,
     templating,
     workload_lease,
 )
@@ -1552,6 +1553,22 @@ class RenderQueue:
         elif is_multiref_workflow:
             multiref.inject_references(workflow_file, workflow, reference_filenames)
         apply_runtime_settings(workflow, prompt, width, height)
+        if stream_decode.has_video_decode_chain(workflow):
+            # Decode straight to disk where the box has our streaming node;
+            # elsewhere refuse clips the in-RAM decode chain cannot hold.
+            box = await stream_decode.probe(
+                self._client,
+                comfy_adapter._validate_server_url(server.render_server_url),
+                comfy_adapter._auth_for(server),
+            )
+            if box["stream"]:
+                stream_decode.to_streaming(workflow)
+            else:
+                too_big = stream_decode.ram_guard_error(
+                    width, height, templating._ltxv_frames(prompt.frame_count), box["ram_total"])
+                if too_big:
+                    raise comfy_adapter.ComfyAdapterError(too_big)
+            stream_decode.apply_decode_policy(workflow, box["vram_total"])
         prompt_id = task.comfy_prompt_id or str(uuid.uuid4())
         task.comfy_prompt_id = prompt_id
         task.server_name = server.render_server_name
