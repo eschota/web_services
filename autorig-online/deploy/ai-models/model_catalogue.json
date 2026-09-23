@@ -80,7 +80,10 @@
     "preview": "",
     "size_mb": 19999,
     "validated_workers": [
-      "worker-4090"
+      "worker-4090",
+      "f12",
+      "Raptor",
+      "f15"
     ],
     "sampling_policy": {
       "auto_steps": 4,
@@ -97,7 +100,7 @@
       "https://github.com/Comfy-Org/workflow_templates/blob/main/templates/video_minimax_h3_i2v.json",
       "https://huggingface.co/lightx2v/Minimax-h3-Turbo"
     ],
-    "author_notes": "Premium tier, RTX 4090 only for now (24 GB VRAM, ~48 GB system RAM peak). Clip length snaps up to the H3 17k+5 frame grid (97 requested -> 107). Generates stereo audio. Civitai baseModel 'MiniMax H3'.",
+    "author_notes": "Premium tier. Fleet test map 2026-09-23 (158 f 960x544): worker-4090 82 s, Raptor 127 s, f12 137 s, f15 192 s. Clip length snaps to the H3 17k+5 grid inside its trained 124-362 frame range. Generates stereo audio. Civitai baseModel 'MiniMax H3'.",
     "sampling_audit_at": "2026-09-23",
     "legacy_files": [
       "minimax_h3_fl2va_int8_convrot.safetensors"
@@ -138,8 +141,10 @@
     "preview": "",
     "size_mb": 20508,
     "validated_workers": [
+      "worker-4090",
       "f12",
-      "worker-4090"
+      "Raptor",
+      "f15"
     ],
     "sampling_policy": {
       "auto_steps": 8,
