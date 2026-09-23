@@ -88,8 +88,8 @@ queue watchdog and the VPS tunnel all came back within about 1 minute.
 
 | Model (case) | worker-4090 | f12 | Raptor | f15 | f5 |
 |---|---|---|---|---|---|
-| **MiniMax H3**, 158 f 960×544 | 81.6 s (ref) | ✅ 137 s · 1.7× | ✅ 127 s · 1.6× | ✅ 192 s · 2.4× | ❌ blocked: host RAM (see f5) |
-| **LTX-2.5** std, 153 f 960×540 (owner case) | 39.1 s (ref) | ✅ 66 s · 1.7× | ✅ 66 s · 1.7× | ⚠️ 130 s · 3.3× only with `--cache-ram 6`; default launcher trips the RAM guard | ❌ blocked: host RAM |
+| **MiniMax H3**, 158 f 960×544 | 81.6 s (ref) | ✅ 137 s · 1.7× | ✅ 127 s · 1.6× | ✅ 192 s · 2.4× | ✅ 192 s · 2.4× (after reboot) |
+| **LTX-2.5** std, 153 f 960×540 (owner case) | 39.1 s (ref) | ✅ 66 s · 1.7× | ✅ 66 s · 1.7× | ⚠️ 130 s · 3.3× only with `--cache-ram 6`; default launcher trips the RAM guard | ✅ 92 s · 2.4× (after reboot, default launcher) |
 | LTX-2.5 std, 97 f 960×540 | 46.0 s (ref) | ✅ 81 s · 1.7× | ✅ 43 s · 0.9× | ✅ 93 s · 2.0× | ❌ blocked: host RAM |
 | LTX-2.5 HQ (two-stage), 97 f | 22.9 s (ref) | ✅ 75 s · 3.3× | ✅ 47 s · 2.0× | ❌ 117 s · 5.1× | ❌ blocked |
 | Krea 2 Turbo 1024² | 7.7 s (ref) | ✅ 25 s · 3.2× | ✅ 17 s · 2.2× | — | — |
@@ -107,7 +107,7 @@ been advertised by this map):
 | f12 | yes | yes | yes |
 | Raptor | yes (new: H3 files are there, sha-checked) | yes | yes |
 | f15 | yes | yes, **after** its launcher gets `--cache-ram 6` | no (5.1×) |
-| f5 | not until the AdGuard VPN memory leak is fixed and the map is re-run | same | no |
+| f5 | yes | yes (default launcher; `--cache-ram 6` optional, 96 s) | not measured after reboot (f15 twin: 5.1×, so no) |
 
 ## Per-model tables
 
@@ -123,7 +123,8 @@ RAM = worst free system RAM (GB). VRAM = peak used (GB, whole card).
 | Raptor (torch 2.9.1) | 142 s | 127 s | 1.6 | 86.5 s | 26.6 s | 23.6 of 64 | 11.8 of 12 | ok | 0.976 |
 | f15 (torch 2.9.1) | 198 s | 192 s | 2.4 | 132 s | 37.0 s | 4.7 of 32 | 7.7 of 8 | ok | 0.738 (same shot, see note) |
 | f15 (torch 2.7.1, before) | guard trip in the text encoder (1.9 GB free) | | | | | | | ❌ | |
-| f5 | guard trip: 1.4-1.9 GB free before the model even loads | | | | | | | ❌ host RAM | |
+| f5 (before reboot) | guard trip: 1.4-1.9 GB free before the model even loads | | | | | | | ❌ host RAM | |
+| f5 (after reboot, torch 2.9.1) | 197 s | 192 s | 2.4 | 133.5 s | 37.2 s | 6.7 of 32 | 7.9 of 8 | ok | 0.778 |
 
 \* 80 s: that 4090 run found the loaders already warm from a production H3 job.
 
@@ -150,7 +151,9 @@ all 158 frames on every box.
 | f15, default launcher | sampling done (72 s), then the RAM guard trips (1.94 GB free) | | | | | 1.9 | 7.5 | ❌ | |
 | f15, `--cache-ram 6` | 179 s | 130 s | 3.3 | 93.2 s | 25.5 s | 3.2 | 7.2 | ok | 0.721 |
 | f15 (torch 2.7.1, before) | guard trip in 4 s (0.9 GB free) | | | | | | | ❌ | |
-| f5 | guard trip | | | | | 1.5 | | ❌ host RAM | |
+| f5 (before reboot) | guard trip | | | | | 1.5 | | ❌ host RAM | |
+| f5 (after reboot), default launcher | 144 s | 92 s | 2.4 | 55.3 s | 25.6 s | 6.4 | 7.6 | ok | 0.721 (bit-identical to f15) |
+| f5 (after reboot), `--cache-ram 6` | 150 s | 96.5 s | 2.5 | – | – | 5.1 | 7.6 | ok | |
 
 `--cache-ram 6` is ComfyUI 0.37's RAM-pressure cache: it drops cached models once free
 RAM falls below 6 GB, so the Gemma text encoder and the DiT are not both held while the
@@ -224,14 +227,17 @@ With no 4090 reference, the rule cannot be applied as written. Raptor is the onl
 runs it, at about 5 minutes an image. The template's 20 steps without the installed
 `Qwen-Image-Edit-2511-Lightning-4steps` LoRA is the obvious lever; that is the image agent's call.
 
-## f5: blocked by host RAM, not by the model
+## f5: host RAM (resolved by a reboot)
 
-After the torch upgrade f5 matches f15 in software. At idle it has only about 1.8 GB
-of RAM free: **`AdGuardVpnSvc` holds 9.3 GB working set / 9.8 GB private**, and several
-Chrome/Edge processes run on a render box. Almost every job, even Z-Image, trips the
-2 GB guard. f15 runs the same AdGuard VPN without that footprint, so this looks like a
-leak. Restarting the service (or the box) needs the owner's yes. f5 should then be
-re-run with the f15 settings, and the same hardware predicts f15's numbers.
+After the torch upgrade f5 matched f15 in software but had only about 1.8 GB of RAM free at
+idle: **`AdGuardVpnSvc` held 9.3 GB working set** (a leak after 66 days of uptime), so almost
+every job tripped the 2 GB guard. The owner had f5 rebooted. Afterwards AdGuard used 0.06 GB
+and 26 GB of RAM was free. The video tests were then re-run: H3 158 f warm 192 s (2.4×) and
+LTX-2.5 153 f warm 92 s (2.4×), both on the **default launcher** with at least 6.4 GB free.
+f5's LTX output is bit-identical to f15's, which is the same card.
+f15 only needs `--cache-ram 6` because of its own resident load: the Freestock embeddings
+worker, and more. The image rows for f5 are from before the reboot. Re-run them the next
+time f5 is idle.
 
 ## Distribution done for this map (download once per site)
 
