@@ -73,3 +73,61 @@ test('weights stay in the range the node offers', () => {
   assert.equal(stack.clampWeight(0.333, 0.8), 0.33);
   assert.equal(stack.MAX_SLOTS, 8);
 });
+
+/* ---------------------------------------------- family mismatch */
+
+const videoCatalogue = {
+  checkpoints_array: [
+    {file: 'minimax_h3.safetensors', family: 'minimax_h3', base: 'MiniMax H3'},
+    {file: 'ltx25.safetensors', family: 'ltx25', base: 'LTX-2.5', default_for_services: ['video']},
+  ],
+  loras_array: [
+    {file: 'bounceV2_5_LTX23_I2V.comfy.safetensors', family: 'ltx23', base: 'LTXV 2.3', services: ['video'],
+     page: 'https://civitai.com/models/1343431?modelVersionId=2864091', usable: true},
+    {file: 'bounce_H3.safetensors', family: 'minimax_h3', base: 'MiniMax H3', services: ['video'],
+     page: 'https://civitai.com/models/1343431?modelVersionId=3000001', usable: true, title: 'Bounce', version: 'H3'},
+    {file: 'VBVR_H3_attn_only.safetensors', family: 'minimax_h3', base: 'MiniMax H3', services: ['video'],
+     page: 'https://civitai.com/models/2497207?modelVersionId=3220766', usable: true},
+  ],
+};
+
+test('a LoRA of another family is named as not fitting the checkpoint', () => {
+  const h3 = videoCatalogue.checkpoints_array[0];
+  assert.equal(stack.familyMismatch(videoCatalogue.loras_array[0], h3), 'not for MiniMax H3');
+  assert.equal(stack.familyMismatch(videoCatalogue.loras_array[2], h3), '');
+  assert.equal(stack.familyMismatch(null, h3), '');
+});
+
+test('the same Civitai model in the checkpoint family is offered as the swap', () => {
+  const h3 = videoCatalogue.checkpoints_array[0];
+  assert.equal(stack.civitaiModel(videoCatalogue.loras_array[0]), '1343431');
+  assert.equal(stack.familySwap(videoCatalogue.loras_array[0], h3, videoCatalogue.loras_array, 'video').file,
+    'bounce_H3.safetensors');
+  assert.equal(stack.familySwap(videoCatalogue.loras_array[2], videoCatalogue.checkpoints_array[1],
+    videoCatalogue.loras_array, 'video'), null);
+});
+
+test('the request leaves out mismatched LoRAs and keeps the rest', () => {
+  stack._setCatalogue('video', videoCatalogue);
+  const body = {checkpoint: 'minimax_h3.safetensors', lora: 'bounceV2_5_LTX23_I2V.comfy.safetensors',
+    lora_strength: 0.8, loras: '<lora:VBVR_H3_attn_only:1> <lora:bounceV2_5_LTX23_I2V.comfy:0.5>', prompt: 'x'};
+  const dropped = stack.filterBody('video', body);
+  assert.deepEqual(JSON.parse(JSON.stringify(body)),
+    {checkpoint: 'minimax_h3.safetensors', loras: '<lora:VBVR_H3_attn_only:1>', prompt: 'x'});
+  assert.equal(dropped.length, 2);
+});
+
+test('without a checkpoint the service default decides; matching requests are untouched', () => {
+  stack._setCatalogue('video', videoCatalogue);
+  const ok = {lora: 'bounceV2_5_LTX23_I2V.comfy.safetensors'};
+  stack.filterBody('video', ok);  // default is LTX-2.5: ltx23 does not fit
+  assert.equal(ok.lora, undefined);
+  const fine = {checkpoint: 'minimax_h3.safetensors', lora: 'VBVR_H3_attn_only.safetensors', lora_strength: 1};
+  stack.filterBody('video', fine);
+  assert.deepEqual(JSON.parse(JSON.stringify(fine)),
+    {checkpoint: 'minimax_h3.safetensors', lora: 'VBVR_H3_attn_only.safetensors', lora_strength: 1});
+  const raw = {checkpoint: 'minimax_h3.safetensors', loras: '<lora:bounceV2_5_LTX23_I2V.comfy:0.5:1>'};
+  stack.filterBody('video', raw);
+  assert.equal(raw.loras, '<lora:bounceV2_5_LTX23_I2V.comfy:0.5:1>');
+  assert.equal(stack.filterBody('image', {lora: 'x'}).length, 0);
+});

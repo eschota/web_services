@@ -26,9 +26,9 @@
     <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-node-lora-stack.js?v=20260923-lstack3"></script>
+    <script src="/static/js/ai-node-lora-stack.js?v=20260923-lfam1"></script>
     <script src="/static/js/ai-render-quality.js?v=20260923-rq2"></script>
-    <script src="/static/js/ai-nodes.js?v=20260923-rq2"></script>
+    <script src="/static/js/ai-nodes.js?v=20260923-lfam1"></script>
     <style>
         .ai-page {
             background:
@@ -385,6 +385,17 @@
             color: #9aa0b5; font-size: 13px; line-height: 1; cursor: pointer;
         }
         .lslot-remove:hover { color: #fb7185; border-color: #fb7185; }
+        .lslot-swap {
+            flex: 0 0 20px; width: 20px; height: 20px; padding: 0; border-radius: 6px;
+            border: 1px solid rgba(56,189,248,.45); background: rgba(56,189,248,.12);
+            color: #38bdf8; font-size: 12px; line-height: 1; cursor: pointer;
+        }
+        .lslot-swap:hover { background: rgba(56,189,248,.25); }
+        .lslot-swap[hidden] { display: none; }
+        /* A LoRA of another family: dimmed, struck through, left out of the render. */
+        .lslot.lslot-bad .mpick-button { border-color: rgba(248,113,113,.6); opacity: .6; }
+        .lslot.lslot-bad .mpick-label { text-decoration: line-through; }
+        .lslot-note.lslot-note-bad { color: #f87171; cursor: help; }
         .lslot-weight[hidden], .lslot-remove[hidden], .lslot-note[hidden] { display: none; }
         .lslot-note {
             display: block; flex: 1 0 100%; margin: 2px 0 0 0; font-size: 10px; line-height: 1.3;

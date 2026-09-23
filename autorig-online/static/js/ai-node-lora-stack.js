@@ -94,6 +94,74 @@
     return sdxl.includes(left) && sdxl.includes(right);
   }
 
+  /** The Civitai model a LoRA version belongs to (from its page URL). */
+  function civitaiModel(entry) {
+    const match = /\/models\/(\d+)/.exec(String((entry && entry.page) || ''));
+    return match ? match[1] : '';
+  }
+
+  /** The checkpoint a node will actually run: its own choice, else the service default. */
+  function effectiveCheckpoint(catalogue, service, file) {
+    const list = (catalogue && catalogue.checkpoints_array) || [];
+    if (file) return list.find(item => item.file === file || (item.legacy_files || []).includes(file)) || null;
+    return list.find(item => (item.default_for_services || []).includes(service) || item.default === true) || null;
+  }
+
+  /** Why a LoRA cannot go with this checkpoint ('' when it can). */
+  function familyMismatch(entry, checkpoint) {
+    if (!entry || !checkpoint || familiesMatch(checkpoint.family, entry.family)) return '';
+    return 'not for ' + (checkpoint.base || checkpoint.title || checkpoint.family);
+  }
+
+  /** Another version of the same Civitai model made for this checkpoint's family. */
+  function familySwap(entry, checkpoint, loras, service) {
+    const model = civitaiModel(entry);
+    if (!model || !checkpoint) return null;
+    return (loras || []).find(other => other.file !== entry.file && civitaiModel(other) === model &&
+      familiesMatch(checkpoint.family, other.family) && other.family &&
+      (!service || !other.services || other.services.includes(service)) && other.usable !== false) || null;
+  }
+
+  const catalogues = new Map();
+
+  /**
+   * Drop, from a request about to be sent, every LoRA that does not fit the
+   * node's checkpoint, so the render runs with the ones that do instead of
+   * failing with a 400. Returns the files it dropped. A stack string this
+   * module cannot read is left for the server to judge.
+   */
+  function filterBody(service, body) {
+    const catalogue = catalogues.get(service);
+    if (!body || !catalogue) return [];
+    const checkpoint = effectiveCheckpoint(catalogue, service, body.checkpoint);
+    if (!checkpoint) return [];
+    const list = catalogue.loras_array || [];
+    const dropped = [];
+    if (body.lora) {
+      const entry = list.find(item => item.file === body.lora);
+      if (familyMismatch(entry, checkpoint)) {
+        dropped.push(body.lora);
+        delete body.lora; delete body.lora_strength;
+      }
+    }
+    if (typeof body.loras === 'string' && body.loras.trim()) {
+      const items = parseTags(body.loras);
+      if (items) {
+        const kept = items.filter(item => {
+          const file = resolveFile(item.name, list);
+          const entry = list.find(value => value.file === file);
+          if (familyMismatch(entry, checkpoint)) { dropped.push(file); return false; }
+          return true;
+        });
+        if (kept.length !== items.length) {
+          const text = kept.map(item => '<lora:' + item.name + ':' + formatWeight(item.weight) + '>').join(' ');
+          if (text) body.loras = text; else delete body.loras;
+        }
+      }
+    }
+    return dropped;
+  }
+
   /** Re-issue value writes made by code (applyParams, the graph agent) as a hook. */
   function watchValue(input, onSet) {
     const proto = Object.getPrototypeOf(input);
@@ -194,6 +262,7 @@
 
       entities().loadModels(service).then(data => {
         state.catalogue = data || {};
+        catalogues.set(service, state.catalogue);
         readField(state);
         render(state);
       }).catch(() => { state.catalogue = {}; readField(state); render(state); });
@@ -220,11 +289,53 @@
       return button;
     }
 
+    function swapButton() {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'lslot-swap';
+      button.textContent = '⇄';
+      button.hidden = true;
+      return button;
+    }
+
+    /** Incompatible → ⛔ note (+ swap when another version fits); else readiness. */
+    function markSlot(state, box, note, entry, checkpoint, onSwap) {
+      let swap = box.querySelector('.lslot-swap');
+      if (!swap) {
+        swap = swapButton();
+        box.insertBefore(swap, box.querySelector('.lslot-remove'));
+        swap.addEventListener('click', event => {
+          event.preventDefault(); event.stopPropagation();
+          if (swap._target) swap._onSwap(swap._target);
+        });
+      }
+      const mismatch = familyMismatch(entry, checkpoint);
+      const alternative = mismatch ? familySwap(entry, checkpoint, loras(state), state.service) : null;
+      swap._target = alternative ? alternative.file : '';
+      swap._onSwap = onSwap;
+      swap.hidden = !alternative;
+      if (alternative) {
+        swap.title = 'Use the ' + (alternative.base || alternative.family) + ' version: ' +
+          (alternative.title || alternative.file) + (alternative.version ? ' · ' + alternative.version : '');
+        swap.setAttribute('aria-label', swap.title);
+      }
+      box.classList.toggle('lslot-bad', !!mismatch);
+      note.classList.toggle('lslot-note-bad', !!mismatch);
+      if (mismatch) {
+        note.textContent = '⛔ ' + mismatch;
+        note.title = (entry.title || entry.file) + ' is ' + (entry.base || entry.family) +
+          '; it is ' + mismatch + ' and is left out of the render.';
+        note.hidden = false;
+        return;
+      }
+      setNote(note, readiness(entry, checkpoint));
+    }
+
     function loras(state) { return (state.catalogue && state.catalogue.loras_array) || []; }
 
     function checkpointEntry(state) {
       const value = (state.element.querySelector('[data-param="checkpoint"]') || {}).value || '';
-      return ((state.catalogue && state.catalogue.checkpoints_array) || []).find(item => item.file === value) || null;
+      return effectiveCheckpoint(state.catalogue, state.service, value);
     }
 
     function readField(state) {
@@ -318,7 +429,14 @@
       const checkpoint = checkpointEntry(state);
       const firstEntry = loras(state).find(item => item.file === firstFile);
       const firstNote = state.element.querySelector('.lstack-first .lslot-note');
-      if (firstNote) setNote(firstNote, readiness(firstEntry, checkpoint));
+      const firstBox = state.element.querySelector('.lslot-1');
+      if (firstNote && firstBox) markSlot(state, firstBox, firstNote, firstEntry, checkpoint, file => {
+        const picker = state.firstSlot._picker;
+        if (picker) picker.value = file;
+        state.firstHidden.value = file;
+        state.firstHidden.dispatchEvent(new Event('change', {bubbles: true}));
+        render(state);
+      });
       const firstRemove = state.element.querySelector('.lslot-1 .lslot-remove');
       if (firstRemove) firstRemove.hidden = !firstFile;
       const firstWeight = state.element.querySelector('.lslot-1 .lslot-weight');
@@ -338,7 +456,14 @@
       state.slots.forEach(slot => {
         state.list.appendChild(slot.box);
         const entry = loras(state).find(item => item.file === slot.file);
-        setNote(slot.note, slot.file ? readiness(entry, checkpoint) : '');
+        if (slot.file) markSlot(state, slot.box, slot.note, entry, checkpoint, file => {
+          slot.file = file;
+          if (slot.picker) slot.picker.value = file;
+          writeStack(state);
+          render(state);
+        });
+        else { setNote(slot.note, ''); slot.box.classList.remove('lslot-bad'); slot.note.classList.remove('lslot-note-bad');
+               const swap = slot.box.querySelector('.lslot-swap'); if (swap) swap.hidden = true; }
         slot.box.querySelector('.lslot-remove').hidden = !slot.file;
         slot.weightBox.hidden = !slot.file;
       });
@@ -378,12 +503,19 @@
       if (element && element._lstack) render(element._lstack);
     });
     schedule();
+    if (entities() && entities().loadModels) {
+      ['image', 'video'].forEach(service => entities().loadModels(service)
+        .then(data => { if (data && !catalogues.has(service)) catalogues.set(service, data); })
+        .catch(() => {}));
+    }
 
     return {refresh: enhanceAll};
   }
 
   global.AINodeLoraStack = Object.freeze({
     install, parseTags, toTags, resolveFile, readiness, familiesMatch, stem, clampWeight,
+    filterBody, familyMismatch, familySwap, civitaiModel, effectiveCheckpoint,
+    _setCatalogue: (service, data) => catalogues.set(service, data),
     MAX_SLOTS, MIN_WEIGHT, MAX_WEIGHT, DEFAULT_WEIGHT
   });
 })(typeof window !== 'undefined' ? window : globalThis);

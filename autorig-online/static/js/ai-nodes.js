@@ -1893,6 +1893,12 @@
       if (text.trim()) body.system_prompt = text;
       body.structured = true;
     }
+    // A LoRA of another model family (left in a slot when the checkpoint
+    // changed) is left out, so the render runs with the ones that fit; the
+    // slot says so inline (ai-node-lora-stack.js).
+    if (typeof window !== 'undefined' && window.AINodeLoraStack && window.AINodeLoraStack.filterBody) {
+      window.AINodeLoraStack.filterBody(serviceId, body);
+    }
     // Render quality: every width/height scaled, rounded and clamped here, so
     // the scaled size is what the signature records and what the server gets.
     if (typeof window !== 'undefined' && window.AIRenderQuality && renderQuality !== 'normal') {
