@@ -77,6 +77,50 @@ logger = logging.getLogger(__name__)
 BUILD_DIR = Path(os.getenv("AUTORIG_AI_AVATAR_BUILD_DIR", "/srv/autorig/data/var/ai-avatar-build"))
 INTERNAL_API = os.getenv("AUTORIG_INTERNAL_PUBLIC_API", "http://127.0.0.1:8200").rstrip("/")
 VISION_MODEL = "qwen35-9b-uncensored"
+ENGINES = ("auto", "klein", "qwen")
+RETRY_ENGINES = ("auto", "klein", "qwen", "none")
+# A model whose context cannot hold a full-size picture reads a smaller copy
+# (Bonsai 27B runs with a 4k window on f13: a 1024-pixel image alone is about
+# 4100 tokens). Longest side in pixels, by context size.
+SMALL_CONTEXT_TOKENS = 6000
+SMALL_CONTEXT_MAX_SIDE = 640
+
+
+def vision_models() -> Dict[str, Dict[str, Any]]:
+    """The Vision node's own catalogue (/api/ai/models), by id."""
+    import ai_vision_api
+    return {str(m["id"]): m for m in ai_vision_api.AI_MODELS if "vision" in (m.get("modes") or [])}
+
+
+def check_vision_model(value: Optional[str], role: str) -> str:
+    model = str(value or "").strip() or VISION_MODEL
+    known = vision_models()
+    if model not in known:
+        raise HTTPException(400, detail=(f"The {role} model '{model}' is not a Vision model on the farm; "
+                                         f"choose one of {', '.join(sorted(known))}"))
+    return model
+
+
+def shrink_for(model: str, data: bytes) -> bytes:
+    """A copy small enough for the model's context, as JPEG."""
+    entry = vision_models().get(model) or {}
+    if int(entry.get("context_tokens") or 99999) >= SMALL_CONTEXT_TOKENS:
+        return data
+    from PIL import Image
+    with Image.open(io.BytesIO(data)) as image:
+        image = image.convert("RGB")
+        image.thumbnail((SMALL_CONTEXT_MAX_SIDE, SMALL_CONTEXT_MAX_SIDE))
+        out = io.BytesIO()
+        image.save(out, "JPEG", quality=88)
+        return out.getvalue()
+
+
+def output_budget(model: str, wanted: int) -> int:
+    """Models that reason first spend the budget on reasoning: give them their own default."""
+    entry = vision_models().get(model) or {}
+    if entry.get("reasons_first"):
+        return max(wanted, int(entry.get("default_output_tokens") or 2048))
+    return wanted
 KLEIN_CHECKPOINT = "flux-2-klein-4b.safetensors"
 JOB_ID_RE = re.compile(r"^avb_[a-f0-9]{24}$")
 AVATAR_REF_RE = re.compile(r"^(av_[a-f0-9]{24})(?:@([1-9][0-9]{0,5}))?$")
@@ -220,6 +264,11 @@ class BuildRequest(BaseModel):
     qa: Optional[bool] = True
     seed: Optional[int] = Field(default=None, ge=0, le=2**31 - 1)
     engine: Optional[str] = Field(default=None, max_length=12)
+    retry_engine: Optional[str] = Field(default=None, max_length=12)
+    # The Vision model that writes the description, and the one that judges
+    # each view against the source (defaults to the same).
+    model: Optional[str] = Field(default=None, max_length=100)
+    judge_model: Optional[str] = Field(default=None, max_length=100)
     # Keep every derived picture out of saved graphs whatever the classifier says.
     private: Optional[bool] = None
 
@@ -981,9 +1030,13 @@ class AvatarBuilder:
         raise BuildError(f"could not download {url}")
 
     async def _vision(self, client: httpx.AsyncClient, prompt: str, *, image_url: str = "",
-                      image_base64: str = "", budget: int = 1024) -> str:
-        body: Dict[str, Any] = {"prompt": prompt, "model": VISION_MODEL,
-                                "max_output_tokens": budget, "wait_seconds": 0}
+                      image_base64: str = "", budget: int = 1024, model: str = VISION_MODEL) -> str:
+        if image_url and vision_models().get(model, {}).get("context_tokens", 99999) < SMALL_CONTEXT_TOKENS:
+            # Too big for this model's window: send a smaller inline copy.
+            data = shrink_for(model, await self._fetch(client, image_url))
+            image_url, image_base64 = "", "data:image/jpeg;base64," + base64.b64encode(data).decode()
+        body: Dict[str, Any] = {"prompt": prompt, "model": model,
+                                "max_output_tokens": output_budget(model, budget), "wait_seconds": 0}
         if image_url:
             body["image_url"] = image_url
         else:
@@ -1125,7 +1178,8 @@ class AvatarBuilder:
         last_error = ""
         for attempt in range(2):
             answer = await self._vision(client, DESCRIBE_INSTRUCTION,
-                                        image_url=job["source"]["frame_url"], budget=1200)
+                                        image_url=job["source"]["frame_url"], budget=1200,
+                                        model=job["request"].get("model") or VISION_MODEL)
             try:
                 job["description"] = clean_description(_extract_json(answer))
                 if job["description"].get("explicit"):
@@ -1228,13 +1282,16 @@ class AvatarBuilder:
         if not job["request"].get("qa", True):
             attempt["qa"] = {"status": "unchecked", "face_detected": haar}
             return
+        judge = job["request"].get("judge_model") or job["request"].get("model") or VISION_MODEL
         pair = await asyncio.to_thread(compose_pair, source_face, data)
+        pair = await asyncio.to_thread(shrink_for, judge, pair)
         try:
             answer = await self._vision(
                 client, JUDGE_INSTRUCTION,
-                image_base64="data:image/jpeg;base64," + base64.b64encode(pair).decode(), budget=400)
+                image_base64="data:image/jpeg;base64," + base64.b64encode(pair).decode(), budget=400,
+                model=judge)
             verdict = judge_verdict(slot, _extract_json(answer), haar)
-            verdict["identity_method"] = f"vision_judge:{VISION_MODEL}"
+            verdict["identity_method"] = f"vision_judge:{judge}"
         except (BuildError, ValueError) as error:
             verdict = {"status": "unchecked", "face_detected": haar,
                        "notes": f"judge unavailable: {error}"[:500]}
@@ -1263,9 +1320,11 @@ class AvatarBuilder:
         base_seed = int(job["request"]["seed"])
         forced = job["request"].get("engine") or "auto"
         first = VIEW_SPECS[slot]["engine"] if forced == "auto" else forced
-        other = "qwen" if first == "klein" else "klein"
-        plan = [(first, base_seed + CANONICAL_VIEW_SLOTS.index(slot)),
-                (other, base_seed + 1000 + CANONICAL_VIEW_SLOTS.index(slot))]
+        retry = job["request"].get("retry_engine") or "auto"
+        other = ("qwen" if first == "klein" else "klein") if retry == "auto" else retry
+        plan = [(first, base_seed + CANONICAL_VIEW_SLOTS.index(slot))]
+        if other != "none":
+            plan.append((other, base_seed + 1000 + CANONICAL_VIEW_SLOTS.index(slot)))
         tried = []
         for number, (engine, seed) in enumerate(plan):
             try:
@@ -1413,7 +1472,8 @@ class AvatarBuilder:
                 "kind", "sha256", "url", "width", "height", "duration_seconds",
                 "frame_time_seconds", "frame_url", "frame_sha256", "frame_score")}],
             "provenance": {"source_kind": "mixed", "source_task_ids": task_ids[:32],
-                           "source_model": f"flux-2-klein-4b + qwen-image-edit-2511 + {VISION_MODEL}",
+                           "source_model": ("flux-2-klein-4b + qwen-image-edit-2511 + "
+                                            + (request.get("model") or VISION_MODEL)),
                            "source_workflow": PIPELINE_VERSION,
                            "note": (description.get("production_notes", "") +
                                     f" | views passed {passed}/{len(views)}")[:1000]},
@@ -1513,14 +1573,25 @@ def _split_avatar(value: Optional[str]) -> Optional[str]:
 def _identity(kind: str, source_sha_or_url: str, body: BuildRequest, avatar_id: Optional[str]) -> Dict[str, Any]:
     views = parse_views(body.views)
     engine = str(body.engine or "auto").strip().lower()
-    if engine not in ("auto", "klein", "qwen"):
-        raise HTTPException(400, detail="engine must be auto, klein or qwen")
+    if engine not in ENGINES:
+        raise HTTPException(400, detail="The views engine must be auto, klein (FLUX.2 klein 4B) or qwen (Qwen-Image-Edit-2511)")
+    retry = str(body.retry_engine or "auto").strip().lower()
+    if retry not in RETRY_ENGINES:
+        raise HTTPException(400, detail="The retry engine must be auto, klein, qwen or none")
+    model = check_vision_model(body.model, "description")
+    judge = check_vision_model(body.judge_model or model, "judge")
     seed = body.seed if body.seed else int(hashlib.sha256(source_sha_or_url.encode()).hexdigest()[:7], 16)
     return {"kind": kind, "source": source_sha_or_url, "views": views, "engine": engine,
             "outfit": str(body.outfit or "").strip(), "display_name": str(body.display_name or "").strip(),
             "qa": body.qa is not False, "seed": seed, "avatar_id": avatar_id,
             "private": bool(body.private),
-            "pipeline": PIPELINE_VERSION}
+            "pipeline": PIPELINE_VERSION,
+            # Only a choice that differs from the default is part of the
+            # identity, so graphs saved before these settings existed map to
+            # the same build.
+            **({"retry_engine": retry} if retry != "auto" else {}),
+            **({"model": model} if model != VISION_MODEL else {}),
+            **({"judge_model": judge} if judge != VISION_MODEL else {})}
 
 
 def _stage_bytes(jobs: BuildJobStore, data: bytes, kind: str) -> Path:

@@ -251,6 +251,54 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(build.parse_views("back, front")[0], build.ANCHOR_SLOT)
 
 
+class ModelChoiceTests(unittest.TestCase):
+    def test_defaults_keep_the_old_identity_and_bad_choices_are_refused(self):
+        plain = build._identity("image", "sha", build.BuildRequest(), None)
+        same = build._identity("image", "sha", build.BuildRequest(
+            model="qwen35-9b-uncensored", judge_model="qwen35-9b-uncensored", engine="auto",
+            retry_engine="auto"), None)
+        self.assertEqual(plain, same)
+        bonsai = build._identity("image", "sha", build.BuildRequest(model="bonsai2-27b"), None)
+        self.assertEqual((bonsai["model"], bonsai["judge_model"]), ("bonsai2-27b", "bonsai2-27b"))
+        for bad in ({"model": "gpt-9"}, {"judge_model": "nope"}, {"engine": "sdxl"}, {"retry_engine": "x"}):
+            with self.assertRaises(Exception, msg=bad):
+                build._identity("image", "sha", build.BuildRequest(**bad), None)
+
+    def test_small_context_models_get_a_small_picture_and_their_own_budget(self):
+        big = png(size=(1200, 1920))
+        small = build.shrink_for("bonsai2-27b", big)
+        with Image.open(io.BytesIO(small)) as image:
+            self.assertLessEqual(max(image.size), build.SMALL_CONTEXT_MAX_SIDE)
+        self.assertIs(build.shrink_for("qwen35-9b-uncensored", big), big)
+        self.assertGreaterEqual(build.output_budget("bonsai2-27b", 400), 2048)
+        self.assertEqual(build.output_budget("qwen35-9b-uncensored", 400), 400)
+
+    def test_views_engine_and_no_retry_are_honoured(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            assets = AvatarAssetStore(root / "assets", max_assets_per_owner=500)
+            farm = FakeFarm(assets, scores={("back", "qwen"): 1})
+            detect, box = build.detect_face_kind, build.face_box
+            build.detect_face_kind, build.face_box = (lambda data: "unknown"), (lambda data: [10, 10, 30, 32])
+            try:
+                builder = build.AvatarBuilder(
+                    avatar_store=AvatarStore(root / "avatars"), asset_store=assets,
+                    job_store=build.BuildJobStore(root / "build"),
+                    http_client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(farm.handler)),
+                    api_base="http://internal", poll_seconds=0)
+                source = root / "s.png"
+                source.write_bytes(png())
+                identity = build._identity("image", "sha-e", build.BuildRequest(
+                    views="back", engine="qwen", retry_engine="none"), None)
+                identity["local_file"] = str(source)
+                job, _ = builder.jobs.create(ALICE, identity)
+                job = asyncio.run(builder.run(job["job_id"]))
+            finally:
+                build.detect_face_kind, build.face_box = detect, box
+            self.assertEqual([a["engine"] for a in job["views"]["back"]["attempts"]], ["qwen"])
+            self.assertEqual(job["views"]["back"]["final"]["qa"]["status"], "failed")
+
+
 class ExternalSourceTests(unittest.TestCase):
     def test_external_addresses_are_checked(self):
         ok = build.validate_external_url("https://image.civitai.com/x/original=true/a.mp4")
