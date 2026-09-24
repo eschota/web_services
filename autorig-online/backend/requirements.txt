@@ -27,3 +27,9 @@ google-auth-httplib2==0.2.0
 openai>=1.40.0
 
 Pillow==10.4.0
+
+# AutoRig Regen geometry core (regen/): body / hair / cloth split and bone chains
+# scipy 1.17 accepts numpy 1.26.4-2.6, so installing it never downgrades numpy
+# on the VPS; it needs Python 3.11+, which onnxruntime above already requires
+scipy==1.17.1
+trimesh==5.1.0
