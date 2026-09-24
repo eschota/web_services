@@ -178,8 +178,10 @@ cross-service work.
   `YOUTUBE_GOOGLE_CLIENT_ID` and `YOUTUBE_GOOGLE_CLIENT_SECRET` for this
   integration; keep AutoRig sign-in's `GOOGLE_CLIENT_ID` and
   `GOOGLE_CLIENT_SECRET` unchanged.
-- `/dev` keeps its Telegram Developer Validator UI and adds the proxied
-  `POST /dev/api/youtube/videos` route. It accepts a video file plus
+- `/dev` is the separate Telegram Developer Validator and must remain available.
+  Link its YouTube upload card to `/dev/youtube`; Nginx serves the AutoRig docs
+  there and proxies `POST /dev/api/youtube/videos` to the authenticated backend.
+  The route accepts a video file plus
   title, description, optional comma-separated tags, and `privacy_status`.
   Require an admin session or an API key owned by an admin; never make this
   endpoint available to anonymous or ordinary user keys. Default visibility is

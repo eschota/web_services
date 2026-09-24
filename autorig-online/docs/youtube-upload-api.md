@@ -1,7 +1,8 @@
 # YouTube uploads for `@unlim3d`
 
 This is the operator guide for connecting the AutoRig backend and using the
-upload API documented at `https://autorig.online/dev`.
+upload API linked from `https://autorig.online/dev` and documented at
+`https://autorig.online/dev/youtube`.
 
 ## Fixed channel and account
 
