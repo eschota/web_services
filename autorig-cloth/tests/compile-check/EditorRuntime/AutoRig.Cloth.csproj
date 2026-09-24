@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The runtime again, against the monolithic UnityEngine.dll that ships with UnityEditor.dll
+       (Unity3D.SDK), so the editor check sees one consistent set of engine types. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>AutoRig.Cloth</AssemblyName>
+    <RootNamespace>AutoRig.Cloth</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(PackageRoot)Runtime/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Unity3D.SDK" Version="2021.1.14.1" />
+  </ItemGroup>
+</Project>

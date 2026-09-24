@@ -1,0 +1,31 @@
+{
+  "name": "online.autorig.cloth",
+  "displayName": "AutoRig Cloth",
+  "version": "0.1.0",
+  "unity": "2021.3",
+  "description": "Secondary motion for rigged characters: hair, skirts, capes, tails and accessories simulated on bone chains. Reads the .autorig-cloth.json manifests AutoRig.online writes next to rigged models, so AutoRig characters get working cloth with no manual setup. Includes body colliders, wind, automatic chain detection and a procedural demo.",
+  "keywords": [
+    "cloth",
+    "hair",
+    "physics",
+    "secondary motion",
+    "bone",
+    "spring",
+    "character",
+    "autorig"
+  ],
+  "author": {
+    "name": "AutoRig.online",
+    "url": "https://autorig.online"
+  },
+  "documentationUrl": "https://github.com/eschota/web_services/blob/main/autorig-cloth/package/Documentation~/index.md",
+  "changelogUrl": "https://github.com/eschota/web_services/blob/main/autorig-cloth/package/CHANGELOG.md",
+  "licensesUrl": "https://github.com/eschota/web_services/blob/main/autorig-cloth/package/LICENSE.md",
+  "samples": [
+    {
+      "displayName": "Procedural Demo",
+      "description": "An empty-scene demo: a procedural character with a skirt, hair and a cape that walks, turns and jumps.",
+      "path": "Samples~/ProceduralDemo"
+    }
+  ]
+}

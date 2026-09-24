@@ -1,0 +1,76 @@
+{
+  "format": "autorig.cloth",
+  "version": 1,
+  "generator": "autorig-regen/0.1.0",
+  "units": "meters",
+  "calibration": { "bone_a": "Hips", "bone_b": "Head", "distance": 0.62 },
+  "presets": [
+    { "name": "hair", "gravity": 1.0, "damping": 0.12, "stiffness": 0.25, "angle_limit_deg": 70, "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.015, "radius_tip": 0.008, "inertia_move": 0.6, "inertia_rotate": 0.6, "drag": 0.02, "wind": 1.0 },
+    { "name": "skirt_hero", "gravity": 1.0, "damping": 0.16, "stiffness": 0.32, "angle_limit_deg": 65, "stretch": 0.05, "connection_stiffness": 0.6, "radius": 0.03, "radius_tip": 0.024, "inertia_move": 0.6, "inertia_rotate": 0.5, "drag": 0.03, "wind": 0.7 }
+  ],
+  "groups": [
+    {
+      "name": "hair_back",
+      "kind": "hair",
+      "attach_bone": "Head",
+      "preset": "hair",
+      "connection": "none",
+      "collider_tags": ["body"],
+      "chains": [
+        { "bones": ["hair_back_00_0", "hair_back_00_1", "hair_back_00_2", "hair_back_00_end"] },
+        { "bones": ["hair_back_01_0", "hair_back_01_1", "hair_back_01_2", "hair_back_01_end"] },
+        { "bones": ["hair_back_02_0", "hair_back_02_1", "hair_back_02_2", "hair_back_02_end"] },
+        { "bones": ["hair_back_03_0", "hair_back_03_1", "hair_back_03_2", "hair_back_03_end"] },
+        { "bones": ["hair_back_04_0", "hair_back_04_1", "hair_back_04_2", "hair_back_04_end"] },
+        { "bones": ["hair_back_05_0", "hair_back_05_1", "hair_back_05_2", "hair_back_05_end"] }
+      ]
+    },
+    {
+      "name": "skirt",
+      "kind": "cloth",
+      "attach_bone": "Hips",
+      "preset": "skirt_hero",
+      "connection": "loop",
+      "collider_tags": ["body"],
+      "chains": [
+        { "bones": ["skirt_00_0", "skirt_00_1", "skirt_00_2", "skirt_00_3", "skirt_00_end"] },
+        { "bones": ["skirt_01_0", "skirt_01_1", "skirt_01_2", "skirt_01_3", "skirt_01_end"] },
+        { "bones": ["skirt_02_0", "skirt_02_1", "skirt_02_2", "skirt_02_3", "skirt_02_end"] },
+        { "bones": ["skirt_03_0", "skirt_03_1", "skirt_03_2", "skirt_03_3", "skirt_03_end"] },
+        { "bones": ["skirt_04_0", "skirt_04_1", "skirt_04_2", "skirt_04_3", "skirt_04_end"] },
+        { "bones": ["skirt_05_0", "skirt_05_1", "skirt_05_2", "skirt_05_3", "skirt_05_end"] },
+        { "bones": ["skirt_06_0", "skirt_06_1", "skirt_06_2", "skirt_06_3", "skirt_06_end"] },
+        { "bones": ["skirt_07_0", "skirt_07_1", "skirt_07_2", "skirt_07_3", "skirt_07_end"] }
+      ]
+    },
+    {
+      "name": "cape",
+      "kind": "cloth",
+      "attach_bone": "Spine2",
+      "preset": "cape",
+      "connection": "open",
+      "collider_tags": ["body"],
+      "chains": [
+        { "bones": ["cape_00_0", "cape_00_1", "cape_00_2", "cape_00_3", "cape_00_end"] },
+        { "bones": ["cape_01_0", "cape_01_1", "cape_01_2", "cape_01_3", "cape_01_end"] },
+        { "bones": ["cape_02_0", "cape_02_1", "cape_02_2", "cape_02_3", "cape_02_end"] },
+        { "bones": ["cape_03_0", "cape_03_1", "cape_03_2", "cape_03_3", "cape_03_end"] },
+        { "bones": ["cape_04_0", "cape_04_1", "cape_04_2", "cape_04_3", "cape_04_end"] }
+      ]
+    }
+  ],
+  "colliders": [
+    { "name": "head", "tag": "body", "shape": "sphere", "bone": "Head", "to_bone": "HeadTop_End", "t": 0.35, "radius": 0.1, "radius_to": 0.0 },
+    { "name": "chest", "tag": "body", "shape": "capsule", "bone": "Spine2", "to_bone": "Neck", "t": 0.0, "radius": 0.13, "radius_to": 0.08 },
+    { "name": "spine", "tag": "body", "shape": "capsule", "bone": "Spine", "to_bone": "Spine2", "t": 0.0, "radius": 0.12, "radius_to": 0.13 },
+    { "name": "hips", "tag": "body", "shape": "capsule", "bone": "LeftUpLeg", "to_bone": "RightUpLeg", "t": 0.0, "radius": 0.11, "radius_to": 0.11 },
+    { "name": "upperarm_l", "tag": "body", "shape": "capsule", "bone": "LeftArm", "to_bone": "LeftForeArm", "t": 0.0, "radius": 0.05, "radius_to": 0.042 },
+    { "name": "upperarm_r", "tag": "body", "shape": "capsule", "bone": "RightArm", "to_bone": "RightForeArm", "t": 0.0, "radius": 0.05, "radius_to": 0.042 },
+    { "name": "forearm_l", "tag": "body", "shape": "capsule", "bone": "LeftForeArm", "to_bone": "LeftHand", "t": 0.0, "radius": 0.042, "radius_to": 0.032 },
+    { "name": "forearm_r", "tag": "body", "shape": "capsule", "bone": "RightForeArm", "to_bone": "RightHand", "t": 0.0, "radius": 0.042, "radius_to": 0.032 },
+    { "name": "thigh_l", "tag": "body", "shape": "capsule", "bone": "LeftUpLeg", "to_bone": "LeftLeg", "t": 0.0, "radius": 0.075, "radius_to": 0.06 },
+    { "name": "thigh_r", "tag": "body", "shape": "capsule", "bone": "RightUpLeg", "to_bone": "RightLeg", "t": 0.0, "radius": 0.075, "radius_to": 0.06 },
+    { "name": "shin_l", "tag": "body", "shape": "capsule", "bone": "LeftLeg", "to_bone": "LeftFoot", "t": 0.0, "radius": 0.055, "radius_to": 0.04 },
+    { "name": "shin_r", "tag": "body", "shape": "capsule", "bone": "RightLeg", "to_bone": "RightFoot", "t": 0.0, "radius": 0.055, "radius_to": 0.04 }
+  ]
+}

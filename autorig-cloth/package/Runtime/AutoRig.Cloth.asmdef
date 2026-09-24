@@ -1,0 +1,14 @@
+{
+    "name": "AutoRig.Cloth",
+    "rootNamespace": "AutoRig.Cloth",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

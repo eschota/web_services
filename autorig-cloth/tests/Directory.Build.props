@@ -1,0 +1,15 @@
+<Project>
+  <!-- Shared settings for every project under tests/. The package targets Unity 2021.3, i.e. C# 9. -->
+  <PropertyGroup>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- NU1701: Unity reference packages only ship .NET Framework assets.
+         CS1701/CS1702: harmless reference-version unification notices from those assets. -->
+    <NoWarn>$(NoWarn);NU1701;CS1701;CS1702</NoWarn>
+    <PackageRoot>$(MSBuildThisFileDirectory)../package/</PackageRoot>
+  </PropertyGroup>
+</Project>

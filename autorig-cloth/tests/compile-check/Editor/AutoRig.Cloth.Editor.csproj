@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- package/Editor against UnityEditor + UnityEngine (Unity3D.SDK) and the runtime assembly,
+       mirroring AutoRig.Cloth.Editor.asmdef (Editor platform, references AutoRig.Cloth). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>AutoRig.Cloth.Editor</AssemblyName>
+    <RootNamespace>AutoRig.Cloth.EditorTools</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(PackageRoot)Editor/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../EditorRuntime/AutoRig.Cloth.csproj" />
+    <PackageReference Include="Unity3D.SDK" Version="2021.1.14.1" />
+  </ItemGroup>
+</Project>

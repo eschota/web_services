@@ -1,0 +1,6 @@
+# Build output of the test and compile-check projects
+bin/
+obj/
+TestResults/
+*.user
+.vs/
