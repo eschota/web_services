@@ -57,7 +57,9 @@ FAILED_JOB_ALERT_SECONDS = float(
 DELIVERY_GRACE_SECONDS = float(
     os.getenv("AUTORIG_HEALTHCHECK_DELIVERY_GRACE_SECONDS", "600")
 )
-ACTIVE_STAGES = ("flux_render", "hunyuan", "turntable")
+# regen_source parks while the main app is unreachable, so a stall there is as
+# silent as one on the farm stages.
+ACTIVE_STAGES = ("regen_source", "flux_render", "hunyuan", "turntable")
 
 
 class Report:
