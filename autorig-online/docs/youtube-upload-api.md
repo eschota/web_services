@@ -46,11 +46,11 @@ compliance audit. These are separate Google review gates.
 
 Only AutoRig administrators can upload. Create an API key while signed in as an
 administrator on `/dev`; an API key owned by an ordinary user is rejected.
-Send a multipart request to `POST /api/youtube/videos`:
+Send a multipart request to `POST /dev/api/youtube/videos`:
 
 ```sh
 BASE=https://autorig.online
-curl -X POST "$BASE/api/youtube/videos" \
+curl -X POST "$BASE/dev/api/youtube/videos" \
   -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
   -F "file=@video.mp4;type=video/mp4" \
   -F "title=Video title" \

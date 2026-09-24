@@ -111,7 +111,7 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                 <p style="color: var(--text-secondary); line-height: 1.6;">Connect the channel once through the admin YouTube OAuth flow. The refresh token is stored server-side. This upload endpoint accepts only administrator sessions or API keys owned by an administrator. Create a key while signed in to an admin account on this page.</p>
                 <p style="color: var(--text-secondary); line-height: 1.6;">Uploads default to <code>public</code>. YouTube may still force uploads from a new or unverified API project to remain private until the project passes its compliance audit.</p>
                 <p style="color: var(--text-secondary); line-height: 1.6;">Shorts are classified by YouTube from the video itself, not by an API flag. For standard channels, square or vertical videos up to three minutes are categorized as Shorts under YouTube's current rules. A landscape video or a longer video is long-form.</p>
-                <pre style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5;"><code>curl -X POST "$BASE/api/youtube/videos" \
+                <pre style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5;"><code>curl -X POST "$BASE/dev/api/youtube/videos" \
   -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
   -F "file=@short-or-long-video.mp4;type=video/mp4" \
   -F "title=Video title" \
@@ -201,7 +201,7 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                     "GET /api/task/{task_id} until status is done or error",
                     "GET /api/task/{task_id}/cached-files for file list",
                     "Download GLB/FBX via GET /api/task/{task_id}/prepared.glb, animations.glb, animations.fbx, model.glb",
-                    "POST /api/youtube/videos — multipart upload for administrator-owned API keys; fields: file, title, description, tags (comma-separated), privacy_status (private|unlisted|public); defaults to public, subject to YouTube project audit restrictions",
+                    "POST /dev/api/youtube/videos — multipart upload for administrator-owned API keys; fields: file, title, description, tags (comma-separated), privacy_status (private|unlisted|public); defaults to public, subject to YouTube project audit restrictions",
                     "Shorts classification is automatic from video aspect ratio and duration; no Shorts flag is sent by the API"
                 ],
                 paths: [
@@ -213,7 +213,7 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                     "/api/task/{task_id}/model.glb",
                     "/api/task/{task_id}/cached-files",
                     "/api/user/api-keys",
-                    "/api/youtube/videos",
+                    "/dev/api/youtube/videos",
                     "/api/admin/youtube/oauth/start",
                     "/api/admin/youtube/status"
                 ]
