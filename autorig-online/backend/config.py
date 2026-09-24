@@ -67,6 +67,10 @@ GOOGLE_CLIENT_SECRET = os.getenv(
     "GOOGLE_CLIENT_SECRET",
     "your-google-client-secret-here"
 )
+# Keep the YouTube OAuth client separate so setting up uploads cannot break
+# AutoRig's existing Google sign-in OAuth client.
+YOUTUBE_GOOGLE_CLIENT_ID = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID).strip()
+YOUTUBE_GOOGLE_CLIENT_SECRET = os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET).strip()
 GOOGLE_REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI",
     f"{APP_URL}/auth/callback"
@@ -79,6 +83,12 @@ YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
 )
 # Auto-uploads are always public (not unlisted / not link-only). Not overridable via env.
 YOUTUBE_UPLOAD_PRIVACY = "public"
+
+# OAuth callback guard: only persist credentials for the owner's intended channel.
+YOUTUBE_EXPECTED_CHANNEL_ID = os.getenv(
+    "YOUTUBE_EXPECTED_CHANNEL_ID",
+    "UCpCN8wm6UXr8Ke_m-zSaThQ",
+).strip()
 
 # Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()

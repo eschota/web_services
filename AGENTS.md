@@ -165,6 +165,36 @@ Active production wiring:
 For AutoRig changes, touch only `autorig-online/...` unless the user asks for
 cross-service work.
 
+### YouTube channel upload API
+
+- The owner channel is `U3d Indie Game Developer` (`@unlim3d`), channel ID
+  `UCpCN8wm6UXr8Ke_m-zSaThQ`. Google OAuth must be completed while signed in
+  as `cgteamorg@gmail.com`; the OAuth callback must verify the authorized
+  channel ID before saving the refresh token.
+- OAuth uses only the `youtube.upload` scope and the production callback
+  `https://autorig.online/api/oauth/youtube/callback`. Never put client secrets
+  or refresh tokens in Git, browser storage, task output, or logs. Refresh
+  tokens are stored in the server database `youtube_credentials` row. Use
+  `YOUTUBE_GOOGLE_CLIENT_ID` and `YOUTUBE_GOOGLE_CLIENT_SECRET` for this
+  integration; keep AutoRig sign-in's `GOOGLE_CLIENT_ID` and
+  `GOOGLE_CLIENT_SECRET` unchanged.
+- `/dev` documents `POST /api/youtube/videos`. It accepts a video file plus
+  title, description, optional comma-separated tags, and `privacy_status`.
+  Require an admin session or an API key owned by an admin; never make this
+  endpoint available to anonymous or ordinary user keys. Default visibility is
+  `public`, matching the owner's request. YouTube may force private visibility
+  until the API project passes its compliance audit; never claim public status
+  without checking the uploaded video's actual state.
+- YouTube classifies Shorts from the uploaded video's aspect ratio and length;
+  the API has no Shorts flag. Check current YouTube rules before giving
+  duration/format guidance. Long-form videos use the same resumable upload API.
+- Stream multipart uploads from FastAPI's request-scoped `UploadFile` spool
+  directly into the resumable YouTube upload, then close it. Do not make a
+  second video copy or put uploads or OAuth credentials in the release tree.
+- New or unverified YouTube Data API projects can be restricted to private
+  uploads until YouTube completes its compliance audit. Never promise public
+  publishing until a production upload confirms the project's current status.
+
 ### AutoRig Runtime Storage
 
 AutoRig intentionally keeps generated task assets on disk so the public site

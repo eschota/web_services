@@ -2772,6 +2772,13 @@ async def auth_callback(
     return redirect
 
 
+# Keep the standalone upload API admin-only; API keys resolve to their owner
+# through get_current_user, so only keys belonging to an admin can use it.
+from youtube_api import build_youtube_upload_api_router
+
+app.include_router(build_youtube_upload_api_router(require_admin, get_db))
+
+
 @app.get("/api/admin/youtube/oauth/start")
 async def admin_youtube_oauth_start(
     request: Request,
@@ -2803,7 +2810,12 @@ async def admin_youtube_oauth_callback(
     user: Optional[User] = Depends(get_current_user),
 ):
     """OAuth callback: stores refresh token for YouTube uploads."""
-    from youtube_upload import exchange_youtube_code_for_tokens, save_youtube_refresh_token
+    from youtube_upload import (
+        exchange_youtube_code_for_tokens,
+        save_youtube_refresh_token,
+        youtube_authorized_channel,
+        youtube_expected_channel_id,
+    )
 
     if error:
         return RedirectResponse(url=f"/?youtube_error={quote(error)}")
@@ -2820,6 +2832,15 @@ async def admin_youtube_oauth_callback(
     refresh = tokens.get("refresh_token")
     if not refresh:
         return RedirectResponse(url="/?youtube_error=no_refresh_token_reauthorize_with_prompt")
+    channel = await youtube_authorized_channel(refresh)
+    if not channel:
+        return RedirectResponse(url="/?youtube_error=channel_verification")
+    if channel.get("id") != youtube_expected_channel_id():
+        print(
+            "[YouTube OAuth] Refusing to store token for unexpected channel "
+            f"id={channel.get('id')} title={channel.get('title')}"
+        )
+        return RedirectResponse(url="/?youtube_error=channel_mismatch")
     await save_youtube_refresh_token(db, refresh)
     response = RedirectResponse(url="/?youtube_connected=1")
     response.delete_cookie("yt_oauth_state")

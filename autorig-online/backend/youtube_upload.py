@@ -2,7 +2,7 @@
 YouTube Data API: upload completed task videos when poster content rating is safe or suggestive.
 
 Requires one-time admin OAuth (refresh token in youtube_credentials).
-Uses GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET and YOUTUBE_OAUTH_REDIRECT_URI from config.
+Uses YOUTUBE_GOOGLE_CLIENT_ID / YOUTUBE_GOOGLE_CLIENT_SECRET and YOUTUBE_OAUTH_REDIRECT_URI from config.
 """
 from __future__ import annotations
 
@@ -29,12 +29,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import (
     APP_URL,
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
+    YOUTUBE_GOOGLE_CLIENT_ID,
+    YOUTUBE_GOOGLE_CLIENT_SECRET,
     OPENAI_API_KEY,
     YOUTUBE_OAUTH_REDIRECT_URI,
     YOUTUBE_REFRESH_TOKEN,
     YOUTUBE_UPLOAD_PRIVACY,
+    YOUTUBE_EXPECTED_CHANNEL_ID,
 )
 from database import AsyncSessionLocal, Task, YoutubeCredentials, YoutubeUploadedHash
 from workers import get_worker_base_url
@@ -396,7 +397,7 @@ async def _telegram_youtube_token_notice(detail: str) -> None:
 
 def build_youtube_authorize_url(state: str) -> str:
     params = {
-        "client_id": GOOGLE_CLIENT_ID,
+        "client_id": YOUTUBE_GOOGLE_CLIENT_ID,
         "redirect_uri": YOUTUBE_OAUTH_REDIRECT_URI,
         "response_type": "code",
         "scope": YOUTUBE_UPLOAD_SCOPE,
@@ -414,8 +415,8 @@ async def exchange_youtube_code_for_tokens(code: str) -> Optional[dict]:
                 "https://oauth2.googleapis.com/token",
                 data={
                     "code": code,
-                    "client_id": GOOGLE_CLIENT_ID,
-                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "client_id": YOUTUBE_GOOGLE_CLIENT_ID,
+                    "client_secret": YOUTUBE_GOOGLE_CLIENT_SECRET,
                     "redirect_uri": YOUTUBE_OAUTH_REDIRECT_URI,
                     "grant_type": "authorization_code",
                 },
@@ -446,10 +447,39 @@ def _youtube_credentials_from_db(refresh_token: str) -> Credentials:
         token=None,
         refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
+        client_id=YOUTUBE_GOOGLE_CLIENT_ID,
+        client_secret=YOUTUBE_GOOGLE_CLIENT_SECRET,
         scopes=[YOUTUBE_UPLOAD_SCOPE],
     )
+
+
+async def youtube_authorized_channel(refresh_token: str) -> Optional[dict]:
+    """Return the channel selected in OAuth, without ever persisting a mismatched token."""
+    def fetch_channel() -> Optional[dict]:
+        creds = _youtube_credentials_from_db(refresh_token)
+        creds.refresh(Request())
+        youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
+        response = youtube.channels().list(part="snippet", mine=True, maxResults=1).execute()
+        items = response.get("items") if isinstance(response, dict) else None
+        if not items:
+            return None
+        item = items[0]
+        snippet = item.get("snippet") or {}
+        return {
+            "id": item.get("id"),
+            "title": snippet.get("title"),
+            "custom_url": snippet.get("customUrl"),
+        }
+
+    try:
+        return await asyncio.to_thread(fetch_channel)
+    except Exception as exc:
+        print(f"[YouTube OAuth] channel verification failed: {type(exc).__name__}")
+        return None
+
+
+def youtube_expected_channel_id() -> str:
+    return YOUTUBE_EXPECTED_CHANNEL_ID
 
 
 def _upload_video_file_blocking(

@@ -106,6 +106,23 @@ curl -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID"
 curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/prepared.glb"</code></pre>
             </div>
 
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;">YouTube uploads</h2>
+                <p style="color: var(--text-secondary); line-height: 1.6;">Connect the channel once through the admin YouTube OAuth flow. The refresh token is stored server-side. This upload endpoint accepts only administrator sessions or API keys owned by an administrator. Create a key while signed in to an admin account on this page.</p>
+                <p style="color: var(--text-secondary); line-height: 1.6;">Uploads default to <code>public</code>. YouTube may still force uploads from a new or unverified API project to remain private until the project passes its compliance audit.</p>
+                <p style="color: var(--text-secondary); line-height: 1.6;">Shorts are classified by YouTube from the video itself, not by an API flag. For standard channels, square or vertical videos up to three minutes are categorized as Shorts under YouTube's current rules. A landscape video or a longer video is long-form.</p>
+                <pre style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5;"><code>curl -X POST "$BASE/api/youtube/videos" \
+  -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
+  -F "file=@short-or-long-video.mp4;type=video/mp4" \
+  -F "title=Video title" \
+  -F "description=Video description" \
+  -F "tags=3D,game development,AutoRig" \
+  -F "privacy_status=public"
+
+# Response: {"ok":true,"video_id":"...","url":"https://www.youtube.com/watch?v=...","privacy_status":"public","requested_privacy_status":"public"}</code></pre>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">Maximum upload size defaults to 4096 MB and can be changed with <code>YOUTUBE_API_UPLOAD_MAX_MB</code>. The file is removed from the server after the upload attempt.</p>
+            </div>
+
             <div class="sr-only visually-hidden" aria-hidden="true" style="position:absolute;left:-10000px; width:1px;height:1px;overflow:hidden;">
                 <p data-i18n="developers_agent_hint">Machine-readable API brief for agents is embedded as JSON below.</p>
             </div>
@@ -183,7 +200,9 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                     "POST /api/task/create — Content-Type: application/json with {\"input_url\":\"...\"} (defaults: source=link, type=t_pose); or multipart/form-data with input_url, optional file for upload",
                     "GET /api/task/{task_id} until status is done or error",
                     "GET /api/task/{task_id}/cached-files for file list",
-                    "Download GLB/FBX via GET /api/task/{task_id}/prepared.glb, animations.glb, animations.fbx, model.glb"
+                    "Download GLB/FBX via GET /api/task/{task_id}/prepared.glb, animations.glb, animations.fbx, model.glb",
+                    "POST /api/youtube/videos — multipart upload for administrator-owned API keys; fields: file, title, description, tags (comma-separated), privacy_status (private|unlisted|public); defaults to public, subject to YouTube project audit restrictions",
+                    "Shorts classification is automatic from video aspect ratio and duration; no Shorts flag is sent by the API"
                 ],
                 paths: [
                     "/api/task/create",
@@ -193,7 +212,10 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                     "/api/task/{task_id}/animations.fbx",
                     "/api/task/{task_id}/model.glb",
                     "/api/task/{task_id}/cached-files",
-                    "/api/user/api-keys"
+                    "/api/user/api-keys",
+                    "/api/youtube/videos",
+                    "/api/admin/youtube/oauth/start",
+                    "/api/admin/youtube/status"
                 ]
             };
             const jsonEl = document.getElementById('autorig-api-agent-brief');
