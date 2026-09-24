@@ -1,0 +1,21 @@
+{
+  "format": "autorig.cloth.builtin-presets",
+  "version": 1,
+  "note": "Canonical values of the built-in presets of cloth manifest v1. Producers and runtimes must both match this file; tests on each side compare against it. Lengths are meters for an adult of about 1.7 m.",
+  "presets": [
+    { "name": "hair", "gravity": 1.0, "damping": 0.12, "stiffness": 0.25, "angle_limit_deg": 70, "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.015, "radius_tip": 0.008, "inertia_move": 0.6, "inertia_rotate": 0.6, "drag": 0.02, "wind": 1.0 },
+    { "name": "hair_stiff", "gravity": 0.5, "damping": 0.2, "stiffness": 0.5, "angle_limit_deg": 30, "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.015, "radius_tip": 0.01, "inertia_move": 0.4, "inertia_rotate": 0.4, "drag": 0.02, "wind": 0.5 },
+    { "name": "skirt", "gravity": 1.0, "damping": 0.15, "stiffness": 0.3, "angle_limit_deg": 60, "stretch": 0.05, "connection_stiffness": 0.6, "radius": 0.03, "radius_tip": 0.025, "inertia_move": 0.6, "inertia_rotate": 0.5, "drag": 0.03, "wind": 0.7 },
+    { "name": "cape", "gravity": 1.0, "damping": 0.08, "stiffness": 0.08, "angle_limit_deg": 110, "stretch": 0.03, "connection_stiffness": 0.5, "radius": 0.035, "radius_tip": 0.035, "inertia_move": 0.8, "inertia_rotate": 0.75, "drag": 0.05, "wind": 1.0 },
+    { "name": "ribbon", "gravity": 0.8, "damping": 0.06, "stiffness": 0.05, "angle_limit_deg": 0, "stretch": 0.0, "connection_stiffness": 0.3, "radius": 0.01, "radius_tip": 0.01, "inertia_move": 0.85, "inertia_rotate": 0.85, "drag": 0.08, "wind": 1.0 },
+    { "name": "tail", "gravity": 0.4, "damping": 0.18, "stiffness": 0.45, "angle_limit_deg": 45, "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.04, "radius_tip": 0.015, "inertia_move": 0.5, "inertia_rotate": 0.45, "drag": 0.02, "wind": 0.2 },
+    { "name": "accessory", "gravity": 1.0, "damping": 0.25, "stiffness": 0.35, "angle_limit_deg": 50, "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.012, "radius_tip": 0.012, "inertia_move": 0.5, "inertia_rotate": 0.5, "drag": 0.02, "wind": 0.3 }
+  ],
+  "default": { "name": "", "gravity": 1.0, "damping": 0.1, "stiffness": 0.2, "angle_limit_deg": 0, "stretch": 0.0, "connection_stiffness": 0.5, "radius": 0.02, "radius_tip": 0.0, "inertia_move": 0.7, "inertia_rotate": 0.7, "drag": 0.02, "wind": 1.0 },
+  "kind_fallback": [
+    { "kind": "hair", "preset": "hair" },
+    { "kind": "cloth", "preset": "skirt" },
+    { "kind": "tail", "preset": "tail" },
+    { "kind": "accessory", "preset": "accessory" }
+  ]
+}

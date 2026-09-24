@@ -45,8 +45,19 @@ PRESET_FIELDS = (
 # Fields holding a length (meters). They are scaled with the character.
 PRESET_LENGTH_FIELDS = ("radius", "radius_tip")
 
-# Built-in presets every runtime must know (spec, "presets[]"). Radii are for
-# an adult of REFERENCE_HEIGHT_M and are scaled to the actual character.
+# Built-in presets every runtime must know (spec, "presets[]"). The values are
+# the canonical ones in autorig-cloth/spec/builtin-presets.v1.json, which the
+# Unity runtime (BuiltInPresets.cs) matches too; a test keeps the three equal.
+# They are inlined because the VPS deploy ships tools/regen/ without
+# autorig-cloth/.
+#
+# Radii are meters for an adult of REFERENCE_HEIGHT_M (the canonical file's
+# "about 1.7 m"). preset_entry() multiplies only the length fields by the
+# character's height / REFERENCE_HEIGHT_M, and the producer writes every preset
+# its groups use, so the file's own preset (which overrides the built-in one of
+# the same name) fits the body: exactly the canonical values at 1.7 m, smaller
+# radii for a child. The runtime's calibration factor then corrects only the
+# import scale.
 REFERENCE_HEIGHT_M = 1.7
 BUILTIN_PRESETS: dict[str, dict[str, float]] = {
     "hair": {
@@ -55,34 +66,34 @@ BUILTIN_PRESETS: dict[str, dict[str, float]] = {
         "inertia_move": 0.6, "inertia_rotate": 0.6, "drag": 0.02, "wind": 1.0,
     },
     "hair_stiff": {
-        "gravity": 0.6, "damping": 0.2, "stiffness": 0.5, "angle_limit_deg": 40.0,
+        "gravity": 0.5, "damping": 0.2, "stiffness": 0.5, "angle_limit_deg": 30.0,
         "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.015, "radius_tip": 0.01,
-        "inertia_move": 0.5, "inertia_rotate": 0.5, "drag": 0.02, "wind": 0.6,
+        "inertia_move": 0.4, "inertia_rotate": 0.4, "drag": 0.02, "wind": 0.5,
     },
     "skirt": {
         "gravity": 1.0, "damping": 0.15, "stiffness": 0.3, "angle_limit_deg": 60.0,
-        "stretch": 0.05, "connection_stiffness": 0.5, "radius": 0.03, "radius_tip": 0.03,
-        "inertia_move": 0.7, "inertia_rotate": 0.7, "drag": 0.03, "wind": 0.8,
+        "stretch": 0.05, "connection_stiffness": 0.6, "radius": 0.03, "radius_tip": 0.025,
+        "inertia_move": 0.6, "inertia_rotate": 0.5, "drag": 0.03, "wind": 0.7,
     },
     "cape": {
-        "gravity": 1.0, "damping": 0.1, "stiffness": 0.12, "angle_limit_deg": 90.0,
-        "stretch": 0.05, "connection_stiffness": 0.6, "radius": 0.03, "radius_tip": 0.03,
-        "inertia_move": 0.8, "inertia_rotate": 0.8, "drag": 0.05, "wind": 1.0,
+        "gravity": 1.0, "damping": 0.08, "stiffness": 0.08, "angle_limit_deg": 110.0,
+        "stretch": 0.03, "connection_stiffness": 0.5, "radius": 0.035, "radius_tip": 0.035,
+        "inertia_move": 0.8, "inertia_rotate": 0.75, "drag": 0.05, "wind": 1.0,
     },
     "ribbon": {
-        "gravity": 1.0, "damping": 0.08, "stiffness": 0.1, "angle_limit_deg": 0.0,
-        "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.01, "radius_tip": 0.01,
-        "inertia_move": 0.8, "inertia_rotate": 0.8, "drag": 0.04, "wind": 1.0,
+        "gravity": 0.8, "damping": 0.06, "stiffness": 0.05, "angle_limit_deg": 0.0,
+        "stretch": 0.0, "connection_stiffness": 0.3, "radius": 0.01, "radius_tip": 0.01,
+        "inertia_move": 0.85, "inertia_rotate": 0.85, "drag": 0.08, "wind": 1.0,
     },
     "tail": {
-        "gravity": 0.5, "damping": 0.15, "stiffness": 0.4, "angle_limit_deg": 60.0,
-        "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.04, "radius_tip": 0.02,
-        "inertia_move": 0.6, "inertia_rotate": 0.6, "drag": 0.02, "wind": 0.3,
+        "gravity": 0.4, "damping": 0.18, "stiffness": 0.45, "angle_limit_deg": 45.0,
+        "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.04, "radius_tip": 0.015,
+        "inertia_move": 0.5, "inertia_rotate": 0.45, "drag": 0.02, "wind": 0.2,
     },
     "accessory": {
-        "gravity": 1.0, "damping": 0.2, "stiffness": 0.3, "angle_limit_deg": 45.0,
-        "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.02, "radius_tip": 0.02,
-        "inertia_move": 0.6, "inertia_rotate": 0.6, "drag": 0.02, "wind": 0.5,
+        "gravity": 1.0, "damping": 0.25, "stiffness": 0.35, "angle_limit_deg": 50.0,
+        "stretch": 0.0, "connection_stiffness": 0.0, "radius": 0.012, "radius_tip": 0.012,
+        "inertia_move": 0.5, "inertia_rotate": 0.5, "drag": 0.02, "wind": 0.3,
     },
 }
 
@@ -142,7 +153,12 @@ def artifact_paths(out_dir: str | Path, stem: str) -> dict[str, Path]:
 
 
 def default_preset_name(kind: str, connection: str) -> str:
-    """Built-in preset for a group that did not name one."""
+    """Built-in preset for a decomposition group that did not name one.
+
+    This is the producer's own choice (cloth by connection). The spec's
+    ``kind_fallback`` (cloth -> ``skirt``) is what a runtime uses for a group
+    whose ``preset`` is empty, which this producer never writes.
+    """
     if kind == "hair":
         return "hair"
     if kind == "tail":
@@ -211,8 +227,11 @@ def build_manifest(
     }
     for preset in presets:
         entry = {"name": str(preset["name"])}
+        missing = [field for field in PRESET_FIELDS if field not in preset]
+        if missing:  # never invent values: a reader cannot tell a missing number from 0
+            raise ValueError(f"preset {entry['name']!r} lacks {missing}; every preset field is required")
         for field in PRESET_FIELDS:
-            entry[field] = _round(preset.get(field, BUILTIN_PRESETS["accessory"][field]))
+            entry[field] = _round(preset[field])
         doc["presets"].append(entry)
     for group in groups:
         doc["groups"].append(
@@ -310,9 +329,11 @@ def validate_manifest(doc: Any) -> list[str]:
                 errors.append(f"{where}.name {name!r} is not unique")
             else:
                 preset_names.add(name)
-            for field, (low, high) in _PRESET_RANGES.items():
-                if field not in preset:
+            for field in PRESET_FIELDS:
+                if field not in preset:  # schema: every field is required (JsonUtility reads it as 0)
+                    errors.append(f"{where}.{field} is missing; every preset field is required")
                     continue
+                low, high = _PRESET_RANGES[field]
                 value = preset[field]
                 if not _is_number(value) or value < low or (high is not None and value > high):
                     bound = f"[{low}, {high}]" if high is not None else f">= {low}"
@@ -447,11 +468,17 @@ def strip_namespace(name: str) -> str:
 
 
 def resolve_bone(name: str, available: Iterable[str]) -> str | None:
-    """Resolve like a runtime does: exact name, then namespace-stripped name."""
+    """Resolve like a runtime does: exact name, then namespace-stripped name.
+
+    Pass ``available`` in depth-first hierarchy order: when several bones match
+    after stripping, the first one wins. An empty stripped name never matches.
+    """
     pool = list(available)
     if name in pool:
         return name
     stripped = strip_namespace(name)
+    if not stripped:
+        return None
     for candidate in pool:
         if strip_namespace(candidate) == stripped:
             return candidate

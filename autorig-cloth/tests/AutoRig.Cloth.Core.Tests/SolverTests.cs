@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using AutoRig.Cloth.Core;
 using Xunit;
 
@@ -282,6 +284,19 @@ namespace AutoRig.Cloth.Core.Tests
             GroupHandle open = solver.AddGroup(new[] { 5, 4, 6 }, ConnectionMode.Open);
             Assert.Equal(2 * 3, solver.GetLinkCount(open)); // 2 pairs × (4 − 1) linked free joints
 
+            // The shortest chain of the whole group bounds every pair, not just the pairs it is in.
+            GroupHandle unevenOpen = solver.AddGroup(new[] { 4, 6, 6 }, ConnectionMode.Open);
+            Assert.Equal(2 * 3, solver.GetLinkCount(unevenOpen));
+            GroupHandle unevenLoop = solver.AddGroup(new[] { 6, 4, 6 }, ConnectionMode.Loop);
+            Assert.Equal(3 * 3, solver.GetLinkCount(unevenLoop));
+            static int JointOf(int particle) => particle >= 10 ? particle - 10 : (particle >= 6 ? particle - 6 : particle); // chains start at 0, 6, 10
+            for (int l = 0; l < solver.GetLinkCount(unevenLoop); l++)
+            {
+                solver.GetLink(unevenLoop, l, out int first, out int second);
+                Assert.Equal(JointOf(first), JointOf(second));
+                Assert.InRange(JointOf(first), 1, 3);
+            }
+
             GroupHandle loop = solver.AddGroup(new[] { 3, 3, 3 }, ConnectionMode.Loop);
             Assert.Equal(3 * 2, solver.GetLinkCount(loop));
             solver.GetLink(loop, 5, out int a, out int b);
@@ -293,6 +308,64 @@ namespace AutoRig.Cloth.Core.Tests
 
             GroupHandle none = solver.AddGroup(new[] { 3, 3 }, ConnectionMode.None);
             Assert.Equal(0, solver.GetLinkCount(none));
+        }
+
+        [Fact]
+        public void Stiffness_RecoversItsShareOfTheAnglePerSixtiethOfASecond_AtAnyStepRate()
+        {
+            // stiffness is the share of the angle back to the animated direction recovered per 1/60 s;
+            // it turns the link and never changes its length. No gravity, no inertia, and damping 1 so
+            // that only the restoration moves the joint.
+            const float stiffness = 0.2f;
+            const float startDegrees = 10f;
+            const float segment = 0.5f;
+            V3 hanging = V3.Down * segment;
+            V3 turned = Q4.AngleAxis(startDegrees, V3.Forward) * hanging;
+            var remaining = new List<float>();
+            foreach (float rate in new[] { 60f, 120f, 240f, 480f })
+            {
+                var solver = new ClothSolver { Settings = new SolverSettings { substepRate = rate, maxSubsteps = 16, iterations = 4, gravity = V3.Zero } };
+                GroupHandle group = solver.AddGroup(new[] { 2 }, ConnectionMode.None);
+                solver.SetParameters(group, ChainScene.Plain(gravity: 0f, damping: 1f, stiffness: stiffness));
+                solver.SetGroupFrame(group, RigidFrame.Identity);
+                solver.SetTarget(group, 0, V3.Zero);
+                solver.SetTarget(group, 1, hanging);
+                solver.Simulate(Frame60); // starts on the animated pose
+
+                // Turn the animated pose; a paused frame makes it the pose of the whole next frame.
+                solver.SetTarget(group, 1, turned);
+                solver.Simulate(0f);
+                solver.Simulate(Frame60);
+
+                V3 link = solver.GetPosition(group, 1) - solver.GetPosition(group, 0);
+                Assert.Equal(segment, link.Length, 5);
+                double cos = Math.Min(1.0, V3.Dot(link.Normalized, turned.Normalized));
+                remaining.Add((float)(Math.Acos(cos) * 180.0 / Math.PI));
+            }
+
+            float expected = (1f - stiffness) * startDegrees;
+            Assert.All(remaining, angle => Assert.InRange(angle, expected * 0.99f, expected * 1.01f));
+            Assert.True(remaining.Max() - remaining.Min() < 0.01f, "depends on the step rate: " + string.Join(", ", remaining));
+        }
+
+        [Fact]
+        public void RadiusTipZero_MeansTheSameAsRadius()
+        {
+            var solver = new ClothSolver();
+            GroupHandle group = solver.AddGroup(new[] { 3 }, ConnectionMode.None);
+            solver.SetLengthScale(group, 2f);
+            solver.SetParameters(group, ClothParameters.Default); // radius 0.02, radius_tip 0
+            for (int k = 0; k < 3; k++)
+            {
+                Assert.Equal(0.04f, solver.GetParticleRadius(group, k), 6);
+            }
+
+            ClothParameters tapered = ClothParameters.Default;
+            tapered.radiusTip = 0.01f;
+            solver.SetParameters(group, tapered);
+            Assert.Equal(0.04f, solver.GetParticleRadius(group, 0), 6);
+            Assert.Equal(0.03f, solver.GetParticleRadius(group, 1), 6); // interpolated along the chain
+            Assert.Equal(0.02f, solver.GetParticleRadius(group, 2), 6);
         }
 
         [Fact]

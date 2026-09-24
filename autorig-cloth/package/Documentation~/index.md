@@ -150,7 +150,7 @@ length, so behaviour does not depend on the frame rate or the step rate.
 | stretch | 0–1 | 0 | Allowed stretch and compression of links along a chain while simulating (bones keep their length on screen). |
 | connection stiffness | 0–1 | 0.5 | Stiffness of links between neighbouring chains, per 1/60 s. |
 | radius | metres | 0.02 | Collision radius of the first joint of a chain. |
-| radius tip | metres | = radius | Collision radius of the last joint (0 = same as radius); interpolated in between. |
+| radius tip | metres | 0 | Collision radius of the last joint; interpolated in between. 0 = same as radius, so a tip radius of exactly zero cannot be expressed. |
 | inertia move | 0–1 | 0.7 | Share of the attach bone's translation the cloth feels: 1 = pure world-space physics (trails behind), 0 = moves rigidly with the character. |
 | inertia rotate | 0–1 | 0.7 | The same for the attach bone's rotation. |
 | drag | 0–1 | 0.02 | Quadratic air drag: grows with speed, taming fast whipping while leaving slow sway lively. |

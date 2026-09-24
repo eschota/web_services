@@ -18,7 +18,9 @@ Machine-readable schema: [`cloth-manifest.v1.schema.json`](cloth-manifest.v1.sch
    through `calibration` (see below).
 3. **Unity `JsonUtility` must be able to parse it.** So: no arrays of arrays,
    no dictionaries, no optional nested objects. Lists are arrays of objects;
-   an absent string is `""`, an absent number is `0`.
+   an absent string is `""`, an absent number is `0`. A reader cannot tell a
+   missing number from a written 0, so producers write every field of every
+   preset.
 4. **Unknown fields are ignored**, so a v1 reader accepts files written by a
    newer producer that only added fields. A change in meaning bumps `version`.
 
@@ -83,20 +85,24 @@ the factor is 1 and the runtime warns.
 
 ### `presets[]`
 
-All numbers are dimensionless unless a unit is given. Defaults in brackets are
-what a runtime uses for a preset name it does not find.
+All numbers are dimensionless unless a unit is given. **Every field is
+required**: `JsonUtility` reads a missing number as 0, so a partial preset
+would silently simulate with no gravity or no collision radius. A runtime
+warns when a preset looks partial. Values in brackets are the `default`
+parameters of [`builtin-presets.v1.json`](builtin-presets.v1.json), used for a
+preset name that is neither in the file nor built in.
 
 | Field | Range | Meaning |
 |---|---|---|
 | `name` | string | Referenced by `groups[].preset`. |
 | `gravity` | 0–2 [1] | Multiplier of 9.81 m/s². |
 | `damping` | 0–1 [0.1] | Share of velocity removed per 1/60 s. |
-| `stiffness` | 0–1 [0.2] | Pull back toward the animated pose direction, per step. |
+| `stiffness` | 0–1 [0.2] | Share of the angle back to the animated pose direction recovered per 1/60 s. It turns links; it never changes their length. |
 | `angle_limit_deg` | 0–180 [0] | Hard limit of deviation from the animated direction; 0 = no limit. |
 | `stretch` | 0–1 [0] | Allowed stretch of links along a chain; 0 = inextensible. |
 | `connection_stiffness` | 0–1 [0.5] | Stiffness of links between neighbouring chains (see `connection`). |
 | `radius` | meters [0.02] | Collision radius of a chain's first joint. |
-| `radius_tip` | meters [same as `radius`] | Collision radius of the last joint; linearly interpolated in between. |
+| `radius_tip` | meters [0] | Collision radius of the last joint; linearly interpolated in between. 0 = same as `radius`, as with `radius_to`, so a tip radius of exactly zero cannot be expressed. |
 | `inertia_move` | 0–1 [0.7] | How much of the character's world translation the cloth feels. 1 = pure world-space physics, 0 = none (moves rigidly with the character). |
 | `inertia_rotate` | 0–1 [0.7] | Same for the character's world rotation. |
 | `drag` | 0–1 [0.02] | Air drag. |
@@ -104,6 +110,12 @@ what a runtime uses for a preset name it does not find.
 
 Built-in preset names a runtime must know even when the file does not define
 them: `hair`, `hair_stiff`, `skirt`, `cape`, `ribbon`, `tail`, `accessory`.
+Their values live in one place, [`builtin-presets.v1.json`](builtin-presets.v1.json),
+and producer and runtime tests both compare against that file. A file's own
+preset with a built-in name overrides the built-in values. A group whose
+`preset` is empty gets the built-in preset for its `kind` (the file's
+`kind_fallback`: hair → `hair`, cloth → `skirt`, tail → `tail`,
+accessory → `accessory`), with a warning.
 
 ### `groups[]`
 
@@ -127,7 +139,9 @@ of a chain keeps its animated position (it is attached to its parent) and has
 its rotation simulated; every later joint is a free particle.
 
 Chains in one `open`/`loop` group should have the same number of bones. When
-they do not, links are made only up to the shortest chain's length.
+they do not, links are made only up to the length of the shortest chain in the
+whole group. A `loop` of exactly two chains behaves as `open`: closing it would
+link the same pair twice.
 
 ### `colliders[]`
 
@@ -147,15 +161,16 @@ A collider follows its bones every frame, so it animates with the character.
 ## Runtime behaviour a reader must implement
 
 - Resolve every bone by exact name first, then by name with any namespace
-  prefix stripped (`mixamorig:Hips` → `Hips`, `Armature|Hips` → `Hips`).
-  A group with an unresolvable bone is skipped with a warning; the rest still
-  load.
+  prefix stripped on both sides (`mixamorig:Hips` → `Hips`,
+  `Armature|Hips` → `Hips`). When several bones match after stripping, the
+  first in depth-first hierarchy order wins, with a warning. A group with an
+  unresolvable bone is skipped with a warning; the rest still load.
 - Read the animated pose first (after the Animator), simulate, then write
   rotations back — so an animation clip without the chain bones still plays
   and the chains swing on top of it.
 - Reset (teleport) when the attach bone moves more than 3× the calibrated
-  Hips–Head distance (about 2 m on an adult), or rotates more than 90°,
-  within one frame. Running at 10 m/s is 0.17 m per frame at 60 fps, so this
+  `bone_a`–`bone_b` distance (about 2 m on an adult with Hips–Head), or
+  rotates more than 90°, within one frame. Running at 10 m/s is 0.17 m per frame at 60 fps, so this
   never fires on real movement.
 
 ## Versioning

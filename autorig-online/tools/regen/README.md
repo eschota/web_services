@@ -176,6 +176,11 @@ venv-bpy/bin/python -m pytest autorig-online/backend/tests/test_regen_cloth_rig.
 Without `bpy` the same test file runs its numpy-only tests and skips the
 Blender ones. Without `jsonschema` it also skips the schema check.
 
+After a run that imported or exported a model, the `bpy` module segfaults
+while the interpreter shuts down (exit 139). pytest has already printed its
+summary by then, so read the result from that line, not from the exit code.
+A real Blender binary does not do this, so the runner is unaffected.
+
 ## Installing Blender on the Linux VPS
 
 The farm boxes (Windows) have Blender 4.3 and 5.1, and every known-good

@@ -31,6 +31,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 TOOLS = REPO / "autorig-online" / "tools" / "regen"
 SCHEMA_PATH = REPO / "autorig-cloth" / "spec" / "cloth-manifest.v1.schema.json"
+BUILTIN_PRESETS_PATH = REPO / "autorig-cloth" / "spec" / "builtin-presets.v1.json"
 REAL_WEIGHTS = REPO / "autorig-online" / "backend" / "regen" / "weights.py"
 
 
@@ -357,10 +358,17 @@ def test_real_weights_module_loads_by_path_through_the_adapter():
     assert (ids <= 3).all()  # end joint (id 4 would be joint 3) never weighted
 
 
-def _manifest_example() -> dict:
+def _spec_json(path: Path) -> dict:
+    """A file of ``autorig-cloth/spec``. The VPS deploy ships ``tools/regen`` without it."""
+    if not (REPO / "autorig-cloth").is_dir():
+        pytest.skip("autorig-cloth/ is not part of this checkout")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _manifest_example(presets: list | None = None) -> dict:
     return manifest_lib.build_manifest(
         calibration={"bone_a": "Hips", "bone_b": "Head", "distance": 0.62},
-        presets=[manifest_lib.preset_entry("skirt", length_scale=1.0)],
+        presets=presets or [manifest_lib.preset_entry("skirt", length_scale=1.0)],
         groups=[{"name": "skirt", "kind": "cloth", "attach_bone": "Hips", "preset": "skirt", "connection": "loop",
                  "collider_tags": ["body"], "chains": [{"bones": ["skirt_00_0", "skirt_00_end"]},
                                                        {"bones": ["skirt_01_0", "skirt_01_end"]}]}],
@@ -384,6 +392,65 @@ def test_manifest_builder_and_validator():
     assert any("damping" in p for p in problems)
     jsonschema = pytest.importorskip("jsonschema")
     jsonschema.validate(doc, json.loads(SCHEMA_PATH.read_text()))
+
+
+def test_builtin_presets_equal_the_canonical_file():
+    """The inlined values are autorig-cloth/spec/builtin-presets.v1.json, which the runtime matches too."""
+    canonical = _spec_json(BUILTIN_PRESETS_PATH)
+    assert (canonical["format"], canonical["version"]) == ("autorig.cloth.builtin-presets", 1)
+    for preset in [*canonical["presets"], canonical["default"]]:
+        assert list(preset) == ["name", *manifest_lib.PRESET_FIELDS]
+    expected = {p["name"]: {f: p[f] for f in manifest_lib.PRESET_FIELDS} for p in canonical["presets"]}
+    assert manifest_lib.BUILTIN_PRESETS == expected
+    assert list(manifest_lib.BUILTIN_PRESETS) == list(expected)
+    assert all(tuple(values) == manifest_lib.PRESET_FIELDS for values in manifest_lib.BUILTIN_PRESETS.values())
+    # The producer picks cloth presets by connection; for a loop it agrees with the runtime's kind fallback.
+    for entry in canonical["kind_fallback"]:
+        assert manifest_lib.default_preset_name(entry["kind"], "loop") == entry["preset"]
+
+
+def test_validator_and_builder_require_every_preset_field():
+    doc = _manifest_example()
+    for field in manifest_lib.PRESET_FIELDS:
+        partial = json.loads(json.dumps(doc))
+        del partial["presets"][0][field]
+        assert manifest_lib.validate_manifest(partial) == [
+            f"presets[0].{field} is missing; every preset field is required"]
+    nameless = json.loads(json.dumps(doc))
+    del nameless["presets"][0]["name"]
+    assert manifest_lib.validate_manifest(nameless) == ["presets[0].name must be a non-empty string"]
+    with pytest.raises(ValueError, match=r"lacks \['damping'.*every preset field is required"):
+        _manifest_example([{"name": "skirt", "gravity": 1.0}])
+
+
+@pytest.mark.parametrize("height", [1.7, 1.0, 0.3, 2.4, 9.0])
+def test_produced_presets_are_complete_and_schema_valid(height):
+    scale = manifest_lib.length_scale_for_height(height)
+    presets = [manifest_lib.preset_entry(name, length_scale=scale) for name in manifest_lib.BUILTIN_PRESETS]
+    presets.append(manifest_lib.preset_entry("skirt_hero", base="skirt", length_scale=scale))
+    doc = _manifest_example(presets)
+    assert manifest_lib.validate_manifest(doc) == []
+    for entry in doc["presets"]:
+        assert list(entry) == ["name", *manifest_lib.PRESET_FIELDS]
+        base = manifest_lib.BUILTIN_PRESETS["skirt" if entry["name"] == "skirt_hero" else entry["name"]]
+        for field in manifest_lib.PRESET_FIELDS:  # only lengths follow the character's height
+            factor = scale if field in manifest_lib.PRESET_LENGTH_FIELDS else 1.0
+            assert entry[field] == pytest.approx(base[field] * factor, abs=1e-6), (entry["name"], field)
+            if height == manifest_lib.REFERENCE_HEIGHT_M:
+                assert entry[field] == base[field]  # the canonical values, exactly
+    schema = _spec_json(SCHEMA_PATH)
+    assert schema["$defs"]["preset"]["required"] == ["name", *manifest_lib.PRESET_FIELDS]
+    jsonschema = pytest.importorskip("jsonschema")
+    jsonschema.validate(doc, schema)
+
+
+def test_bone_resolution_mirrors_the_runtime():
+    depth_first = ["Armature|Hips", "mixamorig:Hips", "Spine", "Armature|"]
+    assert manifest_lib.resolve_bone("mixamorig:Hips", depth_first) == "mixamorig:Hips"  # exact name first
+    assert manifest_lib.resolve_bone("Hips", depth_first) == "Armature|Hips"  # then stripped: first in order
+    assert manifest_lib.resolve_bone("rig:Spine", depth_first) == "Spine"
+    assert manifest_lib.resolve_bone("mixamorig:", depth_first) is None  # an empty stripped name never matches
+    assert manifest_lib.resolve_bone("Head", depth_first) is None
 
 
 def test_stem_and_artifact_names():
@@ -880,6 +947,13 @@ def test_manifest_validates_against_schema(fbx_run):
     assert len(groups["skirt"]["chains"]) == 8 and len(groups["ponytail"]["chains"]) == 3
     assert groups["skirt"]["chains"][0]["bones"] == ["skirt_00_0", "skirt_00_1", "skirt_00_2", "skirt_00_3", "skirt_00_end"]
     assert {p["name"] for p in manifest["presets"]} == {"skirt", "hair"}
+    scale = fbx_run["report"]["length_scale"]
+    for preset in manifest["presets"]:  # the built-in values, radii scaled to the character's height
+        assert list(preset) == ["name", *manifest_lib.PRESET_FIELDS]
+        base = manifest_lib.BUILTIN_PRESETS[preset["name"]]
+        for field in manifest_lib.PRESET_FIELDS:
+            factor = scale if field in manifest_lib.PRESET_LENGTH_FIELDS else 1.0
+            assert preset[field] == pytest.approx(base[field] * factor, abs=1e-6), (preset["name"], field)
     colliders = {c["name"]: c for c in manifest["colliders"]}
     assert {"head", "hips", "spine", "chest", "thigh_l", "thigh_r", "calf_l", "calf_r",
             "upperarm_l", "upperarm_r", "forearm_l", "forearm_r"} <= set(colliders)

@@ -36,7 +36,9 @@
     "unit": { "type": "number", "minimum": 0, "maximum": 1 },
     "preset": {
       "type": "object",
-      "required": ["name"],
+      "required": ["name", "gravity", "damping", "stiffness", "angle_limit_deg", "stretch",
+                   "connection_stiffness", "radius", "radius_tip", "inertia_move",
+                   "inertia_rotate", "drag", "wind"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "gravity": { "type": "number", "minimum": 0, "maximum": 2 },

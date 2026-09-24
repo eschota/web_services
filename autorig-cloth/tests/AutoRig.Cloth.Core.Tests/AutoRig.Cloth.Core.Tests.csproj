@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <None Include="../../spec/cloth-manifest.v1.schema.json" Link="spec/cloth-manifest.v1.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../spec/builtin-presets.v1.json" Link="spec/builtin-presets.v1.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../spec/examples/*.json" LinkBase="spec/examples" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

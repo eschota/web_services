@@ -50,6 +50,14 @@ namespace AutoRig.Cloth.Core.Tests
             node = JsonNode.Parse(ExampleText);
             node["groups"][0]["connection"] = "ring";
             Assert.False(Validate(node.ToJsonString()).IsValid);
+
+            // Every preset field is required: JsonUtility would read a missing one as 0.
+            foreach (string field in new[] { "gravity", "radius_tip", "wind" })
+            {
+                node = JsonNode.Parse(ExampleText);
+                node["presets"][1].AsObject().Remove(field);
+                Assert.False(Validate(node.ToJsonString()).IsValid, "a preset without " + field + " passed the schema");
+            }
         }
 
         [Fact]
@@ -224,6 +232,45 @@ namespace AutoRig.Cloth.Core.Tests
             Assert.False(BoneNames.Matches("LeftHips", "Hips"));
             Assert.False(BoneNames.Matches("Hips", ""));
             Assert.False(BoneNames.Matches("mixamorig:", "Armature|"));
+        }
+
+        [Fact]
+        public void BoneNameIndex_ExactFirst_ThenStrippedOnBothSides_FirstInDepthFirstOrderWins()
+        {
+            // Bones added in depth-first order; plain objects stand in for transforms.
+            object armatureHips = new object(), rigHips = new object(), hips = new object();
+            object spine = new object(), spineCopy = new object(), empty = new object();
+            var index = new BoneNameIndex<object>();
+            index.Add("Armature|Hips", armatureHips);
+            index.Add("mixamorig:Hips", rigHips);
+            index.Add("Hips", hips);
+            index.Add("Spine", spine);
+            index.Add("Spine", spineCopy);
+            index.Add("Armature|", empty);
+            var warnings = new List<string>();
+
+            // An exact name wins even when another bone comes first once stripped, and is not ambiguous.
+            Assert.Same(hips, index.Find("Hips", warnings));
+            Assert.Same(rigHips, index.Find("mixamorig:Hips", warnings));
+            Assert.Empty(warnings);
+
+            // No exact match: stripped on both sides, the first in depth-first order wins, with one warning per name.
+            Assert.Same(armatureHips, index.Find("rig:Hips", warnings));
+            Assert.Single(warnings);
+            Assert.Contains("rig:Hips", warnings[0]);
+            Assert.Same(armatureHips, index.Find("other|Hips", warnings));
+            Assert.Single(warnings);
+
+            // Duplicate exact names: the first wins, with a warning.
+            Assert.Same(spine, index.Find("Spine", warnings));
+            Assert.Equal(2, warnings.Count);
+
+            Assert.Null(index.Find("Head", warnings));
+            Assert.Null(index.Find("mixamorig:", warnings)); // nothing left after stripping never matches
+            Assert.Same(empty, index.Find("Armature|", warnings)); // … but the exact name still does
+            Assert.Null(index.Find(string.Empty, warnings));
+            Assert.Null(index.Find(null, warnings));
+            Assert.Equal(2, warnings.Count);
         }
 
         [Fact]
