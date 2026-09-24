@@ -23,7 +23,7 @@ import uuid
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from PIL import Image, ImageChops, UnidentifiedImageError
 
@@ -40,6 +40,25 @@ DEFAULT_ALPHA_OCCUPANCY_MAX = 0.90
 DEFAULT_ECHO_MAE_LEVELS = 2.0
 DEFAULT_ECHO_WITHIN_LEVELS = 5
 DEFAULT_ECHO_WITHIN_FRACTION = 0.995
+
+# Qwen-Image-Edit re-pose (regen). There is no control mask to compare with -
+# the input is the task's own still - so the cut-out itself is read instead.
+QWEN_EDIT_REPORT_SCHEMA = "renderfin.qwen_edit_bundle_quality.v1"
+# RMBG leaves a soft fringe; only a clearly opaque pixel counts as the subject.
+QWEN_EDIT_SOLID_ALPHA_LEVEL = 127
+# Solid pixels in the outermost two rows/columns that mean the frame cut the
+# figure. A clipped hand or foot reconstructs as a truncated stump, and a
+# single matting speck must not fail an otherwise clean render.
+QWEN_EDIT_EDGE_BAND_PIXELS = 2
+QWEN_EDIT_EDGE_CLIP_MIN_PIXELS = 12
+# Trimmed from each end of the subject's mass before measuring its extent, so a
+# stray speck cannot stretch the box; fingertips lose only a few pixels.
+QWEN_EDIT_EXTENT_TRIM_FRACTION = 0.002
+# Arms out: a T-pose spans about its own height, arms down about half of it.
+QWEN_EDIT_MIN_SPAN_TO_HEIGHT = 0.7
+# Every verdict on the CONTENT of a well-formed render carries this prefix, and
+# nothing else does: callers use it to tell a model miss from a broken box.
+CONTENT_REJECTION_PREFIX = "qwen_edit_"
 
 
 class RenderArtifactQualityError(ValueError):
@@ -64,6 +83,20 @@ class RenderArtifactQualityError(ValueError):
             "message": str(self),
             "report": _json_safe_copy(self.report),
         }
+
+
+class RenderContentRejected(RenderArtifactQualityError):
+    """A well-formed render whose content cannot be used (no clean T-pose).
+
+    Unlike a broken bundle this says nothing about the renderer: the next seed
+    on the same box may well succeed, so the box must not be quarantined. It is
+    a verdict on this output, so the retry it causes spends an attempt.
+    """
+
+
+def is_content_rejection(text: str) -> bool:
+    """Whether an error text carries a content verdict rather than a box fault."""
+    return CONTENT_REJECTION_PREFIX in (text or "").lower()
 
 
 def _json_safe_copy(value: Any) -> Any:
@@ -431,6 +464,228 @@ def validate_tpose_bundle(
             "performed": False,
             "reason": "reference_not_supplied",
         }
+
+    report["passed"] = True
+    return _json_safe_copy(report)
+
+
+def _reject_content(
+    report: Dict[str, Any],
+    machine_code: str,
+    message: str,
+    **details: Any,
+) -> None:
+    report["passed"] = False
+    failure: Dict[str, Any] = {
+        "machine_code": machine_code,
+        "message": message,
+        "content": True,
+    }
+    if details:
+        failure["details"] = details
+    report["failure"] = failure
+    raise RenderContentRejected(machine_code, message, report)
+
+
+def _solid_line_counts(alpha: Image.Image) -> Tuple[List[float], List[float]]:
+    """Clearly-opaque pixel count of every column and of every row.
+
+    A float image box-filtered down to a single row (or column) holds the exact
+    per-line mean, which keeps this PIL-only and fast even at 2048 px.
+    """
+    width, height = alpha.size
+    solid = alpha.point(
+        lambda level: 255 if level > QWEN_EDIT_SOLID_ALPHA_LEVEL else 0
+    ).convert("F")
+    columns = solid.resize((width, 1), Image.Resampling.BOX).getdata()
+    rows = solid.resize((1, height), Image.Resampling.BOX).getdata()
+    return (
+        [value / 255.0 * height for value in columns],
+        [value / 255.0 * width for value in rows],
+    )
+
+
+def _trimmed_extent(counts: List[float], trim: float) -> Tuple[int, int]:
+    """First and last line holding the subject, ignoring `trim` of its mass
+    at each end."""
+    cut = sum(counts) * trim
+    first, last = 0, len(counts) - 1
+    running = 0.0
+    for index, value in enumerate(counts):
+        running += value
+        if running > cut:
+            first = index
+            break
+    running = 0.0
+    for index in range(len(counts) - 1, -1, -1):
+        running += counts[index]
+        if running > cut:
+            last = index
+            break
+    return first, last
+
+
+def validate_qwen_edit_bundle(
+    primary_bytes: bytes,
+    isolated_bytes: bytes,
+    *,
+    min_dimension: int = DEFAULT_MIN_DIMENSION,
+    max_image_pixels: int = DEFAULT_MAX_IMAGE_PIXELS,
+    max_encoded_bytes: int = DEFAULT_MAX_ENCODED_BYTES,
+    alpha_occupancy_min: float = DEFAULT_ALPHA_OCCUPANCY_MIN,
+    alpha_occupancy_max: float = DEFAULT_ALPHA_OCCUPANCY_MAX,
+    min_span_to_height: float = QWEN_EDIT_MIN_SPAN_TO_HEIGHT,
+) -> Dict[str, Any]:
+    """Validate a Qwen-Image-Edit re-pose before the 3D stage can consume it.
+
+    Structure is checked as for a Flux T-pose bundle - both images decode, the
+    cut-out is RGBA, the pair shares one size - and a failure there is the
+    box's, raised as :class:`RenderArtifactQualityError`. The content is then
+    read off the alpha: a subject is present, the frame did not cut it, and it
+    spans roughly its own height the way a T-pose does. A miss there raises
+    :class:`RenderContentRejected`: the render was fine, the pose was not.
+    """
+
+    if not 0.0 <= alpha_occupancy_min < alpha_occupancy_max <= 1.0:
+        raise ValueError("alpha occupancy bounds must satisfy 0 <= min < max <= 1")
+    if min_span_to_height <= 0:
+        raise ValueError("min_span_to_height must be positive")
+
+    report: Dict[str, Any] = {
+        "schema": QWEN_EDIT_REPORT_SCHEMA,
+        "passed": False,
+        "thresholds": {
+            "minimum_dimension_pixels": int(min_dimension),
+            "maximum_decoded_pixels": int(max_image_pixels),
+            "maximum_encoded_bytes": int(max_encoded_bytes),
+            "alpha_foreground_level_exclusive": int(
+                DEFAULT_ALPHA_FOREGROUND_THRESHOLD
+            ),
+            "alpha_foreground_occupancy_min": float(alpha_occupancy_min),
+            "alpha_foreground_occupancy_max": float(alpha_occupancy_max),
+            "solid_alpha_level_exclusive": int(QWEN_EDIT_SOLID_ALPHA_LEVEL),
+            "edge_band_pixels": int(QWEN_EDIT_EDGE_BAND_PIXELS),
+            "edge_clip_min_solid_pixels": int(QWEN_EDIT_EDGE_CLIP_MIN_PIXELS),
+            "extent_trim_fraction": float(QWEN_EDIT_EXTENT_TRIM_FRACTION),
+            "min_span_to_height": float(min_span_to_height),
+        },
+    }
+
+    try:
+        primary_payload = _coerce_bytes(primary_bytes, "primary")
+        isolated_payload = _coerce_bytes(isolated_bytes, "isolated")
+    except TypeError as exc:
+        _reject(
+            report,
+            "edit_bundle_bytes_invalid",
+            "edit bundle inputs must be bytes-like",
+            error=str(exc),
+        )
+
+    primary, _ = _decode_image(
+        primary_payload,
+        role="primary",
+        report=report,
+        min_dimension=min_dimension,
+        max_image_pixels=max_image_pixels,
+        max_encoded_bytes=max_encoded_bytes,
+    )
+    isolated, isolated_metrics = _decode_image(
+        isolated_payload,
+        role="isolated",
+        report=report,
+        min_dimension=min_dimension,
+        max_image_pixels=max_image_pixels,
+        max_encoded_bytes=max_encoded_bytes,
+    )
+    if isolated.mode != "RGBA" or "A" not in isolated.getbands():
+        _reject(
+            report,
+            "isolated_rgba_required",
+            "isolated image must decode as RGBA with an alpha channel",
+            decoded_mode=isolated.mode,
+        )
+    if isolated.size != primary.size:
+        _reject(
+            report,
+            "isolated_dimensions_mismatch",
+            "isolated image dimensions do not match the primary image",
+            primary_size=[primary.width, primary.height],
+            isolated_size=[isolated.width, isolated.height],
+        )
+
+    alpha = isolated.getchannel("A")
+    alpha_histogram = alpha.histogram()
+    total_pixels = isolated.width * isolated.height
+    foreground_occupancy = sum(
+        alpha_histogram[DEFAULT_ALPHA_FOREGROUND_THRESHOLD + 1 :]
+    ) / float(total_pixels)
+    isolated_metrics["alpha_foreground_occupancy"] = float(foreground_occupancy)
+    if foreground_occupancy < alpha_occupancy_min:
+        _reject_content(
+            report,
+            "qwen_edit_subject_missing",
+            "the cut-out holds too little of a figure",
+            occupancy=float(foreground_occupancy),
+            minimum=float(alpha_occupancy_min),
+        )
+    if foreground_occupancy > alpha_occupancy_max:
+        _reject_content(
+            report,
+            "qwen_edit_background_not_removed",
+            "the cut-out covers nearly the whole frame",
+            occupancy=float(foreground_occupancy),
+            maximum=float(alpha_occupancy_max),
+        )
+
+    columns, rows = _solid_line_counts(alpha)
+    if sum(columns) <= 0:
+        _reject_content(
+            report,
+            "qwen_edit_subject_missing",
+            "the cut-out has no clearly opaque pixels",
+        )
+    band = QWEN_EDIT_EDGE_BAND_PIXELS
+    edge_counts = {
+        "left": sum(columns[:band]),
+        "right": sum(columns[-band:]),
+        "top": sum(rows[:band]),
+        "bottom": sum(rows[-band:]),
+    }
+    left, right = _trimmed_extent(columns, QWEN_EDIT_EXTENT_TRIM_FRACTION)
+    top, bottom = _trimmed_extent(rows, QWEN_EDIT_EXTENT_TRIM_FRACTION)
+    span = right - left + 1
+    height = bottom - top + 1
+    span_to_height = span / float(height)
+    report["subject"] = {
+        "extent_px": [int(left), int(top), int(right), int(bottom)],
+        "span_px": int(span),
+        "height_px": int(height),
+        "span_to_height": round(span_to_height, 4),
+        "edge_solid_pixels": {
+            name: round(count, 2) for name, count in edge_counts.items()
+        },
+    }
+    clipped = sorted(
+        name
+        for name, count in edge_counts.items()
+        if count >= QWEN_EDIT_EDGE_CLIP_MIN_PIXELS
+    )
+    if clipped:
+        _reject_content(
+            report,
+            "qwen_edit_subject_clipped",
+            "the frame cuts the figure at " + ", ".join(clipped),
+            edges=clipped,
+        )
+    if span_to_height < min_span_to_height:
+        _reject_content(
+            report,
+            "qwen_edit_pose_not_spread",
+            "the figure is not spread like a T-pose",
+            span_to_height=round(span_to_height, 4),
+            minimum=float(min_span_to_height),
+        )
 
     report["passed"] = True
     return _json_safe_copy(report)

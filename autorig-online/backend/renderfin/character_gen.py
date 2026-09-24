@@ -3,6 +3,10 @@
 Stages: flux_render (t_pose image + isolated alpha) -> hunyuan (image_to_3d GLB)
 -> turntable (6s orbit mp4) -> ready. Stage state is persisted to sqlite so the
 service can resume interrupted jobs after a restart.
+
+A regen job re-poses an existing AutoRig task instead: it starts one stage
+earlier at regen_source (a still of the task's own model), and its flux_render
+is a Qwen-Image-Edit re-pose of that still. Everything after it is shared.
 """
 from __future__ import annotations
 
@@ -22,16 +26,28 @@ import httpx
 
 from fleet_admission import fleet_admission_lock
 
-from . import config, glb_quality, hunyuan_client, turntable, workload_lease
+from . import (
+    config,
+    glb_quality,
+    hunyuan_client,
+    image_quality,
+    regen_prompts,
+    regen_source,
+    turntable,
+    workload_lease,
+)
 from .models import (
+    CHARGEN_KIND_REGEN,
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
     CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_REGEN_SOURCE,
     CHARGEN_STAGE_SUBMITTED,
     CHARGEN_STAGE_TURNTABLE,
+    RENDER_TYPE_QWEN_EDIT,
     TASK_DONE,
     TASK_ERROR,
     TASK_PENDING,
@@ -53,7 +69,12 @@ CREATE TABLE IF NOT EXISTS chargen_jobs (
 CREATE INDEX IF NOT EXISTS idx_chargen_stage ON chargen_jobs(stage);
 """
 
-_ACTIVE_STAGES = (CHARGEN_STAGE_FLUX, CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_TURNTABLE)
+_ACTIVE_STAGES = (
+    CHARGEN_STAGE_REGEN_SOURCE,
+    CHARGEN_STAGE_FLUX,
+    CHARGEN_STAGE_HUNYUAN,
+    CHARGEN_STAGE_TURNTABLE,
+)
 
 
 def _atomic_artifact_bytes(path: Path, data: bytes) -> None:
@@ -154,6 +175,16 @@ FLUX_STAGE_TIMEOUT = float(
 HUNYUAN_STAGE_TIMEOUT = float(
     os.getenv("RENDERFIN_CHARGEN_HUNYUAN_TIMEOUT", "")
     or config.HUNYUAN_TIMEOUT_SECONDS + _STAGE_SLACK_SECONDS
+)
+# regen_source: how long a model that cannot be REACHED (the main app
+# restarting, a deploy's 502) is waited for before the poster stands in, and
+# how often it is asked again meanwhile. A model that does not EXIST falls back
+# to the poster at once; nothing is gained by waiting for it.
+REGEN_SOURCE_STAGE_TIMEOUT = float(
+    os.getenv("RENDERFIN_CHARGEN_REGEN_SOURCE_TIMEOUT", "900")
+)
+REGEN_SOURCE_PARK_SECONDS = float(
+    os.getenv("RENDERFIN_CHARGEN_REGEN_SOURCE_PARK", "60")
 )
 
 # Automatic stage recovery: how many times a stage retries itself before the
@@ -641,6 +672,49 @@ class CharacterGenManager:
         self._spawn(job)
         return job
 
+    async def create_regen(
+        self,
+        source_task_id: str,
+        *,
+        user_name: str = "autorig-bot",
+        telegram_chat_id: int = 0,
+        view: str = "front",
+    ) -> CharacterGenJob:
+        """Re-pose an existing AutoRig task's character into a clean T-pose.
+
+        A badly generated character (arms fused to the torso, messy hair) is
+        still the character the user wanted. Instead of inventing one from a
+        prompt, the job renders a still of the task's own model, has
+        Qwen-Image-Edit re-pose it in two variants, and from the variant choice
+        on runs the exact code a generated character runs: the same approval
+        album, the same 3D queue, turntable and auto-submit.
+
+        Raises ValueError for an id that is not an AutoRig task UUID or a view
+        the still renderer cannot take.
+        """
+        task_id = regen_source.normalize_task_id(source_task_id)
+        view = regen_source.normalize_view(view)
+        prompt, prompt_b = regen_prompts.build_regen_prompts(view)
+        # The source still is written under RENDER_DIR/<user_name>/, so the
+        # name gets the same path-safety the queue gives its own renders.
+        user_name = RenderPrompt(user_name=user_name).user_name
+        job = CharacterGenJob(
+            seq=self._next_seq(),
+            kind=CHARGEN_KIND_REGEN,
+            render_type=RENDER_TYPE_QWEN_EDIT,
+            prompt=prompt,
+            prompt_b=prompt_b,
+            user_name=user_name,
+            source_task_id=task_id,
+            regen_view=view,
+            stage=CHARGEN_STAGE_REGEN_SOURCE,
+            telegram_chat_id=int(telegram_chat_id or 0),
+        )
+        self._jobs[job.id] = job
+        await self._persist(job)
+        self._spawn(job)
+        return job
+
     def get(self, job_id: str) -> Optional[CharacterGenJob]:
         return self._jobs.get(job_id)
 
@@ -1019,7 +1093,9 @@ class CharacterGenManager:
         job.glb_url = ""
         job.video_url = ""
         job.error = ""
-        job.warning = ""
+        if job.kind != CHARGEN_KIND_REGEN:
+            # a regen's warning describes its source still, which is reused
+            job.warning = ""
         job.retry_at = 0
         job.attempts = {}
         job.stage_started_at = 0
@@ -1038,6 +1114,8 @@ class CharacterGenManager:
 
     async def _run(self, job: CharacterGenJob) -> None:
         try:
+            if job.stage == CHARGEN_STAGE_REGEN_SOURCE:
+                await self._stage_regen_source(job)
             if job.stage == CHARGEN_STAGE_FLUX:
                 await self._stage_flux(job)
             if job.stage == CHARGEN_STAGE_AWAITING_IMAGE:
@@ -1066,6 +1144,22 @@ class CharacterGenManager:
         stage = job.stage
         job.last_error = str(exc)[:1000]
         job.hunyuan_waiting_for_capacity = False
+
+        if isinstance(exc, regen_source.RegenSourceUnavailable):
+            # The task's model is there but could not be reached: the main app
+            # restarting says nothing about the task. Park without spending an
+            # attempt and WITHOUT resetting the stage clock - that window is
+            # what ends the waiting and lets the poster stand in, so a model
+            # that never comes back cannot park the job forever.
+            job.retry_at = time.time() + REGEN_SOURCE_PARK_SECONDS
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} waiting for task "
+                f"{job.source_task_id}'s model ({exc}); re-checking in "
+                f"{int(REGEN_SOURCE_PARK_SECONDS)}s"
+            )
+            return
 
         if stage == CHARGEN_STAGE_HUNYUAN and job.hunyuan_workload_lease_id:
             if isinstance(exc, hunyuan_client.SubmissionOutcomeUnknown):
@@ -1204,6 +1298,10 @@ class CharacterGenManager:
         if (
             stage == CHARGEN_STAGE_FLUX
             and "render artifact quality rejected" in str(exc).lower()
+            # A pose the edit model missed is a verdict on that output, not on
+            # the box, so it spends an attempt below: a character the model
+            # cannot pose ends in a failure card instead of a GPU loop.
+            and not image_quality.is_content_rejection(str(exc))
         ):
             # The input/prompt remains valid; the renderer returned no genuine
             # task-owned bundle. Queue-level worker cooldown rotates this same
@@ -1511,6 +1609,19 @@ class CharacterGenManager:
             return task
 
     async def _enqueue_flux(self, job: CharacterGenJob, prompt: str, mask_url: str = ""):
+        if job.render_type == RENDER_TYPE_QWEN_EDIT:
+            # A regen edits the task's own still: both variants start from the
+            # same picture and differ only in the instruction. The edit
+            # workflow reads no pose mask and no negative prompt.
+            return await self._enqueue_managed_render(
+                job,
+                RenderPrompt(
+                    prompt=prompt,
+                    image_url=job.source_image_url,
+                    type=RENDER_TYPE_QWEN_EDIT,
+                    user_name=job.user_name,
+                ),
+            )
         return await self._enqueue_managed_render(
             job,
             RenderPrompt(
@@ -1522,6 +1633,118 @@ class CharacterGenManager:
             ),
         )
 
+    def _regen_source_path(self, job: CharacterGenJob) -> Path:
+        return config.RENDER_DIR / job.user_name / f"{job.id}_regen_source.png"
+
+    def _regen_source_ready(self, job: CharacterGenJob) -> bool:
+        return bool(job.source_image_url) and self._regen_source_path(job).is_file()
+
+    async def _stage_regen_source(self, job: CharacterGenJob) -> None:
+        """Render the still both edit variants start from.
+
+        The task's own model is rendered head-on over the backdrop the edit
+        keeps, so the edit only has to move the limbs. A model that cannot be
+        REACHED is waited for (RegenSourceUnavailable parks the job) but only
+        for this stage's persisted window; after that, and at once when no
+        model exists or it will not render twice running, the task's poster
+        stands in and the image card says so.
+        """
+        budget = await self._persisted_stage_budget(job, REGEN_SOURCE_STAGE_TIMEOUT)
+        out = self._regen_source_path(job)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        stamp = uuid.uuid4().hex[:8]
+        glb_download = config.TMP_DIR / f"regen_{job.id}_{stamp}.glb"
+        still_part = out.with_name(f".{out.stem}.{stamp}.part.png")
+        # Why the poster stands in: `why` for errors, `card` for the image card.
+        # Raw exception text only ever goes to the log - see the render below.
+        why = ""
+        card = ""
+        origin = ""
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                glb_path: Optional[Path] = None
+                try:
+                    glb_path, origin = await regen_source.fetch_glb(
+                        client, job.source_task_id, glb_download
+                    )
+                except regen_source.RegenSourceUnavailable as exc:
+                    if budget > 0:
+                        raise
+                    why, card = str(exc), "модель недоступна"
+                except regen_source.RegenSourceError as exc:
+                    why, card = str(exc), "у задачи нет модели"
+
+                if glb_path is not None:
+                    # resolved per call: a turntable module without a still
+                    # renderer must degrade to the poster, not crash the stage
+                    render_still = getattr(turntable, "render_still", None)
+                    if render_still is None:
+                        why, card = "no still renderer installed", "нет рендера стилла"
+                    else:
+                        try:
+                            produced = await render_still(
+                                glb_path,
+                                still_part,
+                                view=job.regen_view or "front",
+                                size=config.REGEN_SOURCE_SIZE,
+                            )
+                            produced = Path(produced or still_part)
+                            regen_source.check_still(produced)
+                            os.replace(str(produced), str(out))
+                        except Exception as exc:
+                            print(
+                                f"[Renderfin][CharGen] job {job.id} still render "
+                                f"failed: {exc}"
+                            )
+                            # The first miss is retried like any stage: Chrome
+                            # hiccups. A model that fails twice will fail
+                            # every time, and the poster beats nothing.
+                            if not (job.attempts or {}).get(CHARGEN_STAGE_REGEN_SOURCE):
+                                if isinstance(exc, regen_source.RegenSourceError):
+                                    raise
+                                # Only the type travels on: a renderer's own
+                                # output can read like a farm outage ("timed
+                                # out after"), which the retry loop would park
+                                # and revive forever.
+                                raise regen_source.RegenSourceError(
+                                    f"still render failed ({type(exc).__name__})"
+                                ) from exc
+                            why = f"still render failed twice ({type(exc).__name__})"
+                            card = "модель не рендерится"
+
+                if card:
+                    try:
+                        data, poster_origin = await regen_source.fetch_poster(
+                            client, job.source_task_id
+                        )
+                    except regen_source.RegenSourceUnavailable as exc:
+                        if budget > 0:
+                            raise
+                        # the window is spent, so this is a failed attempt now
+                        raise regen_source.RegenSourceError(
+                            f"no picture of task {job.source_task_id} could be "
+                            f"fetched ({why}; {exc})"
+                        ) from exc
+                    regen_source.poster_to_png(
+                        data, out, size=config.REGEN_SOURCE_SIZE
+                    )
+                    origin = poster_origin
+        finally:
+            glb_download.unlink(missing_ok=True)
+            still_part.unlink(missing_ok=True)
+
+        job.source_image_url = (
+            f"{config.PUBLIC_BASE_URL}/render/{job.user_name}/{out.name}"
+        )
+        job.warning = f"исходник — постер задачи: {card}" if card else ""
+        job.stage = CHARGEN_STAGE_FLUX
+        await self._persist(job)
+        print(
+            f"[Renderfin][CharGen] job {job.id} regen source for task "
+            f"{job.source_task_id} from {origin or 'unknown'}"
+            + (f" (poster stands in: {why})" if card else "")
+        )
+
     async def _stage_flux(self, job: CharacterGenJob) -> None:
         """Render both style variants so the user picks the better 3D base.
 
@@ -1529,6 +1752,16 @@ class CharacterGenManager:
         the farm has capacity, so two variants cost roughly one render of
         wall-clock time.
         """
+        if job.render_type == RENDER_TYPE_QWEN_EDIT and not self._regen_source_ready(job):
+            # The edit's only input is gone (resume or regenerate of a job that
+            # never finished its still, or a deleted file): every render would
+            # fail on the box. Rebuild it first; the retry loop picks the job
+            # up again on its next tick.
+            job.stage = CHARGEN_STAGE_REGEN_SOURCE
+            job.source_image_url = ""
+            job.retry_at = time.time()
+            await self._persist(job)
+            return
         if not job.flux_task_id or self.queue.get(job.flux_task_id) is None:
             task = await self._enqueue_flux(job, job.prompt)
             job.flux_task_id = task.id
@@ -2255,7 +2488,13 @@ class CharacterGenManager:
 
     def _cleanup_artifacts(self, job: CharacterGenJob) -> None:
         prefix = f"{config.PUBLIC_BASE_URL}/render/"
-        for url in (job.image_url, job.isolated_url, job.glb_url, job.video_url):
+        for url in (
+            job.image_url,
+            job.isolated_url,
+            job.glb_url,
+            job.video_url,
+            job.source_image_url,
+        ):
             if not url or not url.startswith(prefix):
                 continue
             path = config.RENDER_DIR / url[len(prefix):]

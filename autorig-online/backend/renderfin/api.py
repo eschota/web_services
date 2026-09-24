@@ -130,6 +130,13 @@ class CharacterGenFromImageRequest(BaseModel):
     source_task_id: str = ""
 
 
+class CharacterGenRegenRequest(BaseModel):
+    task_id: str
+    view: str = "front"
+    user_name: str = "autorig-bot"
+    telegram_chat_id: int = 0
+
+
 class CharacterCollectionMemberRequest(BaseModel):
     index: int
     title: str
@@ -231,6 +238,28 @@ async def api_character_gen_from_image(
         user_name=body.user_name,
         source_task_id=body.source_task_id,
     )
+    return job.public_dict()
+
+
+@router.post("/api-character-gen/regen")
+async def api_character_gen_regen(
+    request: Request, body: CharacterGenRegenRequest
+) -> Dict[str, Any]:
+    """Re-pose an existing AutoRig task's character into a clean T-pose.
+
+    The job renders a still of the task's own model, has Qwen-Image-Edit
+    re-pose it in two variants, and from the operator's choice on runs the
+    ordinary 3D -> turntable -> auto-submit pipeline.
+    """
+    try:
+        job = await _chargen(request).create_regen(
+            body.task_id,
+            user_name=body.user_name,
+            telegram_chat_id=body.telegram_chat_id,
+            view=body.view,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return job.public_dict()
 
 

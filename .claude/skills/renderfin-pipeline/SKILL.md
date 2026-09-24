@@ -36,6 +36,14 @@ flux_render → awaiting_image_approval → hunyuan → turntable → ready → 
 - **ready → submitted** — auto-submitted into the full autorig convert pipeline
   (retopology 1k/10k/100k, bake, rig, animations, every format). No button.
 
+**Regen** (♻️ on done notifications) is a second way into the same pipeline:
+`regen_source` renders a still of an existing task's own model before
+`flux_render`, whose two renders are then Qwen-Image-Edit-2511 re-poses
+(`qwen_edit.json`, its own scheduling token) instead of Flux. From the variant
+choice on nothing differs. Box setup, the X-Accel empty-body trap on
+127.0.0.1:8000 and the durability rules are in the RENDERFIN.md section
+"Regen: перегенерация существующей задачи".
+
 The chat shows **one message per job**, rewritten as it moves. Cards whose
 moment has passed (the variant choice, a failure that was retried) are deleted.
 Cleanup is private-chat only — groups are a shared log nobody asked us to

@@ -14,6 +14,10 @@ WORKFLOW_Z_DEPTH = "gen_image_by_z_depth.json"
 WORKFLOW_OPEN_POSE = "open_pose.json"
 WORKFLOW_INPAINT = "inpaint.json"
 WORKFLOW_IMAGE_TO_3D = "image_to_3d.json"
+# Qwen-Image-Edit-2511 re-pose of a supplied still (regen). Its models are ~30GB
+# that most boxes do not carry, so it is scheduled like image_to_3d: only boxes
+# that advertise this exact name receive it.
+WORKFLOW_QWEN_EDIT = "qwen_edit.json"
 WORKFLOW_ANIMATION_DEFAULT = "gen_animation_by_url.json"
 
 # Canonical LTX2 animation names advertised by workers; runtime file comes from
@@ -25,7 +29,10 @@ CANONICAL_ANIMATION_WORKFLOWS = {
     "autorig_animal_oneshot_ltx2_19b_v1",
 }
 
-IMAGE_TYPES = {"z_depth", "t_pose", "t_poses", "open_pose", "inpaint", "material", "image_to_3d"}
+IMAGE_TYPES = {
+    "z_depth", "t_pose", "t_poses", "open_pose", "inpaint", "material", "image_to_3d",
+    "qwen_edit",
+}
 
 
 def is_image_request(prompt: RenderPrompt) -> bool:
@@ -44,11 +51,15 @@ def scheduling_token(prompt: RenderPrompt) -> str:
 
     C# quirk preserved: any typed image request is scheduled as gen_image.json;
     the actual template file is picked later from prompt.type. image_to_3d is
-    new here and gets its own token so it only lands on capable workers (4090).
+    new here and gets its own token so it only lands on capable workers (4090);
+    qwen_edit likewise, because a box without the Qwen models would accept the
+    prompt and fail it on a missing file.
     """
     ptype = (prompt.type or "").strip().lower()
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
+    if ptype == "qwen_edit":
+        return WORKFLOW_QWEN_EDIT
     if is_image_request(prompt):
         return WORKFLOW_GEN_IMAGE
     return select_animation_workflow(prompt.work_flow)
@@ -71,6 +82,9 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
 
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D, None
+    if ptype == "qwen_edit":
+        # no forced size: the workflow scales the supplied still itself
+        return WORKFLOW_QWEN_EDIT, None
     if ptype == "z_depth":
         return WORKFLOW_Z_DEPTH, None
     if ptype in ("t_pose", "t_poses") and not has_aspect_ratio:

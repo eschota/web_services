@@ -176,6 +176,8 @@ class SentMessage(BaseModel):
 
 
 CHARGEN_STAGE_PROMPT = "prompt"
+# Regen only: render the existing task's model into the still the edit starts from.
+CHARGEN_STAGE_REGEN_SOURCE = "regen_source"
 CHARGEN_STAGE_FLUX = "flux_render"
 CHARGEN_STAGE_AWAITING_IMAGE = "awaiting_image_approval"
 CHARGEN_STAGE_HUNYUAN = "hunyuan"
@@ -184,6 +186,15 @@ CHARGEN_STAGE_READY = "ready"
 CHARGEN_STAGE_FAILED = "failed"
 CHARGEN_STAGE_DISCARDED = "discarded"
 CHARGEN_STAGE_SUBMITTED = "submitted"
+
+# A job either invents a character from a prompt or re-poses one that already
+# exists as an AutoRig task; everything from the variant choice on is shared.
+CHARGEN_KIND_GENERATE = "generate"
+CHARGEN_KIND_REGEN = "regen"
+# What the flux_render stage runs: the Flux T-pose render, or a Qwen-Image-Edit
+# re-pose of a supplied still (qwen_edit.json).
+RENDER_TYPE_T_POSE = "t_pose"
+RENDER_TYPE_QWEN_EDIT = "qwen_edit"
 
 
 class CharacterGenJob(BaseModel):
@@ -202,6 +213,14 @@ class CharacterGenJob(BaseModel):
     mask_url_b: str = ""
     user_name: str = "autorig-bot"
     source_task_id: str = ""
+    # Defaults describe every job persisted before regen existed, so old rows
+    # load unchanged. A regen re-poses source_task_id's own character.
+    kind: str = CHARGEN_KIND_GENERATE
+    render_type: str = RENDER_TYPE_T_POSE
+    # regen: the still both edit variants start from - an own artifact under
+    # RENDER_DIR, so the queue reads it from disk instead of through nginx
+    source_image_url: str = ""
+    regen_view: str = ""
     # Single generations are interactive.  Only create_collection changes this
     # to the background class; collection metadata by itself never implies it.
     queue_class: str = "interactive"
@@ -305,6 +324,10 @@ class CharacterGenJob(BaseModel):
             "mask_url_b": self.mask_url_b or None,
             "user_name": self.user_name,
             "source_task_id": self.source_task_id,
+            "kind": self.kind or CHARGEN_KIND_GENERATE,
+            "render_type": self.render_type or RENDER_TYPE_T_POSE,
+            "source_image_url": self.source_image_url or None,
+            "regen_view": self.regen_view or None,
             "collection_guid": self.collection_guid or None,
             "collection_title": self.collection_title or None,
             "collection_description": self.collection_description or None,

@@ -31,12 +31,14 @@ import httpx
 
 from . import config
 from .models import (
+    CHARGEN_KIND_REGEN,
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
     CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_REGEN_SOURCE,
     CHARGEN_STAGE_SUBMITTED,
     CHARGEN_STAGE_TURNTABLE,
     CharacterGenJob,
@@ -124,7 +126,16 @@ def _image_marker(job: CharacterGenJob) -> str:
     return f"{job.image_url}|{job.image_url_b}"
 
 
+def regen_caption(job: CharacterGenJob) -> str:
+    """"♻️ Regen задачи 1a2b3c4d" - what a regen job's cards show as its subject."""
+    return f"♻️ Regen задачи {(job.source_task_id or '')[:8]}"
+
+
 def _prompt_preview(job: CharacterGenJob, limit: int = 300) -> str:
+    if job.kind == CHARGEN_KIND_REGEN:
+        # A regen's prompt is the same edit instruction on every job; what
+        # tells the cards apart is the task being re-posed.
+        return html.escape(regen_caption(job))
     return html.escape((job.prompt or "")[:limit])
 
 
@@ -254,17 +265,21 @@ async def deliver_image_review(
         local_a = _local_render_file(job.image_url)
         local_b = _local_render_file(job.image_url_b)
         use_upload = local_a is not None and local_b is not None
+        if job.kind == CHARGEN_KIND_REGEN:
+            label_a, label_b = "1️⃣ точная T-поза", "2️⃣ чистая под 3D"
+        else:
+            label_a, label_b = "1️⃣ базовый стиль", "2️⃣ low-poly cartoon PBR"
         media = [
             {
                 "type": "photo",
                 "media": "attach://variant_a" if use_upload else job.image_url,
-                "caption": header + "\n1️⃣ базовый стиль",
+                "caption": header + f"\n{label_a}",
                 "parse_mode": "HTML",
             },
             {
                 "type": "photo",
                 "media": "attach://variant_b" if use_upload else job.image_url_b,
-                "caption": "2️⃣ low-poly cartoon PBR",
+                "caption": label_b,
                 "parse_mode": "HTML",
             },
         ]
@@ -404,6 +419,8 @@ def digest_text(jobs: List[CharacterGenJob], stats: Optional[Dict[str, int]] = N
                 f"{int(job.collection_index or 0)}/{int(job.collection_size or 0)} "
                 f"{job.collection_member_title}"
             )[:64]
+        elif job.kind == CHARGEN_KIND_REGEN:
+            subject = regen_caption(job)
         else:
             subject = (job.prompt or "").split(",")[0].strip()[:48]
         if subject:
@@ -508,6 +525,7 @@ async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Li
 
 
 _STAGE_LABELS = {
+    "regen_source": "рендер исходника",
     "flux_render": "рендер T-позы",
     "awaiting_image_approval": "ждёт вашего выбора",
     "ready": "готова к отправке",
@@ -523,6 +541,7 @@ _STAGE_LABELS = {
 # What the operator asked to see in the chat: work that is not finished.
 # awaiting_image_approval is included because it is waiting on THEM.
 UNFINISHED_STAGES = (
+    CHARGEN_STAGE_REGEN_SOURCE,
     CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_HUNYUAN,
@@ -532,6 +551,7 @@ UNFINISHED_STAGES = (
 )
 
 PROGRESS_STAGES = (
+    CHARGEN_STAGE_REGEN_SOURCE,
     CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_TURNTABLE,

@@ -281,6 +281,39 @@ TURNTABLE_FFMPEG = os.getenv("RENDERFIN_TURNTABLE_FFMPEG", "ffmpeg")
 TURNTABLE_SECONDS = float(os.getenv("RENDERFIN_TURNTABLE_SECONDS", "6"))
 TURNTABLE_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_TURNTABLE_TIMEOUT_SECONDS", "600"))
 
+# Regen (re-pose an existing AutoRig task): where the main app and its caches
+# are, so the task's model is read off this host's disk before any HTTP.
+MAIN_APP_INTERNAL_URL = os.getenv(
+    "RENDERFIN_MAIN_APP_INTERNAL_URL", "http://127.0.0.1:8000"
+).rstrip("/")
+MAIN_APP_PUBLIC_URL = os.getenv(
+    "RENDERFIN_MAIN_APP_PUBLIC_URL", "https://autorig.online"
+).rstrip("/")
+# The main app answers a cached file with an empty body and X-Accel-Redirect
+# for nginx to fill in; these roots map that internal uri back to the file.
+MAIN_GLB_CACHE_DIR = Path(
+    os.getenv(
+        "RENDERFIN_MAIN_GLB_CACHE_DIR",
+        str(PACKAGE_DIR.parent.parent / "static" / "glb_cache"),
+    )
+)
+MAIN_ARTIFACT_CACHE_DIR = Path(
+    os.getenv(
+        "RENDERFIN_MAIN_ARTIFACT_CACHE_DIR",
+        os.getenv("ARTIFACT_CACHE_ROOT", "/var/autorig/artifact-cache"),
+    )
+)
+PREFLIGHT_RENDER_DIR = Path(
+    os.getenv("RENDERFIN_PREFLIGHT_RENDER_DIR", "/var/autorig/preflight-renders")
+)
+REGEN_FETCH_TIMEOUT_SECONDS = float(
+    os.getenv("RENDERFIN_REGEN_FETCH_TIMEOUT_SECONDS", "300")
+)
+REGEN_MAX_GLB_BYTES = int(
+    os.getenv("RENDERFIN_REGEN_MAX_GLB_BYTES", str(1024 * 1024 * 1024))
+)
+REGEN_SOURCE_SIZE = int(os.getenv("RENDERFIN_REGEN_SOURCE_SIZE", "1024"))
+
 
 def ensure_dirs() -> None:
     for p in (DATA_DIR, RENDER_DIR, DB_DIR, TMP_DIR, SERVERS_DIR, RENDER_DIR / "masks"):

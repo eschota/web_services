@@ -808,6 +808,38 @@ async def start_character_gen_from_image(
     return job_id
 
 
+async def start_character_regen(
+    task_id: str,
+    *,
+    view: str = "front",
+    user_name: str = "autorig-bot",
+    telegram_chat_id: int = 0,
+) -> Dict[str, Any]:
+    """Re-pose an existing task's character (♻️ Regen). Returns the job.
+
+    No prompt is written here: renderfin renders the task's own model and
+    asks Qwen-Image-Edit for the T-pose, so the character needs no describing.
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{RENDERFIN_INTERNAL_URL}/api-character-gen/regen",
+            json={
+                "task_id": task_id,
+                "view": view,
+                "user_name": user_name,
+                "telegram_chat_id": telegram_chat_id,
+            },
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"character regen failed: HTTP {resp.status_code} {resp.text[:300]}"
+        )
+    payload = resp.json()
+    if not str(payload.get("job_id") or ""):
+        raise RuntimeError("character regen returned no job_id")
+    return payload
+
+
 async def poll_character_gen(job_id: str) -> Dict[str, Any]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}")

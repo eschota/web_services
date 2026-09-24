@@ -39,6 +39,12 @@ from .registry import ServerRegistry
 # finite, so it stays usable when every box is unreadable.
 _UNKNOWN_DEPTH = 10_000
 
+# Prompt types whose workflow saves a FULL render plus an RMBG `_Isolated_`
+# companion. Both must be collected together: the 3D stage reads the cut-out.
+# The Qwen re-pose (regen) has no control mask, so its bundle is validated by
+# its own alpha check instead of the T-pose mask comparison.
+_PAIRED_ISOLATED_TYPES = frozenset({"t_pose", "t_poses", "qwen_edit"})
+
 
 class ManagedComfyCleanupPending(RuntimeError):
     """Host registration may exist; keep lease/binding until exact cleanup."""
@@ -603,7 +609,7 @@ class RenderQueue:
         ):
             return False
         ptype = str(task.prompt.type or "").strip().lower()
-        if ptype in {"t_pose", "t_poses"}:
+        if ptype in _PAIRED_ISOLATED_TYPES:
             return bool(
                 task.managed_comfy_isolated_output_path
                 and workload_lease.verify_central_artifact(
@@ -1652,6 +1658,59 @@ class RenderQueue:
                 },
             ) from exc
 
+    async def _validate_qwen_edit_bundle_bytes(
+        self,
+        task: RenderTask,
+        server: RenderServer,
+        *,
+        primary_data: bytes,
+        isolated_data: bytes,
+        primary_artifact: Optional[Dict[str, str]] = None,
+        isolated_artifact: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Read the re-posed cut-out itself: there is no control mask here.
+
+        The input is the task's own still, so an echo comparison would prove
+        nothing; what the 3D stage needs is one unclipped figure with its arms
+        out, and that is readable straight off the alpha.
+        """
+        try:
+            return image_quality.validate_qwen_edit_bundle(primary_data, isolated_data)
+        except image_quality.RenderArtifactQualityError as exc:
+            report = dict(exc.report)
+            report["context"] = {
+                "task_id": task.id,
+                "server_name": server.render_server_name,
+                "prompt_id": task.comfy_prompt_id,
+                "primary_artifact": dict(primary_artifact or {}),
+                "isolated_artifact": dict(isolated_artifact or {}),
+            }
+            try:
+                archived = image_quality.archive_rejected_bundle(
+                    config.DATA_DIR / "rejected" / "qwen_edit" / task.id,
+                    primary_bytes=primary_data,
+                    isolated_bytes=isolated_data,
+                    report=report,
+                    label=server.render_server_name or "unknown-server",
+                )
+                print(
+                    f"[Renderfin][Queue] rejected Qwen edit bundle {task.id} "
+                    f"archived at {archived}"
+                )
+            except Exception as archive_exc:
+                print(
+                    f"[Renderfin][Queue] rejected bundle archive failed for "
+                    f"{task.id}: {archive_exc}"
+                )
+            raise
+
+    async def _validate_paired_bundle_bytes(
+        self, task: RenderTask, server: RenderServer, **bundle: Any
+    ) -> Dict[str, Any]:
+        if str(task.prompt.type or "").strip().lower() == "qwen_edit":
+            return await self._validate_qwen_edit_bundle_bytes(task, server, **bundle)
+        return await self._validate_tpose_bundle_bytes(task, server, **bundle)
+
     async def _reject_artifact_quality(
         self,
         task: RenderTask,
@@ -1664,11 +1723,16 @@ class RenderQueue:
             60.0,
             float(os.getenv("RENDERFIN_RENDER_QUALITY_COOLDOWN_SECONDS", "3600")),
         )
-        self._server_submit_cooldowns[server.render_server_name] = (
-            time.time() + cooldown
-        )
-        server.status = "render_quality_error"
-        self.registry.save(server)
+        # A well-formed render whose pose missed says nothing about the box,
+        # and the edit model usually lives on one box: an hour's quarantine
+        # would park the job's other variant behind a stochastic miss.
+        producer_fault = not isinstance(exc, image_quality.RenderContentRejected)
+        if producer_fault:
+            self._server_submit_cooldowns[server.render_server_name] = (
+                time.time() + cooldown
+            )
+            server.status = "render_quality_error"
+            self.registry.save(server)
         error = (
             f"render artifact quality rejected on {server.render_server_name}: "
             f"{exc}"
@@ -1718,7 +1782,11 @@ class RenderQueue:
             )
         print(
             f"[Renderfin][Queue] task {task.id} rejected by quality gate; "
-            f"{server.render_server_name} cooled down for {int(cooldown)}s"
+            + (
+                f"{server.render_server_name} cooled down for {int(cooldown)}s"
+                if producer_fault
+                else f"{server.render_server_name} stays in rotation (content miss)"
+            )
         )
 
     async def _finish_guarded(self, task: RenderTask, server: RenderServer, entry: dict) -> None:
@@ -1808,7 +1876,7 @@ class RenderQueue:
             return
         preferred = ""
         ptype = (task.prompt.type or "").strip().lower()
-        if ptype in ("t_pose", "t_poses", "inpaint"):
+        if ptype in _PAIRED_ISOLATED_TYPES or ptype == "inpaint":
             preferred = "_Isolated_"
         artifacts = comfy_adapter.resolve_artifacts(
             entry, output_ext=task.output_ext, preferred_fragment=preferred
@@ -1821,7 +1889,7 @@ class RenderQueue:
                 [],
             )
         history_artifacts = artifacts
-        if ptype in {"t_pose", "t_poses"}:
+        if ptype in _PAIRED_ISOLATED_TYPES:
             artifacts = [
                 artifact
                 for artifact in history_artifacts
@@ -1838,12 +1906,13 @@ class RenderQueue:
         user_dir = config.RENDER_DIR / task.prompt.user_name
         user_dir.mkdir(parents=True, exist_ok=True)
 
-        # Primary artifact: for t_pose the primary is the FULL render (no
-        # _Isolated_ fragment) at output_url; the isolated one is stored as an
-        # extra output. For inpaint the C# primary IS the isolated file.
+        # Primary artifact: for t_pose (and the qwen_edit re-pose) the primary
+        # is the FULL render (no _Isolated_ fragment) at output_url; the
+        # isolated one is stored as an extra output. For inpaint the C# primary
+        # IS the isolated file.
         primary = artifacts[0]
         isolated: List[Dict[str, str]] = []
-        if ptype in ("t_pose", "t_poses"):
+        if ptype in _PAIRED_ISOLATED_TYPES:
             non_isolated = [
                 a for a in artifacts if "_isolated_" not in a.get("filename", "").lower()
             ]
@@ -1881,11 +1950,11 @@ class RenderQueue:
             _host_terminal_outcome(host_heartbeat, task, action="heartbeat")
         data = await comfy_adapter.download_artifact(self._client, server, primary)
         iso_data: Optional[bytes] = None
-        if ptype in ("t_pose", "t_poses"):
+        if ptype in _PAIRED_ISOLATED_TYPES:
             iso_data = await comfy_adapter.download_artifact(
                 self._client, server, isolated[0]
             )
-            await self._validate_tpose_bundle_bytes(
+            await self._validate_paired_bundle_bytes(
                 task,
                 server,
                 primary_data=data,
@@ -1900,7 +1969,7 @@ class RenderQueue:
         if task.output_ext == ".png":
             _jpeg_sibling(out_path)
 
-        if ptype in ("t_pose", "t_poses"):
+        if ptype in _PAIRED_ISOLATED_TYPES:
             assert iso_data is not None
             iso_path = user_dir / f"{task.id}_Isolated.png"
             _atomic_fsync_bytes(iso_path, iso_data)
@@ -1982,7 +2051,11 @@ class RenderQueue:
         out_path = user_dir / f"{task.id}{task.output_ext}"
 
         if not task.managed_comfy_artifact_relative_path_string:
-            preferred = "_Isolated_" if ptype in {"t_pose", "t_poses", "inpaint"} else ""
+            preferred = (
+                "_Isolated_"
+                if ptype in _PAIRED_ISOLATED_TYPES or ptype == "inpaint"
+                else ""
+            )
             artifacts = comfy_adapter.resolve_artifacts(
                 entry,
                 output_ext=task.output_ext,
@@ -1996,7 +2069,7 @@ class RenderQueue:
                     [],
                 )
             history_artifacts = artifacts
-            if ptype in {"t_pose", "t_poses"}:
+            if ptype in _PAIRED_ISOLATED_TYPES:
                 artifacts = [
                     artifact
                     for artifact in history_artifacts
@@ -2010,7 +2083,7 @@ class RenderQueue:
                         history_artifacts,
                     )
             primary = artifacts[0]
-            if ptype in {"t_pose", "t_poses"}:
+            if ptype in _PAIRED_ISOLATED_TYPES:
                 non_isolated = [
                     artifact
                     for artifact in artifacts
@@ -2056,7 +2129,7 @@ class RenderQueue:
             await self._persist(task)
             state = "prepared"
 
-        if ptype in {"t_pose", "t_poses"}:
+        if ptype in _PAIRED_ISOLATED_TYPES:
             if not (
                 task.managed_comfy_isolated_output_path
                 and workload_lease.verify_central_artifact(
@@ -2122,7 +2195,7 @@ class RenderQueue:
                 expected_size_int=task.managed_comfy_artifact_size_int,
             )
             task.output_path = str(out_path)
-            if task.output_ext == ".png" and ptype not in {"t_pose", "t_poses"}:
+            if task.output_ext == ".png" and ptype not in _PAIRED_ISOLATED_TYPES:
                 _jpeg_sibling(out_path)
             task.managed_comfy_central_persistence_receipt_id_string = (
                 _bundle_receipt_id(task)
@@ -2133,14 +2206,14 @@ class RenderQueue:
             await self._persist(task)
             state = "central_persisted"
 
-        if state in {"central_persisted", "acknowledged"} and ptype in {
-            "t_pose",
-            "t_poses",
-        }:
+        if (
+            state in {"central_persisted", "acknowledged"}
+            and ptype in _PAIRED_ISOLATED_TYPES
+        ):
             primary_data = out_path.read_bytes()
             isolated_path = Path(task.managed_comfy_isolated_output_path)
             isolated_data = isolated_path.read_bytes()
-            await self._validate_tpose_bundle_bytes(
+            await self._validate_paired_bundle_bytes(
                 task,
                 server,
                 primary_data=primary_data,

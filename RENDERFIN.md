@@ -168,6 +168,192 @@ Chrome (SwiftShader, без GPU) + ffmpeg. Работает на самом VPS,
 
 ---
 
+## Regen: перегенерация существующей задачи
+
+Кнопка **♻️ Regen** в уведомлении «Task completed», рядом с «🎨 Коллекция ×15».
+Она для задачи, чей персонаж сгенерирован плохо — руки срослись с туловищем,
+волосы кашей, — но это всё ещё тот персонаж, которого хотел пользователь.
+Вместо того чтобы выдумывать его заново по промпту, renderfin рендерит
+собственную модель задачи спереди, Qwen-Image-Edit-2511 переставляет её в
+чистую T-позу в двух вариантах, оператор выбирает один — и дальше идут те же
+Hunyuan3D → облёт → автосабмит, что и у сгенерированного персонажа.
+
+```
+[♻️ Regen]  callback rgx:{task_id} → POST /renderfin/api-character-gen/regen
+     │
+     ▼
+ regen_source            стилл модели задачи: спереди, 1024², орто, фон #7f7f7f
+     │
+     ▼
+ flux_render             Qwen-Image-Edit-2511 ×2 (qwen_edit.json), не Flux:
+     │                   a — точная T-поза, b — чистая под 3D
+     ▼
+ awaiting_image_approval тот же альбом: «1️⃣ точная T-поза / 2️⃣ чистая под 3D»
+     │
+     ▼
+ hunyuan → turntable → ready → submitted   без изменений
+```
+
+У джоба `kind=regen`, `render_type=qwen_edit`, `source_task_id`,
+`source_image_url`, `regen_view`. Старые записи без этих полей грузятся с
+умолчаниями (`generate`, `t_pose`). Карточки и строка в очереди пишут
+«♻️ Regen задачи 1a2b3c4d» вместо промпта: инструкция правки у всех
+regen-джобов одинаковая, отличает их задача.
+
+### Стадия regen_source
+
+Модель ищется от дешёвого к дорогому: `static/glb_cache/<id>_prepared.glb` на
+диске → `http://127.0.0.1:8000/api/task/<id>/prepared.glb` → `.../model.glb` →
+то же на `https://autorig.online`. Стилл рисует `turntable.render_still` (тот же
+headless Chrome, что и облёт) в `/var/autorig/renderfin/render/<user>/<job>_regen_source.png`
+— это собственный артефакт, очередь читает его с диска, а не через nginx.
+
+**Ловушка: основной сайт отдаёт закэшированный файл ПУСТЫМ ответом 200** с
+заголовком `X-Accel-Redirect`, тело подставляет nginx. При прямом запросе на
+127.0.0.1 это выглядит как модель нулевой длины. renderfin читает заголовок и
+берёт файл с диска: `/_autorig_glb_cache/` → каталог glb_cache,
+`/_autorig_artifacts/` → artifact-cache. Пути и адреса настраиваются:
+`RENDERFIN_MAIN_APP_INTERNAL_URL` (по умолчанию `http://127.0.0.1:8000`),
+`RENDERFIN_MAIN_APP_PUBLIC_URL`, `RENDERFIN_MAIN_GLB_CACHE_DIR`,
+`RENDERFIN_MAIN_ARTIFACT_CACHE_DIR` (по умолчанию `ARTIFACT_CACHE_ROOT`),
+`RENDERFIN_PREFLIGHT_RENDER_DIR`.
+
+Если модели нет, вместо неё берётся постер: `/api/thumb/<id>`, затем
+`/var/autorig/preflight-renders/<id>.jpg` (это вид сверху-сбоку, исходник
+хуже). Постер вписывается в тот же серый квадрат 1024², а в карточке выбора
+появляется «⚠️ исходник — постер задачи: …».
+
+| Что случилось | Что делает стадия |
+|---|---|
+| сайт недоступен (обрыв, 5xx) | паркуется на 60 с **без траты попытки**; часы стадии при этом не сбрасываются, и через 15 мин (`RENDERFIN_CHARGEN_REGEN_SOURCE_TIMEOUT=900`) стадия перестаёт ждать и берёт постер |
+| модели нет нигде (404) | сразу постер |
+| стилл не отрендерился | первый раз — обычный ретрай с тратой попытки (Chrome бывает), второй — постер |
+| нет ни модели, ни постера | три попытки → `failed` |
+
+Тексты ошибок этой стадии не содержат маркеров из `_FLEET_ERROR_MARKERS` и
+`_FARM_BREAKAGE_MARKERS`: статусы пишутся как «status 502», а не «HTTP 403», а от
+ошибки рендерера остаётся только её тип. Иначе, например, строка
+`timed out after` из вывода Chrome сделала бы из локального рендера «поломку
+фермы», которую retry-loop паркует на полчаса и оживляет вечно.
+
+### Правка Qwen (flux_render у regen)
+
+Воркфлоу `backend/renderfin/assets/workflows/qwen_edit.json` — официальный
+шаблон Comfy `image_qwen_image_edit_2511` в API-формате с жёстко включённой
+веткой Lightning: `LoadImage($image)` → `FluxKontextImageScale` →
+`TextEncodeQwenImageEditPlus` (позитив `$prompt`, негатив пустой; оба получают
+картинку и VAE) → `FluxKontextMultiReferenceLatentMethod` (`index_timestep_zero`)
+→ `UNETLoader` fp8mixed → `ModelSamplingAuraFlow` 3.1 → `CFGNorm` 1 → LoRA
+Lightning → `KSampler` (4 шага, cfg 1, euler/simple) → `VAEDecode` →
+`SaveImage $output_url` и RMBG-2.0 → `SaveImage $output_url_Isolated`, как в
+`t_pose.json`. Плейсхолдеров `$negative_prompt`, `$width`, `$height` нет.
+
+Промпты — `backend/renderfin/regen_prompts.py`: вариант a меняет только позу,
+вариант b вдобавок собирает волосы в несколько крупных прядей, делает чёткие
+края одежды и убирает оружие, реквизит и всё прозрачное и пушистое. Для них
+действуют те же анти-паттерны, что в
+[`references/prompts.md`](.claude/skills/renderfin-pipeline/references/prompts.md),
+и то же вырезание слов «glass/glasses». Там же лежит `BASE_BODY_PROMPT` для v2
+(не используется): локальные веса не имеют safety-checker и отказать не
+могут, поэтому «базовое тело» — это серый облегающий костюм-манекен и лысая
+голова, никогда не нагота.
+
+Очередь собирает пару FULL + `_Isolated_` так же, как для t_pose, но вместо
+сравнения с маской позы читает саму альфу
+(`image_quality.validate_qwen_edit_bundle`): фигура есть (2–90% кадра), кадр её
+не режет (не больше 11 непрозрачных пикселей в двух крайних строках/столбцах),
+и она раскинута как T-поза (ширина / высота ≥ 0.7).
+
+- Промах по содержимому (код `qwen_edit_*`) — задача рендера в Error, **бокс не
+  карантинится** (модель правки обычно живёт на одном боксе, и час карантина
+  оставил бы второй вариант ждать из-за случайного сида), джоб тратит попытку:
+  персонаж, которого модель не может поставить в T-позу, после трёх попыток
+  приходит карточкой об ошибке, а не крутится на GPU вечно.
+- Поломка комплекта (нет пары, альфа не RGBA) — как у t_pose: час карантина
+  бокса, попытка не тратится.
+- Отбракованные пары: `/var/autorig/renderfin/rejected/qwen_edit/<task>/`.
+
+### Как поставить Qwen-Image-Edit-2511 на ComfyUI-бокс
+
+| Файл | Папка ComfyUI | Размер | Откуда |
+|---|---|---|---|
+| `qwen_image_edit_2511_fp8mixed.safetensors` | `models/diffusion_models/` | ≈20.5 ГБ | `https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors` |
+| `qwen_2.5_vl_7b_fp8_scaled.safetensors` | `models/text_encoders/` | ≈9.4 ГБ | `https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors` |
+| `qwen_image_vae.safetensors` | `models/vae/` | ≈254 МБ | `https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors` |
+| `Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors` | `models/loras/` | ≈0.85 ГБ | `https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors` |
+| RMBG-2.0 (кастом-нода ComfyUI-RMBG, `RMBG`) | как для t_pose | — | уже стоит на боксах, которые рендерят t_pose |
+
+- Размеры приблизительные: huggingface.co недоступен из песочницы, где это
+  писалось, — сверить `Content-Length` при скачивании. Для сверки: индекс
+  шаблонов Comfy даёт весь комплект с bf16-моделью в 47.8 ГиБ, с int8 — 28.9 ГиБ.
+- Страница документации Comfy называет bf16-модель
+  (`qwen_image_edit_2511_bf16.safetensors`, ≈41 ГБ), но сам официальный шаблон
+  грузит fp8mixed. На 24 ГБ — только fp8mixed.
+- LoRA Lightning для 2511 лежит в `lightx2v/Qwen-Image-Edit-2511-Lightning`, а не
+  в `ModelTC/Qwen-Image-Lightning` (там LoRA для Qwen-Image и Edit-2509).
+- Лицензия 2511 — Apache-2.0. **Qwen-Image 2.1 не ставить**: некоммерческая лицензия.
+- Нужен свежий ComfyUI (шаблон требует ≥ 0.4.0): ноды
+  `TextEncodeQwenImageEditPlus`, `FluxKontextMultiReferenceLatentMethod` с методом
+  `index_timestep_zero`, `CFGNorm`, `FluxKontextImageScale` — встроенные.
+- Проверка: `GET /object_info/UNETLoader` на боксе должен перечислять файл в
+  `unet_name`, а `GET /object_info/TextEncodeQwenImageEditPlus` — отвечать.
+
+### Как бокс сообщает, что умеет regen
+
+У `qwen_edit` свой токен планирования, как у `image_to_3d`: задача попадает
+только на бокс, у которого в `available_workflows` есть `"qwen_edit.json"`.
+Бокс без моделей принял бы промпт и уронил его на отсутствующем файле. Строку
+добавляют в регистрацию бокса (`POST /renderfin/api-render` с
+`render_operation: "info"`, непустой список заменяет старый) или в
+`/var/autorig/renderfin/servers/<бокс>.json` с последующим перезапуском renderfin:
+
+```json
+{
+  "render_server_name": "f15",
+  "available_workflows": ["gen_image.json", "gen_animation_by_url.json", "qwen_edit.json"],
+  "workflow_overrides": {}
+}
+```
+
+`workflow_overrides` отображает токен на **другой шаблон из
+`backend/renderfin/assets/workflows/` на VPS** (не файл на боксе): например,
+`{"qwen_edit.json": "qwen_edit_bf16.json"}` для бокса на 48 ГБ с bf16-моделью —
+такой шаблон сначала надо положить рядом с `qwen_edit.json`.
+
+### VRAM и время
+
+- fp8mixed (≈20.5 ГБ) и текстовый энкодер (≈9.4 ГБ) вместе в 24 ГБ не
+  помещаются: ComfyUI кодирует промпт, выгружает энкодер в RAM и только потом
+  грузит UNet. Нужно ≥ 32 ГБ оперативной памяти, лучше 64.
+- С Lightning (4 шага) на 4090 — примерно 10–30 с на правку на прогретом боксе;
+  первый запуск с загрузкой моделей с диска — минуты. Два варианта на одном
+  боксе идут друг за другом: бокс держит один промпт за раз.
+
+### Известные ограничения v1
+
+- Если ни один бокс не объявил `qwen_edit.json`, рендер висит в очереди
+  Pending, а джоб ждёт на `flux_render` («рендер T-позы»), попыток не тратя.
+- Проверка позы меряет только габарит силуэта: A-поза с широко разведёнными
+  руками пройдёт, сросшиеся пальцы и потерянная кисть — тоже.
+- Постер — худший исходник: у `/api/thumb` перспектива и студийный свет, у
+  preflight-рендера вид сверху-сбоку; сходство с персонажем плывёт сильнее.
+- Не-гуманоиды (четвероногие): T-поза для них бессмысленна, проверка позы их
+  отбракует, после трёх попыток — `failed`.
+- Healthcheck (`deploy/healthcheck/renderfin_healthcheck.py`) пока не считает
+  `regen_source` активной стадией, так что зависание на ней он не увидит.
+- Повторное нажатие ♻️ в том же чате отклоняется, пока regen не отменён
+  (🗑) или не упал на запуске — так же, как у 🎨.
+
+Деплой — как обычно, файлами: renderfin (`models.py`, `routing.py`, `queue.py`,
+`image_quality.py`, `character_gen.py`, `config.py`, `api.py`,
+`telegram_delivery.py`, `regen_source.py`, `regen_prompts.py`,
+`assets/workflows/qwen_edit.json`, а также рендер стилла — `turntable.py` и
+`tools/renderfin/glb_turntable.mjs`; без него regen работает, но всегда от
+постера) и бот (`telegram_bot.py`, `render_prompting.py`); перезапуск: сначала
+renderfin, потом бот.
+
+---
+
 ## Живучесть: что не должно ронять задачу
 
 Оператор нажал кнопку и обязан получить результат. Несколько состояний выглядят
@@ -320,6 +506,7 @@ mtime совпадает со стартом процесса запечки с�
 | Промпты | `backend/render_prompting.py`, `render_prompt_instruction.json` |
 | Бот | `backend/telegram_bot.py` |
 | Воркфлоу и маски | `backend/renderfin/assets/` |
+| Regen (перегенерация задачи) | `backend/renderfin/regen_source.py`, `regen_prompts.py`, `assets/workflows/qwen_edit.json` |
 | Видео-облёт | `tools/renderfin/glb_turntable.mjs` |
 | Состояние | sqlite `/var/autorig/renderfin/db/renderfin.db`, таблица `chargen_jobs` |
 | Артефакты | `/var/autorig/renderfin/render/<user>/` |

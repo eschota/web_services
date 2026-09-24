@@ -1,0 +1,270 @@
+{
+  "41": {
+    "inputs": {
+      "image": "$image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "160": {
+    "inputs": {
+      "image": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "FluxKontextImageScale",
+    "_meta": {
+      "title": "FluxKontextImageScale"
+    }
+  },
+  "161": {
+    "inputs": {
+      "unet_name": "qwen_image_edit_2511_fp8mixed.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "162": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "146": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "145": {
+    "inputs": {
+      "shift": 3.1,
+      "model": [
+        "161",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "152": {
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "145",
+        0
+      ]
+    },
+    "class_type": "CFGNorm",
+    "_meta": {
+      "title": "CFGNorm"
+    }
+  },
+  "153": {
+    "inputs": {
+      "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "152",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly (Lightning 4 steps)"
+    }
+  },
+  "151": {
+    "inputs": {
+      "prompt": "$prompt",
+      "clip": [
+        "162",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ],
+      "image1": [
+        "160",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "TextEncodeQwenImageEditPlus (Positive)"
+    }
+  },
+  "149": {
+    "inputs": {
+      "prompt": "",
+      "clip": [
+        "162",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ],
+      "image1": [
+        "160",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "TextEncodeQwenImageEditPlus (Negative)"
+    }
+  },
+  "148": {
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "Edit Model Reference Method (Positive)"
+    }
+  },
+  "147": {
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "149",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "Edit Model Reference Method (Negative)"
+    }
+  },
+  "156": {
+    "inputs": {
+      "pixels": [
+        "160",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "169": {
+    "inputs": {
+      "seed": 677909188488042,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "153",
+        0
+      ],
+      "positive": [
+        "148",
+        0
+      ],
+      "negative": [
+        "147",
+        0
+      ],
+      "latent_image": [
+        "156",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "158": {
+    "inputs": {
+      "samples": [
+        "169",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "$output_url",
+      "images": [
+        "158",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image Original"
+    }
+  },
+  "300": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": false,
+      "background": "Alpha",
+      "background_color": "#ffffff",
+      "image": [
+        "158",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "Remove Background (RMBG)"
+    }
+  },
+  "301": {
+    "inputs": {
+      "filename_prefix": "$output_url_Isolated",
+      "images": [
+        "300",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image Isolated"
+    }
+  }
+}

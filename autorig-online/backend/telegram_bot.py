@@ -2154,6 +2154,7 @@ async def broadcast_task_done(
     generate_markup = InlineKeyboardMarkup(
         [[
             InlineKeyboardButton("🎨 Коллекция ×15", callback_data=f"rfg:{task_id}"),
+            InlineKeyboardButton("♻️ Regen", callback_data=_regen_task_callback_data(task_id)),
             InlineKeyboardButton("📦 Сабмитить", callback_data=f"rfc:{task_id}"),
         ]]
     )
@@ -2394,6 +2395,16 @@ CHARGEN_TOTAL_TIMEOUT_SECONDS = 7800
 # The trailing variant is optional so buttons sent before two-variant rendering
 # still resolve (they mean variant "a").
 _APPROVE_PATTERN = r"^rfa:([0-9a-fA-F-]{8,64})(?::([ab]))?$"
+
+# ♻️ Regen on done notifications: "rgx:{task}" re-poses that task's own
+# character with Qwen-Image-Edit (40 bytes for a UUID; the cap is 64). As with
+# _APPROVE_PATTERN, the handler registration and the parser share one pattern.
+_REGEN_TASK_PREFIX = "rgx"
+_REGEN_TASK_PATTERN = rf"^{_REGEN_TASK_PREFIX}:([0-9a-fA-F-]{{8,64}})$"
+
+
+def _regen_task_callback_data(task_id: str) -> str:
+    return f"{_REGEN_TASK_PREFIX}:{task_id}"
 
 _CHARGEN_STAGE_LABELS = {
     "flux_render": "рендерим T-позу (Flux)",
@@ -2712,6 +2723,92 @@ async def _handle_generate_callback(update, context) -> None:
     )
 
 
+async def _run_regen(
+    bot, chat_id: int, task_id: str, status_message_id: int, reservation_chat_id: int
+) -> None:
+    """Hand the regen to renderfin, which owns the job and its delivery."""
+    import render_prompting
+
+    short = html.escape(task_id[:8])
+    try:
+        job = await render_prompting.start_character_regen(
+            task_id, telegram_chat_id=chat_id
+        )
+        await _chargen_edit_status(
+            bot, chat_id, status_message_id,
+            f"♻️ <b>Regen задачи {short}</b> · #{int(job.get('seq') or 0)}\n"
+            "Рендер модели → Qwen T-поза ×2 → ваш выбор → 3D → конвертация. "
+            "Варианты придут сюда.",
+        )
+        print(
+            f"[Telegram][Renderfin] regen job {job.get('job_id')} started for task {task_id}"
+        )
+    except Exception as e:
+        print(f"[Telegram][Renderfin] regen failed for task {task_id}: {e}")
+        await _chargen_edit_status(
+            bot, chat_id, status_message_id,
+            f"❌ Regen не запустился: {html.escape(str(e)[:300])}\n"
+            "Кнопку можно нажать ещё раз.",
+        )
+        # released where it was taken: the button's chat, not the DM
+        await release_notification(reservation_chat_id, "renderfin_regen", task_id)
+
+
+async def _handle_regen_task_callback(update, context) -> None:
+    """♻️ button: re-pose this task's own character into a clean T-pose.
+
+    A badly generated character (arms fused to the torso, messy hair) is still
+    the one the user wanted. Renderfin renders the task's model, Qwen re-poses
+    it in two variants, and the choice and everything after it arrive exactly
+    like a generated character's.
+    """
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(_REGEN_TASK_PATTERN, query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    task_id = match.group(1)
+    chat = query.message.chat if query.message else None
+    if chat is None:
+        await query.answer("Нет чата")
+        return
+    origin_chat_id = int(chat.id)
+    user = getattr(query, "from_user", None)
+    user_id = int(getattr(user, "id", 0) or 0)
+
+    if not await reserve_notification(origin_chat_id, "renderfin_regen", task_id):
+        await query.answer("Regen для этой задачи уже запущен")
+        return
+
+    bot = context.bot
+    status_text = f"⏳ ♻️ Regen задачи {task_id[:8]}: рендерю модель…"
+    # Same routing as 🎨: the variants go to the presser's DM if the bot may
+    # write there, otherwise to the chat the button is in.
+    chat_id, status_message_id, reply_to = origin_chat_id, 0, query.message.message_id
+    if user_id and user_id != origin_chat_id:
+        try:
+            dm = await bot.send_message(chat_id=user_id, text=status_text)
+            chat_id, status_message_id, reply_to = user_id, dm.message_id, None
+            await query.answer("Запускаю regen — варианты пришлю в личку")
+        except Exception as e:
+            print(f"[Telegram][Renderfin] DM to {user_id} unavailable ({e}); using chat {origin_chat_id}")
+
+    if not status_message_id:
+        await query.answer("Запускаю regen…")
+        status_message = await bot.send_message(
+            chat_id=chat_id,
+            text=status_text,
+            reply_to_message_id=reply_to,
+        )
+        status_message_id = status_message.message_id
+
+    asyncio.create_task(
+        _run_regen(bot, chat_id, task_id, status_message_id, origin_chat_id)
+    )
+
+
 async def _submit_generated_model(
     glb_url: str, *, collection_metadata: dict | None = None,
     queue_class: str = "interactive",
@@ -3023,6 +3120,9 @@ async def _handle_delete_callback(update, context) -> None:
         source_task_id = str(payload.get("source_task_id") or "")
         if chat_id and source_task_id:
             await release_notification(chat_id, "renderfin_gen", source_task_id)
+            if payload.get("kind") == "regen":
+                # and ♻️, for a discarded regen of it
+                await release_notification(chat_id, "renderfin_regen", source_task_id)
         if chat_id:
             await release_notification(chat_id, "renderfin_submit", job_id)
     except Exception as e:
@@ -3065,6 +3165,7 @@ async def run_polling() -> None:
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", _start_cmd))
     app.add_handler(CallbackQueryHandler(_handle_generate_callback, pattern=r"^rfg:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_regen_task_callback, pattern=_REGEN_TASK_PATTERN))
     app.add_handler(CallbackQueryHandler(_handle_full_convert_callback, pattern=r"^rfc:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=_APPROVE_PATTERN))
     app.add_handler(CallbackQueryHandler(_handle_regen_callback, pattern=r"^rfr:[0-9a-fA-F-]{8,64}$"))
