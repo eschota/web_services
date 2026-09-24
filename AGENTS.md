@@ -169,8 +169,8 @@ cross-service work.
 
 - The owner channel is `U3d Indie Game Developer` (`@unlim3d`), channel ID
   `UCpCN8wm6UXr8Ke_m-zSaThQ`. Google OAuth must be completed while signed in
-  as `cgteamorg@gmail.com`; the OAuth callback must verify the authorized
-  channel ID before saving the refresh token.
+  as `cgteamorg@gmail.com`; select that Brand Account in Google's chooser and
+  check `channel_id` in the first upload response.
 - OAuth uses only the `youtube.upload` scope and the production callback
   `https://autorig.online/api/oauth/youtube/callback`. Never put client secrets
   or refresh tokens in Git, browser storage, task output, or logs. Refresh

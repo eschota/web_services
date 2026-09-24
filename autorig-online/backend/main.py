@@ -2810,12 +2810,7 @@ async def admin_youtube_oauth_callback(
     user: Optional[User] = Depends(get_current_user),
 ):
     """OAuth callback: stores refresh token for YouTube uploads."""
-    from youtube_upload import (
-        exchange_youtube_code_for_tokens,
-        save_youtube_refresh_token,
-        youtube_authorized_channel,
-        youtube_expected_channel_id,
-    )
+    from youtube_upload import exchange_youtube_code_for_tokens, save_youtube_refresh_token
 
     if error:
         return RedirectResponse(url=f"/?youtube_error={quote(error)}")
@@ -2832,15 +2827,8 @@ async def admin_youtube_oauth_callback(
     refresh = tokens.get("refresh_token")
     if not refresh:
         return RedirectResponse(url="/?youtube_error=no_refresh_token_reauthorize_with_prompt")
-    channel = await youtube_authorized_channel(refresh)
-    if not channel:
-        return RedirectResponse(url="/?youtube_error=channel_verification")
-    if channel.get("id") != youtube_expected_channel_id():
-        print(
-            "[YouTube OAuth] Refusing to store token for unexpected channel "
-            f"id={channel.get('id')} title={channel.get('title')}"
-        )
-        return RedirectResponse(url="/?youtube_error=channel_mismatch")
+    # Channel selection happens in Google's Brand Account chooser. The upload
+    # response includes channelId for validation against the owner channel.
     await save_youtube_refresh_token(db, refresh)
     response = RedirectResponse(url="/?youtube_connected=1")
     response.delete_cookie("yt_oauth_state")

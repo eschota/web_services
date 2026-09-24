@@ -35,7 +35,6 @@ from config import (
     YOUTUBE_OAUTH_REDIRECT_URI,
     YOUTUBE_REFRESH_TOKEN,
     YOUTUBE_UPLOAD_PRIVACY,
-    YOUTUBE_EXPECTED_CHANNEL_ID,
 )
 from database import AsyncSessionLocal, Task, YoutubeCredentials, YoutubeUploadedHash
 from workers import get_worker_base_url
@@ -451,35 +450,6 @@ def _youtube_credentials_from_db(refresh_token: str) -> Credentials:
         client_secret=YOUTUBE_GOOGLE_CLIENT_SECRET,
         scopes=[YOUTUBE_UPLOAD_SCOPE],
     )
-
-
-async def youtube_authorized_channel(refresh_token: str) -> Optional[dict]:
-    """Return the channel selected in OAuth, without ever persisting a mismatched token."""
-    def fetch_channel() -> Optional[dict]:
-        creds = _youtube_credentials_from_db(refresh_token)
-        creds.refresh(Request())
-        youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
-        response = youtube.channels().list(part="snippet", mine=True, maxResults=1).execute()
-        items = response.get("items") if isinstance(response, dict) else None
-        if not items:
-            return None
-        item = items[0]
-        snippet = item.get("snippet") or {}
-        return {
-            "id": item.get("id"),
-            "title": snippet.get("title"),
-            "custom_url": snippet.get("customUrl"),
-        }
-
-    try:
-        return await asyncio.to_thread(fetch_channel)
-    except Exception as exc:
-        print(f"[YouTube OAuth] channel verification failed: {type(exc).__name__}")
-        return None
-
-
-def youtube_expected_channel_id() -> str:
-    return YOUTUBE_EXPECTED_CHANNEL_ID
 
 
 def _upload_video_file_blocking(

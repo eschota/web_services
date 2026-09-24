@@ -10,9 +10,9 @@ upload API linked from `https://autorig.online/dev` and documented at
 - Channel ID: `UCpCN8wm6UXr8Ke_m-zSaThQ` (verified from the channel's YouTube
   Studio link).
 - Google account used for the Cloud project and channel OAuth: `cgteamorg@gmail.com`.
-- The OAuth callback refuses to store a refresh token unless `channels.list(mine=true)`
-  returns the fixed channel ID above. If OAuth opens the wrong channel, switch
-  channel in the Google/YouTube account chooser and retry.
+- In Google's OAuth flow, select the **U3d Indie Game Developer** Brand Account.
+  The first upload response includes `channel_id` and
+  `channel_matches_expected` for checking the destination.
 
 ## One-time Google Cloud setup
 
@@ -32,9 +32,9 @@ upload API linked from `https://autorig.online/dev` and documented at
    source code, the browser, or Git.
 7. Sign in to AutoRig with an administrator account and open
    `https://autorig.online/api/admin/youtube/oauth/start`. In Google's consent
-   flow, select the `@unlim3d` channel and grant the upload scope. The callback
-   verifies the channel ID and saves the refresh token in the server-side
-   `youtube_credentials` database row.
+   flow, select the `@unlim3d` Brand Account and grant the upload scope. The
+   callback saves the refresh token in the server-side `youtube_credentials`
+   database row.
 8. Confirm connection through `GET /api/admin/youtube/status` while signed in as
    an administrator. Never print or return the token.
 
@@ -72,7 +72,7 @@ Fields:
 Successful response:
 
 ```json
-{"ok":true,"video_id":"VIDEO_ID","url":"https://www.youtube.com/watch?v=VIDEO_ID","privacy_status":"public","requested_privacy_status":"public"}
+{"ok":true,"video_id":"VIDEO_ID","url":"https://www.youtube.com/watch?v=VIDEO_ID","privacy_status":"public","requested_privacy_status":"public","channel_id":"UCpCN8wm6UXr8Ke_m-zSaThQ","channel_matches_expected":true}
 ```
 
 Use the returned URL to review the uploaded video in YouTube Studio. The API
@@ -102,8 +102,8 @@ duration guidance:
   owner's direct request for that video.
 - Never accept the Google OAuth grant on the owner's behalf. Stop at the Google
   consent screen and let the owner approve `youtube.upload` access.
-- If channel verification fails, do not save the token; retry OAuth after
-  selecting `@unlim3d`.
+- Check `channel_matches_expected` on the first test upload before sending more
+  videos if this Google account manages multiple channels.
 - Keep Google client credentials and refresh tokens server-side. Do not log
   OAuth response bodies or token values.
 - YouTube API uploads use quota. Watch the API project's quota and upload

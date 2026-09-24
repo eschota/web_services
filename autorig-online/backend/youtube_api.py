@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import YOUTUBE_REFRESH_TOKEN
+from config import YOUTUBE_EXPECTED_CHANNEL_ID, YOUTUBE_REFRESH_TOKEN
 from database import YoutubeCredentials
 
 
@@ -64,7 +64,7 @@ def build_youtube_upload_api_router(require_admin, get_db) -> APIRouter:
             from config import YOUTUBE_GOOGLE_CLIENT_ID, YOUTUBE_GOOGLE_CLIENT_SECRET
             from youtube_upload import YOUTUBE_UPLOAD_SCOPE
 
-            def perform_upload() -> tuple[str, str]:
+            def perform_upload() -> tuple[str, str, Optional[str]]:
                 credentials = Credentials(
                     token=None,
                     refresh_token=refresh_token,
@@ -96,15 +96,18 @@ def build_youtube_upload_api_router(require_admin, get_db) -> APIRouter:
                 if not video_id:
                     raise RuntimeError("YouTube API returned no video id")
                 status = response.get("status") or {}
-                return video_id, status.get("privacyStatus", privacy_status)
+                snippet = response.get("snippet") or {}
+                return video_id, status.get("privacyStatus", privacy_status), snippet.get("channelId")
 
-            video_id, actual_privacy = await asyncio.to_thread(perform_upload)
+            video_id, actual_privacy, channel_id = await asyncio.to_thread(perform_upload)
             return {
                 "ok": True,
                 "video_id": video_id,
                 "url": f"https://www.youtube.com/watch?v={video_id}",
                 "privacy_status": actual_privacy,
                 "requested_privacy_status": privacy_status,
+                "channel_id": channel_id,
+                "channel_matches_expected": channel_id == YOUTUBE_EXPECTED_CHANNEL_ID,
             }
         except HTTPException:
             raise
