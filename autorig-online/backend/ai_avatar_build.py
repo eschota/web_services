@@ -907,10 +907,34 @@ class AvatarBuilder:
         self.api = api_base.rstrip("/")
         self.poll_seconds = poll_seconds
         self._running: Dict[str, asyncio.Task] = {}
+        LIVE_BUILDERS.append(self)
         self._job_locks: Dict[str, asyncio.Lock] = {}
         self._slots = asyncio.Semaphore(MAX_PARALLEL_BUILDS)
 
     # ---- lifecycle
+
+    def cancel_all(self, reason: str, *, dry_run: bool = False) -> List[str]:
+        """Stop every build this process is running and mark it failed (farm reset).
+
+        A failed build is rebuilt from scratch by the next identical request,
+        so the graph node re-runs on the next Render.
+        """
+        ids = [job_id for job_id, task in self._running.items() if not task.done()]
+        if dry_run:
+            return ids
+        for job_id in ids:
+            task = self._running.get(job_id)
+            if task is not None:
+                task.cancel()
+            try:
+                job = self.jobs.load(job_id)
+                if not job.get("finished"):
+                    job.update(status="failed", finished=True, error=reason)
+                    _log(job, reason)
+                    self.jobs.write(job)
+            except Exception:
+                logger.exception("could not mark avatar build %s cancelled", job_id)
+        return ids
 
     def ensure_running(self, job_id: str) -> None:
         task = self._running.get(job_id)
@@ -1640,6 +1664,17 @@ def _stage_bytes(jobs: BuildJobStore, data: bytes, kind: str) -> Path:
 async def _source_kind(url: str) -> str:
     import ai_multiref
     return "video" if await ai_multiref.is_video(url) else "image"
+
+
+# Every builder in this process, so a farm reset can stand them all down.
+LIVE_BUILDERS: List["AvatarBuilder"] = []
+
+
+def cancel_all_builds(reason: str, *, dry_run: bool = False) -> List[str]:
+    ids: List[str] = []
+    for builder in LIVE_BUILDERS:
+        ids.extend(builder.cancel_all(reason, dry_run=dry_run))
+    return ids
 
 
 def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[AvatarBuilder] = None) -> APIRouter:

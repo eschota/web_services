@@ -118,6 +118,14 @@ def build_queue_admin_router(require_admin: Callable[..., Any]) -> APIRouter:
         except Exception as exc:
             logger.exception("Farm reset failed")
             raise HTTPException(status_code=502, detail=f"the render queue could not be reset: {exc}") from None
+        try:
+            import ai_avatar_build
+            builds = ai_avatar_build.cancel_all_builds(
+                "cancelled: farm reset by an administrator", dry_run=bool(dry_run))
+        except Exception:
+            logger.exception("Could not stand the avatar builds down")
+            builds = []
+        result["avatar_builds_int"] = len(builds)
         if not dry_run:
             logger.warning("FARM RESET by %s: cancelled %s queued, %s running; boxes %s", who,
                            result.get("cancelled_queued_int"), result.get("cancelled_running_int"),
