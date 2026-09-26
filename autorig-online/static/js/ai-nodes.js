@@ -228,7 +228,7 @@
     if (nodeCompare) requestAnimationFrame(() => nodeCompare.refresh(String(id)));
     if (record.status === 'done' && record.value) {
       continuableResults.set(String(id), {type:record.type, value:record.value,
-        task_id:record.task_id || '', outputs:record.outputs || null});
+        task_id:record.task_id || '', outputs:record.outputs || null, items:record.items || null});
       // A finished step is new information about size: a ControlNet map that
       // has just landed is what the image below it must now be drawn at.
       if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
@@ -640,6 +640,7 @@
       label: (params && params._label) || '',
       followInputSize: hasDimensions ? sizeFollowsInput(entry, params) : undefined,
       disabled: !!(params && params._disabled),
+      when: (params && params._when && typeof params._when === 'object') ? params._when : null,
       // A node that can carry a standing instruction is born with the default
       // one, so a graph saved before this existed opens with it too.
       systemPrompt: entry.system_prompt_capable
@@ -651,6 +652,7 @@
     });
     applySystemPromptMarker(id);
     addIsolateButton(id);
+    if (window.AINodeLists) window.AINodeLists.decorate(id, params);
     if (X9_SERVICES.has(serviceId)) addX9Button(id, !!(params && params._x9));
     alignPorts(id, inputs.length, outputs.length);
     refreshReferenceSockets(id);
@@ -1401,6 +1403,7 @@
     }
     if (meta(id)?.disabled) values._disabled = true;
     if (meta(id)?.x9) values._x9 = true;
+    if (meta(id)?.when) values._when = meta(id).when;
     if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
@@ -2599,6 +2602,26 @@
       field: 'image_url_string', type: 'control_' + channel };
   });
 
+  // For each shot (2026-09-27): Scene split, Concat shots, Audio from source
+  // and the scene-aware Storyboard live in ai-node-lists.js.
+  if (window.AINodeLists) {
+    Object.assign(RUNNERS, window.AINodeLists.RUNNERS);
+    window.AINodeLists.install({
+      meta, nodeElement, runState, bodyFor, stableJson, runnerFor, runnerType, submitJson, splitMulti,
+      upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
+      followInputSizeAtRun, startIncrementalService,
+      invalidate: id => invalidateNodeAndDownstream(id),
+      epoch: () => canvasEpoch,
+      get BUDGET_EXHAUSTED() { return BUDGET_EXHAUSTED; },
+      findByStoredId: storedId => {
+        let hit = null;
+        nodeMeta.forEach((item, key) => { if (hit == null && item && item.storedId === storedId) hit = key; });
+        if (hit == null && nodeMeta.has(storedId)) hit = storedId;
+        return hit;
+      }
+    });
+  }
+
   /** A runner's result type; 'auto' reads it off the address (picture or clip). */
   function runnerType(runner, value) {
     if (!runner || runner.type !== 'auto') return runner ? runner.type : 'image';
@@ -2973,7 +2996,7 @@
   function splitMulti(finished) {
     if (finished && typeof finished === 'object' && !Array.isArray(finished) &&
         Object.prototype.hasOwnProperty.call(finished, 'outputs')) {
-      return {value: finished.value, outputs: finished.outputs || null};
+      return {value: finished.value, outputs: finished.outputs || null, items: finished.items || null, summary: finished.summary || ''};
     }
     return {value: finished, outputs: null};
   }
@@ -3261,6 +3284,7 @@
         body._post_upscale = 2;
       }
     }
+    if (window.AINodeLists) window.AINodeLists.adjustBody(serviceId, body);
     return body;
   }
 
@@ -3314,8 +3338,10 @@
       }
       let value;
       let outputs = null;
+      let listItems = null;
+      let listSummary = '';
       try {
-        ({value, outputs} = splitMulti(await runner.finish(accepted, runner,
+        ({value, outputs, items: listItems, summary: listSummary} = splitMulti(await runner.finish(accepted, runner,
           taskStateReporter(state, task, accepted, execution))));
         if (postUpscale && value) {
           value = await upscaleClip2x(value, executionIsCurrent(execution) ? state : null);
@@ -3341,9 +3367,12 @@
         showResult(outBox, runnerType(runner, value), value, outputs);
         recordResult(id, Object.assign({ status: 'done', type: runnerType(runner, value), value: value,
                            input_reference_url: execution.inputReference || '',
-                           task_id: accepted.task_id_string || '' }, outputs ? {outputs} : {}));
+                           task_id: accepted.task_id_string || '' }, outputs ? {outputs} : {},
+                           listItems ? {items: listItems, summary: listSummary || ''} : {}));
+        if (listItems && window.AINodeLists) window.AINodeLists.paint(id);
       }
-      return outputs ? { type: runnerType(runner, value), value: value, outputs } : { type: runnerType(runner, value), value: value };
+      return Object.assign({ type: runnerType(runner, value), value: value }, outputs ? {outputs} : {},
+                           listItems ? {items: listItems} : {});
     } catch (error) {
       finishTaskTracker(task, false, execution, progress);
       if (executionIsCurrent(execution)) {
@@ -3806,14 +3835,15 @@
 
   /** Nodes in an order where everything a node needs has already run. */
   function executionOrder(graph) {
+    const links = graph.links.concat(window.AINodeLists ? window.AINodeLists.gateLinks(graph) : []);
     const incoming = new Map(graph.nodes.map(node => [node.id, 0]));
-    graph.links.forEach(link => incoming.set(link.to, (incoming.get(link.to) || 0) + 1));
+    links.forEach(link => incoming.set(link.to, (incoming.get(link.to) || 0) + 1));
     const ready = graph.nodes.filter(node => !incoming.get(node.id)).map(node => node.id);
     const order = [];
     while (ready.length) {
       const id = ready.shift();
       order.push(id);
-      graph.links.filter(link => link.from === id).forEach(link => {
+      links.filter(link => link.from === id).forEach(link => {
         incoming.set(link.to, incoming.get(link.to) - 1);
         if (incoming.get(link.to) === 0) ready.push(link.to);
       });
@@ -4006,8 +4036,10 @@
         state.textContent = 'continued';
         state.className = 'nstate done';
         showResult(element.querySelector('.nout'), continued.type, continued.value, continued.outputs);
+        if (continued.items && window.AINodeLists) window.AINodeLists.paint(idString);
       }
-      return Promise.resolve({type:continued.type, value:continued.value, outputs:continued.outputs || null});
+      return Promise.resolve(Object.assign({type:continued.type, value:continued.value, outputs:continued.outputs || null},
+        continued.items ? {items: continued.items} : {}));
     }
 
     const requestBody = bodyFor(node.service, resolved, params);
@@ -4019,6 +4051,7 @@
         state.textContent = 'cached';
         state.className = 'nstate done';
         showResult(element.querySelector('.nout'), completed.type, completed.value, completed.outputs);
+        if (completed.items && window.AINodeLists) requestAnimationFrame(() => window.AINodeLists.paint(idString));
         recordResult(idString, {status:'done', type:completed.type, value:completed.value,
           input_reference_url:completed.input_reference_url || (nodeCompare?.resolveReference(idString, graphSnapshot) || resolved.image || ''),
           task_id:completed.task_id || '', outputs:completed.outputs || undefined});
@@ -4138,6 +4171,18 @@
             const type = node.entity_type === 'media'
               ? (looksLikeVideo(value) ? 'video' : 'image') : node.entity_type;
             return {ok:true, result:{type, value, media:node.entity_type === 'media'}};
+          }
+          if (window.AINodeLists) {
+            const listed = await window.AINodeLists.maybeRun({id, node, feeds, upstreamRecords, pending, epoch, keepDone, graph});
+            if (listed) {
+              if (listed.ok) {
+                if (!graph.results) graph.results = {};
+                graph.results[id] = {status:'done', type:listed.result.type, value:listed.result.value};
+              } else if (epoch === canvasEpoch && meta(id)) {
+                markState(id, listed.error, 'nstate failed');
+              }
+              return listed;
+            }
           }
           const resolved = {};
           const fan = {};
@@ -4298,6 +4343,15 @@
       const state = element.querySelector('.nstate');
       const outBox = element.querySelector('.nout');
       runState.set(String(id), record);
+      if (window.AINodeLists && Array.isArray(record.items) && record.items.length) {
+        if (record.status === 'done') {
+          continuableResults.set(String(id), {type:record.type, value:record.value, outputs:record.outputs || null,
+            items:record.items, task_id:''});
+          if (record.outputs) showResult(outBox, record.type, record.value, record.outputs);
+        }
+        window.AINodeLists.restore(id, record, state);
+        return;
+      }
       // An X9 set saved mid-render has no single task to resume (its nine
       // tasks ran in the tab that started them): keep the cells, say so.
       if (Array.isArray(record.x9) && record.x9.length && record.status === 'running') {
@@ -4584,7 +4638,7 @@
   const TOOL_ICONS = {
     upscale2x: '⏫', music: '🎵', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
-    video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
+    video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃', scene_split: '✂️', video_concat: '🔗', audio_from_source: '🔊',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
     upscale: '🔎', detail_enhance: '✨', face_fix: '🙂', upscale_video: '📺',
     qwen_image: '🖌️'
@@ -4612,7 +4666,7 @@
     ['Inputs', ['input:media', 'input:text', 'input:avatar']],
     ['Vision / Text', ['vision', 'text']],
     ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
-    ['Video', ['video', 'video_frame', 'video_storyboard', 'video_control', 'upscale_video']],
+    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'audio_from_source', 'video_control', 'upscale_video']],
     ['Avatars', ['avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
     ['Audio', ['music']],
@@ -4623,6 +4677,7 @@
     vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
     video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
+    scene_split: 'Scene split', video_concat: 'Concat shots', audio_from_source: 'Audio from source',
     upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
     control_canny: 'Canny', control_normal: 'Normal', music: 'Music', '3dmodel': '3D model',
