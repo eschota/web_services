@@ -16,19 +16,19 @@
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260923-lora-fitrule"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260923-multiout1"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260926-media2"></script>
     <script src="/static/js/ai-node-display.js?v=20260923-sockets1"></script>
-    <script src="/static/js/ai-node-sockets.js?v=20260923-sockets1"></script>
+    <script src="/static/js/ai-node-sockets.js?v=20260926-media2"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
-    <script src="/static/js/ai-node-compare.js?v=20260922-nodesui5"></script>
-    <script src="/static/js/ai-graph-bridge.js?v=20260922-sysprompt1"></script>
+    <script src="/static/js/ai-node-compare.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-graph-bridge.js?v=20260926-media2"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
     <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260923-lorafit1"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-nodes.js?v=20260926-draft1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260926-media2"></script>
     <style>
         .ai-page {
             background:
@@ -225,6 +225,7 @@
         }
         [data-socket-type="text"] { --sock-c: var(--t-text); }
         [data-socket-type="image"] { --sock-c: var(--t-image); }
+        [data-socket-type="media"] { --sock-c: var(--t-image); }
         [data-socket-type="video"] { --sock-c: var(--t-video); }
         [data-socket-type="avatar"] { --sock-c: var(--t-avatar); }
         [data-socket-type="model3d"] { --sock-c: var(--t-model3d); }
@@ -240,6 +241,7 @@
         }
         .drawflow .connection[data-wire-type="text"] .main-path { stroke: var(--t-text); }
         .drawflow .connection[data-wire-type="image"] .main-path { stroke: var(--t-image); }
+        .drawflow .connection[data-wire-type="media"] .main-path { stroke: var(--t-image); }
         .drawflow .connection[data-wire-type="video"] .main-path { stroke: var(--t-video); }
         .drawflow .connection[data-wire-type="avatar"] .main-path { stroke: var(--t-avatar); }
         .drawflow .connection[data-wire-type="model3d"] .main-path { stroke: var(--t-model3d); }

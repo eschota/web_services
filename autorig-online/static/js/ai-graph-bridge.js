@@ -230,7 +230,7 @@
       if (heading) {
         if (!heading.dataset.aiDefaultHeading) {
           const fallback = node.kind === 'input'
-            ? ({image:'Image in', video:'Video in', text:'Text in', avatar:'Avatar'}[node.entity_type] || 'Input')
+            ? ({media:'Media in', image:'Media in', video:'Media in', text:'Text in', avatar:'Avatar'}[node.entity_type] || 'Input')
             : String(node.service || 'Node').replace(/^control_/, 'ControlNet - ').replace(/_/g, ' ')
               .replace(/^3dmodel$/i, '3D model').replace(/\b\w/g, value => value.toUpperCase());
           heading.dataset.aiDefaultHeading = previousLabel ? fallback : heading.textContent;

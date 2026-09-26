@@ -81,7 +81,7 @@
     const httpUrl = strictHttpUrl;
 
     function inputImageFromNode(node, graph) {
-      if (!node || node.kind !== 'input' || node.entity_type !== 'image') return '';
+      if (!node || node.kind !== 'input' || !['image', 'media'].includes(node.entity_type)) return '';
       return httpUrl(node.value);
     }
 
@@ -125,7 +125,9 @@
       const meta = getMeta(String(id)) || {};
       if (!element) return null;
       if (meta.kind === 'input' || element.classList.contains('input-node')) {
-        if (!['image', 'video', 'avatar'].includes(meta.entityType)) return null;
+        if (!['image', 'video', 'media', 'avatar'].includes(meta.entityType)) return null;
+        const clipShown = element.querySelector('.ninput [data-vpreview]:not([hidden])');
+        if (clipShown && httpUrl(clipShown.currentSrc || clipShown.src)) return { type: 'video', value: httpUrl(clipShown.currentSrc || clipShown.src) };
         const preview = element.querySelector('.ninput [data-preview]:not([hidden])');
         const value = element.querySelector('.ninput [data-value]');
         const url = preview ? httpUrl(preview.currentSrc || preview.src) : httpUrl(value && value.value);

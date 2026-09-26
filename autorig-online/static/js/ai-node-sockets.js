@@ -20,7 +20,7 @@
   'use strict';
 
   const TYPE_ORDER = Object.freeze([
-    'text', 'image', 'video', 'avatar', 'model3d',
+    'text', 'media', 'image', 'video', 'avatar', 'model3d',
     'control_pose', 'control_depth', 'control_canny', 'audio'
   ]);
 
@@ -28,8 +28,11 @@
   function typeAccepts(produced, accepted, alsoAccepts) {
     produced = String(produced || '');
     if (!produced || !accepted) return false;
-    return produced === String(accepted) ||
-      (alsoAccepts || []).map(String).includes(produced);
+    const also = (alsoAccepts || []).map(String);
+    if (produced === 'media') {
+      return ['image', 'video'].includes(String(accepted)) || also.includes('image') || also.includes('video');
+    }
+    return produced === String(accepted) || also.includes(produced);
   }
 
   /** Drop radius in screen pixels: a far-away camera needs a forgiving target. */

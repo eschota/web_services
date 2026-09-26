@@ -618,7 +618,7 @@
         visited.add(current.id);
         const node = nodes.get(current.id);
         if (!node) continue;
-        if (node.kind === 'input' && node.entity_type === 'image') {
+        if (node.kind === 'input' && ['image', 'media'].includes(node.entity_type)) {
           const element = nodeElement(current.id);
           const liveValue = element && element.querySelector('[data-value]');
           originals.push({ distance: current.distance, url: (liveValue && liveValue.value) || node.value || '' });
