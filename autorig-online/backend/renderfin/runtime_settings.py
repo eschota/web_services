@@ -22,7 +22,7 @@ def apply_runtime_settings(workflow, prompt, width, height):
     """
     # A control map must retain the source framing. Cropping a portrait pose
     # map to the product's landscape render default would cut off both bodies.
-    if getattr(prompt, 'type', '') in {'control_pose', 'control_depth', 'control_canny'}:
+    if getattr(prompt, 'type', '') in {'control_pose', 'control_depth', 'control_canny', 'control_normal'}:
         # The preprocessors scale the shorter edge to `resolution`. Asking for
         # the requested size's own shorter edge keeps the map at the source
         # picture's exact pixel size, so nodes that follow the map's size

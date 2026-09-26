@@ -113,6 +113,10 @@ if ((Test-Path "$img\diffusion_models\z_image_turbo_fp8_e4m3fn.safetensors") -an
     (Test-Path "$img\text_encoders\qwen_3_4b.safetensors") -and (Test-Path "$img\vae\ae.safetensors") -and
     (Test-Path "$img\model_patches\Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors") -and
     (Test-ComfyNode 'ZImageFunControlnet')) { $workflows += @('gen_image_control_pose.json','gen_image_control_depth.json') }
+# ControlNet maps: the comfyui_controlnet_aux preprocessors (weights download on first use).
+if ((Test-ComfyNode 'DepthAnythingV2Preprocessor') -and (Test-ComfyNode 'OpenposePreprocessor') -and
+    (Test-ComfyNode 'CannyEdgePreprocessor') -and (Test-ComfyNode 'BAE-NormalMapPreprocessor')) {
+    $workflows += @('gen_control_depth.json','gen_control_pose.json','gen_control_canny.json','gen_control_normal.json') }
 if ((Test-Path "$img\diffusion_models\krea2_turbo_fp8_scaled.safetensors") -and
     (Test-Path "$img\text_encoders\qwen3vl_4b_fp8_scaled.safetensors") -and
     (Test-Path "$img\vae\qwen_image_vae.safetensors")) { $workflows += 'gen_image_krea2.json' }

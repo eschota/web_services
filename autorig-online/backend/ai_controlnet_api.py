@@ -31,13 +31,16 @@ CHANNEL_TYPES = {
     "pose": "control_pose",
     "depth": "control_depth",
     "canny": "control_canny",
+    # Surface orientation (BAE normal preprocessor). No model on the fleet has a
+    # native normal ControlNet; the map is used as a reference picture.
+    "normal": "control_normal",
 }
 
 
 class ControlNetRequest(BaseModel):
     image_url: Optional[str] = Field(None, description="Source image, public http(s) URL")
     image_base64: Optional[str] = Field(None, description="Source image as base64 or data URL")
-    channel: str = Field(..., description="pose, depth or canny")
+    channel: str = Field(..., description="pose, depth, canny or normal")
     width: Optional[int] = Field(None, ge=64, le=2048,
         description="Map width; omitted = the source image's own width")
     height: Optional[int] = Field(None, ge=64, le=2048,
@@ -80,7 +83,7 @@ def renderfin_payload(channel: str, image_url: str,
     if channel not in CHANNEL_TYPES:
         raise HTTPException(status_code=400, detail={
             "error_string": "unknown_control_channel",
-            "message_string": "channel must be pose, depth or canny",
+            "message_string": "channel must be pose, depth, canny or normal",
             "available_channels_array": sorted(CHANNEL_TYPES),
         })
     if not str(image_url or "").strip().startswith(("http://", "https://")):
@@ -192,3 +195,8 @@ router.include_router(_enhance_router)
 from ai_qwen_image_api import router as _qwen_image_router  # noqa: E402
 
 router.include_router(_qwen_image_router)
+
+# /api/music (Stable Audio 3, 2026-09-26): the same renderfin shape again.
+from ai_music_api import router as _music_router  # noqa: E402
+
+router.include_router(_music_router)

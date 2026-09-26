@@ -26,22 +26,34 @@ router = APIRouter()
 TEXT = "text"
 IMAGE = "image"
 VIDEO = "video"
+MEDIA = "media"
 AVATAR = "avatar"
 MODEL3D = "model3d"
+AUDIO = "audio"
 CONTROL_POSE = "control_pose"
 CONTROL_DEPTH = "control_depth"
 CONTROL_CANNY = "control_canny"
+CONTROL_NORMAL = "control_normal"
 
 ENTITY_TYPES: List[Dict[str, object]] = [
     {"id": AVATAR, "title": "Avatar", "carries": "saved private Avatar id and immutable version", "icon": "👤"},
     {"id": CONTROL_POSE, "title": "Pose control", "carries": "validated OpenPose map URL", "icon": "🧍"},
     {"id": CONTROL_DEPTH, "title": "Depth control", "carries": "validated depth map URL", "icon": "▧"},
+    {"id": CONTROL_NORMAL, "title": "Normal control", "carries": "normal map URL (RGB surface orientation)", "icon": "◩"},
     {"id": CONTROL_CANNY, "title": "Canny control", "carries": "validated edge map URL", "icon": "▱"},
     {
         "id": TEXT,
         "title": "Text",
         "carries": "the string itself",
         "icon": "📝",
+    },
+    {
+        # The one input node for pictures and clips (2026-09-26): any link,
+        # upload or paste. A picture socket gets a clip's first frame.
+        "id": MEDIA,
+        "title": "Media",
+        "carries": "any image or video: link (Civitai pages too), upload or paste",
+        "icon": "🎞️",
     },
     {
         "id": IMAGE,
@@ -60,6 +72,12 @@ ENTITY_TYPES: List[Dict[str, object]] = [
         "title": "3D model",
         "carries": "a public URL to a GLB or FBX",
         "icon": "🧊",
+    },
+    {
+        "id": AUDIO,
+        "title": "Audio",
+        "carries": "a public URL to an MP3",
+        "icon": "🎵",
     },
 ]
 
@@ -322,14 +340,19 @@ SERVICES: List[Dict[str, object]] = [
 #
 # Only knobs implemented by the selected model's workflow are presented.
 # The checkpoint determines the video architecture and its trained schedule.
-for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth", CONTROL_DEPTH), ("canny", "Canny", CONTROL_CANNY)):
+# Every map is also a plain PNG at the source size (pose: coloured skeleton on
+# black, depth: grey, near = white, canny: white edges on black, normal: RGB),
+# so it wires into any image socket as a reference picture too (ai_graph
+# type check, ai-nodes.js typeFits); the dedicated control sockets use it
+# natively where a model has that ControlNet.
+for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth", CONTROL_DEPTH), ("canny", "Canny", CONTROL_CANNY), ("normal", "Normal map", CONTROL_NORMAL)):
     SERVICES.append({
         "id": "control_" + _channel, "title": "ControlNet - " + _title,
         "path": "/nodes", "api": "/api/controlnet", "status": "live",
         "summary": "Extract a tested " + _title + " map for compatible image generation.",
         "inputs": [{"type": IMAGE, "field": "image", "required": True, "title": "Source image"}],
         "outputs": [{"type": _type, "field": "image_url_string", "title": _title + " map"}],
-        "compatible_image_families": ["zimage"],
+        "compatible_image_families": [] if _channel == "normal" else ["zimage"],
     })
 
 
@@ -345,6 +368,16 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
 # video super-resolution is declared and disabled rather than quietly missing;
 # `blocked_reason` is what the palette shows instead of a generic tooltip.
 SERVICES.extend([
+    {
+        # Owner rule 2026-09-26: render within half-HD, enlarge at the end.
+        "id": "upscale2x", "title": "Upscale 2×", "path": "/nodes",
+        "api": "/api/upscale2x", "status": "live",
+        "summary": "Fast 2x enlargement of a picture or a clip (RealESRGAN x2, per frame for video). Put it last.",
+        "inputs": [{"type": IMAGE, "field": "image", "required": True,
+                    "title": "Picture or clip", "also_accepts": [VIDEO]}],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Picture ×2"},
+                    {"type": VIDEO, "field": "video_url_string", "title": "Clip ×2"}],
+    },
     {
         "id": "upscale", "title": "Upscale", "path": "/nodes",
         "api": "/api/upscale", "status": "live",
@@ -407,10 +440,14 @@ SERVICES.extend([
 SERVICES.append({
     "id": "qwen_image", "title": "Qwen-Image", "path": "/nodes",
     "api": "/api/qwen-image", "status": "live",
+    "system_prompt_capable": True,
+    "system_prompt_default": (  # = ai_qwen_image_api.QWEN_SYSTEM_PROMPT_DEFAULT
+        "Remix {images} into one coherent image: unify the style and lighting, "
+        "combine the subjects and the story of all inputs; image 1 is the base scene and composition."),
     "summary": "The farm's one edit model: Qwen-Image 2.1 turbo (6 steps, 15-40 s). Rewrite the picture wired in (up to 3 pictures), or draw from a prompt alone.",
     "inputs": [
-        {"type": TEXT, "field": "prompt", "required": True,
-         "title": "What to draw, or what to change"},
+        {"type": TEXT, "field": "prompt", "required": False,
+         "title": "What to draw, or what to change (optional with pictures)"},
         {"type": IMAGE, "field": "image", "required": False,
          "title": "Picture to edit", "ref_index": 1, "also_accepts": [VIDEO]},
         # Qwen-Image 2.1 turbo reads up to three pictures (image 1..3). It is
@@ -423,7 +460,60 @@ SERVICES.append({
 })
 
 
+# ------------------------------------------------------------------ Music
+#
+# Stable Audio 3 medium (ai_music_api, renderfin.music). Text, a picture or a
+# clip in: the Vision model (or the Text model, for text alone) writes the
+# Stable Audio prompt under the node's system prompt, and the length follows
+# the clip. A clip also comes back with the music under it.
+import ai_music_api as _music_api  # noqa: E402
+
+SERVICES.append({
+    "id": "music", "title": "Music · Stable Audio 3", "path": "/nodes",
+    "api": "/api/music", "status": "live",
+    "summary": ("Music from text, a picture or a clip: Vision writes the prompt, Stable Audio 3 "
+                "medium renders stereo 44.1 kHz. Length follows the clip, else 30 s."),
+    "system_prompt_capable": True,
+    "system_prompt_default": _music_api.MUSIC_SYSTEM_PROMPT_DEFAULT,
+    "inputs": [
+        {"type": TEXT, "field": "prompt", "required": False, "title": "Idea or prompt"},
+        {"type": IMAGE, "field": "image", "required": False,
+         "title": "Picture or clip", "also_accepts": [VIDEO]},
+    ],
+    "outputs": [
+        {"type": AUDIO, "field": "audio_url_string", "title": "Music"},
+        {"type": VIDEO, "field": "video_url_string", "title": "Clip with music"},
+        {"type": TEXT, "field": "prompt_string", "title": "Prompt used"},
+    ],
+    "models_url": "/api/ai/models",
+})
+
 PARAMS: Dict[str, List[Dict[str, object]]] = {
+    "music": [
+        {"name": "duration_s", "title": "Length, s", "type": "number", "min": 0, "max": 380,
+         "step": 1, "default": 0,
+         "help": "0 = the clip's length, else 30 s (Draft caps text/picture music at 30 s)"},
+        {"name": "render_quality", "title": "Quality", "type": "select", "default": "",
+         "help": "Blank follows the graph. Draft = 4 sampler steps, Full = 8",
+         "options": [
+             {"value": "", "title": "Follow the graph"},
+             {"value": "preview", "title": "Draft — 4 steps"},
+             {"value": "fast", "title": "6 steps"},
+             {"value": "normal", "title": "Full — 8 steps"},
+         ]},
+        {"name": "instrumental", "title": "Vocals", "type": "select", "default": "true",
+         "options": [{"value": "true", "title": "Instrumental"},
+                     {"value": "false", "title": "Vocals allowed"}]},
+        {"name": "reprompt", "title": "Prompt", "type": "select", "default": "true",
+         "options": [{"value": "true", "title": "Written by Vision/Text from the inputs"},
+                     {"value": "false", "title": "Use my text as it is"}]},
+        {"name": "negative", "title": "Avoid", "type": "text", "default": ""},
+        {"name": "model", "title": "👁 Prompt writer", "type": "select", "source": "ai_models",
+         "default": "qwen35-9b-uncensored",
+         "help": "Vision/Text model that writes the music prompt"},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991,
+         "step": 1, "default": 0, "help": "0 gives a different piece each run"},
+    ],
     "qwen_image": [
         # Automatic is the honest default: the wiring already says which of
         # the two models is meant. The explicit choices exist for the case

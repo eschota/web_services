@@ -119,6 +119,7 @@ SERVICE_TOKENS = {
     "control_pose": "gen_control_pose.json",
     "control_depth": "gen_control_depth.json",
     "control_canny": "gen_control_canny.json",
+    "control_normal": "gen_control_normal.json",
     "upscale": ENHANCE_SCHEDULING_TOKEN,
     "detail_enhance": ENHANCE_SCHEDULING_TOKEN,
     "face_fix": ENHANCE_SCHEDULING_TOKEN,

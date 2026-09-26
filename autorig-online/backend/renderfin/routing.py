@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 from .models import RenderPrompt, RenderServer
 from .multiref import MULTIREF_TYPES, MULTIREF_WORKFLOWS
+from .music import MUSIC_EXT, MUSIC_TYPES, MUSIC_WORKFLOWS
 
 SAFE_WORKFLOW_RE = re.compile(r"^[A-Za-z0-9_.-]+\.json$")
 
@@ -29,7 +30,11 @@ ENHANCE_WORKFLOWS = {
     "detail_plain": "detail_plain.json",
     "face_fix": "face_fix.json",
     "face_fix_skin": "face_fix_skin.json",
+    # Upscale 2x node (2026-09-26): RealESRGAN x2, a picture or a clip frame by frame.
+    "upscale_x2": "upscale_fast.json",
+    "upscale_video_x2": "upscale_video_x2.json",
 }
+VIDEO_ENHANCE_TYPES = frozenset({"upscale_video_x2"})
 ENHANCE_TYPES = frozenset(ENHANCE_WORKFLOWS)
 
 # Which workers may take this work. Scheduling matches a token against a
@@ -53,6 +58,11 @@ ENHANCE_MAX_SIDE = 4096
 QWEN_IMAGE_WORKFLOWS = {
     "qwen_image": "qwen_image_generate.json",
     "qwen_image_edit": "qwen_image_edit.json",
+    # Qwen-Image-2.1 with Viggle's 6-step turbo LoRA (2026-09-26): one int8
+    # transformer serves both, no CFG, a fixed 6-sigma schedule. The GGUF pair
+    # above stays installed and selectable by `checkpoint` for rollback.
+    "qwen_image21": "qwen_image21_generate.json",
+    "qwen_image21_edit": "qwen_image21_edit.json",
 }
 QWEN_IMAGE_TYPES = frozenset(QWEN_IMAGE_WORKFLOWS)
 
@@ -92,6 +102,10 @@ def is_image_request(prompt: RenderPrompt) -> bool:
 def output_extension(prompt: RenderPrompt) -> str:
     if (prompt.type or "").strip().lower() == "image_to_3d":
         return ".glb"
+    if (prompt.type or "").strip().lower() in VIDEO_ENHANCE_TYPES:
+        return ".mp4"
+    if (prompt.type or "").strip().lower() in MUSIC_TYPES:
+        return MUSIC_EXT
     return ".png" if is_image_request(prompt) else ".mp4"
 
 
@@ -103,7 +117,7 @@ def scheduling_token(prompt: RenderPrompt) -> str:
     new here and gets its own token so it only lands on capable workers (4090).
     """
     ptype = (prompt.type or "").strip().lower()
-    if ptype in {"control_pose", "control_depth", "control_canny"}:
+    if ptype in {"control_pose", "control_depth", "control_canny", "control_normal"}:
         return "gen_" + ptype + ".json"
     if ptype in ENHANCE_TYPES:
         return ENHANCE_SCHEDULING_TOKEN
@@ -111,6 +125,9 @@ def scheduling_token(prompt: RenderPrompt) -> str:
         return QWEN_IMAGE_SCHEDULING_TOKEN
     if ptype in MULTIREF_TYPES:
         return MULTIREF_SCHEDULING_TOKEN
+    if ptype in MUSIC_TYPES:
+        # Own token: only boxes that advertise it hold the audio checkpoints.
+        return MUSIC_WORKFLOWS[ptype]
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
     if is_image_request(prompt):
@@ -137,7 +154,7 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
     image_url = (prompt.image_url or "").strip()
     has_aspect_ratio = (prompt.aspect_ratio or 0) > 0
 
-    if ptype in {"control_pose", "control_depth", "control_canny"}:
+    if ptype in {"control_pose", "control_depth", "control_canny", "control_normal"}:
         return "gen_" + ptype + ".json", None
     if ptype in ENHANCE_WORKFLOWS:
         return ENHANCE_WORKFLOWS[ptype], None
@@ -145,6 +162,8 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
         return QWEN_IMAGE_WORKFLOWS[ptype], None
     if ptype in MULTIREF_WORKFLOWS:
         return MULTIREF_WORKFLOWS[ptype], None
+    if ptype in MUSIC_WORKFLOWS:
+        return MUSIC_WORKFLOWS[ptype], None
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D, None
     if ptype == "z_depth":

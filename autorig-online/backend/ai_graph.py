@@ -193,6 +193,9 @@ class Graph(BaseModel):
     # Keyed by node id. Never part of what makes a graph's identity: a rerun
     # must update the same link, not mint a new one.
     results: Dict[str, NodeResult] = Field(default_factory=dict)
+    # Branch isolation (Ctrl+O): {"target": node id, "prior": {node id: was
+    # bypassed}}. Absent when nothing is isolated; never part of identity.
+    isolation: Optional[Dict[str, object]] = None
 
     @field_validator("instance_id")
     @classmethod
@@ -466,8 +469,16 @@ def validate(graph: Graph) -> None:
                 "message_string": "An input node takes nothing; it only produces"})
         produced = _output_type(source, link.output)
         accepted = _input_type(target, link.input)
+        also = _input_also_accepts(target, link.input)
+        media_fits = produced == ai_services.MEDIA and (
+            accepted in (ai_services.IMAGE, ai_services.VIDEO)
+            or ai_services.IMAGE in also or ai_services.VIDEO in also)
+        # A control map is a raster: any picture socket takes it as a reference.
+        raster_fits = str(produced or "").startswith("control_") and (
+            accepted == ai_services.IMAGE or ai_services.IMAGE in also)
         if produced is None or accepted is None or (
-                produced != accepted and produced not in _input_also_accepts(target, link.input)):
+                produced != accepted and produced not in also and not media_fits
+                and not raster_fits):
             raise HTTPException(status_code=400, detail={
                 "error_string": "type_mismatch",
                 "message_string": (
@@ -475,6 +486,23 @@ def validate(graph: Graph) -> None:
                     f"but '{link.to_node}.{link.input}' takes {accepted or 'nothing'}")})
 
     _reject_cycles(graph, by_id)
+
+
+LEGACY_MEDIA_INPUTS = (ai_services.IMAGE, ai_services.VIDEO)
+
+
+def migrate_media_inputs(graph) -> None:
+    """Old Image-in / Video-in nodes become the universal Media node in place.
+
+    Works on a Graph or a plain dict; ids, values and links are untouched.
+    """
+    nodes = graph.get("nodes") if isinstance(graph, dict) else getattr(graph, "nodes", None)
+    for node in nodes or []:
+        if isinstance(node, dict):
+            if node.get("kind") == NODE_INPUT and node.get("entity_type") in LEGACY_MEDIA_INPUTS:
+                node["entity_type"] = ai_services.MEDIA
+        elif getattr(node, "kind", None) == NODE_INPUT and node.entity_type in LEGACY_MEDIA_INPUTS:
+            node.entity_type = ai_services.MEDIA
 
 
 def _output_type(node: GraphNode, field: str) -> Optional[str]:
@@ -569,7 +597,7 @@ def _identity_payload(body: Dict[str, object]) -> str:
     identity = {
         key: value
         for key, value in body.items()
-        if key != "results" and not (
+        if key not in ("results", "isolation") and not (
             key in {"instance_id", "comparison_anchor_id"} and not value
         ) and not (key == "render_quality" and value in ("", "normal"))
     }
@@ -613,9 +641,12 @@ def _identity_payload(body: Dict[str, object]) -> str:
 @router.get("/api/ai/graph/templates")
 async def api_graph_templates():
     """Compositions that ship with the editor."""
+    listed = templates()
+    for template in listed:
+        migrate_media_inputs(template.get("graph") or {})
     return {
         "success_bool": True,
-        "templates_array": templates(),
+        "templates_array": listed,
         "server_time_unix_int": int(time.time()),
     }
 
@@ -623,6 +654,7 @@ async def api_graph_templates():
 @router.post("/api/ai/graphs")
 async def api_graph_save(graph: Graph):
     """Store a graph and hand back the link that reopens it."""
+    migrate_media_inputs(graph)
     validate(graph)
     body = graph.model_dump(by_alias=True)
     # The link names the composition, not the run: saving after a render must
@@ -649,7 +681,8 @@ async def api_graph_save(graph: Graph):
             saved_at = int(existing.get("saved_at_unix_int") or now)
     try:
         GRAPH_DIR.mkdir(parents=True, exist_ok=True)
-        stored = {"id": graph_id, "saved_at_unix_int": saved_at, "graph": body}
+        stored = {"id": graph_id, "saved_at_unix_int": saved_at, "graph": body,
+                  "revision_int": int((existing or {}).get("revision_int") or 0) + 1}
         if existing is not None:
             stored["updated_at_unix_int"] = now
         _path_for(graph_id).write_text(
@@ -667,8 +700,14 @@ async def api_graph_save(graph: Graph):
         "success_bool": True,
         "graph_id_string": graph_id,
         "deep_link_string": f"/nodes?g={graph_id}",
+        "revision_int": stored["revision_int"],
         "server_time_unix_int": int(time.time()),
     }
+
+
+def _migrated(graph: Dict[str, object]) -> Dict[str, object]:
+    migrate_media_inputs(graph)
+    return graph
 
 
 def _read_stored(path: pathlib.Path) -> Optional[Dict[str, object]]:
@@ -713,7 +752,7 @@ def _carry_results(previous: Dict[str, object], body: Dict[str, object]) -> Dict
 
 
 @router.put("/api/ai/graphs/{graph_id}")
-async def api_graph_update(graph_id: str, graph: Graph):
+async def api_graph_update(graph_id: str, graph: Graph, request: Request):
     """Save an edited graph under the link it already has.
 
     Ordinary saving is an edit of one document, not a new library entry: the
@@ -727,6 +766,7 @@ async def api_graph_update(graph_id: str, graph: Graph):
             raise HTTPException(status_code=409, detail={
                 "error_string": "template_is_read_only",
                 "message_string": "A built-in composition is saved as a new graph"})
+    migrate_media_inputs(graph)
     validate(graph)
     path = _stored_path(graph_id)
     previous = _read_stored(path)
@@ -734,6 +774,22 @@ async def api_graph_update(graph_id: str, graph: Graph):
         raise HTTPException(status_code=404, detail={
             "error_string": "graph_not_found",
             "message_string": f"No graph saved as '{graph_id}'"})
+    # A tab saves with the revision it opened. If anyone saved since, this tab
+    # holds an older graph and would overwrite (and drop) their nodes.
+    current_revision = int(previous.get("revision_int") or 0)
+    base = str(request.headers.get("x-graph-revision") or "").strip()
+    if not base and "/nodes" in str(request.headers.get("referer") or ""):
+        # An editor tab opened before the revision guard existed: it holds a
+        # canvas of unknown age, so it may not overwrite the stored graph.
+        raise HTTPException(status_code=428, detail={
+            "error_string": "graph_stale",
+            "message_string": "This tab runs an older editor; reload the page (your graph was changed elsewhere)",
+            "revision_int": current_revision})
+    if base.isdigit() and int(base) != current_revision:
+        raise HTTPException(status_code=409, detail={
+            "error_string": "graph_stale",
+            "message_string": "This graph was changed in another tab or by an agent; reload to get the latest version",
+            "revision_int": current_revision})
     body = graph.model_dump(by_alias=True)
     if "render_quality" not in graph.model_fields_set:
         # An edit that does not mention the quality leaves it as it was;
@@ -748,7 +804,8 @@ async def api_graph_update(graph_id: str, graph: Graph):
             "message_string": "The graph is larger than the store accepts"})
     now = int(time.time())
     stored = {key: value for key, value in previous.items() if key != "graph"}
-    stored.update({"id": graph_id, "graph": body, "updated_at_unix_int": now})
+    stored.update({"id": graph_id, "graph": body, "updated_at_unix_int": now,
+                   "revision_int": current_revision + 1})
     stored.setdefault("saved_at_unix_int", now)
     try:
         path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -762,6 +819,7 @@ async def api_graph_update(graph_id: str, graph: Graph):
         "graph_id_string": graph_id,
         "deep_link_string": f"/nodes?g={graph_id}",
         "updated_bool": True,
+        "revision_int": current_revision + 1,
         "server_time_unix_int": now,
     }
 
@@ -1281,6 +1339,7 @@ async def api_graph_load(graph_id: str):
     """Reopen a saved graph, or a template if the id names one."""
     for template in templates():
         if str(template["id"]) == graph_id:
+            migrate_media_inputs(template["graph"])
             return {"success_bool": True, "graph_id_string": graph_id,
                     "graph_object": template["graph"],
                     "template_bool": True,
@@ -1300,9 +1359,10 @@ async def api_graph_load(graph_id: str):
     return {
         "success_bool": True,
         "graph_id_string": graph_id,
-        "graph_object": stored.get("graph") or {},
+        "graph_object": _migrated(stored.get("graph") or {}),
         "template_bool": False,
         "saved_at_unix_int": int(stored.get("saved_at_unix_int") or 0),
+        "revision_int": int(stored.get("revision_int") or 0),
         "server_time_unix_int": int(time.time()),
     }
 

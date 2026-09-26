@@ -68,6 +68,19 @@
   const pendingImageUploads = new Map();
   const pendingModelSelections = new Map();
   let graphId = null;
+  // The store's revision this tab opened; a save based on an older one is
+  // refused (409 graph_stale) instead of overwriting somebody's newer graph.
+  let graphRevision = null;
+  let graphStale = false;
+  // Branch isolation: the node isolated and every node's bypass state before.
+  let isolation = null;
+  // Nodes this page could not draw (a service it does not know yet) are kept
+  // verbatim, with their wires and results, and written back on every save.
+  let unplacedNodes = [];
+  let unplacedLinks = [];
+  let unplacedResults = {};
+  let loadMapping = new Map();
+  const LEGACY_MEDIA_INPUTS = ['image', 'video'];
   let resultsTimer = null;
   // Set by Cancel. It only stops work that has not been handed to the farm
   // yet: a job already on a card is left to finish, because killing it wastes
@@ -281,9 +294,17 @@
       control = `<input type="range" data-param="${name}" min="${param.min}" max="${param.max}" `
               + `step="${param.step}" value="${param.default}"${help}>`
               + `<output data-for="${name}">${rangeLabel(param.default)}</output>`;
+    } else if (param.type === 'number' && !['seed', 'width', 'height'].includes(param.name)
+               && param.min != null && param.max != null && Number(param.max) - Number(param.min) <= 100000) {
+      // Bounded numbers (frames, CFG, token budget) are sliders like the rest.
+      control = `<input type="range" data-param="${name}" min="${param.min}" max="${param.max}" `
+              + `step="${param.step || 1}" value="${param.default}"${help}>`
+              + `<output data-for="${name}">${rangeLabel(param.default)}</output>`;
     } else if (param.type === 'number') {
       control = `<input type="number" data-param="${name}" min="${param.min}" max="${param.max}" `
-              + `step="${param.step || 1}" value="${param.default}"${help}>`;
+              + `step="${param.step || 1}" value="${param.default}"${help}>`
+              + (param.name === 'seed'
+                ? `<button type="button" class="nseed-rand" data-seed-for="${name}" title="Random seed">🎲</button>` : '');
     } else if (param.type === 'model') {
       // Filled in after the node exists: the picker needs a live element to
       // mount into, which the HTML string cannot give it.
@@ -529,6 +550,14 @@
   }
 
   function inputNodeHtml(entityType) {
+    if (entityType === 'media') return `
+      <div class="nhead"><b>Media in</b></div>
+      <div class="nports"><div class="prow pout">image / video ${typeIcon('media')}</div></div>
+      <div class="ninput"><input type="text" data-value placeholder="Any link (Civitai too), drop a file or Ctrl+V">
+        <input type="file" data-file accept="image/*,video/mp4,video/webm,video/quicktime" hidden>
+        <button type="button" data-pick class="npick">Choose a file or Ctrl+V</button>
+        <img data-preview alt="" hidden><video data-vpreview muted autoplay loop playsinline hidden></video></div>
+      <div class="nstate"></div>`;
     if (entityType === 'avatar') return '<div class="nhead"><b>Avatar</b></div>'
       + '<div class="nports"><div class="prow pout">character 👤</div></div>'
       + '<div class="ninput"><select data-value aria-label="Saved Avatar"><option value="">Choose an Avatar…</option></select>'
@@ -571,7 +600,7 @@
       service: serviceId,
       displayMode: params && params._display_mode,
       label: (params && params._label) || '',
-      followInputSize: hasDimensions ? (!params || params._follow_input_size !== false) : undefined,
+      followInputSize: hasDimensions ? sizeFollowsInput(entry, params) : undefined,
       disabled: !!(params && params._disabled),
       // A node that can carry a standing instruction is born with the default
       // one, so a graph saved before this existed opens with it too.
@@ -583,6 +612,7 @@
       outFields: outputs.map(o => o.field)
     });
     applySystemPromptMarker(id);
+    addIsolateButton(id);
     alignPorts(id, inputs.length, outputs.length);
     refreshReferenceSockets(id);
     mountModelPickers(id, serviceId);
@@ -592,7 +622,31 @@
     return id;
   }
 
+  /**
+   * Auto (follow the input) or manual size, for a node being drawn.
+   * `_size_auto` is the saved choice; a graph from before it existed follows
+   * its input only if its size is one of the old stock defaults (owner rule).
+   */
+  const STOCK_SIZES = new Set(['960x540', '960x640', '540x960', '640x960', '1024x1024', '1024x576', '576x1024',
+    '768x768', '512x512', '1280x720', '720x1280', '832x480', '480x832', '1024x768', '768x1024']);
+  function sizeFollowsInput(entry, params) {
+    if (!params) return true;
+    if (params._follow_input_size === false) return false;
+    if (typeof params._size_auto === 'boolean') return params._size_auto;
+    // Saved by the earlier follow mode and never edited by hand (an edit
+    // wrote false): it was following its input, so it keeps doing so.
+    if (params._follow_input_size === true) return true;
+    const w = Number(params.width), h = Number(params.height);
+    if (!(w > 0 && h > 0)) return true;
+    const find = name => ((entry.params_array || []).find(item => item.name === name) || {}).default;
+    return STOCK_SIZES.has(w + 'x' + h) || (Number(find('width')) === w && Number(find('height')) === h);
+  }
+
   function addInputNode(entityType, x, y, value, params) {
+    // Image in / Video in were folded into one Media node; old graphs,
+    // pasted groups and agent edits open as Media with value and wires kept.
+    if (LEGACY_MEDIA_INPUTS.includes(entityType) &&
+        (catalogue.entity_types_array || []).some(item => item.id === 'media')) entityType = 'media';
     if (!(catalogue.entity_types_array || []).some(item => item.id === entityType)) return null;
     const id = editor.addNode(
       'input-' + entityType, 0, 1, x, y,
@@ -887,7 +941,7 @@
   function imageOutputField(id) {
     const node = meta(id);
     if (!node) return '';
-    if (node.kind === KIND_INPUT) return node.entityType === 'image' ? 'value' : '';
+    if (node.kind === KIND_INPUT) return ['image', 'media'].includes(node.entityType) ? 'value' : '';
     const entry = serviceById(node.service);
     const output = ((entry && entry.outputs) || []).find(item => item.type === 'image');
     return output ? output.field : '';
@@ -905,6 +959,174 @@
     const outputs = element.querySelector('.outputs');
     if (inputs) inputs.style.marginTop = (HEADER_HEIGHT + 6) + 'px';
     if (outputs) outputs.style.marginTop = (HEADER_HEIGHT + 6 + inCount * ROW_HEIGHT) + 'px';
+  }
+
+  /** Civitai pages and CDN links, resolved once per address. */
+  const mediaResolveCache = new Map();
+  function isCivitai(url) {
+    try { return /(^|\.)civitai\.(com|red|green)$/i.test(new URL(url).hostname); } catch (error) { return false; }
+  }
+  function resolveMediaLink(url) {
+    if (!isCivitai(url)) return Promise.resolve({url, type: looksLikeVideo(url) ? 'video' : 'image'});
+    if (!mediaResolveCache.has(url)) {
+      mediaResolveCache.set(url, fetch('/api/ai/media/resolve?url=' + encodeURIComponent(url))
+        .then(async response => {
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error((data.detail && data.detail.message_string) || 'The link could not be resolved');
+          const resolved = data.url_string || data.url || url;
+          const type = data.type_string || data.type || (looksLikeVideo(resolved) ? 'video' : 'image');
+          return {url: resolved, type: type === 'video' ? 'video' : 'image'};
+        })
+        .catch(error => { mediaResolveCache.delete(url); throw error; }));
+    }
+    return mediaResolveCache.get(url);
+  }
+
+  /** A clip's first frame, for a socket that takes only a picture. */
+  const firstFrameCache = new Map();
+  function firstFrameOf(videoUrl) {
+    if (!firstFrameCache.has(videoUrl)) {
+      const runner = RUNNERS.video_frame;
+      firstFrameCache.set(videoUrl, submitJson(runner.api, {video_url: videoUrl, view: 'first_frame'})
+        .then(accepted => runner.finish(accepted, runner, null))
+        .then(finished => splitMulti(finished).value)
+        .catch(error => { firstFrameCache.delete(videoUrl); throw error; }));
+    }
+    return firstFrameCache.get(videoUrl);
+  }
+
+  function socketAcceptsVideo(serviceId, field) {
+    const entry = catalogue ? serviceById(serviceId) : null;
+    const input = ((entry || {}).inputs || []).find(item => item.field === field);
+    return !!input && (input.type === 'video' || (input.also_accepts || []).includes('video'));
+  }
+
+  /**
+   * What a Media node hands one socket: a video consumer gets the clip, a
+   * picture consumer gets the picture or, for a clip, its first frame.
+   */
+  async function adaptMediaValue(value, serviceId, field) {
+    const text = String(value || '').trim();
+    if (!text || text.startsWith('data:image/')) return text;
+    let url = text;
+    let kind = looksLikeVideo(text) ? 'video' : 'image';
+    if (text.startsWith('data:video/')) kind = 'video';
+    else if (isCivitai(text)) ({url, type: kind} = await resolveMediaLink(text));
+    if (kind !== 'video' || socketAcceptsVideo(serviceId, field)) return url;
+    if (url.startsWith('data:')) throw new Error('Upload the clip first; an inline video has no first frame yet');
+    return firstFrameOf(url);
+  }
+
+  function wireMediaNode(id, element) {
+    const file = element.querySelector('[data-file]');
+    const pick = element.querySelector('[data-pick]');
+    const picture = element.querySelector('[data-preview]');
+    const clip = element.querySelector('[data-vpreview]');
+    const text = element.querySelector('[data-value]');
+    const status = element.querySelector('.nstate');
+    const host = element.querySelector('.ninput');
+    [picture, clip].forEach(item => {
+      item.classList.add('preview-expandable');
+      item.title = 'Click to enlarge';
+      item.addEventListener('click', event => {
+        event.stopPropagation();
+        if (item.src) openPreview(item === clip ? 'video' : 'image', item.src);
+      });
+    });
+    function show(url, kind) {
+      const active = kind === 'video' ? clip : picture;
+      const other = kind === 'video' ? picture : clip;
+      other.hidden = true;
+      if (other === clip) clip.pause();
+      other.removeAttribute('src');
+      if (!url) { active.hidden = true; active.removeAttribute('src'); return; }
+      active.src = url;
+      active.hidden = false;
+      if (active === clip) clip.play().catch(() => {});
+      markResolution(host, active);
+    }
+    let generation = 0;
+    async function refresh() {
+      const value = text.value.trim();
+      const mine = ++generation;
+      if (!/^(https?:\/\/|data:(image|video)\/)/.test(value)) { show('', 'image'); return; }
+      if (value.startsWith('data:')) { show(value, value.startsWith('data:video/') ? 'video' : 'image'); return; }
+      if (!isCivitai(value)) { show(value, looksLikeVideo(value) ? 'video' : 'image'); return; }
+      status.textContent = 'resolving link…';
+      status.className = 'nstate running';
+      try {
+        const resolved = await resolveMediaLink(value);
+        if (mine !== generation) return;
+        show(resolved.url, resolved.type);
+        status.textContent = resolved.type === 'video' ? 'video · picture sockets get its first frame' : 'image';
+        status.className = 'nstate done';
+      } catch (error) {
+        if (mine !== generation) return;
+        show('', 'image');
+        status.textContent = error.message;
+        status.className = 'nstate failed';
+      }
+    }
+    async function acceptMedia(chosen) {
+      if (!chosen || !/^(image|video)\//.test(chosen.type || '')) return;
+      const isVideo = chosen.type.startsWith('video/');
+      const limit = (isVideo ? 100 : 12) * 1024 * 1024;
+      if (chosen.size > limit) { toast(`${isVideo ? 'Videos' : 'Images'} must be at most ${isVideo ? 100 : 12} MB.`); return; }
+      const mine = (element._uploadGeneration || 0) + 1;
+      element._uploadGeneration = mine;
+      generation += 1;
+      status.textContent = `uploading ${isVideo ? 'video' : 'image'}...`;
+      status.className = 'nstate running';
+      text.value = '';
+      if (element._previewObjectUrl) URL.revokeObjectURL(element._previewObjectUrl);
+      element._previewObjectUrl = URL.createObjectURL(chosen);
+      show(element._previewObjectUrl, isVideo ? 'video' : 'image');
+      const form = new FormData();
+      form.append('file', chosen, chosen.name || (isVideo ? 'input.mp4' : 'clipboard.png'));
+      const upload = fetch('/dev/api/scratch', {method: 'POST', body: form})
+        .then(async response => {
+          const data = await response.json();
+          if (!response.ok || !data.url) throw new Error(`The ${isVideo ? 'video' : 'image'} upload failed`);
+          if (element._uploadGeneration !== mine) return;
+          text.value = data.url;
+          text.dispatchEvent(new Event('change', {bubbles: true}));
+          status.textContent = `${isVideo ? 'video' : 'image'} ready`;
+          status.className = 'nstate done';
+        }).catch(error => {
+          if (element._uploadGeneration !== mine) return;
+          status.textContent = error.message;
+          status.className = 'nstate failed';
+        }).finally(() => {
+          if (pendingImageUploads.get(String(id)) === upload) pendingImageUploads.delete(String(id));
+        });
+      pendingImageUploads.set(String(id), upload);
+      await upload;
+    }
+    function acceptText(value) {
+      const link = String(value || '').trim();
+      if (!/^(https?:\/\/|data:(image|video)\/)/.test(link)) return false;
+      text.value = link;
+      text.dispatchEvent(new Event('change', {bubbles: true}));
+      return true;
+    }
+    element._acceptImage = acceptMedia;
+    element._acceptVideo = acceptMedia;
+    element._acceptMedia = acceptMedia;
+    element._acceptText = acceptText;
+    element.tabIndex = 0;
+    pick.addEventListener('click', () => file.click());
+    file.addEventListener('change', event => acceptMedia(event.target.files[0]));
+    element.addEventListener('dragover', event => event.preventDefault());
+    element.addEventListener('drop', event => {
+      event.preventDefault();
+      const dropped = [...event.dataTransfer.files].find(item => /^(image|video)\//.test(item.type));
+      if (dropped) { acceptMedia(dropped); return; }
+      acceptText(event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain'));
+    });
+    let timer = null;
+    text.addEventListener('change', refresh);
+    text.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(refresh, 250); });
+    refresh();
   }
 
   function wireInputNode(id, entityType) {
@@ -947,6 +1169,7 @@
       }).catch(() => { state.textContent = 'Could not load Avatars'; });
       return;
     }
+    if (element && entityType === 'media') { wireMediaNode(id, element); return; }
     if (!element || !['image', 'video'].includes(entityType)) return;
     const isVideo = entityType === 'video';
     const file = element.querySelector('[data-file]');
@@ -1075,10 +1298,13 @@
     const node = select.closest('.drawflow-node');
     const service = node ? (meta(node.id.replace(/^node-/, '')) || {}).service : '';
     select.dataset.filled = '1';
+    const cached = loraMenuCache.get(service);
+    if (cached && Date.now() - cached.at > 60000) loraMenuCache.delete(service);
     if (!loraMenuCache.has(service)) {
       loraMenuCache.set(service, fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(service || 'image'))
         .then(r => r.json()).then(body => (body.loras_array || []).filter(entry => entry.usable))
         .catch(() => []));
+      loraMenuCache.get(service).at = Date.now();
     }
     loraMenuCache.get(service).then(loras => {
       loras.forEach(entry => {
@@ -1099,6 +1325,7 @@
     if (meta(id)?.displayMode) values._display_mode = meta(id).displayMode;
     if (typeof meta(id)?.followInputSize === 'boolean') {
       values._follow_input_size = meta(id).followInputSize;
+      values._size_auto = meta(id).followInputSize;
     }
     if (meta(id)?.disabled) values._disabled = true;
     if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
@@ -1156,7 +1383,7 @@
   function toggleBypass(ids) {
     const list = [...new Set((ids || []).map(String))].filter(id => meta(id) && nodeElement(id));
     if (!list.length) {
-      toast('Select a node first — Ctrl+P then takes it out of the run.');
+      toast('Select a node first — B (or Ctrl+B) then takes it out of the run.');
       return false;
     }
     // A mixed selection is bypassed as a whole; a fully bypassed one comes back.
@@ -1168,6 +1395,277 @@
       : count + ' bypassed — Render will skip it and everything that needs it.');
     return true;
   }
+
+  /* ------------------------------------------------------ branch isolation */
+
+  /** Every node the given one reads from, itself included. */
+  function upstreamOf(id) {
+    const data = editor.export().drawflow.Home.data;
+    const seen = new Set();
+    const queue = [String(id)];
+    while (queue.length) {
+      const current = queue.pop();
+      if (seen.has(current) || !data[current]) continue;
+      seen.add(current);
+      Object.values(data[current].inputs || {}).forEach(input =>
+        (input.connections || []).forEach(connection => queue.push(String(connection.node))));
+    }
+    return seen;
+  }
+
+  function paintIsolation() {
+    let banner = document.getElementById('isolation-banner');
+    document.querySelectorAll('#canvas .niso').forEach(button =>
+      button.classList.toggle('on', !!isolation && button.dataset.node === String(isolation.target)));
+    if (!isolation) { if (banner) banner.remove(); return; }
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'isolation-banner';
+      banner.style.cssText = 'position:absolute;bottom:14px;left:50%;transform:translateX(-50%);z-index:20;' +
+        'background:#7c3aed;color:#fff;padding:6px 12px;border-radius:8px;font:600 13px system-ui;cursor:pointer;' +
+        'box-shadow:0 2px 10px rgba(0,0,0,.35)';
+      banner.title = 'Click, or press I (or Ctrl+I), to restore every node';
+      banner.addEventListener('click', () => toggleIsolation());
+      const host = document.getElementById('canvas');
+      (host && host.parentElement ? host.parentElement : document.body).appendChild(banner);
+    }
+    const item = meta(isolation.target) || {};
+    const element = nodeElement(isolation.target);
+    const heading = element && element.querySelector('.nhead b');
+    const name = item.label || (heading && heading.textContent) || ('node ' + isolation.target);
+    banner.textContent = 'Isolated: ' + name + ' — I or Ctrl+I (or click) to restore';
+  }
+
+  function restoreIsolation(quiet) {
+    if (!isolation) return false;
+    Object.entries(isolation.prior || {}).forEach(([id, wasBypassed]) => {
+      if (!meta(id) || !nodeElement(id)) return;
+      if (isBypassed(id) !== !!wasBypassed) { applyBypass(id, !!wasBypassed); invalidateNodeAndDownstream(id); }
+    });
+    isolation = null;
+    paintIsolation();
+    if (!quiet) toast('Isolation lifted — every node is back as it was.');
+    return true;
+  }
+
+  /**
+   * Ctrl+I on a selected node: bypass everything that is not upstream of it,
+   * so Render computes that branch only. Again (or the banner) restores each
+   * node's own earlier state, including nodes that were bypassed before.
+   */
+  function toggleIsolation(targetId) {
+    const target = targetId != null ? String(targetId) : null;
+    if (isolation && (!target || target === String(isolation.target))) return restoreIsolation();
+    if (!target || !meta(target) || !nodeElement(target)) {
+      toast('Select a node first — I (or Ctrl+I) then isolates its branch.');
+      return false;
+    }
+    if (isolation) restoreIsolation(true);
+    const keep = upstreamOf(target);
+    const prior = {};
+    nodeMeta.forEach((item, id) => { if (item) prior[String(id)] = !!item.disabled; });
+    Object.keys(prior).forEach(id => {
+      if (!keep.has(id) && !prior[id]) { applyBypass(id, true); invalidateNodeAndDownstream(id); }
+      // Everything the target needs runs, even if it was bypassed before;
+      // restoring puts it back as it was.
+      if (keep.has(id) && prior[id]) { applyBypass(id, false); invalidateNodeAndDownstream(id); }
+    });
+    isolation = {target, prior};
+    paintIsolation();
+    toast('Branch isolated: ' + keep.size + ' node(s) will run. I or Ctrl+I restores.');
+    return true;
+  }
+
+  /** Ids selected on the canvas (the groups module owns selection). */
+  function selectedIds() {
+    if (nodeGroups && nodeGroups.selected && nodeGroups.selected.size) return [...nodeGroups.selected].map(String);
+    const element = document.querySelector('#canvas .drawflow-node.selected');
+    return element && element.id ? [element.id.replace(/^node-/, '')] : [];
+  }
+
+  function selectedNodeId() {
+    const ids = selectedIds();
+    if (ids.length === 1) return ids[0];
+    const element = document.querySelector('#canvas .drawflow-node.selected');
+    if (element && element.id) return element.id.replace(/^node-/, '');
+    return editor && editor.node_selected && editor.node_selected.id
+      ? String(editor.node_selected.id).replace(/^node-/, '') : null;
+  }
+
+  function addIsolateButton(id) {
+    const element = nodeElement(id);
+    const head = element && element.querySelector('.nhead');
+    if (!head || head.querySelector('.niso')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'niso';
+    button.dataset.node = String(id);
+    button.textContent = '◎';
+    button.title = 'Isolate this branch: run only what this node needs (I or Ctrl+I)';
+    button.setAttribute('aria-label', 'Isolate branch');
+    button.style.cssText = 'margin-left:4px;border:0;background:transparent;color:inherit;cursor:pointer;font-size:13px;padding:0 3px;opacity:.75';
+    button.addEventListener('mousedown', event => event.stopPropagation());
+    button.addEventListener('click', event => { event.stopPropagation(); toggleIsolation(id); });
+    head.appendChild(button);
+  }
+
+  /**
+   * Node hotkeys, on window in the capture phase so nothing on the page sees
+   * them first. Plain letters work everywhere (no browser or extension owns
+   * them): I isolate, B or M bypass. Ctrl+I / Ctrl+B / Ctrl+M / Ctrl+P too.
+   * Ignored while typing.
+   */
+  const HOTKEYS = {isolate: 'I or Ctrl+I', bypass: 'B / M or Ctrl+B / Ctrl+P'};
+  function typingIn(target) {
+    return !!(target && ((/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || '') && !target.readOnly) ||
+      target.isContentEditable || (target.closest && target.closest('dialog, .mpick-panel'))));
+  }
+  function hotkeyAction(event) {
+    if (event.altKey || event.shiftKey) return null;
+    const key = String(event.key || '').toLowerCase();
+    const command = event.ctrlKey || event.metaKey;
+    if (key === 'i') return 'isolate';
+    if (key === 'b' || key === 'm') return 'bypass';
+    if (key === 'p' && command) return 'bypass';
+    return null;
+  }
+  window.addEventListener('keydown', event => {
+    if (!document.getElementById('canvas')) return;
+    const action = hotkeyAction(event);
+    if (!action) return;
+    if (typingIn(event.target) || typingIn(document.activeElement)) {
+      // Ctrl+P must still never open the print dialog on this page.
+      if (action === 'bypass' && (event.ctrlKey || event.metaKey)) event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (action === 'isolate') {
+      const id = selectedNodeId();
+      if (isolation && (!id || id === String(isolation.target))) toggleIsolation();
+      else toggleIsolation(id);
+    } else {
+      toggleBypass(selectedIds());
+    }
+    paintQuickbar();
+  }, true);
+
+  /* ------------------------------------------------------- media throttle */
+
+  /**
+   * A graph of 25 nodes holds dozens of looping clips and full-size pictures.
+   * Only clips that are on screen and big enough to see play; pictures decode
+   * lazily and off the main thread (2026-09-27, owner: node actions slow).
+   */
+  function installMediaThrottle(canvas) {
+    if (!canvas || typeof IntersectionObserver === 'undefined') return;
+    const visible = new WeakMap();
+    const worth = video => {
+      const rect = video.getBoundingClientRect();
+      return visible.get(video) && rect.width >= 80 && !document.hidden;
+    };
+    const apply = video => {
+      if (worth(video)) { if (video.paused) video.play().catch(() => {}); }
+      else if (!video.paused) video.pause();
+    };
+    const io = new IntersectionObserver(entries => entries.forEach(entry => {
+      visible.set(entry.target, entry.isIntersecting);
+      apply(entry.target);
+    }), {threshold: 0.2});
+    const prep = element => {
+      if (element.tagName === 'IMG') {
+        if (element.loading !== 'lazy') element.loading = 'lazy';
+        element.decoding = 'async';
+      } else if (element.tagName === 'VIDEO' && !element._throttled) {
+        element._throttled = true;
+        element.preload = 'metadata';
+        element.removeAttribute('autoplay');
+        element.autoplay = false;
+        // Code that calls play() on a new source must not wake a clip nobody sees.
+        element.addEventListener('play', () => { if (!worth(element)) element.pause(); });
+        io.observe(element);
+      }
+    };
+    canvas.querySelectorAll('img, video').forEach(prep);
+    new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(node => {
+      if (node.nodeType !== 1) return;
+      if (node.tagName === 'IMG' || node.tagName === 'VIDEO') prep(node);
+      if (node.querySelectorAll) node.querySelectorAll('img, video').forEach(prep);
+    }))).observe(canvas, {childList: true, subtree: true});
+    let timer = null;
+    const recheck = () => { clearTimeout(timer); timer = setTimeout(() => canvas.querySelectorAll('video').forEach(apply), 200); };
+    document.addEventListener('visibilitychange', recheck);
+    if (editor && typeof editor.on === 'function') editor.on('zoom', recheck);
+  }
+
+  /* ---------------------------------------------------------- quick toolbar */
+
+  let quickbar = null;
+  function quickButton(glyph, title, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = glyph;
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.style.cssText = 'min-width:34px;height:30px;border:0;border-radius:7px;background:transparent;color:inherit;' +
+      'font-size:16px;cursor:pointer;padding:0 6px';
+    ['mousedown', 'pointerdown', 'touchstart', 'dblclick'].forEach(type =>
+      button.addEventListener(type, event => { event.stopPropagation(); if (type !== 'touchstart') event.preventDefault(); }));
+    button.addEventListener('click', event => { event.stopPropagation(); event.preventDefault(); onClick(); paintQuickbar(); });
+    return button;
+  }
+  function ensureQuickbar() {
+    if (quickbar) return quickbar;
+    quickbar = document.createElement('div');
+    quickbar.id = 'node-quickbar';
+    quickbar.style.cssText = 'position:fixed;z-index:40;display:none;gap:2px;padding:3px;border-radius:10px;' +
+      'background:#1f1b33;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12)';
+    const id = () => selectedNodeId();
+    quickbar._isolate = quickButton('◎', 'Isolate this branch / restore (' + HOTKEYS.isolate + ')', () => {
+      const target = id();
+      if (isolation && String(isolation.target) === String(target)) toggleIsolation(); else toggleIsolation(target);
+    });
+    quickbar._bypass = quickButton('⏻', 'Enable / disable (bypass) this node (' + HOTKEYS.bypass + ')', () => toggleBypass([id()]));
+    quickbar._run = quickButton('▶', 'Run this branch: isolate it and render (keeps finished results)', () => {
+      const target = id();
+      if (!target) return;
+      if (!isolation || String(isolation.target) !== String(target)) toggleIsolation(target);
+      runGraph(true);
+    });
+    quickbar.append(quickbar._isolate, quickbar._bypass, quickbar._run);
+    document.body.appendChild(quickbar);
+    return quickbar;
+  }
+  function paintQuickbar() {
+    const bar = ensureQuickbar();
+    const ids = selectedIds();
+    const element = ids.length === 1 ? nodeElement(ids[0]) : null;
+    if (!element || !meta(ids[0])) { bar.style.display = 'none'; return; }
+    const rect = element.getBoundingClientRect();
+    const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+    if (rect.bottom < canvasRect.top || rect.top > canvasRect.bottom || rect.right < canvasRect.left || rect.left > canvasRect.right) {
+      bar.style.display = 'none'; return;
+    }
+    const isService = meta(ids[0]).kind === KIND_SERVICE;
+    bar._isolate.style.display = isService ? '' : 'none';
+    bar._run.style.display = isService ? '' : 'none';
+    const isolatedHere = !!isolation && String(isolation.target) === String(ids[0]);
+    bar._isolate.style.background = isolatedHere ? '#7c3aed' : 'transparent';
+    bar._isolate.title = (isolatedHere ? 'Restore every node' : 'Isolate this branch') + ' (' + HOTKEYS.isolate + ')';
+    const off = isBypassed(ids[0]);
+    bar._bypass.style.background = off ? '#6b7280' : 'transparent';
+    bar._bypass.title = (off ? 'Enable this node' : 'Disable (bypass) this node') + ' (' + HOTKEYS.bypass + ')';
+    bar.style.display = 'flex';
+    const width = bar.offsetWidth || 110;
+    bar.style.left = Math.max(canvasRect.left + 4, Math.min(rect.left + rect.width / 2 - width / 2, canvasRect.right - width - 4)) + 'px';
+    bar.style.top = Math.max(canvasRect.top + 4, rect.top - 40) + 'px';
+  }
+  setInterval(() => {
+    if (typeof editor === 'undefined' || !editor) return;
+    if (!quickbar && !selectedIds().length) return;
+    if (quickbar && quickbar.style.display === 'none' && !selectedIds().length) return;
+    paintQuickbar();
+  }, 150);
 
   /* ------------------------------------------------------- system prompts */
 
@@ -1351,26 +1849,46 @@
    * after the fact (type or also_accepts, then the ControlNet family rule),
    * asked before the drop so incompatible sockets can grey out.
    */
+  /** Same type, listed in also_accepts, or a Media node into a picture/clip socket. */
+  function typeFits(info) {
+    if (!info || !info.produced) return false;
+    if (info.produced === info.accepted || info.alsoAccepts.includes(info.produced)) return true;
+    // A control map is a plain PNG: any picture socket takes it as a reference
+    // (bodyFor tells the model what it is). Native control sockets are typed.
+    if (info.produced.startsWith('control_') &&
+        (info.accepted === 'image' || info.alsoAccepts.includes('image'))) return true;
+    return info.produced === 'media' && (['image', 'video'].includes(info.accepted) ||
+      info.alsoAccepts.includes('image') || info.alsoAccepts.includes('video'));
+  }
+
   function linkAllowed(connection) {
     if (String(connection.output_id) === String(connection.input_id)) return false;
     if ((meta(connection.input_id) || {}).kind !== KIND_SERVICE) return false;
     const info = linkTypes(connection);
     if (!info || !info.produced) return false;
-    if (!(info.produced === info.accepted || info.alsoAccepts.includes(info.produced))) return false;
-    if (info.produced.startsWith('control_')) {
+    if (!typeFits(info)) return false;
+    if (info.produced.startsWith('control_') && String(info.accepted || '').startsWith('control_')) {
       const element = nodeElement(connection.input_id);
       const slot = element && element.querySelector('[data-model-param="checkpoint"]');
       const entry = slot && slot._picker && slot._picker.entry;
       const sourceService = serviceById((meta(connection.output_id) || {}).service || info.produced);
-      return controlChannelAccepted(info.produced.slice(8), entry, sourceService);
+      const ok = controlChannelAccepted(info.produced.slice(8), entry, sourceService);
+      const socket = element && element.querySelector('.inputs .' + connection.input_class);
+      if (socket) {
+        if (socket.dataset.typeTitle === undefined) socket.dataset.typeTitle = socket.title || '';
+        socket.title = ok ? socket.dataset.typeTitle : ((entry && (entry.title || entry.file)) || 'This model') +
+          ': no native ' + info.produced.slice(8) + ' ControlNet. Switch the model to Z-Image Turbo, ' +
+          'or drop the map on a picture socket to use it as a reference image.';
+      }
+      return ok;
     }
     return true;
   }
 
   function onConnectionCreated(connection) {
     const info = linkTypes(connection);
-    if (info && (info.produced === info.accepted || (info.produced && info.alsoAccepts.includes(info.produced)))) {
-      if (info.produced.startsWith('control_')) {
+    if (typeFits(info)) {
+      if (info.produced.startsWith('control_') && String(info.inField || '').startsWith('control_')) {
         const channel = info.produced.slice(8);
         const element = nodeElement(connection.input_id);
         const slot = element && element.querySelector('[data-model-param="checkpoint"]');
@@ -1461,17 +1979,44 @@
     // Enhancement: a picture in, the same picture out, published at a URL the
     // farm fills in later — exactly the ControlNet shape.
     upscale: { api: '/api/upscale', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    // Picture or clip in, the same x2 out; the type follows what came back.
+    upscale2x: { api: '/api/upscale2x', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      return {value, outputs: looksLikeVideo(value) ? {video_url_string: value} : {image_url_string: value}};
+    }, field: 'output_url_string', type: 'auto' },
     detail_enhance: { api: '/api/detail', finish: pollForFile, field: 'image_url_string', type: 'image' },
     face_fix: { api: '/api/facefix', finish: pollForFile, field: 'image_url_string', type: 'image' },
     // Draws or rewrites depending on whether a picture is wired in; the
     // endpoint reads the wiring, so the runner is the ordinary picture shape.
     qwen_image: { api: '/api/qwen-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
-    '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
+    '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' },
+    // Stable Audio 3 (2026-09-26): the audio file, and for a clip the clip
+    // with the music under it (muxed by the server once the audio exists).
+    music: { api: '/api/music', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      const outputs = {audio_url_string: value};
+      if (accepted.prompt_string) outputs.prompt_string = String(accepted.prompt_string);
+      if (accepted.video_url_string) {
+        const clip = String(accepted.video_url_string);
+        for (let attempt = 0; attempt < 60; attempt++) {
+          const probe = await fetch(clip, { method: 'HEAD' }).catch(() => null);
+          if (probe && probe.ok) { outputs.video_url_string = clip; break; }
+          await sleep(3000);
+        }
+      }
+      return {value, outputs};
+    }, field: 'audio_url_string', type: 'audio' }
   };
   ['pose', 'depth', 'canny'].forEach(channel => {
     RUNNERS['control_' + channel] = { api: '/api/controlnet', finish: pollForFile,
       field: 'image_url_string', type: 'control_' + channel };
   });
+
+  /** A runner's result type; 'auto' reads it off the address (picture or clip). */
+  function runnerType(runner, value) {
+    if (!runner || runner.type !== 'auto') return runner ? runner.type : 'image';
+    return looksLikeVideo(value) ? 'video' : 'image';
+  }
 
   function runnerFor(serviceId) {
     const runner = RUNNERS[serviceId];
@@ -1910,8 +2455,64 @@
     return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(text);
   }
 
+  /** Auto-size nodes take the size of what actually arrived on the primary socket. */
+  async function followInputSizeAtRun(node, resolved, params) {
+    if (!params || params.width == null || params.height == null) return;
+    if (params._follow_input_size === false || params._size_auto === false) return;
+    if (!nodeGroups || !nodeGroups.mediaDimensions) return;
+    const order = ['image', 'image_url_end', 'video_url', 'control_video_url', 'source', 'source_url'];
+    let source = order.map(field => resolved[field]).find(value => typeof value === 'string' && /^(https?:|data:)/.test(value));
+    if (!source) source = Object.keys(resolved).filter(field => !/^control_(pose|depth|canny)$/.test(field))
+      .map(field => resolved[field]).find(value => typeof value === 'string' && /^(https?:|data:)/.test(value) &&
+        /\.(png|jpe?g|webp|gif|mp4|webm|mov|m4v)(\?|#|$)|^data:(image|video)\//i.test(value));
+    if (!source) return;
+    try {
+      const size = nodeGroups.fitDimensions(await nodeGroups.mediaDimensions(source), node.service);
+      if (size) { params.width = size.width; params.height = size.height; }
+    } catch (error) { /* keep the canvas size */ }
+  }
+
+  const HALF_HD_LONG = 960;
+  const VIDEO_SAMPLERS = new Set(['video', 'video_control', 'avatar_video']);
+
+  /** Clip at half-HD -> x2 through /api/upscale2x (the post step of a big target). */
+  async function upscaleClip2x(url, state) {
+    if (state) { state.textContent = 'upscaling 2× (half-HD render → target size)…'; state.className = 'nstate running'; }
+    const accepted = await submitJson('/api/upscale2x', {video_url: url});
+    return pollForFile(accepted, {field: 'output_url_string', type: 'video'}, null);
+  }
+
+  const MAP_RULES = {
+    pose: 'an OpenPose skeleton map: pose the person exactly like it, same place and size in the frame',
+    depth: 'a depth map (near = white): keep its layout, perspective and every object\'s place',
+    canny: 'an edge map: keep its lines, layout and perspective',
+    normal: 'a normal map (RGB = surface orientation): keep its shapes and surface orientation'
+  };
+  /** "Image N is a pose map: ..." for every control map among the pictures. */
+  function controlMapHints(resolved) {
+    const channels = new Map();
+    runState.forEach(record => {
+      const type = String((record && record.type) || '');
+      if (type.startsWith('control_') && record.value) channels.set(String(record.value), type.slice(8));
+    });
+    if (!channels.size) return '';
+    const hints = [];
+    Object.keys(resolved || {}).forEach(field => {
+      const match = field === 'image' ? ['', '1'] : /^reference_(\d+)$/.exec(field);
+      const channel = match && channels.get(String(resolved[field]));
+      if (channel && MAP_RULES[channel]) {
+        hints.push('Image ' + match[1] + ' is ' + MAP_RULES[channel] + '; do not draw the map itself.');
+      }
+    });
+    return hints.join(' ');
+  }
+
   function bodyFor(serviceId, resolved, params) {
     const body = {};
+    if (serviceId === 'video' && resolved && !resolved.image && resolved.image_url_end) {
+      resolved = Object.assign({}, resolved, {image: resolved.image_url_end});
+      delete resolved.image_url_end;
+    }
     if (serviceId.startsWith('control_')) body.channel = serviceId.slice('control_'.length);
     if (serviceId === 'video_frame') body.view = 'first_frame';
     if (serviceId === 'video_storyboard') body.view = 'storyboard';
@@ -1949,6 +2550,13 @@
         body[field] = value;
       }
     });
+    // A control map wired into a picture socket is a reference, not a photo:
+    // say which picture it is and what to take from it.
+    const mapHints = controlMapHints(resolved);
+    if (mapHints) {
+      if (typeof body.prompt === 'string' && body.prompt.trim()) body.prompt = body.prompt.trim() + ' ' + mapHints;
+      else if (serviceId === 'vision' || serviceId === 'text') body._map_hint = mapHints;
+    }
     // A node that carries a standing instruction always asks for the answer
     // alone: one JSON object in, `output_text` out. The instruction travels as
     // its own field so it never lands in the text the next node reads, and it
@@ -1958,9 +2566,11 @@
       const standing = (params || {})._system_prompt;
       const text = String(typeof standing === 'string'
         ? standing : (declaration.system_prompt_default || ''));
-      if (text.trim()) body.system_prompt = text;
+      const withHint = [text.trim(), body._map_hint || ''].filter(Boolean).join(' ');
+      if (withHint) body.system_prompt = withHint;
       body.structured = true;
     }
+    delete body._map_hint;
     // A LoRA of another model family (left in a slot when the checkpoint
     // changed) is left out, so the render runs with the ones that fit; the
     // slot says so inline (ai-node-lora-stack.js).
@@ -1975,6 +2585,19 @@
     // the scaled size is what the signature records and what the server gets.
     if (typeof window !== 'undefined' && window.AIRenderQuality && renderQuality !== 'normal') {
       window.AIRenderQuality.applyToBody(serviceId, body, renderQuality, declaration);
+    }
+    // Owner rule: video samples within half-HD at every quality. A larger
+    // target (Full with a big manual size, 2x) renders at half-HD and is then
+    // enlarged 2x by the Upscale 2x service; 1280x1920x297 frames ran a 24 GB
+    // card out of memory (2026-09-27).
+    if (VIDEO_SAMPLERS.has(serviceId) && Number(body.width) > 0 && Number(body.height) > 0) {
+      const w = Number(body.width), h = Number(body.height);
+      if (Math.max(w, h) > HALF_HD_LONG) {
+        const s = HALF_HD_LONG / Math.max(w, h);
+        body.width = Math.max(256, Math.round(w * s / 32) * 32);
+        body.height = Math.max(256, Math.round(h * s / 32) * 32);
+        body._post_upscale = 2;
+      }
     }
     return body;
   }
@@ -2007,6 +2630,8 @@
       const submitBody = Object.assign(
         bodyFor(node.service, resolved, params),
         budget ? {max_output_tokens:budget} : {});
+      const postUpscale = submitBody._post_upscale;
+      delete submitBody._post_upscale;
       const accepted = await submitJson(runner.api, submitBody, retry => {
         if (!executionIsCurrent(execution)) return;
         state.textContent = `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
@@ -2018,7 +2643,7 @@
       // opened mid-render knows which task to carry on watching.
       if (executionIsCurrent(execution)) {
         recordResult(id, {
-          status: 'running', type: runner.type,
+          status: 'running', type: runnerType(runner, accepted[runner.field] || ''),
           value: accepted[runner.field] || '',
           task_id: accepted.task_id_string || '',
           input_reference_url: execution.inputReference || '',
@@ -2030,6 +2655,10 @@
       try {
         ({value, outputs} = splitMulti(await runner.finish(accepted, runner,
           taskStateReporter(state, task, accepted, execution))));
+        if (postUpscale && value) {
+          value = await upscaleClip2x(value, executionIsCurrent(execution) ? state : null);
+          if (outputs && outputs.video_url_string) outputs.video_url_string = value;
+        }
       } catch (error) {
         if (!attempt && String(error.message || '').indexOf(BUDGET_EXHAUSTED) !== -1) {
           if (!executionIsCurrent(execution)) throw error;
@@ -2047,12 +2676,12 @@
       if (executionIsCurrent(execution)) {
         state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
         state.className = 'nstate done';
-        showResult(outBox, runner.type, value, outputs);
-        recordResult(id, Object.assign({ status: 'done', type: runner.type, value: value,
+        showResult(outBox, runnerType(runner, value), value, outputs);
+        recordResult(id, Object.assign({ status: 'done', type: runnerType(runner, value), value: value,
                            input_reference_url: execution.inputReference || '',
                            task_id: accepted.task_id_string || '' }, outputs ? {outputs} : {}));
       }
-      return outputs ? { type: runner.type, value: value, outputs } : { type: runner.type, value: value };
+      return outputs ? { type: runnerType(runner, value), value: value, outputs } : { type: runnerType(runner, value), value: value };
     } catch (error) {
       finishTaskTracker(task, false, execution, progress);
       if (executionIsCurrent(execution)) {
@@ -2161,6 +2790,35 @@
         picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', value); });
       host.appendChild(picture);
       markResolution(host, picture);
+    } else if (type === 'audio') {
+      const player = document.createElement('audio');
+      player.src = value;
+      player.controls = true;
+      player.preload = 'metadata';
+      player.className = 'naudio';
+      player.style.width = '100%';
+      player.addEventListener('click', event => event.stopPropagation());
+      player.addEventListener('mousedown', event => event.stopPropagation());
+      host.appendChild(player);
+      const extra = outputs || {};
+      if (extra.video_url_string) {
+        const clip = document.createElement('video');
+        clip.src = String(extra.video_url_string);
+        clip.controls = true;
+        clip.playsInline = true;
+        clip.preload = 'metadata';
+        clip.style.cssText = 'width:100%;margin-top:4px;border-radius:4px;background:#111';
+        clip.addEventListener('click', event => event.stopPropagation());
+        clip.addEventListener('mousedown', event => event.stopPropagation());
+        host.appendChild(clip);
+      }
+      if (extra.prompt_string) {
+        const block = document.createElement('div');
+        block.className = 'ntext';
+        block.style.cssText = 'font-size:11px;opacity:.75;margin-top:4px';
+        block.textContent = String(extra.prompt_string);
+        host.appendChild(block);
+      }
     } else if (type === 'video') {
       const clip = document.createElement('video');
       clip.src = value;
@@ -2180,7 +2838,7 @@
         markResolution(host, clip);
         clip.play().catch(() => {});
     }
-    if (outputs && typeof outputs === 'object') showOutputs(host, outputs);
+    if (outputs && typeof outputs === 'object' && type !== 'audio') showOutputs(host, outputs);
     const link = document.createElement('a');
     link.href = type === 'avatar' ? '/avatars' : value;
     link.target = '_blank';
@@ -2371,7 +3029,7 @@
     editor.zoom_max = 2.5;
     applySocketScale(editor.zoom);
     canvas.addEventListener('wheel', event => {
-      if (event.target.closest('input, textarea, select, .mpick-panel, .ntext')) return;
+      if (event.target.closest('input, textarea, select, .mpick-panel, .ntext, .aislider')) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       const bounds = canvas.getBoundingClientRect();
@@ -2430,9 +3088,33 @@
     });
     const results = {};
     runState.forEach((value, key) => { results[key] = value; });
+    if (unplacedNodes.length) {
+      // Written back untouched; wires to drawn nodes follow those nodes' ids.
+      const live = new Set(nodes.map(item => item.id));
+      const keptIds = new Map();
+      unplacedNodes.forEach(item => {
+        let keptId = String(item.id);
+        while (live.has(keptId)) keptId = 'kept_' + keptId;
+        live.add(keptId);
+        keptIds.set(String(item.id), keptId);
+        nodes.push(Object.assign({}, item, {id: keptId}));
+        if (unplacedResults[item.id]) results[keptId] = unplacedResults[item.id];
+      });
+      const endpoint = original => {
+        if (keptIds.has(String(original))) return keptIds.get(String(original));
+        const drawn = loadMapping.get(original);
+        return drawn != null && meta(drawn) ? String(drawn) : null;
+      };
+      unplacedLinks.forEach(link => {
+        const from = endpoint(link.from);
+        const to = endpoint(link.to);
+        if (from && to) links.push(Object.assign({}, link, {from, to}));
+      });
+    }
     return { name: document.getElementById('graph-name').value.trim() || 'Untitled',
              instance_id: graphInstanceId, comparison_anchor_id: comparisonAnchorId,
              render_quality: renderQuality,
+             isolation: isolation ? {target: String(isolation.target), prior: Object.assign({}, isolation.prior)} : null,
              nodes, links, results };
   }
 
@@ -2470,6 +3152,47 @@
     setRunning(runRequests.size > 0 || activeExecutions.size > 0 || restoredExecutions.size > 0);
   }
 
+  /** A farm error in words; the raw text goes behind a details toggle. */
+  function humanizeFailure(state) {
+    // Once rewritten, the state holds a <details>; never touch it again (the
+    // observer sees our own edit, and the raw text still matches below).
+    if (!state || state._humanizing || state.querySelector('details.nerr')) return;
+    const text = state.textContent || '';
+    let human = '', raw = '';
+    const marker = text.indexOf(' | details: ');
+    if (marker > 0) { human = text.slice(0, marker); raw = text.slice(marker + 12); }
+    else if (/comfy error: \{/.test(text)) {
+      raw = text;
+      const type = (/"exception_type": "([^"]+)"/.exec(text) || [])[1] || '';
+      const node = (/"node_type": "([^"]+)"/.exec(text) || [])[1] || '';
+      human = /OutOfMemory|out of memory/i.test(text)
+        ? 'Out of GPU memory — lower the size or the frame count'
+        : 'The render failed' + (node ? ' in ' + node : '') + (type ? ' (' + type + ')' : '');
+    } else return;
+    state._humanizing = true;
+    state.textContent = human + ' ';
+    const box = document.createElement('details');
+    box.className = 'nerr';
+    box.style.cssText = 'display:inline;font-size:11px;opacity:.8';
+    const summary = document.createElement('summary');
+    summary.textContent = 'details';
+    summary.style.cursor = 'pointer';
+    const pre = document.createElement('pre');
+    pre.textContent = raw;
+    pre.style.cssText = 'white-space:pre-wrap;max-height:160px;overflow:auto;user-select:text';
+    ['mousedown', 'pointerdown'].forEach(type => box.addEventListener(type, event => event.stopPropagation()));
+    box.append(summary, pre);
+    state.appendChild(box);
+    state._humanizing = false;
+  }
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(records => records.forEach(record => {
+      const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      const state = target && target.closest && target.closest('.nstate');
+      if (state && state.classList.contains('failed')) humanizeFailure(state);
+    })).observe(document.documentElement, {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class']});
+  }
+
   function markState(id, message, className) {
     const element = nodeElement(id);
     if (!element) return;
@@ -2491,12 +3214,26 @@
   async function persistGraph() {
     const graph = graphFromCanvas();
     if (graphId) {
+      if (graphStale) {
+        return { response: {ok: false, status: 409}, data: {detail: {error_string: 'graph_stale',
+          message_string: 'This graph was changed elsewhere; reload the page before saving.'}}, created: false };
+      }
+      const headers = { 'Content-Type': 'application/json' };
+      if (graphRevision != null) headers['X-Graph-Revision'] = String(graphRevision);
       const response = await fetch('/api/ai/graphs/' + encodeURIComponent(graphId), {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(graph)
+        method: 'PUT', headers, body: JSON.stringify(graph)
       });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 409 && (data.detail || {}).error_string === 'graph_stale') {
+        graphStale = true;
+        if (window.confirm('This graph was changed in another tab or by an agent. Your tab holds an older copy and was not saved.\n\nReload now to get the latest version?')) {
+          location.reload();
+        }
+        return { response, data, created: false };
+      }
       if (response.status !== 404 && response.status !== 409) {
-        return { response, data: await response.json().catch(() => ({})), created: false };
+        if (response.ok && data.revision_int != null) graphRevision = data.revision_int;
+        return { response, data, created: false };
       }
     }
     if (!graphInstanceId) {
@@ -2509,7 +3246,9 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(graph)
     });
-    return { response, data: await response.json().catch(() => ({})), created: true };
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.revision_int != null) graphRevision = data.revision_int;
+    return { response, data, created: true };
   }
 
   /** The quality rides in the address too (?q=), so a shared link opens in it. */
@@ -2527,6 +3266,7 @@
     renderQuality = quality;
     if (renderQualityToolbar) renderQualityToolbar.paint();
     if (renderQualityBadges) renderQualityBadges.refresh();
+    if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
     syncQualityUrl();
     return quality;
   }
@@ -2666,24 +3406,50 @@
           }
           if (upstreamRecords.some(record => !record || !record.ok)) {
             const bypassed = upstreamRecords.some(record => record && record.bypassed);
+            const missing = feeds.map((link, index) => {
+              const record = upstreamRecords[index];
+              if (record && record.ok) return '';
+              const from = byId.get(link.from) || {};
+              const name = ((from.params || {})._label) || from.service || from.entity_type || ('node ' + link.from);
+              const why = !record ? 'not in the run'
+                : record.bypassed ? 'bypassed'
+                : record.cancelled ? 'cancelled'
+                : record.superseded ? 'superseded by a newer run'
+                : (record.error || 'failed');
+              return link.input + ' ← ' + name + ': ' + String(why).slice(0, 120);
+            }).filter(Boolean);
+            const detail = missing.join('; ');
             if (epoch === canvasEpoch && meta(id)) {
-              markState(id, bypassed
-                ? 'skipped — something it needs is bypassed'
-                : 'skipped — what it needed did not arrive', bypassed ? 'nstate' : 'nstate failed');
+              markState(id, (bypassed ? 'skipped — needs a bypassed node: ' : 'skipped — input did not arrive: ') + detail,
+                bypassed ? 'nstate' : 'nstate failed');
             }
-            return {ok:false, bypassed:bypassed};
+            return {ok:false, bypassed:bypassed, error:'upstream ' + detail};
           }
           if (node.kind === KIND_INPUT) {
             const value = inputValues.get(id) || '';
             if (!value) return {ok:false, error:'empty input'};
-            return {ok:true, result:{type:node.entity_type, value}};
+            const type = node.entity_type === 'media'
+              ? (looksLikeVideo(value) ? 'video' : 'image') : node.entity_type;
+            return {ok:true, result:{type, value, media:node.entity_type === 'media'}};
           }
           const resolved = {};
-          feeds.forEach((link, index) => {
+          for (let index = 0; index < feeds.length; index += 1) {
+            const link = feeds[index];
             const upstream = upstreamRecords[index]?.result;
-            if (upstream) resolved[link.input] = outputValue(upstream, link.output);
-          });
+            if (!upstream) continue;
+            let value = outputValue(upstream, link.output);
+            if (upstream.media) {
+              try {
+                value = await adaptMediaValue(value, node.service, link.input);
+              } catch (error) {
+                markState(id, 'media input: ' + error.message, 'nstate failed');
+                return {ok:false, error:error.message};
+              }
+            }
+            resolved[link.input] = value;
+          }
           const params = {...(node.params || {})};
+          await followInputSizeAtRun(node, resolved, params);
           const requestBody = bodyFor(node.service, resolved, params);
           const signature = stableJson({service:node.service, body:requestBody});
           try {
@@ -2850,17 +3616,17 @@
       state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);
-      showResult(outBox, runner.type, value, outputs);
-      recordResult(id, Object.assign({ status: 'done', type: runner.type, value: value,
+      showResult(outBox, runnerType(runner, value), value, outputs);
+      recordResult(id, Object.assign({ status: 'done', type: runnerType(runner, value), value: value,
                          input_reference_url:record.input_reference_url || '', history:record.history || [],
                          task_id: record.task_id || '' }, outputs ? {outputs} : {}));
-      return outputs ? {type:runner.type, value, outputs} : {type:runner.type, value};
+      return outputs ? {type:runnerType(runner, value), value, outputs} : {type:runnerType(runner, value), value};
     } catch (error) {
       if (!stillHere()) throw error;
       state.textContent = String(error.message || error);
       state.className = 'nstate failed';
       if (task) task.finish(false);
-      recordResult(id, { status: 'failed', type: runner.type, value: '',
+      recordResult(id, { status: 'failed', type: runnerType(runner, ''), value: '',
                          error: String(error.message || error) });
       throw error;
     }
@@ -2876,16 +3642,31 @@
     comparisonAnchorId = '';
     document.getElementById('graph-name').value = graph.name || 'Untitled';
     const mapping = new Map();
+    unplacedNodes = [];
+    unplacedLinks = [];
+    unplacedResults = {};
     (graph.nodes || []).forEach(node => {
       const id = node.kind === KIND_INPUT
         ? addInputNode(node.entity_type, node.x, node.y, node.value, node.params)
         : addServiceNode(node.service, node.x, node.y, node.params);
       if (id) mapping.set(node.id, id);
+      else {
+        unplacedNodes.push(JSON.parse(JSON.stringify(node)));
+        if (graph.results && graph.results[node.id]) unplacedResults[node.id] = graph.results[node.id];
+      }
     });
+    loadMapping = mapping;
+    if (unplacedNodes.length) {
+      toast(unplacedNodes.length + ' node(s) of a type this page does not know are kept as they are — reload the page to see them.');
+    }
     (graph.links || []).forEach(link => {
       const from = mapping.get(link.from);
       const to = mapping.get(link.to);
-      if (!from || !to) return;
+      if (!from || !to) {
+        const kept = new Set(unplacedNodes.map(item => String(item.id)));
+        if (kept.has(String(link.from)) || kept.has(String(link.to))) unplacedLinks.push(Object.assign({}, link));
+        return;
+      }
       const fromMeta = meta(from);
       const toMeta = meta(to);
       const outIndex = Math.max(0, fromMeta.outFields.indexOf(link.output));
@@ -2894,7 +3675,18 @@
       editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1));
     });
     comparisonAnchorId = String(mapping.get(graph.comparison_anchor_id) || '');
+    isolation = null;
+    if (graph.isolation && graph.isolation.target != null && mapping.get(String(graph.isolation.target)) != null) {
+      const prior = {};
+      Object.entries(graph.isolation.prior || {}).forEach(([old, was]) => {
+        const now = mapping.get(String(old));
+        if (now != null) prior[String(now)] = !!was;
+      });
+      isolation = {target: String(mapping.get(String(graph.isolation.target))), prior};
+    }
+    paintIsolation();
     restoreResults(graph.results, mapping);
+    if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
     refreshRunningControls();
     // A graph that opens half off-screen looks empty. The canvas has just been
     // replaced wholesale, so there is no pan of anyone's to preserve.
@@ -2991,6 +3783,7 @@
   }
 
   const SOURCE_HELP = {
+    media: 'Any picture or clip: a link (Civitai pages too), a file, or Ctrl+V. Picture sockets get a clip\'s first frame.',
     image: 'A picture to start from: paste, drop a file or give an address.',
     video: 'A clip to start from: drop a file or give an address.',
     text: 'Words to hand to a service as a prompt.',
@@ -3006,7 +3799,7 @@
    * of the thing it makes, so a new service appears without an edit.
    */
   const TOOL_ICONS = {
-    'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
+    upscale2x: '⏫', music: '🎵', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
@@ -3030,7 +3823,7 @@
     const host = document.getElementById('palette');
     if (!host) return;
     host.innerHTML = '';
-    [['image', 'Image in'], ['video', 'Video in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
+    [['media', 'Media in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
       host.appendChild(paletteButton(title, toolIcon('input:' + type, type), SOURCE_HELP[type] || '',
         {kind:'input', type, title}));
     });
@@ -3295,6 +4088,7 @@
     }
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
+    installMediaThrottle(document.getElementById('canvas'));
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
       exportGraph:graphFromCanvas, imageOutput:imageOutputField, nodeLimit:200, toast,
@@ -3303,6 +4097,7 @@
     if (window.AINodeGroups) nodeGroups = window.AINodeGroups.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
       addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200,
+      getQuality:() => renderQuality, serviceById, invalidate:id => invalidateNodeAndDownstream(id),
       onNodesRemoved:forgetNodes,
       nodeFunctions:id => nodePipelines ? nodePipelines.functionsFor(id) : [],
       onArrange:ids => arrangeNodes(ids),
@@ -3311,13 +4106,22 @@
       systemPromptTargets,
       onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
     document.addEventListener('paste', event => {
-      const item = [...(event.clipboardData?.items || [])].find(value => value.type.startsWith('image/'));
-      if (!item) return;
+      const items = [...(event.clipboardData?.items || [])];
+      const item = items.find(value => value.kind === 'file' && /^(image|video)\//.test(value.type));
       const current = event.target.closest && event.target.closest('.drawflow-node');
       const target = current || document.querySelector('#canvas .drawflow-node.selected');
-      if (!target || !target._acceptImage) { toast('Select an Image in node to paste an image.'); return; }
-      event.preventDefault();
-      target._acceptImage(item.getAsFile());
+      if (item) {
+        if (!target || !target._acceptImage) { toast('Select a Media in node to paste an image or video.'); return; }
+        event.preventDefault();
+        target._acceptImage(item.getAsFile());
+        return;
+      }
+      // A copied link lands in the selected Media node; typing into a field
+      // keeps the browser's own paste.
+      const editing = event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || '');
+      if (editing || !target || !target._acceptText) return;
+      const link = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
+      if (target._acceptText(link)) event.preventDefault();
     });
     editor.on('connectionCreated', onConnectionCreated);
     editor.on('connectionRemoved', connection => {
@@ -3374,6 +4178,18 @@
     });
 
     buildPalette();
+    if (window.AISlider) window.AISlider.watch(document.getElementById('canvas'));
+    document.addEventListener('click', event => {
+      const dice = event.target.closest && event.target.closest('.nseed-rand');
+      if (!dice) return;
+      event.stopPropagation();
+      const field = dice.parentElement.querySelector('[data-param="' + dice.dataset.seedFor + '"]');
+      if (!field) return;
+      const top = Math.min(Number(field.max) || 2147483647, 2147483647);
+      field.value = String(Math.floor(Math.random() * top));
+      field.dispatchEvent(new Event('input', {bubbles: true}));
+      field.dispatchEvent(new Event('change', {bubbles: true}));
+    }, true);
     // A dropdown that stays open after a click elsewhere reads as stuck.
     const compositions = document.getElementById('compositions');
     if (compositions) {
@@ -3432,7 +4248,10 @@
       const data = await fetch('/api/ai/graphs/' + encodeURIComponent(wanted))
         .then(r => r.json()).catch(() => null);
       if (data && data.success_bool) {
-        if (!data.template_bool) graphId = data.graph_id_string;
+        if (!data.template_bool) {
+          graphId = data.graph_id_string;
+          graphRevision = data.revision_int != null ? data.revision_int : null;
+        }
         loadGraph(data.template_bool
           ? Object.assign({render_quality: NEW_GRAPH_QUALITY}, data.graph_object)
           : data.graph_object);
