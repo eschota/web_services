@@ -367,10 +367,14 @@ def _merge_physical_nodes(nodes: List[dict]) -> List[dict]:
             merged[key] = dict(source)
             merged[key]["id"] = "ryzen-server" if key == "ryzen-server" else str(source.get("id") or key)
             merged[key]["sources"] = [str(source.get("kind") or "")]
+            merged[key]["offline_sources"] = (
+                [] if source.get("online") else [str(source.get("kind") or "")])
             order.append(key)
             continue
         target = merged[key]
         target["sources"].append(str(source.get("kind") or ""))
+        if not source.get("online"):
+            target["offline_sources"].append(str(source.get("kind") or ""))
         target["kind"] = "mixed"
         target["online"] = bool(target.get("online") or source.get("online"))
         target["busy"] = bool(target.get("busy") or source.get("busy"))
@@ -385,8 +389,11 @@ def _merge_physical_nodes(nodes: List[dict]) -> List[dict]:
         if source.get("task_id"):
             for field in ("task_id", "task_status", "workflow", "assigned_worker"):
                 target[field] = source.get(field) or target.get(field) or ""
+        # A mixed box whose render side is down (e.g. f12's ComfyUI answering
+        # 423 gpu_leased) is not "idle": say so instead of painting it free.
         target["state"] = "active" if target["busy"] else (
-            "idle" if target["online"] else "offline")
+            "offline" if not target["online"]
+            else "degraded" if target["offline_sources"] else "idle")
     return [merged[key] for key in order]
 
 

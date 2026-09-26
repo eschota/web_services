@@ -271,7 +271,7 @@
       nodes.forEach(node => {
         const dot = document.createElement('i');
         dot.className = 'fleet-dot' +
-          (!node.online ? ' off' : node.busy ? ' busy' : ' free') +
+          (!node.online || (!node.busy && node.state === 'degraded') ? ' off' : node.busy ? ' busy' : ' free') +
           (node.kind === 'render' ? ' render' : '');
         const work = node.online && node.busy ? ACTIVITY[node.activity] : null;
         if (work) {
@@ -279,7 +279,9 @@
           if (seen.indexOf(node.activity) === -1) seen.push(node.activity);
         }
         dot.title = node.id + (work ? ' — ' + work.title
-                                    : node.online ? ' — free' : ' — offline');
+                                    : !node.online ? ' — offline'
+                                    : node.state === 'degraded' ? ' — partly offline (' + (node.offline_sources || []).join(', ') + ')'
+                                    : ' — free');
         dots.appendChild(dot);
       });
       const service = (data.services_object || {})[serviceId] || {};
@@ -330,7 +332,7 @@
             const work = n.online && n.busy ? ACTIVITY[n.activity] : null;
             const style = work ? ' style="border-color:' + work.colour +
                                  ';color:' + work.colour + '"' : '';
-            return '<span class="' + (!n.online ? 'off' : n.busy ? 'busy' : 'free') +
+            return '<span class="' + (!n.online || (!n.busy && n.state === 'degraded') ? 'off' : n.busy ? 'busy' : 'free') +
                    '"' + style + '>' + n.id +
                    (work ? ' · ' + work.title : '') + '</span>';
           }).join('') + '</div>' +
