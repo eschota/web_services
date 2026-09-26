@@ -192,3 +192,8 @@ router.include_router(_enhance_router)
 from ai_qwen_image_api import router as _qwen_image_router  # noqa: E402
 
 router.include_router(_qwen_image_router)
+
+# /api/music (Stable Audio 3, 2026-09-26): the same renderfin shape again.
+from ai_music_api import router as _music_router  # noqa: E402
+
+router.include_router(_music_router)

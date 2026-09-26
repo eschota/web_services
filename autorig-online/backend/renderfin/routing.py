@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 from .models import RenderPrompt, RenderServer
 from .multiref import MULTIREF_TYPES, MULTIREF_WORKFLOWS
+from .music import MUSIC_EXT, MUSIC_TYPES, MUSIC_WORKFLOWS
 
 SAFE_WORKFLOW_RE = re.compile(r"^[A-Za-z0-9_.-]+\.json$")
 
@@ -103,6 +104,8 @@ def output_extension(prompt: RenderPrompt) -> str:
         return ".glb"
     if (prompt.type or "").strip().lower() in VIDEO_ENHANCE_TYPES:
         return ".mp4"
+    if (prompt.type or "").strip().lower() in MUSIC_TYPES:
+        return MUSIC_EXT
     return ".png" if is_image_request(prompt) else ".mp4"
 
 
@@ -122,6 +125,9 @@ def scheduling_token(prompt: RenderPrompt) -> str:
         return QWEN_IMAGE_SCHEDULING_TOKEN
     if ptype in MULTIREF_TYPES:
         return MULTIREF_SCHEDULING_TOKEN
+    if ptype in MUSIC_TYPES:
+        # Own token: only boxes that advertise it hold the audio checkpoints.
+        return MUSIC_WORKFLOWS[ptype]
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D
     if is_image_request(prompt):
@@ -156,6 +162,8 @@ def select_image_workflow(prompt: RenderPrompt) -> Tuple[str, Optional[Tuple[int
         return QWEN_IMAGE_WORKFLOWS[ptype], None
     if ptype in MULTIREF_WORKFLOWS:
         return MULTIREF_WORKFLOWS[ptype], None
+    if ptype in MUSIC_WORKFLOWS:
+        return MUSIC_WORKFLOWS[ptype], None
     if ptype == "image_to_3d":
         return WORKFLOW_IMAGE_TO_3D, None
     if ptype == "z_depth":

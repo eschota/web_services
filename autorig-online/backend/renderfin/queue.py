@@ -22,6 +22,7 @@ from . import (
     image_quality,
     model_eligibility,
     multiref,
+    music,
     routing,
     stream_decode,
     templating,
@@ -1557,6 +1558,8 @@ class RenderQueue:
         elif is_multiref_workflow:
             multiref.inject_references(workflow_file, workflow, reference_filenames)
         apply_runtime_settings(workflow, prompt, width, height)
+        if music.is_music(prompt):
+            music.apply_music_settings(workflow, prompt)
         if stream_decode.has_video_decode_chain(workflow):
             # Decode straight to disk where the box has our streaming node;
             # elsewhere refuse clips the in-RAM decode chain cannot hold.

@@ -70,6 +70,12 @@ if ((Has 'diffusion_models\krea2_turbo_fp8_scaled.safetensors') -and
     (Has 'text_encoders\qwen3vl_4b_fp8_scaled.safetensors') -and
     (Has 'vae\qwen_image_vae.safetensors')) { $tokens += 'gen_image_krea2.json' }
 
+# Music: Stable Audio 3 through ComfyUI's native nodes (ComfyUI >= 0.37 knows
+# the architecture). Medium is the /api/music default and wants a 12 GB card;
+# small-music is the optional 8 GB variant. Both need the T5Gemma encoder.
+if ((Has 'text_encoders\t5gemma_b_b_ul2.safetensors') -and (Has 'checkpoints\stable_audio_3_medium.safetensors')) { $tokens += 'gen_music_sa3.json' }
+if ((Has 'text_encoders\t5gemma_b_b_ul2.safetensors') -and (Has 'checkpoints\stable_audio_3_small_music.safetensors')) { $tokens += 'gen_music_sa3_small.json' }
+
 # Having the files is not the same as being able to run them: measurement
 # settles that. Names listed one per line in advertise_block.txt are stripped
 # from the list instead of added to it, so a box that crashes or is hopelessly

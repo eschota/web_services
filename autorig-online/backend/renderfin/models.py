@@ -80,6 +80,8 @@ class RenderPrompt(BaseModel):
     loras: List["LoraStackItem"] = Field(default_factory=list)
     user_name: str = "default_user"
     render_mode: str = ""
+    # Music (renderfin.music): clip length in seconds; 0 = the default 30 s.
+    audio_seconds: float = 0
 
     @field_validator("frame_count")
     @classmethod

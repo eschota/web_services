@@ -1924,7 +1924,23 @@
     // Draws or rewrites depending on whether a picture is wired in; the
     // endpoint reads the wiring, so the runner is the ordinary picture shape.
     qwen_image: { api: '/api/qwen-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
-    '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
+    '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' },
+    // Stable Audio 3 (2026-09-26): the audio file, and for a clip the clip
+    // with the music under it (muxed by the server once the audio exists).
+    music: { api: '/api/music', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      const outputs = {audio_url_string: value};
+      if (accepted.prompt_string) outputs.prompt_string = String(accepted.prompt_string);
+      if (accepted.video_url_string) {
+        const clip = String(accepted.video_url_string);
+        for (let attempt = 0; attempt < 60; attempt++) {
+          const probe = await fetch(clip, { method: 'HEAD' }).catch(() => null);
+          if (probe && probe.ok) { outputs.video_url_string = clip; break; }
+          await sleep(3000);
+        }
+      }
+      return {value, outputs};
+    }, field: 'audio_url_string', type: 'audio' }
   };
   ['pose', 'depth', 'canny'].forEach(channel => {
     RUNNERS['control_' + channel] = { api: '/api/controlnet', finish: pollForFile,
@@ -2646,6 +2662,35 @@
         picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', value); });
       host.appendChild(picture);
       markResolution(host, picture);
+    } else if (type === 'audio') {
+      const player = document.createElement('audio');
+      player.src = value;
+      player.controls = true;
+      player.preload = 'metadata';
+      player.className = 'naudio';
+      player.style.width = '100%';
+      player.addEventListener('click', event => event.stopPropagation());
+      player.addEventListener('mousedown', event => event.stopPropagation());
+      host.appendChild(player);
+      const extra = outputs || {};
+      if (extra.video_url_string) {
+        const clip = document.createElement('video');
+        clip.src = String(extra.video_url_string);
+        clip.controls = true;
+        clip.playsInline = true;
+        clip.preload = 'metadata';
+        clip.style.cssText = 'width:100%;margin-top:4px;border-radius:4px;background:#111';
+        clip.addEventListener('click', event => event.stopPropagation());
+        clip.addEventListener('mousedown', event => event.stopPropagation());
+        host.appendChild(clip);
+      }
+      if (extra.prompt_string) {
+        const block = document.createElement('div');
+        block.className = 'ntext';
+        block.style.cssText = 'font-size:11px;opacity:.75;margin-top:4px';
+        block.textContent = String(extra.prompt_string);
+        host.appendChild(block);
+      }
     } else if (type === 'video') {
       const clip = document.createElement('video');
       clip.src = value;
@@ -2665,7 +2710,7 @@
         markResolution(host, clip);
         clip.play().catch(() => {});
     }
-    if (outputs && typeof outputs === 'object') showOutputs(host, outputs);
+    if (outputs && typeof outputs === 'object' && type !== 'audio') showOutputs(host, outputs);
     const link = document.createElement('a');
     link.href = type === 'avatar' ? '/avatars' : value;
     link.target = '_blank';
@@ -3585,7 +3630,7 @@
    * of the thing it makes, so a new service appears without an edit.
    */
   const TOOL_ICONS = {
-    upscale2x: '⏫', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
+    upscale2x: '⏫', music: '🎵', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',

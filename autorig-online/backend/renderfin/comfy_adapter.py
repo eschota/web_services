@@ -23,6 +23,7 @@ CLIENT_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479"  # C# parity (Adapter_Comfy.c
 
 VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".avi", ".mkv")
 MODEL_EXTENSIONS = (".glb", ".gltf", ".obj", ".fbx")
+AUDIO_EXTENSIONS = (".mp3", ".flac", ".wav", ".opus", ".ogg")
 
 
 class ComfyAdapterError(RuntimeError):
@@ -408,6 +409,8 @@ def resolve_artifacts(
             ext_ok = 0 if name.endswith(VIDEO_EXTENSIONS) else 1
         elif output_ext == ".glb":
             ext_ok = 0 if name.endswith(MODEL_EXTENSIONS) else 1
+        elif output_ext in AUDIO_EXTENSIONS:
+            ext_ok = 0 if name.endswith(AUDIO_EXTENSIONS) else 1
         else:
             ext_ok = 0 if name.endswith((".png", ".jpg", ".jpeg", ".webp")) else 1
         return (frag, ext_ok)
