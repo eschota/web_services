@@ -1507,6 +1507,39 @@ def build_lora_admin_router(require_admin: Callable[..., Any]) -> APIRouter:
         _spawn(kick_boxes())
         return {"success_bool": True, "note_string": "moved to the box's lora_trash folder on its next sync"}
 
+    @admin.post("/api/ai/loras/{entry_id}/upload")
+    async def api_upload(entry_id: str, request: Request, _admin=Depends(require_admin)):
+        """The file itself, for a LoRA Civitai will not hand the site (early
+        access bought by the owner): raw request body, verified against the
+        registered SHA-256, then mirrored and synced like a download."""
+        data = load_registry()
+        entry = next((e for e in data["loras"] if e.get("id") == entry_id and e.get("state") != "removed"), None)
+        if not entry:
+            raise HTTPException(status_code=404, detail="no such LoRA")
+        _path("blobs").mkdir(parents=True, exist_ok=True)
+        part = _path("blobs") / f"{entry['sha256']}.upload"
+        digest = hashlib.sha256()
+        written = 0
+        try:
+            with open(part, "wb") as handle:
+                async for chunk in request.stream():
+                    written += len(chunk)
+                    if written > MAX_LORA_BYTES:
+                        raise HTTPException(status_code=413, detail="too large for a LoRA")
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if digest.hexdigest() != entry["sha256"]:
+                raise HTTPException(status_code=400, detail={
+                    "error_string": "hash_mismatch",
+                    "message_string": f"that file hashes to {digest.hexdigest()[:12]}…, "
+                                      f"the registered one is {entry['sha256'][:12]}…"})
+            os.replace(part, _path("blobs") / entry["sha256"])
+        finally:
+            part.unlink(missing_ok=True)
+        await _set_mirror(entry_id, "ready", written, "")
+        _spawn(kick_boxes())
+        return {"success_bool": True, "bytes_int": written}
+
     @admin.post("/api/ai/loras/kick")
     async def api_kick(_admin=Depends(require_admin)):
         return {"success_bool": True, "boxes_object": await kick_boxes()}

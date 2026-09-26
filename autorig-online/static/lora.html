@@ -291,6 +291,7 @@
     var actions = state.admin
       ? '<div class="c-actions">'
         + (mirror.state === 'failed' ? '<button class="ib sm" data-retry="' + esc(l.id) + '" title="Download again">' + ICON.retry + '</button>' : '')
+        + (mirror.state !== 'ready' ? '<button class="ib sm" data-upload="' + esc(l.id) + '" title="Upload the .safetensors from this computer (early access you bought, login-only files); checked against the registered SHA-256">' + ICON.plus + '</button>' : '')
         + ((l.boxes && l.boxes.length) ? '<button class="ib sm" data-unpin="' + esc(l.id) + '" title="Pinned to ' + esc(l.boxes.join(', ')) + ' — send it to every computer that runs its model">' + ICON.link + '</button>' : '')
         + '<button class="ib sm danger" data-remove="' + esc(l.id) + '" title="Remove from every computer (moved to their trash)">' + ICON.trash + '</button></div>'
       : '';
@@ -383,7 +384,7 @@
   });
 
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-copy],[data-remove],[data-retry],[data-unpin],[data-clean],[data-adopt],[data-install],[data-tab],[data-mode],[data-install-lora]');
+    var t = e.target.closest('[data-copy],[data-remove],[data-retry],[data-upload],[data-unpin],[data-clean],[data-adopt],[data-install],[data-tab],[data-mode],[data-install-lora]');
     if (!t) return;
     if (t.dataset.copy) copy(t.dataset.copy);
     else if (t.dataset.remove) {
@@ -393,6 +394,18 @@
       api('PATCH', '/api/ai/loras/' + encodeURIComponent(t.dataset.unpin), { boxes: [] })
         .then(function () { say('Sent to every computer that runs its model; they fetch it on their next sync', 'ok'); return api('POST', '/api/ai/loras/kick'); })
         .then(load).catch(function (x) { say(x.message, 'err'); });
+    } else if (t.dataset.upload) {
+      var pick = document.createElement('input'); pick.type = 'file'; pick.accept = '.safetensors';
+      pick.onchange = function () {
+        var f = pick.files[0]; if (!f) return;
+        say('Uploading ' + f.name + ' (' + mb(f.size) + ')…');
+        fetch('/api/ai/loras/' + encodeURIComponent(t.dataset.upload) + '/upload', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/octet-stream' }, body: f })
+          .then(function (r) { return r.json().then(function (j) { if (!r.ok) { var d = j.detail || j; throw new Error((d && d.message_string) || (typeof d === 'string' ? d : 'HTTP ' + r.status)); } return j; }); })
+          .then(function () { say('Uploaded and verified; the computers fetch it on their next sync', 'ok'); load(); })
+          .catch(function (x) { say(x.message, 'err'); });
+      };
+      pick.click();
     } else if (t.dataset.retry) {
       api('POST', '/api/ai/loras/' + encodeURIComponent(t.dataset.retry) + '/retry').then(function () { setTimeout(load, 3000); });
     } else if (t.dataset.clean) {
