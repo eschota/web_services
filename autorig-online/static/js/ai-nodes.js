@@ -1877,8 +1877,9 @@
       if (socket) {
         if (socket.dataset.typeTitle === undefined) socket.dataset.typeTitle = socket.title || '';
         socket.title = ok ? socket.dataset.typeTitle : ((entry && (entry.title || entry.file)) || 'This model') +
-          ': no native ' + info.produced.slice(8) + ' ControlNet. Switch the model to Z-Image Turbo, ' +
-          'or drop the map on a picture socket to use it as a reference image.';
+          ': no native ' + info.produced.slice(8) + ' ControlNet. Click this socket to switch the model to one ' +
+          'that has it (Z-Image Turbo), or drop the map on a picture socket to use it as a reference image.';
+        if (ok) delete socket.dataset.switchTo; else socket.dataset.switchTo = info.produced.slice(8);
       }
       return ok;
     }
@@ -2484,24 +2485,63 @@
 
   const MAP_RULES = {
     pose: 'an OpenPose skeleton map: pose the person exactly like it, same place and size in the frame',
-    depth: 'a depth map (near = white): keep its layout, perspective and every object\'s place',
-    canny: 'an edge map: keep its lines, layout and perspective',
-    normal: 'a normal map (RGB = surface orientation): keep its shapes and surface orientation'
+    depth: 'a depth map (near = white) of the layout only: keep its perspective and every object\'s place',
+    canny: 'an edge map of the layout only: follow its edges for the room, furniture and framing',
+    normal: 'a grey shaded render of the scene geometry: use it only for shapes, layout and surface orientation, not for colours or lighting'
   };
-  /** "Image N is a pose map: ..." for every control map among the pictures. */
-  function controlMapHints(resolved) {
+  const MAP_PLACEHOLDER = ' Any person in the map is only a placeholder: draw the character from the other picture in that place instead.';
+  /** Where the grey-shaded copy of a farm-made normal map is served. */
+  function shadedNormalUrl(url) {
+    const match = /\/renderfin\/render\/[^/]+\/([0-9a-f-]{36})\.png(?:[?#]|$)/i.exec(String(url || ''));
+    return match ? location.origin + '/api/ai/normal-shade/' + match[1] + '.png' : '';
+  }
+  function mapChannels() {
     const channels = new Map();
     runState.forEach(record => {
       const type = String((record && record.type) || '');
       if (type.startsWith('control_') && record.value) channels.set(String(record.value), type.slice(8));
     });
+    return channels;
+  }
+  /**
+   * Qwen-Image copies picture 1 when it is an edge map and keeps the
+   * person drawn in it (2026-09-27). The maps therefore go after the ordinary
+   * pictures, and "image N" in the prompt is renumbered to match.
+   */
+  function mapsLast(serviceId, resolved) {
+    if (serviceId !== 'qwen_image' || !resolved) return resolved;
+    const channels = mapChannels();
+    const fields = ['image', 'reference_2', 'reference_3'].filter(field => resolved[field]);
+    // Measured: only an edge map needs to go last; a pose map and the shaded
+    // normal work best as picture 1, where they also set the framing.
+    const isMap = field => channels.get(String(resolved[field])) === 'canny';
+    if (!fields.some(isMap) || fields.every(isMap)) return resolved;
+    const ordered = fields.filter(field => !isMap(field)).concat(fields.filter(isMap));
+    if (ordered.every((field, index) => field === fields[index])) return resolved;
+    const out = Object.assign({}, resolved);
+    const renumber = {};
+    ['image', 'reference_2', 'reference_3'].forEach(field => delete out[field]);
+    ordered.forEach((field, index) => {
+      out[index === 0 ? 'image' : 'reference_' + (index + 1)] = resolved[field];
+      renumber[fields.indexOf(field) + 1] = index + 1;
+    });
+    if (typeof out.prompt === 'string') {
+      out.prompt = out.prompt.replace(/\b(image|picture)\s+([1-3])\b/gi,
+        (whole, word, n) => word + ' ' + (renumber[n] || n));
+    }
+    return out;
+  }
+  /** "Image N is a pose map: ..." for every control map among the pictures. */
+  function controlMapHints(resolved) {
+    const channels = mapChannels();
     if (!channels.size) return '';
     const hints = [];
     Object.keys(resolved || {}).forEach(field => {
       const match = field === 'image' ? ['', '1'] : /^reference_(\d+)$/.exec(field);
       const channel = match && channels.get(String(resolved[field]));
       if (channel && MAP_RULES[channel]) {
-        hints.push('Image ' + match[1] + ' is ' + MAP_RULES[channel] + '; do not draw the map itself.');
+        hints.push('Image ' + match[1] + ' is ' + MAP_RULES[channel] + '; do not draw the map itself.' +
+                   (channel === 'pose' ? '' : MAP_PLACEHOLDER));
       }
     });
     return hints.join(' ');
@@ -2509,6 +2549,19 @@
 
   function bodyFor(serviceId, resolved, params) {
     const body = {};
+    resolved = mapsLast(serviceId, resolved);
+    const mapHints = controlMapHints(resolved);
+    // A normal map travels as its grey shaded copy: the RGB leaks into renders.
+    if (mapHints) {
+      const channels = mapChannels();
+      resolved = Object.assign({}, resolved);
+      Object.keys(resolved).forEach(field => {
+        if ((field === 'image' || /^reference_\d+$/.test(field)) &&
+            channels.get(String(resolved[field])) === 'normal') {
+          resolved[field] = shadedNormalUrl(resolved[field]) || resolved[field];
+        }
+      });
+    }
     if (serviceId === 'video' && resolved && !resolved.image && resolved.image_url_end) {
       resolved = Object.assign({}, resolved, {image: resolved.image_url_end});
       delete resolved.image_url_end;
@@ -2552,7 +2605,6 @@
     });
     // A control map wired into a picture socket is a reference, not a photo:
     // say which picture it is and what to take from it.
-    const mapHints = controlMapHints(resolved);
     if (mapHints) {
       if (typeof body.prompt === 'string' && body.prompt.trim()) body.prompt = body.prompt.trim() + ' ' + mapHints;
       else if (serviceId === 'vision' || serviceId === 'text') body._map_hint = mapHints;
@@ -2900,6 +2952,30 @@
    * a checkpoint on it, so the second toast normally lands in the same frame;
    * the first one is there for the rare cold start.
    */
+  /** One click on a refused control socket: pick a model with that ControlNet. */
+  document.addEventListener('click', event => {
+    const socket = event.target && event.target.closest && event.target.closest('.input[data-switch-to]');
+    if (!socket || !window.AIEntities || !window.AIEntities.loadModels) return;
+    const element = socket.closest('.drawflow-node');
+    const slot = element && element.querySelector('[data-model-param="checkpoint"]');
+    const channel = socket.dataset.switchTo;
+    if (!slot || !slot._picker) return;
+    event.stopPropagation();
+    const id = element.id.replace(/^node-/, '');
+    window.AIEntities.loadModels((meta(id) || {}).service || 'image').then(data => {
+      const controlService = serviceById('control_' + channel);
+      const target = ((data && data.checkpoints_array) || []).find(item => item && item.usable !== false &&
+        ((item.control_channels || []).map(String).includes(channel)));
+      if (!target) { toast('No model on the fleet has a native ' + channel + ' ControlNet.'); return; }
+      const item = slot.querySelector('.mpick-item[data-model-file="' + CSS.escape(target.file) + '"]');
+      if (item) item.click(); else slot._picker.value = target.file;
+      delete socket.dataset.switchTo;
+      socket.title = socket.dataset.typeTitle || '';
+      toast('Model switched to ' + (target.title || target.file) + ': it has a native ' + channel + ' ControlNet.');
+      void controlService;
+    }).catch(() => {});
+  }, true);
+
   function toastControlRefusal(channel, serviceId) {
     const controlService = serviceById('control_' + channel);
     toast(controlRefusalMessage(channel, null));
@@ -3686,7 +3762,12 @@
     }
     paintIsolation();
     restoreResults(graph.results, mapping);
-    if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
+    if (nodeGroups && nodeGroups.refreshSizes) {
+      nodeGroups.refreshSizes();
+      // Model pickers and system-prompt markers finish a beat later on some
+      // nodes (Qwen-Image); settle sizes again once they have.
+      [1500, 4000].forEach(delay => setTimeout(() => nodeGroups.refreshSizes(), delay));
+    }
     refreshRunningControls();
     // A graph that opens half off-screen looks empty. The canvas has just been
     // replaced wholesale, so there is no pan of anyone's to preserve.

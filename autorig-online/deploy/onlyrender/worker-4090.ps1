@@ -125,6 +125,11 @@ if ($zimage) {
 if ((Has-Model 'diffusion_models\krea2_turbo_fp8_scaled.safetensors') -and
     (Has-Model 'text_encoders\qwen3vl_4b_fp8_scaled.safetensors') -and
     (Has-Model 'vae\qwen_image_vae.safetensors')) { $workflows += 'gen_image_krea2.json' }
+# ControlNet maps (comfyui_controlnet_aux; weights download on first use). Added 2026-09-27
+# so the /api/controlnet jobs keep this box after every START.
+if ((Test-ComfyNode 'DepthAnythingV2Preprocessor') -and (Test-ComfyNode 'OpenposePreprocessor') -and
+    (Test-ComfyNode 'CannyEdgePreprocessor') -and (Test-ComfyNode 'BAE-NormalMapPreprocessor')) {
+    $workflows += @('gen_control_depth.json','gen_control_pose.json','gen_control_canny.json','gen_control_normal.json') }
 if (-not $workflows.Count) { throw 'No complete current model set is installed' }
 $overrides=@{}
 # info preserves worker history, unlike add_server.
