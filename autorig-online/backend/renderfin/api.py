@@ -129,8 +129,26 @@ async def api_render_cancel_pending(request: Request) -> Dict[str, Any]:
     free, and enumerating ids from outside would race the pump. Access is the
     caller's business - this port is bound to localhost, and the public site
     only reaches it through an endpoint that requires an administrator.
+    nginx does publish /renderfin/ though, so a forwarded request is refused.
     """
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="clearing the queue is not public")
     return await _queue(request).cancel_all_pending()
+
+
+@router.post("/api-render/reset")
+async def api_render_reset(request: Request, dry_run: int = Query(default=0)) -> Dict[str, Any]:
+    """Cancel everything queued and running and clear every box's ComfyUI queue.
+
+    Localhost only, like cancel-pending: the site reaches it through an
+    administrator endpoint (ai_queue_admin.py).
+    """
+    # nginx publishes this service under /renderfin/ and sets X-Real-IP on
+    # everything it forwards; only a direct loopback call (the site's admin
+    # endpoint) may reset the farm.
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="the farm reset is not public")
+    return await _queue(request).reset_farm(dry_run=bool(dry_run))
 
 
 @router.post("/api-render")

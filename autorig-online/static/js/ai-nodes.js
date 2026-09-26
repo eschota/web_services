@@ -239,12 +239,50 @@
   }
 
   /** Written a beat after the change so a burst of finishes is one request. */
+  /** Drawflow id -> the id the stored graph knows the node by. */
+  function storedIdMap() {
+    const map = new Map();
+    const used = new Set();
+    nodeMeta.forEach((item, id) => {
+      if (item && item.storedId && !used.has(item.storedId)) { map.set(String(id), item.storedId); used.add(item.storedId); }
+    });
+    unplacedNodes.forEach(item => used.add(String(item.id)));
+    nodeMeta.forEach((item, id) => {
+      if (map.has(String(id))) return;
+      let candidate = String(id);
+      while (used.has(candidate)) candidate = 'n' + candidate;
+      map.set(String(id), candidate);
+      used.add(candidate);
+      if (item) item.storedId = candidate;
+    });
+    return map;
+  }
+
+  /** The canvas graph with stored ids (nodes, links, results, anchors). */
+  function toStoredIds(graph) {
+    const map = storedIdMap();
+    const to = id => map.get(String(id)) || String(id);
+    const out = Object.assign({}, graph);
+    out.nodes = (graph.nodes || []).map(node => Object.assign({}, node, {id: to(node.id)}));
+    out.links = (graph.links || []).map(link => Object.assign({}, link, {from: to(link.from), to: to(link.to)}));
+    out.results = {};
+    Object.keys(graph.results || {}).forEach(key => { out.results[to(key)] = graph.results[key]; });
+    if (graph.comparison_anchor_id) out.comparison_anchor_id = to(graph.comparison_anchor_id);
+    if (graph.isolation) {
+      const prior = {};
+      Object.keys(graph.isolation.prior || {}).forEach(key => { prior[to(key)] = graph.isolation.prior[key]; });
+      out.isolation = {target: to(graph.isolation.target), prior};
+    }
+    return out;
+  }
+
   function pushResults() {
     if (!graphId) return;
     clearTimeout(resultsTimer);
     resultsTimer = setTimeout(() => {
       const body = {};
-      runState.forEach((value, key) => { body[key] = value; });
+      const map = storedIdMap();
+      runState.forEach((value, key) => { body[map.get(String(key)) || key] = value; });
       fetch('/api/ai/graphs/' + encodeURIComponent(graphId) + '/results', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -613,12 +651,21 @@
     });
     applySystemPromptMarker(id);
     addIsolateButton(id);
+    if (X9_SERVICES.has(serviceId)) addX9Button(id, !!(params && params._x9));
     alignPorts(id, inputs.length, outputs.length);
     refreshReferenceSockets(id);
     mountModelPickers(id, serviceId);
     if (params) applyParams(id, params);
     if (params && params._disabled) applyBypass(id, true);
     materializeDefaultModel(id);
+    // A Qwen-Image node saved with no model runs on the farm's one edit model;
+    // show that instead of "Choose a model" (owner, 2026-09-27).
+    if (serviceId === 'qwen_image' && !(params && String(params.checkpoint || '').trim())) {
+      setTimeout(() => {
+        const hidden = nodeElement(id) && nodeElement(id).querySelector('[data-param="checkpoint"]');
+        if (hidden && !hidden.value) applyParams(id, {checkpoint: QWEN_DEFAULT_CHECKPOINT});
+      }, 600);
+    }
     return id;
   }
 
@@ -641,6 +688,8 @@
     const find = name => ((entry.params_array || []).find(item => item.name === name) || {}).default;
     return STOCK_SIZES.has(w + 'x' + h) || (Number(find('width')) === w && Number(find('height')) === h);
   }
+
+  const QWEN_DEFAULT_CHECKPOINT = 'qwen_image_2.1_int8_convrot.safetensors';
 
   function addInputNode(entityType, x, y, value, params) {
     // Image in / Video in were folded into one Media node; old graphs,
@@ -995,7 +1044,10 @@
     return firstFrameCache.get(videoUrl);
   }
 
+  const CLIP_AS_PICTURE = new Set(['image', 'qwen_image']);
+
   function socketAcceptsVideo(serviceId, field) {
+    if (CLIP_AS_PICTURE.has(serviceId)) return false;
     const entry = catalogue ? serviceById(serviceId) : null;
     const input = ((entry || {}).inputs || []).find(item => item.field === field);
     return !!input && (input.type === 'video' || (input.also_accepts || []).includes('video'));
@@ -1328,6 +1380,7 @@
       values._size_auto = meta(id).followInputSize;
     }
     if (meta(id)?.disabled) values._disabled = true;
+    if (meta(id)?.x9) values._x9 = true;
     if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
@@ -1596,6 +1649,394 @@
     const recheck = () => { clearTimeout(timer); timer = setTimeout(() => canvas.querySelectorAll('video').forEach(apply), 200); };
     document.addEventListener('visibilitychange', recheck);
     if (editor && typeof editor.on === 'function') editor.on('zoom', recheck);
+  }
+
+  /* ------------------------------------------------------------------- X9 */
+
+  /**
+   * X9 (owner, 2026-09-27): one Render runs an image or video node with nine
+   * seeds in parallel. The grid shows all nine; the cell last opened in the
+   * lightbox is the node's output. An X9 node fed by an X9 node pairs them:
+   * picture i -> clip i.
+   */
+  const X9_SERVICES = new Set(['image', 'qwen_image', 'video', 'video_control']);
+
+  function addX9Button(id, on) {
+    const element = nodeElement(id);
+    const head = element && element.querySelector('.nhead');
+    const item = meta(id);
+    if (!head || !item || head.querySelector('.nx9')) return;
+    item.x9 = !!on;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nx9';
+    button.textContent = 'X9';
+    button.title = 'X9: one Render = 9 seeds in parallel, shown as a 3×3 grid; the cell you open last is the output';
+    const paint = () => {
+      button.style.cssText = 'margin-left:4px;border:1px solid rgba(255,255,255,.25);border-radius:6px;cursor:pointer;' +
+        'font:700 10px system-ui;padding:1px 5px;' + (item.x9 ? 'background:#f59e0b;color:#111;border-color:#f59e0b' : 'background:transparent;color:inherit;opacity:.7');
+    };
+    paint();
+    ['mousedown', 'pointerdown', 'touchstart', 'dblclick'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      item.x9 = !item.x9;
+      paint();
+      invalidateNodeAndDownstream(id);
+      toast(item.x9 ? 'X9 on: the next Render makes 9 variants.' : 'X9 off.');
+    });
+    head.appendChild(button);
+  }
+
+  function x9Record(id) {
+    const record = runState.get(String(id));
+    return record && Array.isArray(record.x9) && record.x9.length ? record : null;
+  }
+
+  function x9Pick(record) {
+    if (!record) return -1;
+    if (record.pick >= 0 && record.x9[record.pick] && record.x9[record.pick].value) return record.pick;
+    return record.x9.findIndex(cell => cell.status === 'done' && cell.value);
+  }
+
+  function paintX9(id) {
+    const element = nodeElement(id);
+    const record = x9Record(id);
+    if (!element || !record) return;
+    const host = element.querySelector('.nout');
+    if (!host) return;
+    const params = readParams(id);
+    const w = Number(params.width) || 16, h = Number(params.height) || 9;
+    const portrait = h > w;
+    const pick = x9Pick(record);
+    let grid = host.querySelector(':scope > .nx9grid');
+    if (!grid) {
+      host.innerHTML = '';
+      grid = document.createElement('div');
+      grid.className = 'nx9grid';
+      host.appendChild(grid);
+    }
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin:0 auto;' +
+      'width:100%;max-width:' + (portrait ? 220 : 330) + 'px';
+    grid.innerHTML = '';
+    record.x9.forEach((cell, index) => {
+      const box = document.createElement('div');
+      box.className = 'nx9cell';
+      box.style.cssText = 'position:relative;aspect-ratio:' + w + '/' + h + ';border-radius:4px;overflow:hidden;cursor:pointer;' +
+        'background:rgba(255,255,255,.06);outline:' + (index === pick ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,.12)');
+      box.title = 'Seed ' + cell.seed + ' · ' + cell.status + (cell.error ? ': ' + cell.error : '') + ' — click to open';
+      if (cell.status === 'done' && cell.value) {
+        const media = document.createElement(looksLikeVideo(cell.value) ? 'video' : 'img');
+        media.src = cell.value;
+        media.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+        if (media.tagName === 'VIDEO') { media.muted = true; media.loop = true; media.preload = 'metadata'; media.playsInline = true; }
+        else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = 'Seed ' + cell.seed; }
+        box.appendChild(media);
+      } else {
+        const label = document.createElement('span');
+        label.textContent = cell.status === 'error' ? '⚠ error' : cell.status;
+        label.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;opacity:.8;' +
+          (cell.status === 'error' ? 'color:#fb7185' : '');
+        box.appendChild(label);
+      }
+      const tag = document.createElement('i');
+      tag.textContent = String(index + 1);
+      tag.style.cssText = 'position:absolute;left:3px;top:2px;font:600 9px system-ui;font-style:normal;color:#fff;text-shadow:0 0 3px #000';
+      box.appendChild(tag);
+      ['mousedown', 'pointerdown'].forEach(type => box.addEventListener(type, event => event.stopPropagation()));
+      box.addEventListener('click', event => { event.stopPropagation(); openX9Lightbox(id, index); });
+      grid.appendChild(box);
+    });
+  }
+
+  /** The chosen cell becomes the node's output; nodes downstream re-run on it. */
+  function setX9Pick(id, index) {
+    const record = x9Record(id);
+    if (!record || !record.x9[index] || record.x9[index].status !== 'done') return;
+    if (record.pick === index && record.value === record.x9[index].value) return;
+    record.pick = index;
+    record.value = record.x9[index].value;
+    recordResult(id, record);
+    continuableResults.set(String(id), {type: record.type, value: record.value, outputs: null, task_id: ''});
+    paintX9(id);
+    const graph = graphFromCanvas();
+    // An X9 node downstream used all nine (cell i -> cell i), so a new pick
+    // changes nothing for it; a normal node reads the pick and must re-run.
+    graph.links.filter(link => String(link.from) === String(id) && !(meta(link.to) || {}).x9)
+      .forEach(link => invalidateNodeAndDownstream(link.to));
+  }
+
+  function openX9Lightbox(id, start) {
+    const record = x9Record(id);
+    if (!record) return;
+    let dialog = document.getElementById('x9-lightbox');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'x9-lightbox';
+      dialog.style.cssText = 'max-width:96vw;max-height:96vh;padding:10px;border:0;border-radius:12px;background:#0d0e1c;color:#fff';
+      dialog.innerHTML = '<div class="x9stage" style="display:flex;align-items:center;justify-content:center;min-width:300px;min-height:200px"></div>' +
+        '<div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:8px;font:13px system-ui">' +
+        '<button type="button" data-x9="prev" title="Previous (←)">←</button><span class="x9cap"></span>' +
+        '<button type="button" data-x9="next" title="Next (→)">→</button>' +
+        '<button type="button" data-x9="use" title="Use this one as the node output">Use this</button>' +
+        '<button type="button" data-x9="close" title="Close (Esc)">✕</button></div>';
+      document.body.appendChild(dialog);
+      dialog.addEventListener('click', event => {
+        const action = event.target && event.target.dataset && event.target.dataset.x9;
+        if (action === 'prev') dialog._show(dialog._index - 1);
+        if (action === 'next') dialog._show(dialog._index + 1);
+        if (action === 'use') { setX9Pick(dialog._node, dialog._index); toast('Cell ' + (dialog._index + 1) + ' is the output.'); }
+        if (action === 'close' || event.target === dialog) dialog.close();
+      });
+      dialog.addEventListener('keydown', event => {
+        if (event.key === 'ArrowLeft') { event.preventDefault(); dialog._show(dialog._index - 1); }
+        if (event.key === 'ArrowRight') { event.preventDefault(); dialog._show(dialog._index + 1); }
+      });
+      dialog.addEventListener('close', () => { const clip = dialog.querySelector('video'); if (clip) clip.pause(); });
+    }
+    dialog._node = String(id);
+    dialog._show = index => {
+      const current = x9Record(dialog._node);
+      if (!current) return;
+      const count = current.x9.length;
+      index = ((index % count) + count) % count;
+      dialog._index = index;
+      const cell = current.x9[index];
+      const stage = dialog.querySelector('.x9stage');
+      stage.innerHTML = '';
+      if (cell.status === 'done' && cell.value) {
+        const media = document.createElement(looksLikeVideo(cell.value) ? 'video' : 'img');
+        media.src = cell.value;
+        media.style.cssText = 'max-width:92vw;max-height:80vh;display:block';
+        if (media.tagName === 'VIDEO') { media.controls = true; media.autoplay = true; media.loop = true; media.muted = true; }
+        stage.appendChild(media);
+        // The last cell looked at is the node's output (owner rule).
+        setX9Pick(dialog._node, index);
+      } else {
+        stage.textContent = cell.status === 'error' ? ('Seed ' + cell.seed + ' failed: ' + cell.error) : ('Seed ' + cell.seed + ': ' + cell.status);
+      }
+      dialog.querySelector('.x9cap').textContent = (index + 1) + ' / ' + count + ' · seed ' + cell.seed +
+        (x9Pick(current) === index ? ' · output' : '');
+    };
+    if (!dialog.open) dialog.showModal();
+    dialog._show(start);
+  }
+
+  /** Nine seeds of one node, in parallel; `fan` pairs cell i with upstream cell i. */
+  async function runX9(id, node, resolved, fan, params, epoch, keepDone) {
+    const runner = runnerFor(node.service);
+    const element = nodeElement(id);
+    const state = element && element.querySelector('.nstate');
+    const base = Number(params.seed) > 0 ? Number(params.seed) : Math.floor(Math.random() * 2147483000);
+    const bodies = [];
+    for (let index = 0; index < 9; index += 1) {
+      const inputs = {...resolved};
+      Object.keys(fan).forEach(field => { if (fan[field][index]) inputs[field] = fan[field][index]; });
+      bodies.push(bodyFor(node.service, inputs, {...params, seed: base + index}));
+    }
+    const signature = stableJson({x9: bodies.map(body => ({...body, seed: Number(params.seed) > 0 ? body.seed : 0}))});
+    const previous = x9Record(id);
+    if (keepDone && previous && previous.x9sig === signature && previous.x9.every(cell => cell.status === 'done')) {
+      paintX9(id);
+      if (state) { state.textContent = 'continued · X9'; state.className = 'nstate done'; }
+      return {type: previous.type, value: previous.value, x9: previous.x9.map(cell => cell.value)};
+    }
+    const cells = bodies.map(body => ({seed: body.seed, status: 'queued', value: '', error: ''}));
+    const record = {status: 'running', type: runnerType(runner, ''), value: '', x9: cells,
+                    pick: previous ? previous.pick : -1, x9sig: signature, started_at: Date.now() / 1000};
+    runState.set(String(id), record);
+    paintX9(id);
+    const report = () => {
+      if (epoch !== canvasEpoch || !nodeElement(id)) return;
+      const done = cells.filter(cell => cell.status === 'done').length;
+      const failed = cells.filter(cell => cell.status === 'error').length;
+      const running = cells.filter(cell => cell.status === 'running').length;
+      if (state) {
+        state.textContent = 'X9 · ' + done + '/9 done' + (running ? ' · ' + running + ' rendering' : '') + (failed ? ' · ' + failed + ' failed' : '');
+        state.className = 'nstate running';
+      }
+      paintX9(id);
+    };
+    await Promise.all(bodies.map(async (body, index) => {
+      const cell = cells[index];
+      const post = body._post_upscale;
+      delete body._post_upscale;
+      try {
+        const accepted = await submitJson(runner.api, body);
+        cell.status = 'running';
+        report();
+        let {value} = splitMulti(await runner.finish(accepted, runner, null));
+        if (post && value) value = await upscaleClip2x(value, null);
+        if (!value) throw new Error('no result');
+        cell.value = value;
+        cell.status = 'done';
+        cell.type = runnerType(runner, value);
+      } catch (error) {
+        cell.status = 'error';
+        cell.error = String(error.message || error).slice(0, 300);
+      }
+      report();
+    }));
+    const pick = x9Pick(record);
+    if (pick < 0) {
+      record.status = 'failed';
+      record.error = 'all 9 seeds failed: ' + (cells[0].error || '');
+      recordResult(id, record);
+      if (state) { state.textContent = record.error; state.className = 'nstate failed'; }
+      throw new Error(record.error);
+    }
+    record.status = 'done';
+    record.pick = pick;
+    record.value = cells[pick].value;
+    record.type = runnerType(runner, record.value);
+    recordResult(id, record);
+    paintX9(id);
+    if (state) {
+      const failed = cells.filter(cell => cell.status === 'error').length;
+      state.textContent = 'done · X9' + (failed ? ' (' + failed + ' failed)' : '') + ' — click a cell to view / choose';
+      state.className = 'nstate done';
+    }
+    return {type: record.type, value: record.value, x9: cells.map(cell => cell.value)};
+  }
+
+  /* ------------------------------------------------------- post to Civitai */
+
+  /**
+   * "Post to Civitai" on a node's output (owner only, 2026-09-27). The server
+   * posts a picture with its own token (draft by default); a clip, music, or
+   * any refusal comes back as a manual path: download, copy, open the page.
+   */
+  let civitaiAdmin = null;
+  function civitaiIsAdmin() {
+    if (civitaiAdmin === null) {
+      civitaiAdmin = fetch('/auth/me', {credentials: 'same-origin'}).then(r => r.ok ? r.json() : null)
+        .then(data => !!(data && data.user && data.user.is_admin)).catch(() => false);
+    }
+    return civitaiAdmin;
+  }
+
+  function nodePromptText(id) {
+    const graph = graphFromCanvas();
+    const link = graph.links.find(item => String(item.to) === String(id) && item.input === 'prompt');
+    if (!link) return '';
+    const from = graph.nodes.find(node => String(node.id) === String(link.from));
+    if (from && from.kind === KIND_INPUT) return String(from.value || '');
+    const record = runState.get(String(link.from));
+    return record && record.value ? String(record.value) : '';
+  }
+
+  async function nodeResources(id) {
+    const params = readParams(id);
+    const item = meta(id) || {};
+    const files = [params.checkpoint, params.lora].filter(Boolean).map(String);
+    String(params.loras || '').replace(/<lora:([^:>]+)/g, (_, name) => { files.push(name.trim()); return ''; });
+    // Curated models the catalogue does not tag with a Civitai version.
+    const KNOWN = {
+      'z_image_turbo_fp8_e4m3fn.safetensors': [2442439, 'Z-Image Turbo'],
+      'krea2_turbo_fp8_scaled.safetensors': [3091481, 'Krea 2 Turbo'],
+      'qwen-image-2512-Q3_K_S.gguf': [2552908, 'Qwen-Image-2512'],
+      'minimax_h3_fl2va_pruned_int8_convrot.safetensors': [3216500, 'MiniMax H3']
+    };
+    const known = files.filter(file => KNOWN[file]).map(file => ({model_version_id: KNOWN[file][0], name: KNOWN[file][1]}));
+    if (!files.length || !window.AIEntities) return known;
+    try {
+      const data = await window.AIEntities.loadModels(item.service || 'image');
+      const all = [].concat((data && data.checkpoints_array) || [], (data && data.loras_array) || []);
+      const found = files.map(file => all.find(entry => entry.file === file || (entry.file || '').replace(/\.safetensors$/, '') === file))
+        .filter(entry => entry && entry.source_version_id)
+        .map(entry => ({model_version_id: Number(entry.source_version_id), name: entry.title || entry.file}));
+      return known.concat(found.filter(item => !known.some(k => k.model_version_id === item.model_version_id)));
+    } catch (error) { return known; }
+  }
+
+  async function openCivitaiDialog(id) {
+    const record = runState.get(String(id));
+    const url = record && record.value;
+    if (!url || !/^https?:/.test(url)) { toast('Render the node first.'); return; }
+    const item = meta(id) || {};
+    const params = readParams(id);
+    const resources = await nodeResources(id);
+    const prompt = nodePromptText(id);
+    const risky = /porn|nsfw|xxx|hentai|nude|lewd/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' '));
+    let dialog = document.getElementById('civitai-post');
+    if (dialog) dialog.remove();
+    dialog = document.createElement('dialog');
+    dialog.id = 'civitai-post';
+    dialog.className = 'civ-dialog';
+    const esc = value => escapeHtml(String(value || ''));
+    dialog.innerHTML = `<form method="dialog" style="display:grid;gap:8px">
+      <b style="font-size:15px">Post to Civitai (NoDeadLine)</b>
+      <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
+      <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
+      <label>Tags (comma separated)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
+      <label>Rating (required)<select name="rating" required>
+        <option value="">— choose —</option><option${risky ? '' : ' selected'}>None</option><option>Soft</option><option>Mature</option><option${risky ? ' selected' : ''}>X</option></select></label>
+      <label><input type="checkbox" name="confirm" required> I checked the rating (suggested from the model/LoRA and prompt)</label>
+      <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
+      <label><input type="radio" name="publish" value="draft" checked> Save as draft (recommended)</label>
+      <label><input type="radio" name="publish" value="publish"> Publish now</label>
+      <div class="civ-out" style="white-space:pre-wrap"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button value="cancel">Close</button><button type="button" class="civ-go">Post</button></div></form>`;
+    document.body.appendChild(dialog);
+    ['mousedown', 'pointerdown', 'keydown'].forEach(type => dialog.addEventListener(type, event => event.stopPropagation()));
+    const form = dialog.querySelector('form');
+    const out = dialog.querySelector('.civ-out');
+    dialog.querySelector('.civ-go').addEventListener('click', async () => {
+      if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
+      const publish = form.publish.value === 'publish';
+      if (publish && !window.confirm('Publish this publicly on Civitai now?')) return;
+      out.textContent = 'Posting…';
+      const body = {media_url: url, title: form.title.value, description: form.description.value, prompt,
+        tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
+        resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name})), publish};
+      try {
+        const response = await fetch('/api/ai/civitai/post', {method: 'POST', credentials: 'same-origin',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error((data.detail && (data.detail.message_string || data.detail)) || ('HTTP ' + response.status));
+        if (data.success_bool && data.post_url_string) {
+          out.innerHTML = (data.warning_string ? '<b style="color:#fb7185">' + esc(data.warning_string) + '</b><br>' : '') +
+            (data.draft_bool ? 'Draft saved: ' : 'Posted: ') + `<a href="${esc(data.post_url_string)}" target="_blank" rel="noopener">${esc(data.post_url_string)}</a>`;
+          const current = runState.get(String(id));
+          if (current) { current.civitai_url = data.post_url_string; recordResult(id, current); }
+        } else {
+          out.innerHTML = esc(data.reason_string || 'Post by hand:') + `<br><a href="${esc(data.download_url_string)}" target="_blank" rel="noopener" download>Download the file</a> · ` +
+            `<a href="${esc(data.open_url_string)}" target="_blank" rel="noopener">Open Civitai's post page</a> · <button type="button" class="civ-copy">Copy details</button>`;
+          const copy = out.querySelector('.civ-copy');
+          if (copy) copy.addEventListener('click', () => copyText(data.details_string || '').then(() => toast('Details copied.')));
+        }
+      } catch (error) { out.textContent = 'Failed: ' + error.message; }
+    });
+    dialog.showModal();
+  }
+
+  function attachCivitaiButton(host) {
+    if (!host || host.querySelector(':scope > .civ-btn')) return;
+    const node = host.closest('.drawflow-node');
+    if (!node) return;
+    civitaiIsAdmin().then(admin => {
+      if (!admin || host.querySelector(':scope > .civ-btn')) return;
+      if (!host.querySelector('img, video, audio, .nx9grid')) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'civ-btn';
+      button.textContent = 'C↑';
+      button.title = 'Post to Civitai (NoDeadLine) — draft by default';
+      button.style.cssText = 'position:absolute;top:4px;right:4px;z-index:3;font:700 10px system-ui;padding:2px 5px;border-radius:6px;' +
+        'border:1px solid rgba(255,255,255,.3);background:rgba(10,12,30,.8);color:#7dd3fc;cursor:pointer';
+      ['mousedown', 'pointerdown', 'dblclick'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+      button.addEventListener('click', event => { event.stopPropagation(); openCivitaiDialog(node.id.replace(/^node-/, '')); });
+      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+      host.appendChild(button);
+    });
+  }
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(added => {
+      if (added.nodeType !== 1) return;
+      const host = added.classList && added.classList.contains('nout') ? added : (added.closest && added.closest('.nout'));
+      if (host) attachCivitaiButton(host);
+      if (added.querySelectorAll) added.querySelectorAll('.nout').forEach(attachCivitaiButton);
+    }))).observe(document.documentElement, {childList: true, subtree: true});
   }
 
   /* ---------------------------------------------------------- quick toolbar */
@@ -2346,10 +2787,24 @@
     if (!url) throw new Error('the farm accepted the job without an output address');
     // The farm publishes where the file will be before it exists, so the file
     // appearing is the completion signal. Video is allowed half an hour.
+    let missing = 0;
     for (let attempt = 0; attempt < 800; attempt++) {
       if (accepted.task_id_string) {
         const status = await fetch('/api/ai/render-status/' + encodeURIComponent(accepted.task_id_string))
-          .then(response => response.ok ? response.json() : null).catch(() => null);
+          .then(response => response.status === 404 ? {gone: true} : (response.ok ? response.json() : null)).catch(() => null);
+        // The farm no longer knows the task (cancelled and purged, or from an
+        // old session): stop waiting unless the file is already there.
+        if (status && status.gone) {
+          missing += 1;
+          if (missing >= 3) {
+            const landed = await fetch(url, { method: 'HEAD' }).catch(() => null);
+            if (landed && landed.ok) return url;
+            throw new Error('the farm no longer has this task (cancelled or expired) — Render again');
+          }
+          await sleep(2500);
+          continue;
+        }
+        missing = 0;
         if (status) {
           if (report) report(status);
           if (status.status_string === 'failed' || status.status_string === 'cancelled') {
@@ -2549,6 +3004,11 @@
 
   function bodyFor(serviceId, resolved, params) {
     const body = {};
+    // An empty LoRA slot carries a strength and nothing to apply it to.
+    if (params && !String(params.lora || '').trim() && 'lora_strength' in params) {
+      params = Object.assign({}, params);
+      delete params.lora_strength;
+    }
     resolved = mapsLast(serviceId, resolved);
     const mapHints = controlMapHints(resolved);
     // A normal map travels as its grey shaded copy: the RGB leaks into renders.
@@ -2592,7 +3052,10 @@
         // wire carries a picture to `image_url` and a clip to `video_url`.
         // Read off the value, not off a type passed alongside, so a retry and
         // a graph reopened from a link behave the same as the first run.
-        if (field === 'image' && socketTakesVideo(serviceId, 'image') && looksLikeVideo(value)) {
+        // Qwen-Image and Image have no video_url field: a clip goes as image_url and
+        // the server reads its first frame (sent as video_url it was dropped, and
+        // the edit failed "needs a picture", 2026-09-27).
+        if (field === 'image' && !CLIP_AS_PICTURE.has(serviceId) && socketTakesVideo(serviceId, 'image') && looksLikeVideo(value)) {
           body.video_url = value;
           return;
         }
@@ -2620,7 +3083,9 @@
         ? standing : (declaration.system_prompt_default || ''));
       const withHint = [text.trim(), body._map_hint || ''].filter(Boolean).join(' ');
       if (withHint) body.system_prompt = withHint;
-      body.structured = true;
+      // Image and Video read their standing instruction only when the text is
+      // empty; they are not answer-writing services.
+      if (!['image', 'video'].includes(serviceId)) body.structured = true;
     }
     delete body._map_hint;
     // A LoRA of another model family (left in a slot when the checkpoint
@@ -3288,7 +3753,7 @@
    * document after all. Only "Duplicate graph" makes a copy.
    */
   async function persistGraph() {
-    const graph = graphFromCanvas();
+    const graph = toStoredIds(graphFromCanvas());
     if (graphId) {
       if (graphStale) {
         return { response: {ok: false, status: 409}, data: {detail: {error_string: 'graph_stale',
@@ -3369,7 +3834,15 @@
 
     const restored = restoredExecutions.get(idString);
     if (restored && !restored.invalidated && restored.epoch === epoch) {
-      return restored.promise;
+      // A task carried over from before the page opened may be gone (cancelled
+      // on the farm, purged). Then this Render submits it afresh instead of
+      // leaving everything downstream waiting (owner, 2026-09-27).
+      return restored.promise.catch(error => {
+        restored.invalidated = true;
+        if (restoredExecutions.get(idString) === restored) restoredExecutions.delete(idString);
+        toast('A render from before was gone (' + String(error.message || error).slice(0, 60) + ') — submitting it again.');
+        return startIncrementalService(id, node, resolved, params, signature, epoch, keepDone, graphSnapshot);
+      });
     }
 
     const active = activeExecutions.get(key);
@@ -3509,10 +3982,12 @@
             return {ok:true, result:{type, value, media:node.entity_type === 'media'}};
           }
           const resolved = {};
+          const fan = {};
           for (let index = 0; index < feeds.length; index += 1) {
             const link = feeds[index];
             const upstream = upstreamRecords[index]?.result;
             if (!upstream) continue;
+            if (Array.isArray(upstream.x9) && (!link.output || /url_string$|^value$/.test(link.output))) fan[link.input] = upstream.x9;
             let value = outputValue(upstream, link.output);
             if (upstream.media) {
               try {
@@ -3526,6 +4001,16 @@
           }
           const params = {...(node.params || {})};
           await followInputSizeAtRun(node, resolved, params);
+          if (params._x9 && X9_SERVICES.has(node.service)) {
+            try {
+              const result = await runX9(id, node, resolved, fan, params, epoch, keepDone);
+              if (!graph.results) graph.results = {};
+              graph.results[id] = {status:'done', type:result.type, value:result.value};
+              return {ok:true, result};
+            } catch (error) {
+              return {ok:false, error:String(error.message || error)};
+            }
+          }
           const requestBody = bodyFor(node.service, resolved, params);
           const signature = stableJson({service:node.service, body:requestBody});
           try {
@@ -3591,6 +4076,34 @@
     } catch (error) { /* the local stop already happened */ }
   }
 
+  /** Administrator: wipe the whole farm queue after an explicit, typed confirmation. */
+  async function resetFarm() {
+    let preview;
+    try {
+      const response = await fetch('/api/ai/farm/reset?dry_run=1', {method: 'POST'});
+      preview = await response.json();
+      if (!response.ok) throw new Error(preview.detail || 'not allowed');
+    } catch (error) { toast('Farm reset is not available: ' + error.message); return; }
+    const list = object => Object.entries(object || {}).map(([k, v]) => '  ' + k + ': ' + v).join('\n') || '  none';
+    const text = 'RESET THE WHOLE FARM\n\n' +
+      'Queued: ' + preview.queued_int + '   Running: ' + preview.running_int + '\n\n' +
+      'Running on boxes:\n' + list(preview.running_by_box_object) + '\n\n' +
+      'Jobs by owner:\n' + list(preview.by_owner_object) + '\n\n' +
+      'Every one of them (every graph, user and agent) is cancelled, and the ComfyUI queue on ' +
+      (preview.boxes_array || []).join(', ') + ' is cleared. Results, caches and models stay.\n\n' +
+      'Type RESET to confirm:';
+    if ((window.prompt(text, '') || '').trim().toUpperCase() !== 'RESET') { toast('Farm reset cancelled.'); return; }
+    runRequests.forEach(token => { token.cancelled = true; });
+    try {
+      const response = await fetch('/api/ai/farm/reset', {method: 'POST'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'the reset failed');
+      const boxes = Object.values(data.boxes_object || {}).filter(value => value === 'cleared').length;
+      toast('Farm reset: cancelled ' + data.cancelled_queued_int + ' queued, ' +
+            data.cancelled_running_int + ' running on ' + boxes + ' boxes.');
+    } catch (error) { toast('Farm reset failed: ' + error.message); }
+  }
+
   /**
    * Throw away what these compositions have left on the site's disk.
    *
@@ -3627,6 +4140,25 @@
       const state = element.querySelector('.nstate');
       const outBox = element.querySelector('.nout');
       runState.set(String(id), record);
+      // An X9 set saved mid-render has no single task to resume (its nine
+      // tasks ran in the tab that started them): keep the cells, say so.
+      if (Array.isArray(record.x9) && record.x9.length && record.status === 'running') {
+        record.status = record.x9.some(cell => cell.status === 'done') ? 'stale' : 'failed';
+        record.error = record.status === 'failed' ? 'X9 was interrupted — Render again' : '';
+      }
+      if (Array.isArray(record.x9) && record.x9.length && record.status === 'failed') {
+        state.textContent = record.error || 'X9 was interrupted — Render again';
+        state.className = 'nstate';
+        requestAnimationFrame(() => paintX9(id));
+        return;
+      }
+      if (Array.isArray(record.x9) && record.x9.length && ['done', 'stale'].includes(record.status)) {
+        if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value, outputs:null, task_id:''});
+        state.textContent = record.status === 'stale' ? 'changed — render to update' : 'done · X9 — click a cell to view / choose';
+        state.className = record.status === 'stale' ? 'nstate' : 'nstate done';
+        requestAnimationFrame(() => paintX9(id));
+        return;
+      }
       if (['done', 'stale'].includes(record.status) && record.value) {
         if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value, outputs:record.outputs || null,
           task_id:record.task_id || ''});
@@ -3641,6 +4173,11 @@
         return;
       }
       if (record.status !== 'running') return;
+      if (!record.value && !record.task_id) {
+        state.textContent = 'interrupted — Render again';
+        state.className = 'nstate';
+        return;
+      }
       const registration = {id:String(id), epoch:canvasEpoch, invalidated:false, promise:null};
       registration.promise = resumeNode(id, record, registration)
         .finally(() => {
@@ -3725,7 +4262,14 @@
       const id = node.kind === KIND_INPUT
         ? addInputNode(node.entity_type, node.x, node.y, node.value, node.params)
         : addServiceNode(node.service, node.x, node.y, node.params);
-      if (id) mapping.set(node.id, id);
+      if (id) {
+        mapping.set(node.id, id);
+        // Stored ids stay what they were: API patches, caches and results
+        // are keyed by them (owner, 2026-09-27). Drawflow numbers only exist
+        // inside this page.
+        const item = meta(id);
+        if (item) item.storedId = String(node.id);
+      }
       else {
         unplacedNodes.push(JSON.parse(JSON.stringify(node)));
         if (graph.results && graph.results[node.id]) unplacedResults[node.id] = graph.results[node.id];
@@ -3900,47 +4444,134 @@
    * lines. The name and the one-line description are still there, on hover and
    * in the accessible name, so nothing is lost but the space.
    */
+  /**
+   * The tool dock (owner, 2026-09-27): a fixed strip at the bottom of the page,
+   * icon + name for every node, grouped by category, Media in first. Fixed
+   * cell sizes, no wrapping, no scrolling. When a window is too narrow for all
+   * groups, the dock shows category tabs and one group at a time.
+   */
+  const DOCK_GROUPS = [
+    ['Inputs', ['input:media', 'input:text', 'input:avatar']],
+    ['Vision / Text', ['vision', 'text']],
+    ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
+    ['Video', ['video', 'video_frame', 'video_storyboard', 'video_control', 'upscale_video']],
+    ['Avatars', ['avatar_build', 'avatar_image', 'avatar_video']],
+    ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
+    ['Audio', ['music']],
+    ['Utility', ['3dmodel', 'action:arrange', 'action:fit', 'action:assistant']]
+  ];
+  const DOCK_LABELS = {
+    'input:media': 'Media in', 'input:text': 'Text in', 'input:avatar': 'Avatar',
+    vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
+    upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
+    video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
+    upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_image: 'Avatar scene',
+    avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
+    control_canny: 'Canny', control_normal: 'Normal', music: 'Music', '3dmodel': '3D model',
+    'action:arrange': 'Arrange', 'action:fit': 'Fit view', 'action:assistant': 'Assistant'
+  };
+  let dockTab = 0;
+
+  function dockItem(key) {
+    if (key.startsWith('input:')) {
+      const type = key.slice(6);
+      const title = DOCK_LABELS[key];
+      return paletteButton(title, toolIcon(key, type), SOURCE_HELP[type] || '', {kind: 'input', type, title});
+    }
+    if (key === 'action:arrange') return actionButton('Arrange', '▦',
+      'Lay the selected nodes out in columns by depth, or the whole graph when nothing is selected.',
+      () => arrangeNodes(Array.from(nodeGroups?.selected || [])));
+    if (key === 'action:fit') return actionButton('Fit view', '⤢',
+      'Frame the whole composition: zoom and pan so every node is on screen.',
+      () => { if (!document.querySelector('#canvas .drawflow-node')) toast('There is nothing on the canvas to frame yet.'); else fitView(); });
+    if (key === 'action:assistant') return actionButton('Assistant', '💬',
+      'Show or hide the graph assistant (describe a change in words).',
+      () => document.body.classList.toggle('aga-shown'));
+    const entry = serviceById(key);
+    if (!entry) return null;
+    const button = paletteButton(entry.title, toolIcon(entry.id, (entry.produces_array || [])[0]), entry.summary,
+      {kind: 'service', service: entry.id, title: entry.title});
+    if (entry.status !== 'live') {
+      const why = entry.blocked_reason || 'Not wired up yet.';
+      button.disabled = true;
+      button.draggable = false;
+      button.setAttribute('aria-label', entry.title + '. ' + why);
+      const note = button.querySelector('.ttip i');
+      if (note) note.textContent = why;
+    }
+    return button;
+  }
+
   function buildPalette() {
     const host = document.getElementById('palette');
     if (!host) return;
     host.innerHTML = '';
-    [['media', 'Media in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
-      host.appendChild(paletteButton(title, toolIcon('input:' + type, type), SOURCE_HELP[type] || '',
-        {kind:'input', type, title}));
-    });
-    host.appendChild(document.createElement('hr'));
+    const placed = new Set();
+    const groups = DOCK_GROUPS.map(([name, keys]) => [name, keys.slice()]);
+    // A service the groups do not name yet still gets a place (Utility).
     (catalogue.services_array || []).forEach(entry => {
-      const button = paletteButton(entry.title,
-                                   toolIcon(entry.id, (entry.produces_array || [])[0]),
-                                   entry.summary,
-                                   {kind:'service', service:entry.id, title:entry.title});
-      if (entry.status !== 'live') {
-        // A service can say *why* it is not callable. "Not wired up yet" is a
-        // fine default, but "the card has no weights for it" is the answer to
-        // the question the greyed-out button actually raises.
-        const why = entry.blocked_reason || 'Not wired up yet.';
-        button.disabled = true;
-        // A disabled button still starts a drag, and dropping it on the canvas
-        // made a node no runner knows how to call.
-        button.draggable = false;
-        button.setAttribute('aria-label', entry.title + '. ' + why);
-        const note = button.querySelector('.ttip i');
-        if (note) note.textContent = why;
-      }
-      host.appendChild(button);
+      if (!groups.some(([, keys]) => keys.includes(entry.id))) groups[groups.length - 1][1].unshift(entry.id);
     });
-    host.appendChild(document.createElement('hr'));
-    host.appendChild(actionButton('Arrange', '▦',
-      'Lay the selected nodes out in columns by depth, or the whole graph when nothing is selected.',
-      () => arrangeNodes(Array.from(nodeGroups?.selected || []))));
-    host.appendChild(actionButton('Fit view', '⤢',
-      'Frame the whole composition: zoom and pan so every node is on screen.',
-      () => {
-        if (!document.querySelector('#canvas .drawflow-node')) {
-          toast('There is nothing on the canvas to frame yet.');
-        } else fitView();
-      }));
+    const tabs = document.createElement('div');
+    tabs.className = 'dock-tabs';
+    // Tabs hold short names: a phone shows every category in one row.
+    const SHORT = {'Vision / Text': 'V/T', 'Control maps': 'Maps', 'Avatars': 'Avatar', 'Utility': 'More'};
+    const row = document.createElement('div');
+    row.className = 'dock-row';
+    groups.forEach(([name, keys], index) => {
+      const group = document.createElement('div');
+      group.className = 'dock-group';
+      group.dataset.group = String(index);
+      group.title = name;
+      keys.forEach(key => {
+        if (placed.has(key)) return;
+        const item = dockItem(key);
+        if (!item) return;
+        placed.add(key);
+        const label = document.createElement('span');
+        label.className = 'tlabel';
+        label.textContent = DOCK_LABELS[key] || (serviceById(key) || {}).title || key;
+        item.appendChild(label);
+        group.appendChild(item);
+      });
+      if (!group.children.length) return;
+      row.appendChild(group);
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'dock-tab';
+      tab.textContent = window.innerWidth < 600 ? (SHORT[name] || name) : name;
+      tab.title = name;
+      tab.dataset.group = String(index);
+      tab.addEventListener('click', () => { dockTab = index; layoutDock(); });
+      tabs.appendChild(tab);
+    });
+    host.append(tabs, row);
+    layoutDock();
   }
+
+  /** All groups in one row if they fit, else tabs + the chosen group. */
+  function layoutDock() {
+    const host = document.getElementById('palette');
+    if (!host) return;
+    // The stage ends where the dock begins, whatever height the top bar wraps to.
+    const shell = document.querySelector('.shell');
+    if (shell) {
+      const top = shell.getBoundingClientRect().top + window.scrollY;
+      shell.style.height = Math.max(240, window.innerHeight - top - host.offsetHeight) + 'px';
+    }
+    const groups = [...host.querySelectorAll('.dock-group')];
+    host.classList.remove('dock-tabbed');
+    groups.forEach(group => { group.hidden = false; });
+    const needed = groups.reduce((sum, group) => sum + group.scrollWidth + 14, 0);
+    const tabbed = needed > host.clientWidth - 8;
+    host.classList.toggle('dock-tabbed', tabbed);
+    if (!tabbed) return;
+    const visible = groups.some(group => group.dataset.group === String(dockTab)) ? String(dockTab) : groups[0].dataset.group;
+    groups.forEach(group => { group.hidden = group.dataset.group !== visible; });
+    host.querySelectorAll('.dock-tab').forEach(tab => tab.classList.toggle('on', tab.dataset.group === visible));
+  }
+  let dockResizeTimer = null;
+  window.addEventListener('resize', () => { clearTimeout(dockResizeTimer); dockResizeTimer = setTimeout(layoutDock, 120); });
 
   /** Lay the graph out, then frame what the layout produced. */
   function arrangeNodes(ids) {
@@ -4063,8 +4694,9 @@
     // icon per row — a 800px band that would push the graph off the bottom of
     // the screen. Two rows of icons is about 90px, so anything past a quarter
     // of the window is a measurement, not a toolbar.
-    return Math.min(Math.round(tools.getBoundingClientRect().height) + 20,
-                    Math.round(window.innerHeight / 4) || 140);
+    // The dock sits below the stage now, not over it.
+    return tools && getComputedStyle(tools).position === 'fixed' ? 0 :
+      Math.min(Math.round(tools.getBoundingClientRect().height) + 20, Math.round(window.innerHeight / 4) || 140);
   }
 
   /**
@@ -4129,6 +4761,7 @@
   function offsetViewBelowTools() {
     const tools = document.getElementById('palette');
     if (!tools || !editor || editor.canvas_x || editor.canvas_y) return;
+    if (getComputedStyle(tools).position === 'fixed') return;
     editor.canvas_x = 20;
     // Measured before the strip has finished wrapping, this comes back as one
     // icon per row — a 800px push that leaves the canvas looking empty on a
@@ -4290,6 +4923,12 @@
     document.getElementById('save').addEventListener('click', saveGraph);
     document.getElementById('duplicate-graph').addEventListener('click', duplicateGraph);
     document.getElementById('cancel').addEventListener('click', cancelRun);
+    const farmReset = document.getElementById('farm-reset');
+    if (farmReset) {
+      farmReset.addEventListener('click', resetFarm);
+      fetch('/api/ai/queue/admin').then(r => r.json())
+        .then(data => { farmReset.hidden = !(data && data.admin_bool); }).catch(() => {});
+    }
     document.getElementById('purge').addEventListener('click', purgeCache);
     document.getElementById('clear').addEventListener('click', () => {
       resetCanvasExecutionState();

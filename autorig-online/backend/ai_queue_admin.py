@@ -98,6 +98,34 @@ def build_queue_admin_router(require_admin: Callable[..., Any]) -> APIRouter:
             "server_time_unix_int": int(time.time()),
         }
 
+    @router.post("/api/ai/farm/reset")
+    async def api_farm_reset(dry_run: int = 0, admin=Depends(require_admin)) -> Dict[str, Any]:
+        """Admin: wipe the whole farm queue (queued and running) and the boxes' queues.
+
+        dry_run=1 only lists what would be cancelled. Nothing in the result
+        caches, the rendered files or the models is removed.
+        """
+        import ai_vision_api
+
+        who = str(getattr(admin, "email", "") or "admin")
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/reset",
+                    params={"dry_run": 1 if dry_run else 0}, timeout=180.0)
+            response.raise_for_status()
+            result = response.json()
+        except Exception as exc:
+            logger.exception("Farm reset failed")
+            raise HTTPException(status_code=502, detail=f"the render queue could not be reset: {exc}") from None
+        if not dry_run:
+            logger.warning("FARM RESET by %s: cancelled %s queued, %s running; boxes %s", who,
+                           result.get("cancelled_queued_int"), result.get("cancelled_running_int"),
+                           result.get("boxes_object"))
+        result.pop("task_ids_array", None)
+        result.update({"success_bool": True, "by_string": who, "server_time_unix_int": int(time.time())})
+        return result
+
     @router.get("/api/ai/queue/admin")
     async def api_queue_admin(request: Request) -> Dict[str, Any]:
         """Whether this browser would be allowed to clear the queue."""

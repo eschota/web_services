@@ -23,13 +23,13 @@
     <script src="/static/js/ai-node-compare.js?v=20260926-media2"></script>
     <script src="/static/js/ai-graph-bridge.js?v=20260926-media2"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
-    <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
+    <script src="/static/js/ai-node-placement.js?v=20260927-ids1"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3"></script>
+    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ5-reset1"></script>
     <style>
         .ai-page {
             background:
@@ -67,6 +67,7 @@
         }
         .bar button:disabled { opacity: .55; cursor: not-allowed; }
         .bar button#cancel { border-color: rgba(251,113,133,.5); color: #fb7185; }
+        .bar button#farm-reset { border-color: rgba(251,113,133,.8); color: #fff; background: #b91c1c; }
         /* Render quality: four icon segments; the name is in the tooltip. */
         .rq-group {
             display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px;
@@ -95,7 +96,6 @@
         /* One column: the canvas is the page, and the tools float over it. */
         .shell { display: block; height: calc(100vh - 59px); }
         .stage { position: relative; height: 100%; }
-        @media (max-width: 860px) { .shell { height: auto; } }
 
         /* ---- compositions dropdown --------------------------------------- */
         .drop { position: relative; }
@@ -120,36 +120,71 @@
         .pgroup:first-child { margin-top: 0; }
 
         /* ---- compact icon toolbar over the canvas ------------------------ */
+        /* ---- Post to Civitai dialog ---- */
+        .civ-dialog { width: min(560px, 94vw); padding: 18px 20px; border: 1px solid rgba(255,255,255,.14);
+            border-radius: 14px; background: #121327; color: #e9e9f4; font: 13px/1.4 system-ui;
+            box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+        .civ-dialog::backdrop { background: rgba(4,5,14,.6); }
+        .civ-dialog form { display: grid; gap: 10px; }
+        .civ-dialog b { font-size: 15px; }
+        .civ-dialog label { display: grid; gap: 4px; color: #aab0c8; font-size: 12px; }
+        .civ-dialog label:has(input[type=checkbox]), .civ-dialog label:has(input[type=radio]) { display: flex; align-items: center; gap: 8px; color: #e9e9f4; }
+        .civ-dialog input:not([type=checkbox]):not([type=radio]), .civ-dialog textarea, .civ-dialog select {
+            box-sizing: border-box; width: 100%; padding: 8px 10px; border-radius: 9px; font: inherit; color: #fff;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); }
+        .civ-dialog a { color: #7dd3fc; }
+        .civ-dialog button { padding: 8px 14px; border-radius: 9px; border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.07); color: inherit; cursor: pointer; font: inherit; }
+        .civ-dialog .civ-go { background: linear-gradient(90deg,#38bdf8,#7b5cff); border: 0; color: #fff; font-weight: 600; }
+        .civ-dialog .civ-out:not(:empty) { padding: 8px 10px; border-radius: 9px; background: rgba(56,189,248,.08); }
+        /* ---- tool dock (bottom, fixed; owner 2026-09-27) ---------------- */
+        :root { --dock-h: 96px; }
+        .shell { height: calc(100vh - 59px - var(--dock-h)); }
         .ntools {
-            position: absolute; z-index: 5; top: 10px; left: 10px;
-            display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px;
-            max-width: min(388px, calc(100% - 20px)); max-height: calc(100% - 150px); overflow-y: auto;
-            padding: 5px; border-radius: 12px;
-            border: 1px solid rgba(255,255,255,.1); background: rgba(12,13,26,.82);
-            backdrop-filter: blur(8px); box-shadow: 0 10px 28px rgba(0,0,0,.4);
+            position: fixed; z-index: 30; left: 0; width: 100vw; bottom: 0;
+            height: var(--dock-h); box-sizing: border-box; overflow: hidden;
+            display: flex; flex-direction: column; justify-content: flex-end;
+            padding: 4px 8px 6px; contain: layout paint;
+            border-top: 1px solid rgba(255,255,255,.12); background: rgba(12,13,26,.97);
         }
-        .ntools hr {
-            width: 1px; height: 26px; margin: 4px 3px; align-self: center;
-            border: 0; background: rgba(255,255,255,.14);
-        }
+        .dock-tabs { display: none; height: 20px; gap: 4px; flex: 0 0 20px; overflow: hidden; flex-wrap: nowrap; }
+        /* The fleet status line is one long run of text; on a phone it widened
+           the page and pushed the fixed dock below the screen. */
+        #fleet { max-width: 100%; min-width: 0; overflow: hidden; }
+        #fleet .fleet-dots, #fleet .fleet-queue { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        html, body { overflow-x: hidden; }
+        .dock-tabbed .dock-tabs { display: flex; }
+        .dock-tab { font-size: 11px; padding: 0 7px; height: 20px; border-radius: 6px; flex: 0 0 auto;
+            border: 1px solid rgba(255,255,255,.14); background: transparent; color: inherit; cursor: pointer; }
+        .dock-tab.on { background: rgba(56,189,248,.2); border-color: #38bdf8; }
+        .dock-row { display: flex; flex-wrap: nowrap; justify-content: center; align-items: flex-end;
+            gap: 14px; height: 66px; flex: 0 0 66px; overflow: hidden; }
+        .dock-tabbed .dock-row { justify-content: flex-start; }
+        .dock-group { display: flex; flex-wrap: nowrap; gap: 3px; flex: 0 0 auto; position: relative; }
+        .dock-group + .dock-group::before { content: ''; position: absolute; left: -8px; top: 8px; bottom: 8px;
+            width: 1px; background: rgba(255,255,255,.14); }
+        .dock-group[hidden] { display: none; }
         .titem {
-            width: 36px; height: 36px; padding: 0; flex: 0 0 auto;
-            display: flex; align-items: center; justify-content: center; cursor: grab;
-            font-size: 17px; line-height: 1; color: inherit;
-            background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
-            border-radius: 9px;
+            width: 58px; height: 64px; padding: 4px 2px 2px; flex: 0 0 58px; box-sizing: border-box;
+            display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
+            cursor: grab; font-size: 22px; line-height: 1; color: inherit;
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 9px;
+            position: relative;
         }
+        .ticon { height: 24px; display: flex; align-items: center; }
+        .tlabel { font-size: 10px; line-height: 1.15; text-align: center; white-space: normal;
+            overflow-wrap: normal; word-break: normal; max-height: 2.3em; overflow: hidden; width: 100%; }
         .titem:hover:not(:disabled), .titem:focus-visible {
-            border-color: #38bdf8; background: rgba(56,189,248,.16); outline: none;
+            border-color: #38bdf8; background: rgba(56,189,248,.14); outline: none;
         }
         .titem:active:not(:disabled) { cursor: grabbing; }
         .titem:disabled { opacity: .35; cursor: not-allowed; }
         .titem.taction { cursor: pointer; }
-        /* Anchored to the strip, not to the button, so a tooltip never lands
-           on top of the row below it. */
+        body:not(.aga-shown) .aga { display: none !important; }
+        body.aga-shown .aga { bottom: calc(var(--dock-h) + 10px) !important; }
         .ttip {
-            position: absolute; z-index: 9; top: calc(100% + 8px); left: 0;
-            display: none; width: max-content; max-width: 300px; text-align: left;
+            position: fixed; z-index: 40; bottom: calc(var(--dock-h) + 6px); left: 50%; transform: translateX(-50%);
+            display: none; width: max-content; max-width: 320px; text-align: left;
             padding: 7px 9px; border-radius: 9px; pointer-events: none;
             border: 1px solid rgba(255,255,255,.14); background: rgba(10,11,22,.98);
             box-shadow: 0 12px 26px rgba(0,0,0,.5);
@@ -159,6 +194,7 @@
         .ttip b { display: block; font-size: 12.5px; font-weight: 600; }
         .ttip i { display: block; font-style: normal; font-size: 11px; margin-top: 2px;
                   line-height: 1.35; color: var(--text-secondary, #9aa0b5); }
+        @media (max-width: 860px) { .shell { height: calc(100vh - 59px - var(--dock-h)); } }
 
         .tmpl {
             display: block; width: 100%; text-align: left; color: inherit; cursor: pointer;
@@ -589,6 +625,7 @@
     <button id="run">Render</button>
     <button id="continue">Continue</button>
     <button id="cancel" hidden>Cancel</button>
+    <button id="farm-reset" hidden title="Administrator: cancel every queued and running job on the whole farm">Reset farm</button>
     <button id="save">Save &amp; copy link</button>
     <button id="duplicate-graph" title="Create an independent graph with a new link">Duplicate graph</button>
     <button id="clear">Clear</button>

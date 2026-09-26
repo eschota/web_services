@@ -22,6 +22,7 @@ from . import (
     image_quality,
     model_eligibility,
     multiref,
+    music,
     routing,
     stream_decode,
     templating,
@@ -669,6 +670,79 @@ class RenderQueue:
             "running_untouched_int": running,
             "pending_seen_int": len(waiting),
         }
+
+    def farm_snapshot(self) -> Dict[str, Any]:
+        """Everything queued or on a card, by box and by owner (for the reset dialog)."""
+        active = [t for t in self._tasks.values() if t.status in (TASK_PENDING, TASK_RENDERING)]
+        by_box: Dict[str, int] = {}
+        by_owner: Dict[str, int] = {}
+        by_workflow: Dict[str, int] = {}
+        for task in active:
+            if task.status == TASK_RENDERING:
+                box = task.server_name or "?"
+                by_box[box] = by_box.get(box, 0) + 1
+            owner = str(getattr(task.prompt, "user_name", "") or "?")
+            by_owner[owner] = by_owner.get(owner, 0) + 1
+            workflow = str(task.workflow or "?")
+            by_workflow[workflow] = by_workflow.get(workflow, 0) + 1
+        return {
+            "queued_int": sum(1 for t in active if t.status == TASK_PENDING),
+            "running_int": sum(1 for t in active if t.status == TASK_RENDERING),
+            "running_by_box_object": by_box,
+            "by_owner_object": by_owner,
+            "by_workflow_object": by_workflow,
+            "task_ids_array": [t.id for t in active],
+            "boxes_array": [s.render_server_name for s in self.registry.all()],
+        }
+
+    async def reset_farm(self, *, dry_run: bool = False,
+                         reason: str = "cancelled: farm reset by an administrator") -> Dict[str, Any]:
+        """Cancel every queued and running task and empty each box's ComfyUI queue.
+
+        Only the render-worker ComfyUI instances in this registry are touched
+        (their prompt queue is cleared and the current prompt interrupted);
+        results, caches and models stay where they are.
+        """
+        summary = self.farm_snapshot()
+        if dry_run:
+            summary["dry_run_bool"] = True
+            return summary
+        cancelled_queued = cancelled_running = 0
+        for task_id in list(summary["task_ids_array"]):
+            task = self._tasks.get(task_id)
+            if task is None or task.status not in (TASK_PENDING, TASK_RENDERING):
+                continue
+            was_running = task.status == TASK_RENDERING
+            if await self.cancel(task_id, reason=reason):
+                if was_running:
+                    cancelled_running += 1
+                else:
+                    cancelled_queued += 1
+        boxes: Dict[str, str] = {}
+        if self._client is not None:
+            for server in self.registry.all():
+                name = server.render_server_name
+                if (server.status or "") != "online":
+                    boxes[name] = "skipped (" + (server.status or "unknown") + ")"
+                    continue
+                try:
+                    base = comfy_adapter._validate_server_url(server.render_server_url)
+                    auth = comfy_adapter._auth_for(server)
+                    await self._client.post(f"{base}/queue", json={"clear": True}, timeout=15.0, auth=auth)
+                    await self._client.post(f"{base}/interrupt", timeout=15.0, auth=auth)
+                    boxes[name] = "cleared"
+                except Exception as exc:
+                    boxes[name] = f"unreachable: {exc}"[:200]
+        summary.update({
+            "dry_run_bool": False,
+            "cancelled_queued_int": cancelled_queued,
+            "cancelled_running_int": cancelled_running,
+            "boxes_object": boxes,
+            "after_object": {k: v for k, v in self.farm_snapshot().items() if k != "task_ids_array"},
+        })
+        print(f"[Renderfin][Queue] FARM RESET: cancelled {cancelled_queued} queued, "
+              f"{cancelled_running} running; boxes {boxes}")
+        return summary
 
     async def cancel(self, task_id: str, *, reason: str = "cancelled") -> bool:
         """Stop a queued/running task and best-effort interrupt the worker."""
@@ -1495,14 +1569,18 @@ class RenderQueue:
         control_url = str(getattr(prompt, "control_video_url", "") or "").strip()
         controlled_video = workflow_file in {
             "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
-            "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json"}
+            "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json",
+            "upscale_video_x2.json"}
         if bool(control_url) != controlled_video:
             raise comfy_adapter.ComfyRequestError(
                 "A video control workflow requires its driving video"
             )
         if control_url:
             from .video_input import download_prepare_video
-            name, data = await download_prepare_video(self._client, control_url, prompt.frame_count)
+            name, data = await download_prepare_video(
+                self._client, control_url, prompt.frame_count,
+                # An enlargement keeps the clip's own length; no held tail.
+                allow_shorter=workflow_file == "upscale_video_x2.json")
             control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
@@ -1553,6 +1631,8 @@ class RenderQueue:
         elif is_multiref_workflow:
             multiref.inject_references(workflow_file, workflow, reference_filenames)
         apply_runtime_settings(workflow, prompt, width, height)
+        if music.is_music(prompt):
+            music.apply_music_settings(workflow, prompt)
         if stream_decode.has_video_decode_chain(workflow):
             # Decode straight to disk where the box has our streaming node;
             # elsewhere refuse clips the in-RAM decode chain cannot hold.
@@ -1960,7 +2040,7 @@ class RenderQueue:
                 err = ""
                 if entry:
                     err = json.dumps(entry.get("status", {}))[:500]
-                await self._fail(task, f"comfy error: {err}")
+                await self._fail(task, _readable_comfy_error(task, entry) + f" | details: comfy error: {err}")
                 continue
             # Finish (download artifacts) off the pump so a slow transfer cannot
             # stall dispatch or status polling for every other task.
@@ -2690,3 +2770,31 @@ class RenderQueue:
         if self._client is not None:
             await self._release_workload(task, outcome="released")
         print(f"[Renderfin][Queue] task {task.id} FAILED: {error[:200]}")
+
+
+def _readable_comfy_error(task, entry) -> str:
+    """One line a person can act on, from a ComfyUI execution_error (2026-09-27)."""
+    info = {}
+    try:
+        for message in (entry or {}).get("status", {}).get("messages", []) or []:
+            if isinstance(message, (list, tuple)) and len(message) > 1 and message[0] == "execution_error":
+                info = message[1] or {}
+    except Exception:
+        info = {}
+    kind = str(info.get("exception_type") or "")
+    text = str(info.get("exception_message") or "").strip().splitlines()
+    node = str(info.get("node_type") or "")
+    prompt = getattr(task, "prompt", None)
+    size = ""
+    try:
+        w, h = int(prompt.main_size_width or 0), int(prompt.main_size_height or 0)
+        frames = int(getattr(prompt, "frame_count", 0) or 0)
+        if w and h:
+            size = f" at {w}x{h}" + (f"x{frames} frames" if frames and not str(prompt.type or "").strip() else "")
+    except Exception:
+        pass
+    box = getattr(task, "server_name", "") or "the render box"
+    if "OutOfMemory" in kind or "out of memory" in " ".join(text).lower():
+        return f"Out of GPU memory on {box}{size} - lower the size or the frame count"
+    first = text[0][:200] if text else ""
+    return f"{node or 'The workflow'} failed on {box}{size}: {kind or 'error'}" + (f" - {first}" if first else "")
