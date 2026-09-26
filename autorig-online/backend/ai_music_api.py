@@ -350,12 +350,16 @@ async def _mux(video_url: str, audio: Path, target: Path) -> None:
     try:
         source = work / "source.bin"
         async with httpx.AsyncClient() as client:
-            await download_source_video(client, video_url, source)
+            probe = await download_source_video(client, video_url, source)
         partial = work / "out.mp4"
+        # A short clip's music is cut to the clip; a 0.8 s fade makes the cut an ending.
+        video_seconds = float((probe.get("format") or {}).get("duration") or 0)
+        fade = f"afade=t=out:st={max(0.0, video_seconds - 0.8):.2f}:d=0.8" if video_seconds > 2 else "anull"
         process = await asyncio.create_subprocess_exec(
             "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
             "-i", str(source), "-i", str(audio),
-            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-af", fade,
+            "-c:a", "aac", "-b:a", "192k",
             "-shortest", "-movflags", "+faststart", str(partial),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         _, stderr = await asyncio.wait_for(process.communicate(), timeout=180)
@@ -365,7 +369,7 @@ async def _mux(video_url: str, audio: Path, target: Path) -> None:
                 "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
                 "-i", str(source), "-i", str(audio),
                 "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-crf", "18",
-                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                "-pix_fmt", "yuv420p", "-af", fade, "-c:a", "aac", "-b:a", "192k",
                 "-shortest", "-movflags", "+faststart", str(partial),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             _, stderr = await asyncio.wait_for(process.communicate(), timeout=600)

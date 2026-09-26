@@ -39,9 +39,29 @@ def clamp_seconds(value: Any) -> float:
     return round(max(MIN_SECONDS, min(MAX_SECONDS, seconds)), 2)
 
 
+# Stable Audio 3 writes a whole piece for the length it is given: asked for 8 s
+# it plays a short phrase and fades from the first second (measured 26.09:
+# -8 dBFS falling to -32 dBFS over 8 s). Asked for 20 s it holds its level
+# until the last ~4 s. So anything shorter is rendered at this length and cut
+# to the requested one, which keeps a short clip's music at full level.
+MIN_RENDER_SECONDS = 20.0
+
+
 def apply_music_settings(workflow: Dict[str, Any], prompt: Any) -> None:
-    """Set the clip length on the empty latent."""
+    """Set the render length on the empty latent; cut short requests to size."""
     seconds = clamp_seconds(getattr(prompt, "audio_seconds", 0))
+    render_seconds = max(seconds, MIN_RENDER_SECONDS)
     for node in workflow.values():
         if isinstance(node, dict) and node.get("class_type") == "EmptyLatentAudio":
-            node.setdefault("inputs", {})["seconds"] = seconds
+            node.setdefault("inputs", {})["seconds"] = render_seconds
+    if render_seconds <= seconds:
+        return
+    for node_id, node in list(workflow.items()):
+        if not isinstance(node, dict) or not str(node.get("class_type", "")).startswith("SaveAudio"):
+            continue
+        inputs = node.setdefault("inputs", {})
+        source = inputs.get("audio")
+        trim_id = "music_trim_" + str(node_id)
+        workflow[trim_id] = {"class_type": "TrimAudioDuration",
+                             "inputs": {"audio": source, "start_index": 0.0, "duration": seconds}}
+        inputs["audio"] = [trim_id, 0]
