@@ -1550,6 +1550,54 @@
     paintQuickbar();
   }, true);
 
+  /* ------------------------------------------------------- media throttle */
+
+  /**
+   * A graph of 25 nodes holds dozens of looping clips and full-size pictures.
+   * Only clips that are on screen and big enough to see play; pictures decode
+   * lazily and off the main thread (2026-09-27, owner: node actions slow).
+   */
+  function installMediaThrottle(canvas) {
+    if (!canvas || typeof IntersectionObserver === 'undefined') return;
+    const visible = new WeakMap();
+    const worth = video => {
+      const rect = video.getBoundingClientRect();
+      return visible.get(video) && rect.width >= 80 && !document.hidden;
+    };
+    const apply = video => {
+      if (worth(video)) { if (video.paused) video.play().catch(() => {}); }
+      else if (!video.paused) video.pause();
+    };
+    const io = new IntersectionObserver(entries => entries.forEach(entry => {
+      visible.set(entry.target, entry.isIntersecting);
+      apply(entry.target);
+    }), {threshold: 0.2});
+    const prep = element => {
+      if (element.tagName === 'IMG') {
+        if (element.loading !== 'lazy') element.loading = 'lazy';
+        element.decoding = 'async';
+      } else if (element.tagName === 'VIDEO' && !element._throttled) {
+        element._throttled = true;
+        element.preload = 'metadata';
+        element.removeAttribute('autoplay');
+        element.autoplay = false;
+        // Code that calls play() on a new source must not wake a clip nobody sees.
+        element.addEventListener('play', () => { if (!worth(element)) element.pause(); });
+        io.observe(element);
+      }
+    };
+    canvas.querySelectorAll('img, video').forEach(prep);
+    new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(node => {
+      if (node.nodeType !== 1) return;
+      if (node.tagName === 'IMG' || node.tagName === 'VIDEO') prep(node);
+      if (node.querySelectorAll) node.querySelectorAll('img, video').forEach(prep);
+    }))).observe(canvas, {childList: true, subtree: true});
+    let timer = null;
+    const recheck = () => { clearTimeout(timer); timer = setTimeout(() => canvas.querySelectorAll('video').forEach(apply), 200); };
+    document.addEventListener('visibilitychange', recheck);
+    if (editor && typeof editor.on === 'function') editor.on('zoom', recheck);
+  }
+
   /* ---------------------------------------------------------- quick toolbar */
 
   let quickbar = null;
@@ -1612,7 +1660,12 @@
     bar.style.left = Math.max(canvasRect.left + 4, Math.min(rect.left + rect.width / 2 - width / 2, canvasRect.right - width - 4)) + 'px';
     bar.style.top = Math.max(canvasRect.top + 4, rect.top - 40) + 'px';
   }
-  setInterval(() => { if (typeof editor !== 'undefined' && editor) paintQuickbar(); }, 150);
+  setInterval(() => {
+    if (typeof editor === 'undefined' || !editor) return;
+    if (!quickbar && !selectedIds().length) return;
+    if (quickbar && quickbar.style.display === 'none' && !selectedIds().length) return;
+    paintQuickbar();
+  }, 150);
 
   /* ------------------------------------------------------- system prompts */
 
@@ -1800,6 +1853,10 @@
   function typeFits(info) {
     if (!info || !info.produced) return false;
     if (info.produced === info.accepted || info.alsoAccepts.includes(info.produced)) return true;
+    // A control map is a plain PNG: any picture socket takes it as a reference
+    // (bodyFor tells the model what it is). Native control sockets are typed.
+    if (info.produced.startsWith('control_') &&
+        (info.accepted === 'image' || info.alsoAccepts.includes('image'))) return true;
     return info.produced === 'media' && (['image', 'video'].includes(info.accepted) ||
       info.alsoAccepts.includes('image') || info.alsoAccepts.includes('video'));
   }
@@ -1810,12 +1867,20 @@
     const info = linkTypes(connection);
     if (!info || !info.produced) return false;
     if (!typeFits(info)) return false;
-    if (info.produced.startsWith('control_')) {
+    if (info.produced.startsWith('control_') && String(info.accepted || '').startsWith('control_')) {
       const element = nodeElement(connection.input_id);
       const slot = element && element.querySelector('[data-model-param="checkpoint"]');
       const entry = slot && slot._picker && slot._picker.entry;
       const sourceService = serviceById((meta(connection.output_id) || {}).service || info.produced);
-      return controlChannelAccepted(info.produced.slice(8), entry, sourceService);
+      const ok = controlChannelAccepted(info.produced.slice(8), entry, sourceService);
+      const socket = element && element.querySelector('.inputs .' + connection.input_class);
+      if (socket) {
+        if (socket.dataset.typeTitle === undefined) socket.dataset.typeTitle = socket.title || '';
+        socket.title = ok ? socket.dataset.typeTitle : ((entry && (entry.title || entry.file)) || 'This model') +
+          ': no native ' + info.produced.slice(8) + ' ControlNet. Switch the model to Z-Image Turbo, ' +
+          'or drop the map on a picture socket to use it as a reference image.';
+      }
+      return ok;
     }
     return true;
   }
@@ -1823,7 +1888,7 @@
   function onConnectionCreated(connection) {
     const info = linkTypes(connection);
     if (typeFits(info)) {
-      if (info.produced.startsWith('control_')) {
+      if (info.produced.startsWith('control_') && String(info.inField || '').startsWith('control_')) {
         const channel = info.produced.slice(8);
         const element = nodeElement(connection.input_id);
         const slot = element && element.querySelector('[data-model-param="checkpoint"]');
@@ -1924,7 +1989,23 @@
     // Draws or rewrites depending on whether a picture is wired in; the
     // endpoint reads the wiring, so the runner is the ordinary picture shape.
     qwen_image: { api: '/api/qwen-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
-    '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' }
+    '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' },
+    // Stable Audio 3 (2026-09-26): the audio file, and for a clip the clip
+    // with the music under it (muxed by the server once the audio exists).
+    music: { api: '/api/music', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      const outputs = {audio_url_string: value};
+      if (accepted.prompt_string) outputs.prompt_string = String(accepted.prompt_string);
+      if (accepted.video_url_string) {
+        const clip = String(accepted.video_url_string);
+        for (let attempt = 0; attempt < 60; attempt++) {
+          const probe = await fetch(clip, { method: 'HEAD' }).catch(() => null);
+          if (probe && probe.ok) { outputs.video_url_string = clip; break; }
+          await sleep(3000);
+        }
+      }
+      return {value, outputs};
+    }, field: 'audio_url_string', type: 'audio' }
   };
   ['pose', 'depth', 'canny'].forEach(channel => {
     RUNNERS['control_' + channel] = { api: '/api/controlnet', finish: pollForFile,
@@ -2391,6 +2472,41 @@
     } catch (error) { /* keep the canvas size */ }
   }
 
+  const HALF_HD_LONG = 960;
+  const VIDEO_SAMPLERS = new Set(['video', 'video_control', 'avatar_video']);
+
+  /** Clip at half-HD -> x2 through /api/upscale2x (the post step of a big target). */
+  async function upscaleClip2x(url, state) {
+    if (state) { state.textContent = 'upscaling 2× (half-HD render → target size)…'; state.className = 'nstate running'; }
+    const accepted = await submitJson('/api/upscale2x', {video_url: url});
+    return pollForFile(accepted, {field: 'output_url_string', type: 'video'}, null);
+  }
+
+  const MAP_RULES = {
+    pose: 'an OpenPose skeleton map: pose the person exactly like it, same place and size in the frame',
+    depth: 'a depth map (near = white): keep its layout, perspective and every object\'s place',
+    canny: 'an edge map: keep its lines, layout and perspective',
+    normal: 'a normal map (RGB = surface orientation): keep its shapes and surface orientation'
+  };
+  /** "Image N is a pose map: ..." for every control map among the pictures. */
+  function controlMapHints(resolved) {
+    const channels = new Map();
+    runState.forEach(record => {
+      const type = String((record && record.type) || '');
+      if (type.startsWith('control_') && record.value) channels.set(String(record.value), type.slice(8));
+    });
+    if (!channels.size) return '';
+    const hints = [];
+    Object.keys(resolved || {}).forEach(field => {
+      const match = field === 'image' ? ['', '1'] : /^reference_(\d+)$/.exec(field);
+      const channel = match && channels.get(String(resolved[field]));
+      if (channel && MAP_RULES[channel]) {
+        hints.push('Image ' + match[1] + ' is ' + MAP_RULES[channel] + '; do not draw the map itself.');
+      }
+    });
+    return hints.join(' ');
+  }
+
   function bodyFor(serviceId, resolved, params) {
     const body = {};
     if (serviceId === 'video' && resolved && !resolved.image && resolved.image_url_end) {
@@ -2434,6 +2550,13 @@
         body[field] = value;
       }
     });
+    // A control map wired into a picture socket is a reference, not a photo:
+    // say which picture it is and what to take from it.
+    const mapHints = controlMapHints(resolved);
+    if (mapHints) {
+      if (typeof body.prompt === 'string' && body.prompt.trim()) body.prompt = body.prompt.trim() + ' ' + mapHints;
+      else if (serviceId === 'vision' || serviceId === 'text') body._map_hint = mapHints;
+    }
     // A node that carries a standing instruction always asks for the answer
     // alone: one JSON object in, `output_text` out. The instruction travels as
     // its own field so it never lands in the text the next node reads, and it
@@ -2443,9 +2566,11 @@
       const standing = (params || {})._system_prompt;
       const text = String(typeof standing === 'string'
         ? standing : (declaration.system_prompt_default || ''));
-      if (text.trim()) body.system_prompt = text;
+      const withHint = [text.trim(), body._map_hint || ''].filter(Boolean).join(' ');
+      if (withHint) body.system_prompt = withHint;
       body.structured = true;
     }
+    delete body._map_hint;
     // A LoRA of another model family (left in a slot when the checkpoint
     // changed) is left out, so the render runs with the ones that fit; the
     // slot says so inline (ai-node-lora-stack.js).
@@ -2460,6 +2585,19 @@
     // the scaled size is what the signature records and what the server gets.
     if (typeof window !== 'undefined' && window.AIRenderQuality && renderQuality !== 'normal') {
       window.AIRenderQuality.applyToBody(serviceId, body, renderQuality, declaration);
+    }
+    // Owner rule: video samples within half-HD at every quality. A larger
+    // target (Full with a big manual size, 2x) renders at half-HD and is then
+    // enlarged 2x by the Upscale 2x service; 1280x1920x297 frames ran a 24 GB
+    // card out of memory (2026-09-27).
+    if (VIDEO_SAMPLERS.has(serviceId) && Number(body.width) > 0 && Number(body.height) > 0) {
+      const w = Number(body.width), h = Number(body.height);
+      if (Math.max(w, h) > HALF_HD_LONG) {
+        const s = HALF_HD_LONG / Math.max(w, h);
+        body.width = Math.max(256, Math.round(w * s / 32) * 32);
+        body.height = Math.max(256, Math.round(h * s / 32) * 32);
+        body._post_upscale = 2;
+      }
     }
     return body;
   }
@@ -2492,6 +2630,8 @@
       const submitBody = Object.assign(
         bodyFor(node.service, resolved, params),
         budget ? {max_output_tokens:budget} : {});
+      const postUpscale = submitBody._post_upscale;
+      delete submitBody._post_upscale;
       const accepted = await submitJson(runner.api, submitBody, retry => {
         if (!executionIsCurrent(execution)) return;
         state.textContent = `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
@@ -2515,6 +2655,10 @@
       try {
         ({value, outputs} = splitMulti(await runner.finish(accepted, runner,
           taskStateReporter(state, task, accepted, execution))));
+        if (postUpscale && value) {
+          value = await upscaleClip2x(value, executionIsCurrent(execution) ? state : null);
+          if (outputs && outputs.video_url_string) outputs.video_url_string = value;
+        }
       } catch (error) {
         if (!attempt && String(error.message || '').indexOf(BUDGET_EXHAUSTED) !== -1) {
           if (!executionIsCurrent(execution)) throw error;
@@ -2646,6 +2790,35 @@
         picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', value); });
       host.appendChild(picture);
       markResolution(host, picture);
+    } else if (type === 'audio') {
+      const player = document.createElement('audio');
+      player.src = value;
+      player.controls = true;
+      player.preload = 'metadata';
+      player.className = 'naudio';
+      player.style.width = '100%';
+      player.addEventListener('click', event => event.stopPropagation());
+      player.addEventListener('mousedown', event => event.stopPropagation());
+      host.appendChild(player);
+      const extra = outputs || {};
+      if (extra.video_url_string) {
+        const clip = document.createElement('video');
+        clip.src = String(extra.video_url_string);
+        clip.controls = true;
+        clip.playsInline = true;
+        clip.preload = 'metadata';
+        clip.style.cssText = 'width:100%;margin-top:4px;border-radius:4px;background:#111';
+        clip.addEventListener('click', event => event.stopPropagation());
+        clip.addEventListener('mousedown', event => event.stopPropagation());
+        host.appendChild(clip);
+      }
+      if (extra.prompt_string) {
+        const block = document.createElement('div');
+        block.className = 'ntext';
+        block.style.cssText = 'font-size:11px;opacity:.75;margin-top:4px';
+        block.textContent = String(extra.prompt_string);
+        host.appendChild(block);
+      }
     } else if (type === 'video') {
       const clip = document.createElement('video');
       clip.src = value;
@@ -2665,7 +2838,7 @@
         markResolution(host, clip);
         clip.play().catch(() => {});
     }
-    if (outputs && typeof outputs === 'object') showOutputs(host, outputs);
+    if (outputs && typeof outputs === 'object' && type !== 'audio') showOutputs(host, outputs);
     const link = document.createElement('a');
     link.href = type === 'avatar' ? '/avatars' : value;
     link.target = '_blank';
@@ -2977,6 +3150,47 @@
 
   function refreshRunningControls() {
     setRunning(runRequests.size > 0 || activeExecutions.size > 0 || restoredExecutions.size > 0);
+  }
+
+  /** A farm error in words; the raw text goes behind a details toggle. */
+  function humanizeFailure(state) {
+    // Once rewritten, the state holds a <details>; never touch it again (the
+    // observer sees our own edit, and the raw text still matches below).
+    if (!state || state._humanizing || state.querySelector('details.nerr')) return;
+    const text = state.textContent || '';
+    let human = '', raw = '';
+    const marker = text.indexOf(' | details: ');
+    if (marker > 0) { human = text.slice(0, marker); raw = text.slice(marker + 12); }
+    else if (/comfy error: \{/.test(text)) {
+      raw = text;
+      const type = (/"exception_type": "([^"]+)"/.exec(text) || [])[1] || '';
+      const node = (/"node_type": "([^"]+)"/.exec(text) || [])[1] || '';
+      human = /OutOfMemory|out of memory/i.test(text)
+        ? 'Out of GPU memory — lower the size or the frame count'
+        : 'The render failed' + (node ? ' in ' + node : '') + (type ? ' (' + type + ')' : '');
+    } else return;
+    state._humanizing = true;
+    state.textContent = human + ' ';
+    const box = document.createElement('details');
+    box.className = 'nerr';
+    box.style.cssText = 'display:inline;font-size:11px;opacity:.8';
+    const summary = document.createElement('summary');
+    summary.textContent = 'details';
+    summary.style.cursor = 'pointer';
+    const pre = document.createElement('pre');
+    pre.textContent = raw;
+    pre.style.cssText = 'white-space:pre-wrap;max-height:160px;overflow:auto;user-select:text';
+    ['mousedown', 'pointerdown'].forEach(type => box.addEventListener(type, event => event.stopPropagation()));
+    box.append(summary, pre);
+    state.appendChild(box);
+    state._humanizing = false;
+  }
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(records => records.forEach(record => {
+      const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      const state = target && target.closest && target.closest('.nstate');
+      if (state && state.classList.contains('failed')) humanizeFailure(state);
+    })).observe(document.documentElement, {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class']});
   }
 
   function markState(id, message, className) {
@@ -3472,7 +3686,12 @@
     }
     paintIsolation();
     restoreResults(graph.results, mapping);
-    if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
+    if (nodeGroups && nodeGroups.refreshSizes) {
+      nodeGroups.refreshSizes();
+      // Model pickers and system-prompt markers finish a beat later on some
+      // nodes (Qwen-Image); settle sizes again once they have.
+      [1500, 4000].forEach(delay => setTimeout(() => nodeGroups.refreshSizes(), delay));
+    }
     refreshRunningControls();
     // A graph that opens half off-screen looks empty. The canvas has just been
     // replaced wholesale, so there is no pan of anyone's to preserve.
@@ -3585,7 +3804,7 @@
    * of the thing it makes, so a new service appears without an edit.
    */
   const TOOL_ICONS = {
-    upscale2x: '⏫', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
+    upscale2x: '⏫', music: '🎵', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
@@ -3874,6 +4093,7 @@
     }
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
+    installMediaThrottle(document.getElementById('canvas'));
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
       exportGraph:graphFromCanvas, imageOutput:imageOutputField, nodeLimit:200, toast,

@@ -52,7 +52,52 @@ MIN_SIDE = 256
 # demonstrated at.
 DEFAULT_SIZE = (1024, 1024)
 
-CACHE_NAMESPACE = "qwen-image-20260922-v1"
+CACHE_NAMESPACE = "qwen-image-20260926-v3"
+
+# Qwen-Image-2.1 + Viggle turbo (2026-09-26). A catalogue entry that declares
+# "qwen_image_generation": "2.1" is rendered by the 2.1 templates: one int8
+# transformer for both modes, Viggle's 6-step LoRA, no CFG, no negative. Its
+# sampling is fixed, so steps/cfg/negative_prompt are not forwarded to it.
+TYPE21_GENERATE = "qwen_image21"
+TYPE21_EDIT = "qwen_image21_edit"
+TYPE21_EDIT_MULTI = "qwen_image21_edit_multi"
+
+# One edit model on the farm (owner, 2026-09-26): every edit runs on the
+# Qwen-Image 2.1 turbo. The old edit files stay installed on the boxes for
+# rollback but are out of the catalogue; a request that still names one is
+# redirected to the default and told so, instead of failing.
+RETIRED_EDIT_CHECKPOINTS = frozenset({
+    "qwen-image-edit-2511-Q3_K_S.gguf",
+    "qwen-image-edit-2511",
+    "qwen-image-edit-2512-Q3_K_S.gguf",
+})
+
+
+def default_edit_checkpoint() -> str:
+    for entry in ai_model_catalogue.for_service(SERVICE_ID, "checkpoint"):
+        if entry.get("usable") and entry.get("qwen_image_default") and "edit" in _entry_modes(entry):
+            return str(entry.get("file") or "")
+    return ""
+
+
+def redirect_retired_checkpoint(name: Optional[str], mode: str) -> Tuple[Optional[str], str]:
+    """(checkpoint to use, deprecation note or "")."""
+    wanted = str(name or "").strip()
+    if not wanted:
+        return name, ""
+    retired = wanted in RETIRED_EDIT_CHECKPOINTS
+    if not retired and mode == "edit":
+        entry = ai_model_catalogue.known_file(wanted, "checkpoint") or {}
+        # A generate-only Qwen file named for an edit: same answer.
+        retired = bool(entry) and str(entry.get("qwen_image_generation") or "") != "2.1"
+    if not retired:
+        return name, ""
+    target = default_edit_checkpoint()
+    note = (f"checkpoint '{wanted}' is retired for editing since 2026-09-26; "
+            f"the request ran on '{target or 'the default'}' (Qwen-Image 2.1 turbo). "
+            "Leave checkpoint empty.")
+    logger.warning("qwen-image deprecation: %s", note)
+    return (target or None), note
 
 
 def _round_side(value: float) -> int:
@@ -153,6 +198,11 @@ def validate_checkpoint(name: Optional[str], mode: str) -> str:
     return wanted
 
 
+def is_generation21(name: str) -> bool:
+    entry = ai_model_catalogue.known_file(str(name or ""), "checkpoint") or {}
+    return str(entry.get("qwen_image_generation") or "") == "2.1"
+
+
 def installed_checkpoints(mode: Optional[str] = None) -> list:
     """What a caller may actually name, optionally for one of the two modes.
 
@@ -166,13 +216,46 @@ def installed_checkpoints(mode: Optional[str] = None) -> list:
             continue
         if mode and mode in MODES and mode != "auto" and mode not in _entry_modes(entry):
             continue
-        out.append(entry.get("file"))
-    return [name for name in out if name]
+        out.append(entry)
+    # The entry marked qwen_image_default comes first: that is the file an
+    # unnamed request loads.
+    out.sort(key=lambda entry: 0 if entry.get("qwen_image_default") else 1)
+    return [entry.get("file") for entry in out if entry.get("file")]
+
+
+# Owner rule 2026-09-27: an edit needs no text. The standing instruction is
+# always applied (editable per node as `system_prompt`); the user's text, if
+# any, follows it. {images} expands to "image 1, image 2, ..." for the pictures
+# actually wired in.
+QWEN_SYSTEM_PROMPT_DEFAULT = (
+    "Remix {images} into one coherent image: unify the style and lighting, "
+    "combine the subjects and the story of all inputs; image 1 is the base scene and composition."
+)
+QWEN_SINGLE_VARIATION = (
+    "Re-render image 1 as a clean, style-consistent variation: keep the subject, "
+    "composition, colours and lighting."
+)
+
+
+def compose_prompt(user_text: str, system_prompt: Optional[str], picture_count: int) -> str:
+    """The prompt Qwen-Image gets: standing instruction + the user's text."""
+    user_text = str(user_text or "").strip()
+    if picture_count <= 0:
+        return user_text
+    standing = str(system_prompt if system_prompt is not None else QWEN_SYSTEM_PROMPT_DEFAULT).strip()
+    if picture_count == 1 and not user_text and standing == QWEN_SYSTEM_PROMPT_DEFAULT:
+        return QWEN_SINGLE_VARIATION
+    names = ", ".join(f"image {index}" for index in range(1, picture_count + 1))
+    standing = standing.replace("{images}", names)
+    return (standing + " " + user_text).strip()
 
 
 class QwenImageRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=12000,
-                        description="What to draw, or what to change about the picture")
+    prompt: str = Field("", max_length=12000,
+                        description=("What to draw, or what to change about the picture. May be empty "
+                                     "when at least one picture is wired in (the standing instruction remixes them)"))
+    system_prompt: Optional[str] = Field(None, max_length=12000,
+                                         description="Standing instruction applied before the prompt; {images} = image 1..N")
     image_url: Optional[str] = Field(None, description="Picture to edit, public http(s) URL")
     image_base64: Optional[str] = Field(None, description="Picture to edit as base64 or data URL")
     mode: str = Field("auto", description="auto, generate or edit")
@@ -212,7 +295,8 @@ def extra_references(body: "QwenImageRequest") -> List[str]:
 async def api_qwen_image_docs():
     return {
         "status_string": "ok", "method_string": "POST", "url_string": "/api/qwen-image",
-        "required_fields_array": ["prompt"],
+        "required_fields_array": ["prompt (optional with at least one picture)"],
+        "system_prompt_default_string": QWEN_SYSTEM_PROMPT_DEFAULT,
         "modes_array": list(MODES),
         "mode_note_string": ("auto edits when a picture is supplied and generates when "
                              "it is not; the two modes load different models"),
@@ -242,7 +326,12 @@ async def _uncached_qwen_image(body: QwenImageRequest):
     mode = resolve_mode(body.mode, has_image)
     if mode == "generate":
         extras = []
-    checkpoint = validate_checkpoint(body.checkpoint, mode)
+        if not str(body.prompt or "").strip():
+            raise HTTPException(status_code=400, detail={
+                "error_string": "prompt_required",
+                "message_string": "Say what to draw, or wire in a picture to remix"})
+    requested, deprecation = redirect_retired_checkpoint(body.checkpoint, mode)
+    checkpoint = validate_checkpoint(requested, mode)
     if not checkpoint:
         # The model is named even when nobody picked one, and that is what
         # keeps the job off a box that cannot run it. Renderfin only asks a
@@ -282,31 +371,39 @@ async def _uncached_qwen_image(body: QwenImageRequest):
                 # be working at a size nobody asked for.
                 width, height = _fit_source(*await _source_size(client, source))
 
+    turbo21 = is_generation21(checkpoint)
+    final_prompt = compose_prompt(body.prompt, body.system_prompt,
+                                  len(pictures) if mode == "edit" else 0)
     payload: Dict[str, object] = {
-        "prompt": str(body.prompt).strip(),
-        "negative_prompt": str(body.negative_prompt or "").strip(),
-        "type": TYPE_EDIT if mode == "edit" else TYPE_GENERATE,
+        "prompt": final_prompt,
+        "negative_prompt": "" if turbo21 else str(body.negative_prompt or "").strip(),
+        "type": ((TYPE21_EDIT if turbo21 else TYPE_EDIT) if mode == "edit"
+                 else (TYPE21_GENERATE if turbo21 else TYPE_GENERATE)),
         "main_size_width": width,
         "main_size_height": height,
     }
     if len(pictures) > 1:
         # The output follows image 1, the one the prompt edits; the others are
         # what it borrows from.
-        payload["type"] = TYPE_EDIT_MULTI
+        payload["type"] = TYPE21_EDIT_MULTI if turbo21 else TYPE_EDIT_MULTI
         payload["reference_image_urls"] = pictures
     elif source:
         payload["image_url"] = source
     if checkpoint:
         payload["checkpoint"] = checkpoint
-    if body.steps:
+    if body.steps and not turbo21:
         payload["steps"] = int(body.steps)
-    if body.cfg:
+    if body.cfg and not turbo21:
         payload["cfg"] = float(body.cfg)
     if body.seed:
         payload["noise_seed"] = int(body.seed)
 
     answer = await _run(SERVICE_ID, payload, body.wait_seconds)
     answer["mode_string"] = mode
+    answer["prompt_string"] = final_prompt
     answer["width_int"] = width
     answer["height_int"] = height
+    answer["checkpoint_string"] = checkpoint
+    if deprecation:
+        answer["deprecation_string"] = deprecation
     return answer

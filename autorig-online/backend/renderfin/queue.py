@@ -22,6 +22,7 @@ from . import (
     image_quality,
     model_eligibility,
     multiref,
+    music,
     routing,
     stream_decode,
     templating,
@@ -1557,6 +1558,8 @@ class RenderQueue:
         elif is_multiref_workflow:
             multiref.inject_references(workflow_file, workflow, reference_filenames)
         apply_runtime_settings(workflow, prompt, width, height)
+        if music.is_music(prompt):
+            music.apply_music_settings(workflow, prompt)
         if stream_decode.has_video_decode_chain(workflow):
             # Decode straight to disk where the box has our streaming node;
             # elsewhere refuse clips the in-RAM decode chain cannot hold.
@@ -1964,7 +1967,7 @@ class RenderQueue:
                 err = ""
                 if entry:
                     err = json.dumps(entry.get("status", {}))[:500]
-                await self._fail(task, f"comfy error: {err}")
+                await self._fail(task, _readable_comfy_error(task, entry) + f" | details: comfy error: {err}")
                 continue
             # Finish (download artifacts) off the pump so a slow transfer cannot
             # stall dispatch or status polling for every other task.
@@ -2694,3 +2697,31 @@ class RenderQueue:
         if self._client is not None:
             await self._release_workload(task, outcome="released")
         print(f"[Renderfin][Queue] task {task.id} FAILED: {error[:200]}")
+
+
+def _readable_comfy_error(task, entry) -> str:
+    """One line a person can act on, from a ComfyUI execution_error (2026-09-27)."""
+    info = {}
+    try:
+        for message in (entry or {}).get("status", {}).get("messages", []) or []:
+            if isinstance(message, (list, tuple)) and len(message) > 1 and message[0] == "execution_error":
+                info = message[1] or {}
+    except Exception:
+        info = {}
+    kind = str(info.get("exception_type") or "")
+    text = str(info.get("exception_message") or "").strip().splitlines()
+    node = str(info.get("node_type") or "")
+    prompt = getattr(task, "prompt", None)
+    size = ""
+    try:
+        w, h = int(prompt.main_size_width or 0), int(prompt.main_size_height or 0)
+        frames = int(getattr(prompt, "frame_count", 0) or 0)
+        if w and h:
+            size = f" at {w}x{h}" + (f"x{frames} frames" if frames and not str(prompt.type or "").strip() else "")
+    except Exception:
+        pass
+    box = getattr(task, "server_name", "") or "the render box"
+    if "OutOfMemory" in kind or "out of memory" in " ".join(text).lower():
+        return f"Out of GPU memory on {box}{size} - lower the size or the frame count"
+    first = text[0][:200] if text else ""
+    return f"{node or 'The workflow'} failed on {box}{size}: {kind or 'error'}" + (f" - {first}" if first else "")
