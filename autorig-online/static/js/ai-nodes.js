@@ -239,12 +239,50 @@
   }
 
   /** Written a beat after the change so a burst of finishes is one request. */
+  /** Drawflow id -> the id the stored graph knows the node by. */
+  function storedIdMap() {
+    const map = new Map();
+    const used = new Set();
+    nodeMeta.forEach((item, id) => {
+      if (item && item.storedId && !used.has(item.storedId)) { map.set(String(id), item.storedId); used.add(item.storedId); }
+    });
+    unplacedNodes.forEach(item => used.add(String(item.id)));
+    nodeMeta.forEach((item, id) => {
+      if (map.has(String(id))) return;
+      let candidate = String(id);
+      while (used.has(candidate)) candidate = 'n' + candidate;
+      map.set(String(id), candidate);
+      used.add(candidate);
+      if (item) item.storedId = candidate;
+    });
+    return map;
+  }
+
+  /** The canvas graph with stored ids (nodes, links, results, anchors). */
+  function toStoredIds(graph) {
+    const map = storedIdMap();
+    const to = id => map.get(String(id)) || String(id);
+    const out = Object.assign({}, graph);
+    out.nodes = (graph.nodes || []).map(node => Object.assign({}, node, {id: to(node.id)}));
+    out.links = (graph.links || []).map(link => Object.assign({}, link, {from: to(link.from), to: to(link.to)}));
+    out.results = {};
+    Object.keys(graph.results || {}).forEach(key => { out.results[to(key)] = graph.results[key]; });
+    if (graph.comparison_anchor_id) out.comparison_anchor_id = to(graph.comparison_anchor_id);
+    if (graph.isolation) {
+      const prior = {};
+      Object.keys(graph.isolation.prior || {}).forEach(key => { prior[to(key)] = graph.isolation.prior[key]; });
+      out.isolation = {target: to(graph.isolation.target), prior};
+    }
+    return out;
+  }
+
   function pushResults() {
     if (!graphId) return;
     clearTimeout(resultsTimer);
     resultsTimer = setTimeout(() => {
       const body = {};
-      runState.forEach((value, key) => { body[key] = value; });
+      const map = storedIdMap();
+      runState.forEach((value, key) => { body[map.get(String(key)) || key] = value; });
       fetch('/api/ai/graphs/' + encodeURIComponent(graphId) + '/results', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -3556,7 +3594,7 @@
    * document after all. Only "Duplicate graph" makes a copy.
    */
   async function persistGraph() {
-    const graph = graphFromCanvas();
+    const graph = toStoredIds(graphFromCanvas());
     if (graphId) {
       if (graphStale) {
         return { response: {ok: false, status: 409}, data: {detail: {error_string: 'graph_stale',
@@ -4012,7 +4050,14 @@
       const id = node.kind === KIND_INPUT
         ? addInputNode(node.entity_type, node.x, node.y, node.value, node.params)
         : addServiceNode(node.service, node.x, node.y, node.params);
-      if (id) mapping.set(node.id, id);
+      if (id) {
+        mapping.set(node.id, id);
+        // Stored ids stay what they were: API patches, caches and results
+        // are keyed by them (owner, 2026-09-27). Drawflow numbers only exist
+        // inside this page.
+        const item = meta(id);
+        if (item) item.storedId = String(node.id);
+      }
       else {
         unplacedNodes.push(JSON.parse(JSON.stringify(node)));
         if (graph.results && graph.results[node.id]) unplacedResults[node.id] = graph.results[node.id];

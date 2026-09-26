@@ -496,12 +496,63 @@ def validate(graph: Graph) -> None:
 LEGACY_MEDIA_INPUTS = (ai_services.IMAGE, ai_services.VIDEO)
 
 
+_MOJIBAKE_MARKERS = ("В·", "вЂ", "Р’", "Г—", "в†", "В ")
+
+
+def repair_mojibake(text):
+    """UTF-8 text once (or twice) misread as cp1251 back to what was typed.
+
+    "Vision В· person" -> "Vision · person". Graphs written through
+    Windows shells picked this up (2026-09-27). Only strings carrying the
+    telltale pairs are touched, and only when the round trip decodes cleanly,
+    so real Russian text is never altered.
+    """
+    if not isinstance(text, str) or not any(marker in text for marker in _MOJIBAKE_MARKERS):
+        return text
+    fixed = text
+    for _ in range(3):
+        if not any(marker in fixed for marker in _MOJIBAKE_MARKERS):
+            break
+        try:
+            fixed = fixed.encode("cp1251").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            break
+    return fixed
+
+
+def _repair_tree(value):
+    if isinstance(value, str):
+        return repair_mojibake(value)
+    if isinstance(value, list):
+        return [_repair_tree(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _repair_tree(item) for key, item in value.items()}
+    return value
+
+
 def migrate_media_inputs(graph) -> None:
     """Old Image-in / Video-in nodes become the universal Media node in place.
 
     Works on a Graph or a plain dict; ids, values and links are untouched.
+    Also repairs cp1251 mojibake in the name, labels, params and input values.
     """
+    if isinstance(graph, dict):
+        if isinstance(graph.get("name"), str):
+            graph["name"] = repair_mojibake(graph["name"])
+    elif isinstance(getattr(graph, "name", None), str):
+        graph.name = repair_mojibake(graph.name)
     nodes = graph.get("nodes") if isinstance(graph, dict) else getattr(graph, "nodes", None)
+    for node in nodes or []:
+        if isinstance(node, dict):
+            if isinstance(node.get("params"), dict):
+                node["params"] = _repair_tree(node["params"])
+            if isinstance(node.get("value"), str):
+                node["value"] = repair_mojibake(node["value"])
+        else:
+            if isinstance(getattr(node, "params", None), dict):
+                node.params = _repair_tree(node.params)
+            if isinstance(getattr(node, "value", None), str):
+                node.value = repair_mojibake(node.value)
     for node in nodes or []:
         if isinstance(node, dict):
             if node.get("kind") == NODE_INPUT and node.get("entity_type") in LEGACY_MEDIA_INPUTS:
