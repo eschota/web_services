@@ -1177,6 +1177,13 @@
     });
     let timer = null;
     text.addEventListener('change', refresh);
+    let lastValue = text.value.trim();
+    text.addEventListener('change', () => {
+      const value = text.value.trim();
+      if (value === lastValue) return;
+      lastValue = value;
+      invalidateNodeAndDownstream(id);
+    });
     text.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(refresh, 250); });
     refresh();
   }
@@ -3876,6 +3883,8 @@
       return active.promise;
     }
 
+    const priorRecord = runState.get(idString);
+    if (priorRecord && priorRecord.status === 'failed') continuableResults.delete(idString);
     const continued = keepDone && continuableResults.get(idString);
     if (continued) {
       const element = nodeElement(idString);
@@ -3933,6 +3942,13 @@
 
   /** Add the current graph snapshot to the live queue. */
   async function runGraph(keepDone) {
+    // Say up front when most of the graph will not run: an isolated branch or
+    // bypassed nodes look like "Render did nothing" otherwise (2026-09-27).
+    if (isolation) {
+      const item = meta(isolation.target) || {};
+      toast('Isolated on ' + (item.label || (serviceById(item.service) || {}).title || 'a node') +
+        ': only its branch renders. Press I (or the banner) to run the whole graph.');
+    }
     await prepareGraphSnapshot();
     const graph = graphFromCanvas();
     const epoch = canvasEpoch;

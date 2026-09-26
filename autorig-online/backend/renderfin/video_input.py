@@ -191,7 +191,39 @@ def _validate_mp4_probe(probe: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-async def _download(client: httpx.AsyncClient, url: str, target: Path) -> None:
+_CIVITAI_CDN_SEGMENT = re.compile(r"^(/[A-Za-z0-9_-]+/[0-9a-fA-F-]{36}/)([^/]+)(/[^/]+)$")
+
+
+def _smaller_civitai_variant(url: str) -> str:
+    """The same Civitai clip transcoded to 1080 px wide, or "" if not a CDN link.
+
+    Originals on image.civitai.* can be hundreds of MB; the CDN serves any
+    width on request, and a control input or a first frame never needs more
+    than half-HD (owner, 2026-09-27).
+    """
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if not host.startswith("image.civitai."):
+        return ""
+    match = _CIVITAI_CDN_SEGMENT.match(parts.path)
+    if not match or "width=1080" in match.group(2):
+        return ""
+    path = match.group(1) + "transcode=true,width=1080,optimized=true" + match.group(3)
+    return parts._replace(path=path).geturl()
+
+
+async def _download(client, url, target):
+    """Fetch a control video; an oversized Civitai original falls back to a smaller variant."""
+    try:
+        return await _download_once(client, url, target)
+    except VideoInputError as error:
+        smaller = _smaller_civitai_variant(url) if "exceeds the 100 MB limit" in str(error) else ""
+        if not smaller:
+            raise
+        return await _download_once(client, smaller, target)
+
+
+async def _download_once(client: httpx.AsyncClient, url: str, target: Path) -> None:
     current_url = _validated_url(url)
     may_follow_redirect = (urlsplit(current_url).hostname or "").rstrip(".").lower() in _CIVITAI_HOSTS
     try:
