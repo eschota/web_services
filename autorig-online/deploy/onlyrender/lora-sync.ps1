@@ -18,7 +18,7 @@ param([switch]$Install, [switch]$UserTask, [string]$Box = '', [string]$ComfyRoot
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$AgentVersion = 'lora-sync/2026-09-23'
+$AgentVersion = 'lora-sync/2026-09-26-logscrub'
 $Api = 'https://autorig.online/api/ai/loras/sync'
 # -HomeDir: a box without an elevated installer (worker-4090, the owner's
 # desktop) keeps its state under %LOCALAPPDATA% instead of ProgramData.
@@ -28,6 +28,9 @@ $HashFile = Join-Path $Home_ 'hashes.json'
 $TaskName = 'AutoRig LoRA Sync'
 
 function Log($m) {
+    # Presigned CDN links carry their credential in the query string; no URL
+    # query ever reaches the log (installed-from lines, curl/HTTP errors).
+    $m = ([string]$m) -replace '(https?://[^\s?"'']+)\?[^\s"'']*', '$1?[query removed]'
     $line = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m
     try {
         if ((Test-Path $LogFile) -and ((Get-Item $LogFile).Length -gt 2MB)) {
