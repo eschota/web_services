@@ -86,7 +86,7 @@
 
         .st-ready { color: #4ade80; } .st-downloading { color: #38bdf8; } .st-queued { color: #94a3b8; }
         .st-failed, .st-hash_mismatch { color: #f87171; } .st-no_space { color: #fbbf24; }
-        .st-offline, .st-no_agent, .st-excluded { color: #5b6485; }
+        .st-offline, .st-no_agent, .st-excluded, .st-not_needed { color: #5b6485; }
         .st-downloading .arrow { animation: drop 1.1s ease-in-out infinite; }
         .st-queued .hand { transform-origin: 12px 12px; animation: spin 3s linear infinite; }
         .st-ready .tick { stroke-dasharray: 20; stroke-dashoffset: 20; animation: draw .6s ease-out forwards; }
@@ -251,7 +251,9 @@
   };
   var LABEL = { ready: 'ready', downloading: 'downloading', queued: 'queued', failed: 'failed',
     hash_mismatch: 'hash mismatch', no_space: 'no disk space', offline: 'computer offline',
-    no_agent: 'no sync agent installed', excluded: 'not sent to this computer' };
+    no_agent: 'no sync agent installed',
+    excluded: 'not sent here: this LoRA is pinned to other computers (its box list) — the unpin button sends it to every computer that runs its model',
+    not_needed: 'not needed here: this computer does not run a model this LoRA fits' };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -272,6 +274,7 @@
   function boxDots(states) {
     return Object.keys(states || {}).map(function (box) {
       var st = states[box] || {}, key = st.state || 'no_agent';
+      if (key === 'not_needed') { return '<span class="bx st-not_needed" title="' + esc(box + ': ' + LABEL.not_needed) + '">' + ICON.excluded + esc(box) + '</span>'; }
       var tip = box + ': ' + (LABEL[key] || key) + (st.error ? ' — ' + st.error : '') + (st.bytes ? ' (' + mb(st.bytes) + ')' : '');
       return '<span class="bx st-' + esc(key) + '" title="' + esc(tip) + '">' + (ICON[key] || ICON.no_agent) + esc(box) + '</span>';
     }).join('');
@@ -288,6 +291,7 @@
     var actions = state.admin
       ? '<div class="c-actions">'
         + (mirror.state === 'failed' ? '<button class="ib sm" data-retry="' + esc(l.id) + '" title="Download again">' + ICON.retry + '</button>' : '')
+        + ((l.boxes && l.boxes.length) ? '<button class="ib sm" data-unpin="' + esc(l.id) + '" title="Pinned to ' + esc(l.boxes.join(', ')) + ' — send it to every computer that runs its model">' + ICON.link + '</button>' : '')
         + '<button class="ib sm danger" data-remove="' + esc(l.id) + '" title="Remove from every computer (moved to their trash)">' + ICON.trash + '</button></div>'
       : '';
     var strength = state.admin
@@ -379,12 +383,16 @@
   });
 
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-copy],[data-remove],[data-retry],[data-clean],[data-adopt],[data-install],[data-tab],[data-mode],[data-install-lora]');
+    var t = e.target.closest('[data-copy],[data-remove],[data-retry],[data-unpin],[data-clean],[data-adopt],[data-install],[data-tab],[data-mode],[data-install-lora]');
     if (!t) return;
     if (t.dataset.copy) copy(t.dataset.copy);
     else if (t.dataset.remove) {
       if (!window.confirm('Remove ' + t.dataset.remove + ' from every computer? Files go to each computer’s trash folder.')) return;
       api('DELETE', '/api/ai/loras/' + encodeURIComponent(t.dataset.remove)).then(load).catch(function (x) { say(x.message, 'err'); });
+    } else if (t.dataset.unpin) {
+      api('PATCH', '/api/ai/loras/' + encodeURIComponent(t.dataset.unpin), { boxes: [] })
+        .then(function () { say('Sent to every computer that runs its model; they fetch it on their next sync', 'ok'); return api('POST', '/api/ai/loras/kick'); })
+        .then(load).catch(function (x) { say(x.message, 'err'); });
     } else if (t.dataset.retry) {
       api('POST', '/api/ai/loras/' + encodeURIComponent(t.dataset.retry) + '/retry').then(function () { setTimeout(load, 3000); });
     } else if (t.dataset.clean) {

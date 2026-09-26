@@ -513,8 +513,15 @@ async def _download_to_mirror(entry_id: str) -> None:
         async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(60.0, read=120.0)) as client:
             async with client.stream("GET", url, headers=headers) as response:
                 if response.status_code in (401, 403):
+                    await response.aread()
+                    try:
+                        why = response.json()
+                    except ValueError:
+                        why = {}
+                    until = str((why or {}).get("deadline") or "")[:10]
                     raise ResolveError("download_denied",
-                                       "Civitai refused the download (early access or login-only file)")
+                                       "Civitai refused the download (early access or login-only file)"
+                                       + (f"; early access ends {until}" if until else ""))
                 if response.status_code >= 400:
                     raise ResolveError("download_failed", f"download answered HTTP {response.status_code}")
                 with open(part, "wb") as handle:
@@ -718,6 +725,9 @@ def lora_box_state(entry: Dict[str, Any], box: str, cfg: Dict[str, Any],
         return {"state": "excluded"}
     if targets is not None and box not in targets:
         return {"state": "not_needed"}
+    mirror = entry.get("mirror") or {}
+    if mirror.get("state") == "failed":
+        return {"state": "failed", "error": "the VPS could not fetch it: " + str(mirror.get("error") or "")}
     if not report:
         return {"state": "no_agent"}
     reported = (report.get("items") or {}).get(entry["id"]) or {}

@@ -704,11 +704,17 @@
     };
   }
 
+  // Kept 60 s, not for the life of the tab: LoRAs and models are installed
+  // while the editor is open (/lora), and a new picker must list them.
+  const modelCatalogueAt = {};
   async function loadModels(serviceId) {
-    if (modelCatalogue[serviceId]) return modelCatalogue[serviceId];
+    if (modelCatalogue[serviceId] && Date.now() - (modelCatalogueAt[serviceId] || 0) < 60000) {
+      return modelCatalogue[serviceId];
+    }
     const response = await fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(serviceId));
     const data = await response.json();
     modelCatalogue[serviceId] = data;
+    modelCatalogueAt[serviceId] = Date.now();
     return data;
   }
 

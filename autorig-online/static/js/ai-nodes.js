@@ -1072,10 +1072,13 @@
     const node = select.closest('.drawflow-node');
     const service = node ? (meta(node.id.replace(/^node-/, '')) || {}).service : '';
     select.dataset.filled = '1';
+    const cached = loraMenuCache.get(service);
+    if (cached && Date.now() - cached.at > 60000) loraMenuCache.delete(service);
     if (!loraMenuCache.has(service)) {
       loraMenuCache.set(service, fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(service || 'image'))
         .then(r => r.json()).then(body => (body.loras_array || []).filter(entry => entry.usable))
         .catch(() => []));
+      loraMenuCache.get(service).at = Date.now();
     }
     loraMenuCache.get(service).then(loras => {
       loras.forEach(entry => {
