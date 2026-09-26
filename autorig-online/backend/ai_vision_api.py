@@ -1835,6 +1835,10 @@ async def _uncached_api_video(body: VideoRequest):
             raise HTTPException(400, detail=str(error)) from None
         if body.lora:
             raise HTTPException(400, detail="Video control uses its dedicated Union adapter; remove the style LoRA")
+    if not body.image_url and not body.image_base64 and (body.image_url_end or body.image_base64_end):
+        # One picture wired to the Last-frame socket only: animate from it.
+        body.image_url, body.image_base64 = body.image_url_end, body.image_base64_end
+        body.image_url_end = body.image_base64_end = None
     if not body.image_url and not body.image_base64:
         raise HTTPException(status_code=400, detail={
             "error_string": "image_required",
