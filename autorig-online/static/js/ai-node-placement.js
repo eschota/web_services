@@ -31,17 +31,25 @@
    * centre, which is also where the node lands.
    */
   const GHOST_SIZE = 38;
+  const GHOST_W = 96, GHOST_H = 58;
 
   function buildGhost(documentRef, button) {
     const ghost = documentRef.createElement('div');
     const icon = button.querySelector && button.querySelector('.ticon');
-    ghost.textContent = (icon && icon.textContent) || '+';
+    const label = button.querySelector && button.querySelector('.tlabel');
+    const glyph = documentRef.createElement('span');
+    glyph.textContent = (icon && icon.textContent) || '+';
+    glyph.style.cssText = 'font-size:22px;line-height:1';
+    const name = documentRef.createElement('span');
+    name.textContent = (label && label.textContent) || '';
+    name.style.cssText = 'font:600 11px system-ui;text-align:center;line-height:1.1';
+    ghost.append(glyph, name);
     ghost.setAttribute('aria-hidden', 'true');
     // Off-screen rather than hidden: a drag image that is not being rendered
     // is not captured at all, and the drag starts with no ghost.
     ghost.style.cssText = 'position:fixed;top:-1000px;left:-1000px;z-index:-1;' +
-      'display:flex;align-items:center;justify-content:center;pointer-events:none;' +
-      'width:' + GHOST_SIZE + 'px;height:' + GHOST_SIZE + 'px;border-radius:10px;' +
+      'display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center;pointer-events:none;' +
+      'width:' + GHOST_W + 'px;height:' + GHOST_H + 'px;border-radius:10px;' +
       'font-size:19px;line-height:1;background:#1b1c33;border:1px solid #38bdf8;color:#eef;';
     documentRef.body.appendChild(ghost);
     return ghost;
@@ -98,7 +106,7 @@
         dropGhost();
         ghost = buildGhost(documentRef, button);
         if (event.dataTransfer.setDragImage) {
-          event.dataTransfer.setDragImage(ghost, GHOST_SIZE / 2, GHOST_SIZE / 2);
+          event.dataTransfer.setDragImage(ghost, GHOST_W / 2, GHOST_H / 2);
         }
       });
       button.addEventListener('dragend', () => {

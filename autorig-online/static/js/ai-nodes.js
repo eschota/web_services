@@ -620,6 +620,14 @@
     if (params) applyParams(id, params);
     if (params && params._disabled) applyBypass(id, true);
     materializeDefaultModel(id);
+    // A Qwen-Image node saved with no model runs on the farm's one edit model;
+    // show that instead of "Choose a model" (owner, 2026-09-27).
+    if (serviceId === 'qwen_image' && !(params && String(params.checkpoint || '').trim())) {
+      setTimeout(() => {
+        const hidden = nodeElement(id) && nodeElement(id).querySelector('[data-param="checkpoint"]');
+        if (hidden && !hidden.value) applyParams(id, {checkpoint: QWEN_DEFAULT_CHECKPOINT});
+      }, 600);
+    }
     return id;
   }
 
@@ -642,6 +650,8 @@
     const find = name => ((entry.params_array || []).find(item => item.name === name) || {}).default;
     return STOCK_SIZES.has(w + 'x' + h) || (Number(find('width')) === w && Number(find('height')) === h);
   }
+
+  const QWEN_DEFAULT_CHECKPOINT = 'qwen_image_2.1_int8_convrot.safetensors';
 
   function addInputNode(entityType, x, y, value, params) {
     // Image in / Video in were folded into one Media node; old graphs,
@@ -4169,47 +4179,134 @@
    * lines. The name and the one-line description are still there, on hover and
    * in the accessible name, so nothing is lost but the space.
    */
+  /**
+   * The tool dock (owner, 2026-09-27): a fixed strip at the bottom of the page,
+   * icon + name for every node, grouped by category, Media in first. Fixed
+   * cell sizes, no wrapping, no scrolling. When a window is too narrow for all
+   * groups, the dock shows category tabs and one group at a time.
+   */
+  const DOCK_GROUPS = [
+    ['Inputs', ['input:media', 'input:text', 'input:avatar']],
+    ['Vision / Text', ['vision', 'text']],
+    ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
+    ['Video', ['video', 'video_frame', 'video_storyboard', 'video_control', 'upscale_video']],
+    ['Avatars', ['avatar_build', 'avatar_image', 'avatar_video']],
+    ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
+    ['Audio', ['music']],
+    ['Utility', ['3dmodel', 'action:arrange', 'action:fit', 'action:assistant']]
+  ];
+  const DOCK_LABELS = {
+    'input:media': 'Media in', 'input:text': 'Text in', 'input:avatar': 'Avatar',
+    vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
+    upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
+    video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
+    upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_image: 'Avatar scene',
+    avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
+    control_canny: 'Canny', control_normal: 'Normal', music: 'Music', '3dmodel': '3D model',
+    'action:arrange': 'Arrange', 'action:fit': 'Fit view', 'action:assistant': 'Assistant'
+  };
+  let dockTab = 0;
+
+  function dockItem(key) {
+    if (key.startsWith('input:')) {
+      const type = key.slice(6);
+      const title = DOCK_LABELS[key];
+      return paletteButton(title, toolIcon(key, type), SOURCE_HELP[type] || '', {kind: 'input', type, title});
+    }
+    if (key === 'action:arrange') return actionButton('Arrange', '▦',
+      'Lay the selected nodes out in columns by depth, or the whole graph when nothing is selected.',
+      () => arrangeNodes(Array.from(nodeGroups?.selected || [])));
+    if (key === 'action:fit') return actionButton('Fit view', '⤢',
+      'Frame the whole composition: zoom and pan so every node is on screen.',
+      () => { if (!document.querySelector('#canvas .drawflow-node')) toast('There is nothing on the canvas to frame yet.'); else fitView(); });
+    if (key === 'action:assistant') return actionButton('Assistant', '💬',
+      'Show or hide the graph assistant (describe a change in words).',
+      () => document.body.classList.toggle('aga-shown'));
+    const entry = serviceById(key);
+    if (!entry) return null;
+    const button = paletteButton(entry.title, toolIcon(entry.id, (entry.produces_array || [])[0]), entry.summary,
+      {kind: 'service', service: entry.id, title: entry.title});
+    if (entry.status !== 'live') {
+      const why = entry.blocked_reason || 'Not wired up yet.';
+      button.disabled = true;
+      button.draggable = false;
+      button.setAttribute('aria-label', entry.title + '. ' + why);
+      const note = button.querySelector('.ttip i');
+      if (note) note.textContent = why;
+    }
+    return button;
+  }
+
   function buildPalette() {
     const host = document.getElementById('palette');
     if (!host) return;
     host.innerHTML = '';
-    [['media', 'Media in'], ['text', 'Text in'], ['avatar', 'Avatar']].forEach(([type, title]) => {
-      host.appendChild(paletteButton(title, toolIcon('input:' + type, type), SOURCE_HELP[type] || '',
-        {kind:'input', type, title}));
-    });
-    host.appendChild(document.createElement('hr'));
+    const placed = new Set();
+    const groups = DOCK_GROUPS.map(([name, keys]) => [name, keys.slice()]);
+    // A service the groups do not name yet still gets a place (Utility).
     (catalogue.services_array || []).forEach(entry => {
-      const button = paletteButton(entry.title,
-                                   toolIcon(entry.id, (entry.produces_array || [])[0]),
-                                   entry.summary,
-                                   {kind:'service', service:entry.id, title:entry.title});
-      if (entry.status !== 'live') {
-        // A service can say *why* it is not callable. "Not wired up yet" is a
-        // fine default, but "the card has no weights for it" is the answer to
-        // the question the greyed-out button actually raises.
-        const why = entry.blocked_reason || 'Not wired up yet.';
-        button.disabled = true;
-        // A disabled button still starts a drag, and dropping it on the canvas
-        // made a node no runner knows how to call.
-        button.draggable = false;
-        button.setAttribute('aria-label', entry.title + '. ' + why);
-        const note = button.querySelector('.ttip i');
-        if (note) note.textContent = why;
-      }
-      host.appendChild(button);
+      if (!groups.some(([, keys]) => keys.includes(entry.id))) groups[groups.length - 1][1].unshift(entry.id);
     });
-    host.appendChild(document.createElement('hr'));
-    host.appendChild(actionButton('Arrange', '▦',
-      'Lay the selected nodes out in columns by depth, or the whole graph when nothing is selected.',
-      () => arrangeNodes(Array.from(nodeGroups?.selected || []))));
-    host.appendChild(actionButton('Fit view', '⤢',
-      'Frame the whole composition: zoom and pan so every node is on screen.',
-      () => {
-        if (!document.querySelector('#canvas .drawflow-node')) {
-          toast('There is nothing on the canvas to frame yet.');
-        } else fitView();
-      }));
+    const tabs = document.createElement('div');
+    tabs.className = 'dock-tabs';
+    // Tabs hold short names: a phone shows every category in one row.
+    const SHORT = {'Vision / Text': 'V/T', 'Control maps': 'Maps', 'Avatars': 'Avatar', 'Utility': 'More'};
+    const row = document.createElement('div');
+    row.className = 'dock-row';
+    groups.forEach(([name, keys], index) => {
+      const group = document.createElement('div');
+      group.className = 'dock-group';
+      group.dataset.group = String(index);
+      group.title = name;
+      keys.forEach(key => {
+        if (placed.has(key)) return;
+        const item = dockItem(key);
+        if (!item) return;
+        placed.add(key);
+        const label = document.createElement('span');
+        label.className = 'tlabel';
+        label.textContent = DOCK_LABELS[key] || (serviceById(key) || {}).title || key;
+        item.appendChild(label);
+        group.appendChild(item);
+      });
+      if (!group.children.length) return;
+      row.appendChild(group);
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'dock-tab';
+      tab.textContent = window.innerWidth < 600 ? (SHORT[name] || name) : name;
+      tab.title = name;
+      tab.dataset.group = String(index);
+      tab.addEventListener('click', () => { dockTab = index; layoutDock(); });
+      tabs.appendChild(tab);
+    });
+    host.append(tabs, row);
+    layoutDock();
   }
+
+  /** All groups in one row if they fit, else tabs + the chosen group. */
+  function layoutDock() {
+    const host = document.getElementById('palette');
+    if (!host) return;
+    // The stage ends where the dock begins, whatever height the top bar wraps to.
+    const shell = document.querySelector('.shell');
+    if (shell) {
+      const top = shell.getBoundingClientRect().top + window.scrollY;
+      shell.style.height = Math.max(240, window.innerHeight - top - host.offsetHeight) + 'px';
+    }
+    const groups = [...host.querySelectorAll('.dock-group')];
+    host.classList.remove('dock-tabbed');
+    groups.forEach(group => { group.hidden = false; });
+    const needed = groups.reduce((sum, group) => sum + group.scrollWidth + 14, 0);
+    const tabbed = needed > host.clientWidth - 8;
+    host.classList.toggle('dock-tabbed', tabbed);
+    if (!tabbed) return;
+    const visible = groups.some(group => group.dataset.group === String(dockTab)) ? String(dockTab) : groups[0].dataset.group;
+    groups.forEach(group => { group.hidden = group.dataset.group !== visible; });
+    host.querySelectorAll('.dock-tab').forEach(tab => tab.classList.toggle('on', tab.dataset.group === visible));
+  }
+  let dockResizeTimer = null;
+  window.addEventListener('resize', () => { clearTimeout(dockResizeTimer); dockResizeTimer = setTimeout(layoutDock, 120); });
 
   /** Lay the graph out, then frame what the layout produced. */
   function arrangeNodes(ids) {
@@ -4332,8 +4429,9 @@
     // icon per row — a 800px band that would push the graph off the bottom of
     // the screen. Two rows of icons is about 90px, so anything past a quarter
     // of the window is a measurement, not a toolbar.
-    return Math.min(Math.round(tools.getBoundingClientRect().height) + 20,
-                    Math.round(window.innerHeight / 4) || 140);
+    // The dock sits below the stage now, not over it.
+    return tools && getComputedStyle(tools).position === 'fixed' ? 0 :
+      Math.min(Math.round(tools.getBoundingClientRect().height) + 20, Math.round(window.innerHeight / 4) || 140);
   }
 
   /**
@@ -4398,6 +4496,7 @@
   function offsetViewBelowTools() {
     const tools = document.getElementById('palette');
     if (!tools || !editor || editor.canvas_x || editor.canvas_y) return;
+    if (getComputedStyle(tools).position === 'fixed') return;
     editor.canvas_x = 20;
     // Measured before the strip has finished wrapping, this comes back as one
     // icon per row — a 800px push that leaves the canvas looking empty on a

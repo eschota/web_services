@@ -422,7 +422,7 @@ def _activities(payload: Dict[str, object]) -> List[str]:
 async def _pick_worker(
     client: httpx.AsyncClient, model_id: Optional[str] = None,
     *, require_system_prompt: bool = False, require_unlimited_output: bool = False,
-    with_info: bool = False,
+    with_info: bool = False, exclude: Optional[set] = None,
 ):
     """The least loaded reachable node that actually serves the requested model.
 
@@ -431,6 +431,11 @@ async def _pick_worker(
     was asked for.
     """
     workers = _load_ai_workers()
+    # Used to step past a node that just refused: it is still reachable and
+    # would be picked again, and picking it again is how one node's bad minute
+    # becomes the caller's failed render.
+    if exclude:
+        workers = [w for w in workers if _node_key(w) not in exclude] or workers
     if not workers:
         raise HTTPException(
             status_code=503,
@@ -525,6 +530,36 @@ def _output_budget(model: Dict[str, object], asked: Optional[int]) -> int:
     if asked and int(asked) > 0:
         return int(asked)
     return int(model.get("default_output_tokens") or 1024)
+
+
+# Owner rule 2026-09-27: every generator runs without text when it has
+# pictures. The user's text wins; these fill in only when it is empty.
+DEFAULT_REMIX_PROMPT = ("Remix {images} into one coherent image: unify the style and lighting, "
+                        "combine the subjects and the story of all inputs; image 1 is the base "
+                        "scene and composition.")
+DEFAULT_VARIATION_PROMPT = ("A clean, style-consistent variation of the reference picture: keep the "
+                            "subject, composition, colours and lighting.")
+DEFAULT_STRUCTURE_PROMPT = ("A detailed, natural, well-lit photograph that follows the given "
+                            "structure map exactly.")
+DEFAULT_ANIMATE_PROMPT = ("Animate the picture naturally: subtle, realistic motion that fits the "
+                          "scene; keep the subject, style and framing.")
+DEFAULT_TRANSITION_PROMPT = ("A smooth, natural transition from the first frame to the last frame; "
+                             "keep the subject and style consistent.")
+
+
+def default_image_prompt(body) -> str:
+    """The prompt an image request gets when its own is empty ('' = nothing to go on)."""
+    pictures = [str(item or "").strip() for item in
+                [getattr(body, "image_url", None)] + list(getattr(body, "reference_image_urls", None) or [])]
+    count = len([item for item in pictures if item]) + (1 if getattr(body, "image_base64", None) else 0)
+    if count >= 2:
+        names = ", ".join(f"image {index}" for index in range(1, count + 1))
+        return DEFAULT_REMIX_PROMPT.replace("{images}", names)
+    if count == 1:
+        return DEFAULT_VARIATION_PROMPT
+    if any(getattr(body, name, None) for name in ("control_pose", "control_depth", "control_canny")):
+        return DEFAULT_STRUCTURE_PROMPT
+    return ""
 
 
 def _validate_prompt(raw: str) -> str:
@@ -917,7 +952,10 @@ async def _submit(
         reason = ""
         try:
             body = response.json() or {}
-            reason = str(body.get("error") or body.get("message")
+            # The sentence first, the code second: "invalid_request" alone
+            # reads like a malformed body when the node actually said its DNS
+            # timed out.
+            reason = str(body.get("message") or body.get("error")
                          or body.get("detail") or "").strip()
         except Exception:
             reason = response.text.strip()[:200]
@@ -1018,6 +1056,32 @@ def _folded_system_prompt(payload: Dict[str, object],
     return folded
 
 
+# Faults that are about the node's moment rather than the request. Matched on
+# the node's own wording because the converter reports them all under one code.
+TRANSIENT_REFUSALS = (
+    "host resolution",
+    "timed out",
+    "timeout",
+    "temporarily",
+    "connection reset",
+    "connection aborted",
+    "maintenance",
+)
+
+
+def _refusal_reason(exc: HTTPException) -> str:
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    return str(detail.get("message_string") or detail.get("error_string") or exc.detail)
+
+
+def _refusal_is_transient(exc: HTTPException) -> bool:
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    if str(detail.get("error_string") or "") not in ("worker_rejected", "worker_unreachable"):
+        return False
+    reason = _refusal_reason(exc).lower()
+    return any(mark in reason for mark in TRANSIENT_REFUSALS)
+
+
 async def _run(
     request_model: Dict[str, object],
     path: str,
@@ -1046,7 +1110,22 @@ async def _run(
         # status poll reports it.
         worker, node_info = picked if isinstance(picked, tuple) else (picked, {})
         served_model = model_id if model_id in (node_info.get("models") or []) else ""
-        worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
+        try:
+            worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
+        except HTTPException as exc:
+            # A node whose network blinked refuses the job and the next node
+            # takes it without anyone noticing. Only transient faults are
+            # retried: a genuinely bad request would be refused everywhere and
+            # retrying it would just cost a second node its time.
+            if not _refusal_is_transient(exc):
+                raise
+            logger.warning("Node %s refused a %s job (%s); trying another node",
+                           _node_key(worker), service_id or path, _refusal_reason(exc))
+            second = await _pick_worker(client, model_id, with_info=True,
+                                        exclude={_node_key(worker)}, **requirements)
+            worker, node_info = second if isinstance(second, tuple) else (second, {})
+            served_model = model_id if model_id in (node_info.get("models") or []) else ""
+            worker_task_id = await _submit(client, worker, path, dict(payload, model=model_id))
         task_id = f"{_node_key(worker)}.{worker_task_id}"
         raw: Dict[str, object] = {"status": "Pending"}
         if wait_seconds and wait_seconds > 0:
@@ -1441,7 +1520,10 @@ def _stack_profile(service_id: str, prompt: Optional[str], stack_value: object,
 
 
 class ImageRequest(BaseModel):
-    prompt: str = Field(..., description="What to draw; <lora:NAME:WEIGHT> tags pick LoRAs")
+    # Defaulted rather than required so an empty one reaches `_validate_prompt`
+    # and comes back as "prompt must not be empty" instead of FastAPI's
+    # "Field required", which reads like the caller used the wrong field name.
+    prompt: str = Field("", description="What to draw; <lora:NAME:WEIGHT> tags pick LoRAs")
     image_url: Optional[str] = Field(None, description="Reference image URL")
     image_base64: Optional[str] = Field(None, description="Reference image, inline")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
@@ -1469,8 +1551,11 @@ class ImageRequest(BaseModel):
     control_end: float = Field(1.0, ge=0, le=1)
     reference_image_urls: Optional[List[str]] = Field(
         None, description=("More pictures after image_url, in order: image 1 is image_url, "
-                           "image 2 the first entry here. FLUX.2 klein only; 4 in all. "
+                           "image 2 the first entry here; 3 in all. Since 2026-09-26 "
+                           "these edits run on Qwen-Image 2.1 turbo. "
                            "A video URL stands for its first frame"))
+    internal_pipeline: Optional[str] = Field(
+        None, description="Internal callers only (avatar build): keep the named model for an edit")
 
 
 # Several pictures composed into one (renderfin.multiref). Only FLUX.2 klein
@@ -1546,8 +1631,9 @@ async def api_image_docs():
                                   "control_pose", "control_depth",
                                   "control_canny", "reference_image_urls"],
         "multi_reference_object": {
-            "max_images_int": MULTIREF_MAX_IMAGES,
+            "max_images_int": 3,
             "families_array": sorted(MULTIREF_FAMILIES),
+            "edit_model_string": "Qwen-Image 2.1 turbo (since 2026-09-26 every picture edit and multi-picture edit is redirected to POST /api/qwen-image)",
             "note_string": ("image_url is image 1, reference_image_urls follow in order; "
                             "refer to them as image 1, image 2... in the prompt. "
                             "A video URL stands for its first frame"),
@@ -1558,10 +1644,75 @@ async def api_image_docs():
     }
 
 
+def _retired_edit_reason(body: "ImageRequest") -> str:
+    """Why this /api/image request is an edit that now belongs to Qwen 2.1, or "".
+
+    One edit model on the farm (owner, 2026-09-26): instruction edits and
+    multi-picture edits run on Qwen-Image 2.1 turbo only. FLUX.2 klein stays a
+    text-to-image model here; its edit and multi-reference templates stay on
+    the boxes for rollback and for the avatar pipeline, which names itself.
+    """
+    if str(body.internal_pipeline or "").strip():
+        return ""
+    if body.reference_image_urls and any(str(item or "").strip() for item in body.reference_image_urls):
+        return "several pictures"
+    has_picture = bool(str(body.image_url or "").strip() or str(body.image_base64 or "").strip())
+    if not has_picture or body.mode or body.control_pose or body.control_depth or body.control_canny:
+        return ""
+    import ai_model_catalogue
+    import ai_model_defaults
+    selected = (ai_model_catalogue.known_file(str(body.checkpoint or ""), "checkpoint")
+                or ai_model_catalogue.known_file(str(body.lora or ""), "lora"))
+    if selected and ai_model_defaults.model_family(selected) in MULTIREF_FAMILIES:
+        return "a FLUX.2 klein picture edit"
+    return ""
+
+
+async def _redirected_edit(body: "ImageRequest", reason: str) -> Dict[str, object]:
+    import ai_qwen_image_api
+    extras = [str(item or "").strip() for item in (body.reference_image_urls or [])
+              if str(item or "").strip()]
+    total = len(extras) + (1 if (body.image_url or body.image_base64) else 0)
+    if total > ai_qwen_image_api.MAX_REFERENCE_IMAGES:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "too_many_reference_images",
+            "message_string": (f"Edits run on Qwen-Image 2.1 turbo, which takes at most "
+                               f"{ai_qwen_image_api.MAX_REFERENCE_IMAGES} pictures; "
+                               f"{total} were wired in"),
+            "max_int": ai_qwen_image_api.MAX_REFERENCE_IMAGES})
+    image_url = str(body.image_url or "").strip() or None
+    if not image_url and not body.image_base64 and extras:
+        image_url, extras = extras[0], extras[1:]
+    request = ai_qwen_image_api.QwenImageRequest(
+        # Empty text is fine: Qwen-Image applies its remix/variation default.
+        prompt=str(body.prompt or "").strip(), image_url=image_url,
+        image_base64=body.image_base64, mode="edit",
+        width=body.width, height=body.height, seed=body.seed or None,
+        wait_seconds=body.wait_seconds, reference_image_urls=extras or None)
+    note = (f"/api/image: {reason} is retired since 2026-09-26; the edit ran on "
+            "Qwen-Image 2.1 turbo (POST /api/qwen-image)")
+    logger.warning("image edit deprecation: %s (checkpoint=%s)", note, body.checkpoint)
+    answer = dict(await ai_qwen_image_api.api_qwen_image(request))
+    answer["deprecation_string"] = note
+    answer.setdefault("poll_url_string", answer.get("image_url_string"))
+    answer["effective_params_object"] = {
+        "checkpoint": answer.get("checkpoint_string"),
+        "work_flow": ("qwen_image21_edit_multi.json" if extras else "qwen_image21_edit.json"),
+        "service": "qwen_image",
+        "main_size_width": answer.get("width_int"), "main_size_height": answer.get("height_int"),
+        "prompt": request.prompt, "noise_seed": body.seed or 0,
+    }
+    return answer
+
+
 @router.post("/api/image")
 async def api_image(body: ImageRequest):
     import ai_request_cache
+    retired_edit = _retired_edit_reason(body)
+    if retired_edit:
+        return await _redirected_edit(body, retired_edit)
     payload = body.model_dump(exclude_none=True)
+    payload.pop("internal_pipeline", None)
     if "image" in ("vision", "text"):
         model = _model_entry(body.model)
         payload["model"] = model["id"]
@@ -1581,6 +1732,13 @@ async def api_image(body: ImageRequest):
 
 async def _uncached_api_image(body: ImageRequest):
     """Prompt (and optionally a reference picture) into a generated image."""
+    if not str(body.prompt or "").strip():
+        fallback = default_image_prompt(body)
+        if not fallback:
+            raise HTTPException(status_code=400, detail={
+                "error_string": "prompt_required",
+                "message_string": "Nothing to draw: connect a prompt (Text / Vision) or a picture"})
+        body.prompt = fallback
     prompt = _validate_prompt(body.prompt)
     prompt, lora_stack, single_strength = _lora_stack_request(
         "image", prompt, body.loras, body.lora)
@@ -1876,6 +2034,8 @@ async def _uncached_api_video(body: VideoRequest):
             )
         if last_frame:
             payload["image_url_end"] = last_frame
+        if not (video_prompt and str(video_prompt).strip()):
+            video_prompt = DEFAULT_TRANSITION_PROMPT if last_frame else DEFAULT_ANIMATE_PROMPT
         if video_prompt and str(video_prompt).strip():
             rendered_prompt = _validate_prompt(video_prompt)
             import ai_model_defaults
