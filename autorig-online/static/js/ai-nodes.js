@@ -613,6 +613,7 @@
     });
     applySystemPromptMarker(id);
     addIsolateButton(id);
+    if (X9_SERVICES.has(serviceId)) addX9Button(id, !!(params && params._x9));
     alignPorts(id, inputs.length, outputs.length);
     refreshReferenceSockets(id);
     mountModelPickers(id, serviceId);
@@ -1328,6 +1329,7 @@
       values._size_auto = meta(id).followInputSize;
     }
     if (meta(id)?.disabled) values._disabled = true;
+    if (meta(id)?.x9) values._x9 = true;
     if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
@@ -1596,6 +1598,254 @@
     const recheck = () => { clearTimeout(timer); timer = setTimeout(() => canvas.querySelectorAll('video').forEach(apply), 200); };
     document.addEventListener('visibilitychange', recheck);
     if (editor && typeof editor.on === 'function') editor.on('zoom', recheck);
+  }
+
+  /* ------------------------------------------------------------------- X9 */
+
+  /**
+   * X9 (owner, 2026-09-27): one Render runs an image or video node with nine
+   * seeds in parallel. The grid shows all nine; the cell last opened in the
+   * lightbox is the node's output. An X9 node fed by an X9 node pairs them:
+   * picture i -> clip i.
+   */
+  const X9_SERVICES = new Set(['image', 'qwen_image', 'video', 'video_control']);
+
+  function addX9Button(id, on) {
+    const element = nodeElement(id);
+    const head = element && element.querySelector('.nhead');
+    const item = meta(id);
+    if (!head || !item || head.querySelector('.nx9')) return;
+    item.x9 = !!on;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nx9';
+    button.textContent = 'X9';
+    button.title = 'X9: one Render = 9 seeds in parallel, shown as a 3×3 grid; the cell you open last is the output';
+    const paint = () => {
+      button.style.cssText = 'margin-left:4px;border:1px solid rgba(255,255,255,.25);border-radius:6px;cursor:pointer;' +
+        'font:700 10px system-ui;padding:1px 5px;' + (item.x9 ? 'background:#f59e0b;color:#111;border-color:#f59e0b' : 'background:transparent;color:inherit;opacity:.7');
+    };
+    paint();
+    ['mousedown', 'pointerdown', 'touchstart', 'dblclick'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      item.x9 = !item.x9;
+      paint();
+      invalidateNodeAndDownstream(id);
+      toast(item.x9 ? 'X9 on: the next Render makes 9 variants.' : 'X9 off.');
+    });
+    head.appendChild(button);
+  }
+
+  function x9Record(id) {
+    const record = runState.get(String(id));
+    return record && Array.isArray(record.x9) && record.x9.length ? record : null;
+  }
+
+  function x9Pick(record) {
+    if (!record) return -1;
+    if (record.pick >= 0 && record.x9[record.pick] && record.x9[record.pick].value) return record.pick;
+    return record.x9.findIndex(cell => cell.status === 'done' && cell.value);
+  }
+
+  function paintX9(id) {
+    const element = nodeElement(id);
+    const record = x9Record(id);
+    if (!element || !record) return;
+    const host = element.querySelector('.nout');
+    if (!host) return;
+    const params = readParams(id);
+    const w = Number(params.width) || 16, h = Number(params.height) || 9;
+    const portrait = h > w;
+    const pick = x9Pick(record);
+    let grid = host.querySelector(':scope > .nx9grid');
+    if (!grid) {
+      host.innerHTML = '';
+      grid = document.createElement('div');
+      grid.className = 'nx9grid';
+      host.appendChild(grid);
+    }
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin:0 auto;' +
+      'width:100%;max-width:' + (portrait ? 220 : 330) + 'px';
+    grid.innerHTML = '';
+    record.x9.forEach((cell, index) => {
+      const box = document.createElement('div');
+      box.className = 'nx9cell';
+      box.style.cssText = 'position:relative;aspect-ratio:' + w + '/' + h + ';border-radius:4px;overflow:hidden;cursor:pointer;' +
+        'background:rgba(255,255,255,.06);outline:' + (index === pick ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,.12)');
+      box.title = 'Seed ' + cell.seed + ' · ' + cell.status + (cell.error ? ': ' + cell.error : '') + ' — click to open';
+      if (cell.status === 'done' && cell.value) {
+        const media = document.createElement(looksLikeVideo(cell.value) ? 'video' : 'img');
+        media.src = cell.value;
+        media.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+        if (media.tagName === 'VIDEO') { media.muted = true; media.loop = true; media.preload = 'metadata'; media.playsInline = true; }
+        else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = 'Seed ' + cell.seed; }
+        box.appendChild(media);
+      } else {
+        const label = document.createElement('span');
+        label.textContent = cell.status === 'error' ? '⚠ error' : cell.status;
+        label.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;opacity:.8;' +
+          (cell.status === 'error' ? 'color:#fb7185' : '');
+        box.appendChild(label);
+      }
+      const tag = document.createElement('i');
+      tag.textContent = String(index + 1);
+      tag.style.cssText = 'position:absolute;left:3px;top:2px;font:600 9px system-ui;font-style:normal;color:#fff;text-shadow:0 0 3px #000';
+      box.appendChild(tag);
+      ['mousedown', 'pointerdown'].forEach(type => box.addEventListener(type, event => event.stopPropagation()));
+      box.addEventListener('click', event => { event.stopPropagation(); openX9Lightbox(id, index); });
+      grid.appendChild(box);
+    });
+  }
+
+  /** The chosen cell becomes the node's output; nodes downstream re-run on it. */
+  function setX9Pick(id, index) {
+    const record = x9Record(id);
+    if (!record || !record.x9[index] || record.x9[index].status !== 'done') return;
+    if (record.pick === index && record.value === record.x9[index].value) return;
+    record.pick = index;
+    record.value = record.x9[index].value;
+    recordResult(id, record);
+    continuableResults.set(String(id), {type: record.type, value: record.value, outputs: null, task_id: ''});
+    paintX9(id);
+    const graph = graphFromCanvas();
+    // An X9 node downstream used all nine (cell i -> cell i), so a new pick
+    // changes nothing for it; a normal node reads the pick and must re-run.
+    graph.links.filter(link => String(link.from) === String(id) && !(meta(link.to) || {}).x9)
+      .forEach(link => invalidateNodeAndDownstream(link.to));
+  }
+
+  function openX9Lightbox(id, start) {
+    const record = x9Record(id);
+    if (!record) return;
+    let dialog = document.getElementById('x9-lightbox');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'x9-lightbox';
+      dialog.style.cssText = 'max-width:96vw;max-height:96vh;padding:10px;border:0;border-radius:12px;background:#0d0e1c;color:#fff';
+      dialog.innerHTML = '<div class="x9stage" style="display:flex;align-items:center;justify-content:center;min-width:300px;min-height:200px"></div>' +
+        '<div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:8px;font:13px system-ui">' +
+        '<button type="button" data-x9="prev" title="Previous (←)">←</button><span class="x9cap"></span>' +
+        '<button type="button" data-x9="next" title="Next (→)">→</button>' +
+        '<button type="button" data-x9="use" title="Use this one as the node output">Use this</button>' +
+        '<button type="button" data-x9="close" title="Close (Esc)">✕</button></div>';
+      document.body.appendChild(dialog);
+      dialog.addEventListener('click', event => {
+        const action = event.target && event.target.dataset && event.target.dataset.x9;
+        if (action === 'prev') dialog._show(dialog._index - 1);
+        if (action === 'next') dialog._show(dialog._index + 1);
+        if (action === 'use') { setX9Pick(dialog._node, dialog._index); toast('Cell ' + (dialog._index + 1) + ' is the output.'); }
+        if (action === 'close' || event.target === dialog) dialog.close();
+      });
+      dialog.addEventListener('keydown', event => {
+        if (event.key === 'ArrowLeft') { event.preventDefault(); dialog._show(dialog._index - 1); }
+        if (event.key === 'ArrowRight') { event.preventDefault(); dialog._show(dialog._index + 1); }
+      });
+      dialog.addEventListener('close', () => { const clip = dialog.querySelector('video'); if (clip) clip.pause(); });
+    }
+    dialog._node = String(id);
+    dialog._show = index => {
+      const current = x9Record(dialog._node);
+      if (!current) return;
+      const count = current.x9.length;
+      index = ((index % count) + count) % count;
+      dialog._index = index;
+      const cell = current.x9[index];
+      const stage = dialog.querySelector('.x9stage');
+      stage.innerHTML = '';
+      if (cell.status === 'done' && cell.value) {
+        const media = document.createElement(looksLikeVideo(cell.value) ? 'video' : 'img');
+        media.src = cell.value;
+        media.style.cssText = 'max-width:92vw;max-height:80vh;display:block';
+        if (media.tagName === 'VIDEO') { media.controls = true; media.autoplay = true; media.loop = true; media.muted = true; }
+        stage.appendChild(media);
+        // The last cell looked at is the node's output (owner rule).
+        setX9Pick(dialog._node, index);
+      } else {
+        stage.textContent = cell.status === 'error' ? ('Seed ' + cell.seed + ' failed: ' + cell.error) : ('Seed ' + cell.seed + ': ' + cell.status);
+      }
+      dialog.querySelector('.x9cap').textContent = (index + 1) + ' / ' + count + ' · seed ' + cell.seed +
+        (x9Pick(current) === index ? ' · output' : '');
+    };
+    if (!dialog.open) dialog.showModal();
+    dialog._show(start);
+  }
+
+  /** Nine seeds of one node, in parallel; `fan` pairs cell i with upstream cell i. */
+  async function runX9(id, node, resolved, fan, params, epoch, keepDone) {
+    const runner = runnerFor(node.service);
+    const element = nodeElement(id);
+    const state = element && element.querySelector('.nstate');
+    const base = Number(params.seed) > 0 ? Number(params.seed) : Math.floor(Math.random() * 2147483000);
+    const bodies = [];
+    for (let index = 0; index < 9; index += 1) {
+      const inputs = {...resolved};
+      Object.keys(fan).forEach(field => { if (fan[field][index]) inputs[field] = fan[field][index]; });
+      bodies.push(bodyFor(node.service, inputs, {...params, seed: base + index}));
+    }
+    const signature = stableJson({x9: bodies.map(body => ({...body, seed: Number(params.seed) > 0 ? body.seed : 0}))});
+    const previous = x9Record(id);
+    if (keepDone && previous && previous.x9sig === signature && previous.x9.every(cell => cell.status === 'done')) {
+      paintX9(id);
+      if (state) { state.textContent = 'continued · X9'; state.className = 'nstate done'; }
+      return {type: previous.type, value: previous.value, x9: previous.x9.map(cell => cell.value)};
+    }
+    const cells = bodies.map(body => ({seed: body.seed, status: 'queued', value: '', error: ''}));
+    const record = {status: 'running', type: runnerType(runner, ''), value: '', x9: cells,
+                    pick: previous ? previous.pick : -1, x9sig: signature, started_at: Date.now() / 1000};
+    runState.set(String(id), record);
+    paintX9(id);
+    const report = () => {
+      if (epoch !== canvasEpoch || !nodeElement(id)) return;
+      const done = cells.filter(cell => cell.status === 'done').length;
+      const failed = cells.filter(cell => cell.status === 'error').length;
+      const running = cells.filter(cell => cell.status === 'running').length;
+      if (state) {
+        state.textContent = 'X9 · ' + done + '/9 done' + (running ? ' · ' + running + ' rendering' : '') + (failed ? ' · ' + failed + ' failed' : '');
+        state.className = 'nstate running';
+      }
+      paintX9(id);
+    };
+    await Promise.all(bodies.map(async (body, index) => {
+      const cell = cells[index];
+      const post = body._post_upscale;
+      delete body._post_upscale;
+      try {
+        const accepted = await submitJson(runner.api, body);
+        cell.status = 'running';
+        report();
+        let {value} = splitMulti(await runner.finish(accepted, runner, null));
+        if (post && value) value = await upscaleClip2x(value, null);
+        if (!value) throw new Error('no result');
+        cell.value = value;
+        cell.status = 'done';
+        cell.type = runnerType(runner, value);
+      } catch (error) {
+        cell.status = 'error';
+        cell.error = String(error.message || error).slice(0, 300);
+      }
+      report();
+    }));
+    const pick = x9Pick(record);
+    if (pick < 0) {
+      record.status = 'failed';
+      record.error = 'all 9 seeds failed: ' + (cells[0].error || '');
+      recordResult(id, record);
+      if (state) { state.textContent = record.error; state.className = 'nstate failed'; }
+      throw new Error(record.error);
+    }
+    record.status = 'done';
+    record.pick = pick;
+    record.value = cells[pick].value;
+    record.type = runnerType(runner, record.value);
+    recordResult(id, record);
+    paintX9(id);
+    if (state) {
+      const failed = cells.filter(cell => cell.status === 'error').length;
+      state.textContent = 'done · X9' + (failed ? ' (' + failed + ' failed)' : '') + ' — click a cell to view / choose';
+      state.className = 'nstate done';
+    }
+    return {type: record.type, value: record.value, x9: cells.map(cell => cell.value)};
   }
 
   /* ---------------------------------------------------------- quick toolbar */
@@ -1877,8 +2127,9 @@
       if (socket) {
         if (socket.dataset.typeTitle === undefined) socket.dataset.typeTitle = socket.title || '';
         socket.title = ok ? socket.dataset.typeTitle : ((entry && (entry.title || entry.file)) || 'This model') +
-          ': no native ' + info.produced.slice(8) + ' ControlNet. Switch the model to Z-Image Turbo, ' +
-          'or drop the map on a picture socket to use it as a reference image.';
+          ': no native ' + info.produced.slice(8) + ' ControlNet. Click this socket to switch the model to one ' +
+          'that has it (Z-Image Turbo), or drop the map on a picture socket to use it as a reference image.';
+        if (ok) delete socket.dataset.switchTo; else socket.dataset.switchTo = info.produced.slice(8);
       }
       return ok;
     }
@@ -2484,24 +2735,63 @@
 
   const MAP_RULES = {
     pose: 'an OpenPose skeleton map: pose the person exactly like it, same place and size in the frame',
-    depth: 'a depth map (near = white): keep its layout, perspective and every object\'s place',
-    canny: 'an edge map: keep its lines, layout and perspective',
-    normal: 'a normal map (RGB = surface orientation): keep its shapes and surface orientation'
+    depth: 'a depth map (near = white) of the layout only: keep its perspective and every object\'s place',
+    canny: 'an edge map of the layout only: follow its edges for the room, furniture and framing',
+    normal: 'a grey shaded render of the scene geometry: use it only for shapes, layout and surface orientation, not for colours or lighting'
   };
-  /** "Image N is a pose map: ..." for every control map among the pictures. */
-  function controlMapHints(resolved) {
+  const MAP_PLACEHOLDER = ' Any person in the map is only a placeholder: draw the character from the other picture in that place instead.';
+  /** Where the grey-shaded copy of a farm-made normal map is served. */
+  function shadedNormalUrl(url) {
+    const match = /\/renderfin\/render\/[^/]+\/([0-9a-f-]{36})\.png(?:[?#]|$)/i.exec(String(url || ''));
+    return match ? location.origin + '/api/ai/normal-shade/' + match[1] + '.png' : '';
+  }
+  function mapChannels() {
     const channels = new Map();
     runState.forEach(record => {
       const type = String((record && record.type) || '');
       if (type.startsWith('control_') && record.value) channels.set(String(record.value), type.slice(8));
     });
+    return channels;
+  }
+  /**
+   * Qwen-Image copies picture 1 when it is an edge map and keeps the
+   * person drawn in it (2026-09-27). The maps therefore go after the ordinary
+   * pictures, and "image N" in the prompt is renumbered to match.
+   */
+  function mapsLast(serviceId, resolved) {
+    if (serviceId !== 'qwen_image' || !resolved) return resolved;
+    const channels = mapChannels();
+    const fields = ['image', 'reference_2', 'reference_3'].filter(field => resolved[field]);
+    // Measured: only an edge map needs to go last; a pose map and the shaded
+    // normal work best as picture 1, where they also set the framing.
+    const isMap = field => channels.get(String(resolved[field])) === 'canny';
+    if (!fields.some(isMap) || fields.every(isMap)) return resolved;
+    const ordered = fields.filter(field => !isMap(field)).concat(fields.filter(isMap));
+    if (ordered.every((field, index) => field === fields[index])) return resolved;
+    const out = Object.assign({}, resolved);
+    const renumber = {};
+    ['image', 'reference_2', 'reference_3'].forEach(field => delete out[field]);
+    ordered.forEach((field, index) => {
+      out[index === 0 ? 'image' : 'reference_' + (index + 1)] = resolved[field];
+      renumber[fields.indexOf(field) + 1] = index + 1;
+    });
+    if (typeof out.prompt === 'string') {
+      out.prompt = out.prompt.replace(/\b(image|picture)\s+([1-3])\b/gi,
+        (whole, word, n) => word + ' ' + (renumber[n] || n));
+    }
+    return out;
+  }
+  /** "Image N is a pose map: ..." for every control map among the pictures. */
+  function controlMapHints(resolved) {
+    const channels = mapChannels();
     if (!channels.size) return '';
     const hints = [];
     Object.keys(resolved || {}).forEach(field => {
       const match = field === 'image' ? ['', '1'] : /^reference_(\d+)$/.exec(field);
       const channel = match && channels.get(String(resolved[field]));
       if (channel && MAP_RULES[channel]) {
-        hints.push('Image ' + match[1] + ' is ' + MAP_RULES[channel] + '; do not draw the map itself.');
+        hints.push('Image ' + match[1] + ' is ' + MAP_RULES[channel] + '; do not draw the map itself.' +
+                   (channel === 'pose' ? '' : MAP_PLACEHOLDER));
       }
     });
     return hints.join(' ');
@@ -2509,6 +2799,19 @@
 
   function bodyFor(serviceId, resolved, params) {
     const body = {};
+    resolved = mapsLast(serviceId, resolved);
+    const mapHints = controlMapHints(resolved);
+    // A normal map travels as its grey shaded copy: the RGB leaks into renders.
+    if (mapHints) {
+      const channels = mapChannels();
+      resolved = Object.assign({}, resolved);
+      Object.keys(resolved).forEach(field => {
+        if ((field === 'image' || /^reference_\d+$/.test(field)) &&
+            channels.get(String(resolved[field])) === 'normal') {
+          resolved[field] = shadedNormalUrl(resolved[field]) || resolved[field];
+        }
+      });
+    }
     if (serviceId === 'video' && resolved && !resolved.image && resolved.image_url_end) {
       resolved = Object.assign({}, resolved, {image: resolved.image_url_end});
       delete resolved.image_url_end;
@@ -2552,7 +2855,6 @@
     });
     // A control map wired into a picture socket is a reference, not a photo:
     // say which picture it is and what to take from it.
-    const mapHints = controlMapHints(resolved);
     if (mapHints) {
       if (typeof body.prompt === 'string' && body.prompt.trim()) body.prompt = body.prompt.trim() + ' ' + mapHints;
       else if (serviceId === 'vision' || serviceId === 'text') body._map_hint = mapHints;
@@ -2900,6 +3202,30 @@
    * a checkpoint on it, so the second toast normally lands in the same frame;
    * the first one is there for the rare cold start.
    */
+  /** One click on a refused control socket: pick a model with that ControlNet. */
+  document.addEventListener('click', event => {
+    const socket = event.target && event.target.closest && event.target.closest('.input[data-switch-to]');
+    if (!socket || !window.AIEntities || !window.AIEntities.loadModels) return;
+    const element = socket.closest('.drawflow-node');
+    const slot = element && element.querySelector('[data-model-param="checkpoint"]');
+    const channel = socket.dataset.switchTo;
+    if (!slot || !slot._picker) return;
+    event.stopPropagation();
+    const id = element.id.replace(/^node-/, '');
+    window.AIEntities.loadModels((meta(id) || {}).service || 'image').then(data => {
+      const controlService = serviceById('control_' + channel);
+      const target = ((data && data.checkpoints_array) || []).find(item => item && item.usable !== false &&
+        ((item.control_channels || []).map(String).includes(channel)));
+      if (!target) { toast('No model on the fleet has a native ' + channel + ' ControlNet.'); return; }
+      const item = slot.querySelector('.mpick-item[data-model-file="' + CSS.escape(target.file) + '"]');
+      if (item) item.click(); else slot._picker.value = target.file;
+      delete socket.dataset.switchTo;
+      socket.title = socket.dataset.typeTitle || '';
+      toast('Model switched to ' + (target.title || target.file) + ': it has a native ' + channel + ' ControlNet.');
+      void controlService;
+    }).catch(() => {});
+  }, true);
+
   function toastControlRefusal(channel, serviceId) {
     const controlService = serviceById('control_' + channel);
     toast(controlRefusalMessage(channel, null));
@@ -3433,10 +3759,12 @@
             return {ok:true, result:{type, value, media:node.entity_type === 'media'}};
           }
           const resolved = {};
+          const fan = {};
           for (let index = 0; index < feeds.length; index += 1) {
             const link = feeds[index];
             const upstream = upstreamRecords[index]?.result;
             if (!upstream) continue;
+            if (Array.isArray(upstream.x9) && (!link.output || /url_string$|^value$/.test(link.output))) fan[link.input] = upstream.x9;
             let value = outputValue(upstream, link.output);
             if (upstream.media) {
               try {
@@ -3450,6 +3778,16 @@
           }
           const params = {...(node.params || {})};
           await followInputSizeAtRun(node, resolved, params);
+          if (params._x9 && X9_SERVICES.has(node.service)) {
+            try {
+              const result = await runX9(id, node, resolved, fan, params, epoch, keepDone);
+              if (!graph.results) graph.results = {};
+              graph.results[id] = {status:'done', type:result.type, value:result.value};
+              return {ok:true, result};
+            } catch (error) {
+              return {ok:false, error:String(error.message || error)};
+            }
+          }
           const requestBody = bodyFor(node.service, resolved, params);
           const signature = stableJson({service:node.service, body:requestBody});
           try {
@@ -3551,6 +3889,13 @@
       const state = element.querySelector('.nstate');
       const outBox = element.querySelector('.nout');
       runState.set(String(id), record);
+      if (Array.isArray(record.x9) && record.x9.length && ['done', 'stale'].includes(record.status)) {
+        if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value, outputs:null, task_id:''});
+        state.textContent = record.status === 'stale' ? 'changed — render to update' : 'done · X9 — click a cell to view / choose';
+        state.className = record.status === 'stale' ? 'nstate' : 'nstate done';
+        requestAnimationFrame(() => paintX9(id));
+        return;
+      }
       if (['done', 'stale'].includes(record.status) && record.value) {
         if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value, outputs:record.outputs || null,
           task_id:record.task_id || ''});

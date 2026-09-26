@@ -133,6 +133,11 @@ class NodeResult(BaseModel):
     # views, a sheet, a description) keeps each one by its output field, so a
     # reopened link can feed every socket and not only the first.
     outputs: Dict[str, str] = Field(default_factory=dict)
+    # X9 mode (2026-09-27): nine seeds of one node, {seed, status, value, error}
+    # each, and which one is the node's output (`pick`).
+    x9: List[Dict[str, object]] = Field(default_factory=list, max_length=9)
+    pick: int = -1
+    x9sig: str = Field("", max_length=200000)
 
     @field_validator("input_reference_url")
     @classmethod
@@ -473,8 +478,12 @@ def validate(graph: Graph) -> None:
         media_fits = produced == ai_services.MEDIA and (
             accepted in (ai_services.IMAGE, ai_services.VIDEO)
             or ai_services.IMAGE in also or ai_services.VIDEO in also)
+        # A control map is a raster: any picture socket takes it as a reference.
+        raster_fits = str(produced or "").startswith("control_") and (
+            accepted == ai_services.IMAGE or ai_services.IMAGE in also)
         if produced is None or accepted is None or (
-                produced != accepted and produced not in also and not media_fits):
+                produced != accepted and produced not in also and not media_fits
+                and not raster_fits):
             raise HTTPException(status_code=400, detail={
                 "error_string": "type_mismatch",
                 "message_string": (
