@@ -552,6 +552,9 @@ def default_image_prompt(body) -> str:
     pictures = [str(item or "").strip() for item in
                 [getattr(body, "image_url", None)] + list(getattr(body, "reference_image_urls", None) or [])]
     count = len([item for item in pictures if item]) + (1 if getattr(body, "image_base64", None) else 0)
+    custom = str(getattr(body, "system_prompt", None) or "").strip()
+    if custom and custom != DEFAULT_REMIX_PROMPT and count >= 1:
+        return custom.replace("{images}", ", ".join(f"image {index}" for index in range(1, count + 1)))
     if count >= 2:
         names = ", ".join(f"image {index}" for index in range(1, count + 1))
         return DEFAULT_REMIX_PROMPT.replace("{images}", names)
@@ -1524,6 +1527,8 @@ class ImageRequest(BaseModel):
     # and comes back as "prompt must not be empty" instead of FastAPI's
     # "Field required", which reads like the caller used the wrong field name.
     prompt: str = Field("", description="What to draw; <lora:NAME:WEIGHT> tags pick LoRAs")
+    system_prompt: Optional[str] = Field(None, max_length=12000, description=(
+        "Used only when prompt is empty and pictures are given; {images} = image 1..N"))
     image_url: Optional[str] = Field(None, description="Reference image URL")
     image_base64: Optional[str] = Field(None, description="Reference image, inline")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
@@ -1911,6 +1916,7 @@ class VideoRequest(BaseModel):
     image_url: Optional[str] = Field(None, description="First frame, public URL")
     image_base64: Optional[str] = Field(None, description="First frame, inline")
     prompt: Optional[str] = Field(None, description="What should happen in the clip")
+    system_prompt: Optional[str] = Field(None, max_length=12000, description="Used only when prompt is empty")
     frame_count: Optional[int] = Field(None, ge=8, le=400)
     # Giving a last frame turns the clip into a journey between two pictures;
     # passing the first frame again is how a loop is made. Renderfin prunes the
@@ -2035,7 +2041,11 @@ async def _uncached_api_video(body: VideoRequest):
         if last_frame:
             payload["image_url_end"] = last_frame
         if not (video_prompt and str(video_prompt).strip()):
-            video_prompt = DEFAULT_TRANSITION_PROMPT if last_frame else DEFAULT_ANIMATE_PROMPT
+            custom = str(body.system_prompt or "").strip()
+            if custom and custom != DEFAULT_ANIMATE_PROMPT:
+                video_prompt = custom
+            else:
+                video_prompt = DEFAULT_TRANSITION_PROMPT if last_frame else DEFAULT_ANIMATE_PROMPT
         if video_prompt and str(video_prompt).strip():
             rendered_prompt = _validate_prompt(video_prompt)
             import ai_model_defaults

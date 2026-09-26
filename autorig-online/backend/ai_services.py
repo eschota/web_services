@@ -257,6 +257,12 @@ SERVICES: List[Dict[str, object]] = [
     },
     {
         "id": "image",
+        # Used only when the node's text is empty (owner, 2026-09-27); {images}
+        # = "image 1, image 2, ...". Editable per node like Vision's.
+        "system_prompt_capable": True,
+        "system_prompt_default": ("Remix {images} into one coherent image: unify the style and lighting, "
+                                  "combine the subjects and the story of all inputs; image 1 is the base "
+                                  "scene and composition."),
         "title": "Image",
         "path": "/image",
         "api": "/api/image",
@@ -285,6 +291,9 @@ SERVICES: List[Dict[str, object]] = [
     },
     {
         "id": "video",
+        "system_prompt_capable": True,
+        "system_prompt_default": ("Animate the picture naturally: subtle, realistic motion that fits the "
+                                  "scene; keep the subject, style and framing."),
         "title": "Video",
         "path": "/video",
         "api": "/api/video",

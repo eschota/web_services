@@ -1006,7 +1006,10 @@
     return firstFrameCache.get(videoUrl);
   }
 
+  const CLIP_AS_PICTURE = new Set(['image', 'qwen_image']);
+
   function socketAcceptsVideo(serviceId, field) {
+    if (CLIP_AS_PICTURE.has(serviceId)) return false;
     const entry = catalogue ? serviceById(serviceId) : null;
     const input = ((entry || {}).inputs || []).find(item => item.field === field);
     return !!input && (input.type === 'video' || (input.also_accepts || []).includes('video'));
@@ -2852,7 +2855,10 @@
         // wire carries a picture to `image_url` and a clip to `video_url`.
         // Read off the value, not off a type passed alongside, so a retry and
         // a graph reopened from a link behave the same as the first run.
-        if (field === 'image' && socketTakesVideo(serviceId, 'image') && looksLikeVideo(value)) {
+        // Qwen-Image and Image have no video_url field: a clip goes as image_url and
+        // the server reads its first frame (sent as video_url it was dropped, and
+        // the edit failed "needs a picture", 2026-09-27).
+        if (field === 'image' && !CLIP_AS_PICTURE.has(serviceId) && socketTakesVideo(serviceId, 'image') && looksLikeVideo(value)) {
           body.video_url = value;
           return;
         }
@@ -2880,7 +2886,9 @@
         ? standing : (declaration.system_prompt_default || ''));
       const withHint = [text.trim(), body._map_hint || ''].filter(Boolean).join(' ');
       if (withHint) body.system_prompt = withHint;
-      body.structured = true;
+      // Image and Video read their standing instruction only when the text is
+      // empty; they are not answer-writing services.
+      if (!['image', 'video'].includes(serviceId)) body.structured = true;
     }
     delete body._map_hint;
     // A LoRA of another model family (left in a slot when the checkpoint
