@@ -1312,6 +1312,10 @@ app = FastAPI(
 # Add GZip compression for responses > 500 bytes.
 # GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
 app.add_middleware(GZipMiddleware, minimum_size=500)
+# Civitai pages and CDN previews as media inputs (civitai_media.py).
+from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
+app.add_middleware(CivitaiMediaMiddleware)
+app.include_router(civitai_media_router)
 
 app.state.limiter = limiter
 
