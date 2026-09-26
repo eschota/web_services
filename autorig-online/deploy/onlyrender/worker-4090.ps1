@@ -125,6 +125,9 @@ if ($zimage) {
 if ((Has-Model 'diffusion_models\krea2_turbo_fp8_scaled.safetensors') -and
     (Has-Model 'text_encoders\qwen3vl_4b_fp8_scaled.safetensors') -and
     (Has-Model 'vae\qwen_image_vae.safetensors')) { $workflows += 'gen_image_krea2.json' }
+# Music: Stable Audio 3 medium, ComfyUI-native (/api/music, 2026-09-27).
+if ((Has-Model 'checkpoints\stable_audio_3_medium.safetensors') -and
+    (Has-Model 'text_encoders	5gemma_b_b_ul2.safetensors')) { $workflows += 'gen_music_sa3.json' }
 if (-not $workflows.Count) { throw 'No complete current model set is installed' }
 $overrides=@{}
 # info preserves worker history, unlike add_server.
