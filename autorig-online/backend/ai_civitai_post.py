@@ -101,7 +101,10 @@ class CivitaiPostRequest(BaseModel):
     publish: bool = False
     dry_run: bool = False
     poster_url: Optional[str] = Field(None, max_length=4096, description="Still for audio")
-    upscale: bool = Field(True, description="Enlarge 2x (RealESRGAN) before posting a picture or clip")
+    # Removed 2026-09-27 (owner): the pre-post upscale cropped a portrait
+    # clip. Posts send the output file as it is; enlarge with the Upscale 2x
+    # node in the graph first. The field is accepted and ignored.
+    upscale: bool = Field(False, description="Ignored: posts use the file as it is")
     generation: Dict[str, Any] = Field(default_factory=dict, description="seed, steps, sampler, cfg, model...")
     background: bool = Field(False, description="Answer at once with a job id; poll /api/ai/civitai/jobs/<id>")
     auto_meta: bool = Field(True, description="Write title/description/tags with the LLM when the title is "
@@ -113,6 +116,8 @@ class CivitaiMetaRequest(BaseModel):
     prompt: str = Field("", max_length=12000)
     resources: List[str] = Field(default_factory=list, max_length=20)
     service: str = ""
+    caption_only: bool = Field(False, description="Answer with the Vision caption only (first, fast step)")
+    caption: str = Field("", max_length=4000, description="A caption from the first step; skips Vision")
 
 
 def _token() -> str:
@@ -134,8 +139,8 @@ def _kind(url: str) -> str:
 
 
 # ---------------------------------------------------------------- jobs
-# One post = one job the page can watch: upscale on the farm (queued ->
-# running on <box>), upload to Civitai (%), post, done. Kept in memory and
+# One post = one job the page can watch: writing title/tags ->
+# upload to Civitai (%), post, done. Kept in memory and
 # mirrored to disk so a status read survives a page reload; a job cut by a
 # server restart is marked interrupted when the module loads.
 
@@ -710,7 +715,8 @@ async def generate_meta(body: "CivitaiMetaRequest") -> Dict[str, Any]:
     kind = _kind(body.media_url)
     caption = ""
     async with httpx.AsyncClient() as client:
-        if kind in ("image", "video"):
+        caption = body.caption.strip()
+        if kind in ("image", "video") and not caption:
             try:
                 caption = await _ask(client, "/api/vision", dict({
                     "prompt": "Describe this " + ("clip" if kind == "video" else "picture") +
@@ -719,6 +725,9 @@ async def generate_meta(body: "CivitaiMetaRequest") -> Dict[str, Any]:
                     **({"video_mode": "storyboard"} if kind == "video" else {})))
             except Exception as error:
                 logger.info("civitai meta caption failed: %s", error)
+        if body.caption_only:
+            return {"success_bool": bool(caption), "caption_string": caption, "title_string": "",
+                    "description_string": caption, "tags_array": [], "tag_limit_int": POST_TAG_LIMIT}
         text = await _ask(client, "/api/text2text", {
             "system_prompt": META_SYSTEM, "structured": True,
             "prompt": ("Generation prompt: " + (body.prompt or "(none)") + "\n"
@@ -740,55 +749,6 @@ async def generate_meta(body: "CivitaiMetaRequest") -> Dict[str, Any]:
             tags.append(value)
     return {"success_bool": bool(title), "title_string": title, "description_string": description,
             "tags_array": tags[:15], "tag_limit_int": POST_TAG_LIMIT, "caption_string": caption}
-
-
-async def _farm_task(client: httpx.AsyncClient, task_id: str) -> Dict[str, Any]:
-    """The render farm's own view of one task: status, box, place in line, progress."""
-    try:
-        import ai_enhance_api
-        response = await client.get(f"{ai_enhance_api.RENDERFIN_BASE}/api-render/tasks/{task_id}", timeout=10.0)
-        return response.json() if response.status_code == 200 else {}
-    except Exception:
-        return {}
-
-
-async def _upscale_first(client: httpx.AsyncClient, url: str, kind: str,
-                         job: Optional[Dict[str, Any]] = None) -> str:
-    """The same file 2x through /api/upscale2x (a render-farm job); waits for it to land."""
-    import ai_enhance_api
-    request = ai_enhance_api.Upscale2xRequest(**({"video_url": url} if kind == "video" else {"image_url": url}))
-    answer = await ai_enhance_api.api_upscale2x(request)
-    target = str(answer.get("output_url_string") or "")
-    task_id = str(answer.get("task_id_string") or "")
-    if not target:
-        raise RuntimeError("upscale: no output address")
-    _job_update(job, stage="upscale_queued", stage_label="Upscale 2x queued on the farm",
-                upscale_task_id_string=task_id)
-    deadline = time.monotonic() + (3 * 3600 if kind == "video" else 1800)
-    while time.monotonic() < deadline:
-        farm = await _farm_task(client, task_id) if task_id else {}
-        status = str(farm.get("status_string") or farm.get("status") or "").lower()
-        box = str(farm.get("render_server_name") or "")
-        if status in ("failed", "error", "cancelled", "canceled"):
-            raise RuntimeError("upscale failed on the farm: " + str(farm.get("error_string") or status)[:200])
-        if status == "pending" and not box:
-            position, length = farm.get("queue_position_int"), farm.get("queue_length_int")
-            _job_update(job, stage="upscale_queued", queue_position_int=position, queue_length_int=length,
-                        stage_label="Upscale 2x queued on the farm" +
-                                    (f" ({position} of {length})" if position else ""))
-        elif status not in ("done", "completed"):
-            percent = farm.get("managed_comfy_progress_percent", farm.get("progress_percent"))
-            percent = float(percent) if isinstance(percent, (int, float)) and percent >= 0 else None
-            _job_update(job, stage="upscale_running", box_string=box, progress_percent=percent,
-                        farm_started_at=farm.get("started_at") or 0,
-                        stage_label=f"Upscale 2x running on {box or 'a box'}" +
-                                    (f" {percent:.0f}%" if percent is not None else ""))
-        if status in ("done", "completed") or not farm:
-            probe = await client.head(target, timeout=20.0)
-            if probe.status_code == 200:
-                return target
-        await asyncio.sleep(4)
-    raise RuntimeError("upscale did not finish in time")
 
 
 _BACKGROUND: set = set()
@@ -821,7 +781,7 @@ async def run_post(body: CivitaiPostRequest, job: Optional[Dict[str, Any]]) -> D
         download = body.media_url
         source = body.media_url
         local = None
-        # The LLM writes while the farm upscales.
+        # The LLM writes (when the title is a placeholder) before the upload.
         meta_task = asyncio.ensure_future(_auto_meta(body, kind))
         if kind == "audio":
             try:
@@ -835,18 +795,10 @@ async def run_post(body: CivitaiPostRequest, job: Optional[Dict[str, Any]]) -> D
             meta_task.cancel()
             return _manual(body, "No Civitai token on the server", download)
         upscaled = ""
-        if body.upscale and kind in ("image", "video"):
-            try:
-                upscaled = await _upscale_first(client, body.media_url, kind, job)
-            except Exception as error:
-                logger.warning("civitai pre-post upscale failed: %s", error)
-                _job_update(job, upscale_error_string=str(error)[:200])
         if not meta_task.done():
             _job_update(job, stage="writing", stage_label="Writing title and tags", progress_percent=None)
         body = await meta_task
         _job_update(job, title_string=body.title)
-        if upscaled:
-            body = body.model_copy(update={"media_url": upscaled})
         try:
             answer = await _post_image(client, body, local, source_url=source, upscaled=bool(upscaled), job=job)
             answer["upscaled_url_string"] = upscaled
@@ -877,7 +829,7 @@ def build_civitai_post_router(require_admin) -> APIRouter:
             return {"success_bool": True, "dry_run_bool": True, "kind_string": kind, "host_string": CIVITAI_HOST,
                     "token_present_bool": bool(_token()), "resources_array": resources, "notes_array": notes,
                     "meta": build_meta(body.prompt, request, dict(body.generation or {}), resources,
-                                       body.upscale, (0, 0)),
+                                       False, (0, 0)),
                     "techniques_array": techniques_for(request, kind),
                     "steps_array": (["POST /api/v1/image-upload", "PUT <uploadURL> (file)", "trpc post.create",
                                      "trpc post.addImage (meta + civitaiResources)",
@@ -888,7 +840,7 @@ def build_civitai_post_router(require_admin) -> APIRouter:
         if body.background:
             job = {"id": uuid.uuid4().hex[:12], "created_at": time.time(), "stage": "starting",
                    "stage_label": "Starting", "kind_string": kind, "media_url_string": body.media_url,
-                   "title_string": body.title, "publish_bool": body.publish, "upscale_bool": body.upscale,
+                   "title_string": body.title, "publish_bool": body.publish,
                    "box_string": "", "progress_percent": None}
             JOBS[job["id"]] = job
             _job_save(job)

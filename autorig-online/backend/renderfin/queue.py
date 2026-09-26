@@ -671,6 +671,79 @@ class RenderQueue:
             "pending_seen_int": len(waiting),
         }
 
+    def farm_snapshot(self) -> Dict[str, Any]:
+        """Everything queued or on a card, by box and by owner (for the reset dialog)."""
+        active = [t for t in self._tasks.values() if t.status in (TASK_PENDING, TASK_RENDERING)]
+        by_box: Dict[str, int] = {}
+        by_owner: Dict[str, int] = {}
+        by_workflow: Dict[str, int] = {}
+        for task in active:
+            if task.status == TASK_RENDERING:
+                box = task.server_name or "?"
+                by_box[box] = by_box.get(box, 0) + 1
+            owner = str(getattr(task.prompt, "user_name", "") or "?")
+            by_owner[owner] = by_owner.get(owner, 0) + 1
+            workflow = str(task.workflow or "?")
+            by_workflow[workflow] = by_workflow.get(workflow, 0) + 1
+        return {
+            "queued_int": sum(1 for t in active if t.status == TASK_PENDING),
+            "running_int": sum(1 for t in active if t.status == TASK_RENDERING),
+            "running_by_box_object": by_box,
+            "by_owner_object": by_owner,
+            "by_workflow_object": by_workflow,
+            "task_ids_array": [t.id for t in active],
+            "boxes_array": [s.render_server_name for s in self.registry.all()],
+        }
+
+    async def reset_farm(self, *, dry_run: bool = False,
+                         reason: str = "cancelled: farm reset by an administrator") -> Dict[str, Any]:
+        """Cancel every queued and running task and empty each box's ComfyUI queue.
+
+        Only the render-worker ComfyUI instances in this registry are touched
+        (their prompt queue is cleared and the current prompt interrupted);
+        results, caches and models stay where they are.
+        """
+        summary = self.farm_snapshot()
+        if dry_run:
+            summary["dry_run_bool"] = True
+            return summary
+        cancelled_queued = cancelled_running = 0
+        for task_id in list(summary["task_ids_array"]):
+            task = self._tasks.get(task_id)
+            if task is None or task.status not in (TASK_PENDING, TASK_RENDERING):
+                continue
+            was_running = task.status == TASK_RENDERING
+            if await self.cancel(task_id, reason=reason):
+                if was_running:
+                    cancelled_running += 1
+                else:
+                    cancelled_queued += 1
+        boxes: Dict[str, str] = {}
+        if self._client is not None:
+            for server in self.registry.all():
+                name = server.render_server_name
+                if (server.status or "") != "online":
+                    boxes[name] = "skipped (" + (server.status or "unknown") + ")"
+                    continue
+                try:
+                    base = comfy_adapter._validate_server_url(server.render_server_url)
+                    auth = comfy_adapter._auth_for(server)
+                    await self._client.post(f"{base}/queue", json={"clear": True}, timeout=15.0, auth=auth)
+                    await self._client.post(f"{base}/interrupt", timeout=15.0, auth=auth)
+                    boxes[name] = "cleared"
+                except Exception as exc:
+                    boxes[name] = f"unreachable: {exc}"[:200]
+        summary.update({
+            "dry_run_bool": False,
+            "cancelled_queued_int": cancelled_queued,
+            "cancelled_running_int": cancelled_running,
+            "boxes_object": boxes,
+            "after_object": {k: v for k, v in self.farm_snapshot().items() if k != "task_ids_array"},
+        })
+        print(f"[Renderfin][Queue] FARM RESET: cancelled {cancelled_queued} queued, "
+              f"{cancelled_running} running; boxes {boxes}")
+        return summary
+
     async def cancel(self, task_id: str, *, reason: str = "cancelled") -> bool:
         """Stop a queued/running task and best-effort interrupt the worker."""
         task = self._tasks.get(task_id)
@@ -1507,7 +1580,9 @@ class RenderQueue:
             name, data = await download_prepare_video(
                 self._client, control_url, prompt.frame_count,
                 # An enlargement keeps the clip's own length; no held tail.
-                allow_shorter=workflow_file == "upscale_video_x2.json")
+                allow_shorter=workflow_file == "upscale_video_x2.json",
+                # The enlarged clip keeps its sound (CreateVideo takes it from LoadVideo).
+                keep_audio=workflow_file == "upscale_video_x2.json")
             control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)

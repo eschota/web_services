@@ -22,7 +22,7 @@ def apply_runtime_settings(workflow, prompt, width, height):
     """
     # A control map must retain the source framing. Cropping a portrait pose
     # map to the product's landscape render default would cut off both bodies.
-    if getattr(prompt, 'type', '') in {'control_pose', 'control_depth', 'control_canny'}:
+    if getattr(prompt, 'type', '') in {'control_pose', 'control_depth', 'control_canny', 'control_normal'}:
         # The preprocessors scale the shorter edge to `resolution`. Asking for
         # the requested size's own shorter edge keeps the map at the source
         # picture's exact pixel size, so nodes that follow the map's size
@@ -32,6 +32,12 @@ def apply_runtime_settings(workflow, prompt, width, height):
             inputs = node.get('inputs', {})
             if 'resolution' in inputs and str(node.get('class_type', '')).endswith('Preprocessor'):
                 inputs['resolution'] = short_side
+        return workflow
+    # Upscale 2x delivers the model's own output: exactly twice the source,
+    # the source's framing and length. The delivery resize below used to
+    # scale-and-centre-crop it to the product's 1920x1080 default, which cut a
+    # portrait clip down to a landscape strip (owner, 2026-09-27).
+    if getattr(prompt, 'type', '') == 'upscale_video_x2':
         return workflow
     has_video_control = any(n.get('class_type') in {'LTXAddVideoICLoRAGuide', 'LTXAddVideoICLoRAGuideAdvanced'} for n in workflow.values())
     grid = 64 if has_video_control else 32

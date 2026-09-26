@@ -1984,7 +1984,11 @@
     const params = readParams(id);
     const resources = await nodeResources(id);
     const prompt = nodePromptText(id);
-    const risky = /porn|nsfw|xxx|hentai|nude|lewd/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' '));
+    // The owner only presses Post: rating X and its confirmation are preset,
+    // draft/publish is whatever was chosen last time (draft until then).
+    let lastMode = 'draft';
+    try { lastMode = localStorage.getItem('civ.publishMode') === 'publish' ? 'publish' : 'draft'; } catch (error) { /* private mode */ }
+    const ratings = ['None', 'Soft', 'Mature', 'X'];
     let dialog = document.getElementById('civitai-post');
     if (dialog) dialog.remove();
     dialog = document.createElement('dialog');
@@ -1996,14 +2000,13 @@
       <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
       <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
       <label>Tags (comma separated; Civitai keeps the first 5, existing tags first)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
-      <label>Rating (required)<select name="rating" required>
-        <option value="">— choose —</option><option${risky ? '' : ' selected'}>None</option><option>Soft</option><option>Mature</option><option${risky ? ' selected' : ''}>X</option></select></label>
-      <label><input type="checkbox" name="confirm" required> I checked the rating (suggested from the model/LoRA and prompt)</label>
+      <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(r =>
+        `<label class="civ-seg-opt"><input type="radio" name="rating" value="${r}"${r === 'X' ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div></div>
+      <label><input type="checkbox" name="confirm" checked> I checked the rating</label>
       <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
-      <label><input type="checkbox" name="upscale"${/\.(mp3|wav|flac|ogg|m4a)(\?|$)/i.test(url) ? '' : ' checked'}> Upscale 2× before posting (RealESRGAN)</label>
       <div><button type="button" class="civ-regen">↻ Write title, description and tags</button> <span class="civ-meta-state"></span></div>
-      <label><input type="radio" name="publish" value="draft" checked> Save as draft (recommended)</label>
-      <label><input type="radio" name="publish" value="publish"> Publish now</label>
+      <label><input type="radio" name="publish" value="draft"${lastMode === 'draft' ? ' checked' : ''}> Save as draft</label>
+      <label><input type="radio" name="publish" value="publish"${lastMode === 'publish' ? ' checked' : ''}> Publish now</label>
       <div class="civ-out" style="white-space:pre-wrap"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button value="cancel">Close</button><button type="button" class="civ-go">Post</button></div></form>`;
     document.body.appendChild(dialog);
@@ -2012,35 +2015,61 @@
     const out = dialog.querySelector('.civ-out');
     const metaState = dialog.querySelector('.civ-meta-state');
     const go = dialog.querySelector('.civ-go');
-    const writeMeta = async () => {
-      go.disabled = true;
-      go.title = 'Waiting for the title, description and tags';
-      metaState.textContent = 'writing with the text model… (Post unlocks when it is done)';
-      try {
-        const response = await fetch('/api/ai/civitai/meta', {method: 'POST', credentials: 'same-origin',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({media_url: url, prompt, service: item.service || '', resources: resources.map(r => r.name)})});
-        const meta = await response.json();
-        if (meta.title_string) form.title.value = meta.title_string;
-        if (meta.description_string) form.description.value = meta.description_string;
-        if (meta.tags_array && meta.tags_array.length) form.tags.value = meta.tags_array.join(', ');
-        metaState.textContent = meta.title_string ? 'written — edit freely' : 'the model gave no title; kept the defaults';
-      } catch (error) { metaState.textContent = 'could not write: ' + error.message + ' — the server writes them while posting'; }
-      go.disabled = false;
-      go.title = '';
+    form.querySelectorAll('input[name=publish]').forEach(radio => radio.addEventListener('change', () => {
+      try { localStorage.setItem('civ.publishMode', form.publish.value); } catch (error) { /* private mode */ }
+    }));
+    // Metadata starts the moment the dialog opens and fills in as it comes:
+    // the Vision caption first (description), then title and tags. A field
+    // the owner has typed in is left alone.
+    const touched = new Set();
+    ['title', 'description', 'tags'].forEach(name => form[name].addEventListener('input', () => touched.add(name)));
+    const setField = (name, value) => { if (value && !touched.has(name)) form[name].value = value; };
+    const metaCall = extra => fetch('/api/ai/civitai/meta', {method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(Object.assign({media_url: url, prompt, service: item.service || '',
+                                          resources: resources.map(r => r.name)}, extra))}).then(r => r.json());
+    let metaPromise = null;
+    let metaRun = 0;
+    const writeMeta = (force) => {
+      const run = ++metaRun;
+      if (force) touched.clear();
+      metaState.textContent = 'looking at the output…';
+      metaPromise = (async () => {
+        let caption = '';
+        try {
+          const first = await metaCall({caption_only: true});
+          caption = first.caption_string || '';
+          if (run === metaRun && caption) { setField('description', caption); metaState.textContent = 'writing the title and tags…'; }
+        } catch (error) { /* the text step still runs */ }
+        try {
+          const meta = await metaCall({caption});
+          if (run !== metaRun) return;
+          setField('title', meta.title_string);
+          setField('description', meta.description_string);
+          if (meta.tags_array && meta.tags_array.length) setField('tags', meta.tags_array.join(', '));
+          metaState.textContent = meta.title_string ? 'written — edit freely' : 'the model gave no title; the server writes one while posting';
+        } catch (error) {
+          if (run === metaRun) metaState.textContent = 'could not write: ' + error.message + ' — the server writes them while posting';
+        }
+      })();
+      return metaPromise;
     };
-    dialog.querySelector('.civ-regen').addEventListener('click', writeMeta);
-    writeMeta();
+    dialog.querySelector('.civ-regen').addEventListener('click', () => writeMeta(true));
+    writeMeta(false);
     dialog.querySelector('.civ-go').addEventListener('click', async () => {
       if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
       const publish = form.publish.value === 'publish';
-      if (publish && !window.confirm('Publish this publicly on Civitai now?')) return;
+      go.disabled = true;
+      if (metaPromise) {
+        out.textContent = 'Waiting for the title and tags…';
+        await metaPromise;
+      }
       out.textContent = 'Starting…';
       const body = {media_url: url, title: form.title.value, description: form.description.value, prompt,
         tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
         resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
           weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
-        publish, upscale: !!form.upscale.checked, background: true, auto_meta: true,
+        publish, background: true, auto_meta: true,
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
@@ -2063,14 +2092,14 @@
           const copy = out.querySelector('.civ-copy');
           if (copy) copy.addEventListener('click', () => copyText(data.details_string || '').then(() => toast('Details copied.')));
         }
-      } catch (error) { out.textContent = 'Failed: ' + error.message; }
+      } catch (error) { out.textContent = 'Failed: ' + error.message; go.disabled = false; }
     });
     dialog.showModal();
   }
 
-  /* Civitai post jobs: a small panel beside the farm status that lists every
-     running post (upscale on the farm -> upload -> post) with its box, stage
-     and elapsed time; the dialog can close, the job keeps going. */
+  /* Civitai post jobs: a small panel that lists every running post
+     (writing -> upload % -> post -> done) with its stage and elapsed time;
+     the dialog can close, the job keeps going. */
   const civitaiJobs = (() => {
     const watchers = new Map();
     const seenFinal = new Set();

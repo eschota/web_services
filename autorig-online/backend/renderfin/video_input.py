@@ -366,6 +366,7 @@ async def download_prepare_video(
     fps: int = 24,
     *,
     allow_shorter: bool = False,
+    keep_audio: bool = False,
 ) -> Tuple[str, bytes]:
     """Download and normalize a trusted control video.
 
@@ -393,6 +394,11 @@ async def download_prepare_video(
         source_probe = await _probe(source)
         _validate_source_probe(source_probe)
         source_duration = float((source_probe.get("format") or {}).get("duration") or 0)
+        if keep_audio and source_duration > MAX_DURATION_SECONDS + 0.05:
+            # An enlargement is the whole clip or nothing: never a silent trim.
+            raise VideoInputError(
+                f"the clip is {source_duration:.1f} s; Upscale 2x takes clips up to "
+                f"{MAX_DURATION_SECONDS} s - split it first")
         available_frames = max(1, int(math.floor(source_duration * fps + 1e-6)))
         held_tail_frames = 0 if allow_shorter else max(0, frame_count - available_frames)
         video_filter = (
@@ -418,7 +424,7 @@ async def download_prepare_video(
             "-y",
             "-i", str(source),
             "-map", "0:v:0",
-            "-an",
+            *(["-map", "0:a:0?", "-c:a", "aac", "-b:a", "192k"] if keep_audio else ["-an"]),
             "-vf", video_filter,
             "-frames:v", str(frame_count),
             "-c:v", "libx264",
