@@ -29,7 +29,9 @@
   let graphInstanceId = '';
   // Graph-wide render quality (ai-render-quality.js): scales every width and
   // height at submit time; node params keep the base size.
-  let renderQuality = 'normal';
+  // New documents start as drafts (every size / 4); a saved graph keeps its own.
+  const NEW_GRAPH_QUALITY = 'preview';
+  let renderQuality = NEW_GRAPH_QUALITY;
   let renderQualityToolbar = null;
   let renderQualityBadges = null;
   let comparisonAnchorId = '';
@@ -485,7 +487,7 @@
     const element = nodeElement(id);
     if (!node || node.kind !== KIND_SERVICE || !element) return;
     const entries = (serviceById(node.service) || {}).inputs || [];
-    if (!entries.some(item => item.ref_index >= 2)) return;
+    if (!entries.some(item => item.ref_index >= 2 || item.hide_when_empty)) return;
     const data = editor.getNodeFromId(id);
     const connected = {};
     node.inFields.forEach((field, index) => {
@@ -496,7 +498,9 @@
     let visible = 0;
     node.inFields.forEach((field, index) => {
       const entry = entries.find(item => item.field === field) || {};
-      const show = entry.ref_index ? shown[field] !== false : true;
+      // A socket kept only for older graphs appears once one wires it.
+      const show = entry.hide_when_empty ? !!connected[field]
+                 : (entry.ref_index ? shown[field] !== false : true);
       const port = element.querySelector('.inputs .input_' + (index + 1));
       if (port) {
         port.style.display = show ? '' : 'none';
@@ -623,6 +627,14 @@
   }
 
   /** Turn every `model` parameter on a node into a picture dropdown. */
+  function commitModelValue(hidden, value, notify) {
+    if (!hidden) return;
+    hidden.value = value;
+    // Re-assert after picker policy/recommendation work. Production QA caught
+    // the visible card changing while this request field stayed empty.
+    if (notify) hidden.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+
   function mountModelPickers(id, serviceId) {
     const element = nodeElement(id);
     if (!element || !window.AIEntities || !window.AIEntities.modelPicker) return;
@@ -648,8 +660,11 @@
             if (!reason?.materialized) toastControlRefusal(connectedControlChannel(id) || 'control', serviceId);
             return;
           }
-          if (hidden) hidden.value = value;
-          if (reason && reason.materialized) return;
+          commitModelValue(hidden, value, false);
+          if (reason && reason.materialized) {
+            commitModelValue(hidden, value, true);
+            return;
+          }
           if (name === 'checkpoint') {
             applySamplingPolicy(id, entry?.sampling_policy_object || entry?.sampling_policy || {});
             refreshModeOptions(id, entry);
@@ -665,6 +680,7 @@
           const pending = applyRecommended(id, entry);
           pendingModelSelections.set(String(id), pending);
           pending.finally(() => { if(pendingModelSelections.get(String(id))===pending) pendingModelSelections.delete(String(id)); });
+          commitModelValue(hidden, value, true);
         }
       });
       slot._picker = picker;
@@ -1443,6 +1459,7 @@
   // at once so the node can say it is running and the deep link can carry the
   // id; waiting on the submit would leave both blank for minutes.
   const RUNNERS = {
+    avatar_from_image: { api: '/api/ai/avatar-from-image', finish: pollAvatarStatus, field: 'avatar_string', type: 'avatar' },
     // One job, many answers: the Avatar plus every view it drew (ai_avatar_build).
     avatar_build: { api: '/api/ai/avatar-build', finish: pollAvatarBuild, field: 'avatar_string', type: 'avatar', multi: true },
     avatar_image: { api: '/api/ai/avatar-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
@@ -1749,6 +1766,48 @@
     throw new Error('the answer did not arrive in time');
   }
 
+  function avatarStatusUrl(raw, taskId) {
+    const fallback = '/api/ai/avatar-from-image/status/' + encodeURIComponent(taskId || '');
+    const parsed = new URL(raw || fallback, location.origin);
+    if (parsed.origin !== location.origin ||
+        !parsed.pathname.startsWith('/api/ai/avatar-from-image/status/')) {
+      throw new Error('Avatar creation returned an unsafe status address.');
+    }
+    return parsed.pathname + parsed.search;
+  }
+
+  async function pollAvatarStatus(accepted, runner, report) {
+    if (accepted[runner.field]) return accepted[runner.field];
+    if (accepted.finished_bool) {
+      throw new Error(accepted.error_string || 'Avatar creation finished without a saved profile.');
+    }
+    let url = avatarStatusUrl(accepted.status_url_string, accepted.task_id_string);
+    let retrySeconds = Number(accepted.retry_after_seconds_float) || 2;
+    for (let attempt = 0; attempt < 480; attempt++) {
+      await sleep(Math.max(0.5, Math.min(10, retrySeconds)) * 1000);
+      let response;
+      try { response = await fetch(url); } catch (_) { continue; }
+      if (response.status >= 500) continue;
+      const parsed = await readJsonResponse(response);
+      if (!response.ok) {
+        if (parsed.data) throw new Error(describeError(parsed.data, response.status));
+        throw new Error(nonJsonHttpError(response, parsed.text));
+      }
+      const data = parsed.data;
+      if (!data || typeof data !== 'object') continue;
+      if (report) report(data);
+      if (data.status_url_string) url = avatarStatusUrl(data.status_url_string, accepted.task_id_string);
+      retrySeconds = Number(data.retry_after_seconds_float) || 2;
+      if (!data.finished_bool) continue;
+      if (data.success_bool === false || String(data.status_string).toLowerCase() === 'failed') {
+        throw new Error(data.error_string || 'Avatar creation failed.');
+      }
+      if (data[runner.field]) return data[runner.field];
+      throw new Error('Avatar creation finished without a saved profile.');
+    }
+    throw new Error('Avatar creation did not arrive in time');
+  }
+
   async function pollForFile(accepted, runner, report) {
     const url = accepted[runner.field];
     if (!url) throw new Error('the farm accepted the job without an output address');
@@ -1850,6 +1909,20 @@
     throw new Error('the model did not arrive in time');
   }
 
+  /** Whether this socket was declared to take a clip as well as a picture. */
+  function socketTakesVideo(serviceId, field) {
+    const entry = catalogue ? serviceById(serviceId) : null;
+    const input = ((entry || {}).inputs || []).find(item => item.field === field);
+    return !!input && (input.also_accepts || []).includes('video');
+  }
+
+  /** What arrived, judged by the address the farm published it at. */
+  function looksLikeVideo(value) {
+    const text = String(value || '');
+    if (text.startsWith('data:')) return text.slice(5, 25).startsWith('video/');
+    return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(text);
+  }
+
   function bodyFor(serviceId, resolved, params) {
     const body = {};
     if (serviceId.startsWith('control_')) body.channel = serviceId.slice('control_'.length);
@@ -1874,6 +1947,14 @@
       const value = resolved[field];
       if (/^reference_\d+$/.test(field)) return;
       if (field === 'image' || field === 'image_url_end') {
+        // A socket that declares both kinds routes by what arrived: the same
+        // wire carries a picture to `image_url` and a clip to `video_url`.
+        // Read off the value, not off a type passed alongside, so a retry and
+        // a graph reopened from a link behave the same as the first run.
+        if (field === 'image' && socketTakesVideo(serviceId, 'image') && looksLikeVideo(value)) {
+          body.video_url = value;
+          return;
+        }
         const key = field === 'image' ? 'image_url' : 'image_url_end';
         const inline = field === 'image' ? 'image_base64' : 'image_base64_end';
         if (String(value).startsWith('data:')) body[inline] = value; else body[key] = value;
@@ -2076,6 +2157,11 @@
       block.className = 'ntext';
       block.textContent = value;
       host.appendChild(block);
+    } else if (type === 'avatar') {
+      const block = document.createElement('div');
+      block.className = 'ntext';
+      block.textContent = value;
+      host.appendChild(block);
       } else if (type === 'image' || type.startsWith('control_')) {
       const picture = document.createElement('img');
         picture.src = value;
@@ -2105,12 +2191,13 @@
     }
     if (outputs && typeof outputs === 'object') showOutputs(host, outputs);
     const link = document.createElement('a');
-    link.href = value;
+    link.href = type === 'avatar' ? '/avatars' : value;
     link.target = '_blank';
     link.rel = 'noopener';
     link.className = 'nlink';
-    // The preview itself opens full size; no separate Open link.
-    link.textContent = '';
+    // The preview itself opens full size; only an Avatar keeps a link, to
+    // its profile page, which the preview cannot stand for.
+    link.textContent = type === 'avatar' ? 'open profile' : '';
     if (link.textContent) host.appendChild(link);
   }
 
@@ -3340,7 +3427,7 @@
         // the graph that was open before.
         graphId = null;
         history.replaceState(null, '', '/nodes');
-        loadGraph(template.graph);
+        loadGraph(Object.assign({render_quality: NEW_GRAPH_QUALITY}, template.graph));
         const drop = document.getElementById('compositions');
         if (drop) drop.open = false;
       });
@@ -3355,17 +3442,20 @@
         .then(r => r.json()).catch(() => null);
       if (data && data.success_bool) {
         if (!data.template_bool) graphId = data.graph_id_string;
-        loadGraph(data.graph_object);
+        loadGraph(data.template_bool
+          ? Object.assign({render_quality: NEW_GRAPH_QUALITY}, data.graph_object)
+          : data.graph_object);
       } else {
         toast('That link does not open a graph any more.');
       }
     } else if (wantedAvatar) {
       resetCanvasExecutionState();
       editor.clear(); nodeMeta.clear(); runState.clear();
+      setRenderQuality(NEW_GRAPH_QUALITY);
       document.getElementById('graph-name').value = 'Avatar production';
       addInputNode('avatar', 60, 100, wantedAvatar);
     } else if ((templates.templates_array || []).length) {
-      loadGraph(templates.templates_array[0].graph);
+      loadGraph(Object.assign({render_quality: NEW_GRAPH_QUALITY}, templates.templates_array[0].graph));
     }
     if (wantedQuality) setRenderQuality(wantedQuality);
     scheduleFitView();

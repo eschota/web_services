@@ -1,7 +1,7 @@
 /**
  * Render quality: one graph-wide scale for every width/height a run sends.
  *
- *   preview ÷4 · fast ÷2 · normal ×1 (default) · highquality ×2
+ *   preview ÷4 (draft; default for new graphs) · fast ÷2 · normal ×1 (full) · highquality ×2
  *
  * Node params keep showing the base (normal) size; the scale is applied only
  * when a request body is built (ai-nodes.js bodyFor), so it is part of each
@@ -18,11 +18,11 @@
 
   const MODES = Object.freeze(['preview', 'fast', 'normal', 'highquality']);
   const FACTORS = Object.freeze({preview: 0.25, fast: 0.5, normal: 1, highquality: 2});
-  const LABELS = Object.freeze({preview: '¼', fast: '½', normal: '1×', highquality: '2×'});
+  const LABELS = Object.freeze({preview: 'Draft ¼', fast: '½', normal: 'Full 1×', highquality: '2×'});
   const TITLES = Object.freeze({
-    preview: 'Preview — every size ÷4',
+    preview: 'Draft — every size ÷4 (default for new graphs; switch to Full 1× for the final render)',
     fast: 'Fast — every size ÷2',
-    normal: 'Normal — sizes as set',
+    normal: 'Full quality — sizes as set',
     highquality: 'High quality — every size ×2'
   });
   const MULTIPLE = 32;

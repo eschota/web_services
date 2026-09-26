@@ -22,7 +22,10 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 import ai_services
@@ -167,6 +170,8 @@ class NodeResult(BaseModel):
 
 # Render quality: the factor every width/height is multiplied by at submit time.
 RENDER_QUALITIES = {"preview": 0.25, "fast": 0.5, "normal": 1.0, "highquality": 2.0}
+# What a newly created graph renders at when its body names no quality.
+DEFAULT_RENDER_QUALITY = "preview"
 
 
 class Graph(BaseModel):
@@ -177,10 +182,12 @@ class Graph(BaseModel):
     instance_id: str = Field("", max_length=64)
     comparison_anchor_id: str = Field("", max_length=64)
     # One scale for every width/height the graph sends (the editor applies it
-    # at submit time; node params keep the base size). "normal" is the
-    # default and is left out of a graph's identity, so every graph saved
-    # before this existed keeps its id.
-    render_quality: str = Field("normal", max_length=16)
+    # at submit time; node params keep the base size). "normal" is left out
+    # of a graph's identity, so every graph saved before this existed keeps
+    # its id. A NEW graph that does not say otherwise is a draft (preview,
+    # every size / 4): the owner tests in draft first (2026-09-26). A PUT
+    # that omits the field keeps the stored graph's value (see update).
+    render_quality: str = Field(DEFAULT_RENDER_QUALITY, max_length=16)
     nodes: List[GraphNode] = Field(default_factory=list)
     links: List[GraphLink] = Field(default_factory=list)
     # Keyed by node id. Never part of what makes a graph's identity: a rerun
@@ -728,6 +735,11 @@ async def api_graph_update(graph_id: str, graph: Graph):
             "error_string": "graph_not_found",
             "message_string": f"No graph saved as '{graph_id}'"})
     body = graph.model_dump(by_alias=True)
+    if "render_quality" not in graph.model_fields_set:
+        # An edit that does not mention the quality leaves it as it was;
+        # the draft default is for new graphs only.
+        body["render_quality"] = str(
+            (previous.get("graph") or {}).get("render_quality") or "normal")
     body["results"] = _carry_results(previous, body)
     payload = json.dumps(body, ensure_ascii=False, sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_GRAPH_BYTES:
@@ -1176,6 +1188,92 @@ async def api_graph_library(
         "graphs_array": rows[offset:offset + limit],
         "server_time_unix_int": int(time.time()),
     }
+
+
+# ------------------------------------------------------------ named links
+#
+# /nodes/<slug> opens a saved graph by a readable name. The alias table is a
+# small JSON file next to the graphs ({slug: graph_id}); a slug that is not in
+# it falls back to a saved graph whose name slugifies to it (newest wins).
+
+ALIAS_FILE = "aliases.json"
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,78}[a-z0-9]$")
+
+
+def _slugify(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")[:80]
+
+
+def _aliases() -> Dict[str, str]:
+    try:
+        data = json.loads((GRAPH_DIR / ALIAS_FILE).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.exception("Could not read graph aliases")
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def _resolve_slug(slug: str) -> Optional[str]:
+    slug = _slugify(slug)
+    if not slug:
+        return None
+    graph_id = _aliases().get(slug)
+    if graph_id:
+        return graph_id
+    for row in _library_rows():
+        if _slugify(row.get("name_string")) == slug:
+            return str(row["graph_id_string"])
+    return None
+
+
+class GraphAliasRequest(BaseModel):
+    slug: str = Field(..., max_length=80)
+
+
+@router.put("/api/ai/graphs/{graph_id}/alias")
+async def api_graph_alias(graph_id: str, body: GraphAliasRequest):
+    """Give a saved graph a readable link, /nodes/<slug>.
+
+    First come, first served: a slug that already names another graph is
+    refused (409) rather than silently re-pointed.
+    """
+    slug = _slugify(body.slug)
+    if not SLUG_RE.match(slug):
+        raise HTTPException(status_code=400, detail={
+            "error_string": "bad_slug",
+            "message_string": "A slug is 3-80 characters of a-z, 0-9 and -"})
+    if _read_stored(_stored_path(graph_id)) is None:
+        raise HTTPException(status_code=404, detail={
+            "error_string": "graph_not_found",
+            "message_string": f"No graph saved as '{graph_id}'"})
+    aliases = _aliases()
+    if aliases.get(slug) not in (None, graph_id):
+        raise HTTPException(status_code=409, detail={
+            "error_string": "slug_taken",
+            "message_string": f"'{slug}' already opens another graph"})
+    aliases[slug] = graph_id
+    GRAPH_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = GRAPH_DIR / (ALIAS_FILE + ".tmp")
+    tmp.write_text(json.dumps(aliases, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, GRAPH_DIR / ALIAS_FILE)
+    return {"success_bool": True, "slug_string": slug, "graph_id_string": graph_id,
+            "deep_link_string": f"/nodes/{slug}", "server_time_unix_int": int(time.time())}
+
+
+@router.get("/nodes/{slug}")
+async def nodes_named_link(slug: str, request: Request):
+    graph_id = _resolve_slug(slug)
+    if not graph_id:
+        raise HTTPException(status_code=404, detail={
+            "error_string": "graph_not_found",
+            "message_string": f"No graph is called '{slug}'"})
+    query = {"g": graph_id}
+    quality = request.query_params.get("q")
+    if quality in RENDER_QUALITIES:
+        query["q"] = quality
+    return RedirectResponse("/nodes?" + urlencode(query), status_code=302)
 
 
 @router.get("/api/ai/graphs/{graph_id}")

@@ -1534,6 +1534,7 @@ from ai_avatar_video import build_avatar_video_router
 from ai_avatar_build import build_avatar_build_router
 from ai_video_reference import router as ai_video_reference_router
 from ai_graph_edits import router as ai_graph_edits_router
+from ai_pipelines_api import router as ai_pipelines_router
 
 app.include_router(build_avatar_router(get_avatar_owner))
 app.include_router(build_avatar_asset_router(get_avatar_owner))
@@ -1542,6 +1543,7 @@ app.include_router(build_avatar_video_router(get_avatar_owner))
 app.include_router(build_avatar_build_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
 app.include_router(ai_graph_edits_router)
+app.include_router(ai_pipelines_router)
 
 
 async def require_admin(
@@ -2776,12 +2778,51 @@ async def auth_callback(
     return redirect
 
 
-# Keep the standalone upload API admin-only; API keys resolve to their owner
-# through get_current_user, so only keys belonging to an admin can use it.
+# Keep video uploads behind administrator authentication.
 from youtube_api import build_youtube_upload_api_router
-
 app.include_router(build_youtube_upload_api_router(require_admin, get_db))
+@app.get("/api/admin/u3d-youtube/oauth/start")
+async def admin_u3d_youtube_oauth_start(admin: User = Depends(require_admin)):
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
+    if not U3D_YOUTUBE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
+    state = secrets.token_urlsafe(32)
+    query = urlencode({"client_id": U3D_YOUTUBE_CLIENT_ID, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "response_type": "code", "scope": YOUTUBE_UPLOAD_SCOPE, "access_type": "offline", "prompt": "consent", "state": state})
+    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
+    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
+    return response
 
+
+@app.get("/api/oauth/u3d-youtube/callback")
+async def admin_u3d_youtube_oauth_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, db: AsyncSession = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
+    if error:
+        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
+    if not user or not is_admin_email(user.email):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
+    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
+    if not code:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": U3D_YOUTUBE_CLIENT_ID, "client_secret": U3D_YOUTUBE_CLIENT_SECRET, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "grant_type": "authorization_code"}, timeout=30.0)
+    if token_response.status_code != 200:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
+    refresh = token_response.json().get("refresh_token")
+    if not refresh:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
+    from database import U3dYoutubeCredentials
+    row = await db.get(U3dYoutubeCredentials, 1)
+    now = datetime.utcnow()
+    if row:
+        row.refresh_token, row.updated_at = refresh, now
+    else:
+        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
+    await db.commit()
+    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
+    response.delete_cookie("u3d_yt_oauth_state")
+    return response
 
 @app.get("/api/admin/youtube/oauth/start")
 async def admin_youtube_oauth_start(
@@ -2831,8 +2872,8 @@ async def admin_youtube_oauth_callback(
     refresh = tokens.get("refresh_token")
     if not refresh:
         return RedirectResponse(url="/?youtube_error=no_refresh_token_reauthorize_with_prompt")
-    # Channel selection happens in Google's Brand Account chooser. The upload
-    # response includes channelId for validation against the owner channel.
+    # The Google Brand Account chooser selects the channel. The first upload
+    # response reports channelId so the client can verify the destination.
     await save_youtube_refresh_token(db, refresh)
     response = RedirectResponse(url="/?youtube_connected=1")
     response.delete_cookie("yt_oauth_state")
@@ -5239,6 +5280,97 @@ async def api_rig_v2_vision_animal_type(request: Request):
             model_override=model_override,
         )
     return openrouter_result
+
+@app.post("/api/rig-v2/vision/appearance")
+@limiter.limit("20/minute")
+async def api_rig_v2_vision_appearance(request: Request):
+    """Hair, loose clothing, tail and pose of an uploaded model, from one sheet of views.
+
+    Decides which rig pipeline to offer before the task exists: the simple rig,
+    or the AI pipeline that animates hair and cloth. The upload page tiles the
+    four side renders it already takes for the rig-type check into one picture.
+    """
+    import rig_appearance
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    image_data_url = _rig_v2_normalize_image_data_url(str(body.get("image_jpg_base64_string") or ""))
+    cfg = _rig_v2_load_vision_config()
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    model = str(cfg.get("open_ai_strong_vision_model_string")
+                or cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    if not api_key or not api_url:
+        return {"success_bool": False, "status_string": "vision_not_configured",
+                "server_time_unix_int": _rig_v2_server_time()}
+    started = time.time()
+    try:
+        result = await rig_appearance.assess(api_url=api_url, api_key=api_key,
+                                             model=model, image_data_url=image_data_url,
+                                             lang=str(body.get("lang_string") or "en"))
+    except Exception as exc:  # the page falls back to manual choice
+        print(f"[rig-v2] appearance check failed: {exc}")
+        return {"success_bool": False, "status_string": "vision_failed",
+                "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
+    return {"success_bool": True, "status_string": "ok", **result,
+            "model_used_string": f"openai/{model}",
+            "elapsed_seconds_float": round(time.time() - started, 2),
+            "server_time_unix_int": _rig_v2_server_time()}
+
+
+@app.post("/api/rig-v2/vision/appearance-depth")
+@limiter.limit("6/minute")
+async def api_rig_v2_vision_appearance_depth(request: Request):
+    """Appearance of an untextured model, judged on a repaint of its Z-depth.
+
+    Grey clay hides the difference between hair and a hood, a robe and a body.
+    The page sends the model's front depth map; the farm paints a character
+    over exactly that silhouette, and the painting is judged. Takes about a
+    minute, so the page asks for it only when the model has no textures.
+    """
+    import rig_appearance
+    from ai_vision_api import _decode_inline_image, _publish_inline_image
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    depth = str(body.get("depth_png_base64_string") or "")
+    if not depth:
+        raise HTTPException(status_code=400, detail="depth_png_base64_string is required")
+    cfg = _rig_v2_load_vision_config()
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    model = str(cfg.get("open_ai_strong_vision_model_string")
+                or cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    if not api_key or not api_url:
+        return {"success_bool": False, "status_string": "vision_not_configured",
+                "server_time_unix_int": _rig_v2_server_time()}
+    started = time.time()
+    try:
+        async with httpx.AsyncClient() as client:
+            depth_url = await _publish_inline_image(client, _decode_inline_image(depth))
+        painted = await rig_appearance.paint_from_depth(
+            site_base="http://127.0.0.1:8200", depth_url=depth_url)
+        result = await rig_appearance.assess(
+            api_url=api_url, api_key=api_key, model=model, image_data_url=painted,
+            lang=str(body.get("lang_string") or "en"), front_only=True)
+    except HTTPException:
+        raise
+    except Exception as exc:  # the page keeps the clay result
+        print(f"[rig-v2] depth appearance check failed: {exc}")
+        return {"success_bool": False, "status_string": "depth_check_failed",
+                "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
+    return {"success_bool": True, "status_string": "ok", **result,
+            "painted_url_string": painted, "depth_url_string": depth_url,
+            "model_used_string": f"openai/{model}",
+            "elapsed_seconds_float": round(time.time() - started, 2),
+            "server_time_unix_int": _rig_v2_server_time()}
+
 
 @app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
@@ -15843,9 +15975,6 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
     return candidates
 
 STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
-    # The farm's LoRA manager: operational, like /models, so it is left out
-    # of the sitemaps too.
-    "lora.html": "/lora",
     "index.html": "/",
     "gallery.html": "/gallery",
     "guides.html": "/guides",
@@ -15898,6 +16027,16 @@ STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "image-to-rigged-3d-character-ru.html": "/image-to-rigged-3d-character-ru",
     "image-to-rigged-3d-character-zh.html": "/image-to-rigged-3d-character-zh",
     "image-to-rigged-3d-character-hi.html": "/image-to-rigged-3d-character-hi",
+    # Deliberately absent from every sitemap: a saved composition is whatever
+    # its author wired up, and the library is for people who have the link.
+    "workflows.html": "/workflows",
+    # The support matrix names the farm's computers and what each one
+    # cost today: operational detail for whoever is running work on it,
+    # of no use in a search result.
+    "models.html": "/models",
+    # The farm's LoRA manager: operational, like /models, so it is left out
+    # of the sitemaps too.
+    "lora.html": "/lora",
 }
 
 PUBLIC_QUERY_NOINDEX_PATHS = {"/", "/gallery"}
@@ -16936,6 +17075,18 @@ async def model3d_page():
 async def nodes_page():
     """Wire the services together and render the whole composition at once."""
     return _static_html_response("nodes.html")
+
+
+@app.get("/workflows")
+async def workflows_page():
+    """Every saved composition at once, with what went in and what came out."""
+    return _static_html_response("workflows.html")
+
+
+@app.get("/models")
+async def models_page():
+    """Which computer can run which pipeline, and what it took in a day."""
+    return _static_html_response("models.html")
 
 
 @app.get("/lora")
