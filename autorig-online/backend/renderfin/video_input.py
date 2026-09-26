@@ -28,6 +28,10 @@ from .errors import RequestFaultError
 
 
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
+# A source larger than the cap is fetched up to this size and transcoded down
+# (owner, 2026-09-27: never reject a big clip, make it fit).
+MAX_RAW_VIDEO_BYTES = 2 * 1024 * 1024 * 1024
+TRANSCODE_LONG_SIDE = 960
 MAX_DIMENSION = 2048
 MAX_DURATION_SECONDS = 16.4
 PROCESS_TIMEOUT_SECONDS = 60.0
@@ -97,7 +101,7 @@ def _validated_frame_count(frame_count: int, fps: int) -> Tuple[int, int]:
     return frame_count, fps
 
 
-async def _run_process(*argv: str) -> bytes:
+async def _run_process(*argv: str, timeout: float = 0) -> bytes:
     try:
         process = await asyncio.create_subprocess_exec(
             *argv,
@@ -108,7 +112,7 @@ async def _run_process(*argv: str) -> bytes:
         raise VideoInputError(f"cannot start {argv[0]}: {exc}") from exc
     try:
         stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=PROCESS_TIMEOUT_SECONDS
+            process.communicate(), timeout=timeout or PROCESS_TIMEOUT_SECONDS
         )
     except asyncio.TimeoutError as exc:
         process.kill()
@@ -213,17 +217,44 @@ def _smaller_civitai_variant(url: str) -> str:
 
 
 async def _download(client, url, target):
-    """Fetch a control video; an oversized Civitai original falls back to a smaller variant."""
+    """Fetch a control video that fits the 100 MB cap, making it fit if it does not.
+
+    1. As served. 2. A Civitai original: the same clip at 1080 px from the CDN.
+    3. Anything else: fetched whole (up to 2 GB) and transcoded to at most
+       960 px on the long side, H.264, the first 16.4 s.
+    """
     try:
         return await _download_once(client, url, target)
     except VideoInputError as error:
-        smaller = _smaller_civitai_variant(url) if "exceeds the 100 MB limit" in str(error) else ""
-        if not smaller:
+        if "exceeds the 100 MB limit" not in str(error):
             raise
-        return await _download_once(client, smaller, target)
+    smaller = _smaller_civitai_variant(url)
+    if smaller:
+        try:
+            return await _download_once(client, smaller, target)
+        except VideoInputError as error:
+            if "exceeds the 100 MB limit" not in str(error):
+                raise
+    raw = target.with_name(target.stem + ".raw" + (target.suffix or ".mp4"))
+    try:
+        await _download_once(client, smaller or url, raw, limit=MAX_RAW_VIDEO_BYTES)
+        scale = (f"scale=w='if(gte(iw,ih),min({TRANSCODE_LONG_SIDE},iw),-2)':"
+                 f"h='if(gte(iw,ih),-2,min({TRANSCODE_LONG_SIDE},ih))'")
+        await _run_process(
+            FFMPEG_BIN, "-v", "error", "-y", "-i", str(raw), "-t", str(MAX_DURATION_SECONDS),
+            "-vf", scale + ",scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", "-fpsmax", "30",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(target), timeout=600)
+    finally:
+        raw.unlink(missing_ok=True)
+    if not target.is_file() or target.stat().st_size == 0:
+        raise VideoInputError("oversized video could not be transcoded")
+    if target.stat().st_size > MAX_VIDEO_BYTES:
+        raise VideoInputError("video is still over 100 MB after transcoding to half-HD")
 
 
-async def _download_once(client: httpx.AsyncClient, url: str, target: Path) -> None:
+async def _download_once(client: httpx.AsyncClient, url: str, target: Path,
+                         limit: int = MAX_VIDEO_BYTES) -> None:
     current_url = _validated_url(url)
     may_follow_redirect = (urlsplit(current_url).hostname or "").rstrip(".").lower() in _CIVITAI_HOSTS
     try:
@@ -254,13 +285,13 @@ async def _download_once(client: httpx.AsyncClient, url: str, target: Path) -> N
                         declared_size = int(declared)
                     except ValueError as exc:
                         raise VideoInputError("invalid control video Content-Length") from exc
-                    if declared_size < 1 or declared_size > MAX_VIDEO_BYTES:
+                    if declared_size < 1 or declared_size > limit:
                         raise VideoInputError("control video exceeds the 100 MB limit")
                 size = 0
                 with target.open("wb") as output:
                     async for chunk in response.aiter_bytes(DOWNLOAD_CHUNK_BYTES):
                         size += len(chunk)
-                        if size > MAX_VIDEO_BYTES:
+                        if size > limit:
                             raise VideoInputError("control video exceeds the 100 MB limit")
                         output.write(chunk)
                 if size == 0:

@@ -23,6 +23,7 @@ CLIENT_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479"  # C# parity (Adapter_Comfy.c
 
 VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".avi", ".mkv")
 MODEL_EXTENSIONS = (".glb", ".gltf", ".obj", ".fbx")
+AUDIO_EXTENSIONS = (".mp3", ".flac", ".wav", ".opus", ".ogg")
 
 
 class ComfyAdapterError(RuntimeError):
@@ -110,7 +111,34 @@ async def download_input_image(client: httpx.AsyncClient, image_url: str) -> Tup
             f"failed to download image {image_url}: HTTP {resp.status_code}"
         )
     name = urlparse(image_url).path.rsplit("/", 1)[-1] or "input.png"
-    return name, resp.content
+    return _fit_input_image(name, resp.content)
+
+
+# A picture bigger than this on either side (or in bytes) is scaled down before
+# it reaches a worker: a 12k photo only costs VRAM (owner, 2026-09-27).
+MAX_INPUT_SIDE = 4096
+MAX_INPUT_BYTES = 40 * 1024 * 1024
+
+
+def _fit_input_image(name: str, data: bytes) -> Tuple[str, bytes]:
+    try:
+        from io import BytesIO
+        from PIL import Image
+        with Image.open(BytesIO(data)) as picture:
+            width, height = picture.size
+            if max(width, height) <= MAX_INPUT_SIDE and len(data) <= MAX_INPUT_BYTES:
+                return name, data
+            scale = min(1.0, MAX_INPUT_SIDE / float(max(width, height)))
+            if len(data) > MAX_INPUT_BYTES:
+                scale = min(scale, 2048 / float(max(width, height)))
+            size = (max(1, int(width * scale)), max(1, int(height * scale)))
+            resized = picture.convert("RGBA" if picture.mode in ("RGBA", "LA", "P") else "RGB").resize(size, Image.LANCZOS)
+            out = BytesIO()
+            resized.save(out, format="PNG", optimize=True)
+            stem = name.rsplit(".", 1)[0] or "input"
+            return stem + ".png", out.getvalue()
+    except Exception:
+        return name, data
 
 
 async def upload_image(
@@ -408,6 +436,8 @@ def resolve_artifacts(
             ext_ok = 0 if name.endswith(VIDEO_EXTENSIONS) else 1
         elif output_ext == ".glb":
             ext_ok = 0 if name.endswith(MODEL_EXTENSIONS) else 1
+        elif output_ext in AUDIO_EXTENSIONS:
+            ext_ok = 0 if name.endswith(AUDIO_EXTENSIONS) else 1
         else:
             ext_ok = 0 if name.endswith((".png", ".jpg", ".jpeg", ".webp")) else 1
         return (frag, ext_ok)
