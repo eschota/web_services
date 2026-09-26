@@ -69,7 +69,14 @@ EXCLUDED_BOXES = {b.strip() for b in os.getenv("AUTORIG_FLEET_MODELS_EXCLUDE", "
 # f15 serves D:\ComfyUI_windows_portable\ComfyUI\models on the LAN
 # (python -m http.server 18998), see ai_lora_manager.F15_LAN_PEER.
 F15_MODELS_PEER = lm.F15_LAN_PEER.rsplit("/loras/", 1)[0] + "/" + MODEL_SUBDIR + "/"
-MODEL_PEERS: Dict[str, List[str]] = {"f5": [F15_MODELS_PEER], "Raptor": [F15_MODELS_PEER]}
+# LAN peers are tried first when listed here. Measured 2026-09-26: f15's
+# http.server gave f5 only 1.6 MB/s (100 MB in 61 s) while the CDN gives
+# ~8.6 MB/s to one box, so no peers by default.
+MODEL_PEERS: Dict[str, List[str]] = {}
+# The boxes share one internet uplink: three parallel 14 GB pulls ran at
+# ~3.4 MB/s each. So PEER_BOX downloads alone first ("waiting_peer" for the
+# rest) and is usable ~3x sooner; the others start when it is done.
+PEER_BOX = "f15"
 FINAL_STATES = {"ready", "failed", "hash_mismatch", "no_space", "no_route", "deleted",
                 "not_needed", "exists_different"}
 
@@ -390,6 +397,14 @@ $ok = $false
 foreach ($u in $Urls) {
     if (-not $u) { continue }
     St 'downloading' ''
+    if ($u.StartsWith('http://')) {
+        # LAN peer (python http.server): no byte ranges, but fast - start over.
+        & $curl -sS -f --connect-timeout 5 --speed-time 60 --speed-limit 1048576 -o ($Part + '.lan') $u 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath ($Part + '.lan')) -and (Get-Item -LiteralPath ($Part + '.lan')).Length -eq $Size) {
+            Move-Item -Force -LiteralPath ($Part + '.lan') -Destination $Part; $ok = $true; break }
+        Remove-Item -Force -LiteralPath ($Part + '.lan') -ErrorAction SilentlyContinue
+        continue
+    }
     & $curl -sS -f -L -C - --connect-timeout 10 --retry 3 --retry-delay 5 --speed-time 180 --speed-limit 20480 -o $Part $u 2>&1 | Out-Null
     if ((Test-Path -LiteralPath $Part) -and (Get-Item -LiteralPath $Part).Length -eq $Size) { $ok = $true; break }
     if ((Test-Path -LiteralPath $Part) -and (Get-Item -LiteralPath $Part).Length -gt $Size) { Remove-Item -Force -LiteralPath $Part }
@@ -449,7 +464,8 @@ if (Test-Path $St) { $s = Get-Content $St -Raw | ConvertFrom-Json; $o.state = $s
 if ($Root) {
     $Part = Join-Path $Root ('autorig_model_tmp\' + $Sha + '.part')
     $Dest = Join-Path $Root ('ComfyUI\models\' + $Sub + '\' + $File)
-    if (Test-Path -LiteralPath $Part) { $o.bytes = (Get-Item -LiteralPath $Part).Length }
+    if (Test-Path -LiteralPath ($Part + '.lan')) { $o.bytes = (Get-Item -LiteralPath ($Part + '.lan')).Length; $o.lan = $true }
+    elseif (Test-Path -LiteralPath $Part) { $o.bytes = (Get-Item -LiteralPath $Part).Length }
     elseif (Test-Path -LiteralPath $Dest) { $o.bytes = (Get-Item -LiteralPath $Dest).Length; $o.on_disk = $true }
     $o.free = (Get-PSDrive (Split-Path $Root -Qualifier).TrimEnd(':')).Free
 }
@@ -475,7 +491,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLin
 Start-Sleep -Milliseconds 500
 if ($Root) {
     $Part = Join-Path $Root ('autorig_model_tmp\' + $Sha + '.part')
-    Remove-Item -Force -LiteralPath $Part -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $Part, ($Part + '.lan') -ErrorAction SilentlyContinue
     $Dest = Join-Path $Root ('ComfyUI\models\' + $Sub + '\' + $File)
     if (Test-Path -LiteralPath $Dest) {
         if ((Get-Item -LiteralPath $Dest).Length -ne $Size) { $o.error = 'file size differs from the registered one: left in place' }
@@ -557,7 +573,7 @@ async def _monitor(entry_id: str) -> None:
             if not entry or entry.get("state") != "active":
                 return
             pending = [b for b, s in (entry.get("box_states") or {}).items()
-                       if s.get("state") not in FINAL_STATES]
+                       if s.get("state") not in FINAL_STATES and s.get("state") != "waiting_peer"]
             if pending:
                 results = await asyncio.gather(*(poll_box(entry, b) for b in pending))
                 for box, result in zip(pending, results):
@@ -568,6 +584,11 @@ async def _monitor(entry_id: str) -> None:
                         continue
                     entry = await _set_box(entry_id, box, result) or entry
             entry = next((e for e in load_registry()["models"] if e.get("id") == entry_id), entry)
+            states = entry.get("box_states") or {}
+            waiting = [b for b, s in states.items() if s.get("state") == "waiting_peer"]
+            if waiting and (states.get(PEER_BOX) or {}).get("state") in FINAL_STATES:
+                await start_downloads(entry_id, waiting)
+                entry = next((e for e in load_registry()["models"] if e.get("id") == entry_id), entry)
             _sync_catalogue(entry)
             if not [b for b, s in (entry.get("box_states") or {}).items() if s.get("state") not in FINAL_STATES]:
                 return
@@ -596,8 +617,15 @@ async def start_downloads(entry_id: str, only: Optional[List[str]] = None) -> No
     if not entry:
         return
     url = await _source_url(entry)
-    boxes = [b for b in entry.get("target_boxes") or [] if not only or b in only]
+    targets = entry.get("target_boxes") or []
+    boxes = [b for b in targets if not only or b in only]
+    peer_state = ((entry.get("box_states") or {}).get(PEER_BOX) or {}).get("state")
     for box in boxes:
+        if (not only and box != PEER_BOX and PEER_BOX in targets
+                and _ssh_route(PEER_BOX) and peer_state not in FINAL_STATES):
+            await _set_box(entry_id, box, {"state": "waiting_peer", "error": "",
+                                           "note": f"starts when {PEER_BOX} is done (shared uplink)"})
+            continue
         if not _ssh_route(box):
             await _set_box(entry_id, box, {"state": "no_route", "error": "the VPS has no SSH route to this box"})
             continue

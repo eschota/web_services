@@ -130,7 +130,7 @@
         .chip.core { border-color: rgba(250,204,21,.5); color: #fde68a; }
         .chip.off { border-color: rgba(248,113,113,.45); color: #fca5a5; }
         .chip.on { border-color: rgba(74,222,128,.45); color: #86efac; }
-        .st-verifying { color: #a78bfa; } .st-no_route, .st-deleted, .st-not_needed { color: #5b6485; }
+        .st-verifying { color: #a78bfa; } .st-waiting_peer { color: #94a3b8; } .st-no_route, .st-deleted, .st-not_needed { color: #5b6485; }
         .st-delete_failed, .st-exists_different { color: #f87171; }
         @media (max-width: 640px) { .lr-add { flex-basis: 100%; } select.lr-in { flex-basis: 120px; } }
     </style>
@@ -522,7 +522,8 @@
   // ---- base models (checkpoints / diffusion models)
   var MLABEL = { ready: 'ready', downloading: 'downloading', queued: 'queued', verifying: 'checking SHA-256',
     failed: 'failed', hash_mismatch: 'hash mismatch', no_space: 'no disk space', no_route: 'no SSH route from the VPS',
-    exists_different: 'another file with this name is there', deleted: 'deleted', delete_failed: 'delete failed' };
+    exists_different: 'another file with this name is there', deleted: 'deleted', delete_failed: 'delete failed',
+    waiting_peer: 'starts after f15 (shared uplink)' };
   function modelBoxes(m) {
     var mg = m.manager_object;
     if (!mg) {
@@ -535,7 +536,7 @@
     var states = mg.box_states_object || {};
     return Object.keys(states).map(function (b) {
       var st = states[b] || {}, key = st.state || 'queued';
-      var icon = ICON[key] || (key === 'verifying' ? ICON.queued : (key === 'no_route' || key === 'deleted') ? ICON.excluded : ICON.failed);
+      var icon = ICON[key] || ((key === 'verifying' || key === 'waiting_peer') ? ICON.queued : (key === 'no_route' || key === 'deleted') ? ICON.excluded : ICON.failed);
       var pct = st.percent != null ? st.percent : key === 'ready' ? 100 : 0;
       var retry = state.admin && /failed|hash_mismatch|no_space/.test(key) && mg.state === 'active'
         ? '<button class="ib sm" data-mretry="' + esc(mg.id) + '" data-box="' + esc(b) + '" title="Try again on ' + esc(b) + '">' + ICON.retry + '</button>' : '';
