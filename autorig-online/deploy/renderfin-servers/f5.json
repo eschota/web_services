@@ -13,7 +13,10 @@
     "gen_image_flux2_klein_edit.json",
     "gen_animation_hq_by_url.json",
     "gen_animation_ltx23_by_url.json",
-    "gen_animation_ltx10eros_by_url.json"
+    "gen_animation_ltx10eros_by_url.json",
+    "gen_control_depth.json",
+    "gen_control_pose.json",
+    "gen_control_canny.json"
   ],
   "workflow_overrides": {},
   "basic_auth": false

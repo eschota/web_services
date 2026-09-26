@@ -65,6 +65,12 @@ if ((Has 'diffusion_models\z_image_turbo_fp8_e4m3fn.safetensors') -and
     (Has 'model_patches\Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors')) {
     $tokens += @('gen_image.json','gen_image_control_pose.json','gen_image_control_depth.json','gen_image_control_canny.json')
 }
+# ControlNet maps (the /api/controlnet jobs): only the preprocessor node pack is
+# needed; its annotator weights download on first use. Until 2026-09-26 only f12
+# advertised these, and with f12 offline every map job sat blocked.
+if (Test-Path (Join-Path (Split-Path $models) 'custom_nodes\comfyui_controlnet_aux')) {
+    $tokens += @('gen_control_depth.json','gen_control_pose.json','gen_control_canny.json')
+}
 # Krea 2 Turbo is the quality tier with the live LoRA ecosystem.
 if ((Has 'diffusion_models\krea2_turbo_fp8_scaled.safetensors') -and
     (Has 'text_encoders\qwen3vl_4b_fp8_scaled.safetensors') -and

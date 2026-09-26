@@ -5,7 +5,10 @@
   "status": "online",
   "available_workflows": [
     "gen_image.json",
-    "gen_animation_by_url.json"
+    "gen_animation_by_url.json",
+    "gen_control_depth.json",
+    "gen_control_pose.json",
+    "gen_control_canny.json"
   ],
   "workflow_overrides": {},
   "basic_auth": false
