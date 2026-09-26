@@ -448,14 +448,19 @@ async def _concat(body: ConcatRequest, work: Path) -> Dict[str, Any]:
 
 class AudioMuxRequest(BaseModel):
     video_url: str = Field(..., min_length=8, max_length=4096)
-    source_url: str = Field(..., min_length=8, max_length=4096)
+    # Empty: nothing to take the audio from, the picture passes through.
+    source_url: str = Field("", max_length=4096)
 
 
 async def _audio_mux(body: AudioMuxRequest, work: Path) -> Dict[str, Any]:
     async with httpx.AsyncClient() as client:
         video = await _download(client, body.video_url, work / "video.mp4")
+        vinfo = await _probe(video)
+        if not body.source_url.strip():
+            return {"video_url_string": body.video_url, "had_audio_bool": False,
+                    "duration_float": round(vinfo["duration"], 3), "note_string": "no audio source wired"}
         source = await _download(client, body.source_url, work / "source.bin")
-        vinfo, sinfo = await _probe(video), await _probe(source)
+        sinfo = await _probe(source)
         out = work / "with_audio.mp4"
         if sinfo["audio"]:
             await _ff("-i", str(video), "-i", str(source), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",

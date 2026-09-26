@@ -46,7 +46,7 @@
       outputs: {shot_clip_url_string: shot.clip_url, first_frame_url_string: shot.first_frame_url,
                 middle_frame_url_string: shot.middle_frame_url || shot.first_frame_url,
                 shot_info_string: shot.label},
-      meta: {frames: shot.frames, label: shot.label, index: shot.index}
+      meta: {frames: shot.frames, label: shot.label, index: shot.index, shot: shot.shot, part: shot.part}
     }));
   }
 
@@ -124,7 +124,13 @@
     if (!when) return {ok: true};
     if (!gateResult) return {ok: false, why: 'gate node did not run'};
     const want = String(when.is || '').toUpperCase();
-    const item = Array.isArray(gateResult.items) ? gateResult.items[index] : {status: 'done', value: gateResult.value};
+    let item = Array.isArray(gateResult.items) ? gateResult.items[index] : {status: 'done', value: gateResult.value};
+    // Parts of one long scene follow the decision made for its first part
+    // (unless `per: "item"`), so a continuous scene never switches subgraph.
+    if (want !== 'FAILED' && when.per !== 'item' && item && item.meta && item.meta.part > 0 && Array.isArray(gateResult.items)) {
+      const head = gateResult.items.find(other => other && other.meta && other.meta.shot === item.meta.shot && other.meta.part === 0);
+      if (head) item = head;
+    }
     if (want === 'FAILED') {
       return item && item.status === 'failed' ? {ok: true} : {ok: false, why: 'not needed (' + (item ? item.status : 'no item') + ')'};
     }

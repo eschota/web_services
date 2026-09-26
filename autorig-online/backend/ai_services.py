@@ -171,7 +171,7 @@ SERVICES: List[Dict[str, object]] = [
         "summary": "Puts the original video's audio under the new picture.",
         "inputs": [
             {"type": VIDEO, "field": "video_url", "required": True, "title": "New picture"},
-            {"type": VIDEO, "field": "source_url", "required": True, "title": "Audio from (original)"},
+            {"type": VIDEO, "field": "source_url", "required": False, "title": "Audio from (original)"},
         ],
         "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Video with audio"}],
     },
