@@ -1380,7 +1380,7 @@
   function toggleBypass(ids) {
     const list = [...new Set((ids || []).map(String))].filter(id => meta(id) && nodeElement(id));
     if (!list.length) {
-      toast('Select a node first — Ctrl+P then takes it out of the run.');
+      toast('Select a node first — B (or Ctrl+B) then takes it out of the run.');
       return false;
     }
     // A mixed selection is bypassed as a whole; a fully bypassed one comes back.
@@ -1418,10 +1418,10 @@
     if (!banner) {
       banner = document.createElement('div');
       banner.id = 'isolation-banner';
-      banner.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:20;' +
+      banner.style.cssText = 'position:absolute;bottom:14px;left:50%;transform:translateX(-50%);z-index:20;' +
         'background:#7c3aed;color:#fff;padding:6px 12px;border-radius:8px;font:600 13px system-ui;cursor:pointer;' +
         'box-shadow:0 2px 10px rgba(0,0,0,.35)';
-      banner.title = 'Click or press Ctrl+I to restore every node';
+      banner.title = 'Click, or press I (or Ctrl+I), to restore every node';
       banner.addEventListener('click', () => toggleIsolation());
       const host = document.getElementById('canvas');
       (host && host.parentElement ? host.parentElement : document.body).appendChild(banner);
@@ -1430,7 +1430,7 @@
     const element = nodeElement(isolation.target);
     const heading = element && element.querySelector('.nhead b');
     const name = item.label || (heading && heading.textContent) || ('node ' + isolation.target);
-    banner.textContent = 'Isolated: ' + name + ' — Ctrl+I to restore';
+    banner.textContent = 'Isolated: ' + name + ' — I or Ctrl+I (or click) to restore';
   }
 
   function restoreIsolation(quiet) {
@@ -1454,7 +1454,7 @@
     const target = targetId != null ? String(targetId) : null;
     if (isolation && (!target || target === String(isolation.target))) return restoreIsolation();
     if (!target || !meta(target) || !nodeElement(target)) {
-      toast('Select an output node first — Ctrl+I then isolates its branch.');
+      toast('Select a node first — I (or Ctrl+I) then isolates its branch.');
       return false;
     }
     if (isolation) restoreIsolation(true);
@@ -1463,14 +1463,26 @@
     nodeMeta.forEach((item, id) => { if (item) prior[String(id)] = !!item.disabled; });
     Object.keys(prior).forEach(id => {
       if (!keep.has(id) && !prior[id]) { applyBypass(id, true); invalidateNodeAndDownstream(id); }
+      // Everything the target needs runs, even if it was bypassed before;
+      // restoring puts it back as it was.
+      if (keep.has(id) && prior[id]) { applyBypass(id, false); invalidateNodeAndDownstream(id); }
     });
     isolation = {target, prior};
     paintIsolation();
-    toast('Branch isolated: ' + keep.size + ' node(s) will run. Ctrl+I restores.');
+    toast('Branch isolated: ' + keep.size + ' node(s) will run. I or Ctrl+I restores.');
     return true;
   }
 
+  /** Ids selected on the canvas (the groups module owns selection). */
+  function selectedIds() {
+    if (nodeGroups && nodeGroups.selected && nodeGroups.selected.size) return [...nodeGroups.selected].map(String);
+    const element = document.querySelector('#canvas .drawflow-node.selected');
+    return element && element.id ? [element.id.replace(/^node-/, '')] : [];
+  }
+
   function selectedNodeId() {
+    const ids = selectedIds();
+    if (ids.length === 1) return ids[0];
     const element = document.querySelector('#canvas .drawflow-node.selected');
     if (element && element.id) return element.id.replace(/^node-/, '');
     return editor && editor.node_selected && editor.node_selected.id
@@ -1486,7 +1498,7 @@
     button.className = 'niso';
     button.dataset.node = String(id);
     button.textContent = '◎';
-    button.title = 'Isolate this branch: run only what this node needs (Ctrl+I)';
+    button.title = 'Isolate this branch: run only what this node needs (I or Ctrl+I)';
     button.setAttribute('aria-label', 'Isolate branch');
     button.style.cssText = 'margin-left:4px;border:0;background:transparent;color:inherit;cursor:pointer;font-size:13px;padding:0 3px;opacity:.75';
     button.addEventListener('mousedown', event => event.stopPropagation());
@@ -1494,18 +1506,110 @@
     head.appendChild(button);
   }
 
-  document.addEventListener('keydown', event => {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-    if (String(event.key).toLowerCase() !== 'i') return;
+  /**
+   * Node hotkeys, on window in the capture phase so nothing on the page sees
+   * them first. Plain letters work everywhere (no browser or extension owns
+   * them): I isolate, B or M bypass. Ctrl+I / Ctrl+B / Ctrl+M / Ctrl+P too.
+   * Ignored while typing.
+   */
+  const HOTKEYS = {isolate: 'I or Ctrl+I', bypass: 'B / M or Ctrl+B / Ctrl+P'};
+  function typingIn(target) {
+    return !!(target && ((/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || '') && !target.readOnly) ||
+      target.isContentEditable || (target.closest && target.closest('dialog, .mpick-panel'))));
+  }
+  function hotkeyAction(event) {
+    if (event.altKey || event.shiftKey) return null;
+    const key = String(event.key || '').toLowerCase();
+    const command = event.ctrlKey || event.metaKey;
+    if (key === 'i') return 'isolate';
+    if (key === 'b' || key === 'm') return 'bypass';
+    if (key === 'p' && command) return 'bypass';
+    return null;
+  }
+  window.addEventListener('keydown', event => {
     if (!document.getElementById('canvas')) return;
-    const typing = event.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || '') || event.target.isContentEditable);
-    if (typing) return;
+    const action = hotkeyAction(event);
+    if (!action) return;
+    if (typingIn(event.target) || typingIn(document.activeElement)) {
+      // Ctrl+P must still never open the print dialog on this page.
+      if (action === 'bypass' && (event.ctrlKey || event.metaKey)) event.preventDefault();
+      return;
+    }
     event.preventDefault();
     event.stopImmediatePropagation();
-    const id = selectedNodeId();
-    if (isolation && (!id || id === String(isolation.target))) toggleIsolation();
-    else toggleIsolation(id);
+    if (action === 'isolate') {
+      const id = selectedNodeId();
+      if (isolation && (!id || id === String(isolation.target))) toggleIsolation();
+      else toggleIsolation(id);
+    } else {
+      toggleBypass(selectedIds());
+    }
+    paintQuickbar();
   }, true);
+
+  /* ---------------------------------------------------------- quick toolbar */
+
+  let quickbar = null;
+  function quickButton(glyph, title, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = glyph;
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.style.cssText = 'min-width:34px;height:30px;border:0;border-radius:7px;background:transparent;color:inherit;' +
+      'font-size:16px;cursor:pointer;padding:0 6px';
+    ['mousedown', 'pointerdown', 'touchstart', 'dblclick'].forEach(type =>
+      button.addEventListener(type, event => { event.stopPropagation(); if (type !== 'touchstart') event.preventDefault(); }));
+    button.addEventListener('click', event => { event.stopPropagation(); event.preventDefault(); onClick(); paintQuickbar(); });
+    return button;
+  }
+  function ensureQuickbar() {
+    if (quickbar) return quickbar;
+    quickbar = document.createElement('div');
+    quickbar.id = 'node-quickbar';
+    quickbar.style.cssText = 'position:fixed;z-index:40;display:none;gap:2px;padding:3px;border-radius:10px;' +
+      'background:#1f1b33;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12)';
+    const id = () => selectedNodeId();
+    quickbar._isolate = quickButton('◎', 'Isolate this branch / restore (' + HOTKEYS.isolate + ')', () => {
+      const target = id();
+      if (isolation && String(isolation.target) === String(target)) toggleIsolation(); else toggleIsolation(target);
+    });
+    quickbar._bypass = quickButton('⏻', 'Enable / disable (bypass) this node (' + HOTKEYS.bypass + ')', () => toggleBypass([id()]));
+    quickbar._run = quickButton('▶', 'Run this branch: isolate it and render (keeps finished results)', () => {
+      const target = id();
+      if (!target) return;
+      if (!isolation || String(isolation.target) !== String(target)) toggleIsolation(target);
+      runGraph(true);
+    });
+    quickbar.append(quickbar._isolate, quickbar._bypass, quickbar._run);
+    document.body.appendChild(quickbar);
+    return quickbar;
+  }
+  function paintQuickbar() {
+    const bar = ensureQuickbar();
+    const ids = selectedIds();
+    const element = ids.length === 1 ? nodeElement(ids[0]) : null;
+    if (!element || !meta(ids[0])) { bar.style.display = 'none'; return; }
+    const rect = element.getBoundingClientRect();
+    const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+    if (rect.bottom < canvasRect.top || rect.top > canvasRect.bottom || rect.right < canvasRect.left || rect.left > canvasRect.right) {
+      bar.style.display = 'none'; return;
+    }
+    const isService = meta(ids[0]).kind === KIND_SERVICE;
+    bar._isolate.style.display = isService ? '' : 'none';
+    bar._run.style.display = isService ? '' : 'none';
+    const isolatedHere = !!isolation && String(isolation.target) === String(ids[0]);
+    bar._isolate.style.background = isolatedHere ? '#7c3aed' : 'transparent';
+    bar._isolate.title = (isolatedHere ? 'Restore every node' : 'Isolate this branch') + ' (' + HOTKEYS.isolate + ')';
+    const off = isBypassed(ids[0]);
+    bar._bypass.style.background = off ? '#6b7280' : 'transparent';
+    bar._bypass.title = (off ? 'Enable this node' : 'Disable (bypass) this node') + ' (' + HOTKEYS.bypass + ')';
+    bar.style.display = 'flex';
+    const width = bar.offsetWidth || 110;
+    bar.style.left = Math.max(canvasRect.left + 4, Math.min(rect.left + rect.width / 2 - width / 2, canvasRect.right - width - 4)) + 'px';
+    bar.style.top = Math.max(canvasRect.top + 4, rect.top - 40) + 'px';
+  }
+  setInterval(() => { if (typeof editor !== 'undefined' && editor) paintQuickbar(); }, 150);
 
   /* ------------------------------------------------------- system prompts */
 
@@ -3074,12 +3178,24 @@
           }
           if (upstreamRecords.some(record => !record || !record.ok)) {
             const bypassed = upstreamRecords.some(record => record && record.bypassed);
+            const missing = feeds.map((link, index) => {
+              const record = upstreamRecords[index];
+              if (record && record.ok) return '';
+              const from = byId.get(link.from) || {};
+              const name = ((from.params || {})._label) || from.service || from.entity_type || ('node ' + link.from);
+              const why = !record ? 'not in the run'
+                : record.bypassed ? 'bypassed'
+                : record.cancelled ? 'cancelled'
+                : record.superseded ? 'superseded by a newer run'
+                : (record.error || 'failed');
+              return link.input + ' ← ' + name + ': ' + String(why).slice(0, 120);
+            }).filter(Boolean);
+            const detail = missing.join('; ');
             if (epoch === canvasEpoch && meta(id)) {
-              markState(id, bypassed
-                ? 'skipped — something it needs is bypassed'
-                : 'skipped — what it needed did not arrive', bypassed ? 'nstate' : 'nstate failed');
+              markState(id, (bypassed ? 'skipped — needs a bypassed node: ' : 'skipped — input did not arrive: ') + detail,
+                bypassed ? 'nstate' : 'nstate failed');
             }
-            return {ok:false, bypassed:bypassed};
+            return {ok:false, bypassed:bypassed, error:'upstream ' + detail};
           }
           if (node.kind === KIND_INPUT) {
             const value = inputValues.get(id) || '';

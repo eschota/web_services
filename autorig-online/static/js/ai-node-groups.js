@@ -81,6 +81,11 @@
       const s = Math.min(limits.min / Math.min(width, height), limits.max / Math.max(width, height));
       width *= s; height *= s;
     }
+    // Video models render up to ~1.5 MP (1648x928 class); keep the aspect.
+    const VIDEO_AREA = 1648 * 928;
+    if (/^(video|video_control|avatar_video|upscale_video)$/.test(String(service)) && width * height > VIDEO_AREA) {
+      const s = Math.sqrt(VIDEO_AREA / (width * height)); width *= s; height *= s;
+    }
     const snap = value => Math.min(Math.floor(limits.max / grid) * grid,
       Math.max(Math.ceil(limits.min / grid) * grid, Math.round(value / grid) * grid));
     const w = snap(width), h = snap(height);
