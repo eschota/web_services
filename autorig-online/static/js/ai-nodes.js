@@ -1899,6 +1899,136 @@
     return {type: record.type, value: record.value, x9: cells.map(cell => cell.value)};
   }
 
+  /* ------------------------------------------------------- post to Civitai */
+
+  /**
+   * "Post to Civitai" on a node's output (owner only, 2026-09-27). The server
+   * posts a picture with its own token (draft by default); a clip, music, or
+   * any refusal comes back as a manual path: download, copy, open the page.
+   */
+  let civitaiAdmin = null;
+  function civitaiIsAdmin() {
+    if (civitaiAdmin === null) {
+      civitaiAdmin = fetch('/auth/me', {credentials: 'same-origin'}).then(r => r.ok ? r.json() : null)
+        .then(data => !!(data && data.user && data.user.is_admin)).catch(() => false);
+    }
+    return civitaiAdmin;
+  }
+
+  function nodePromptText(id) {
+    const graph = graphFromCanvas();
+    const link = graph.links.find(item => String(item.to) === String(id) && item.input === 'prompt');
+    if (!link) return '';
+    const from = graph.nodes.find(node => String(node.id) === String(link.from));
+    if (from && from.kind === KIND_INPUT) return String(from.value || '');
+    const record = runState.get(String(link.from));
+    return record && record.value ? String(record.value) : '';
+  }
+
+  async function nodeResources(id) {
+    const params = readParams(id);
+    const item = meta(id) || {};
+    const files = [params.checkpoint, params.lora].filter(Boolean).map(String);
+    String(params.loras || '').replace(/<lora:([^:>]+)/g, (_, name) => { files.push(name.trim()); return ''; });
+    if (!files.length || !window.AIEntities) return [];
+    try {
+      const data = await window.AIEntities.loadModels(item.service || 'image');
+      const all = [].concat((data && data.checkpoints_array) || [], (data && data.loras_array) || []);
+      return files.map(file => all.find(entry => entry.file === file || (entry.file || '').replace(/\.safetensors$/, '') === file))
+        .filter(entry => entry && entry.source_version_id)
+        .map(entry => ({model_version_id: Number(entry.source_version_id), name: entry.title || entry.file}));
+    } catch (error) { return []; }
+  }
+
+  async function openCivitaiDialog(id) {
+    const record = runState.get(String(id));
+    const url = record && record.value;
+    if (!url || !/^https?:/.test(url)) { toast('Render the node first.'); return; }
+    const item = meta(id) || {};
+    const params = readParams(id);
+    const resources = await nodeResources(id);
+    const prompt = nodePromptText(id);
+    const risky = /porn|nsfw|xxx|hentai|nude|lewd/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' '));
+    let dialog = document.getElementById('civitai-post');
+    if (dialog) dialog.remove();
+    dialog = document.createElement('dialog');
+    dialog.id = 'civitai-post';
+    dialog.style.cssText = 'width:min(560px,94vw);border:1px solid #444;border-radius:12px;background:#12132a;color:#eee;font:13px system-ui';
+    const esc = value => escapeHtml(String(value || ''));
+    dialog.innerHTML = `<form method="dialog" style="display:grid;gap:8px">
+      <b style="font-size:15px">Post to Civitai (NoDeadLine)</b>
+      <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
+      <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
+      <label>Tags (comma separated)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
+      <label>Rating (required)<select name="rating" required>
+        <option value="">— choose —</option><option${risky ? '' : ' selected'}>None</option><option>Soft</option><option>Mature</option><option${risky ? ' selected' : ''}>X</option></select></label>
+      <label><input type="checkbox" name="confirm" required> I checked the rating (suggested from the model/LoRA and prompt)</label>
+      <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
+      <label><input type="radio" name="publish" value="draft" checked> Save as draft (recommended)</label>
+      <label><input type="radio" name="publish" value="publish"> Publish now</label>
+      <div class="civ-out" style="white-space:pre-wrap"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button value="cancel">Close</button><button type="button" class="civ-go">Post</button></div></form>`;
+    document.body.appendChild(dialog);
+    ['mousedown', 'pointerdown', 'keydown'].forEach(type => dialog.addEventListener(type, event => event.stopPropagation()));
+    const form = dialog.querySelector('form');
+    const out = dialog.querySelector('.civ-out');
+    dialog.querySelector('.civ-go').addEventListener('click', async () => {
+      if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
+      const publish = form.publish.value === 'publish';
+      if (publish && !window.confirm('Publish this publicly on Civitai now?')) return;
+      out.textContent = 'Posting…';
+      const body = {media_url: url, title: form.title.value, description: form.description.value, prompt,
+        tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
+        resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name})), publish};
+      try {
+        const response = await fetch('/api/ai/civitai/post', {method: 'POST', credentials: 'same-origin',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error((data.detail && (data.detail.message_string || data.detail)) || ('HTTP ' + response.status));
+        if (data.success_bool && data.post_url_string) {
+          out.innerHTML = (data.draft_bool ? 'Draft saved: ' : 'Posted: ') + `<a href="${esc(data.post_url_string)}" target="_blank" rel="noopener">${esc(data.post_url_string)}</a>`;
+          const current = runState.get(String(id));
+          if (current) { current.civitai_url = data.post_url_string; recordResult(id, current); }
+        } else {
+          out.innerHTML = esc(data.reason_string || 'Post by hand:') + `<br><a href="${esc(data.download_url_string)}" target="_blank" rel="noopener" download>Download the file</a> · ` +
+            `<a href="${esc(data.open_url_string)}" target="_blank" rel="noopener">Open Civitai's post page</a> · <button type="button" class="civ-copy">Copy details</button>`;
+          const copy = out.querySelector('.civ-copy');
+          if (copy) copy.addEventListener('click', () => copyText(data.details_string || '').then(() => toast('Details copied.')));
+        }
+      } catch (error) { out.textContent = 'Failed: ' + error.message; }
+    });
+    dialog.showModal();
+  }
+
+  function attachCivitaiButton(host) {
+    if (!host || host.querySelector(':scope > .civ-btn')) return;
+    const node = host.closest('.drawflow-node');
+    if (!node) return;
+    civitaiIsAdmin().then(admin => {
+      if (!admin || host.querySelector(':scope > .civ-btn')) return;
+      if (!host.querySelector('img, video, audio, .nx9grid')) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'civ-btn';
+      button.textContent = 'C↑';
+      button.title = 'Post to Civitai (NoDeadLine) — draft by default';
+      button.style.cssText = 'position:absolute;top:4px;right:4px;z-index:3;font:700 10px system-ui;padding:2px 5px;border-radius:6px;' +
+        'border:1px solid rgba(255,255,255,.3);background:rgba(10,12,30,.8);color:#7dd3fc;cursor:pointer';
+      ['mousedown', 'pointerdown', 'dblclick'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+      button.addEventListener('click', event => { event.stopPropagation(); openCivitaiDialog(node.id.replace(/^node-/, '')); });
+      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+      host.appendChild(button);
+    });
+  }
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(added => {
+      if (added.nodeType !== 1) return;
+      const host = added.classList && added.classList.contains('nout') ? added : (added.closest && added.closest('.nout'));
+      if (host) attachCivitaiButton(host);
+      if (added.querySelectorAll) added.querySelectorAll('.nout').forEach(attachCivitaiButton);
+    }))).observe(document.documentElement, {childList: true, subtree: true});
+  }
+
   /* ---------------------------------------------------------- quick toolbar */
 
   let quickbar = null;
