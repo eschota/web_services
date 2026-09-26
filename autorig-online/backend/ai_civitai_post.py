@@ -45,6 +45,8 @@ SCRATCH_DIR = Path(os.getenv("AUTORIG_SCRATCH_DIR", "/srv/autorig/data/var/civit
 class CivitaiResource(BaseModel):
     model_version_id: int = Field(..., ge=1)
     name: str = ""
+    weight: Optional[float] = None
+    type: str = ""  # checkpoint | lora
 
 
 class CivitaiPostRequest(BaseModel):
@@ -58,6 +60,15 @@ class CivitaiPostRequest(BaseModel):
     publish: bool = False
     dry_run: bool = False
     poster_url: Optional[str] = Field(None, max_length=4096, description="Still for audio")
+    upscale: bool = Field(True, description="Enlarge 2x (RealESRGAN) before posting a picture or clip")
+    generation: Dict[str, Any] = Field(default_factory=dict, description="seed, steps, sampler, cfg, model...")
+
+
+class CivitaiMetaRequest(BaseModel):
+    media_url: str = Field(..., max_length=4096)
+    prompt: str = Field("", max_length=12000)
+    resources: List[str] = Field(default_factory=list, max_length=20)
+    service: str = ""
 
 
 def _token() -> str:
@@ -180,9 +191,21 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
     first_version = body.resources[0].model_version_id if body.resources else None
     post = await _trpc(client, "post.create", {"modelVersionId": first_version} if first_version else {})
     post_id = int(post["id"])
-    meta = {"prompt": body.prompt} if body.prompt.strip() else {}
+    meta: Dict[str, Any] = {"prompt": body.prompt} if body.prompt.strip() else {}
+    generation = dict(body.generation or {})
+    for key, name in (("seed", "seed"), ("steps", "steps"), ("sampler", "sampler"), ("cfg", "cfgScale"),
+                      ("width", "width"), ("height", "height"), ("model", "Model")):
+        if generation.get(key) not in (None, "", 0):
+            meta[name] = generation[key]
+    if meta.get("width") and meta.get("height"):
+        meta["Size"] = f"{meta.pop('width')}x{meta.pop('height')}"
     if body.resources:
-        meta["civitaiResources"] = [{"modelVersionId": item.model_version_id} for item in body.resources]
+        # The shape Civitai's own generator writes into image meta; the site
+        # links these versions as the image's resources.
+        meta["civitaiResources"] = [
+            dict({"modelVersionId": item.model_version_id, "type": item.type or "checkpoint"},
+                 **({"weight": item.weight} if item.weight is not None else {}))
+            for item in body.resources]
     await _trpc(client, "post.addImage", {
         "postId": post_id, "url": image_id, "name": name, "width": width, "height": height,
         "hash": None, "meta": meta or None, "index": 0, "mimeType": mime,
@@ -194,11 +217,98 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
             logger.info("civitai tag %s: %s", tag, error)
     update: Dict[str, Any] = {"id": post_id, "title": body.title.strip() or None,
                               "detail": body.description.strip() or None}
-    if body.publish:
-        update["publishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    # A draft must say so: post 31261839 came out public although no
+    # publishedAt was sent (2026-09-27). Draft = publishedAt null, checked
+    # by reading the post back.
+    update["publishedAt"] = (time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+                             if body.publish else None)
     await _trpc(client, "post.update", update)
+    published = None
+    try:
+        read = await client.get(f"{CIVITAI_HOST}/api/trpc/post.get", headers=_headers(),
+                                params={"input": '{"json":{"id":%d}}' % post_id}, timeout=30.0)
+        published = (((read.json().get("result") or {}).get("data") or {}).get("json") or {}).get("publishedAt")
+    except Exception:
+        published = "unknown"
+    if not body.publish and published:
+        logger.error("civitai post %s is public although a draft was asked for", post_id)
+        return {"success_bool": True, "post_id_int": post_id, "draft_bool": False,
+                "warning_string": "Civitai published this post although a draft was asked for — check it now",
+                "post_url_string": f"{CIVITAI_HOST}/posts/{post_id}"}
     return {"success_bool": True, "post_id_int": post_id, "draft_bool": not body.publish,
             "post_url_string": f"{CIVITAI_HOST}/posts/{post_id}" + ("" if body.publish else "/edit")}
+
+
+LOCAL = os.getenv("AUTORIG_LOCAL_BASE", "http://127.0.0.1:8200").rstrip("/")
+META_SYSTEM = (
+    "You write Civitai post metadata. Answer with one JSON object only: "
+    '{"title": "...", "description": "...", "tags": ["..."]}. '
+    "title: a catchy, cinematic or game-like title (3-8 words) naming what happens in the picture, "
+    "never a model name. description: 2-3 sentences describing the scene. tags: 5 to 12 short, "
+    "lowercase Civitai tags about subject, style and setting. English only.")
+
+
+async def _ask(client: httpx.AsyncClient, path: str, body: Dict[str, Any], timeout: float = 240.0) -> str:
+    """One Vision/Text request on this backend, answer text (polls the task)."""
+    response = await client.post(LOCAL + path, json=dict(body, wait_seconds=60), timeout=90.0)
+    data = response.json() if response.content else {}
+    deadline = time.monotonic() + timeout
+    while not data.get("answer_string") and time.monotonic() < deadline:
+        task = data.get("task_id_string")
+        if not task or data.get("error_string"):
+            break
+        await asyncio.sleep(3)
+        data = (await client.get(f"{LOCAL}/api/ai/status/{task}", timeout=30.0)).json()
+    return str(data.get("answer_string") or "")
+
+
+async def generate_meta(body: "CivitaiMetaRequest") -> Dict[str, Any]:
+    import json as _json
+    import re as _re
+    kind = _kind(body.media_url)
+    caption = ""
+    async with httpx.AsyncClient() as client:
+        if kind == "image":
+            try:
+                caption = await _ask(client, "/api/vision", {
+                    "prompt": "Describe this picture in 2-3 sentences: who, what happens, setting, style.",
+                    "image_url": body.media_url, "structured": True})
+            except Exception as error:
+                logger.info("civitai meta caption failed: %s", error)
+        text = await _ask(client, "/api/text2text", {
+            "system_prompt": META_SYSTEM, "structured": True,
+            "prompt": ("Generation prompt: " + (body.prompt or "(none)") + "\n"
+                       "What the output shows: " + (caption or "(no caption)") + "\n"
+                       "Made with: " + (", ".join(body.resources) or body.service or "AutoRig nodes"))})
+    match = _re.search(r"\{.*\}", text, _re.S)
+    meta: Dict[str, Any] = {}
+    if match:
+        try:
+            meta = _json.loads(match.group(0))
+        except Exception:
+            meta = {}
+    title = str(meta.get("title") or "").strip()[:120]
+    description = str(meta.get("description") or caption or body.prompt).strip()
+    tags = [str(tag).strip().lower().lstrip("#")[:40] for tag in (meta.get("tags") or []) if str(tag).strip()][:12]
+    return {"success_bool": bool(title), "title_string": title, "description_string": description,
+            "tags_array": tags, "caption_string": caption}
+
+
+async def _upscale_first(client: httpx.AsyncClient, url: str, kind: str) -> str:
+    """The same file 2x through /api/upscale2x; waits for it to land."""
+    import ai_enhance_api
+    request = ai_enhance_api.Upscale2xRequest(**({"video_url": url} if kind == "video" else {"image_url": url}))
+    answer = await ai_enhance_api.api_upscale2x(request)
+    target = str(answer.get("output_url_string") or "")
+    if not target:
+        raise RuntimeError("upscale: no output address")
+    deadline = time.monotonic() + (1800 if kind == "video" else 600)
+    while time.monotonic() < deadline:
+        probe = await client.head(target, timeout=20.0)
+        if probe.status_code == 200:
+            return target
+        await asyncio.sleep(4)
+    raise RuntimeError("upscale did not finish in time")
 
 
 def build_civitai_post_router(require_admin) -> APIRouter:
@@ -233,12 +343,25 @@ def build_civitai_post_router(require_admin) -> APIRouter:
                     return _manual(body, "The music could not be put on a still: " + str(error)[:120], download)
             if not _token():
                 return _manual(body, "No Civitai token on the server", download)
+            upscaled = ""
+            if body.upscale and kind in ("image", "video"):
+                try:
+                    upscaled = await _upscale_first(client, body.media_url, kind)
+                    body = body.model_copy(update={"media_url": upscaled})
+                except Exception as error:
+                    logger.warning("civitai pre-post upscale failed: %s", error)
             try:
-                return await _post_image(client, body, local)
+                answer = await _post_image(client, body, local)
+                answer["upscaled_url_string"] = upscaled
+                return answer
             except Exception as error:
                 logger.warning("civitai post failed: %s", error)
                 return _manual(body, "Civitai did not accept the automatic post (" + str(error)[:200] +
                                "); finish it by hand", download)
+
+    @router.post("/api/ai/civitai/meta")
+    async def api_civitai_meta(body: CivitaiMetaRequest, _admin=Depends(require_admin)):
+        return await generate_meta(body)
 
     @router.post("/api/ai/civitai/post/{post_id}/delete")
     async def api_civitai_delete(post_id: int, _admin=Depends(require_admin)):

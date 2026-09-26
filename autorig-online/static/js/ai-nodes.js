@@ -1944,7 +1944,10 @@
       const all = [].concat((data && data.checkpoints_array) || [], (data && data.loras_array) || []);
       const found = files.map(file => all.find(entry => entry.file === file || (entry.file || '').replace(/\.safetensors$/, '') === file))
         .filter(entry => entry && entry.source_version_id)
-        .map(entry => ({model_version_id: Number(entry.source_version_id), name: entry.title || entry.file}));
+        .map(entry => ({model_version_id: Number(entry.source_version_id), name: entry.title || entry.file,
+          type: String(entry.file || '') === String(params.checkpoint || '') ? 'checkpoint' : 'lora',
+          weight: String(entry.file || '') === String(params.lora || '') ? Number(params.lora_strength) || 1
+            : (() => { const m = new RegExp('<lora:' + String(entry.file || '').replace(/\\.safetensors$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':([-0-9.]+)').exec(String(params.loras || '')); return m ? Number(m[1]) : undefined; })()}));
       return known.concat(found.filter(item => !known.some(k => k.model_version_id === item.model_version_id)));
     } catch (error) { return known; }
   }
@@ -1973,6 +1976,8 @@
         <option value="">— choose —</option><option${risky ? '' : ' selected'}>None</option><option>Soft</option><option>Mature</option><option${risky ? ' selected' : ''}>X</option></select></label>
       <label><input type="checkbox" name="confirm" required> I checked the rating (suggested from the model/LoRA and prompt)</label>
       <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
+      <label><input type="checkbox" name="upscale"${/\.(mp3|wav|flac|ogg|m4a)(\?|$)/i.test(url) ? '' : ' checked'}> Upscale 2× before posting (RealESRGAN)</label>
+      <div><button type="button" class="civ-regen">↻ Write title, description and tags</button> <span class="civ-meta-state"></span></div>
       <label><input type="radio" name="publish" value="draft" checked> Save as draft (recommended)</label>
       <label><input type="radio" name="publish" value="publish"> Publish now</label>
       <div class="civ-out" style="white-space:pre-wrap"></div>
@@ -1981,21 +1986,42 @@
     ['mousedown', 'pointerdown', 'keydown'].forEach(type => dialog.addEventListener(type, event => event.stopPropagation()));
     const form = dialog.querySelector('form');
     const out = dialog.querySelector('.civ-out');
+    const metaState = dialog.querySelector('.civ-meta-state');
+    const writeMeta = async () => {
+      metaState.textContent = 'writing with the text model…';
+      try {
+        const response = await fetch('/api/ai/civitai/meta', {method: 'POST', credentials: 'same-origin',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({media_url: url, prompt, service: item.service || '', resources: resources.map(r => r.name)})});
+        const meta = await response.json();
+        if (meta.title_string) form.title.value = meta.title_string;
+        if (meta.description_string) form.description.value = meta.description_string;
+        if (meta.tags_array && meta.tags_array.length) form.tags.value = meta.tags_array.join(', ');
+        metaState.textContent = meta.title_string ? 'written — edit freely' : 'the model gave no title; kept the defaults';
+      } catch (error) { metaState.textContent = 'could not write: ' + error.message; }
+    };
+    dialog.querySelector('.civ-regen').addEventListener('click', writeMeta);
+    writeMeta();
     dialog.querySelector('.civ-go').addEventListener('click', async () => {
       if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
       const publish = form.publish.value === 'publish';
       if (publish && !window.confirm('Publish this publicly on Civitai now?')) return;
-      out.textContent = 'Posting…';
+      out.textContent = form.upscale.checked ? 'Upscaling 2× and posting… (a clip can take a few minutes)' : 'Posting…';
       const body = {media_url: url, title: form.title.value, description: form.description.value, prompt,
         tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
-        resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name})), publish};
+        resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
+          weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
+        publish, upscale: !!form.upscale.checked,
+        generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
+                     width: params.width, height: params.height, model: params.checkpoint}};
       try {
         const response = await fetch('/api/ai/civitai/post', {method: 'POST', credentials: 'same-origin',
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error((data.detail && (data.detail.message_string || data.detail)) || ('HTTP ' + response.status));
         if (data.success_bool && data.post_url_string) {
-          out.innerHTML = (data.draft_bool ? 'Draft saved: ' : 'Posted: ') + `<a href="${esc(data.post_url_string)}" target="_blank" rel="noopener">${esc(data.post_url_string)}</a>`;
+          out.innerHTML = (data.warning_string ? '<b style="color:#fb7185">' + esc(data.warning_string) + '</b><br>' : '') +
+            (data.draft_bool ? 'Draft saved: ' : 'Posted: ') + `<a href="${esc(data.post_url_string)}" target="_blank" rel="noopener">${esc(data.post_url_string)}</a>`;
           const current = runState.get(String(id));
           if (current) { current.civitai_url = data.post_url_string; recordResult(id, current); }
         } else {
@@ -4075,6 +4101,34 @@
     } catch (error) { /* the local stop already happened */ }
   }
 
+  /** Administrator: wipe the whole farm queue after an explicit, typed confirmation. */
+  async function resetFarm() {
+    let preview;
+    try {
+      const response = await fetch('/api/ai/farm/reset?dry_run=1', {method: 'POST'});
+      preview = await response.json();
+      if (!response.ok) throw new Error(preview.detail || 'not allowed');
+    } catch (error) { toast('Farm reset is not available: ' + error.message); return; }
+    const list = object => Object.entries(object || {}).map(([k, v]) => '  ' + k + ': ' + v).join('\n') || '  none';
+    const text = 'RESET THE WHOLE FARM\n\n' +
+      'Queued: ' + preview.queued_int + '   Running: ' + preview.running_int + '\n\n' +
+      'Running on boxes:\n' + list(preview.running_by_box_object) + '\n\n' +
+      'Jobs by owner:\n' + list(preview.by_owner_object) + '\n\n' +
+      'Every one of them (every graph, user and agent) is cancelled, and the ComfyUI queue on ' +
+      (preview.boxes_array || []).join(', ') + ' is cleared. Results, caches and models stay.\n\n' +
+      'Type RESET to confirm:';
+    if ((window.prompt(text, '') || '').trim().toUpperCase() !== 'RESET') { toast('Farm reset cancelled.'); return; }
+    runRequests.forEach(token => { token.cancelled = true; });
+    try {
+      const response = await fetch('/api/ai/farm/reset', {method: 'POST'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'the reset failed');
+      const boxes = Object.values(data.boxes_object || {}).filter(value => value === 'cleared').length;
+      toast('Farm reset: cancelled ' + data.cancelled_queued_int + ' queued, ' +
+            data.cancelled_running_int + ' running on ' + boxes + ' boxes.');
+    } catch (error) { toast('Farm reset failed: ' + error.message); }
+  }
+
   /**
    * Throw away what these compositions have left on the site's disk.
    *
@@ -4894,6 +4948,12 @@
     document.getElementById('save').addEventListener('click', saveGraph);
     document.getElementById('duplicate-graph').addEventListener('click', duplicateGraph);
     document.getElementById('cancel').addEventListener('click', cancelRun);
+    const farmReset = document.getElementById('farm-reset');
+    if (farmReset) {
+      farmReset.addEventListener('click', resetFarm);
+      fetch('/api/ai/queue/admin').then(r => r.json())
+        .then(data => { farmReset.hidden = !(data && data.admin_bool); }).catch(() => {});
+    }
     document.getElementById('purge').addEventListener('click', purgeCache);
     document.getElementById('clear').addEventListener('click', () => {
       resetCanvasExecutionState();

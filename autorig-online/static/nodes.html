@@ -29,7 +29,7 @@
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ4"></script>
+    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ5-reset1-meta1"></script>
     <style>
         .ai-page {
             background:
@@ -67,6 +67,7 @@
         }
         .bar button:disabled { opacity: .55; cursor: not-allowed; }
         .bar button#cancel { border-color: rgba(251,113,133,.5); color: #fb7185; }
+        .bar button#farm-reset { border-color: rgba(251,113,133,.8); color: #fff; background: #b91c1c; }
         /* Render quality: four icon segments; the name is in the tooltip. */
         .rq-group {
             display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px;
@@ -624,6 +625,7 @@
     <button id="run">Render</button>
     <button id="continue">Continue</button>
     <button id="cancel" hidden>Cancel</button>
+    <button id="farm-reset" hidden title="Administrator: cancel every queued and running job on the whole farm">Reset farm</button>
     <button id="save">Save &amp; copy link</button>
     <button id="duplicate-graph" title="Create an independent graph with a new link">Duplicate graph</button>
     <button id="clear">Clear</button>
