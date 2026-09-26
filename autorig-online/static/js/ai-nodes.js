@@ -1176,6 +1176,19 @@
       acceptText(event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain'));
     });
     let timer = null;
+    // Only links and files belong here. Copied nodes (AUTORIG_NODES_V1…) or
+    // stray text pasted into the field used to become the node's "picture"
+    // and every consumer failed with "Provide image_url" (2026-09-27).
+    text.addEventListener('paste', event => {
+      const pasted = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
+      if (/^AUTORIG_NODES_V1:/.test(pasted)) {
+        event.preventDefault();
+        toast('Those are copied nodes, not a link: click the empty canvas and press Ctrl+V to paste them.');
+      } else if (pasted && !/^\s*(https?:\/\/|data:(image|video)\/)/.test(pasted)) {
+        event.preventDefault();
+        toast('Media in takes a link (http…), a file or a pasted picture.');
+      }
+    });
     text.addEventListener('change', refresh);
     let lastValue = text.value.trim();
     text.addEventListener('change', () => {
@@ -4018,6 +4031,10 @@
           if (node.kind === KIND_INPUT) {
             const value = inputValues.get(id) || '';
             if (!value) return {ok:false, error:'empty input'};
+            if (node.entity_type === 'media' && !/^(https?:\/\/|data:(image|video)\/|blob:)/.test(value)) {
+              if (epoch === canvasEpoch && meta(id)) markState(id, 'not a link or file — paste an image/video link', 'nstate failed');
+              return {ok:false, error:'Media in holds no picture or clip link (' + value.slice(0, 30) + '…)'};
+            }
             const type = node.entity_type === 'media'
               ? (looksLikeVideo(value) ? 'video' : 'image') : node.entity_type;
             return {ok:true, result:{type, value, media:node.entity_type === 'media'}};
