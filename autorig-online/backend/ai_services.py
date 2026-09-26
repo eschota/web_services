@@ -355,6 +355,16 @@ for _channel, _title, _type in (("pose", "Pose", CONTROL_POSE), ("depth", "Depth
 # `blocked_reason` is what the palette shows instead of a generic tooltip.
 SERVICES.extend([
     {
+        # Owner rule 2026-09-26: render within half-HD, enlarge at the end.
+        "id": "upscale2x", "title": "Upscale 2×", "path": "/nodes",
+        "api": "/api/upscale2x", "status": "live",
+        "summary": "Fast 2x enlargement of a picture or a clip (RealESRGAN x2, per frame for video). Put it last.",
+        "inputs": [{"type": IMAGE, "field": "image", "required": True,
+                    "title": "Picture or clip", "also_accepts": [VIDEO]}],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Picture ×2"},
+                    {"type": VIDEO, "field": "video_url_string", "title": "Clip ×2"}],
+    },
+    {
         "id": "upscale", "title": "Upscale", "path": "/nodes",
         "api": "/api/upscale", "status": "live",
         "summary": "Enlarge a picture 2x or 4x, optionally re-rendering the new pixels.",

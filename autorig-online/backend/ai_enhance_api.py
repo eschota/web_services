@@ -243,6 +243,79 @@ async def _uncached_upscale(body: UpscaleRequest):
     return await _run("upscale", payload, body.wait_seconds)
 
 
+# ---------------------------------------------------------------- upscale 2x
+
+# The fast x2 model, on every image box since 2026-09-26 (f5, f15, Raptor).
+UPSCALE_X2_MODEL = "RealESRGAN_x2.pth"
+VIDEO_SUFFIXES = (".mp4", ".webm", ".mov", ".m4v")
+
+
+class Upscale2xRequest(BaseModel):
+    image_url: Optional[str] = Field(None, description="Picture or clip, public http(s) URL")
+    image_base64: Optional[str] = Field(None, description="Picture as base64 or data URL")
+    video_url: Optional[str] = Field(None, description="Clip, public http(s) URL (same as image_url with a video)")
+    wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
+
+
+@router.get("/api/upscale2x")
+async def api_upscale2x_docs():
+    return {
+        "status_string": "ok", "method_string": "POST", "url_string": "/api/upscale2x",
+        "required_fields_array": ["image_url (picture or clip) or image_base64 or video_url"],
+        "model_string": UPSCALE_X2_MODEL, "factor_int": 2,
+        "note_string": "Output = input x2. A clip is enlarged frame by frame at 24 fps (up to 16 s).",
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+@router.post("/api/upscale2x")
+async def api_upscale2x(body: Upscale2xRequest):
+    import ai_request_cache
+    return await ai_request_cache.run_cached(
+        "upscale2x", body.model_dump(exclude_none=True),
+        lambda: _uncached_upscale2x(body), namespace=CACHE_NAMESPACE + "-x2")
+
+
+def _is_video_url(url: str) -> bool:
+    path = str(url or "").split("?", 1)[0].split("#", 1)[0].lower()
+    return path.endswith(VIDEO_SUFFIXES)
+
+
+async def _uncached_upscale2x(body: Upscale2xRequest):
+    clip = str(body.video_url or "").strip()
+    if not clip and _is_video_url(str(body.image_url or "")):
+        clip = str(body.image_url).strip()
+    if clip:
+        if not clip.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail={
+                "error_string": "video_required", "message_string": "Provide a public clip URL"})
+        payload: Dict[str, object] = {
+            "type": "upscale_video_x2",
+            # Renderfin admits a job by a prompt or a picture; a clip job has
+            # neither, so it carries a label the workflow never reads.
+            "prompt": "upscale 2x",
+            "control_video_url": clip,
+            # 8k+1 ceiling of the clip loader; a shorter clip keeps its length.
+            "frame_count": 393,
+            "upscale_model": UPSCALE_X2_MODEL,
+            "main_size_width": 1920, "main_size_height": 1080,
+        }
+        answer = await _run("upscale2x", payload, body.wait_seconds, produces="video")
+    else:
+        async with httpx.AsyncClient() as client:
+            source = await _resolve_source(client, body.image_url, body.image_base64)
+            source_width, source_height = await _source_size(client, source)
+        width, height = _fit(source_width * 2, source_height * 2)
+        payload = {
+            "image_url": source, "type": "upscale_x2",
+            "main_size_width": width, "main_size_height": height,
+            "upscale_model": UPSCALE_X2_MODEL,
+        }
+        answer = await _run("upscale2x", payload, body.wait_seconds)
+    answer["output_url_string"] = answer.get("video_url_string") or answer.get("image_url_string") or ""
+    return answer
+
+
 # ------------------------------------------------------------------- detail
 
 

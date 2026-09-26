@@ -1298,10 +1298,13 @@
     const node = select.closest('.drawflow-node');
     const service = node ? (meta(node.id.replace(/^node-/, '')) || {}).service : '';
     select.dataset.filled = '1';
+    const cached = loraMenuCache.get(service);
+    if (cached && Date.now() - cached.at > 60000) loraMenuCache.delete(service);
     if (!loraMenuCache.has(service)) {
       loraMenuCache.set(service, fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(service || 'image'))
         .then(r => r.json()).then(body => (body.loras_array || []).filter(entry => entry.usable))
         .catch(() => []));
+      loraMenuCache.get(service).at = Date.now();
     }
     loraMenuCache.get(service).then(loras => {
       loras.forEach(entry => {
@@ -1911,6 +1914,11 @@
     // Enhancement: a picture in, the same picture out, published at a URL the
     // farm fills in later — exactly the ControlNet shape.
     upscale: { api: '/api/upscale', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    // Picture or clip in, the same x2 out; the type follows what came back.
+    upscale2x: { api: '/api/upscale2x', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      return {value, outputs: looksLikeVideo(value) ? {video_url_string: value} : {image_url_string: value}};
+    }, field: 'output_url_string', type: 'auto' },
     detail_enhance: { api: '/api/detail', finish: pollForFile, field: 'image_url_string', type: 'image' },
     face_fix: { api: '/api/facefix', finish: pollForFile, field: 'image_url_string', type: 'image' },
     // Draws or rewrites depending on whether a picture is wired in; the
@@ -1922,6 +1930,12 @@
     RUNNERS['control_' + channel] = { api: '/api/controlnet', finish: pollForFile,
       field: 'image_url_string', type: 'control_' + channel };
   });
+
+  /** A runner's result type; 'auto' reads it off the address (picture or clip). */
+  function runnerType(runner, value) {
+    if (!runner || runner.type !== 'auto') return runner ? runner.type : 'image';
+    return looksLikeVideo(value) ? 'video' : 'image';
+  }
 
   function runnerFor(serviceId) {
     const runner = RUNNERS[serviceId];
@@ -2489,7 +2503,7 @@
       // opened mid-render knows which task to carry on watching.
       if (executionIsCurrent(execution)) {
         recordResult(id, {
-          status: 'running', type: runner.type,
+          status: 'running', type: runnerType(runner, accepted[runner.field] || ''),
           value: accepted[runner.field] || '',
           task_id: accepted.task_id_string || '',
           input_reference_url: execution.inputReference || '',
@@ -2518,12 +2532,12 @@
       if (executionIsCurrent(execution)) {
         state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
         state.className = 'nstate done';
-        showResult(outBox, runner.type, value, outputs);
-        recordResult(id, Object.assign({ status: 'done', type: runner.type, value: value,
+        showResult(outBox, runnerType(runner, value), value, outputs);
+        recordResult(id, Object.assign({ status: 'done', type: runnerType(runner, value), value: value,
                            input_reference_url: execution.inputReference || '',
                            task_id: accepted.task_id_string || '' }, outputs ? {outputs} : {}));
       }
-      return outputs ? { type: runner.type, value: value, outputs } : { type: runner.type, value: value };
+      return outputs ? { type: runnerType(runner, value), value: value, outputs } : { type: runnerType(runner, value), value: value };
     } catch (error) {
       finishTaskTracker(task, false, execution, progress);
       if (executionIsCurrent(execution)) {
@@ -3388,17 +3402,17 @@
       state.textContent = accepted.cache_hit_bool ? 'cached' : 'done';
       state.className = 'nstate done';
       if (task) task.finish(true);
-      showResult(outBox, runner.type, value, outputs);
-      recordResult(id, Object.assign({ status: 'done', type: runner.type, value: value,
+      showResult(outBox, runnerType(runner, value), value, outputs);
+      recordResult(id, Object.assign({ status: 'done', type: runnerType(runner, value), value: value,
                          input_reference_url:record.input_reference_url || '', history:record.history || [],
                          task_id: record.task_id || '' }, outputs ? {outputs} : {}));
-      return outputs ? {type:runner.type, value, outputs} : {type:runner.type, value};
+      return outputs ? {type:runnerType(runner, value), value, outputs} : {type:runnerType(runner, value), value};
     } catch (error) {
       if (!stillHere()) throw error;
       state.textContent = String(error.message || error);
       state.className = 'nstate failed';
       if (task) task.finish(false);
-      recordResult(id, { status: 'failed', type: runner.type, value: '',
+      recordResult(id, { status: 'failed', type: runnerType(runner, ''), value: '',
                          error: String(error.message || error) });
       throw error;
     }
@@ -3571,7 +3585,7 @@
    * of the thing it makes, so a new service appears without an edit.
    */
   const TOOL_ICONS = {
-    'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
+    upscale2x: '⏫', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',

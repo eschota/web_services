@@ -1495,14 +1495,18 @@ class RenderQueue:
         control_url = str(getattr(prompt, "control_video_url", "") or "").strip()
         controlled_video = workflow_file in {
             "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
-            "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json"}
+            "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json",
+            "upscale_video_x2.json"}
         if bool(control_url) != controlled_video:
             raise comfy_adapter.ComfyRequestError(
                 "A video control workflow requires its driving video"
             )
         if control_url:
             from .video_input import download_prepare_video
-            name, data = await download_prepare_video(self._client, control_url, prompt.frame_count)
+            name, data = await download_prepare_video(
+                self._client, control_url, prompt.frame_count,
+                # An enlargement keeps the clip's own length; no held tail.
+                allow_shorter=workflow_file == "upscale_video_x2.json")
             control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)

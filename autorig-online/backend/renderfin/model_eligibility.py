@@ -131,6 +131,15 @@ async def can_load(client: httpx.AsyncClient, server: RenderServer,
     """
     checkpoint = str(prompt.checkpoint or "").strip()
     loras = requested_loras(prompt)
+    upscale = str(getattr(prompt, "upscale_model", "") or "").strip()
+    if upscale:
+        # Upscale models are not on every image box (RealESRGAN_x2 was added
+        # to f5/f15/Raptor on 2026-09-26): send the job only where it is.
+        try:
+            if upscale not in await _slot(client, server, "UpscaleModelLoader", "model_name"):
+                return False
+        except Exception:
+            return False
     if not checkpoint and not loras:
         return True
     try:

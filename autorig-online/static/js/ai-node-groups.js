@@ -81,16 +81,23 @@
       const s = Math.min(limits.min / Math.min(width, height), limits.max / Math.max(width, height));
       width *= s; height *= s;
     }
-    // Video models render up to ~1.5 MP (1648x928 class); keep the aspect.
-    const VIDEO_AREA = 1648 * 928;
-    if (/^(video|video_control|avatar_video|upscale_video)$/.test(String(service)) && width * height > VIDEO_AREA) {
-      const s = Math.sqrt(VIDEO_AREA / (width * height)); width *= s; height *= s;
+    // Owner rule (2026-09-26): everything renders within half-HD — the long
+    // side at most 960, aspect kept (portrait ~544x960); upscale 2x at the end.
+    if (HALF_HD_SERVICES.test(String(service)) && Math.max(width, height) > HALF_HD_LONG) {
+      const s = HALF_HD_LONG / Math.max(width, height); width *= s; height *= s;
     }
-    const snap = value => Math.min(Math.floor(limits.max / grid) * grid,
-      Math.max(Math.ceil(limits.min / grid) * grid, Math.round(value / grid) * grid));
+    const snap = value => {
+      const top = HALF_HD_SERVICES.test(String(service)) ? Math.min(limits.max, HALF_HD_LONG) : limits.max;
+      return Math.min(Math.floor(top / grid) * grid,
+        Math.max(Math.ceil(limits.min / grid) * grid, Math.round(value / grid) * grid));
+    };
     const w = snap(width), h = snap(height);
     return {width: w, height: h, evenAdjusted: w !== Math.round(Number(dimensions.width)) || h !== Math.round(Number(dimensions.height))};
   }
+
+  const HALF_HD_LONG = 960;
+  // Generators; the enhancers (upscale, detail, face fix) keep their own sizing.
+  const HALF_HD_SERVICES = /^(image|qwen_image|video|video_control|avatar_image|avatar_video|control_pose|control_depth|control_canny)$/;
 
   /** The socket whose picture decides the size: first frame / main image first. */
   const PRIMARY_SOCKETS = ['image', 'image_url_end', 'video_url', 'control_video_url', 'source', 'source_url'];
@@ -800,7 +807,8 @@
       row.querySelector('.nsize-text').textContent = auto
         ? (source ? 'Auto · ' + source.width + '×' + source.height + (sent ? ' → ' + w + '×' + h : '') + scaled
                   : 'Auto · no input picture — ' + w + '×' + h + scaled)
-        : 'Manual · ' + w + '×' + h + scaled;
+        : 'Manual · ' + w + '×' + h + scaled +
+          (Math.max(w, h) > HALF_HD_LONG ? ' ⚠ above half-HD (960) — render small, Upscale 2× at the end' : '');
     }
 
     /**
