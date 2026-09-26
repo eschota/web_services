@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nodes — Wire the AI Services Together | AutoRig</title>
+    <meta name="description" content="Connect Vision, Image, Video and 3D into one composition and render all of it at once on AutoRig's own GPUs.">
+    <link rel="canonical" href="https://autorig.online/nodes">
+    <meta property="og:title" content="Nodes — Wire the AI Services Together">
+    <meta property="og:description" content="One picture in, a clip, a loop and a 3D model out.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/nodes">
+    <meta property="og:site_name" content="AutoRig.online">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
+    <script src="/static/vendor/drawflow/drawflow.min.js"></script>
+    <script src="/static/js/ai-entities.js?v=20260926-catalogue-ttl"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260926-halfhd1"></script>
+    <script src="/static/js/ai-node-display.js?v=20260923-sockets1"></script>
+    <script src="/static/js/ai-node-sockets.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
+    <script src="/static/js/ai-node-compare.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-graph-bridge.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
+    <script src="/static/js/ai-node-placement.js?v=20260927-ids1"></script>
+    <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
+    <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
+    <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
+    <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
+    <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
+    <script src="/static/js/ai-node-lists.js?v=20260927-lists1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ6-reset1-meta1-mi3-lists1"></script>
+    <style>
+        .ai-page {
+            background:
+                radial-gradient(circle at 10% 6%, rgba(56, 189, 248, .14), transparent 34%),
+                radial-gradient(circle at 90% 10%, rgba(123, 92, 255, .18), transparent 38%),
+                linear-gradient(180deg, #101122 0%, #14152a 48%, #0f101c 100%);
+            color: var(--text-primary, #eef);
+            min-height: 100vh; margin: 0;
+        }
+        .ai-page, .ai-page input, .ai-page textarea, .ai-page select, .ai-page button {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                         'Helvetica Neue', Arial, sans-serif;
+        }
+
+        .bar {
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+            padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,.08);
+            background: rgba(12,13,26,.85); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 6;
+        }
+        .bar h1 { font-size: 17px; margin: 0 8px 0 0; }
+        .bar .grow { flex: 1; }
+        #graph-name {
+            background: rgba(10,11,22,.8); border: 1px solid rgba(255,255,255,.12);
+            border-radius: 9px; color: inherit; padding: 8px 11px; font-size: 14px; width: 230px;
+        }
+        .bar button {
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+            color: inherit; border-radius: 9px; padding: 9px 15px; font-size: 14px; cursor: pointer;
+        }
+        .bar button:hover { background: rgba(255,255,255,.12); }
+        .bar button#run {
+            border: 0; font-weight: 700; color: #071018;
+            background: linear-gradient(135deg, #38bdf8, #7b5cff);
+        }
+        .bar button:disabled { opacity: .55; cursor: not-allowed; }
+        .bar button#cancel { border-color: rgba(251,113,133,.5); color: #fb7185; }
+        .bar button#farm-reset { border-color: rgba(251,113,133,.8); color: #fff; background: #b91c1c; }
+        /* Render quality: four icon segments; the name is in the tooltip. */
+        .rq-group {
+            display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04);
+        }
+        .bar .rq-group .rq-btn {
+            min-width: 30px; padding: 6px 7px; border: 0; border-radius: 7px; font-size: 13px;
+            font-weight: 700; background: transparent; color: #9aa0b5; font-variant-numeric: tabular-nums;
+        }
+        .bar .rq-group .rq-btn:hover { background: rgba(255,255,255,.1); color: #eef; }
+        .bar .rq-group .rq-btn.on { background: rgba(56,189,248,.2); color: #38bdf8; }
+        .bar .rq-group .rq-btn.on[data-quality="preview"], .bar .rq-group .rq-btn.on[data-quality="fast"] { background: rgba(250,204,21,.16); color: #facc15; }
+        .bar .rq-group .rq-btn.on[data-quality="highquality"] { background: rgba(192,132,252,.2); color: #c084fc; }
+        /* The size a node will actually send when the quality is not normal. */
+        .nqual {
+            font-style: normal; font-size: 10px; font-weight: 700; flex: 0 0 auto; cursor: help;
+            font-variant-numeric: tabular-nums; color: #facc15; padding: 2px 5px; border-radius: 6px;
+            background: rgba(250,204,21,.12); border: 1px solid rgba(250,204,21,.35);
+        }
+        .nqual.limited { color: #fb923c; border-color: rgba(251,146,60,.5); background: rgba(251,146,60,.12); }
+        .bar button.danger { border-color: rgba(148,163,184,.35); color: #94a3b8; }
+        .bar button.danger:hover { border-color: #fb7185; color: #fb7185; }
+        .bar nav a { color: var(--text-secondary, #9aa0b5); font-size: 13px; margin-left: 12px; text-decoration: none; }
+        .bar nav a:hover { color: #38bdf8; }
+
+        /* One column: the canvas is the page, and the tools float over it. */
+        .shell { display: block; height: calc(100vh - 59px); }
+        .stage { position: relative; height: 100%; }
+
+        /* ---- compositions dropdown --------------------------------------- */
+        .drop { position: relative; }
+        .drop > summary {
+            list-style: none; cursor: pointer; user-select: none;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+            color: inherit; border-radius: 9px; padding: 9px 15px; font-size: 14px;
+        }
+        .drop > summary::-webkit-details-marker { display: none; }
+        .drop > summary::after { content: ' ▾'; opacity: .65; }
+        .drop > summary:hover { background: rgba(255,255,255,.12); }
+        .drop-panel {
+            position: absolute; z-index: 20; top: calc(100% + 8px); left: 0;
+            width: 310px; max-height: min(66vh, 560px); overflow-y: auto;
+            padding: 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px;
+            background: rgba(14,15,30,.98); box-shadow: 0 20px 55px rgba(0,0,0,.55);
+        }
+        .pgroup {
+            font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+            color: var(--text-secondary, #9aa0b5); margin: 14px 0 8px;
+        }
+        .pgroup:first-child { margin-top: 0; }
+
+        /* ---- compact icon toolbar over the canvas ------------------------ */
+        /* ---- Post to Civitai dialog ---- */
+        .civ-dialog { width: min(560px, 94vw); padding: 18px 20px; border: 1px solid rgba(255,255,255,.14);
+            border-radius: 14px; background: #121327; color: #e9e9f4; font: 13px/1.4 system-ui;
+            box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+        .civ-dialog::backdrop { background: rgba(4,5,14,.6); }
+        .civ-dialog form { display: grid; gap: 10px; }
+        .civ-dialog b { font-size: 15px; }
+        .civ-dialog label { display: grid; gap: 4px; color: #aab0c8; font-size: 12px; }
+        .civ-dialog label:has(input[type=checkbox]), .civ-dialog label:has(input[type=radio]) { display: flex; align-items: center; gap: 8px; color: #e9e9f4; }
+        .civ-dialog input:not([type=checkbox]):not([type=radio]), .civ-dialog textarea, .civ-dialog select {
+            box-sizing: border-box; width: 100%; padding: 8px 10px; border-radius: 9px; font: inherit; color: #fff;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); }
+        .civ-dialog a { color: #7dd3fc; }
+        .civ-dialog button { padding: 8px 14px; border-radius: 9px; border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.07); color: inherit; cursor: pointer; font: inherit; }
+        .civ-dialog .civ-go { background: linear-gradient(90deg,#38bdf8,#7b5cff); border: 0; color: #fff; font-weight: 600; }
+        .civ-dialog .civ-out:not(:empty) { padding: 8px 10px; border-radius: 9px; background: rgba(56,189,248,.08); }
+        /* ---- tool dock (bottom, fixed; owner 2026-09-27) ---------------- */
+        :root { --dock-h: 96px; }
+        .shell { height: calc(100vh - 59px - var(--dock-h)); }
+        .ntools {
+            position: fixed; z-index: 30; left: 0; width: 100vw; bottom: 0;
+            height: var(--dock-h); box-sizing: border-box; overflow: hidden;
+            display: flex; flex-direction: column; justify-content: flex-end;
+            padding: 4px 8px 6px; contain: layout paint;
+            border-top: 1px solid rgba(255,255,255,.12); background: rgba(12,13,26,.97);
+        }
+        .dock-tabs { display: none; height: 20px; gap: 4px; flex: 0 0 20px; overflow: hidden; flex-wrap: nowrap; }
+        /* The fleet status line is one long run of text; on a phone it widened
+           the page and pushed the fixed dock below the screen. */
+        #fleet { max-width: 100%; min-width: 0; overflow: hidden; }
+        #fleet .fleet-dots, #fleet .fleet-queue { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        html, body { overflow-x: hidden; }
+        .dock-tabbed .dock-tabs { display: flex; }
+        .dock-tab { font-size: 11px; padding: 0 7px; height: 20px; border-radius: 6px; flex: 0 0 auto;
+            border: 1px solid rgba(255,255,255,.14); background: transparent; color: inherit; cursor: pointer; }
+        .dock-tab.on { background: rgba(56,189,248,.2); border-color: #38bdf8; }
+        .dock-row { display: flex; flex-wrap: nowrap; justify-content: center; align-items: flex-end;
+            gap: 14px; height: 66px; flex: 0 0 66px; overflow: hidden; }
+        .dock-tabbed .dock-row { justify-content: flex-start; }
+        .dock-group { display: flex; flex-wrap: nowrap; gap: 3px; flex: 0 0 auto; position: relative; }
+        .dock-group + .dock-group::before { content: ''; position: absolute; left: -8px; top: 8px; bottom: 8px;
+            width: 1px; background: rgba(255,255,255,.14); }
+        .dock-group[hidden] { display: none; }
+        .titem {
+            width: 58px; height: 64px; padding: 4px 2px 2px; flex: 0 0 58px; box-sizing: border-box;
+            display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
+            cursor: grab; font-size: 22px; line-height: 1; color: inherit;
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 9px;
+            position: relative;
+        }
+        .ticon { height: 24px; display: flex; align-items: center; }
+        .tlabel { font-size: 10px; line-height: 1.15; text-align: center; white-space: normal;
+            overflow-wrap: normal; word-break: normal; max-height: 2.3em; overflow: hidden; width: 100%; }
+        .titem:hover:not(:disabled), .titem:focus-visible {
+            border-color: #38bdf8; background: rgba(56,189,248,.14); outline: none;
+        }
+        .titem:active:not(:disabled) { cursor: grabbing; }
+        .titem:disabled { opacity: .35; cursor: not-allowed; }
+        .titem.taction { cursor: pointer; }
+        body:not(.aga-shown) .aga { display: none !important; }
+        body.aga-shown .aga { bottom: calc(var(--dock-h) + 10px) !important; }
+        .ttip {
+            position: fixed; z-index: 40; bottom: calc(var(--dock-h) + 6px); left: 50%; transform: translateX(-50%);
+            display: none; width: max-content; max-width: 320px; text-align: left;
+            padding: 7px 9px; border-radius: 9px; pointer-events: none;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(10,11,22,.98);
+            box-shadow: 0 12px 26px rgba(0,0,0,.5);
+        }
+        .titem:hover .ttip, .titem:focus-visible .ttip { display: block; }
+        .titem.dragging .ttip { display: none; }
+        .ttip b { display: block; font-size: 12.5px; font-weight: 600; }
+        .ttip i { display: block; font-style: normal; font-size: 11px; margin-top: 2px;
+                  line-height: 1.35; color: var(--text-secondary, #9aa0b5); }
+        @media (max-width: 860px) { .shell { height: calc(100vh - 59px - var(--dock-h)); } }
+
+        .tmpl {
+            display: block; width: 100%; text-align: left; color: inherit; cursor: pointer;
+            background: rgba(123,92,255,.1); border: 1px solid rgba(123,92,255,.35);
+            border-radius: 10px; padding: 10px 11px; margin-bottom: 7px;
+        }
+        .tmpl:hover { background: rgba(123,92,255,.2); }
+        .tmpl b { display: block; font-size: 13px; }
+        .tmpl i { display: block; font-style: normal; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); margin-top: 3px; line-height: 1.35; }
+
+        #canvas { height: 100%; min-height: 620px; background:
+            radial-gradient(rgba(255,255,255,.055) 1px, transparent 1px) 0 0 / 22px 22px; }
+        /* Every piece of arithmetic that turns a screen point into a graph
+           point — Drawflow's own zoom and pan, the wheel handler, the tool
+           that drops a node where the cursor is — assumes the canvas scales
+           about its top-left corner. The stylesheet left the origin in the
+           middle, so at any zoom but 1 the two disagreed by half a viewport:
+           a dropped node landed nowhere near the pointer and the wheel zoomed
+           somewhere other than where it was aimed. */
+        #canvas > .drawflow { transform-origin: 0 0; }
+
+        /* ---- nodes ------------------------------------------------------- */
+        .drawflow .drawflow-node {
+            align-items: flex-start; padding: 0; width: 244px; border-radius: 13px;
+            background: rgba(21,22,42,.97); border: 1px solid rgba(255,255,255,.13);
+            color: var(--text-primary, #eef); box-shadow: 0 12px 30px rgba(0,0,0,.4);
+        }
+        .drawflow .drawflow-node.selected { background: rgba(21,22,42,.97); border-color: #38bdf8; }
+        /* A socket is a target for the mouse, not part of the picture, so it
+           keeps a roughly constant size on screen: the editor writes
+           --socket-zoom-scale from the current zoom. What shrinks is the box
+           itself and not a transform — Drawflow anchors a wire at
+           offsetWidth/2, which a transform leaves untouched, so a scaled
+           socket would have its wire ending beside it instead of on it. The
+           row still occupies its 26px at any scale, so nothing else moves. */
+        .drawflow .drawflow-node .input, .drawflow .drawflow-node .output {
+            --socket-size: calc(26px * var(--socket-zoom-scale, 1));
+            width: var(--socket-size); height: var(--socket-size);
+            margin-bottom: calc(26px - var(--socket-size));
+            top: calc(2px + (26px - var(--socket-size)) / 2);
+            background: #0f1020; border: 2px solid #7b5cff;
+            cursor: crosshair; z-index: 3;
+        }
+        .drawflow .drawflow-node > .inputs, .drawflow .drawflow-node > .outputs { transform: translateY(-6.5px); }
+        .drawflow .drawflow-node .input { left: calc(var(--socket-size) / -2); background: #0f1020; border-color: #38bdf8; }
+        .drawflow .drawflow-node .output { right: calc(var(--socket-size) / -2); }
+        .drawflow .drawflow-node .input:hover, .drawflow .drawflow-node .output:hover { background:#38bdf8; box-shadow:0 0 0 3px rgba(56,189,248,.2); }
+        .drawflow .connection .main-path { stroke: #7b5cff; stroke-width: 2.6px; }
+        .drawflow .connection .main-path:hover { stroke: #38bdf8; }
+
+        /* ---- typed sockets and wires (ai-node-sockets.js) ------------------
+           One colour per thing a socket carries, used for the input dot, the
+           output dot and the wire alike. A socket that also takes a second
+           type (a picture socket that reads a video's first frame) is split
+           between the two colours. */
+        #canvas, .socket-legend {
+            --t-text: #4ade80; --t-image: #facc15; --t-video: #fb7185;
+            --t-avatar: #38bdf8; --t-model3d: #fb923c; --t-audio: #2dd4bf;
+            --t-control_pose: #c084fc; --t-control_depth: #818cf8; --t-control_canny: #f0abfc;
+            --t-none: #94a3b8;
+        }
+        .drawflow .drawflow-node .input[data-socket-type], .drawflow .drawflow-node .output[data-socket-type] {
+            border-color: var(--sock-c, var(--t-none)); border-style: solid;
+            box-shadow: 0 0 calc(7px * var(--socket-zoom-scale, 1)) color-mix(in srgb, var(--sock-c, var(--t-none)) 45%, transparent);
+            transition: transform .12s, opacity .12s, box-shadow .12s, background-color .12s;
+        }
+        [data-socket-type="text"] { --sock-c: var(--t-text); }
+        [data-socket-type="image"] { --sock-c: var(--t-image); }
+        [data-socket-type="media"] { --sock-c: var(--t-image); }
+        [data-socket-type="video"] { --sock-c: var(--t-video); }
+        [data-socket-type="avatar"] { --sock-c: var(--t-avatar); }
+        [data-socket-type="model3d"] { --sock-c: var(--t-model3d); }
+        [data-socket-type="audio"] { --sock-c: var(--t-audio); }
+        [data-socket-type="control_pose"] { --sock-c: var(--t-control_pose); }
+        [data-socket-type="control_depth"] { --sock-c: var(--t-control_depth); }
+        [data-socket-type="control_canny"] { --sock-c: var(--t-control_canny); }
+        .drawflow .drawflow-node .input[data-socket-type][data-socket-also="video"] {
+            border-color: var(--sock-c) var(--t-video) var(--t-video) var(--sock-c);
+        }
+        .drawflow .drawflow-node .input[data-socket-type]:hover, .drawflow .drawflow-node .output[data-socket-type]:hover {
+            background: var(--sock-c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sock-c) 30%, transparent), 0 0 12px var(--sock-c);
+        }
+        .drawflow .connection[data-wire-type="text"] .main-path { stroke: var(--t-text); }
+        .drawflow .connection[data-wire-type="image"] .main-path { stroke: var(--t-image); }
+        .drawflow .connection[data-wire-type="media"] .main-path { stroke: var(--t-image); }
+        .drawflow .connection[data-wire-type="video"] .main-path { stroke: var(--t-video); }
+        .drawflow .connection[data-wire-type="avatar"] .main-path { stroke: var(--t-avatar); }
+        .drawflow .connection[data-wire-type="model3d"] .main-path { stroke: var(--t-model3d); }
+        .drawflow .connection[data-wire-type="audio"] .main-path { stroke: var(--t-audio); }
+        .drawflow .connection[data-wire-type="control_pose"] .main-path { stroke: var(--t-control_pose); }
+        .drawflow .connection[data-wire-type="control_depth"] .main-path { stroke: var(--t-control_depth); }
+        .drawflow .connection[data-wire-type="control_canny"] .main-path { stroke: var(--t-control_canny); }
+        .drawflow .connection[data-wire-type] .main-path:hover { stroke: #fff; }
+
+        /* While a wire is dragged: what fits glows, the rest greys out. */
+        #canvas.wiring .drawflow-node .input.sock-ok {
+            background: var(--sock-c); transform: scale(1.18);
+            box-shadow: 0 0 0 calc(5px * var(--socket-zoom-scale, 1)) color-mix(in srgb, var(--sock-c) 35%, transparent),
+                        0 0 calc(22px * var(--socket-zoom-scale, 1)) var(--sock-c);
+            animation: sock-pulse 1s ease-in-out infinite alternate;
+        }
+        /* A bigger target than the dot itself: the ring belongs to the socket. */
+        #canvas.wiring .drawflow-node .input.sock-ok::after {
+            content: ''; position: absolute; border-radius: 50%;
+            inset: calc(-16px * var(--socket-zoom-scale, 1));
+        }
+        #canvas.wiring .drawflow-node .input.sock-target { transform: scale(1.5); animation: none; }
+        #canvas.wiring .drawflow-node .input.sock-no {
+            opacity: .28; filter: grayscale(1); box-shadow: none; cursor: not-allowed;
+        }
+        #canvas.wiring .drawflow-node.wire-none { opacity: .55; }
+        .drawflow .drawflow-node .input.sock-refused { animation: sock-shake .4s; opacity: 1; filter: none; border-color: #f87171; }
+        @keyframes sock-pulse { to { box-shadow: 0 0 0 calc(9px * var(--socket-zoom-scale, 1)) color-mix(in srgb, var(--sock-c) 22%, transparent), 0 0 calc(28px * var(--socket-zoom-scale, 1)) var(--sock-c); } }
+        @keyframes sock-shake { 0%,100% { translate: 0 } 25% { translate: -4px 0 } 75% { translate: 4px 0 } }
+        @media (prefers-reduced-motion: reduce) {
+            #canvas.wiring .drawflow-node .input.sock-ok { animation: none; }
+        }
+
+        /* Legend: coloured dots, names in the tooltips. */
+        .socket-legend {
+            /* Bottom-right, above the graph chat: at the top it collided with
+               the tool palette on narrow and portrait windows (2026-09-27). */
+            position: absolute; z-index: 5; right: 10px; top: auto; bottom: 118px;
+            flex-wrap: wrap; max-width: calc(100% - 20px);
+            display: flex; gap: 3px; padding: 4px 6px; border-radius: 10px;
+            border: 1px solid rgba(255,255,255,.1); background: rgba(12,13,26,.82);
+            backdrop-filter: blur(8px);
+        }
+        .socket-legend span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px; border-radius: 6px; cursor: help; }
+        .socket-legend span:hover { background: rgba(255,255,255,.08); }
+        .socket-legend i { width: 9px; height: 9px; border-radius: 50%; display: block;
+            background: var(--sock-c); box-shadow: 0 0 6px var(--sock-c); }
+        .socket-legend b { font-size: 12px; font-weight: 400; line-height: 1; }
+
+        /* Wires into a node that is rendering right now run green; wires between finished nodes fade. */
+        .drawflow .connection.wire-running .main-path { stroke: #4ade80; stroke-width: 3.2px; stroke-dasharray: 10 7; animation: wire-flow .9s linear infinite; }
+        .drawflow .connection.wire-done .main-path { stroke-opacity: .55; }
+        .drawflow .connection.wire-done:not([data-wire-type]) .main-path { stroke: rgba(74,222,128,.55); stroke-opacity: 1; }
+        @keyframes wire-flow { to { stroke-dashoffset: -17; } }
+
+        .nhead {
+            height: 46px; box-sizing: border-box; display: flex; align-items: center; gap: 8px;
+            padding: 0 14px; border-bottom: 1px solid rgba(255,255,255,.1);
+            background: rgba(255,255,255,.04); border-radius: 12px 12px 0 0;
+        }
+        .nhead b { font-size: 13.5px; }
+        .nslow { font-style: normal; font-size: 10.5px; color: #facc15; margin-left: auto; }
+        /* How many computers could take this job right now. Right-aligned, so
+           it reads as a fact about the node rather than part of its name; the
+           auto margin belongs to whichever badge comes first in the header. */
+        .ncap {
+            font-style: normal; font-size: 10.5px; font-weight: 700;
+            font-variant-numeric: tabular-nums; margin-left: auto; flex: 0 0 auto;
+            color: #9aa0b5; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+            min-width: 17px; text-align: center; padding: 2px 6px; cursor: help;
+        }
+        .ncap.free {
+            color: #6ee7b7; border-color: rgba(56,217,150,.42);
+            background: rgba(56,217,150,.12);
+        }
+        .ncap.none {
+            color: #fca5a5; border-color: rgba(248,113,113,.45);
+            background: rgba(248,113,113,.14);
+        }
+        .nslow + .ncap, .nbypass + .ncap { margin-left: 6px; }
+        .nbypass {
+            font-style: normal; font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
+            color: #fbbf24; background: rgba(251,191,36,.14); border: 1px solid rgba(251,191,36,.35);
+            border-radius: 5px; padding: 2px 5px; flex: 0 0 auto;
+        }
+        /* A bypassed node stays legible — it is still being read and edited —
+           but is plainly not part of the run. */
+        .drawflow .drawflow-node.bypassed { opacity: .5; border-style: dashed; }
+        .drawflow .drawflow-node.bypassed .nbypass { opacity: 1; }
+        .nports { padding: 6px 0 0; }
+        .prow {
+            height: 26px; display: flex; align-items: center; padding: 0 14px;
+            font-size: 12px; color: var(--text-secondary, #9aa0b5); white-space: nowrap;
+        }
+        .prow.pout { justify-content: flex-end; color: #c7b9ff; }
+        .prow i { font-style: normal; opacity: .55; margin-left: 4px; }
+        /* Numbered picture sockets of a multi-reference node; the film mark
+           says a video also fits here (its first frame is used). */
+        .prow.pref { gap: 5px; cursor: help; }
+        .prow.pref .refn { display:inline-grid; place-items:center; min-width:17px; height:17px; border-radius:50%;
+            font-size:10.5px; font-weight:700; color:#0f1020; background:#38bdf8; font-variant-numeric: tabular-nums; }
+        .prow.pref .refvid { font-size: 10px; opacity: .6; }
+        .drawflow .drawflow-node .input.accepts-video { border-style: dashed; }
+
+        .nparams { margin: 6px 12px 4px; }
+        .nparams summary {
+            cursor: pointer; font-size: 11.5px; color: var(--text-secondary, #9aa0b5);
+            padding: 4px 2px; list-style: none;
+        }
+        .nparams summary::before { content: '⚙ '; }
+        .nparam { display: flex; align-items: center; gap: 7px; margin: 5px 0; font-size: 11.5px; }
+        /* A row never grows wider than its node: the label keeps its column
+           and ellipsizes, the control takes what is left and ellipsizes too
+           (the full name is in its tooltip), and a policy note wraps below. */
+        .nparam { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+        .nparam > span:not(.mpick-slot):not(.lslot) {
+            flex: 0 0 82px; min-width: 0; color: var(--text-secondary, #9aa0b5);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .nparam > .mpick-slot { flex: 1 1 0; min-width: 0; width: auto; }
+        .nparam .mpick-button { box-sizing: border-box; min-width: 0; max-width: 100%; }
+        .nparam .mpick-panel { max-width: min(330px, calc(100vw - 32px)); }
+        .nparam select { max-width: 100%; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+        .nparam-wide > span:not(.mpick-slot) { white-space: normal; }
+        .ninput select, .ninput input[type=text] { max-width: 100%; box-sizing: border-box; }
+
+        /* ---- LoRA slots (ai-node-lora-stack.js) --------------------------
+           Slot 1 is the `lora` row; its weight stands in for `lora_strength`,
+           whose own row is hidden. Further slots list under it, one empty
+           slot waiting once the one above is filled. */
+        .lslot { display: flex; align-items: center; gap: 4px; flex: 1 1 0; min-width: 0; }
+        .lslot > .mpick-slot, .lslot > .lslot-pick { flex: 1 1 0; min-width: 0; display: block; }
+        .lslot .mpick-button { box-sizing: border-box; min-width: 0; max-width: 100%; }
+        .lslot .mpick-thumb { width: 24px; height: 24px; flex-basis: 24px; }
+        .lslot .mpick-file { display: none; }
+        .nparam .lslot input.lslot-weight {
+            flex: 0 0 46px; width: 46px; min-width: 0; box-sizing: border-box;
+            background: rgba(10,11,22,.85); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 7px; color: inherit; padding: 4px 3px; font-size: 11px;
+            text-align: right; font-variant-numeric: tabular-nums;
+        }
+        .lslot-remove {
+            flex: 0 0 20px; width: 20px; height: 20px; padding: 0; border-radius: 6px;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05);
+            color: #9aa0b5; font-size: 13px; line-height: 1; cursor: pointer;
+        }
+        .lslot-remove:hover { color: #fb7185; border-color: #fb7185; }
+        .lslot-swap {
+            flex: 0 0 20px; width: 20px; height: 20px; padding: 0; border-radius: 6px;
+            border: 1px solid rgba(56,189,248,.45); background: rgba(56,189,248,.12);
+            color: #38bdf8; font-size: 12px; line-height: 1; cursor: pointer;
+        }
+        .lslot-swap:hover { background: rgba(56,189,248,.25); }
+        .lslot-swap[hidden] { display: none; }
+        /* A LoRA of another family: dimmed, struck through, left out of the render. */
+        .lslot.lslot-bad .mpick-button { border-color: rgba(248,113,113,.6); opacity: .6; }
+        .lslot.lslot-bad .mpick-label { text-decoration: line-through; }
+        .lslot-note.lslot-note-bad { color: #f87171; cursor: help; }
+        .lslot-weight[hidden], .lslot-remove[hidden], .lslot-note[hidden] { display: none; }
+        .lslot-note {
+            display: block; flex: 1 0 100%; margin: 2px 0 0 0; font-size: 10px; line-height: 1.3;
+            color: #fbbf24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .lstack-first > .lslot-note { margin-left: 89px; flex-basis: calc(100% - 89px); }
+        .lstack-list { display: flex; flex-direction: column; gap: 5px; }
+        .lstack-list .lslot { flex-wrap: wrap; }
+        .drawflow .drawflow-node .nparams .nparam.lstack-row.lstack-row:not(.lstack-raw) { display: block !important; margin-left: 89px; }
+        .drawflow .drawflow-node .nparams .nparam.lstack-row.lstack-row.lstack-empty:not(.lstack-raw) { display: none !important; }
+        .nparam.lstack-row:not(.lstack-raw) > span:first-child,
+        .nparam.lstack-row:not(.lstack-raw) > input[data-param="loras"],
+        .nparam.lstack-row:not(.lstack-raw) > select.lstack-add { display: none; }
+        .drawflow .drawflow-node .nparams .nparam.lstack-hidden.lstack-hidden { display: none !important; }
+        .drawflow .drawflow-node[data-display-mode="small"] .nparams .nparam.lstack-row.lstack-row { display: none !important; }
+        .nparam select, .nparam input[type=text], .nparam input[type=number] {
+            flex: 1; min-width: 0; background: rgba(10,11,22,.85);
+            border: 1px solid rgba(255,255,255,.14); border-radius: 7px;
+            color: inherit; padding: 4px 6px; font-size: 11.5px;
+        }
+        .nparam input[type=range] { flex: 1; min-width: 0; accent-color: #7b5cff; }
+        .nsize-auto { display: flex; gap: 6px; align-items: center; font-size: 11px; opacity: .9; margin: 2px 0; }
+        .nsize-lock { border: 1px solid rgba(255,255,255,.18); background: transparent; color: inherit; border-radius: 6px; padding: 1px 6px; cursor: pointer; font-size: 11px; }
+        .nsize-text { opacity: .8; font-variant-numeric: tabular-nums; }
+        input.nsize-locked { opacity: .6; }
+        /* ---- node sliders (ai-node-slider.js) ---- */
+        .aislider-native { display: none !important; }
+        .aislider { position: relative; flex: 1; min-width: 60px; height: 22px; display: inline-flex; align-items: center; cursor: ew-resize; touch-action: none; outline: none; }
+        .aislider-track { position: relative; width: 100%; height: 6px; border-radius: 3px; background: rgba(255,255,255,.14); }
+        .aislider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: #7b5cff; }
+        .aislider-thumb { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #7b5cff; }
+        .aislider:focus-visible .aislider-thumb, .aislider.dragging .aislider-thumb { box-shadow: 0 0 0 3px #a78bfa; transform: scale(1.15); }
+        .aislider-value, .aislider-editable { min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; cursor: text; }
+        .aislider-edit { width: 56px; font: inherit; }
+        .aislider-reset { border: 0; background: transparent; color: inherit; opacity: .25; cursor: pointer; padding: 0 2px; font-size: 12px; }
+        .aislider-reset.dirty { opacity: .8; }
+        .nseed-rand { border: 0; background: transparent; cursor: pointer; padding: 0 2px; }
+        .lslot .aislider { min-width: 70px; }
+        .nparam output { font-size: 11px; min-width: 30px; text-align: right; color: #c7b9ff; }
+        .nparam .lstack-add { flex: 0 0 34px; min-width: 34px; padding: 0 2px; text-align: center; }
+        .nparam-wide { display: block; }
+        .nparam-wide > span { display: block; margin-bottom: 4px; }
+        .nparam textarea {
+            width: 100%; box-sizing: border-box; background: rgba(10,11,22,.85);
+            border: 1px solid rgba(255,255,255,.14); border-radius: 7px;
+            color: inherit; padding: 5px 7px; font: inherit; font-size: 11.5px;
+            resize: vertical;
+        }
+
+        .ninput { padding: 4px 12px 10px; }
+        .ninput input[type=text], .ninput textarea {
+            width: 100%; box-sizing: border-box; background: rgba(10,11,22,.85);
+            border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+            color: inherit; padding: 6px 8px; font-size: 11.5px; resize: vertical;
+        }
+        .npick {
+            margin-top: 6px; width: 100%; cursor: pointer; font-size: 11.5px;
+            background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 8px; color: inherit; padding: 5px;
+        }
+        .ninput img, .ninput video { margin-top: 7px; width: 100%; border-radius: 8px; display: block; }
+
+        /* The real pixel size of whatever the preview is showing, in the same
+           corner and the same shape as the badges on the /workflows gallery.
+           It never takes a click: the picture under it opens full size. */
+        .ninput, .nout { position: relative; }
+        .nres {
+            position: absolute; top: 6px; left: 6px; z-index: 2; pointer-events: none;
+            font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
+            padding: 3px 6px; border-radius: 6px; color: #f1f5ff;
+            background: rgba(8,10,22,.76); border: 1px solid rgba(255,255,255,.14);
+        }
+        .nres:empty { display: none; }
+        /* The compact view hides everything in a preview box that is not the
+           media itself; the size badge is part of reading the media. */
+        .drawflow .drawflow-node[data-display-mode] .nout > .nres,
+        .drawflow .drawflow-node[data-display-mode] .ninput > .nres { display: block !important; }
+        .drawflow .drawflow-node[data-display-mode] .nout > .nres:empty,
+        .drawflow .drawflow-node[data-display-mode] .ninput > .nres:empty { display: none !important; }
+
+        .nrec { padding: 0 14px 6px; font-size: 10.5px; color: #4ade80; line-height: 1.4; }
+        /* One status line per node: the applied-settings note lives in the
+           state line's tooltip, and the tracker's caption under the bar is
+           folded into the state line (ai-nodes.js syncStatusLine). */
+        .drawflow .drawflow-node .nrec { display: none !important; }
+        .drawflow .drawflow-node .nprog .task-eta { display: none; }
+        .drawflow .drawflow-node .nprog.task-prog { margin: 0 12px 8px; }
+        .drawflow .drawflow-node .nstate.running {
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            font-variant-numeric: tabular-nums;
+        }
+        .nstate { padding: 0 14px 8px; font-size: 11.5px; color: var(--text-secondary, #9aa0b5); }
+        .nstate.running { color: #38bdf8; }
+        .nstate.done { color: #4ade80; }
+        .nstate.failed { color: #ff8a9b; }
+        .nprog { margin: 0 12px; }
+        .nout { padding: 0 12px 12px; }
+        .nout img, .nout video { width: 100%; border-radius: 9px; display: block; }
+        .preview-expandable { cursor: zoom-in; }
+        #media-preview { position:fixed; inset:0; margin:0; border:0; padding:0; width:100vw; height:100vh; max-width:none; max-height:none; background:rgba(4,5,10,.94); overflow:hidden; }
+        #media-preview::backdrop { background:transparent; }
+        #media-preview[open] { display:flex; align-items:center; justify-content:center; }
+        #media-preview .media-stage { width:100%; height:100%; display:flex; align-items:center; justify-content:center; padding:48px 24px; box-sizing:border-box; cursor:zoom-out; }
+        #media-preview img, #media-preview video { display:block; width:auto; height:auto; max-width:calc(100vw - 48px); max-height:calc(100vh - 96px); object-fit:contain; margin:auto; border-radius:4px; }
+        #media-preview video { cursor:default; }
+        #media-preview .media-close { position:absolute; right:16px; top:12px; width:42px; height:42px; border:1px solid #777; border-radius:50%; background:#171923; color:white; font:30px/1 sans-serif; cursor:pointer; z-index:2; }
+        /* A node whose standing instruction is no longer the usual one says so
+           on its header, quietly: a single letter, with the text on hover. */
+        .nsysprompt {
+            font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
+            color: #a5b4fc; background: rgba(129,140,248,.16); border: 1px solid rgba(129,140,248,.4);
+            border-radius: 5px; padding: 2px 6px; flex: 0 0 auto; cursor: help;
+        }
+        #system-prompt-editor {
+            border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0;
+            background: #12131f; color: #e6e8f2; width: min(560px, 92vw); max-width: none;
+            box-shadow: 0 24px 60px rgba(0,0,0,.55);
+            /* This page zeroes dialog margins for the full-screen media preview,
+               which parks every other dialog in the top-left corner. Centre this
+               one back explicitly rather than relying on the browser default. */
+            position: fixed; inset: 0; margin: auto;
+            height: fit-content; max-height: 88vh; overflow: auto;
+        }
+        #system-prompt-editor::backdrop { background: rgba(4,5,10,.6); }
+        #system-prompt-editor form { display: flex; flex-direction: column; gap: 10px; padding: 18px; margin: 0; }
+        #system-prompt-editor strong { font-size: 14px; }
+        #system-prompt-editor .sysprompt-help { margin: 0; font-size: 11.5px; color: #9aa0b5; }
+        #system-prompt-editor textarea {
+            width: 100%; box-sizing: border-box; resize: vertical; min-height: 120px;
+            font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+            background: rgba(10,11,22,.8); color: #e6e8f2; padding: 10px;
+            border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
+        }
+        #system-prompt-editor .sysprompt-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+        #system-prompt-editor .sysprompt-buttons .sysprompt-reset { margin-right: auto; }
+        #system-prompt-editor button {
+            font-size: 12px; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+            border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: #e6e8f2;
+        }
+        #system-prompt-editor button.sysprompt-save { background: #2563eb; border-color: #2563eb; color: #fff; }
+        #system-prompt-editor button:hover { filter: brightness(1.15); }
+        .ntext {
+            font-size: 11.5px; line-height: 1.45; max-height: 130px; overflow-y: auto;
+            background: rgba(10,11,22,.7); border-radius: 8px; padding: 8px;
+        }
+        .nlink { display: inline-block; margin-top: 6px; font-size: 11.5px; color: #38bdf8; }
+
+        .toast {
+            position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px);
+            background: rgba(18,19,38,.97); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 11px; padding: 11px 17px; font-size: 13px; max-width: 80vw;
+            opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 30;
+        }
+        .toast.shown { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        .hint { font-size: 11.5px; color: var(--text-secondary, #9aa0b5); line-height: 1.5; margin-top: 14px; }
+    </style>
+</head>
+<body class="ai-page">
+
+<div class="bar">
+    <h1>Nodes</h1>
+    <input type="text" id="graph-name" value="SimpleTextToVideoByVision" aria-label="Composition name">
+    <details class="drop" id="compositions">
+        <summary aria-label="Compositions: ready-made graphs and the saved graph library">Compositions</summary>
+        <div class="drop-panel">
+            <div class="pgroup">Start from</div>
+            <div id="templates"></div>
+            <a class="hint" href="/workflows" style="display:block;margin:10px 0 0">Browse all saved graphs →</a>
+            <p class="hint">
+                Drag a tool from the strip at the top left onto the canvas, or click it to
+                drop a node in the middle of the view. Drag from a socket on the right of a
+                node to a socket on the left of another; only sockets that carry the same
+                kind of thing will connect. Render runs the whole composition; steps that do
+                not depend on each other run at the same time.
+                Select with left-drag or Shift-click. Right-drag pans. Ctrl+C/V copies and
+                pastes; Ctrl+D duplicates; Delete removes selected nodes; Ctrl+P takes them
+                out of the run and puts them back. Shift-click a wire to delete it.
+                Double-click a node for S/M/A views, and Shift-click the S/M/A button to
+                change every node. Right-click a picture node for Functions.
+            </p>
+        </div>
+    </details>
+    <button id="run">Render</button>
+    <button id="continue">Continue</button>
+    <button id="cancel" hidden>Cancel</button>
+    <button id="farm-reset" hidden title="Administrator: cancel every queued and running job on the whole farm">Reset farm</button>
+    <button id="save">Save &amp; copy link</button>
+    <button id="duplicate-graph" title="Create an independent graph with a new link">Duplicate graph</button>
+    <button id="clear">Clear</button>
+    <button id="purge" class="danger">Clear cache</button>
+    <span id="fleet"></span>
+    <span class="grow"></span>
+    <nav>
+        <a href="/workflows">Library</a>
+        <a href="/models" title="Which computer can run which pipeline, and what it took today">Models</a>
+        <a href="/vision">Vision</a><a href="/text">Text</a><a href="/image">Image</a>
+        <a href="/video">Video</a><a href="/avatars">Avatars</a><a href="/3dmodel">3D</a>
+    </nav>
+</div>
+
+<div class="shell">
+    <main class="stage">
+        <div id="palette" class="ntools" role="toolbar" aria-label="Node tools"></div>
+        <div id="canvas"></div>
+    </main>
+</div>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>
+
