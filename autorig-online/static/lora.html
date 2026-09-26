@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LoRA Manager — Render Farm | AutoRig</title>
+    <title>LoRA &amp; Model Manager — Render Farm | AutoRig</title>
     <meta name="description" content="Install Civitai LoRAs on every render computer, see which computer holds which, and reproduce a Civitai image with its LoRA stack.">
     <!-- Operational tool for the farm, like /models: not for search results. -->
     <meta name="robots" content="noindex,nofollow">
@@ -120,6 +120,18 @@
         .seg button.on { background: rgba(56,189,248,.18); color: #e0f2fe; }
         .seg svg { width: 16px; height: 16px; }
         .metric { font-size: 12.5px; }
+        .mbar { height: 4px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; margin-top: 2px; width: 100%; }
+        .mbar i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #7b5cff); }
+        .mbox { display: grid; grid-template-columns: 76px 1fr auto; gap: 6px; align-items: center; font-size: 11.5px; color: #aab3d4; margin-top: 4px; }
+        .mbox .pct { font-variant-numeric: tabular-nums; white-space: nowrap; display: inline-flex; gap: 4px; align-items: center; }
+        .card > div { min-width: 0; }
+        .card .chip.tag { overflow-wrap: anywhere; }
+        .mbox .pct { font-size: 11px; }
+        .chip.core { border-color: rgba(250,204,21,.5); color: #fde68a; }
+        .chip.off { border-color: rgba(248,113,113,.45); color: #fca5a5; }
+        .chip.on { border-color: rgba(74,222,128,.45); color: #86efac; }
+        .st-verifying { color: #a78bfa; } .st-no_route, .st-deleted, .st-not_needed { color: #5b6485; }
+        .st-delete_failed, .st-exists_different { color: #f87171; }
         @media (max-width: 640px) { .lr-add { flex-basis: 100%; } select.lr-in { flex-basis: 120px; } }
     </style>
 </head>
@@ -157,6 +169,8 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/></svg><span class="count" id="n-loras">0</span></button>
         <button class="ib" data-tab="boxes" title="Every file in each computer's LoRA folders">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span class="count" id="n-boxes">0</span></button>
+        <button class="ib" data-tab="models" title="Base models on the farm: add by link, download progress per computer, delete">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4z"/><path d="M4 7.4l8 4.6 8-4.6M12 12v9.2"/></svg>Models <span class="count" id="n-models">0</span></button>
         <button class="ib" data-tab="repro" title="Reproduce a Civitai image with its LoRAs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="8" height="14" rx="1.5"/><rect x="13.5" y="5" width="8" height="14" rx="1.5"/><path d="M10.5 12h3"/></svg></button>
     </nav>
@@ -171,6 +185,25 @@
         </div>
     </section>
     <section id="tab-boxes" hidden><div id="lr-boxes"></div></section>
+    <section id="tab-models" hidden>
+        <div class="lr-add" id="md-add" hidden style="flex-basis:auto;margin-bottom:10px">
+            <input class="lr-in" id="md-url" type="url" autocomplete="off" spellcheck="false"
+                   placeholder="civitai.com/models/…?modelVersionId=…  ·  huggingface.co/…/model.safetensors"
+                   title="Paste a Civitai checkpoint link or a Hugging Face file link">
+            <input class="lr-in" id="md-file" style="flex:0 0 120px" placeholder="file: fp8 / int8" title="Which file of the version (precision, file name or id). Empty = the primary file">
+            <select class="lr-in" id="md-base" title="Base model — needed for Hugging Face links" hidden>
+                <option value="">Base model…</option>
+                <option>MiniMax H3</option><option>LTXV 2.5</option><option>Krea 2</option><option>ZImageTurbo</option>
+                <option>Flux.2 Klein 4B</option><option>Qwen</option>
+            </select>
+            <button class="ib" id="md-check" title="Check the link: file, size, base, which computers get it">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+            <button class="ib primary" id="md-add-btn" title="Download to every computer that runs this architecture and register it">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg></button>
+        </div>
+        <div id="md-preview"></div>
+        <div class="lr-grid" id="md-grid"></div>
+    </section>
     <section id="tab-repro" hidden>
         <div class="repro">
             <div class="lr-add" style="flex-basis:auto">
@@ -375,7 +408,8 @@
   function setTab(tab) {
     state.tab = tab;
     document.querySelectorAll('.lr-tabs .ib').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === tab); });
-    ['loras', 'boxes', 'repro'].forEach(function (t) { $('tab-' + t).hidden = t !== tab; });
+    ['loras', 'boxes', 'models', 'repro'].forEach(function (t) { $('tab-' + t).hidden = t !== tab; });
+    if (tab === 'models') loadModels();
     try { history.replaceState(null, '', tab === 'loras' ? location.pathname + location.search : '#' + tab); } catch (x) {}
   }
 
@@ -485,12 +519,105 @@
       .map(function (x) { return '<span class="chip metric">' + esc(x[0]) + ' <b>' + esc(x[1]) + '</b></span>'; }).join('');
   }
 
+  // ---- base models (checkpoints / diffusion models)
+  var MLABEL = { ready: 'ready', downloading: 'downloading', queued: 'queued', verifying: 'checking SHA-256',
+    failed: 'failed', hash_mismatch: 'hash mismatch', no_space: 'no disk space', no_route: 'no SSH route from the VPS',
+    exists_different: 'another file with this name is there', deleted: 'deleted', delete_failed: 'delete failed' };
+  function modelBoxes(m) {
+    var mg = m.manager_object;
+    if (!mg) {
+      var run = m.runnable_workers || [];
+      return (m.validated_workers || []).map(function (b) {
+        var on = !m.runnable_workers || run.indexOf(b) >= 0;
+        return '<span class="bx ' + (on ? 'st-ready' : 'st-offline') + '" title="' + esc(b + (on ? ': has it, online' : ': has it, not advertising the workflow now')) + '">' + (on ? ICON.ready : ICON.offline) + esc(b) + '</span>';
+      }).join('');
+    }
+    var states = mg.box_states_object || {};
+    return Object.keys(states).map(function (b) {
+      var st = states[b] || {}, key = st.state || 'queued';
+      var icon = ICON[key] || (key === 'verifying' ? ICON.queued : (key === 'no_route' || key === 'deleted') ? ICON.excluded : ICON.failed);
+      var pct = st.percent != null ? st.percent : key === 'ready' ? 100 : 0;
+      var retry = state.admin && /failed|hash_mismatch|no_space/.test(key) && mg.state === 'active'
+        ? '<button class="ib sm" data-mretry="' + esc(mg.id) + '" data-box="' + esc(b) + '" title="Try again on ' + esc(b) + '">' + ICON.retry + '</button>' : '';
+      return '<div class="mbox"><span class="bx st-' + esc(key) + '" title="' + esc(b + ': ' + (MLABEL[key] || key) + (st.error ? ' — ' + st.error : '')) + '">' + icon + esc(b) + '</span>'
+        + '<div class="mbar"><i style="width:' + pct + '%"></i></div>'
+        + '<span class="pct">' + ((key === 'downloading' || key === 'verifying') ? pct + '% · ' + mb(st.bytes) : esc(MLABEL[key] || key)) + retry + '</span></div>';
+    }).join('');
+  }
+  function modelCard(m) {
+    var thumb = m.preview ? '<img class="thumb" loading="lazy" src="' + esc(m.preview) + '" alt="">' : '<div class="thumb">' + ICON.image + '</div>';
+    var status = m.usable ? '<span class="chip on" title="Selectable in /nodes and the API">usable</span>'
+      : '<span class="chip off" title="' + esc(m.unusable_reason || '') + '">not usable yet</span>';
+    var lock = m.protected ? '<span class="chip core" title="' + esc(m.protected_reason || 'protected') + '">' + ICON.lock + ' core</span>' : '';
+    var del = state.admin && !m.protected && m.managed_id
+      ? '<div class="c-actions"><button class="ib sm danger" data-mdelete="' + esc(m.managed_id) + '" data-title="' + esc(m.title || m.file) + '" title="Unregister and delete the file from every computer">' + ICON.trash + '</button></div>' : '';
+    var size = m.size_mb ? mb(m.size_mb * 1048576) : '';
+    var name = esc(m.title || m.file);
+    return '<div class="card" data-model="' + esc(m.id) + '">' + thumb + '<div>'
+      + '<div class="c-title">' + (m.page ? '<a href="' + esc(m.page) + '" target="_blank" rel="noopener" title="' + esc(m.file) + '">' + name + '</a>' : '<span title="' + esc(m.file) + '">' + name + '</span>') + '</div>'
+      + '<div class="chips"><span class="chip fam" title="Base model / family">' + esc(m.base || m.family) + '</span>'
+      + (m.version ? '<span class="chip" title="Version">' + esc(m.version) + '</span>' : '')
+      + (size ? '<span class="chip" title="File size">' + size + '</span>' : '')
+      + '<span class="chip" title="Service">' + esc((m.services || []).join(', ')) + '</span>' + status + lock + '</div>'
+      + '<div class="c-row"><span class="chip tag" data-copy="' + esc(m.file) + '" title="checkpoint value for the API — click to copy">' + esc(m.file) + '</span>' + del + '</div>'
+      + '<div class="boxes" style="display:block">' + modelBoxes(m) + '</div>'
+      + '</div></div>';
+  }
+  function loadModels() {
+    return api('GET', '/api/ai/fleet-models').then(function (d) {
+      state.models = d.models_array || [];
+      if (d.admin_bool) state.admin = true;
+      $('md-add').hidden = !state.admin;
+      $('n-models').textContent = state.models.length;
+      var list = state.models.slice().sort(function (a, b) { return (b.managed ? 1 : 0) - (a.managed ? 1 : 0); });
+      $('md-grid').innerHTML = list.map(modelCard).join('') || '<div class="lr-msg">No models.</div>';
+    }).catch(function (e) { if (state.tab === 'models') say('Could not read the model list: ' + e.message, 'err'); });
+  }
+  $('md-url').addEventListener('input', function () { $('md-base').hidden = !/huggingface\.co|hf\.co/.test(this.value); });
+  function modelBody() { return { url: $('md-url').value.trim(), base: $('md-base').value, file: $('md-file').value.trim() }; }
+  $('md-check').addEventListener('click', function () {
+    var b = modelBody(); if (!b.url) return; var btn = this; btn.classList.add('busy');
+    api('POST', '/api/ai/fleet-models/resolve', b).then(function (r) {
+      var m = r.model_object;
+      $('md-preview').innerHTML = '<div class="kv" style="margin-bottom:10px"><span class="chip fam">' + esc(m.base || '?') + '</span><span class="chip">' + esc(m.title) + ' · ' + esc(m.version) + '</span>'
+        + '<span class="chip tag">' + esc(m.file) + '</span><span class="chip">' + mb(m.size_bytes) + (m.precision ? ' · ' + esc(m.precision) : '') + '</span>'
+        + '<span class="chip" title="Runs with this workflow and settings">template: ' + esc(m.template_title || 'none — cannot run') + '</span>'
+        + '<span class="chip" title="Computers that will download it">→ ' + esc((m.target_boxes || []).join(', ') || 'none') + '</span>'
+        + (m.other_files || []).map(function (f) { return '<span class="chip" data-mfile="' + esc(f.id) + '" style="cursor:pointer" title="Use this file instead: ' + esc(f.name) + '">' + esc((f.precision || '') + ' ' + mb(f.size_bytes)) + '</span>'; }).join('') + '</div>';
+    }).catch(function (e) { $('md-preview').innerHTML = ''; say(e.message, 'err'); }).then(function () { btn.classList.remove('busy'); });
+  });
+  $('md-add-btn').addEventListener('click', function () {
+    var b = modelBody(); if (!b.url) return; var btn = this; btn.classList.add('busy'); btn.disabled = true; say('Resolving…');
+    api('POST', '/api/ai/fleet-models', b).then(function (r) {
+      say((r.note_string || 'Downloading') + ': ' + r.model_object.file, 'ok');
+      $('md-url').value = ''; $('md-file').value = ''; $('md-preview').innerHTML = ''; return loadModels();
+    }).catch(function (e) { say(e.message, 'err'); }).then(function () { btn.classList.remove('busy'); btn.disabled = false; });
+  });
+  $('md-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('md-check').click(); });
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-mdelete],[data-mretry],[data-mfile]'); if (!t) return;
+    if (t.dataset.mfile) { $('md-file').value = t.dataset.mfile; $('md-check').click(); return; }
+    if (t.dataset.mretry) {
+      api('POST', '/api/ai/fleet-models/' + encodeURIComponent(t.dataset.mretry) + '/retry?box=' + encodeURIComponent(t.dataset.box))
+        .then(function () { say('Restarting on ' + t.dataset.box, 'ok'); setTimeout(loadModels, 3000); }).catch(function (x) { say(x.message, 'err'); });
+      return;
+    }
+    if (!window.confirm('Delete ' + t.dataset.title + '?\n\nIt leaves the catalogue at once (no new renders), and its file is deleted from every computer.')) return;
+    t.classList.add('busy'); t.disabled = true;
+    api('DELETE', '/api/ai/fleet-models/' + encodeURIComponent(t.dataset.mdelete)).then(function (r) {
+      say('Deleted: ' + Object.keys(r.boxes_object || {}).map(function (b) { var x = r.boxes_object[b]; return b + ' ' + x.state + (x.error ? ' (' + x.error + ')' : ''); }).join(' · '), 'ok');
+      return loadModels();
+    }).catch(function (x) { say(x.message, 'err'); t.disabled = false; t.classList.remove('busy'); });
+  });
+
   var hash = (location.hash || '').slice(1);
-  if (['boxes', 'repro'].indexOf(hash) >= 0) setTab(hash);
+  if (['boxes', 'models', 'repro'].indexOf(hash) >= 0) setTab(hash);
   var q = new URLSearchParams(location.search).get('image');
   if (q) { $('rp-url').value = q; setTab('repro'); }
   load().then(function () { if (q) readImage(); });
-  setInterval(function () { if (!document.hidden && state.tab !== 'repro') load(); }, 15000);
+  setInterval(function () { if (!document.hidden && state.tab !== 'repro' && state.tab !== 'models') load(); }, 15000);
+  setInterval(function () { if (!document.hidden && state.tab === 'models') loadModels(); }, 6000);
+  loadModels();
 })();
 </script>
 </body>

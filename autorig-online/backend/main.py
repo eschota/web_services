@@ -1571,6 +1571,9 @@ from ai_lora_manager import build_lora_admin_router, router as ai_lora_router
 
 app.include_router(ai_lora_router)
 app.include_router(build_lora_admin_router(require_admin))
+from ai_fleet_models import build_admin_router as build_fleet_models_admin_router, router as ai_fleet_models_router
+app.include_router(ai_fleet_models_router)
+app.include_router(build_fleet_models_admin_router(require_admin))
 
 
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
