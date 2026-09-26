@@ -195,10 +195,14 @@ SERVICES: List[Dict[str, object]] = [
             # substitutes for it — the service turns the clip into a picture
             # first — so it is offered as the alternative, not as a second
             # thing the node also needs.
+            # One socket for the thing to look at. A clip wired here is sent
+            # as the clip it is; the service turns it into a picture itself.
             {"type": IMAGE, "field": "image", "required": True,
-             "title": "Image to look at"},
+             "title": "Photo or video", "also_accepts": [VIDEO]},
+            # The separate video socket it replaces. Kept so saved graphs that
+            # wire it by name keep working, and hidden until one does.
             {"type": VIDEO, "field": "video_url", "required": False,
-             "title": "Video to watch instead"},
+             "title": "Video (older graphs)", "hide_when_empty": True},
             # Not required as a wire: the question is usually a fixed sentence,
             # and needing a whole node to hold it was the commonest way to end
             # up submitting a request with no prompt at all.
@@ -241,16 +245,21 @@ SERVICES: List[Dict[str, object]] = [
         "summary": "Generate a picture from a prompt, optionally guided by a reference image.",
         "status": "live",
         "inputs": [
-            {"type": TEXT, "field": "prompt", "required": True,
+            # Not required as a wire: the prompt can be typed on the node, the
+            # same way vision and text take theirs. Required here meant a node
+            # given only a reference picture could not run at all.
+            {"type": TEXT, "field": "prompt", "required": False,
              "title": "What to draw"},
             {"type": IMAGE, "field": "image", "required": False,
              "title": "Reference image", "ref_index": 1, "also_accepts": [VIDEO]},
             {"type": CONTROL_POSE, "field": "control_pose", "required": False, "title": "Pose control"},
             {"type": CONTROL_DEPTH, "field": "control_depth", "required": False, "title": "Depth control"},
             {"type": CONTROL_CANNY, "field": "control_canny", "required": False, "title": "Canny control"},
-            # More pictures composed into one (FLUX.2 klein, 4 in all). Kept
+            # More pictures composed into one. Since 2026-09-26 a picture edit
+            # (FLUX.2 klein + picture) and any multi-picture request run on the
+            # one edit model, Qwen-Image 2.1 turbo: 3 pictures in all. Kept
             # after every older socket so saved graphs keep their wiring.
-            *MULTIREF_INPUTS(4),
+            *MULTIREF_INPUTS(3),
         ],
         "outputs": [
             {"type": IMAGE, "field": "image_url_string", "title": "Picture"},
@@ -397,14 +406,15 @@ SERVICES.extend([
 # 24 GB card, so two of these can render at the same time on two machines.
 SERVICES.append({
     "id": "qwen_image", "title": "Qwen-Image", "path": "/nodes",
-    "api": "/api/qwen-image", "status": "live", "slow": True,
-    "summary": "Draw a picture from a prompt, or rewrite the picture wired in. One node does both.",
+    "api": "/api/qwen-image", "status": "live",
+    "summary": "The farm's one edit model: Qwen-Image 2.1 turbo (6 steps, 15-40 s). Rewrite the picture wired in (up to 3 pictures), or draw from a prompt alone.",
     "inputs": [
         {"type": TEXT, "field": "prompt", "required": True,
          "title": "What to draw, or what to change"},
         {"type": IMAGE, "field": "image", "required": False,
          "title": "Picture to edit", "ref_index": 1, "also_accepts": [VIDEO]},
-        # Qwen-Image-Edit 2511 reads up to three pictures (image1..image3).
+        # Qwen-Image 2.1 turbo reads up to three pictures (image 1..3). It is
+        # the farm's only edit model since 2026-09-26.
         *MULTIREF_INPUTS(3),
     ],
     "outputs": [
@@ -427,7 +437,7 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          ]},
         {"name": "checkpoint", "title": "Model", "type": "model",
          "source": "checkpoints", "default": "",
-         "help": "Leave empty for the quantisation the workflow ships with"},
+         "help": "Leave empty: Qwen-Image 2.1 turbo is the only edit model. Old edit files are redirected to it"},
         # In edit mode these follow the picture that came in unless they are
         # set: an edit that silently reframed the source to 960x540 was the
         # single most confusing thing about the first version of this node.
@@ -437,15 +447,15 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         # coarser step left the node at a size half taken from the picture and
         # half left over from the default.
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,
-         "step": 1, "default": 1024,
+         "step": 1, "default": 960,
          "help": "Editing follows the source picture unless width and height are both set"},
         {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048,
-         "step": 1, "default": 1024,
+         "step": 1, "default": 540,
          "help": "Editing follows the source picture unless width and height are both set"},
         {"name": "steps", "title": "Steps", "type": "range", "min": 0, "max": 60,
-         "step": 1, "default": 0, "help": "0 leaves the workflow's own 20"},
+         "step": 1, "default": 0, "help": "Ignored by Qwen-Image 2.1 turbo (fixed 6 steps)"},
         {"name": "cfg", "title": "CFG", "type": "number", "default": 0, "min": 0,
-         "max": 30, "step": 0.1, "help": "0 leaves the workflow's own 2.5"},
+         "max": 30, "step": 0.1, "help": "Ignored by Qwen-Image 2.1 turbo (no CFG)"},
         {"name": "negative_prompt", "title": "Avoid", "type": "text", "default": ""},
         {"name": "seed", "title": "Seed", "type": "number", "min": 0,
          "max": 9007199254740991, "step": 1, "default": 0,
@@ -494,6 +504,16 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "help": "The wider region is slower and rewrites more of the picture"},
     ],
     "avatar_build": [
+        {"name": "render_quality", "title": "Quality", "type": "select", "default": "",
+         "help": "Size of the drawn views. Blank follows the graph (Draft 1/4 by default); "
+                 "a draft also skips the retry on the other engine",
+         "options": [
+             {"value": "", "title": "Follow the graph"},
+             {"value": "preview", "title": "Draft ¼ — fast, low resolution"},
+             {"value": "fast", "title": "½"},
+             {"value": "normal", "title": "Full 1×"},
+             {"value": "highquality", "title": "2× (cap 2048 px)"},
+         ]},
         {"name": "outfit", "title": "Outfit", "type": "text", "default": "",
          "help": "Blank keeps what the source wears"},
         {"name": "display_name", "title": "Name", "type": "text", "default": "",
@@ -511,13 +531,13 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "options": [
              {"value": "auto", "title": "Auto · FLUX.2 klein 4B"},
              {"value": "klein", "title": "FLUX.2 klein 4B"},
-             {"value": "qwen", "title": "Qwen-Image-Edit-2511"},
+             {"value": "qwen", "title": "Qwen-Image 2.1 turbo"},
          ]},
         {"name": "retry_engine", "title": "↻ Retry", "type": "select", "default": "auto",
          "help": "Model that redraws a view that failed the check",
          "options": [
              {"value": "auto", "title": "Auto · the other one"},
-             {"value": "qwen", "title": "Qwen-Image-Edit-2511"},
+             {"value": "qwen", "title": "Qwen-Image 2.1 turbo"},
              {"value": "klein", "title": "FLUX.2 klein 4B"},
              {"value": "none", "title": "No retry"},
          ]},
@@ -586,6 +606,9 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "help": "0 picks a budget to suit the model"},
     ],
     "image": [
+        # Typed on the node when nothing is wired in; a wired prompt wins.
+        {"name": "prompt", "title": "What to draw", "type": "textarea",
+         "default": "", "help": "Leave empty if a prompt is wired in"},
         {"name": "control_strength", "title": "Control strength", "type": "range", "min": 0, "max": 2, "step": 0.05, "default": 0.8},
         {"name": "control_start", "title": "Control start", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 0.0},
         {"name": "control_end", "title": "Control end", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 1.0},

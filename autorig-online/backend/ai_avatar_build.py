@@ -206,6 +206,28 @@ VIEW_SPECS: Dict[str, Dict[str, Any]] = {
     },
 }
 assert tuple(sorted(VIEW_SPECS)) == tuple(sorted(CANONICAL_VIEW_SLOTS))
+
+# Render quality, the same scale /nodes applies to every width/height
+# (static/js/ai-render-quality.js): sides x factor, both grown together to the
+# 256 px floor and shrunk together to the 2048 px cap, rounded to 32. A draft
+# build also skips the second-engine retry (the anchor-crop fallback stays),
+# because that retry is the slowest step and a draft is for looking, not
+# keeping. "normal" is the build as it always was.
+RENDER_QUALITIES = {"preview": 0.25, "fast": 0.5, "normal": 1.0, "highquality": 2.0}
+
+
+def view_size(slot: str, quality: str = "normal") -> Tuple[int, int]:
+    width, height = VIEW_SPECS[slot]["size"]
+    factor = RENDER_QUALITIES.get(quality or "normal", 1.0)
+    if factor == 1.0:
+        return width, height
+    w, h = width * factor, height * factor
+    if max(w, h) > 2048:
+        s = 2048 / max(w, h); w, h = w * s, h * s
+    if min(w, h) < 256:
+        s = min(256 / min(w, h), 2048 / max(w, h)); w, h = w * s, h * s
+    snap = lambda v: min(2048, max(256, int(round(v / 32.0)) * 32))
+    return snap(w), snap(h)
 DEFAULT_VIEWS = [ANCHOR_SLOT] + [slot for slot in CANONICAL_VIEW_SLOTS if slot != ANCHOR_SLOT]
 NEGATIVE = ("second person, crowd, extra limbs, deformed face, different face, text, "
             "watermark, collage, split screen, character sheet, busy background")
@@ -270,6 +292,8 @@ class BuildRequest(BaseModel):
     judge_model: Optional[str] = Field(default=None, max_length=100)
     # Keep every derived picture out of saved graphs whatever the classifier says.
     private: Optional[bool] = None
+    # preview (draft, sizes / 4, no retry) | fast | normal (default) | highquality.
+    render_quality: Optional[str] = Field(default=None, max_length=16)
 
 
 def _now() -> float:
@@ -1202,7 +1226,7 @@ class AvatarBuilder:
         if state.get("crop_url"):
             return state["crop_url"]
         data = await self._fetch(client, self._anchor_url(job))
-        width, height = VIEW_SPECS[slot]["size"]
+        width, height = view_size(slot, job["request"].get("render_quality") or "normal")
         cropped = await asyncio.to_thread(crop_to_framing, data, VIEW_SPECS[slot]["crop"], width, height)
         asset = self._store_bytes(owner, cropped, f"{slot}_crop.png", job=job)
         state["crop_url"] = asset["canonical_url"]
@@ -1230,7 +1254,7 @@ class AvatarBuilder:
                         if item.get("engine") == engine and item.get("seed") == seed), None)
         description = job["description"]
         prompt = view_prompt(slot, description, job["request"].get("outfit") or "")
-        width, height = VIEW_SPECS[slot]["size"]
+        width, height = view_size(slot, job["request"].get("render_quality") or "normal")
         refs, ref_slots = await self._references(client, job, owner, slot)
         if attempt is None:
             attempt = {"engine": engine, "seed": seed, "prompt": prompt, "reference_slots": ref_slots,
@@ -1239,7 +1263,9 @@ class AvatarBuilder:
         if not attempt.get("task_id"):
             if engine == "klein":
                 body = {"prompt": prompt, "image_url": refs[0], "width": width, "height": height,
-                        "seed": seed, "checkpoint": KLEIN_CHECKPOINT, "negative_prompt": NEGATIVE}
+                        "seed": seed, "checkpoint": KLEIN_CHECKPOINT, "negative_prompt": NEGATIVE,
+                        # The avatar pipeline keeps klein; public edits run on Qwen 2.1.
+                        "internal_pipeline": "avatar_build"}
                 if len(refs) > 1:
                     body["reference_image_urls"] = refs[1:]
                 accepted = await self._post(client, "/api/image", body)
@@ -1320,6 +1346,8 @@ class AvatarBuilder:
         forced = job["request"].get("engine") or "auto"
         first = VIEW_SPECS[slot]["engine"] if forced == "auto" else forced
         retry = job["request"].get("retry_engine") or "auto"
+        if retry == "auto" and job["request"].get("render_quality") == "preview":
+            retry = "none"
         other = ("qwen" if first == "klein" else "klein") if retry == "auto" else retry
         plan = [(first, base_seed + CANONICAL_VIEW_SLOTS.index(slot))]
         if other != "none":
@@ -1580,6 +1608,9 @@ def _identity(kind: str, source_sha_or_url: str, body: BuildRequest, avatar_id: 
     model = check_vision_model(body.model, "description")
     judge = check_vision_model(body.judge_model or model, "judge")
     seed = body.seed if body.seed else int(hashlib.sha256(source_sha_or_url.encode()).hexdigest()[:7], 16)
+    quality = str(body.render_quality or "normal").strip().lower()
+    if quality not in RENDER_QUALITIES:
+        raise HTTPException(400, detail="render_quality is one of " + ", ".join(RENDER_QUALITIES))
     return {"kind": kind, "source": source_sha_or_url, "views": views, "engine": engine,
             "outfit": str(body.outfit or "").strip(), "display_name": str(body.display_name or "").strip(),
             "qa": body.qa is not False, "seed": seed, "avatar_id": avatar_id,
@@ -1589,6 +1620,7 @@ def _identity(kind: str, source_sha_or_url: str, body: BuildRequest, avatar_id: 
             # identity, so graphs saved before these settings existed map to
             # the same build.
             **({"retry_engine": retry} if retry != "auto" else {}),
+            **({"render_quality": quality} if quality != "normal" else {}),
             **({"model": model} if model != VISION_MODEL else {}),
             **({"judge_model": judge} if judge != VISION_MODEL else {})}
 

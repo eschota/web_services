@@ -433,13 +433,12 @@
 
   /* --------------------------------------------------- reference sockets */
 
-  // A multi-reference node (FLUX.2 klein, Qwen-Image-Edit) numbers its
+  // A multi-reference node (Qwen-Image 2.1 turbo, the one edit model) numbers its
   // picture sockets 1..N because the prompt counts them ("the jacket from
   // image 2"). Socket 1 is the node's ordinary `image`; the rest appear one at
   // a time as the previous one is wired. Each also takes a video, which the
   // server reads as its first frame.
   const REFERENCE_FIELD = /^reference_(\d+)$/;
-  const MULTIREF_CHECKPOINT = 'flux-2-klein-4b.safetensors';
 
   function inputRowHtml(item) {
     const video = (item.also_accepts || []).includes('video');
@@ -517,28 +516,16 @@
   }
 
   /**
-   * A second picture wired into an Image node needs a model that composes
-   * several: FLUX.2 klein. Switching for the person is kinder than refusing
-   * the wire, and the toast says what changed.
+   * A second picture wired into an Image node makes it an edit, and since
+   * 2026-09-26 the farm has one edit model: Qwen-Image 2.1 turbo (3 pictures).
+   * The server redirects the request; the toast says so once per node.
    */
   function ensureMultiReferenceModel(id, inField) {
     const node = meta(id);
     if (!node || node.service !== 'image' || referenceIndex(inField) < 2) return;
-    const element = nodeElement(id);
-    const hidden = element && element.querySelector('[data-param="checkpoint"]');
-    if (!hidden) return;
-    const picker = element.querySelector('[data-model-param="checkpoint"]')?._picker;
-    const family = picker && picker.entry && picker.entry.family;
-    if (family === 'flux2' || (!family && /klein/i.test(hidden.value || ''))) return;
-    if (picker) picker.value = MULTIREF_CHECKPOINT;
-    const entry = picker && picker.entry;
-    if (entry) {
-      applySamplingPolicy(id, entry.sampling_policy_object || entry.sampling_policy || {});
-      refreshModeOptions(id, entry);
-    }
-    hidden.value = MULTIREF_CHECKPOINT;
-    hidden.dispatchEvent(new Event('change', {bubbles:true}));
-    toast('Several pictures → FLUX.2 klein 4B');
+    if (node._editToast) return;
+    node._editToast = true;
+    toast('Several pictures → edit on Qwen-Image 2.1 turbo (up to 3)');
   }
 
   function inputNodeHtml(entityType) {
@@ -1980,6 +1967,10 @@
     if (typeof window !== 'undefined' && window.AINodeLoraStack && window.AINodeLoraStack.filterBody) {
       window.AINodeLoraStack.filterBody(serviceId, body);
     }
+    // A service that takes the quality itself (the Avatar builder sizes its
+    // own views) gets the graph's unless its node picked one.
+    if (declaration && (declaration.params_array || []).some(item => item.name === 'render_quality') &&
+        !body.render_quality) body.render_quality = renderQuality;
     // Render quality: every width/height scaled, rounded and clamped here, so
     // the scaled size is what the signature records and what the server gets.
     if (typeof window !== 'undefined' && window.AIRenderQuality && renderQuality !== 'normal') {
