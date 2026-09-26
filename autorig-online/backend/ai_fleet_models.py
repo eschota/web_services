@@ -196,6 +196,49 @@ def _pick_model_file(files: List[Dict[str, Any]], prefer: str = "") -> Dict[str,
     return (primary or usable)[0]
 
 
+FULL_CHECKPOINT_MARKERS = ("model.diffusion_model.", "first_stage_model.", "cond_stage_model.",
+                           "text_encoders.", "conditioner.", "vae.")
+
+
+async def probe_layout(record: Dict[str, Any]) -> Dict[str, Any]:
+    """What is inside the .safetensors, read from its header with two range
+    requests (a few hundred KB, never the file): a bare transformer (the
+    diffusion_models layout the templates' UNETLoader reads) or a full
+    checkpoint with text encoder / VAE baked in, plus the weight dtypes.
+
+    Both go to ComfyUI\models\diffusion_models and load through the template's
+    UNETLoader: ComfyUI's load_diffusion_model finds the `model.diffusion_model.`
+    prefix itself and ignores the bundled encoder and VAE, so the template's own
+    text encoder and VAE stay in charge (what the stock model was tuned with).
+    """
+    if not record["file"].lower().endswith(".safetensors"):
+        return {"layout": "gguf", "loader": "UnetLoaderGGUF"}
+    url = await _source_url({"id": record["id"], "source": record["source"]})
+    if not url:
+        return {"layout": "unknown"}
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            head = await client.get(url, headers={"Range": "bytes=0-7", "User-Agent": lm.USER_AGENT})
+            n = int.from_bytes(head.content[:8], "little")
+            if head.status_code not in (200, 206) or not 0 < n < 64 * 1024 * 1024:
+                return {"layout": "unknown"}
+            body = await client.get(url, headers={"Range": f"bytes=8-{7 + n}", "User-Agent": lm.USER_AGENT})
+        header = json.loads(body.content[:n])
+    except Exception as exc:
+        logger.warning("safetensors header probe failed for %s: %s", record.get("file"), exc)
+        return {"layout": "unknown"}
+    keys = [k for k in header if k != "__metadata__"]
+    dtypes: Dict[str, int] = {}
+    for k in keys:
+        dt = str((header[k] or {}).get("dtype") or "")
+        dtypes[dt] = dtypes.get(dt, 0) + 1
+    full = any(k.startswith(FULL_CHECKPOINT_MARKERS[1:]) for k in keys) or \
+        (keys and sum(k.startswith("model.diffusion_model.") for k in keys) > len(keys) // 2
+         and any(not k.startswith("model.diffusion_model.") for k in keys))
+    return {"layout": "full_checkpoint" if full else "transformer", "tensor_count": len(keys),
+            "dtypes": dict(sorted(dtypes.items(), key=lambda kv: -kv[1])[:4]), "loader": "UNETLoader"}
+
+
 def template_for(family: str) -> Optional[Dict[str, Any]]:
     """The curated usable checkpoint whose workflow a new file of `family` uses."""
     import ai_model_catalogue
@@ -266,6 +309,7 @@ async def resolve_model(url: str, base_hint: str = "", prefer_file: str = "") ->
     if not family and record["base"]:
         family = lm.family_for_base(record["base"])
     record["family"] = family
+    record.update(await probe_layout(record))
     if record["size_bytes"] > MAX_MODEL_BYTES:
         raise lm.ResolveError("too_large", "That file is larger than 60 GB")
     template = template_for(family) if family else None
@@ -621,7 +665,7 @@ async def start_downloads(entry_id: str, only: Optional[List[str]] = None) -> No
     boxes = [b for b in targets if not only or b in only]
     peer_state = ((entry.get("box_states") or {}).get(PEER_BOX) or {}).get("state")
     for box in boxes:
-        if (not only and box != PEER_BOX and PEER_BOX in targets
+        if (not only and box != PEER_BOX and PEER_BOX in targets and _ssh_route(box)
                 and _ssh_route(PEER_BOX) and peer_state not in FINAL_STATES):
             await _set_box(entry_id, box, {"state": "waiting_peer", "error": "",
                                            "note": f"starts when {PEER_BOX} is done (shared uplink)"})
@@ -680,6 +724,7 @@ async def add_model(url: str, *, base: str = "", prefer_file: str = "", title: s
         "validated_workers": [], "nsfw": bool(entry.get("nsfw")),
         "recommended_from": f"Same workflow and settings as {template.get('title')} (template)",
         "source_version_id": (entry.get("source") or {}).get("version_id"),
+        "layout": entry.get("layout") or "", "weight_dtypes": entry.get("dtypes") or {},
         "managed_by": MANAGED_BY, "managed_id": entry["id"], "template_id": template.get("id"),
         "added_at": time.strftime("%Y-%m-%d", time.gmtime()),
     })
@@ -769,7 +814,7 @@ def view(entry: Dict[str, Any]) -> Dict[str, Any]:
         states[box] = s
     return {k: entry.get(k) for k in ("id", "file", "title", "version", "precision", "base", "family",
                                        "page", "preview", "size_bytes", "sha256", "nsfw", "added_at",
-                                       "state", "hidden", "template_id", "template_title", "workflow",
+                                       "state", "hidden", "template_id", "template_title", "workflow", "layout", "dtypes",
                                        "source")} | {"box_states_object": states, "ready_boxes_array": _ready(entry)}
 
 
@@ -898,12 +943,20 @@ def _cli(argv: List[str]) -> int:
     sub.add_parser("list")
     rm = sub.add_parser("delete")
     rm.add_argument("id")
+    mark = sub.add_parser("mark", help="a box an operator filled by hand (sha256 checked there)")
+    mark.add_argument("id")
+    mark.add_argument("box")
     again = sub.add_parser("retry")
     again.add_argument("id")
     again.add_argument("--box", default="")
     args = parser.parse_args(argv)
 
     async def run() -> Any:
+        if args.cmd == "mark":
+            entry = await _set_box(args.id, args.box, {"state": "ready", "error": "",
+                                                        "note": "placed by an operator, sha256 verified"})
+            _sync_catalogue(entry)
+            return view(entry)
         if args.cmd == "retry":
             await start_downloads(args.id, [args.box] if args.box else None)
             for task in list(_monitors.values()):
