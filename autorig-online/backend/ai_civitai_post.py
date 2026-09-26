@@ -103,6 +103,9 @@ class CivitaiPostRequest(BaseModel):
     poster_url: Optional[str] = Field(None, max_length=4096, description="Still for audio")
     upscale: bool = Field(True, description="Enlarge 2x (RealESRGAN) before posting a picture or clip")
     generation: Dict[str, Any] = Field(default_factory=dict, description="seed, steps, sampler, cfg, model...")
+    background: bool = Field(False, description="Answer at once with a job id; poll /api/ai/civitai/jobs/<id>")
+    auto_meta: bool = Field(True, description="Write title/description/tags with the LLM when the title is "
+                                              "empty or generic (Video, Image, ...)")
 
 
 class CivitaiMetaRequest(BaseModel):
@@ -128,6 +131,57 @@ def _kind(url: str) -> str:
     if path.endswith(AUDIO_SUFFIXES):
         return "audio"
     return "image"
+
+
+# ---------------------------------------------------------------- jobs
+# One post = one job the page can watch: upscale on the farm (queued ->
+# running on <box>), upload to Civitai (%), post, done. Kept in memory and
+# mirrored to disk so a status read survives a page reload; a job cut by a
+# server restart is marked interrupted when the module loads.
+
+JOBS: Dict[str, Dict[str, Any]] = {}
+JOB_DIR = SCRATCH_DIR / "jobs"
+GENERIC_TITLES = {"", "video", "image", "picture", "clip", "audio", "music", "output", "result"}
+FINAL_STAGES = ("done", "failed", "manual", "interrupted")
+
+
+def _job_save(job: Dict[str, Any]) -> None:
+    try:
+        JOB_DIR.mkdir(parents=True, exist_ok=True)
+        (JOB_DIR / f"{job['id']}.json").write_text(json.dumps(job), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _job_update(job: Optional[Dict[str, Any]], **fields: Any) -> None:
+    if job is None:
+        return
+    job.update(fields, updated_at=time.time())
+    _job_save(job)
+
+
+def _load_jobs() -> None:
+    try:
+        paths = sorted(JOB_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime)[-200:]
+        for path in paths:
+            job = json.loads(path.read_text(encoding="utf-8"))
+            if job.get("stage") not in FINAL_STAGES:
+                job.update(stage="interrupted", stage_label="Interrupted by a server restart",
+                           finished_at=job.get("updated_at") or time.time())
+                _job_save(job)
+            JOBS[job["id"]] = job
+    except Exception:
+        pass
+
+
+_load_jobs()
+
+
+def _public_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    now = time.time()
+    end = job.get("finished_at") or now
+    return dict(job, elapsed_seconds_float=round(end - job.get("created_at", now), 1),
+                active_bool=job.get("stage") not in FINAL_STAGES)
 
 
 def _manual(body: CivitaiPostRequest, reason: str, download_url: str) -> Dict[str, Any]:
@@ -478,9 +532,41 @@ def _public_scratch(path: Path) -> str:
         return ""
 
 
+async def _probe_video(content: bytes) -> Dict[str, Any]:
+    """width, height, duration (s) and audio of a clip, via ffprobe."""
+    SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    handle, path = tempfile.mkstemp(suffix=".mp4", dir=SCRATCH_DIR)
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(content)
+        process = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration",
+            "-of", "json", path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out_text, _err = await process.communicate()
+        data = json.loads(out_text or b"{}")
+    except Exception as error:
+        logger.info("civitai: ffprobe failed: %s", error)
+        return {}
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    streams = data.get("streams") or []
+    video = next((item for item in streams if item.get("codec_type") == "video"), {})
+    result: Dict[str, Any] = {"audio": any(item.get("codec_type") == "audio" for item in streams)}
+    if video.get("width") and video.get("height"):
+        result.update(width=int(video["width"]), height=int(video["height"]))
+    try:
+        result["duration"] = round(float((data.get("format") or {}).get("duration") or 0), 3)
+    except ValueError:
+        pass
+    return result
+
+
 async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
                       local: Optional[Path] = None, source_url: str = "",
-                      upscaled: bool = False) -> Dict[str, Any]:
+                      upscaled: bool = False, job: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if local is not None:
         content = local.read_bytes()
         name = local.name
@@ -500,6 +586,15 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
             width, height = image.size
     except Exception:
         pass
+    media_metadata: Dict[str, Any] = {"size": len(content)}
+    if is_video:
+        # Civitai's web client sends the clip's size and duration; without
+        # them the video lands as 0x0 (measured 2026-09-27).
+        probe = await _probe_video(content)
+        width, height = probe.get("width", 0), probe.get("height", 0)
+        media_metadata.update(probe)
+    elif width and height:
+        media_metadata.update(width=width, height=height)
     request = (render_task(source_url or body.media_url).get("prompt") or {})
     resources, notes = collect_resources(body.resources, request, dict(body.generation or {}))
     meta = build_meta(body.prompt, request, dict(body.generation or {}), resources, upscaled, (width, height))
@@ -517,17 +612,31 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
     # The ticket is a presigned object-storage URL: it takes a PUT of the raw
     # bytes (a multipart POST answered 501). A Cloudflare Images direct-upload
     # URL takes the multipart POST, so that is the second try.
-    sent = await client.put(target, content=content, headers={"Content-Type": mime}, timeout=180.0)
+    total = len(content)
+
+    async def chunks():
+        step = 1 << 20
+        for offset in range(0, total, step):
+            yield content[offset:offset + step]
+            done = min(100, int((offset + step) * 100 / max(total, 1)))
+            _job_update(job, progress_percent=done,
+                        stage_label=f"Uploading to Civitai {done}% of {total / 1048576:.1f} MB")
+
+    _job_update(job, stage="uploading", stage_label="Uploading to Civitai 0%", progress_percent=0)
+    sent = await client.put(target, content=chunks(), timeout=600.0,
+                            headers={"Content-Type": mime, "Content-Length": str(total)})
     if sent.status_code >= 400:
         retry = await client.post(target, files={"file": (name, content, mime)}, timeout=180.0)
         if retry.status_code >= 400:
             raise RuntimeError(f"upload: PUT HTTP {sent.status_code}, POST HTTP {retry.status_code}")
+    _job_update(job, stage="posting", stage_label="Creating the post", progress_percent=None)
     post = await _trpc(client, "post.create", {})
     post_id = int(post["id"])
+    _job_update(job, post_id_int=post_id)
     try:
         image = await _trpc(client, "post.addImage", {
             "postId": post_id, "url": image_key, "name": name, "width": width, "height": height,
-            "hash": None, "meta": meta, "index": 0, "mimeType": mime,
+            "hash": None, "meta": meta, "index": 0, "mimeType": mime, "metadata": media_metadata,
             "type": "video" if is_video else "image"})
         image_id = int((image or {}).get("id") or 0)
         extras = await attach_extras(client, image_id, resources, techniques) if image_id else {}
@@ -601,12 +710,13 @@ async def generate_meta(body: "CivitaiMetaRequest") -> Dict[str, Any]:
     kind = _kind(body.media_url)
     caption = ""
     async with httpx.AsyncClient() as client:
-        if kind == "image":
+        if kind in ("image", "video"):
             try:
-                caption = await _ask(client, "/api/vision", {
-                    "prompt": "Describe this picture in 3-4 sentences: who, what happens, setting, lighting, "
-                              "camera and style.",
-                    "image_url": body.media_url, "structured": True})
+                caption = await _ask(client, "/api/vision", dict({
+                    "prompt": "Describe this " + ("clip" if kind == "video" else "picture") +
+                              " in 3-4 sentences: who, what happens, setting, lighting, camera and style.",
+                    "image_url": body.media_url, "structured": True},
+                    **({"video_mode": "storyboard"} if kind == "video" else {})))
             except Exception as error:
                 logger.info("civitai meta caption failed: %s", error)
         text = await _ask(client, "/api/text2text", {
@@ -632,21 +742,120 @@ async def generate_meta(body: "CivitaiMetaRequest") -> Dict[str, Any]:
             "tags_array": tags[:15], "tag_limit_int": POST_TAG_LIMIT, "caption_string": caption}
 
 
-async def _upscale_first(client: httpx.AsyncClient, url: str, kind: str) -> str:
-    """The same file 2x through /api/upscale2x; waits for it to land."""
+async def _farm_task(client: httpx.AsyncClient, task_id: str) -> Dict[str, Any]:
+    """The render farm's own view of one task: status, box, place in line, progress."""
+    try:
+        import ai_enhance_api
+        response = await client.get(f"{ai_enhance_api.RENDERFIN_BASE}/api-render/tasks/{task_id}", timeout=10.0)
+        return response.json() if response.status_code == 200 else {}
+    except Exception:
+        return {}
+
+
+async def _upscale_first(client: httpx.AsyncClient, url: str, kind: str,
+                         job: Optional[Dict[str, Any]] = None) -> str:
+    """The same file 2x through /api/upscale2x (a render-farm job); waits for it to land."""
     import ai_enhance_api
     request = ai_enhance_api.Upscale2xRequest(**({"video_url": url} if kind == "video" else {"image_url": url}))
     answer = await ai_enhance_api.api_upscale2x(request)
     target = str(answer.get("output_url_string") or "")
+    task_id = str(answer.get("task_id_string") or "")
     if not target:
         raise RuntimeError("upscale: no output address")
-    deadline = time.monotonic() + (1800 if kind == "video" else 600)
+    _job_update(job, stage="upscale_queued", stage_label="Upscale 2x queued on the farm",
+                upscale_task_id_string=task_id)
+    deadline = time.monotonic() + (3 * 3600 if kind == "video" else 1800)
     while time.monotonic() < deadline:
-        probe = await client.head(target, timeout=20.0)
-        if probe.status_code == 200:
-            return target
+        farm = await _farm_task(client, task_id) if task_id else {}
+        status = str(farm.get("status_string") or farm.get("status") or "").lower()
+        box = str(farm.get("render_server_name") or "")
+        if status in ("failed", "error", "cancelled", "canceled"):
+            raise RuntimeError("upscale failed on the farm: " + str(farm.get("error_string") or status)[:200])
+        if status == "pending" and not box:
+            position, length = farm.get("queue_position_int"), farm.get("queue_length_int")
+            _job_update(job, stage="upscale_queued", queue_position_int=position, queue_length_int=length,
+                        stage_label="Upscale 2x queued on the farm" +
+                                    (f" ({position} of {length})" if position else ""))
+        elif status not in ("done", "completed"):
+            percent = farm.get("managed_comfy_progress_percent", farm.get("progress_percent"))
+            percent = float(percent) if isinstance(percent, (int, float)) and percent >= 0 else None
+            _job_update(job, stage="upscale_running", box_string=box, progress_percent=percent,
+                        farm_started_at=farm.get("started_at") or 0,
+                        stage_label=f"Upscale 2x running on {box or 'a box'}" +
+                                    (f" {percent:.0f}%" if percent is not None else ""))
+        if status in ("done", "completed") or not farm:
+            probe = await client.head(target, timeout=20.0)
+            if probe.status_code == 200:
+                return target
         await asyncio.sleep(4)
     raise RuntimeError("upscale did not finish in time")
+
+
+_BACKGROUND: set = set()
+
+
+async def _auto_meta(body: CivitaiPostRequest, kind: str) -> CivitaiPostRequest:
+    """Title/description/tags from the LLM when the dialog sent a placeholder title."""
+    if not body.auto_meta or body.title.strip().lower() not in GENERIC_TITLES:
+        return body
+    try:
+        meta = await generate_meta(CivitaiMetaRequest(
+            media_url=body.media_url, prompt=body.prompt, service=kind,
+            resources=[item.name for item in body.resources if item.name]))
+    except Exception as error:
+        logger.info("civitai auto meta failed: %s", error)
+        return body
+    if not meta.get("title_string"):
+        return body
+    generic_tags = {"autorig", "video", "image", kind}
+    tags = [tag for tag in body.tags if tag.strip().lower() not in generic_tags]
+    return body.model_copy(update={
+        "title": meta["title_string"],
+        "description": body.description if body.description.strip() else meta.get("description_string", ""),
+        "tags": tags + list(meta.get("tags_array") or [])})
+
+
+async def run_post(body: CivitaiPostRequest, job: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    kind = _kind(body.media_url)
+    async with httpx.AsyncClient() as client:
+        download = body.media_url
+        source = body.media_url
+        local = None
+        # The LLM writes while the farm upscales.
+        meta_task = asyncio.ensure_future(_auto_meta(body, kind))
+        if kind == "audio":
+            try:
+                local = await _mux_audio(client, body.media_url, body.poster_url)
+                download = _public_scratch(local) or body.media_url
+            except Exception as error:
+                logger.warning("civitai audio mux failed: %s", error)
+                meta_task.cancel()
+                return _manual(body, "The music could not be put on a still: " + str(error)[:120], download)
+        if not _token():
+            meta_task.cancel()
+            return _manual(body, "No Civitai token on the server", download)
+        upscaled = ""
+        if body.upscale and kind in ("image", "video"):
+            try:
+                upscaled = await _upscale_first(client, body.media_url, kind, job)
+            except Exception as error:
+                logger.warning("civitai pre-post upscale failed: %s", error)
+                _job_update(job, upscale_error_string=str(error)[:200])
+        if not meta_task.done():
+            _job_update(job, stage="writing", stage_label="Writing title and tags", progress_percent=None)
+        body = await meta_task
+        _job_update(job, title_string=body.title)
+        if upscaled:
+            body = body.model_copy(update={"media_url": upscaled})
+        try:
+            answer = await _post_image(client, body, local, source_url=source, upscaled=bool(upscaled), job=job)
+            answer["upscaled_url_string"] = upscaled
+            logger.info("civitai post %s done: %s", answer.get("post_id_int"), answer.get("post_url_string"))
+            return answer
+        except Exception as error:
+            logger.warning("civitai post failed: %s", error)
+            return _manual(body, "Civitai did not accept the automatic post (" + str(error)[:200] +
+                           "); finish it by hand", download)
 
 
 def build_civitai_post_router(require_admin) -> APIRouter:
@@ -676,34 +885,46 @@ def build_civitai_post_router(require_admin) -> APIRouter:
                                      f"trpc post.addTag x<={POST_TAG_LIMIT}",
                                      "trpc post.update" + (" publishedAt" if body.publish else " (draft)")]
                                     if kind != "audio" else ["mux audio onto a still -> mp4", "then as a clip"])}
-        async with httpx.AsyncClient() as client:
-            download = body.media_url
-            source = body.media_url
-            local = None
-            if kind == "audio":
+        if body.background:
+            job = {"id": uuid.uuid4().hex[:12], "created_at": time.time(), "stage": "starting",
+                   "stage_label": "Starting", "kind_string": kind, "media_url_string": body.media_url,
+                   "title_string": body.title, "publish_bool": body.publish, "upscale_bool": body.upscale,
+                   "box_string": "", "progress_percent": None}
+            JOBS[job["id"]] = job
+            _job_save(job)
+
+            async def runner() -> None:
                 try:
-                    local = await _mux_audio(client, body.media_url, body.poster_url)
-                    download = _public_scratch(local) or body.media_url
-                except Exception as error:
-                    logger.warning("civitai audio mux failed: %s", error)
-                    return _manual(body, "The music could not be put on a still: " + str(error)[:120], download)
-            if not _token():
-                return _manual(body, "No Civitai token on the server", download)
-            upscaled = ""
-            if body.upscale and kind in ("image", "video"):
-                try:
-                    upscaled = await _upscale_first(client, body.media_url, kind)
-                    body = body.model_copy(update={"media_url": upscaled})
-                except Exception as error:
-                    logger.warning("civitai pre-post upscale failed: %s", error)
-            try:
-                answer = await _post_image(client, body, local, source_url=source, upscaled=bool(upscaled))
-                answer["upscaled_url_string"] = upscaled
-                return answer
-            except Exception as error:
-                logger.warning("civitai post failed: %s", error)
-                return _manual(body, "Civitai did not accept the automatic post (" + str(error)[:200] +
-                               "); finish it by hand", download)
+                    answer = await run_post(body, job)
+                except Exception as error:  # run_post answers failures itself; this is the last guard
+                    logger.exception("civitai job %s crashed", job["id"])
+                    answer = {"success_bool": False, "reason_string": str(error)[:300]}
+                done = bool(answer.get("success_bool"))
+                _job_update(job, result=answer, finished_at=time.time(), progress_percent=None,
+                            stage="done" if done else ("manual" if answer.get("manual_bool") else "failed"),
+                            stage_label=("Done" if done else
+                                         "Failed: " + str(answer.get("reason_string") or "")[:200]))
+
+            task = asyncio.get_running_loop().create_task(runner())
+            _BACKGROUND.add(task)
+            task.add_done_callback(_BACKGROUND.discard)
+            return {"success_bool": True, "job_id_string": job["id"], "job": _public_job(job)}
+        return await run_post(body, None)
+
+    @router.get("/api/ai/civitai/jobs")
+    async def api_civitai_jobs(_admin=Depends(require_admin)):
+        cutoff = time.time() - 24 * 3600
+        jobs = [_public_job(job) for job in JOBS.values() if job.get("created_at", 0) >= cutoff]
+        jobs.sort(key=lambda job: job.get("created_at", 0), reverse=True)
+        return {"success_bool": True, "jobs_array": jobs[:30],
+                "active_int": sum(1 for job in jobs if job["active_bool"])}
+
+    @router.get("/api/ai/civitai/jobs/{job_id}")
+    async def api_civitai_job(job_id: str, _admin=Depends(require_admin)):
+        job = JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail={"error_string": "job_not_found"})
+        return {"success_bool": True, "job": _public_job(job)}
 
     @router.post("/api/ai/civitai/meta")
     async def api_civitai_meta(body: CivitaiMetaRequest, _admin=Depends(require_admin)):

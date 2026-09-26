@@ -2008,8 +2008,11 @@
     const form = dialog.querySelector('form');
     const out = dialog.querySelector('.civ-out');
     const metaState = dialog.querySelector('.civ-meta-state');
+    const go = dialog.querySelector('.civ-go');
     const writeMeta = async () => {
-      metaState.textContent = 'writing with the text model…';
+      go.disabled = true;
+      go.title = 'Waiting for the title, description and tags';
+      metaState.textContent = 'writing with the text model… (Post unlocks when it is done)';
       try {
         const response = await fetch('/api/ai/civitai/meta', {method: 'POST', credentials: 'same-origin',
           headers: {'Content-Type': 'application/json'},
@@ -2019,7 +2022,9 @@
         if (meta.description_string) form.description.value = meta.description_string;
         if (meta.tags_array && meta.tags_array.length) form.tags.value = meta.tags_array.join(', ');
         metaState.textContent = meta.title_string ? 'written — edit freely' : 'the model gave no title; kept the defaults';
-      } catch (error) { metaState.textContent = 'could not write: ' + error.message; }
+      } catch (error) { metaState.textContent = 'could not write: ' + error.message + ' — the server writes them while posting'; }
+      go.disabled = false;
+      go.title = '';
     };
     dialog.querySelector('.civ-regen').addEventListener('click', writeMeta);
     writeMeta();
@@ -2027,12 +2032,12 @@
       if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
       const publish = form.publish.value === 'publish';
       if (publish && !window.confirm('Publish this publicly on Civitai now?')) return;
-      out.textContent = form.upscale.checked ? 'Upscaling 2× and posting… (a clip can take a few minutes)' : 'Posting…';
+      out.textContent = 'Starting…';
       const body = {media_url: url, title: form.title.value, description: form.description.value, prompt,
         tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
         resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
           weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
-        publish, upscale: !!form.upscale.checked,
+        publish, upscale: !!form.upscale.checked, background: true, auto_meta: true,
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
@@ -2040,7 +2045,11 @@
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error((data.detail && (data.detail.message_string || data.detail)) || ('HTTP ' + response.status));
-        if (data.success_bool && data.post_url_string) {
+        if (data.job_id_string) {
+          go.disabled = true;
+          civitaiJobs.watch(data.job_id_string, id, job => { out.innerHTML = civitaiJobs.describe(job, true); });
+          out.innerHTML = civitaiJobs.describe(data.job, true) + '<br><i>You can close this window: the post keeps going and shows in the Civitai jobs panel.</i>';
+        } else if (data.success_bool && data.post_url_string) {
           out.innerHTML = (data.warning_string ? '<b style="color:#fb7185">' + esc(data.warning_string) + '</b><br>' : '') +
             (data.draft_bool ? 'Draft saved: ' : 'Posted: ') + `<a href="${esc(data.post_url_string)}" target="_blank" rel="noopener">${esc(data.post_url_string)}</a>`;
           const current = runState.get(String(id));
@@ -2055,6 +2064,96 @@
     });
     dialog.showModal();
   }
+
+  /* Civitai post jobs: a small panel beside the farm status that lists every
+     running post (upscale on the farm -> upload -> post) with its box, stage
+     and elapsed time; the dialog can close, the job keeps going. */
+  const civitaiJobs = (() => {
+    const watchers = new Map();
+    const seenFinal = new Set();
+    let timer = null;
+    let panel = null;
+    const esc = value => escapeHtml(String(value == null ? '' : value));
+    const clock = seconds => {
+      const s = Math.max(0, Math.round(Number(seconds) || 0));
+      return s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's';
+    };
+    const link = job => {
+      const result = job.result || {};
+      return result.post_url_string ? `<a href="${esc(result.post_url_string)}" target="_blank" rel="noopener">${esc(result.post_url_string)}</a>` : '';
+    };
+    function describe(job, full) {
+      if (!job) return '';
+      const result = job.result || {};
+      const parts = [`<b>${esc(job.stage_label || job.stage)}</b>`];
+      if (job.box_string && /upscale/.test(job.stage || '')) parts.push('box ' + esc(job.box_string));
+      parts.push(clock(job.elapsed_seconds_float));
+      let html = parts.join(' · ');
+      if (typeof job.progress_percent === 'number') {
+        html += `<div style="height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin-top:3px"><div style="height:4px;width:${Math.max(2, Math.min(100, job.progress_percent))}%;background:#7dd3fc;border-radius:2px"></div></div>`;
+      }
+      if (job.stage === 'done') {
+        html = (result.warning_string ? '<b style="color:#fb7185">' + esc(result.warning_string) + '</b><br>' : '') +
+          (result.draft_bool ? 'Draft saved: ' : 'Posted: ') + link(job) + ' · ' + clock(job.elapsed_seconds_float);
+      } else if (job.stage === 'manual' || job.stage === 'failed' || job.stage === 'interrupted') {
+        html = '<b style="color:#fb7185">' + esc(job.stage_label) + '</b>' +
+          (result.download_url_string ? `<br><a href="${esc(result.download_url_string)}" target="_blank" rel="noopener" download>Download the file</a> · <a href="${esc(result.open_url_string)}" target="_blank" rel="noopener">Open Civitai's post page</a>` : '');
+      }
+      if (full && job.title_string) html = 'Title: <i>' + esc(job.title_string) + '</i><br>' + html;
+      return html;
+    }
+    function ensurePanel() {
+      if (panel && document.body.contains(panel)) return panel;
+      panel = document.createElement('div');
+      panel.id = 'civ-jobs';
+      panel.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:9000;max-width:380px;font:12px system-ui;' +
+        'background:rgba(10,12,30,.92);color:#e5e7eb;border:1px solid rgba(125,211,252,.4);border-radius:10px;padding:8px 10px;display:none';
+      ['mousedown', 'pointerdown', 'wheel'].forEach(type => panel.addEventListener(type, event => event.stopPropagation()));
+      document.body.appendChild(panel);
+      return panel;
+    }
+    function render(jobs) {
+      const host = ensurePanel();
+      const recent = jobs.filter(job => job.active_bool || (Date.now() / 1000 - (job.finished_at || 0) < 600));
+      host.style.display = recent.length ? 'block' : 'none';
+      host.innerHTML = '<b style="color:#7dd3fc">Civitai posts</b>' + recent.map(job =>
+        `<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.1);padding-top:5px">${esc((job.title_string || job.kind_string || '').slice(0, 60))}<br>${describe(job, false)}</div>`).join('');
+    }
+    async function poll() {
+      timer = null;
+      let jobs = [];
+      try {
+        const response = await fetch('/api/ai/civitai/jobs', {credentials: 'same-origin'});
+        if (!response.ok) return;
+        jobs = (await response.json()).jobs_array || [];
+      } catch (error) { schedule(); return; }
+      render(jobs);
+      jobs.forEach(job => {
+        const watcher = watchers.get(job.id);
+        if (watcher) watcher.update(job);
+        if (!job.active_bool && !seenFinal.has(job.id)) {
+          seenFinal.add(job.id);
+          if (watcher) {
+            if (job.stage === 'done') {
+              toast('Civitai: ' + (job.result && job.result.draft_bool ? 'draft saved' : 'posted') + ' — ' + ((job.result || {}).post_url_string || ''));
+              const current = runState.get(String(watcher.nodeId));
+              if (current && job.result && job.result.post_url_string) { current.civitai_url = job.result.post_url_string; recordResult(watcher.nodeId, current); }
+            } else toast('Civitai post: ' + job.stage_label);
+            watchers.delete(job.id);
+          }
+        }
+      });
+      if (jobs.some(job => job.active_bool) || watchers.size) schedule();
+    }
+    function schedule() { if (!timer) timer = setTimeout(poll, 3000); }
+    function watch(jobId, nodeId, update) {
+      watchers.set(jobId, {nodeId, update});
+      schedule();
+    }
+    // Jobs started earlier (another tab, a reload) show up for the owner.
+    civitaiIsAdmin().then(admin => { if (admin) poll(); }).catch(() => {});
+    return {watch, describe};
+  })();
 
   function attachCivitaiButton(host) {
     if (!host || host.querySelector(':scope > .civ-btn')) return;
