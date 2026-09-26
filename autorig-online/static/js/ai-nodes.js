@@ -294,9 +294,17 @@
       control = `<input type="range" data-param="${name}" min="${param.min}" max="${param.max}" `
               + `step="${param.step}" value="${param.default}"${help}>`
               + `<output data-for="${name}">${rangeLabel(param.default)}</output>`;
+    } else if (param.type === 'number' && !['seed', 'width', 'height'].includes(param.name)
+               && param.min != null && param.max != null && Number(param.max) - Number(param.min) <= 100000) {
+      // Bounded numbers (frames, CFG, token budget) are sliders like the rest.
+      control = `<input type="range" data-param="${name}" min="${param.min}" max="${param.max}" `
+              + `step="${param.step || 1}" value="${param.default}"${help}>`
+              + `<output data-for="${name}">${rangeLabel(param.default)}</output>`;
     } else if (param.type === 'number') {
       control = `<input type="number" data-param="${name}" min="${param.min}" max="${param.max}" `
-              + `step="${param.step || 1}" value="${param.default}"${help}>`;
+              + `step="${param.step || 1}" value="${param.default}"${help}>`
+              + (param.name === 'seed'
+                ? `<button type="button" class="nseed-rand" data-seed-for="${name}" title="Random seed">🎲</button>` : '');
     } else if (param.type === 'model') {
       // Filled in after the node exists: the picker needs a live element to
       // mount into, which the HTML string cannot give it.
@@ -1392,7 +1400,7 @@
       banner.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:20;' +
         'background:#7c3aed;color:#fff;padding:6px 12px;border-radius:8px;font:600 13px system-ui;cursor:pointer;' +
         'box-shadow:0 2px 10px rgba(0,0,0,.35)';
-      banner.title = 'Click or press Ctrl+O to restore every node';
+      banner.title = 'Click or press Ctrl+I to restore every node';
       banner.addEventListener('click', () => toggleIsolation());
       const host = document.getElementById('canvas');
       (host && host.parentElement ? host.parentElement : document.body).appendChild(banner);
@@ -1401,7 +1409,7 @@
     const element = nodeElement(isolation.target);
     const heading = element && element.querySelector('.nhead b');
     const name = item.label || (heading && heading.textContent) || ('node ' + isolation.target);
-    banner.textContent = 'Isolated: ' + name + ' — Ctrl+O to restore';
+    banner.textContent = 'Isolated: ' + name + ' — Ctrl+I to restore';
   }
 
   function restoreIsolation(quiet) {
@@ -1417,7 +1425,7 @@
   }
 
   /**
-   * Ctrl+O on a selected node: bypass everything that is not upstream of it,
+   * Ctrl+I on a selected node: bypass everything that is not upstream of it,
    * so Render computes that branch only. Again (or the banner) restores each
    * node's own earlier state, including nodes that were bypassed before.
    */
@@ -1425,7 +1433,7 @@
     const target = targetId != null ? String(targetId) : null;
     if (isolation && (!target || target === String(isolation.target))) return restoreIsolation();
     if (!target || !meta(target) || !nodeElement(target)) {
-      toast('Select an output node first — Ctrl+O then isolates its branch.');
+      toast('Select an output node first — Ctrl+I then isolates its branch.');
       return false;
     }
     if (isolation) restoreIsolation(true);
@@ -1437,7 +1445,7 @@
     });
     isolation = {target, prior};
     paintIsolation();
-    toast('Branch isolated: ' + keep.size + ' node(s) will run. Ctrl+O restores.');
+    toast('Branch isolated: ' + keep.size + ' node(s) will run. Ctrl+I restores.');
     return true;
   }
 
@@ -1457,7 +1465,7 @@
     button.className = 'niso';
     button.dataset.node = String(id);
     button.textContent = '◎';
-    button.title = 'Isolate this branch: run only what this node needs (Ctrl+O)';
+    button.title = 'Isolate this branch: run only what this node needs (Ctrl+I)';
     button.setAttribute('aria-label', 'Isolate branch');
     button.style.cssText = 'margin-left:4px;border:0;background:transparent;color:inherit;cursor:pointer;font-size:13px;padding:0 3px;opacity:.75';
     button.addEventListener('mousedown', event => event.stopPropagation());
@@ -1467,8 +1475,10 @@
 
   document.addEventListener('keydown', event => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-    if (String(event.key).toLowerCase() !== 'o') return;
+    if (String(event.key).toLowerCase() !== 'i') return;
     if (!document.getElementById('canvas')) return;
+    const typing = event.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || '') || event.target.isContentEditable);
+    if (typing) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     const id = selectedNodeId();
@@ -2690,7 +2700,7 @@
     editor.zoom_max = 2.5;
     applySocketScale(editor.zoom);
     canvas.addEventListener('wheel', event => {
-      if (event.target.closest('input, textarea, select, .mpick-panel, .ntext')) return;
+      if (event.target.closest('input, textarea, select, .mpick-panel, .ntext, .aislider')) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       const bounds = canvas.getBoundingClientRect();
@@ -3781,6 +3791,18 @@
     });
 
     buildPalette();
+    if (window.AISlider) window.AISlider.watch(document.getElementById('canvas'));
+    document.addEventListener('click', event => {
+      const dice = event.target.closest && event.target.closest('.nseed-rand');
+      if (!dice) return;
+      event.stopPropagation();
+      const field = dice.parentElement.querySelector('[data-param="' + dice.dataset.seedFor + '"]');
+      if (!field) return;
+      const top = Math.min(Number(field.max) || 2147483647, 2147483647);
+      field.value = String(Math.floor(Math.random() * top));
+      field.dispatchEvent(new Event('input', {bubbles: true}));
+      field.dispatchEvent(new Event('change', {bubbles: true}));
+    }, true);
     // A dropdown that stays open after a click elsewhere reads as stuck.
     const compositions = document.getElementById('compositions');
     if (compositions) {

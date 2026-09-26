@@ -286,9 +286,11 @@
 
     function weightInput(min, max, value, title) {
       const input = document.createElement('input');
-      input.type = 'number';
+      // A slider (ai-node-slider.js enhances it): -1..2, step 0.05, default 1.
+      input.type = 'range';
       input.className = 'lslot-weight';
-      input.min = String(min); input.max = String(max); input.step = '0.05';
+      input.min = String(Math.min(Number(min), -1)); input.max = String(Math.max(Number(max), 2)); input.step = '0.05';
+      input.setAttribute('value', '1');
       input.value = String(value);
       input.title = title;
       input.setAttribute('aria-label', title);

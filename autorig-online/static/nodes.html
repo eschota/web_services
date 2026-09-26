@@ -26,9 +26,10 @@
     <script src="/static/js/ai-node-placement.js?v=20260922-ui6d"></script>
     <script src="/static/js/ai-node-pipelines.js?v=20260922-toolbar3"></script>
     <script src="/static/js/ai-node-wires.js?v=20260922-wires"></script>
-    <script src="/static/js/ai-node-lora-stack.js?v=20260923-lorafit1"></script>
+    <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
+    <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-nodes.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-nodes.js?v=20260926-slider4"></script>
     <style>
         .ai-page {
             background:
@@ -419,6 +420,19 @@
             color: inherit; padding: 4px 6px; font-size: 11.5px;
         }
         .nparam input[type=range] { flex: 1; min-width: 0; accent-color: #7b5cff; }
+        /* ---- node sliders (ai-node-slider.js) ---- */
+        .aislider-native { display: none !important; }
+        .aislider { position: relative; flex: 1; min-width: 60px; height: 22px; display: inline-flex; align-items: center; cursor: ew-resize; touch-action: none; outline: none; }
+        .aislider-track { position: relative; width: 100%; height: 6px; border-radius: 3px; background: rgba(255,255,255,.14); }
+        .aislider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: #7b5cff; }
+        .aislider-thumb { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #7b5cff; }
+        .aislider:focus-visible .aislider-thumb, .aislider.dragging .aislider-thumb { box-shadow: 0 0 0 3px #a78bfa; transform: scale(1.15); }
+        .aislider-value, .aislider-editable { min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; cursor: text; }
+        .aislider-edit { width: 56px; font: inherit; }
+        .aislider-reset { border: 0; background: transparent; color: inherit; opacity: .25; cursor: pointer; padding: 0 2px; font-size: 12px; }
+        .aislider-reset.dirty { opacity: .8; }
+        .nseed-rand { border: 0; background: transparent; cursor: pointer; padding: 0 2px; }
+        .lslot .aislider { min-width: 70px; }
         .nparam output { font-size: 11px; min-width: 30px; text-align: right; color: #c7b9ff; }
         .nparam .lstack-add { flex: 0 0 34px; min-width: 34px; padding: 0 2px; text-align: center; }
         .nparam-wide { display: block; }
