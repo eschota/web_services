@@ -781,6 +781,29 @@ async def run_post(body: CivitaiPostRequest, job: Optional[Dict[str, Any]]) -> D
         download = body.media_url
         source = body.media_url
         local = None
+        # A node's address exists before its file does: posting a render that
+        # is still queued or running answered a bare 404 (2026-09-27).
+        try:
+            probe = await client.head(body.media_url, timeout=20.0, follow_redirects=True)
+            missing = probe.status_code == 404
+        except Exception:
+            missing = False
+        if missing:
+            state = ""
+            match = re.search(r"/renderfin/render/[^/]+/([0-9a-f-]{36})\.", body.media_url)
+            if match:
+                try:
+                    import ai_enhance_api
+                    farm = (await client.get(f"{ai_enhance_api.RENDERFIN_BASE}/api-render/tasks/{match.group(1)}",
+                                              timeout=10.0)).json()
+                    status = str(farm.get("status_string") or farm.get("status") or "")
+                    box = str(farm.get("render_server_name") or "")
+                    state = status + (f" on {box}" if box else "")
+                except Exception:
+                    state = ""
+            reason = ("This output is not ready yet" + (f" ({state})" if state else "") +
+                      ": post it when the node has finished rendering")
+            return {"success_bool": False, "not_ready_bool": True, "reason_string": reason}
         # The LLM writes (when the title is a placeholder) before the upload.
         meta_task = asyncio.ensure_future(_auto_meta(body, kind))
         if kind == "audio":
