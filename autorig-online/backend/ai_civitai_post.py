@@ -330,9 +330,6 @@ def build_meta(prompt: str, request: Dict[str, Any], generation: Dict[str, Any],
         meta["Model"] = str(model)
     if request.get("creativity"):
         meta["Denoising strength"] = float(request["creativity"])
-    if request.get("control_strength") and ("control" in str(request.get("workflow") or "")
-                                             or "depth map" in text.lower()):
-        meta["ControlNet strength"] = float(request["control_strength"])
     loras = [r for r in resources if r.get("type") == "lora"]
     if loras:
         meta["Lora"] = ", ".join(f"{r['name']}:{r.get('weight') or 1.0}" for r in loras)
@@ -586,7 +583,7 @@ META_SYSTEM = (
     "setting, lighting, style, medium and mood. English only.")
 
 
-async def _ask(client: httpx.AsyncClient, path: str, body: Dict[str, Any], timeout: float = 240.0) -> str:
+async def _ask(client: httpx.AsyncClient, path: str, body: Dict[str, Any], timeout: float = 420.0) -> str:
     """One Vision/Text request on this backend, answer text (polls the task)."""
     response = await client.post(LOCAL + path, json=dict(body, wait_seconds=60), timeout=90.0)
     data = response.json() if response.content else {}
