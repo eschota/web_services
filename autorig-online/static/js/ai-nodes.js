@@ -1984,7 +1984,11 @@
     const params = readParams(id);
     const resources = await nodeResources(id);
     const prompt = nodePromptText(id);
-    const risky = /porn|nsfw|xxx|hentai|nude|lewd/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' '));
+    // The owner only presses Post: rating X and its confirmation are preset,
+    // draft/publish is whatever was chosen last time (draft until then).
+    let lastMode = 'draft';
+    try { lastMode = localStorage.getItem('civ.publishMode') === 'publish' ? 'publish' : 'draft'; } catch (error) { /* private mode */ }
+    const ratings = ['None', 'Soft', 'Mature', 'X'];
     let dialog = document.getElementById('civitai-post');
     if (dialog) dialog.remove();
     dialog = document.createElement('dialog');
@@ -1996,14 +2000,13 @@
       <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
       <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
       <label>Tags (comma separated; Civitai keeps the first 5, existing tags first)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
-      <label>Rating (required)<select name="rating" required>
-        <option value="">— choose —</option><option${risky ? '' : ' selected'}>None</option><option>Soft</option><option>Mature</option><option${risky ? ' selected' : ''}>X</option></select></label>
-      <label><input type="checkbox" name="confirm" required> I checked the rating (suggested from the model/LoRA and prompt)</label>
+      <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(r =>
+        `<label class="civ-seg-opt"><input type="radio" name="rating" value="${r}"${r === 'X' ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div></div>
+      <label><input type="checkbox" name="confirm" checked> I checked the rating</label>
       <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
-      <label><input type="checkbox" name="upscale"${/\.(mp3|wav|flac|ogg|m4a)(\?|$)/i.test(url) ? '' : ' checked'}> Upscale 2× before posting (RealESRGAN)</label>
       <div><button type="button" class="civ-regen">↻ Write title, description and tags</button> <span class="civ-meta-state"></span></div>
-      <label><input type="radio" name="publish" value="draft" checked> Save as draft (recommended)</label>
-      <label><input type="radio" name="publish" value="publish"> Publish now</label>
+      <label><input type="radio" name="publish" value="draft"${lastMode === 'draft' ? ' checked' : ''}> Save as draft</label>
+      <label><input type="radio" name="publish" value="publish"${lastMode === 'publish' ? ' checked' : ''}> Publish now</label>
       <div class="civ-out" style="white-space:pre-wrap"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button value="cancel">Close</button><button type="button" class="civ-go">Post</button></div></form>`;
     document.body.appendChild(dialog);
@@ -2011,31 +2014,62 @@
     const form = dialog.querySelector('form');
     const out = dialog.querySelector('.civ-out');
     const metaState = dialog.querySelector('.civ-meta-state');
-    const writeMeta = async () => {
-      metaState.textContent = 'writing with the text model…';
-      try {
-        const response = await fetch('/api/ai/civitai/meta', {method: 'POST', credentials: 'same-origin',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({media_url: url, prompt, service: item.service || '', resources: resources.map(r => r.name)})});
-        const meta = await response.json();
-        if (meta.title_string) form.title.value = meta.title_string;
-        if (meta.description_string) form.description.value = meta.description_string;
-        if (meta.tags_array && meta.tags_array.length) form.tags.value = meta.tags_array.join(', ');
-        metaState.textContent = meta.title_string ? 'written — edit freely' : 'the model gave no title; kept the defaults';
-      } catch (error) { metaState.textContent = 'could not write: ' + error.message; }
+    const go = dialog.querySelector('.civ-go');
+    form.querySelectorAll('input[name=publish]').forEach(radio => radio.addEventListener('change', () => {
+      try { localStorage.setItem('civ.publishMode', form.publish.value); } catch (error) { /* private mode */ }
+    }));
+    // Metadata starts the moment the dialog opens and fills in as it comes:
+    // the Vision caption first (description), then title and tags. A field
+    // the owner has typed in is left alone.
+    const touched = new Set();
+    ['title', 'description', 'tags'].forEach(name => form[name].addEventListener('input', () => touched.add(name)));
+    const setField = (name, value) => { if (value && !touched.has(name)) form[name].value = value; };
+    const metaCall = extra => fetch('/api/ai/civitai/meta', {method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(Object.assign({media_url: url, prompt, service: item.service || '',
+                                          resources: resources.map(r => r.name)}, extra))}).then(r => r.json());
+    let metaPromise = null;
+    let metaRun = 0;
+    const writeMeta = (force) => {
+      const run = ++metaRun;
+      if (force) touched.clear();
+      metaState.textContent = 'looking at the output…';
+      metaPromise = (async () => {
+        let caption = '';
+        try {
+          const first = await metaCall({caption_only: true});
+          caption = first.caption_string || '';
+          if (run === metaRun && caption) { setField('description', caption); metaState.textContent = 'writing the title and tags…'; }
+        } catch (error) { /* the text step still runs */ }
+        try {
+          const meta = await metaCall({caption});
+          if (run !== metaRun) return;
+          setField('title', meta.title_string);
+          setField('description', meta.description_string);
+          if (meta.tags_array && meta.tags_array.length) setField('tags', meta.tags_array.join(', '));
+          metaState.textContent = meta.title_string ? 'written — edit freely' : 'the model gave no title; the server writes one while posting';
+        } catch (error) {
+          if (run === metaRun) metaState.textContent = 'could not write: ' + error.message + ' — the server writes them while posting';
+        }
+      })();
+      return metaPromise;
     };
-    dialog.querySelector('.civ-regen').addEventListener('click', writeMeta);
-    writeMeta();
+    dialog.querySelector('.civ-regen').addEventListener('click', () => writeMeta(true));
+    writeMeta(false);
     dialog.querySelector('.civ-go').addEventListener('click', async () => {
       if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
       const publish = form.publish.value === 'publish';
-      if (publish && !window.confirm('Publish this publicly on Civitai now?')) return;
-      out.textContent = form.upscale.checked ? 'Upscaling 2× and posting… (a clip can take a few minutes)' : 'Posting…';
+      go.disabled = true;
+      if (metaPromise) {
+        out.textContent = 'Waiting for the title and tags…';
+        await metaPromise;
+      }
+      out.textContent = 'Starting…';
       const body = {media_url: url, title: form.title.value, description: form.description.value, prompt,
         tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
         resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
           weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
-        publish, upscale: !!form.upscale.checked,
+        publish, background: true, auto_meta: true,
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
@@ -2043,7 +2077,11 @@
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error((data.detail && (data.detail.message_string || data.detail)) || ('HTTP ' + response.status));
-        if (data.success_bool && data.post_url_string) {
+        if (data.job_id_string) {
+          go.disabled = true;
+          civitaiJobs.watch(data.job_id_string, id, job => { out.innerHTML = civitaiJobs.describe(job, true); });
+          out.innerHTML = civitaiJobs.describe(data.job, true) + '<br><i>You can close this window: the post keeps going and shows in the Civitai jobs panel.</i>';
+        } else if (data.success_bool && data.post_url_string) {
           out.innerHTML = (data.warning_string ? '<b style="color:#fb7185">' + esc(data.warning_string) + '</b><br>' : '') +
             (data.draft_bool ? 'Draft saved: ' : 'Posted: ') + `<a href="${esc(data.post_url_string)}" target="_blank" rel="noopener">${esc(data.post_url_string)}</a>`;
           const current = runState.get(String(id));
@@ -2054,10 +2092,100 @@
           const copy = out.querySelector('.civ-copy');
           if (copy) copy.addEventListener('click', () => copyText(data.details_string || '').then(() => toast('Details copied.')));
         }
-      } catch (error) { out.textContent = 'Failed: ' + error.message; }
+      } catch (error) { out.textContent = 'Failed: ' + error.message; go.disabled = false; }
     });
     dialog.showModal();
   }
+
+  /* Civitai post jobs: a small panel that lists every running post
+     (writing -> upload % -> post -> done) with its stage and elapsed time;
+     the dialog can close, the job keeps going. */
+  const civitaiJobs = (() => {
+    const watchers = new Map();
+    const seenFinal = new Set();
+    let timer = null;
+    let panel = null;
+    const esc = value => escapeHtml(String(value == null ? '' : value));
+    const clock = seconds => {
+      const s = Math.max(0, Math.round(Number(seconds) || 0));
+      return s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's';
+    };
+    const link = job => {
+      const result = job.result || {};
+      return result.post_url_string ? `<a href="${esc(result.post_url_string)}" target="_blank" rel="noopener">${esc(result.post_url_string)}</a>` : '';
+    };
+    function describe(job, full) {
+      if (!job) return '';
+      const result = job.result || {};
+      const parts = [`<b>${esc(job.stage_label || job.stage)}</b>`];
+      if (job.box_string && /upscale/.test(job.stage || '')) parts.push('box ' + esc(job.box_string));
+      parts.push(clock(job.elapsed_seconds_float));
+      let html = parts.join(' · ');
+      if (typeof job.progress_percent === 'number') {
+        html += `<div style="height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin-top:3px"><div style="height:4px;width:${Math.max(2, Math.min(100, job.progress_percent))}%;background:#7dd3fc;border-radius:2px"></div></div>`;
+      }
+      if (job.stage === 'done') {
+        html = (result.warning_string ? '<b style="color:#fb7185">' + esc(result.warning_string) + '</b><br>' : '') +
+          (result.draft_bool ? 'Draft saved: ' : 'Posted: ') + link(job) + ' · ' + clock(job.elapsed_seconds_float);
+      } else if (job.stage === 'manual' || job.stage === 'failed' || job.stage === 'interrupted') {
+        html = '<b style="color:#fb7185">' + esc(job.stage_label) + '</b>' +
+          (result.download_url_string ? `<br><a href="${esc(result.download_url_string)}" target="_blank" rel="noopener" download>Download the file</a> · <a href="${esc(result.open_url_string)}" target="_blank" rel="noopener">Open Civitai's post page</a>` : '');
+      }
+      if (full && job.title_string) html = 'Title: <i>' + esc(job.title_string) + '</i><br>' + html;
+      return html;
+    }
+    function ensurePanel() {
+      if (panel && document.body.contains(panel)) return panel;
+      panel = document.createElement('div');
+      panel.id = 'civ-jobs';
+      panel.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:9000;max-width:380px;font:12px system-ui;' +
+        'background:rgba(10,12,30,.92);color:#e5e7eb;border:1px solid rgba(125,211,252,.4);border-radius:10px;padding:8px 10px;display:none';
+      ['mousedown', 'pointerdown', 'wheel'].forEach(type => panel.addEventListener(type, event => event.stopPropagation()));
+      document.body.appendChild(panel);
+      return panel;
+    }
+    function render(jobs) {
+      const host = ensurePanel();
+      const recent = jobs.filter(job => job.active_bool || (Date.now() / 1000 - (job.finished_at || 0) < 600));
+      host.style.display = recent.length ? 'block' : 'none';
+      host.innerHTML = '<b style="color:#7dd3fc">Civitai posts</b>' + recent.map(job =>
+        `<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.1);padding-top:5px">${esc((job.title_string || job.kind_string || '').slice(0, 60))}<br>${describe(job, false)}</div>`).join('');
+    }
+    async function poll() {
+      timer = null;
+      let jobs = [];
+      try {
+        const response = await fetch('/api/ai/civitai/jobs', {credentials: 'same-origin'});
+        if (!response.ok) return;
+        jobs = (await response.json()).jobs_array || [];
+      } catch (error) { schedule(); return; }
+      render(jobs);
+      jobs.forEach(job => {
+        const watcher = watchers.get(job.id);
+        if (watcher) watcher.update(job);
+        if (!job.active_bool && !seenFinal.has(job.id)) {
+          seenFinal.add(job.id);
+          if (watcher) {
+            if (job.stage === 'done') {
+              toast('Civitai: ' + (job.result && job.result.draft_bool ? 'draft saved' : 'posted') + ' — ' + ((job.result || {}).post_url_string || ''));
+              const current = runState.get(String(watcher.nodeId));
+              if (current && job.result && job.result.post_url_string) { current.civitai_url = job.result.post_url_string; recordResult(watcher.nodeId, current); }
+            } else toast('Civitai post: ' + job.stage_label);
+            watchers.delete(job.id);
+          }
+        }
+      });
+      if (jobs.some(job => job.active_bool) || watchers.size) schedule();
+    }
+    function schedule() { if (!timer) timer = setTimeout(poll, 3000); }
+    function watch(jobId, nodeId, update) {
+      watchers.set(jobId, {nodeId, update});
+      schedule();
+    }
+    // Jobs started earlier (another tab, a reload) show up for the owner.
+    civitaiIsAdmin().then(admin => { if (admin) poll(); }).catch(() => {});
+    return {watch, describe};
+  })();
 
   function attachCivitaiButton(host) {
     if (!host || host.querySelector(':scope > .civ-btn')) return;
@@ -4130,6 +4258,8 @@
         pending.set(id, start);
       }
       const settled = await Promise.all(pending.values());
+      // Lists stream item by item; the run is over when every item is.
+      await Promise.all(settled.map(record => record && record.whenDone).filter(Boolean));
       const serviceIds = order.filter(id => byId.get(id)?.kind === KIND_SERVICE);
       const produced = serviceIds.filter(id => settled[order.indexOf(id)]?.ok).length;
       const skipped = serviceIds.filter(id => settled[order.indexOf(id)]?.bypassed).length;

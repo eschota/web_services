@@ -188,6 +188,8 @@
       shared[link.input] = value;
     }
     if (sink) {
+      // A sink needs every item: wait for the streamed lists to finish.
+      await Promise.all(feeds.map((link, index) => lists[index] ? settled(upstreamRecords[index].result) : null));
       const resolved = Object.assign({}, shared);
       feeds.forEach((link, index) => {
         if (!lists[index]) return;
@@ -212,14 +214,20 @@
     const count = Math.max(1, ...feeds.map((link, index) => lists[index] ? upstreamRecords[index].result.items.length : 0),
       isList(gateResult) ? gateResult.items.length : 0);
     try {
-      const result = await runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch);
-      return {ok: true, result};
+      // Streamed: the node answers at once and each item resolves on its own,
+      // so shot 1 goes on to the next node while shot 2 is still rendering.
+      const {result, done} = runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch);
+      return {ok: true, result, whenDone: done};
     } catch (error) {
       return {ok: false, error: String(error.message || error)};
     }
   }
 
-  async function runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch) {
+  function settled(result) {
+    return Promise.all((result && result.itemPromises) || []);
+  }
+
+  function runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch) {
     const runner = api.runnerFor(node.service);
     const previous = api.runState.get(String(id));
     const oldItems = previous && Array.isArray(previous.items) ? previous.items : [];
@@ -238,11 +246,30 @@
       paint(id);
     };
     report();
+    const resolvers = [];
+    const itemPromises = items.map((item, i) => new Promise(resolve => { resolvers[i] = resolve; }));
     let next = 0;
     const work = async () => {
       while (next < count) {
         const i = next; next += 1;
+        try {
+          await processItem(i);
+        } catch (error) {
+          items[i].status = 'failed';
+          items[i].error = String(error.message || error).slice(0, 400);
+          report();
+        }
+        resolvers[i](items[i]);
+      }
+    };
+    const processItem = async i => {
         const item = items[i];
+        // Wait only for item i upstream (and the route decisions it depends on).
+        await Promise.all(feeds.map((link, index) => {
+          const upstream = lists[index] && upstreamRecords[index].result;
+          return upstream && upstream.itemPromises ? upstream.itemPromises[i] : null;
+        }));
+        if (gateResult && gateResult.itemPromises) await Promise.all(gateResult.itemPromises.slice(0, i + 1));
         const resolved = Object.assign({}, shared);
         let missing = '';
         feeds.forEach((link, index) => {
@@ -253,9 +280,9 @@
           if (value == null || value === '') missing = missing || (link.input + ' (' + (upstreamItem ? upstreamItem.status : 'no item') + ')');
           else resolved[link.input] = value;
         });
-        if (missing) { item.status = 'skipped'; item.error = 'no input: ' + missing; report(); continue; }
+        if (missing) { item.status = 'skipped'; item.error = 'no input: ' + missing; report(); return; }
         const gate = gatePasses(when, gateResult, i);
-        if (!gate.ok) { item.status = 'skipped'; item.error = gate.why; report(); continue; }
+        if (!gate.ok) { item.status = 'skipped'; item.error = gate.why; report(); return; }
         const itemParams = Object.assign({}, params);
         if (item.meta && item.meta.frames && Number(itemParams.frame_count) > 0 && itemParams._frames_from_shot !== false) {
           itemParams.frame_count = frameCountFor(item.meta.frames, itemParams.frame_count);
@@ -268,7 +295,7 @@
           if (old && old.status === 'done' && old.sig === sig && old.value) {
             Object.assign(item, {status: 'done', value: old.value, outputs: old.outputs || null, type: old.type || item.type, sig, cached: true});
             report();
-            continue;
+            return;
           }
           item.status = 'running';
           report();
@@ -293,9 +320,8 @@
           item.error = String(error.message || error).slice(0, 400);
         }
         report();
-      }
     };
-    await Promise.all(Array.from({length: Math.min(PER_ITEM_PARALLEL, count)}, work));
+    const done = Promise.all(Array.from({length: Math.min(PER_ITEM_PARALLEL, count)}, work)).then(() => {
     const first = items.find(item => item.status === 'done');
     record.status = 'done';
     record.value = first ? first.value : '';
@@ -308,7 +334,12 @@
     report();
     // Even when every shot failed the list goes on: a fallback branch gated on
     // FAILED and Concat (which takes the next candidate per shot) need it.
-    return {type: record.type, value: record.value, outputs: null, items, fromEach: true};
+    result.value = record.value;
+    result.type = record.type;
+    return result;
+    });
+    const result = {type: record.type, value: '', outputs: null, items, itemPromises, fromEach: true};
+    return {result, done};
   }
 
   /* ------------------------------------------------------------ display */
