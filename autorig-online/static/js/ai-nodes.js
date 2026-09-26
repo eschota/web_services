@@ -1955,6 +1955,7 @@
       'z_image_turbo_fp8_e4m3fn.safetensors': [2442439, 'Z-Image Turbo'],
       'krea2_turbo_fp8_scaled.safetensors': [3091481, 'Krea 2 Turbo'],
       'qwen-image-2512-Q3_K_S.gguf': [2552908, 'Qwen-Image-2512'],
+      'qwen_image_2.1_int8_convrot.safetensors': [3352534, 'Qwen Image 2.1'],
       'minimax_h3_fl2va_pruned_int8_convrot.safetensors': [3216500, 'MiniMax H3']
     };
     const known = files.filter(file => KNOWN[file]).map(file => ({model_version_id: KNOWN[file][0], name: KNOWN[file][1]}));
@@ -1991,7 +1992,7 @@
       <b style="font-size:15px">Post to Civitai (NoDeadLine)</b>
       <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
       <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
-      <label>Tags (comma separated)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
+      <label>Tags (comma separated; Civitai keeps the first 5, existing tags first)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
       <label>Rating (required)<select name="rating" required>
         <option value="">— choose —</option><option${risky ? '' : ' selected'}>None</option><option>Soft</option><option>Mature</option><option${risky ? ' selected' : ''}>X</option></select></label>
       <label><input type="checkbox" name="confirm" required> I checked the rating (suggested from the model/LoRA and prompt)</label>
