@@ -1930,14 +1930,23 @@
     const item = meta(id) || {};
     const files = [params.checkpoint, params.lora].filter(Boolean).map(String);
     String(params.loras || '').replace(/<lora:([^:>]+)/g, (_, name) => { files.push(name.trim()); return ''; });
-    if (!files.length || !window.AIEntities) return [];
+    // Curated models the catalogue does not tag with a Civitai version.
+    const KNOWN = {
+      'z_image_turbo_fp8_e4m3fn.safetensors': [2442439, 'Z-Image Turbo'],
+      'krea2_turbo_fp8_scaled.safetensors': [3091481, 'Krea 2 Turbo'],
+      'qwen-image-2512-Q3_K_S.gguf': [2552908, 'Qwen-Image-2512'],
+      'minimax_h3_fl2va_pruned_int8_convrot.safetensors': [3216500, 'MiniMax H3']
+    };
+    const known = files.filter(file => KNOWN[file]).map(file => ({model_version_id: KNOWN[file][0], name: KNOWN[file][1]}));
+    if (!files.length || !window.AIEntities) return known;
     try {
       const data = await window.AIEntities.loadModels(item.service || 'image');
       const all = [].concat((data && data.checkpoints_array) || [], (data && data.loras_array) || []);
-      return files.map(file => all.find(entry => entry.file === file || (entry.file || '').replace(/\.safetensors$/, '') === file))
+      const found = files.map(file => all.find(entry => entry.file === file || (entry.file || '').replace(/\.safetensors$/, '') === file))
         .filter(entry => entry && entry.source_version_id)
         .map(entry => ({model_version_id: Number(entry.source_version_id), name: entry.title || entry.file}));
-    } catch (error) { return []; }
+      return known.concat(found.filter(item => !known.some(k => k.model_version_id === item.model_version_id)));
+    } catch (error) { return known; }
   }
 
   async function openCivitaiDialog(id) {
@@ -1953,7 +1962,7 @@
     if (dialog) dialog.remove();
     dialog = document.createElement('dialog');
     dialog.id = 'civitai-post';
-    dialog.style.cssText = 'width:min(560px,94vw);border:1px solid #444;border-radius:12px;background:#12132a;color:#eee;font:13px system-ui';
+    dialog.className = 'civ-dialog';
     const esc = value => escapeHtml(String(value || ''));
     dialog.innerHTML = `<form method="dialog" style="display:grid;gap:8px">
       <b style="font-size:15px">Post to Civitai (NoDeadLine)</b>
@@ -2777,10 +2786,24 @@
     if (!url) throw new Error('the farm accepted the job without an output address');
     // The farm publishes where the file will be before it exists, so the file
     // appearing is the completion signal. Video is allowed half an hour.
+    let missing = 0;
     for (let attempt = 0; attempt < 800; attempt++) {
       if (accepted.task_id_string) {
         const status = await fetch('/api/ai/render-status/' + encodeURIComponent(accepted.task_id_string))
-          .then(response => response.ok ? response.json() : null).catch(() => null);
+          .then(response => response.status === 404 ? {gone: true} : (response.ok ? response.json() : null)).catch(() => null);
+        // The farm no longer knows the task (cancelled and purged, or from an
+        // old session): stop waiting unless the file is already there.
+        if (status && status.gone) {
+          missing += 1;
+          if (missing >= 3) {
+            const landed = await fetch(url, { method: 'HEAD' }).catch(() => null);
+            if (landed && landed.ok) return url;
+            throw new Error('the farm no longer has this task (cancelled or expired) — Render again');
+          }
+          await sleep(2500);
+          continue;
+        }
+        missing = 0;
         if (status) {
           if (report) report(status);
           if (status.status_string === 'failed' || status.status_string === 'cancelled') {
@@ -2980,6 +3003,11 @@
 
   function bodyFor(serviceId, resolved, params) {
     const body = {};
+    // An empty LoRA slot carries a strength and nothing to apply it to.
+    if (params && !String(params.lora || '').trim() && 'lora_strength' in params) {
+      params = Object.assign({}, params);
+      delete params.lora_strength;
+    }
     resolved = mapsLast(serviceId, resolved);
     const mapHints = controlMapHints(resolved);
     // A normal map travels as its grey shaded copy: the RGB leaks into renders.
@@ -3805,7 +3833,15 @@
 
     const restored = restoredExecutions.get(idString);
     if (restored && !restored.invalidated && restored.epoch === epoch) {
-      return restored.promise;
+      // A task carried over from before the page opened may be gone (cancelled
+      // on the farm, purged). Then this Render submits it afresh instead of
+      // leaving everything downstream waiting (owner, 2026-09-27).
+      return restored.promise.catch(error => {
+        restored.invalidated = true;
+        if (restoredExecutions.get(idString) === restored) restoredExecutions.delete(idString);
+        toast('A render from before was gone (' + String(error.message || error).slice(0, 60) + ') — submitting it again.');
+        return startIncrementalService(id, node, resolved, params, signature, epoch, keepDone, graphSnapshot);
+      });
     }
 
     const active = activeExecutions.get(key);
@@ -4075,6 +4111,18 @@
       const state = element.querySelector('.nstate');
       const outBox = element.querySelector('.nout');
       runState.set(String(id), record);
+      // An X9 set saved mid-render has no single task to resume (its nine
+      // tasks ran in the tab that started them): keep the cells, say so.
+      if (Array.isArray(record.x9) && record.x9.length && record.status === 'running') {
+        record.status = record.x9.some(cell => cell.status === 'done') ? 'stale' : 'failed';
+        record.error = record.status === 'failed' ? 'X9 was interrupted — Render again' : '';
+      }
+      if (Array.isArray(record.x9) && record.x9.length && record.status === 'failed') {
+        state.textContent = record.error || 'X9 was interrupted — Render again';
+        state.className = 'nstate';
+        requestAnimationFrame(() => paintX9(id));
+        return;
+      }
       if (Array.isArray(record.x9) && record.x9.length && ['done', 'stale'].includes(record.status)) {
         if (record.status === 'done') continuableResults.set(String(id), {type:record.type, value:record.value, outputs:null, task_id:''});
         state.textContent = record.status === 'stale' ? 'changed — render to update' : 'done · X9 — click a cell to view / choose';
@@ -4096,6 +4144,11 @@
         return;
       }
       if (record.status !== 'running') return;
+      if (!record.value && !record.task_id) {
+        state.textContent = 'interrupted — Render again';
+        state.className = 'nstate';
+        return;
+      }
       const registration = {id:String(id), epoch:canvasEpoch, invalidated:false, promise:null};
       registration.promise = resumeNode(id, record, registration)
         .finally(() => {

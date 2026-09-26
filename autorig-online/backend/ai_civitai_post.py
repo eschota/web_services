@@ -139,12 +139,19 @@ def _public_scratch(path: Path) -> str:
         return ""
 
 
-async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest) -> Dict[str, Any]:
-    picture = await client.get(body.media_url, timeout=120.0, follow_redirects=True)
-    picture.raise_for_status()
-    content = picture.content
-    name = Path(body.media_url.split("?", 1)[0]).name or "image.png"
-    mime = picture.headers.get("content-type", "image/png").split(";")[0]
+async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
+                      local: Optional[Path] = None) -> Dict[str, Any]:
+    if local is not None:
+        content = local.read_bytes()
+        name = local.name
+        mime = "video/mp4"
+    else:
+        picture = await client.get(body.media_url, timeout=300.0, follow_redirects=True)
+        picture.raise_for_status()
+        content = picture.content
+        name = Path(body.media_url.split("?", 1)[0]).name or "image.png"
+        mime = picture.headers.get("content-type", "image/png").split(";")[0]
+    is_video = mime.startswith("video/") or name.lower().endswith(VIDEO_SUFFIXES)
     width = height = 0
     try:
         from io import BytesIO
@@ -162,9 +169,14 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest) -> Di
     image_id = ticket.get("id")
     if not target or not image_id:
         raise RuntimeError("image-upload: no upload URL")
-    sent = await client.post(target, files={"file": (name, content, mime)}, timeout=180.0)
+    # The ticket is a presigned object-storage URL: it takes a PUT of the raw
+    # bytes (a multipart POST answered 501). A Cloudflare Images direct-upload
+    # URL takes the multipart POST, so that is the second try.
+    sent = await client.put(target, content=content, headers={"Content-Type": mime}, timeout=180.0)
     if sent.status_code >= 400:
-        raise RuntimeError(f"upload: HTTP {sent.status_code}")
+        retry = await client.post(target, files={"file": (name, content, mime)}, timeout=180.0)
+        if retry.status_code >= 400:
+            raise RuntimeError(f"upload: PUT HTTP {sent.status_code}, POST HTTP {retry.status_code}")
     first_version = body.resources[0].model_version_id if body.resources else None
     post = await _trpc(client, "post.create", {"modelVersionId": first_version} if first_version else {})
     post_id = int(post["id"])
@@ -173,7 +185,8 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest) -> Di
         meta["civitaiResources"] = [{"modelVersionId": item.model_version_id} for item in body.resources]
     await _trpc(client, "post.addImage", {
         "postId": post_id, "url": image_id, "name": name, "width": width, "height": height,
-        "hash": None, "meta": meta or None, "index": 0, "mimeType": mime, "type": "image"})
+        "hash": None, "meta": meta or None, "index": 0, "mimeType": mime,
+        "type": "video" if is_video else "image"})
     for tag in [tag.strip() for tag in body.tags if tag.strip()][:10]:
         try:
             await _trpc(client, "post.addTag", {"id": post_id, "name": tag})
@@ -207,24 +220,21 @@ def build_civitai_post_router(require_admin) -> APIRouter:
                     "steps_array": (["POST /api/v1/image-upload", "POST <uploadURL> (file)", "trpc post.create",
                                      "trpc post.addImage", "trpc post.addTag x" + str(len(body.tags)),
                                      "trpc post.update" + (" publishedAt" if body.publish else " (draft)")]
-                                    if kind == "image" else ["manual path (" + kind + ")"])}
+                                    if kind != "audio" else ["mux audio onto a still -> mp4", "then as a clip"])}
         async with httpx.AsyncClient() as client:
             download = body.media_url
+            local = None
             if kind == "audio":
                 try:
-                    muxed = await _mux_audio(client, body.media_url, body.poster_url)
-                    download = _public_scratch(muxed) or body.media_url
+                    local = await _mux_audio(client, body.media_url, body.poster_url)
+                    download = _public_scratch(local) or body.media_url
                 except Exception as error:
                     logger.warning("civitai audio mux failed: %s", error)
-                return _manual(body, "Civitai takes pictures and clips; the music is on a still as an mp4 "
-                                     "to upload by hand", download)
-            if kind == "video":
-                return _manual(body, "Clips are uploaded by hand for now (Civitai's video upload is a "
-                                     "separate flow)", download)
+                    return _manual(body, "The music could not be put on a still: " + str(error)[:120], download)
             if not _token():
                 return _manual(body, "No Civitai token on the server", download)
             try:
-                return await _post_image(client, body)
+                return await _post_image(client, body, local)
             except Exception as error:
                 logger.warning("civitai post failed: %s", error)
                 return _manual(body, "Civitai did not accept the automatic post (" + str(error)[:200] +

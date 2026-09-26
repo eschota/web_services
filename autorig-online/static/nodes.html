@@ -29,7 +29,7 @@
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ1"></script>
+    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ4"></script>
     <style>
         .ai-page {
             background:
@@ -119,6 +119,23 @@
         .pgroup:first-child { margin-top: 0; }
 
         /* ---- compact icon toolbar over the canvas ------------------------ */
+        /* ---- Post to Civitai dialog ---- */
+        .civ-dialog { width: min(560px, 94vw); padding: 18px 20px; border: 1px solid rgba(255,255,255,.14);
+            border-radius: 14px; background: #121327; color: #e9e9f4; font: 13px/1.4 system-ui;
+            box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+        .civ-dialog::backdrop { background: rgba(4,5,14,.6); }
+        .civ-dialog form { display: grid; gap: 10px; }
+        .civ-dialog b { font-size: 15px; }
+        .civ-dialog label { display: grid; gap: 4px; color: #aab0c8; font-size: 12px; }
+        .civ-dialog label:has(input[type=checkbox]), .civ-dialog label:has(input[type=radio]) { display: flex; align-items: center; gap: 8px; color: #e9e9f4; }
+        .civ-dialog input:not([type=checkbox]):not([type=radio]), .civ-dialog textarea, .civ-dialog select {
+            box-sizing: border-box; width: 100%; padding: 8px 10px; border-radius: 9px; font: inherit; color: #fff;
+            border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); }
+        .civ-dialog a { color: #7dd3fc; }
+        .civ-dialog button { padding: 8px 14px; border-radius: 9px; border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.07); color: inherit; cursor: pointer; font: inherit; }
+        .civ-dialog .civ-go { background: linear-gradient(90deg,#38bdf8,#7b5cff); border: 0; color: #fff; font-weight: 600; }
+        .civ-dialog .civ-out:not(:empty) { padding: 8px 10px; border-radius: 9px; background: rgba(56,189,248,.08); }
         /* ---- tool dock (bottom, fixed; owner 2026-09-27) ---------------- */
         :root { --dock-h: 96px; }
         .shell { height: calc(100vh - 59px - var(--dock-h)); }
