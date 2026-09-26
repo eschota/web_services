@@ -1543,6 +1543,8 @@ app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))
 app.include_router(build_avatar_build_router(get_avatar_owner))
+from ai_avatar_ready import build_avatar_ready_router
+app.include_router(build_avatar_ready_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
 app.include_router(ai_graph_edits_router)
 app.include_router(ai_pipelines_router)

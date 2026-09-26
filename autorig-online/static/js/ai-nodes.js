@@ -2134,22 +2134,67 @@
       if (full && job.title_string) html = 'Title: <i>' + esc(job.title_string) + '</i><br>' + html;
       return html;
     }
+    // A badge in the top-right corner under the top bar ("Civitai 1" with a
+    // progress ring); a click opens the card. It never sits over the dock or
+    // the palette, lets clicks through around itself, and hides 8 s after
+    // the last job finishes. × dismisses what is shown.
+    let expanded = false;
+    const dismissed = new Set();
+    let lastJobs = [];
+    function topOffset() {
+      let bottom = 0;
+      document.querySelectorAll('body > .bar, header, .topbar, #topbar').forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (r.top < 40 && r.height < 400 && r.width > window.innerWidth * 0.4) bottom = Math.max(bottom, r.bottom);
+      });
+      return Math.round(bottom + 8);
+    }
     function ensurePanel() {
       if (panel && document.body.contains(panel)) return panel;
       panel = document.createElement('div');
       panel.id = 'civ-jobs';
-      panel.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:9000;max-width:380px;font:12px system-ui;' +
-        'background:rgba(10,12,30,.92);color:#e5e7eb;border:1px solid rgba(125,211,252,.4);border-radius:10px;padding:8px 10px;display:none';
+      panel.style.cssText = 'position:fixed;right:12px;z-index:9000;font:12px system-ui;color:#e5e7eb;display:none;' +
+        'pointer-events:none;display:none;flex-direction:column;align-items:flex-end;gap:6px;max-width:min(360px,calc(100vw - 24px))';
       ['mousedown', 'pointerdown', 'wheel'].forEach(type => panel.addEventListener(type, event => event.stopPropagation()));
+      panel.addEventListener('click', event => {
+        const close = event.target.closest('.civ-x');
+        if (close) { lastJobs.forEach(job => dismissed.add(job.id)); expanded = false; render(lastJobs); return; }
+        if (event.target.closest('.civ-badge')) { expanded = !expanded; render(lastJobs); }
+      });
       document.body.appendChild(panel);
       return panel;
     }
+    function ring(percent, active) {
+      const r = 7, c = 2 * Math.PI * r;
+      const value = typeof percent === 'number' ? Math.max(0, Math.min(100, percent)) : null;
+      const arc = value === null ? `stroke-dasharray="${c / 4} ${c}"` : `stroke-dasharray="${c * value / 100} ${c}"`;
+      return `<svg width="18" height="18" viewBox="0 0 18 18" style="flex:none${value === null && active ? ';animation:civspin 1s linear infinite' : ''}">` +
+        `<circle cx="9" cy="9" r="${r}" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="2.5"/>` +
+        (active ? `<circle cx="9" cy="9" r="${r}" fill="none" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round" ${arc} transform="rotate(-90 9 9)"/>` : '') + '</svg>';
+    }
     function render(jobs) {
+      lastJobs = jobs;
       const host = ensurePanel();
-      const recent = jobs.filter(job => job.active_bool || (Date.now() / 1000 - (job.finished_at || 0) < 600));
-      host.style.display = recent.length ? 'block' : 'none';
-      host.innerHTML = '<b style="color:#7dd3fc">Civitai posts</b>' + recent.map(job =>
-        `<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.1);padding-top:5px">${esc((job.title_string || job.kind_string || '').slice(0, 60))}<br>${describe(job, false)}</div>`).join('');
+      const now = Date.now() / 1000;
+      const shown = jobs.filter(job => !dismissed.has(job.id) &&
+        (job.active_bool || now - (job.finished_at || 0) < 8));
+      if (!shown.length) { host.style.display = 'none'; expanded = false; return; }
+      host.style.top = topOffset() + 'px';
+      host.style.display = 'flex';
+      const active = shown.filter(job => job.active_bool);
+      const lead = active[0] || shown[0];
+      const failed = shown.some(job => ['failed', 'manual', 'interrupted'].includes(job.stage));
+      const label = active.length ? `Civitai ${active.length}` : (failed ? 'Civitai: failed' : 'Civitai: done');
+      const box = 'pointer-events:auto;background:rgba(10,12,30,.94);border:1px solid rgba(125,211,252,.45);border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.4)';
+      let html = `<style>@keyframes civspin{to{transform:rotate(360deg)}}</style>` +
+        `<div class="civ-badge" title="Civitai posts — click for details" style="${box};display:flex;align-items:center;gap:6px;padding:4px 6px 4px 8px;cursor:pointer;user-select:none">` +
+        ring(lead.progress_percent, active.length > 0) + `<b style="color:${failed && !active.length ? '#fb7185' : '#7dd3fc'}">${label}</b>` +
+        `<span class="civ-x" title="Hide" style="margin-left:4px;padding:0 4px;color:#aab0c8;font-size:14px;line-height:1;cursor:pointer">×</span></div>`;
+      if (expanded) {
+        html += `<div style="${box};padding:8px 10px;width:100%;box-sizing:border-box">` + shown.map((job, i) =>
+          `<div style="${i ? 'margin-top:6px;border-top:1px solid rgba(255,255,255,.1);padding-top:5px' : ''}">${esc((job.title_string || job.kind_string || '').slice(0, 60))}<br>${describe(job, false)}</div>`).join('') + '</div>';
+      }
+      host.innerHTML = html;
     }
     async function poll() {
       timer = null;
@@ -2175,7 +2220,9 @@
           }
         }
       });
-      if (jobs.some(job => job.active_bool) || watchers.size) schedule();
+      // Keep ticking until the 8 s tail of the last finished job has passed.
+      const tail = jobs.some(job => !job.active_bool && Date.now() / 1000 - (job.finished_at || 0) < 9);
+      if (jobs.some(job => job.active_bool) || watchers.size || tail) schedule();
     }
     function schedule() { if (!timer) timer = setTimeout(poll, 3000); }
     function watch(jobId, nodeId, update) {
@@ -4698,7 +4745,7 @@
     ['Vision / Text', ['vision', 'text']],
     ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
     ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'audio_from_source', 'video_control', 'upscale_video']],
-    ['Avatars', ['avatar_build', 'avatar_image', 'avatar_video']],
+    ['Avatars', ['avatar_ready', 'avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
     ['Audio', ['music']],
     ['Utility', ['3dmodel', 'action:arrange', 'action:fit', 'action:assistant']]
@@ -4709,7 +4756,7 @@
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
     video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
     scene_split: 'Scene split', video_concat: 'Concat shots', audio_from_source: 'Audio from source',
-    upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_image: 'Avatar scene',
+    upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_ready: 'Avatar (ready)', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
     control_canny: 'Canny', control_normal: 'Normal', music: 'Music', '3dmodel': '3D model',
     'action:arrange': 'Arrange', 'action:fit': 'Fit view', 'action:assistant': 'Assistant'

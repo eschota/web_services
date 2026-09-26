@@ -232,6 +232,33 @@ SERVICES: List[Dict[str, object]] = [
         ],
     },
     {
+        # A saved Avatar on the builder's sockets (2026-09-27); with no Avatar
+        # wired it builds one from the picture/video (whichever is connected).
+        "id": "avatar_ready", "title": "Avatar (ready or build)", "path": "/nodes",
+        "api": "/api/ai/avatar-ready", "status": "live", "multi_output": True,
+        "summary": ("A saved Avatar (av_…@version, yours) out on the same sockets as the Avatar builder; "
+                    "with no Avatar wired, builds one from the picture or video."),
+        "inputs": [
+            {"type": AVATAR, "field": "avatar", "required": False, "title": "Ready Avatar (av_…@N)"},
+            {"type": IMAGE, "field": "image", "required": False, "title": "…or build from photo/video",
+             "also_accepts": [VIDEO]},
+        ],
+        "outputs": [
+            {"type": AVATAR, "field": "avatar_string", "title": "Avatar"},
+            {"type": IMAGE, "field": "front_url_string", "title": "Front", "view": "front"},
+            {"type": IMAGE, "field": "face_closeup_url_string", "title": "Face", "view": "face_closeup"},
+            {"type": IMAGE, "field": "full_body_url_string", "title": "Full body", "view": "full_body"},
+            {"type": IMAGE, "field": "three_quarter_left_url_string", "title": "3/4 left", "view": "three_quarter_left"},
+            {"type": IMAGE, "field": "three_quarter_right_url_string", "title": "3/4 right", "view": "three_quarter_right"},
+            {"type": IMAGE, "field": "profile_left_url_string", "title": "Profile left", "view": "profile_left"},
+            {"type": IMAGE, "field": "profile_right_url_string", "title": "Profile right", "view": "profile_right"},
+            {"type": IMAGE, "field": "back_url_string", "title": "Back", "view": "back"},
+            {"type": IMAGE, "field": "sheet_url_string", "title": "Sheet"},
+            {"type": IMAGE, "field": "source_frame_url_string", "title": "Source frame"},
+            {"type": TEXT, "field": "description_string", "title": "Description"},
+        ],
+    },
+    {
         "id": "avatar_video", "title": "Avatar video · Wan-Animate-2", "path": "/nodes",
         "api": "/api/ai/avatar-video", "status": "live", "slow": True,
         "summary": "Transfer action from a driving video to one or two saved Avatar characters.",

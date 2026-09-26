@@ -50,6 +50,10 @@
     }));
   }
 
+  const AVATAR_FIELDS = ['avatar_string', 'front_url_string', 'face_closeup_url_string', 'full_body_url_string',
+    'three_quarter_left_url_string', 'three_quarter_right_url_string', 'profile_left_url_string',
+    'profile_right_url_string', 'back_url_string', 'sheet_url_string', 'source_frame_url_string', 'description_string'];
+
   const RUNNERS = {
     scene_split: {api: '/api/ai/video-tools/scene-split', field: 'storyboard_url_string', type: 'image',
       finish: async (accepted, runner, report) => {
@@ -71,6 +75,28 @@
                 outputs: {image_url_string: data.storyboard_url_string, scenes_text_string: data.scenes_text_string},
                 summary: data.scenes_int + ' scene' + (data.scenes_int === 1 ? '' : 's') + ' · ' + data.frames_int +
                          ' frames · ' + data.fps_int + ' fps · ' + data.duration_float + ' s'};
+      }},
+    // Avatar (ready or build): a saved Avatar answers at once; otherwise the
+    // server started an Avatar build and this follows it like the builder node.
+    avatar_ready: {api: '/api/ai/avatar-ready', field: 'avatar_string', type: 'avatar',
+      finish: async (accepted) => {
+        let data = accepted;
+        const id = String(accepted.task_id_string || '');
+        for (let attempt = 0; attempt < 1500; attempt += 1) {
+          if (data && data.finished_bool) {
+            if (data.success_bool === false || data.status_string === 'failed') throw new Error(data.error_string || 'the Avatar build failed');
+            if (!data.avatar_string) throw new Error('no Avatar came back');
+            const outputs = {};
+            AVATAR_FIELDS.forEach(field => { if (data[field]) outputs[field] = String(data[field]); });
+            return {value: data.avatar_string, outputs};
+          }
+          if (!/^avb_[a-f0-9]{24}$/.test(id)) throw new Error('the Avatar builder returned no job');
+          await sleep(Math.max(2, Math.min(10, Number(data && data.retry_after_seconds_float) || 4)) * 1000);
+          const response = await fetch('/api/ai/avatar-build/status/' + encodeURIComponent(id));
+          data = await response.json().catch(() => null);
+          if (!response.ok) throw new Error((data && data.detail && data.detail.message_string) || ('HTTP ' + response.status));
+        }
+        throw new Error('the Avatar build did not finish in time');
       }},
     video_concat: {api: '/api/ai/video-tools/concat', field: 'video_url_string', type: 'video',
       finish: async (accepted, runner, report) => (await pollVideoTool(accepted, runner, report)).video_url_string},
