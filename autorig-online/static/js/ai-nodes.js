@@ -600,7 +600,7 @@
       service: serviceId,
       displayMode: params && params._display_mode,
       label: (params && params._label) || '',
-      followInputSize: hasDimensions ? (!params || params._follow_input_size !== false) : undefined,
+      followInputSize: hasDimensions ? sizeFollowsInput(entry, params) : undefined,
       disabled: !!(params && params._disabled),
       // A node that can carry a standing instruction is born with the default
       // one, so a graph saved before this existed opens with it too.
@@ -620,6 +620,26 @@
     if (params && params._disabled) applyBypass(id, true);
     materializeDefaultModel(id);
     return id;
+  }
+
+  /**
+   * Auto (follow the input) or manual size, for a node being drawn.
+   * `_size_auto` is the saved choice; a graph from before it existed follows
+   * its input only if its size is one of the old stock defaults (owner rule).
+   */
+  const STOCK_SIZES = new Set(['960x540', '960x640', '540x960', '640x960', '1024x1024', '1024x576', '576x1024',
+    '768x768', '512x512', '1280x720', '720x1280', '832x480', '480x832', '1024x768', '768x1024']);
+  function sizeFollowsInput(entry, params) {
+    if (!params) return true;
+    if (params._follow_input_size === false) return false;
+    if (typeof params._size_auto === 'boolean') return params._size_auto;
+    // Saved by the earlier follow mode and never edited by hand (an edit
+    // wrote false): it was following its input, so it keeps doing so.
+    if (params._follow_input_size === true) return true;
+    const w = Number(params.width), h = Number(params.height);
+    if (!(w > 0 && h > 0)) return true;
+    const find = name => ((entry.params_array || []).find(item => item.name === name) || {}).default;
+    return STOCK_SIZES.has(w + 'x' + h) || (Number(find('width')) === w && Number(find('height')) === h);
   }
 
   function addInputNode(entityType, x, y, value, params) {
@@ -1302,6 +1322,7 @@
     if (meta(id)?.displayMode) values._display_mode = meta(id).displayMode;
     if (typeof meta(id)?.followInputSize === 'boolean') {
       values._follow_input_size = meta(id).followInputSize;
+      values._size_auto = meta(id).followInputSize;
     }
     if (meta(id)?.disabled) values._disabled = true;
     if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
@@ -2235,6 +2256,23 @@
     return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(text);
   }
 
+  /** Auto-size nodes take the size of what actually arrived on the primary socket. */
+  async function followInputSizeAtRun(node, resolved, params) {
+    if (!params || params.width == null || params.height == null) return;
+    if (params._follow_input_size === false || params._size_auto === false) return;
+    if (!nodeGroups || !nodeGroups.mediaDimensions) return;
+    const order = ['image', 'image_url_end', 'video_url', 'control_video_url', 'source', 'source_url'];
+    let source = order.map(field => resolved[field]).find(value => typeof value === 'string' && /^(https?:|data:)/.test(value));
+    if (!source) source = Object.keys(resolved).filter(field => !/^control_(pose|depth|canny)$/.test(field))
+      .map(field => resolved[field]).find(value => typeof value === 'string' && /^(https?:|data:)/.test(value) &&
+        /\.(png|jpe?g|webp|gif|mp4|webm|mov|m4v)(\?|#|$)|^data:(image|video)\//i.test(value));
+    if (!source) return;
+    try {
+      const size = nodeGroups.fitDimensions(await nodeGroups.mediaDimensions(source), node.service);
+      if (size) { params.width = size.width; params.height = size.height; }
+    } catch (error) { /* keep the canvas size */ }
+  }
+
   function bodyFor(serviceId, resolved, params) {
     const body = {};
     if (serviceId === 'video' && resolved && !resolved.image && resolved.image_url_end) {
@@ -2896,6 +2934,7 @@
     renderQuality = quality;
     if (renderQualityToolbar) renderQualityToolbar.paint();
     if (renderQualityBadges) renderQualityBadges.refresh();
+    if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
     syncQualityUrl();
     return quality;
   }
@@ -3066,6 +3105,7 @@
             resolved[link.input] = value;
           }
           const params = {...(node.params || {})};
+          await followInputSizeAtRun(node, resolved, params);
           const requestBody = bodyFor(node.service, resolved, params);
           const signature = stableJson({service:node.service, body:requestBody});
           try {
@@ -3302,6 +3342,7 @@
     }
     paintIsolation();
     restoreResults(graph.results, mapping);
+    if (nodeGroups && nodeGroups.refreshSizes) nodeGroups.refreshSizes();
     refreshRunningControls();
     // A graph that opens half off-screen looks empty. The canvas has just been
     // replaced wholesale, so there is no pan of anyone's to preserve.
@@ -3711,6 +3752,7 @@
     if (window.AINodeGroups) nodeGroups = window.AINodeGroups.install({editor,
       canvas:document.getElementById('canvas'), getMeta:meta, addInputNode,
       addServiceNode, exportGraph:graphFromCanvas, toast, nodeLimit:200,
+      getQuality:() => renderQuality, serviceById, invalidate:id => invalidateNodeAndDownstream(id),
       onNodesRemoved:forgetNodes,
       nodeFunctions:id => nodePipelines ? nodePipelines.functionsFor(id) : [],
       onArrange:ids => arrangeNodes(ids),

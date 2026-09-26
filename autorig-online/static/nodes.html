@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
     <script src="/static/js/ai-entities.js?v=20260923-lora-fitrule"></script>
-    <script src="/static/js/ai-node-groups.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-node-groups.js?v=20260926-autosize3"></script>
     <script src="/static/js/ai-node-display.js?v=20260923-sockets1"></script>
     <script src="/static/js/ai-node-sockets.js?v=20260926-media2"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
@@ -29,7 +29,7 @@
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-nodes.js?v=20260926-slider4"></script>
+    <script src="/static/js/ai-nodes.js?v=20260926-autosize3"></script>
     <style>
         .ai-page {
             background:
@@ -420,6 +420,10 @@
             color: inherit; padding: 4px 6px; font-size: 11.5px;
         }
         .nparam input[type=range] { flex: 1; min-width: 0; accent-color: #7b5cff; }
+        .nsize-auto { display: flex; gap: 6px; align-items: center; font-size: 11px; opacity: .9; margin: 2px 0; }
+        .nsize-lock { border: 1px solid rgba(255,255,255,.18); background: transparent; color: inherit; border-radius: 6px; padding: 1px 6px; cursor: pointer; font-size: 11px; }
+        .nsize-text { opacity: .8; font-variant-numeric: tabular-nums; }
+        input.nsize-locked { opacity: .6; }
         /* ---- node sliders (ai-node-slider.js) ---- */
         .aislider-native { display: none !important; }
         .aislider { position: relative; flex: 1; min-width: 60px; height: 22px; display: inline-flex; align-items: center; cursor: ew-resize; touch-action: none; outline: none; }

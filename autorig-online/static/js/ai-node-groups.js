@@ -58,26 +58,46 @@
     return !params || params._follow_input_size !== false;
   }
 
+  /**
+   * Outputs inherit their input's size (owner rule 2026-09-26): same aspect,
+   * same size, fitted into the model's limits (256-2048 unless the catalogue
+   * says otherwise) and snapped to its grid (32 px). Graph quality (draft 1/4
+   * ...) is applied later, at submit, by ai-render-quality.js.
+   */
+  let serviceLookup = null;
   function targetDimensions(dimensions, service) {
-    let width = Math.round(Number(dimensions && dimensions.width));
-    let height = Math.round(Number(dimensions && dimensions.height));
-    if (!Number.isFinite(width) || !Number.isFinite(height) ||
-        width < 256 || width > 2048 || height < 256 || height > 2048) return null;
-    let evenAdjusted = false;
-    if (service === 'video') {
-      const evenWidth = Math.round(width / 2) * 2;
-      const evenHeight = Math.round(height / 2) * 2;
-      evenAdjusted = evenWidth !== width || evenHeight !== height;
-      width = evenWidth; height = evenHeight;
+    let width = Number(dimensions && dimensions.width);
+    let height = Number(dimensions && dimensions.height);
+    if (!(width > 0) || !(height > 0)) return null;
+    const quality = window.AIRenderQuality;
+    const limits = quality && quality.limitsFor
+      ? quality.limitsFor(service, serviceLookup ? serviceLookup(service) : null)
+      : {min: 256, max: 2048, multiple: 32};
+    const grid = limits.multiple || 32;
+    if (Math.max(width, height) > limits.max) {
+      const s = limits.max / Math.max(width, height); width *= s; height *= s;
     }
-    return {width, height, evenAdjusted};
+    if (Math.min(width, height) < limits.min) {
+      const s = Math.min(limits.min / Math.min(width, height), limits.max / Math.max(width, height));
+      width *= s; height *= s;
+    }
+    const snap = value => Math.min(Math.floor(limits.max / grid) * grid,
+      Math.max(Math.ceil(limits.min / grid) * grid, Math.round(value / grid) * grid));
+    const w = snap(width), h = snap(height);
+    return {width: w, height: h, evenAdjusted: w !== Math.round(Number(dimensions.width)) || h !== Math.round(Number(dimensions.height))};
   }
+
+  /** The socket whose picture decides the size: first frame / main image first. */
+  const PRIMARY_SOCKETS = ['image', 'image_url_end', 'video_url', 'control_video_url', 'source', 'source_url'];
 
   function install(options) {
     options = options || {};
     const editor = options.editor;
     const canvas = options.canvas;
     const getMeta = options.getMeta;
+    const getQuality = typeof options.getQuality === 'function' ? options.getQuality : () => 'normal';
+    const invalidate = typeof options.invalidate === 'function' ? options.invalidate : function () {};
+    if (typeof options.serviceById === 'function') serviceLookup = options.serviceById;
     const addInputNode = options.addInputNode;
     const addServiceNode = options.addServiceNode;
     const exportGraph = options.exportGraph;
@@ -585,9 +605,35 @@
       });
     }
 
+    function isCivitaiLink(url) {
+      try { return /(^|\.)civitai\.(com|red|green)$/i.test(new URL(url).hostname); } catch (error) { return false; }
+    }
+    function looksVideo(url) {
+      return /^data:video\//i.test(url) || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+    }
     function imageDimensions(url) {
       url = String(url || '').trim();
-      if (!/^(https?:|data:image\/)/i.test(url)) return Promise.reject(new Error('Image source has no readable URL.'));
+      if (!/^(https?:|data:(image|video)\/|blob:)/i.test(url)) return Promise.reject(new Error('Image source has no readable URL.'));
+      if (!imageSizeCache.has(url) && isCivitaiLink(url) && !/\.(jpe?g|png|webp|gif|mp4|webm|mov)(\?|#|$)/i.test(url)) {
+        imageSizeCache.set(url, fetch('/api/ai/media/resolve?url=' + encodeURIComponent(url))
+          .then(response => response.ok ? response.json() : Promise.reject(new Error('Link not resolved')))
+          .then(data => {
+            if (data.width_int && data.height_int) return {width: data.width_int, height: data.height_int, url};
+            return imageDimensions(data.url || url);
+          }).catch(error => { imageSizeCache.delete(url); throw error; }));
+      }
+      if (!imageSizeCache.has(url) && looksVideo(url)) {
+        imageSizeCache.set(url, new Promise((resolve, reject) => {
+          const clip = document.createElement('video');
+          clip.preload = 'metadata';
+          clip.muted = true;
+          const timer = setTimeout(() => reject(new Error('Video size timed out.')), 20000);
+          clip.onloadedmetadata = () => { clearTimeout(timer); clip.videoWidth && clip.videoHeight
+            ? resolve({ width: clip.videoWidth, height: clip.videoHeight, url }) : reject(new Error('Video has no dimensions.')); };
+          clip.onerror = () => { clearTimeout(timer); reject(new Error('Could not read the input video size.')); };
+          clip.src = url;
+        }).catch(error => { imageSizeCache.delete(url); throw error; }));
+      }
       if (!imageSizeCache.has(url)) {
         imageSizeCache.set(url, new Promise((resolve, reject) => {
           const image = new Image();
@@ -601,7 +647,27 @@
       return imageSizeCache.get(url);
     }
 
-    function upstreamCandidates(graph, targetId) {
+    function primaryEdges(graph, targetId) {
+      const target = graph.nodes.find(node => String(node.id) === String(targetId)) || {};
+      const entry = serviceLookup ? serviceLookup(target.service) : null;
+      const sockets = (entry && entry.inputs) || [];
+      const mediaSocket = field => {
+        const socket = sockets.find(item => item.field === field) || {};
+        return ['image', 'video', 'media'].includes(socket.type) || (socket.also_accepts || []).includes('video');
+      };
+      const into = graph.links.filter(link => String(link.to) === String(targetId));
+      for (const field of PRIMARY_SOCKETS) {
+        const link = into.find(item => item.input === field);
+        if (link) return [link];
+      }
+      const media = into.filter(link => mediaSocket(link.input) && !/^control_(pose|depth|canny)$/.test(link.input));
+      if (media.length) return [media[0]];
+      // A ControlNet map is still a picture of the frame: it sizes the render.
+      const control = into.filter(link => /^control_(pose|depth|canny)$/.test(link.input));
+      return control.length ? [control[0]] : [];
+    }
+
+    function upstreamCandidates(graph, targetId, onlyEdges) {
       const nodes = new Map(graph.nodes.map(node => [String(node.id), node]));
       const incoming = new Map();
       graph.links.forEach(link => {
@@ -609,7 +675,10 @@
         if (!incoming.has(to)) incoming.set(to, []);
         incoming.get(to).push({ id: from, output: String(link.output || '') });
       });
-      const queue = (incoming.get(String(targetId)) || []).map(edge => ({ id: edge.id, output: edge.output, distance: 1 }));
+      const first = onlyEdges
+        ? onlyEdges.map(link => ({ id: String(link.from), output: String(link.output || '') }))
+        : (incoming.get(String(targetId)) || []);
+      const queue = first.map(edge => ({ id: edge.id, output: edge.output, distance: 1 }));
       const visited = new Set([String(targetId)]);
       const originals = [], generated = [], controls = [];
       while (queue.length && visited.size <= nodeLimit) {
@@ -636,7 +705,7 @@
             generated.push({ distance: current.distance, url: multiOutputPicture });
           } else if (controlMap) {
             controls.push({ distance: current.distance, url: result.value });
-          } else if (finished && result.type === 'image') {
+          } else if (finished && (result.type === 'image' || result.type === 'video')) {
             generated.push({ distance: current.distance, url: result.value });
           } else if (Number.isFinite(Number(params.width)) && Number.isFinite(Number(params.height))) {
             generated.push({ distance: current.distance, width: Number(params.width), height: Number(params.height) });
@@ -661,13 +730,72 @@
      * falls back to the new original until the new map lands.
      */
     async function resolveInputDimensions(graph, targetId) {
-      const candidates = upstreamCandidates(graph, targetId);
       let lastError = null;
-      for (const candidate of candidates.controls.concat(candidates.originals, candidates.generated)) {
-        if (candidate.width && candidate.height) return candidate;
-        try { return await imageDimensions(candidate.url); } catch (error) { lastError = error; }
+      // The primary socket's chain decides; any other media input is a fallback.
+      // Only picture/clip sockets count: a text-only generator (prompt from a
+      // Vision node) has no input picture and keeps its own size.
+      const edges = primaryEdges(graph, targetId);
+      if (edges.length) {
+        const candidates = upstreamCandidates(graph, targetId, edges);
+        const rank = item => item.distance * 10 + (item.kind === 'control' ? 0 : item.kind === 'generated' ? 1 : 2);
+        const all = candidates.controls.map(item => Object.assign({kind: 'control'}, item))
+          .concat(candidates.generated.map(item => Object.assign({kind: 'generated'}, item)),
+                  candidates.originals.map(item => Object.assign({kind: 'original'}, item)))
+          .sort((a, b) => rank(a) - rank(b));
+        for (const candidate of all) {
+          if (candidate.width && candidate.height) return candidate;
+          try { return await imageDimensions(candidate.url); } catch (error) { lastError = error; }
+        }
       }
       throw lastError || new Error('No upstream image was found for this node.');
+    }
+
+    /** The Auto row above Width/Height: lock toggle and the resolved size. */
+    function paintSizeRow(id, element, auto, source, sent) {
+      const widthControl = element.querySelector('[data-param="width"]');
+      const heightControl = element.querySelector('[data-param="height"]');
+      const label = widthControl && widthControl.closest('label, .nparam');
+      if (!label) return;
+      let row = element.querySelector('.nsize-auto');
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'nsize-auto';
+        row.innerHTML = '<button type="button" class="nsize-lock"></button><span class="nsize-text"></span>';
+        label.parentElement.insertBefore(row, label);
+        const button = row.querySelector('.nsize-lock');
+        ['mousedown', 'pointerdown', 'touchstart'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          const item = getMeta(id) || {};
+          item.followInputSize = !(item.followInputSize !== false);
+          item.sizeTouched = true;
+          invalidate(id);
+          scheduleFollowingRefresh();
+        });
+      }
+      [widthControl, heightControl].forEach(control => {
+        if (!control) return;
+        control.readOnly = !!auto;
+        control.classList.toggle('nsize-locked', !!auto);
+        control.title = auto ? 'Auto: follows the input. Click the lock to set it by hand.' : '';
+      });
+      row.querySelector('.nsize-lock').textContent = auto ? '🔒 Auto' : '🔓 Manual';
+      row.querySelector('.nsize-lock').title = auto
+        ? 'Size follows the input picture/clip. Click to set it by hand.'
+        : 'Manual size. Click to follow the input again.';
+      const w = Number(widthControl.value), h = Number(heightControl.value);
+      const mode = getQuality();
+      const q = window.AIRenderQuality;
+      let scaled = '';
+      if (q && mode !== 'normal' && w > 0 && h > 0) {
+        const entry = serviceLookup ? serviceLookup((getMeta(id) || {}).service) : null;
+        const result = q.scaleSize(w, h, mode, q.limitsFor((getMeta(id) || {}).service, entry));
+        scaled = ' → ' + result.width + '×' + result.height + ' ' + (mode === 'preview' ? 'draft' : mode);
+      }
+      row.querySelector('.nsize-text').textContent = auto
+        ? (source ? 'Auto · ' + source.width + '×' + source.height + (sent ? ' → ' + w + '×' + h : '') + scaled
+                  : 'Auto · no input picture — ' + w + '×' + h + scaled)
+        : 'Manual · ' + w + '×' + h + scaled;
     }
 
     /**
@@ -702,9 +830,11 @@
       return true;
     }
 
+    let followPasses = 0;
     async function refreshFollowingSizes() {
       const graph = safeGraph();
       if (!graph) return;
+      let changed = false;
       await Promise.all(graph.nodes.map(async graphNode => {
         const id = String(graphNode.id);
         const element = nodeElement(id);
@@ -712,24 +842,32 @@
         const heightControl = element && element.querySelector('[data-param="height"]');
         if (!widthControl || !heightControl) return;
         const item = getMeta(id) || {};
-        if (item.followInputSize === false || !followsInputSize(graphNode.params)) return;
+        if (item.followInputSize === false || !followsInputSize(graphNode.params)) {
+          paintSizeRow(id, element, false, null, false);
+          return;
+        }
         const version = (followRefreshVersions.get(id) || 0) + 1;
         followRefreshVersions.set(id, version);
         let dimensions;
         try { dimensions = await resolveInputDimensions(graph, id); }
         catch (_) {
-          // Follow mode has one deterministic no-image fallback. This also
-          // upgrades old graphs whose dimensions predate the persisted mode.
-          setDimensionControl(widthControl, 960);
-          setDimensionControl(heightControl, 540);
+          // No picture upstream (a text-only generator): keep its own size.
+          paintSizeRow(id, element, true, null, false);
           return;
         }
         if (followRefreshVersions.get(id) !== version) return;
         const normalized = targetDimensions(dimensions, item.service);
-        if (!normalized) return; // Never silently shrink an unsupported source.
+        if (!normalized) { paintSizeRow(id, element, true, null, false); return; }
+        const before = widthControl.value + 'x' + heightControl.value;
         setDimensionControl(widthControl, normalized.width);
         setDimensionControl(heightControl, normalized.height);
+        if (before !== widthControl.value + 'x' + heightControl.value) changed = true;
+        paintSizeRow(id, element, true, dimensions,
+          normalized.width !== Math.round(dimensions.width) || normalized.height !== Math.round(dimensions.height));
       }));
+      // A node that follows a node that just changed size settles on the next pass.
+      if (changed && followPasses < 6) { followPasses += 1; scheduleFollowingRefresh(); }
+      else followPasses = 0;
     }
 
     function scheduleFollowingRefresh() {
@@ -744,8 +882,10 @@
       if (!node) return;
       const name = String(target.dataset.param || '');
       if ((name === 'width' || name === 'height') && !internalDimensionControls.has(target)) {
+        if (target.readOnly) return;
         const item = getMeta(numericId(node));
-        if (item) item.followInputSize = false;
+        if (item) { item.followInputSize = false; item.sizeTouched = true; }
+        scheduleFollowingRefresh();
         return;
       }
       if (target.dataset.value !== undefined) scheduleFollowingRefresh();
@@ -1036,6 +1176,8 @@
       // A finished render is new size information; the host calls this so a
       // node following its input catches up with what actually came back.
       refreshSizes: scheduleFollowingRefresh,
+      mediaDimensions: imageDimensions,
+      fitDimensions: targetDimensions,
       destroy: function () {
         closeMenu();
         canvas.removeEventListener('mousedown', onMouseDown, true);
