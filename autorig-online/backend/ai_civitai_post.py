@@ -51,7 +51,16 @@ logger = logging.getLogger(__name__)
 
 CIVITAI_HOST = os.getenv("CIVITAI_POST_HOST", "https://civitai.red").rstrip("/")
 CREATE_PAGE = CIVITAI_HOST + "/posts/create"
-NSFW_LEVELS = ("None", "Soft", "Mature", "X")
+# Civitai's own ratings and their nsfwLevel bit (src/server/common/enums.ts).
+# The old dialog names are still accepted: None=PG, Soft=PG-13, Mature=R.
+RATING_LEVELS = {"PG": 1, "PG-13": 2, "R": 4, "X": 8, "XXX": 16}
+RATING_ALIASES = {"None": "PG", "Soft": "PG-13", "Mature": "R", "PG13": "PG-13"}
+NSFW_LEVELS = tuple(RATING_LEVELS) + tuple(RATING_ALIASES)
+LEVEL_NAMES = {value: key for key, value in RATING_LEVELS.items()}
+
+
+def rating_level(name: str) -> int:
+    return RATING_LEVELS.get(RATING_ALIASES.get(name, name), 0)
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 VIDEO_SUFFIXES = (".mp4", ".webm", ".mov", ".m4v")
 AUDIO_SUFFIXES = (".mp3", ".wav", ".flac", ".ogg", ".m4a")
@@ -96,7 +105,7 @@ class CivitaiPostRequest(BaseModel):
     description: str = Field("", max_length=12000)
     prompt: str = Field("", max_length=12000)
     tags: List[str] = Field(default_factory=list, max_length=40)
-    nsfw_level: str = Field(..., description="None, Soft, Mature or X; the owner confirms it")
+    nsfw_level: str = Field(..., description="PG, PG-13, R, X or XXX; the owner confirms it")
     resources: List[CivitaiResource] = Field(default_factory=list, max_length=20)
     publish: bool = False
     dry_run: bool = False
@@ -740,7 +749,52 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
         result["post_url_string"] = f"{CIVITAI_HOST}/posts/{post_id}"
     if (extras or {}).get("errors"):
         result["extras_errors_array"] = extras["errors"]
+    if image_id:
+        rating = await apply_rating(client, image_id, body.nsfw_level)
+        result.update(rating)
+        if rating.get("rating_note_string"):
+            result["warning_string"] = (result.get("warning_string", "") + " " + rating["rating_note_string"]).strip()
     return result
+
+
+async def _image_level(client: httpx.AsyncClient, image_id: int) -> Tuple[int, bool]:
+    response = await client.get(f"{CIVITAI_HOST}/api/trpc/image.get", headers=_headers(),
+                                params={"input": json.dumps({"json": {"id": image_id}})}, timeout=30.0)
+    data = ((response.json().get("result") or {}).get("data") or {}).get("json") or {}
+    return int(data.get("nsfwLevel") or 0), bool(data.get("nsfwLevelLocked"))
+
+
+async def apply_rating(client: httpx.AsyncClient, image_id: int, name: str) -> Dict[str, Any]:
+    """Send the owner's rating on the image and read back what Civitai shows.
+
+    For an owner (not a moderator) image.updateImageNsfwLevel files a rating
+    request with the owner's weight; Civitai's scanner level stays until its
+    reviewers settle it (measured 2026-09-27: XXX stayed XXX right after a
+    PG-13 request). A difference is reported, never silently accepted."""
+    wanted = rating_level(name)
+    answer: Dict[str, Any] = {"rating_requested_string": LEVEL_NAMES.get(wanted, name)}
+    if not wanted:
+        return answer
+    try:
+        await _trpc(client, "image.updateImageNsfwLevel", {"id": image_id, "nsfwLevel": wanted})
+    except Exception as error:
+        answer["rating_note_string"] = f"Civitai did not take the rating {LEVEL_NAMES[wanted]}: {str(error)[:120]}"
+        return answer
+    level = 0
+    for _attempt in range(4):
+        await asyncio.sleep(3)
+        try:
+            level, _locked = await _image_level(client, image_id)
+        except Exception:
+            level = 0
+        if level == wanted:
+            break
+    answer["rating_on_civitai_string"] = LEVEL_NAMES.get(level, str(level) if level else "not rated yet")
+    if level and level != wanted:
+        answer["rating_note_string"] = (
+            f"Civitai's scanner rated it {LEVEL_NAMES.get(level, level)}; your {LEVEL_NAMES[wanted]} was sent "
+            f"as the owner's rating request and applies once Civitai's reviewers accept it.")
+    return answer
 
 
 LOCAL = os.getenv("AUTORIG_LOCAL_BASE", "http://127.0.0.1:8200").rstrip("/")
@@ -898,7 +952,7 @@ def build_civitai_post_router(require_admin) -> APIRouter:
         if body.nsfw_level not in NSFW_LEVELS:
             raise HTTPException(status_code=400, detail={
                 "error_string": "rating_required",
-                "message_string": "Confirm the rating: None, Soft, Mature or X"})
+                "message_string": "Confirm the rating: PG, PG-13, R, X or XXX"})
         if not body.media_url.startswith(("http://", "https://")):
             raise HTTPException(status_code=400, detail={
                 "error_string": "media_required", "message_string": "Nothing to post"})

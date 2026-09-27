@@ -643,6 +643,7 @@
       framesAuto: parameterNames.has('frame_count') ? framesFollowInput(entry, params) : undefined,
       disabled: !!(params && params._disabled),
       when: (params && params._when && typeof params._when === 'object') ? params._when : null,
+      chainNext: (params && typeof params._chain_next === 'string') ? params._chain_next : '',
       // A node that can carry a standing instruction is born with the default
       // one, so a graph saved before this existed opens with it too.
       systemPrompt: entry.system_prompt_capable
@@ -1407,6 +1408,7 @@
     if (meta(id)?.disabled) values._disabled = true;
     if (meta(id)?.x9) values._x9 = true;
     if (meta(id)?.when) values._when = meta(id).when;
+    if (meta(id)?.chainNext) values._chain_next = meta(id).chainNext;
     if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
@@ -2023,11 +2025,25 @@
     const params = readParams(id);
     const resources = await nodeResources(id);
     const prompt = nodePromptText(id);
-    // The owner only presses Post: rating X and its confirmation are preset,
-    // draft/publish is whatever was chosen last time (draft until then).
+    // The owner only presses Post: the rating (Civitai's own five; R until a
+    // choice is remembered) and its confirmation are preset, draft/publish is
+    // whatever was chosen last time (draft until then).
     let lastMode = 'draft';
     try { lastMode = localStorage.getItem('civ.publishMode') === 'publish' ? 'publish' : 'draft'; } catch (error) { /* private mode */ }
-    const ratings = ['None', 'Soft', 'Mature', 'X'];
+    const ratings = [
+      ['PG', 'Safe for work. No naughty stuff'],
+      ['PG-13', 'Revealing clothing, violence, or light gore'],
+      ['R', 'Adult themes and situations, partial nudity, graphic violence, or death'],
+      ['X', 'Graphic nudity, adult objects, or settings'],
+      ['XXX', 'Overtly sexual or disturbing graphic content']];
+    const order = ratings.map(r => r[0]);
+    let rating = 'R';
+    try { const saved = localStorage.getItem('civ.rating'); if (order.includes(saved)) rating = saved; } catch (error) { /* private mode */ }
+    // A model or prompt that is plainly adult raises the preset, never lowers it.
+    const suggested = /porn|xxx|hentai|sex|cum|penis|pussy|nsfw/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'XXX'
+      : /nude|naked|nipple|topless|lewd|erotic|eros/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'X' : '';
+    let raisedNote = '';
+    if (suggested && order.indexOf(suggested) > order.indexOf(rating)) { raisedNote = `raised from ${rating} by the model/prompt`; rating = suggested; }
     let dialog = document.getElementById('civitai-post');
     if (dialog) dialog.remove();
     dialog = document.createElement('dialog');
@@ -2039,8 +2055,8 @@
       <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
       <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
       <label>Tags (comma separated; Civitai keeps the first 5, existing tags first)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
-      <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(r =>
-        `<label class="civ-seg-opt"><input type="radio" name="rating" value="${r}"${r === 'X' ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div></div>
+      <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(([r, tip]) =>
+        `<label class="civ-seg-opt" title="${esc(r + ': ' + tip)}"><input type="radio" name="rating" value="${r}"${r === rating ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div>${raisedNote ? `<i class="civ-rating-note">${esc(raisedNote)}</i>` : ''}</div>
       <label><input type="checkbox" name="confirm" checked> I checked the rating</label>
       <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
       <div><button type="button" class="civ-regen">↻ Write title, description and tags</button> <span class="civ-meta-state"></span></div>
@@ -2054,6 +2070,10 @@
     const out = dialog.querySelector('.civ-out');
     const metaState = dialog.querySelector('.civ-meta-state');
     const go = dialog.querySelector('.civ-go');
+    form.querySelectorAll('input[name=rating]').forEach(radio => radio.addEventListener('change', () => {
+      try { localStorage.setItem('civ.rating', form.rating.value); } catch (error) { /* private mode */ }
+      const note = form.querySelector('.civ-rating-note'); if (note) note.remove();
+    }));
     form.querySelectorAll('input[name=publish]').forEach(radio => radio.addEventListener('change', () => {
       try { localStorage.setItem('civ.publishMode', form.publish.value); } catch (error) { /* private mode */ }
     }));
@@ -2724,7 +2744,8 @@
     window.AINodeLists.install({
       meta, nodeElement, runState, bodyFor, stableJson, runnerFor, runnerType, submitJson, splitMulti,
       upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
-      followInputSizeAtRun, startIncrementalService, graphFromCanvas, supersedeTasks: ids => supersedeTasks(ids),
+      followInputSizeAtRun, startIncrementalService, graphFromCanvas,
+      runGraph: keep => runGraph(keep), supersedeTasks: ids => supersedeTasks(ids),
       invalidate: id => invalidateNodeAndDownstream(id),
       epoch: () => canvasEpoch,
       get BUDGET_EXHAUSTED() { return BUDGET_EXHAUSTED; },
@@ -5023,7 +5044,7 @@
     ['Inputs', ['input:media', 'input:text', 'input:avatar']],
     ['Vision / Text', ['vision', 'text']],
     ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
-    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'audio_from_source', 'video_control', 'upscale_video']],
+    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'video_summary', 'audio_from_source', 'video_control', 'upscale_video']],
     ['Avatars', ['avatar_ready', 'avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
     ['Audio', ['music']],
@@ -5034,7 +5055,7 @@
     vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
     video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
-    scene_split: 'Scene split', video_concat: 'Concat shots', audio_from_source: 'Audio from source',
+    scene_split: 'Scene split', video_concat: 'Concat shots', video_summary: 'Summary', audio_from_source: 'Audio from source',
     upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_ready: 'Avatar (ready)', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
     control_canny: 'Canny', control_normal: 'Normal', music: 'Music', '3dmodel': '3D model',
