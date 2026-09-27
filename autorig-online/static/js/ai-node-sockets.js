@@ -30,8 +30,10 @@
     if (!produced || !accepted) return false;
     const also = (alsoAccepts || []).map(String);
     if (produced === 'media') {
-      return ['image', 'video'].includes(String(accepted)) || also.includes('image') || also.includes('video');
+      return ['image', 'video', 'model3d'].includes(String(accepted)) || also.includes('image') || also.includes('video') || also.includes('model3d');
     }
+    // A 3D model reaches a picture socket as its rendered view (2026-09-27).
+    if (produced === 'model3d' && (String(accepted) === 'image' || also.includes('image'))) return true;
     return produced === String(accepted) || also.includes(produced);
   }
 

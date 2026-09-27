@@ -613,7 +613,7 @@
       <div class="nhead"><b>Media in</b></div>
       <div class="nports"><div class="prow pout">image / video ${typeIcon('media')}</div></div>
       <div class="ninput"><input type="text" data-value placeholder="Any link (Civitai too), drop a file or Ctrl+V">
-        <input type="file" data-file accept="image/*,video/mp4,video/webm,video/quicktime" hidden>
+        <input type="file" data-file accept="image/*,video/mp4,video/webm,video/quicktime,.glb,.gltf,model/gltf-binary,model/gltf+json" hidden>
         <button type="button" data-pick class="npick">Choose a file or Ctrl+V</button>
         <img data-preview alt="" hidden><video data-vpreview muted autoplay loop playsinline hidden></video></div>
       <div class="nstate"></div>`;
@@ -1082,9 +1082,50 @@
    * What a Media node hands one socket: a video consumer gets the clip, a
    * picture consumer gets the picture or, for a clip, its first frame.
    */
+  function isModelLink(value) { return /^https?:\/\/\S+\.(glb|gltf)(\?|#|$)/i.test(String(value || '').trim()); }
+  function isModelFile(file) { return !!file && (/^model\/gltf/.test(file.type || '') || /\.(glb|gltf)$/i.test(file.name || '')); }
+
+  /** A front view of a 3D model as a picture (rendered in the page, uploaded once). */
+  const modelViewCache = new Map();
+  function renderedModelView(url) {
+    if (!modelViewCache.has(url)) {
+      modelViewCache.set(url, ensureModelViewer().then(() => new Promise((resolve, reject) => {
+        const stage = document.createElement('div');
+        stage.style.cssText = 'position:fixed;left:-2000px;top:0;width:768px;height:768px;pointer-events:none';
+        const viewer = modelViewerElement(url, '', true);
+        viewer.removeAttribute('auto-rotate');
+        viewer.setAttribute('loading', 'eager');
+        viewer.style.height = '768px';
+        viewer.style.background = '#d9dbe3';
+        stage.appendChild(viewer);
+        document.body.appendChild(stage);
+        const timer = setTimeout(() => { stage.remove(); reject(new Error('the 3D model did not load')); }, 60000);
+        viewer.addEventListener('load', async () => {
+          try {
+            await new Promise(r => setTimeout(r, 400));
+            const blob = await viewer.toBlob({mimeType: 'image/png', idealAspect: false});
+            const form = new FormData();
+            form.append('file', blob, 'model-view.png');
+            const response = await fetch('/dev/api/scratch', {method: 'POST', body: form});
+            const data = await response.json();
+            if (!response.ok || !data.url) throw new Error('the 3D view upload failed');
+            clearTimeout(timer); stage.remove(); resolve(data.url);
+          } catch (error) { clearTimeout(timer); stage.remove(); reject(error); }
+        }, {once: true});
+      })).catch(error => { modelViewCache.delete(url); throw error; }));
+    }
+    return modelViewCache.get(url);
+  }
+
   async function adaptMediaValue(value, serviceId, field) {
     const text = String(value || '').trim();
     if (!text || text.startsWith('data:image/')) return text;
+    if (isModelLink(text)) {
+      const entry = catalogue ? serviceById(serviceId) : null;
+      const socket = ((entry || {}).inputs || []).find(item => item.field === field) || {};
+      if (socket.type === 'model3d' || (socket.also_accepts || []).includes('model3d')) return text;
+      return renderedModelView(text);
+    }
     let url = text;
     let kind = looksLikeVideo(text) ? 'video' : 'image';
     if (text.startsWith('data:video/')) kind = 'video';
@@ -1126,6 +1167,16 @@
     async function refresh() {
       const value = text.value.trim();
       const mine = ++generation;
+      const oldModel = element.querySelector('.ninput .nmodel');
+      if (oldModel) oldModel.remove();
+      if (isModelLink(value)) {
+        // A 3D model (owner, 2026-09-27): the same viewer as the 3D node.
+        show('', 'image');
+        showModel(host, value, '');
+        status.textContent = '3D model · picture sockets get a rendered view';
+        status.className = 'nstate done';
+        return;
+      }
       if (!/^(https?:\/\/|data:(image|video)\/)/.test(value)) { show('', 'image'); return; }
       if (value.startsWith('data:')) { show(value, value.startsWith('data:video/') ? 'video' : 'image'); return; }
       if (!isCivitai(value)) { show(value, looksLikeVideo(value) ? 'video' : 'image'); return; }
@@ -1145,7 +1196,10 @@
       }
     }
     async function acceptMedia(chosen) {
-      if (!chosen || !/^(image|video)\//.test(chosen.type || '')) return;
+      if (!chosen) return;
+      const isModel = isModelFile(chosen);
+      if (!isModel && !/^(image|video)\//.test(chosen.type || '')) return;
+      if (isModel) { await acceptModel(chosen); return; }
       const isVideo = chosen.type.startsWith('video/');
       const limit = (isVideo ? 100 : 12) * 1024 * 1024;
       if (chosen.size > limit) { toast(`${isVideo ? 'Videos' : 'Images'} must be at most ${isVideo ? 100 : 12} MB.`); return; }
@@ -1179,6 +1233,22 @@
       pendingImageUploads.set(String(id), upload);
       await upload;
     }
+    async function acceptModel(chosen) {
+      if (chosen.size > 200 * 1024 * 1024) { toast('3D files must be at most 200 MB.'); return; }
+      status.textContent = 'uploading 3D model...';
+      status.className = 'nstate running';
+      const form = new FormData();
+      form.append('file', chosen, chosen.name || 'model.glb');
+      const upload = fetch('/dev/api/scratch', {method: 'POST', body: form}).then(async response => {
+        const data = await response.json();
+        if (!response.ok || !data.url) throw new Error('The 3D upload failed');
+        text.value = data.url;
+        text.dispatchEvent(new Event('change', {bubbles: true}));
+      }).catch(error => { status.textContent = error.message; status.className = 'nstate failed'; })
+        .finally(() => { if (pendingImageUploads.get(String(id)) === upload) pendingImageUploads.delete(String(id)); });
+      pendingImageUploads.set(String(id), upload);
+      await upload;
+    }
     function acceptText(value) {
       const link = String(value || '').trim();
       if (!/^(https?:\/\/|data:(image|video)\/)/.test(link)) return false;
@@ -1196,7 +1266,7 @@
     element.addEventListener('dragover', event => event.preventDefault());
     element.addEventListener('drop', event => {
       event.preventDefault();
-      const dropped = [...event.dataTransfer.files].find(item => /^(image|video)\//.test(item.type));
+      const dropped = [...event.dataTransfer.files].find(item => /^(image|video)\//.test(item.type) || isModelFile(item));
       if (dropped) { acceptMedia(dropped); return; }
       acceptText(event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain'));
     });
@@ -2833,8 +2903,10 @@
     // (bodyFor tells the model what it is). Native control sockets are typed.
     if (info.produced.startsWith('control_') &&
         (info.accepted === 'image' || info.alsoAccepts.includes('image'))) return true;
-    return info.produced === 'media' && (['image', 'video'].includes(info.accepted) ||
-      info.alsoAccepts.includes('image') || info.alsoAccepts.includes('video'));
+    return (info.produced === 'media' && (['image', 'video', 'model3d'].includes(info.accepted) ||
+      info.alsoAccepts.includes('image') || info.alsoAccepts.includes('video') || info.alsoAccepts.includes('model3d'))) ||
+      // A 3D model feeds a picture socket through its rendered view.
+      (info.produced === 'model3d' && (info.accepted === 'image' || info.alsoAccepts.includes('image')));
   }
 
   function linkAllowed(connection) {
@@ -4096,6 +4168,7 @@
     dialog.style.width = 'min(1100px, 96vw)';
     dialog.innerHTML = '<div class="ml-stage"></div><div style="display:flex;gap:8px;justify-content:center;margin-top:10px">' +
       '<a class="ml-download" download>Download</a><button type="button" data-ml="copy">Copy link</button>' +
+      '<button type="button" data-ml="add">Add as Media in</button>' +
       '<button type="button" data-ml="close" title="Close (Esc)">✕</button></div>';
     document.body.appendChild(dialog);
     dialog.querySelector('.ml-download').href = url;
@@ -4103,6 +4176,12 @@
     dialog.addEventListener('click', event => {
       const action = event.target && event.target.dataset && event.target.dataset.ml;
       if (action === 'copy') copyText(url).then(() => toast('Link copied.'));
+      if (action === 'add') {
+        const rect = document.getElementById('canvas').getBoundingClientRect();
+        const scale = Number(editor.zoom) || 1;
+        const nodeId = addInputNode('media', (rect.width / 2 - editor.canvas_x) / scale, (rect.height / 2 - editor.canvas_y) / scale, url);
+        if (nodeId) { toast('Added as a Media in node.'); dialog.close(); }
+      }
       if (action === 'close' || event.target === dialog) dialog.close();
     });
     ensureModelViewer().then(() => dialog.querySelector('.ml-stage').appendChild(modelViewerElement(url, poster, true)))
@@ -4937,6 +5016,17 @@
             if (!upstream) continue;
             if (Array.isArray(upstream.x9) && (!link.output || /url_string$|^value$/.test(link.output))) fan[link.input] = upstream.x9;
             let value = outputValue(upstream, link.output);
+            if (typeof value === 'string' && isModelLink(value) && !upstream.media) {
+              const entry = serviceById(node.service) || {};
+              const socket = (entry.inputs || []).find(item => item.field === link.input) || {};
+              if (socket.type !== 'model3d' && !(socket.also_accepts || []).includes('model3d')) {
+                try { value = await renderedModelView(value); }
+                catch (error) {
+                  markState(id, '3D view: ' + error.message, 'nstate failed');
+                  return {ok:false, error:error.message};
+                }
+              }
+            }
             if (upstream.media) {
               try {
                 value = await adaptMediaValue(value, node.service, link.input);
@@ -5430,7 +5520,7 @@
     'input:media': 'Media in', 'input:text': 'Text in', 'input:avatar': 'Avatar',
     vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
-    video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
+    video_frame: 'Extract Frames', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
     scene_split: 'Scene split', video_concat: 'Concat shots', video_summary: 'Summary', audio_from_source: 'Audio from source',
     upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_ready: 'Avatar (ready)', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
@@ -5819,7 +5909,8 @@
       if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
       if (!document.getElementById('canvas')) return;
       const items = [...(event.clipboardData?.items || [])];
-      const files = items.filter(value => value.kind === 'file' && /^(image|video)\//.test(value.type)).map(value => value.getAsFile()).filter(Boolean);
+      const files = items.filter(value => value.kind === 'file').map(value => value.getAsFile())
+        .filter(file => file && (/^(image|video)\//.test(file.type) || isModelFile(file)));
       const text = (event.clipboardData ? event.clipboardData.getData('text/plain') : '').trim();
       if (!files.length && /^AUTORIG_NODES_V1:/.test(text)) return;  // node paste is handled already
       const current = event.target.closest && event.target.closest('.drawflow-node');
@@ -5848,7 +5939,7 @@
       const types = [...(event.dataTransfer && event.dataTransfer.types || [])];
       if (types.includes('application/x-autorig-node')) return;
       if (event.target.closest && event.target.closest('.drawflow-node')) return;  // a Media node takes its own drops
-      const files = [...(event.dataTransfer.files || [])].filter(file => /^(image|video)\//.test(file.type));
+      const files = [...(event.dataTransfer.files || [])].filter(file => /^(image|video)\//.test(file.type) || isModelFile(file));
       const link = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain') || '').split(String.fromCharCode(10))[0].trim();
       if (!files.length && !MEDIA_LINK.test(link)) return;
       event.preventDefault();

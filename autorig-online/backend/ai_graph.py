@@ -481,9 +481,11 @@ def validate(graph: Graph) -> None:
         produced = _output_type(source, link.output)
         accepted = _input_type(target, link.input)
         also = _input_also_accepts(target, link.input)
-        media_fits = produced == ai_services.MEDIA and (
-            accepted in (ai_services.IMAGE, ai_services.VIDEO)
-            or ai_services.IMAGE in also or ai_services.VIDEO in also)
+        media_fits = (produced == ai_services.MEDIA and (
+            accepted in (ai_services.IMAGE, ai_services.VIDEO, ai_services.MODEL3D)
+            or ai_services.IMAGE in also or ai_services.VIDEO in also or ai_services.MODEL3D in also)) or (
+            # A 3D model reaches a picture socket as its rendered view.
+            produced == ai_services.MODEL3D and (accepted == ai_services.IMAGE or ai_services.IMAGE in also))
         # A control map is a raster: any picture socket takes it as a reference.
         raster_fits = str(produced or "").startswith("control_") and (
             accepted == ai_services.IMAGE or ai_services.IMAGE in also)
