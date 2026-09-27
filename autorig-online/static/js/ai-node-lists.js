@@ -76,8 +76,10 @@
       finish: async (accepted, runner, report) => {
         const data = await pollVideoTool(accepted, runner, report);
         const frames = data.frames_array || [];
-        return {value: data.first_url_string,
-                outputs: {image_url_string: data.first_url_string, frames_text_string: data.frames_text_string},
+        const outputs = {image_url_string: data.first_url_string, frames_text_string: data.frames_text_string};
+        frames.slice(0, FRAME_SOCKETS).forEach((f, i) => { outputs['frame_' + (i + 1) + '_url_string'] = f.url; });
+        return {value: data.first_url_string, outputs,
+                frameLabels: frames.map(f => ({label: f.label, url: f.url})),
                 items: frames.map((f, i) => ({status: 'done', type: 'image', value: f.url, error: '',
                   outputs: {frame_url_string: f.url, frame_info_string: f.text},
                   meta: {label: f.label, index: i, scene: f.scene, frame: f.frame}})),
@@ -319,6 +321,112 @@
   }
   if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
     setInterval(() => { try { paintOverrides(); } catch (e) { /* display only */ } }, 3000);
+  }
+
+  /* ------------------------------------------- Extract Frames sockets */
+
+  // Extract Frames exposes each frame on its own plain socket (frame_1 .. 12):
+  // a node wired there receives that one picture and runs once. The socket
+  // rows show "k · S1 start" + a thumbnail; unused rows are hidden, and a wired
+  // socket past the current count stays visible as "missing" (the link is kept).
+  const FRAME_SOCKETS = 12;
+  const PROBES = new Map();   // node id -> {key, frames}
+
+  function frameLabelsOf(id) {
+    const record = api.runState.get(String(id));
+    if (record && Array.isArray(record.items) && record.items.length) {
+      return record.items.map(it => ({label: (it.meta && it.meta.label) || '', url: it.value}));
+    }
+    const probe = PROBES.get(String(id));
+    return probe && probe.frames ? probe.frames : null;
+  }
+
+  function wiredFrameSockets(id) {
+    const wired = new Set();
+    if (!api.graphFromCanvas) return wired;
+    api.graphFromCanvas().links.forEach(link => {
+      const m = /^frame_(\d+)_url_string$/.exec(String(link.from) === String(id) ? link.output : '');
+      if (m) wired.add(Number(m[1]));
+    });
+    return wired;
+  }
+
+  function paintFrameSockets(id) {
+    const element = api.nodeElement(id);
+    if (!element) return;
+    const rows = [...element.querySelectorAll('.nports .pout')];
+    const ports = [...element.querySelectorAll('.outputs .output')];
+    const frames = frameLabelsOf(id);
+    const wired = wiredFrameSockets(id);
+    const count = frames ? frames.length : 0;
+    let changed = false;
+    for (let k = 1; k <= FRAME_SOCKETS; k += 1) {
+      const row = rows[k - 1], port = ports[k - 1];
+      if (!row || !port) continue;
+      const have = k <= count;
+      const show = have || wired.has(k) || (!frames && k === 1);
+      const key = (show ? '1' : '0') + (have ? frames[k - 1].label + frames[k - 1].url : (wired.has(k) ? 'missing' : ''));
+      if (row.dataset.fkey === key) continue;
+      row.dataset.fkey = key;
+      changed = true;
+      row.style.display = show ? '' : 'none';
+      port.style.display = show ? '' : 'none';
+      row.textContent = '';
+      if (have) {
+        const img = document.createElement('img');
+        img.src = frames[k - 1].url;
+        img.style.cssText = 'width:16px;height:16px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px';
+        row.appendChild(img);
+        row.appendChild(document.createTextNode(k + ' · ' + frames[k - 1].label));
+        row.title = 'Frame ' + k + ': ' + frames[k - 1].label + ' — a node wired here gets this one picture';
+      } else if (wired.has(k)) {
+        row.appendChild(document.createTextNode(k + ' · missing'));
+        row.style.color = '#fb7185';
+        row.title = 'Frame ' + k + ' is not produced by the current template/clip; the wire is kept';
+      } else {
+        row.appendChild(document.createTextNode('Frame ' + k));
+      }
+      if (have) row.style.color = '';
+    }
+    if (changed && api.updatePorts) api.updatePorts(id);
+  }
+
+  /** Quick probe: when the wired clip or template changes, fetch the frame list
+   *  (cached server-side) so sockets can be wired before rendering. */
+  function probeExtract(id) {
+    if (!api.graphFromCanvas) return;
+    const graph = api.graphFromCanvas();
+    const node = graph.nodes.find(n => String(n.id) === String(id));
+    const link = graph.links.find(l => String(l.to) === String(id) && l.input === 'video_url');
+    const src = link && graph.nodes.find(n => String(n.id) === String(link.from));
+    if (!node || !src || src.kind !== 'input' || !/^https?:/.test(String(src.value || ''))) return;
+    const p = node.params || {};
+    const body = adjustBody('video_frame', {video_url: src.value, template: p.template, detect_scenes: p.detect_scenes,
+                                            n: Number(p.n) || 4, offset: Number(p.offset) || 0});
+    const key = JSON.stringify(body);
+    const prior = PROBES.get(String(id));
+    if (prior && prior.key === key) return;
+    PROBES.set(String(id), {key, frames: prior ? prior.frames : null});
+    fetch('/api/ai/video-tools/extract-frames', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: key})
+      .then(r => r.json()).then(accepted => pollVideoTool(accepted, RUNNERS.video_frame, null))
+      .then(data => {
+        const cur = PROBES.get(String(id));
+        if (!cur || cur.key !== key) return;
+        cur.frames = (data.frames_array || []).map(f => ({label: f.label, url: f.url}));
+        paintFrameSockets(id);
+      }).catch(() => {});
+  }
+
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    setInterval(() => {
+      try {
+        if (!api || !api.graphFromCanvas) return;
+        api.graphFromCanvas().nodes.filter(n => n.service === 'video_frame').forEach(n => {
+          probeExtract(n.id);
+          paintFrameSockets(n.id);
+        });
+      } catch (e) { /* display only */ }
+    }, 2500);
   }
 
   async function maybeRun(ctx) {

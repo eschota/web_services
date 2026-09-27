@@ -125,9 +125,24 @@ SERVICES: List[Dict[str, object]] = [
         "summary": ("Pictures from a video by template (Start-End per scene by default): a gallery / list for "
                     "per-item pipelines, plus the first picture for simple wiring."),
         "inputs": [{"type": VIDEO, "field": "video_url", "required": True, "title": "Source video"}],
+        # One plain picture socket per extracted frame (primary, 2026-09-27):
+        # a node wired to frame k gets exactly that picture and runs once.
+        # Labels ("1 · S1 start") and visibility follow the result / probe.
         "outputs": [
+            {"type": IMAGE, "field": "frame_1_url_string", "title": "Frame 1", "frame_socket": 1},
+            {"type": IMAGE, "field": "frame_2_url_string", "title": "Frame 2", "frame_socket": 2},
+            {"type": IMAGE, "field": "frame_3_url_string", "title": "Frame 3", "frame_socket": 3},
+            {"type": IMAGE, "field": "frame_4_url_string", "title": "Frame 4", "frame_socket": 4},
+            {"type": IMAGE, "field": "frame_5_url_string", "title": "Frame 5", "frame_socket": 5},
+            {"type": IMAGE, "field": "frame_6_url_string", "title": "Frame 6", "frame_socket": 6},
+            {"type": IMAGE, "field": "frame_7_url_string", "title": "Frame 7", "frame_socket": 7},
+            {"type": IMAGE, "field": "frame_8_url_string", "title": "Frame 8", "frame_socket": 8},
+            {"type": IMAGE, "field": "frame_9_url_string", "title": "Frame 9", "frame_socket": 9},
+            {"type": IMAGE, "field": "frame_10_url_string", "title": "Frame 10", "frame_socket": 10},
+            {"type": IMAGE, "field": "frame_11_url_string", "title": "Frame 11", "frame_socket": 11},
+            {"type": IMAGE, "field": "frame_12_url_string", "title": "Frame 12", "frame_socket": 12},
             {"type": IMAGE, "field": "image_url_string", "title": "First picture"},
-            {"type": IMAGE, "field": "frame_url_string", "title": "Pictures (each)", "per_item": True},
+            {"type": IMAGE, "field": "frame_url_string", "title": "Pictures (each) · fan-out list", "per_item": True},
             {"type": TEXT, "field": "frame_info_string", "title": "Picture info (each)", "per_item": True},
             {"type": TEXT, "field": "frames_text_string", "title": "Pictures (text)"},
         ],
@@ -1059,3 +1074,71 @@ async def api_ai_services():
         },
         "server_time_unix_int": int(time.time()),
     }
+
+
+# ------------------------------------------------------------ Camera orbit
+#
+# (2026-09-27) See the same subject from another camera position.
+# Image: Qwen-Image 2.1 turbo with a written camera prompt (preset or
+# yaw/pitch/zoom). Video: LTX-2.5 + CrossView-Prompt IC-LoRA re-shoots a clip
+# from a new angle (worker-4090). ai_camera_orbit_api.
+import ai_camera_orbit_api as _camera_api  # noqa: E402
+
+SERVICES.append({
+    "id": "camera_orbit_image", "title": "Camera orbit · image", "path": "/nodes",
+    "api": "/api/camera-orbit/image", "status": "live",
+    "summary": ("The same subject from another camera position: orbit left/right up to the back "
+                "view, high/low angle, dolly in/out. Qwen-Image 2.1 turbo; a clip gives its first frame."),
+    "inputs": [
+        {"type": IMAGE, "field": "image", "required": True, "title": "Picture or clip",
+         "also_accepts": [VIDEO]},
+        {"type": TEXT, "field": "prompt", "required": False, "title": "Extra description"},
+    ],
+    "outputs": [
+        {"type": IMAGE, "field": "image_url_string", "title": "New view"},
+        {"type": TEXT, "field": "prompt_string", "title": "Camera prompt"},
+    ],
+})
+SERVICES.append({
+    "id": "camera_orbit_video", "title": "Camera orbit · video", "path": "/nodes",
+    "api": "/api/camera-orbit/video", "status": "live", "slow": True,
+    "summary": ("Re-shoot a clip from a new camera angle (same action): LTX-2.5 + CrossView IC-LoRA. "
+                "Frontal sector up to ~60°; chain two nodes for a bigger move. worker-4090."),
+    "inputs": [
+        {"type": VIDEO, "field": "video_url", "required": True, "title": "Clip to re-shoot"},
+    ],
+    "outputs": [
+        {"type": VIDEO, "field": "video_url_string", "title": "New angle clip"},
+        {"type": TEXT, "field": "prompt_string", "title": "Camera prompt"},
+    ],
+})
+PARAMS["camera_orbit_image"] = [
+    {"name": "preset", "title": "Camera", "type": "select", "default": "orbit_right_45",
+     "options": [{"value": k, "title": t} for k, t in _camera_api.IMAGE_PRESET_TITLES.items()]},
+    {"name": "yaw", "title": "Yaw °", "type": "range", "min": -180, "max": 180, "step": 15, "default": 0,
+     "help": "Custom only: + = camera orbits to the right, 180 = back view"},
+    {"name": "pitch", "title": "Pitch °", "type": "range", "min": -60, "max": 90, "step": 5, "default": 0,
+     "help": "Custom only: + = camera above looking down, - = below looking up"},
+    {"name": "zoom", "title": "Zoom", "type": "range", "min": 0.25, "max": 4, "step": 0.25, "default": 1,
+     "help": "Custom only: >1 closer (dolly in), <1 further (dolly out)"},
+    {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 960},
+    {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 540},
+    {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1,
+     "default": 0, "help": "0 gives a different picture each run"},
+]
+PARAMS["camera_orbit_video"] = [
+    {"name": "azimuth", "title": "Orbit", "type": "select", "default": "to the right",
+     "options": [{"value": v, "title": v} for v in _camera_api.AZIMUTHS],
+     "help": "slightly ~15°, to the ~30°, far ~50° (frontal sector only)"},
+    {"name": "elevation", "title": "Height", "type": "select", "default": "same height",
+     "options": [{"value": v, "title": v} for v in _camera_api.ELEVATIONS]},
+    {"name": "distance", "title": "Distance", "type": "select", "default": "same distance",
+     "options": [{"value": v, "title": v} for v in _camera_api.DISTANCES]},
+    {"name": "strength", "title": "LoRA strength", "type": "range", "min": 0.5, "max": 2.5, "step": 0.1,
+     "default": 1.5, "help": "1.5 measured best on distilled LTX-2.5; lower = closer to the source"},
+    {"name": "frame_count", "title": "Frames", "type": "number", "min": 0, "max": 193, "step": 8, "default": 0,
+     "help": "0 = the clip's length (8k+1, up to 193)"},
+    {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 960},
+    {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 544},
+    {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
+]

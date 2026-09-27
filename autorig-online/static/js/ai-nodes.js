@@ -613,7 +613,7 @@
       <div class="nhead"><b>Media in</b></div>
       <div class="nports"><div class="prow pout">image / video ${typeIcon('media')}</div></div>
       <div class="ninput"><input type="text" data-value placeholder="Any link (Civitai too), drop a file or Ctrl+V">
-        <input type="file" data-file accept="image/*,video/mp4,video/webm,video/quicktime" hidden>
+        <input type="file" data-file accept="image/*,video/mp4,video/webm,video/quicktime,.glb,.gltf,model/gltf-binary,model/gltf+json" hidden>
         <button type="button" data-pick class="npick">Choose a file or Ctrl+V</button>
         <img data-preview alt="" hidden><video data-vpreview muted autoplay loop playsinline hidden></video></div>
       <div class="nstate"></div>`;
@@ -1082,9 +1082,50 @@
    * What a Media node hands one socket: a video consumer gets the clip, a
    * picture consumer gets the picture or, for a clip, its first frame.
    */
+  function isModelLink(value) { return /^https?:\/\/\S+\.(glb|gltf)(\?|#|$)/i.test(String(value || '').trim()); }
+  function isModelFile(file) { return !!file && (/^model\/gltf/.test(file.type || '') || /\.(glb|gltf)$/i.test(file.name || '')); }
+
+  /** A front view of a 3D model as a picture (rendered in the page, uploaded once). */
+  const modelViewCache = new Map();
+  function renderedModelView(url) {
+    if (!modelViewCache.has(url)) {
+      modelViewCache.set(url, ensureModelViewer().then(() => new Promise((resolve, reject) => {
+        const stage = document.createElement('div');
+        stage.style.cssText = 'position:fixed;left:-2000px;top:0;width:768px;height:768px;pointer-events:none';
+        const viewer = modelViewerElement(url, '', true);
+        viewer.removeAttribute('auto-rotate');
+        viewer.setAttribute('loading', 'eager');
+        viewer.style.height = '768px';
+        viewer.style.background = '#d9dbe3';
+        stage.appendChild(viewer);
+        document.body.appendChild(stage);
+        const timer = setTimeout(() => { stage.remove(); reject(new Error('the 3D model did not load')); }, 60000);
+        viewer.addEventListener('load', async () => {
+          try {
+            await new Promise(r => setTimeout(r, 400));
+            const blob = await viewer.toBlob({mimeType: 'image/png', idealAspect: false});
+            const form = new FormData();
+            form.append('file', blob, 'model-view.png');
+            const response = await fetch('/dev/api/scratch', {method: 'POST', body: form});
+            const data = await response.json();
+            if (!response.ok || !data.url) throw new Error('the 3D view upload failed');
+            clearTimeout(timer); stage.remove(); resolve(data.url);
+          } catch (error) { clearTimeout(timer); stage.remove(); reject(error); }
+        }, {once: true});
+      })).catch(error => { modelViewCache.delete(url); throw error; }));
+    }
+    return modelViewCache.get(url);
+  }
+
   async function adaptMediaValue(value, serviceId, field) {
     const text = String(value || '').trim();
     if (!text || text.startsWith('data:image/')) return text;
+    if (isModelLink(text)) {
+      const entry = catalogue ? serviceById(serviceId) : null;
+      const socket = ((entry || {}).inputs || []).find(item => item.field === field) || {};
+      if (socket.type === 'model3d' || (socket.also_accepts || []).includes('model3d')) return text;
+      return renderedModelView(text);
+    }
     let url = text;
     let kind = looksLikeVideo(text) ? 'video' : 'image';
     if (text.startsWith('data:video/')) kind = 'video';
@@ -1126,6 +1167,16 @@
     async function refresh() {
       const value = text.value.trim();
       const mine = ++generation;
+      const oldModel = element.querySelector('.ninput .nmodel');
+      if (oldModel) oldModel.remove();
+      if (isModelLink(value)) {
+        // A 3D model (owner, 2026-09-27): the same viewer as the 3D node.
+        show('', 'image');
+        showModel(host, value, '');
+        status.textContent = '3D model · picture sockets get a rendered view';
+        status.className = 'nstate done';
+        return;
+      }
       if (!/^(https?:\/\/|data:(image|video)\/)/.test(value)) { show('', 'image'); return; }
       if (value.startsWith('data:')) { show(value, value.startsWith('data:video/') ? 'video' : 'image'); return; }
       if (!isCivitai(value)) { show(value, looksLikeVideo(value) ? 'video' : 'image'); return; }
@@ -1145,7 +1196,10 @@
       }
     }
     async function acceptMedia(chosen) {
-      if (!chosen || !/^(image|video)\//.test(chosen.type || '')) return;
+      if (!chosen) return;
+      const isModel = isModelFile(chosen);
+      if (!isModel && !/^(image|video)\//.test(chosen.type || '')) return;
+      if (isModel) { await acceptModel(chosen); return; }
       const isVideo = chosen.type.startsWith('video/');
       const limit = (isVideo ? 100 : 12) * 1024 * 1024;
       if (chosen.size > limit) { toast(`${isVideo ? 'Videos' : 'Images'} must be at most ${isVideo ? 100 : 12} MB.`); return; }
@@ -1179,6 +1233,22 @@
       pendingImageUploads.set(String(id), upload);
       await upload;
     }
+    async function acceptModel(chosen) {
+      if (chosen.size > 200 * 1024 * 1024) { toast('3D files must be at most 200 MB.'); return; }
+      status.textContent = 'uploading 3D model...';
+      status.className = 'nstate running';
+      const form = new FormData();
+      form.append('file', chosen, chosen.name || 'model.glb');
+      const upload = fetch('/dev/api/scratch', {method: 'POST', body: form}).then(async response => {
+        const data = await response.json();
+        if (!response.ok || !data.url) throw new Error('The 3D upload failed');
+        text.value = data.url;
+        text.dispatchEvent(new Event('change', {bubbles: true}));
+      }).catch(error => { status.textContent = error.message; status.className = 'nstate failed'; })
+        .finally(() => { if (pendingImageUploads.get(String(id)) === upload) pendingImageUploads.delete(String(id)); });
+      pendingImageUploads.set(String(id), upload);
+      await upload;
+    }
     function acceptText(value) {
       const link = String(value || '').trim();
       if (!/^(https?:\/\/|data:(image|video)\/)/.test(link)) return false;
@@ -1196,7 +1266,7 @@
     element.addEventListener('dragover', event => event.preventDefault());
     element.addEventListener('drop', event => {
       event.preventDefault();
-      const dropped = [...event.dataTransfer.files].find(item => /^(image|video)\//.test(item.type));
+      const dropped = [...event.dataTransfer.files].find(item => /^(image|video)\//.test(item.type) || isModelFile(item));
       if (dropped) { acceptMedia(dropped); return; }
       acceptText(event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain'));
     });
@@ -1968,12 +2038,24 @@
       const post = body._post_upscale;
       delete body._post_upscale;
       try {
-        const accepted = await submitJson(runner.api, body);
-        if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
-        if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
-        cell.status = 'running';
-        report();
-        let {value} = splitMulti(await runner.finish(accepted, runner, null));
+        let value = '';
+        for (let round = 0; ; round += 1) {
+          const accepted = await submitJson(runner.api, body);
+          if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
+          if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
+          cell.status = 'running';
+          report();
+          try {
+            ({value} = splitMulti(await runner.finish(accepted, runner, null)));
+            break;
+          } catch (error) {
+            // A site restart wiped the queued cell: submit it again (3 times).
+            if (!/server restarted/i.test(String(error.message || '')) || round >= 2 || !current()) throw error;
+            cell.status = 'queued';
+            report();
+            await sleep(3000);
+          }
+        }
         if (post && value) value = await upscaleClip2x(value, null);
         if (!value) throw new Error('no result');
         cell.value = value;
@@ -2089,6 +2171,45 @@
     } catch (error) { return known; }
   }
 
+  const CIV_MEDIA = /^https?:\/\/[^\s"]+\.(png|jpe?g|webp|mp4|webm|mov|m4v)(\?[^\s"]*)?$/i;
+  // Every file a node shows: its value, its X9 cells and its list items.
+  function nodeOutputUrls(nodeId) {
+    const record = runState.get(String(nodeId));
+    if (!record) return [];
+    const urls = [];
+    const add = value => {
+      const url = value && typeof value === 'object' ? value.value : value;
+      if (typeof url === 'string' && CIV_MEDIA.test(url) && !urls.includes(url)) urls.push(url);
+    };
+    add(record.value);
+    (Array.isArray(record.x9) ? record.x9 : []).forEach(add);
+    (Array.isArray(record.items) ? record.items : []).forEach(add);
+    return urls;
+  }
+
+  // Other finished outputs the owner can add to the same post: this node's
+  // X9 cells / list items first, then every other node's output.
+  function civitaiCandidates(nodeId, mainUrl) {
+    const list = [];
+    const seen = new Set([mainUrl]);
+    const push = (url, from) => { if (!seen.has(url)) { seen.add(url); list.push({url, from}); } };
+    nodeOutputUrls(nodeId).forEach(url => push(url, String(nodeId)));
+    runState.forEach((record, otherId) => {
+      if (String(otherId) === String(nodeId)) return;
+      nodeOutputUrls(otherId).forEach(url => push(url, String(otherId)));
+    });
+    return list;
+  }
+
+  let civitaiLimit = null;
+  async function civitaiLimitState() {
+    try {
+      const response = await fetch('/api/ai/civitai/limit', {credentials: 'same-origin'});
+      civitaiLimit = response.ok ? await response.json() : null;
+    } catch (error) { civitaiLimit = null; }
+    return civitaiLimit;
+  }
+
   async function openCivitaiDialog(id) {
     const record = runState.get(String(id));
     const url = record && record.value;
@@ -2132,6 +2253,9 @@
       <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(([r, tip]) =>
         `<label class="civ-seg-opt" title="${esc(r + ': ' + tip)}"><input type="radio" name="rating" value="${r}"${r === rating ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div>${raisedNote ? `<i class="civ-rating-note">${esc(raisedNote)}</i>` : ''}</div>
       <label><input type="checkbox" name="confirm" checked> I checked the rating</label>
+      <details class="civ-batch"><summary>Add more outputs to this post <span class="civ-batch-count"></span></summary>
+        <div class="civ-batch-grid"></div></details>
+      <div class="civ-limit" style="color:#aab0c8;font-size:12px"></div>
       <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
       <div><button type="button" class="civ-regen">↻ Write title, description and tags</button> <span class="civ-meta-state"></span></div>
       <label><input type="radio" name="publish" value="draft"${lastMode === 'draft' ? ' checked' : ''}> Save as draft</label>
@@ -2189,7 +2313,36 @@
     };
     dialog.querySelector('.civ-regen').addEventListener('click', () => writeMeta(true));
     writeMeta(false);
+    const candidates = civitaiCandidates(id, url);
+    const grid = dialog.querySelector('.civ-batch-grid');
+    const batchBox = dialog.querySelector('.civ-batch');
+    if (!candidates.length) batchBox.hidden = true;
+    grid.innerHTML = candidates.slice(0, 60).map((c, i) => {
+      const video = /\.(mp4|webm|mov|m4v)(\?|$)/i.test(c.url);
+      return `<label class="civ-cell" title="${esc(c.url)}"><input type="checkbox" value="${i}">` +
+        (video ? `<video src="${esc(c.url)}" muted preload="metadata"></video>` : `<img src="${esc(c.url)}" loading="lazy" alt="">`) + '</label>';
+    }).join('');
+    const picked = () => [...grid.querySelectorAll('input:checked')].map(box => candidates[Number(box.value)]);
+    const syncBatch = () => {
+      const extra = picked();
+      grid.querySelectorAll('input:not(:checked)').forEach(box => { box.disabled = extra.length >= 19; });
+      dialog.querySelector('.civ-batch-count').textContent = extra.length ? `(${extra.length} added)` : '';
+      if (!civitaiLimit || !civitaiLimit.limited_bool) go.textContent = extra.length ? `Post ${extra.length + 1} as one post` : 'Post';
+    };
+    grid.addEventListener('change', syncBatch);
+    civitaiLimitState().then(limit => {
+      const line = dialog.querySelector('.civ-limit');
+      if (!limit) return;
+      if (limit.limited_bool) {
+        go.disabled = true;
+        go.textContent = 'Daily limit reached';
+        line.innerHTML = '<b style="color:#fbbf24">' + esc(limit.message_string) + '</b>';
+      } else {
+        line.textContent = `Posts created in the last 24 h: ${limit.created_last_24h_int} · Civitai allows ${limit.tiers_string}`;
+      }
+    });
     dialog.querySelector('.civ-go').addEventListener('click', async () => {
+      if (civitaiLimit && civitaiLimit.limited_bool) { out.textContent = civitaiLimit.message_string; return; }
       if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
       const publish = form.publish.value === 'publish';
       go.disabled = true;
@@ -2203,6 +2356,7 @@
         resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
           weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
         publish, background: true, auto_meta: true, source_urls: nodeSourceUrls(id),
+        extra_items: picked().slice(0, 19).map(c => ({media_url: c.url, source_urls: nodeSourceUrls(c.from)})),
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
@@ -2211,6 +2365,13 @@
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error((data.detail && (data.detail.message_string || data.detail)) || ('HTTP ' + response.status));
+        if (data.limited_bool) {
+          civitaiLimit = data.limit || {limited_bool: true, message_string: data.reason_string};
+          go.disabled = true;
+          go.textContent = 'Daily limit reached';
+          out.innerHTML = '<b style="color:#fbbf24">' + esc(data.reason_string || 'Civitai daily post limit reached') + '</b>';
+          return;
+        }
         if (data.job_id_string) {
           go.disabled = true;
           civitaiJobs.watch(data.job_id_string, id, job => { out.innerHTML = civitaiJobs.describe(job, true); });
@@ -2833,8 +2994,10 @@
     // (bodyFor tells the model what it is). Native control sockets are typed.
     if (info.produced.startsWith('control_') &&
         (info.accepted === 'image' || info.alsoAccepts.includes('image'))) return true;
-    return info.produced === 'media' && (['image', 'video'].includes(info.accepted) ||
-      info.alsoAccepts.includes('image') || info.alsoAccepts.includes('video'));
+    return (info.produced === 'media' && (['image', 'video', 'model3d'].includes(info.accepted) ||
+      info.alsoAccepts.includes('image') || info.alsoAccepts.includes('video') || info.alsoAccepts.includes('model3d'))) ||
+      // A 3D model feeds a picture socket through its rendered view.
+      (info.produced === 'model3d' && (info.accepted === 'image' || info.alsoAccepts.includes('image')));
   }
 
   function linkAllowed(connection) {
@@ -2966,6 +3129,15 @@
     // Draws or rewrites depending on whether a picture is wired in; the
     // endpoint reads the wiring, so the runner is the ordinary picture shape.
     qwen_image: { api: '/api/qwen-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    // Camera orbit (2026-09-27): a new camera position for a picture or a clip.
+    camera_orbit_image: { api: '/api/camera-orbit/image', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      return {value, outputs: {image_url_string: value, prompt_string: String(accepted.prompt_string || '')}};
+    }, field: 'image_url_string', type: 'image' },
+    camera_orbit_video: { api: '/api/camera-orbit/video', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      return {value, outputs: {video_url_string: value, prompt_string: String(accepted.prompt_string || '')}};
+    }, field: 'video_url_string', type: 'video' },
     '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' },
     // Stable Audio 3 (2026-09-26): the audio file, and for a clip the clip
     // with the music under it (muxed by the server once the audio exists).
@@ -2997,7 +3169,9 @@
       meta, nodeElement, runState, bodyFor, stableJson, runnerFor, runnerType, submitJson, splitMulti,
       upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
       followInputSizeAtRun, startIncrementalService, graphFromCanvas,
-      runGraph: keep => runGraph(keep), supersedeTasks: ids => supersedeTasks(ids),
+      runGraph: keep => runGraph(keep),
+      updatePorts: id => { try { editor.updateConnectionNodes('node-' + id); } catch (e) { /* not drawn */ } },
+      ROW_HEIGHT, HEADER_HEIGHT, supersedeTasks: ids => supersedeTasks(ids),
       invalidate: id => invalidateNodeAndDownstream(id),
       epoch: () => canvasEpoch,
       get BUDGET_EXHAUSTED() { return BUDGET_EXHAUSTED; },
@@ -3160,17 +3334,39 @@
     return `HTTP ${status || 'error'} — the service returned ${kind}.${ambiguous}`;
   }
 
+  /**
+   * Every submit carries one request id for all its attempts; the server
+   * answers a repeat with the first answer, so a 502/503/504 or a dropped
+   * connection (a deploy restarting the backend) is retried safely instead
+   * of failing the node (2026-09-27).
+   */
+  const RESTART_RETRY_MS = [2000, 4000, 8000, 12000, 16000, 20000];
   async function submitJson(url, body, onRetry) {
-    for (let attempt = 0; attempt <= 6; attempt += 1) {
+    const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+      : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+    let outageTries = 0;
+    for (let attempt = 0; attempt <= 6 + RESTART_RETRY_MS.length; attempt += 1) {
       let response;
       try {
         response = await pacedSubmitFetch(url, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-Client-Request-Id': requestId},
           body: JSON.stringify(body)
         });
       } catch (error) {
-        throw new Error('Could not connect to the service. The request was not retried because its acceptance is unknown.');
+        if (outageTries < RESTART_RETRY_MS.length) {
+          const delay = RESTART_RETRY_MS[outageTries++];
+          if (onRetry) onRetry({attempt: attempt + 1, delay, restarting: true});
+          await sleep(delay);
+          continue;
+        }
+        throw new Error('Could not connect to the service after several tries.');
+      }
+      if ([502, 503, 504].includes(response.status) && outageTries < RESTART_RETRY_MS.length) {
+        const delay = RESTART_RETRY_MS[outageTries++];
+        if (onRetry) onRetry({attempt: attempt + 1, delay, restarting: true});
+        await sleep(delay);
+        continue;
       }
       let parsed;
       try {
@@ -3895,7 +4091,9 @@
       delete submitBody._post_upscale;
       const accepted = await submitJson(runner.api, submitBody, retry => {
         if (!executionIsCurrent(execution)) return;
-        state.textContent = `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
+        state.textContent = retry.restarting
+          ? `server restarting — retrying in ${Math.ceil(retry.delay / 1000)}s`
+          : `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
         state.className = 'nstate running';
       });
       execution.taskId = accepted.task_id_string || '';
@@ -3932,6 +4130,16 @@
           const bigger = (Number(body.max_output_tokens) || 1024) * 2;
           if (task) task.clear();
           return runServiceNode(id, resolved, params, execution, Math.min(bigger, 8192));
+        }
+        // A site restart wipes queued jobs (owner rule): submit it again,
+        // up to three times, instead of failing the node (2026-09-27).
+        if (/server restarted/i.test(String(error.message || '')) && (execution.restartTries || 0) < 3 &&
+            executionIsCurrent(execution)) {
+          execution.restartTries = (execution.restartTries || 0) + 1;
+          state.textContent = 'server restarted — submitting again';
+          if (task) task.clear();
+          await sleep(3000);
+          return runServiceNode(id, resolved, params, execution, budget);
         }
         throw error;
       }
@@ -4096,6 +4304,7 @@
     dialog.style.width = 'min(1100px, 96vw)';
     dialog.innerHTML = '<div class="ml-stage"></div><div style="display:flex;gap:8px;justify-content:center;margin-top:10px">' +
       '<a class="ml-download" download>Download</a><button type="button" data-ml="copy">Copy link</button>' +
+      '<button type="button" data-ml="add">Add as Media in</button>' +
       '<button type="button" data-ml="close" title="Close (Esc)">✕</button></div>';
     document.body.appendChild(dialog);
     dialog.querySelector('.ml-download').href = url;
@@ -4103,6 +4312,12 @@
     dialog.addEventListener('click', event => {
       const action = event.target && event.target.dataset && event.target.dataset.ml;
       if (action === 'copy') copyText(url).then(() => toast('Link copied.'));
+      if (action === 'add') {
+        const rect = document.getElementById('canvas').getBoundingClientRect();
+        const scale = Number(editor.zoom) || 1;
+        const nodeId = addInputNode('media', (rect.width / 2 - editor.canvas_x) / scale, (rect.height / 2 - editor.canvas_y) / scale, url);
+        if (nodeId) { toast('Added as a Media in node.'); dialog.close(); }
+      }
       if (action === 'close' || event.target === dialog) dialog.close();
     });
     ensureModelViewer().then(() => dialog.querySelector('.ml-stage').appendChild(modelViewerElement(url, poster, true)))
@@ -4937,6 +5152,17 @@
             if (!upstream) continue;
             if (Array.isArray(upstream.x9) && (!link.output || /url_string$|^value$/.test(link.output))) fan[link.input] = upstream.x9;
             let value = outputValue(upstream, link.output);
+            if (typeof value === 'string' && isModelLink(value) && !upstream.media) {
+              const entry = serviceById(node.service) || {};
+              const socket = (entry.inputs || []).find(item => item.field === link.input) || {};
+              if (socket.type !== 'model3d' && !(socket.also_accepts || []).includes('model3d')) {
+                try { value = await renderedModelView(value); }
+                catch (error) {
+                  markState(id, '3D view: ' + error.message, 'nstate failed');
+                  return {ok:false, error:error.message};
+                }
+              }
+            }
             if (upstream.media) {
               try {
                 value = await adaptMediaValue(value, node.service, link.input);
@@ -5395,7 +5621,7 @@
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃', scene_split: '✂️', video_concat: '🔗', audio_from_source: '🔊',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
     upscale: '🔎', detail_enhance: '✨', face_fix: '🙂', upscale_video: '📺',
-    qwen_image: '🖌️'
+    qwen_image: '🖌️', camera_orbit_image: '🔄', camera_orbit_video: '🎥'
   };
 
   function toolIcon(key, fallbackType) {
@@ -5419,8 +5645,8 @@
   const DOCK_GROUPS = [
     ['Inputs', ['input:media', 'input:text', 'input:avatar']],
     ['Vision / Text', ['vision', 'text']],
-    ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
-    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'video_summary', 'audio_from_source', 'video_control', 'upscale_video']],
+    ['Image', ['image', 'qwen_image', 'camera_orbit_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
+    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'video_summary', 'audio_from_source', 'video_control', 'camera_orbit_video', 'upscale_video']],
     ['Avatars', ['avatar_ready', 'avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
     ['Audio', ['music']],
@@ -5428,7 +5654,7 @@
   ];
   const DOCK_LABELS = {
     'input:media': 'Media in', 'input:text': 'Text in', 'input:avatar': 'Avatar',
-    vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
+    vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', camera_orbit_image: 'Camera orbit', camera_orbit_video: 'Camera re-shoot', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
     video_frame: 'Extract Frames', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
     scene_split: 'Scene split', video_concat: 'Concat shots', video_summary: 'Summary', audio_from_source: 'Audio from source',
@@ -5819,7 +6045,8 @@
       if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
       if (!document.getElementById('canvas')) return;
       const items = [...(event.clipboardData?.items || [])];
-      const files = items.filter(value => value.kind === 'file' && /^(image|video)\//.test(value.type)).map(value => value.getAsFile()).filter(Boolean);
+      const files = items.filter(value => value.kind === 'file').map(value => value.getAsFile())
+        .filter(file => file && (/^(image|video)\//.test(file.type) || isModelFile(file)));
       const text = (event.clipboardData ? event.clipboardData.getData('text/plain') : '').trim();
       if (!files.length && /^AUTORIG_NODES_V1:/.test(text)) return;  // node paste is handled already
       const current = event.target.closest && event.target.closest('.drawflow-node');
@@ -5848,7 +6075,7 @@
       const types = [...(event.dataTransfer && event.dataTransfer.types || [])];
       if (types.includes('application/x-autorig-node')) return;
       if (event.target.closest && event.target.closest('.drawflow-node')) return;  // a Media node takes its own drops
-      const files = [...(event.dataTransfer.files || [])].filter(file => /^(image|video)\//.test(file.type));
+      const files = [...(event.dataTransfer.files || [])].filter(file => /^(image|video)\//.test(file.type) || isModelFile(file));
       const link = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain') || '').split(String.fromCharCode(10))[0].trim();
       if (!files.length && !MEDIA_LINK.test(link)) return;
       event.preventDefault();

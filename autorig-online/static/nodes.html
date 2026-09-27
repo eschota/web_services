@@ -18,9 +18,9 @@
     <script src="/static/js/ai-entities.js?v=20260926-catalogue-ttl"></script>
     <script src="/static/js/ai-node-groups.js?v=20260926-halfhd1"></script>
     <script src="/static/js/ai-node-display.js?v=20260923-sockets1-text2"></script>
-    <script src="/static/js/ai-node-sockets.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-node-sockets.js?v=20260926-media2-m3d1"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
-    <script src="/static/js/ai-node-compare.js?v=20260926-media2-video-tools-20260927r-video-tools-20260927s-video-tools-20260927t-video-tools-20260927u"></script>
+    <script src="/static/js/ai-node-compare.js?v=20260926-media2-video-tools-20260927r-video-tools-20260927s-video-tools-20260927t-video-tools-20260927u-video-tools-20260927v-video-tools-20260927w-video-tools-20260927x"></script>
     <script src="/static/js/ai-graph-bridge.js?v=20260926-media2"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
     <script src="/static/js/ai-node-placement.js?v=20260927-ids1"></script>
@@ -29,8 +29,8 @@
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-node-lists.js?v=video-tools-20260927u"></script>
-    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ12-reset1-meta1-mi3-lists1-sup2-own1-wait1-frames3-video-tools-20260927l-video-tools-20260927m-video-tools-20260927n-video-tools-20260927o-gal1-video-tools-20260927p-video-tools-20260927q-video-tools-20260927r-keys1-useseed1-video-tools-20260927s-seedfix1-model3d1-paste1-video-tools-20260927t-video-tools-20260927u"></script>
+    <script src="/static/js/ai-node-lists.js?v=video-tools-20260927x"></script>
+    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ13-reset1-meta1-mi3-lists1-sup2-own1-wait1-frames3-video-tools-20260927l-video-tools-20260927m-video-tools-20260927n-video-tools-20260927o-gal1-video-tools-20260927p-video-tools-20260927q-video-tools-20260927r-keys1-useseed1-video-tools-20260927s-seedfix1-model3d1-paste1-video-tools-20260927t-video-tools-20260927u-video-tools-20260927v-video-tools-20260927w-media3d1-camorbit1-idem2-video-tools-20260927x"></script>
     <style>
         .ai-page {
             background:
@@ -194,6 +194,13 @@
         .civ-seg-opt input:checked + span { background: #7dd3fc; color: #0a0c1e; font-weight: 700; }
         .civ-seg-opt input:focus-visible + span { outline: 2px solid #7dd3fc; outline-offset: -2px; }
         .civ-dialog button:disabled { opacity: .5; cursor: wait; }
+        .civ-batch summary { cursor: pointer; color: #aab0c8; font-size: 12px; }
+        .civ-batch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; margin-top: 6px; max-height: 220px; overflow: auto; }
+        .civ-dialog label.civ-cell { position: relative; display: block; aspect-ratio: 1; border-radius: 6px; overflow: hidden; border: 2px solid transparent; cursor: pointer; }
+        .civ-cell img, .civ-cell video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .civ-cell input { position: absolute; top: 3px; left: 3px; z-index: 1; }
+        .civ-cell:has(input:checked) { border-color: #7dd3fc; }
+        .civ-cell:has(input:disabled) { opacity: .45; }
         .civ-dialog::backdrop { background: rgba(4,5,14,.6); }
         .civ-dialog form { display: grid; gap: 10px; }
         .civ-dialog b { font-size: 15px; }
