@@ -3117,6 +3117,15 @@
     // Draws or rewrites depending on whether a picture is wired in; the
     // endpoint reads the wiring, so the runner is the ordinary picture shape.
     qwen_image: { api: '/api/qwen-image', finish: pollForFile, field: 'image_url_string', type: 'image' },
+    // Camera orbit (2026-09-27): a new camera position for a picture or a clip.
+    camera_orbit_image: { api: '/api/camera-orbit/image', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      return {value, outputs: {image_url_string: value, prompt_string: String(accepted.prompt_string || '')}};
+    }, field: 'image_url_string', type: 'image' },
+    camera_orbit_video: { api: '/api/camera-orbit/video', finish: async (accepted, runner, report) => {
+      const value = await pollForFile(accepted, runner, report);
+      return {value, outputs: {video_url_string: value, prompt_string: String(accepted.prompt_string || '')}};
+    }, field: 'video_url_string', type: 'video' },
     '3dmodel': { api: '/api/3dmodel', finish: poll3dStatus, field: 'model_url_string', type: 'model3d' },
     // Stable Audio 3 (2026-09-26): the audio file, and for a clip the clip
     // with the music under it (muxed by the server once the audio exists).
@@ -5564,7 +5573,7 @@
     video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃', scene_split: '✂️', video_concat: '🔗', audio_from_source: '🔊',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
     upscale: '🔎', detail_enhance: '✨', face_fix: '🙂', upscale_video: '📺',
-    qwen_image: '🖌️'
+    qwen_image: '🖌️', camera_orbit_image: '🔄', camera_orbit_video: '🎥'
   };
 
   function toolIcon(key, fallbackType) {
@@ -5588,8 +5597,8 @@
   const DOCK_GROUPS = [
     ['Inputs', ['input:media', 'input:text', 'input:avatar']],
     ['Vision / Text', ['vision', 'text']],
-    ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
-    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'video_summary', 'audio_from_source', 'video_control', 'upscale_video']],
+    ['Image', ['image', 'qwen_image', 'camera_orbit_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
+    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'video_summary', 'audio_from_source', 'video_control', 'camera_orbit_video', 'upscale_video']],
     ['Avatars', ['avatar_ready', 'avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
     ['Audio', ['music']],
@@ -5597,7 +5606,7 @@
   ];
   const DOCK_LABELS = {
     'input:media': 'Media in', 'input:text': 'Text in', 'input:avatar': 'Avatar',
-    vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
+    vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', camera_orbit_image: 'Camera orbit', camera_orbit_video: 'Camera re-shoot', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
     video_frame: 'Extract Frames', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
     scene_split: 'Scene split', video_concat: 'Concat shots', video_summary: 'Summary', audio_from_source: 'Audio from source',
