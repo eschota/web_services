@@ -259,6 +259,19 @@ SERVICES: List[Dict[str, object]] = [
         ],
     },
     {
+        # Wan-Animate-2 from a plain picture, no saved Avatar (2026-09-27).
+        "id": "wan_image", "title": "Wan-Animate-2 · character picture", "path": "/nodes",
+        "api": "/api/ai/wan-animate", "status": "live", "slow": True,
+        "summary": "Animate a character picture (e.g. a Qwen keyframe) with the motion of a driving video (worker-4090).",
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True, "title": "Character picture / keyframe"},
+            {"type": VIDEO, "field": "control_video_url", "required": True, "title": "Driving video"},
+            {"type": TEXT, "field": "prompt", "required": False, "title": "Motion verbs"},
+            {"type": TEXT, "field": "character", "required": False, "title": "Character description"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Clip"}],
+    },
+    {
         "id": "avatar_video", "title": "Avatar video · Wan-Animate-2", "path": "/nodes",
         "api": "/api/ai/avatar-video", "status": "live", "slow": True,
         "summary": "Transfer action from a driving video to one or two saved Avatar characters.",
@@ -736,6 +749,13 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "out_height", "title": "Height", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,
          "help": "0 = size of the first clip"},
         {"name": "fps", "title": "FPS", "type": "number", "min": 8, "max": 60, "step": 1, "default": 24},
+    ],
+    "wan_image": [
+        {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 960},
+        {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 544},
+        {"name": "frame_count", "title": "Frames", "type": "range", "min": 9, "max": 97, "step": 8, "default": 97},
+        {"name": "control_strength", "title": "Control strength", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 1},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
     ],
     "avatar_video": [
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,

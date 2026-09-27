@@ -1323,6 +1323,8 @@ app.state.limiter = limiter
 app.include_router(ai_fleet_router)
 app.include_router(ai_graph_router)
 app.include_router(ai_video_tools_router)
+from ai_wan_image import router as ai_wan_image_router
+app.include_router(ai_wan_image_router)
 app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)

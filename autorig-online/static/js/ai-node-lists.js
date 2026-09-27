@@ -98,6 +98,20 @@
         }
         throw new Error('the Avatar build did not finish in time');
       }},
+    wan_image: {api: '/api/ai/wan-animate', field: 'video_url_string', type: 'video',
+      finish: async (accepted) => {
+        const url = accepted.video_url_string;
+        for (let attempt = 0; attempt < 900; attempt += 1) {
+          const status = await fetch('/api/ai/render-status/' + encodeURIComponent(accepted.task_id_string))
+            .then(r => r.ok ? r.json() : null).catch(() => null);
+          if (status && (status.status_string === 'failed' || status.status_string === 'cancelled')) throw new Error(status.error_string || status.status_string);
+          if (status && status.status_string === 'completed') return status.output_url_string || url;
+          const probe = await fetch(url, {method: 'HEAD'}).catch(() => null);
+          if (probe && probe.ok) return url;
+          await sleep(3000);
+        }
+        throw new Error('Wan-Animate did not finish in time');
+      }},
     video_concat: {api: '/api/ai/video-tools/concat', field: 'video_url_string', type: 'video',
       finish: async (accepted, runner, report) => (await pollVideoTool(accepted, runner, report)).video_url_string},
     audio_from_source: {api: '/api/ai/video-tools/audio-mux', field: 'video_url_string', type: 'video',
