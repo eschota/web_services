@@ -31,6 +31,10 @@ def _db() -> sqlite3.Connection:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         _conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         _conn.execute("CREATE TABLE IF NOT EXISTS owners (task_id TEXT PRIMARY KEY, owner TEXT, at REAL)")
+        # Idempotent submits (2026-09-27): a retried POST with the same
+        # X-Client-Request-Id gets the answer the first one got.
+        _conn.execute("CREATE TABLE IF NOT EXISTS idem (key TEXT PRIMARY KEY, owner TEXT, path TEXT, body BLOB, at REAL)")
+        _conn.execute("DELETE FROM idem WHERE at < ?", (time.time() - 24 * 3600,))
         _conn.execute("DELETE FROM owners WHERE at < ?", (time.time() - TTL_SECONDS,))
         _conn.commit()
     return _conn
@@ -93,6 +97,26 @@ def scope_identity(scope) -> str:
     return identity_from(_cookies(headers), headers, real)
 
 
+def idem_get(key: str, owner: str, path: str):
+    try:
+        with _lock:
+            row = _db().execute("SELECT body FROM idem WHERE key = ? AND owner = ? AND path = ?",
+                                (key, owner, path)).fetchone()
+        return bytes(row[0]) if row else None
+    except Exception:
+        return None
+
+
+def idem_put(key: str, owner: str, path: str, body: bytes) -> None:
+    try:
+        with _lock:
+            _db().execute("INSERT OR REPLACE INTO idem (key, owner, path, body, at) VALUES (?, ?, ?, ?, ?)",
+                          (key, owner, path, body, time.time()))
+            _db().commit()
+    except Exception:
+        logger.exception("idempotent answer not stored")
+
+
 class TaskOwnerMiddleware:
     def __init__(self, app):
         self.app = app
@@ -102,13 +126,25 @@ class TaskOwnerMiddleware:
                 or not str(scope.get("path") or "").startswith("/api/")):
             return await self.app(scope, receive, send)
         owner = scope_identity(scope)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
+        key = (headers.get("x-client-request-id") or "").strip()[:80]
+        path = str(scope.get("path") or "")
+        if key:
+            stored = idem_get(key, owner, path)
+            if stored is not None:
+                await send({"type": "http.response.start", "status": 200,
+                            "headers": [(b"content-type", b"application/json"),
+                                        (b"content-length", str(len(stored)).encode("ascii")),
+                                        (b"x-idempotent-replay", b"1")]})
+                await send({"type": "http.response.body", "body": stored})
+                return
         state = {"json": False, "buf": bytearray(), "status": 0}
 
         async def wrapped(message):
             if message["type"] == "http.response.start":
                 state["status"] = message.get("status", 0)
-                for key, value in message.get("headers") or []:
-                    if key.lower() == b"content-type" and b"json" in value.lower():
+                for name, value in message.get("headers") or []:
+                    if name.lower() == b"content-type" and b"json" in value.lower():
                         state["json"] = True
             elif message["type"] == "http.response.body" and state["json"] and 200 <= state["status"] < 300:
                 if len(state["buf"]) < _MAX_CAPTURE:
@@ -119,6 +155,8 @@ class TaskOwnerMiddleware:
                         task = data.get("task_id_string") if isinstance(data, dict) else None
                         if task:
                             record(str(task), owner)
+                            if key:
+                                idem_put(key, owner, path, bytes(state["buf"]))
                     except Exception:
                         pass
             await send(message)

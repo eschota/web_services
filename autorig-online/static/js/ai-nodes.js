@@ -2038,12 +2038,24 @@
       const post = body._post_upscale;
       delete body._post_upscale;
       try {
-        const accepted = await submitJson(runner.api, body);
-        if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
-        if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
-        cell.status = 'running';
-        report();
-        let {value} = splitMulti(await runner.finish(accepted, runner, null));
+        let value = '';
+        for (let round = 0; ; round += 1) {
+          const accepted = await submitJson(runner.api, body);
+          if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
+          if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
+          cell.status = 'running';
+          report();
+          try {
+            ({value} = splitMulti(await runner.finish(accepted, runner, null)));
+            break;
+          } catch (error) {
+            // A site restart wiped the queued cell: submit it again (3 times).
+            if (!/server restarted/i.test(String(error.message || '')) || round >= 2 || !current()) throw error;
+            cell.status = 'queued';
+            report();
+            await sleep(3000);
+          }
+        }
         if (post && value) value = await upscaleClip2x(value, null);
         if (!value) throw new Error('no result');
         cell.value = value;
@@ -3320,17 +3332,39 @@
     return `HTTP ${status || 'error'} — the service returned ${kind}.${ambiguous}`;
   }
 
+  /**
+   * Every submit carries one request id for all its attempts; the server
+   * answers a repeat with the first answer, so a 502/503/504 or a dropped
+   * connection (a deploy restarting the backend) is retried safely instead
+   * of failing the node (2026-09-27).
+   */
+  const RESTART_RETRY_MS = [2000, 4000, 8000, 12000, 16000, 20000];
   async function submitJson(url, body, onRetry) {
-    for (let attempt = 0; attempt <= 6; attempt += 1) {
+    const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+      : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+    let outageTries = 0;
+    for (let attempt = 0; attempt <= 6 + RESTART_RETRY_MS.length; attempt += 1) {
       let response;
       try {
         response = await pacedSubmitFetch(url, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-Client-Request-Id': requestId},
           body: JSON.stringify(body)
         });
       } catch (error) {
-        throw new Error('Could not connect to the service. The request was not retried because its acceptance is unknown.');
+        if (outageTries < RESTART_RETRY_MS.length) {
+          const delay = RESTART_RETRY_MS[outageTries++];
+          if (onRetry) onRetry({attempt: attempt + 1, delay, restarting: true});
+          await sleep(delay);
+          continue;
+        }
+        throw new Error('Could not connect to the service after several tries.');
+      }
+      if ([502, 503, 504].includes(response.status) && outageTries < RESTART_RETRY_MS.length) {
+        const delay = RESTART_RETRY_MS[outageTries++];
+        if (onRetry) onRetry({attempt: attempt + 1, delay, restarting: true});
+        await sleep(delay);
+        continue;
       }
       let parsed;
       try {
@@ -4055,7 +4089,9 @@
       delete submitBody._post_upscale;
       const accepted = await submitJson(runner.api, submitBody, retry => {
         if (!executionIsCurrent(execution)) return;
-        state.textContent = `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
+        state.textContent = retry.restarting
+          ? `server restarting — retrying in ${Math.ceil(retry.delay / 1000)}s`
+          : `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
         state.className = 'nstate running';
       });
       execution.taskId = accepted.task_id_string || '';
@@ -4092,6 +4128,16 @@
           const bigger = (Number(body.max_output_tokens) || 1024) * 2;
           if (task) task.clear();
           return runServiceNode(id, resolved, params, execution, Math.min(bigger, 8192));
+        }
+        // A site restart wipes queued jobs (owner rule): submit it again,
+        // up to three times, instead of failing the node (2026-09-27).
+        if (/server restarted/i.test(String(error.message || '')) && (execution.restartTries || 0) < 3 &&
+            executionIsCurrent(execution)) {
+          execution.restartTries = (execution.restartTries || 0) + 1;
+          state.textContent = 'server restarted — submitting again';
+          if (task) task.clear();
+          await sleep(3000);
+          return runServiceNode(id, resolved, params, execution, budget);
         }
         throw error;
       }
