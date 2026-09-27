@@ -20,7 +20,7 @@
     <script src="/static/js/ai-node-display.js?v=20260923-sockets1-text2"></script>
     <script src="/static/js/ai-node-sockets.js?v=20260926-media2"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
-    <script src="/static/js/ai-node-compare.js?v=20260926-media2"></script>
+    <script src="/static/js/ai-node-compare.js?v=20260926-media2-video-tools-20260927r"></script>
     <script src="/static/js/ai-graph-bridge.js?v=20260926-media2"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
     <script src="/static/js/ai-node-placement.js?v=20260927-ids1"></script>
@@ -29,8 +29,8 @@
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-node-lists.js?v=video-tools-20260927g"></script>
-    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ9-reset1-meta1-mi3-lists1-sup2-own1-wait1"></script>
+    <script src="/static/js/ai-node-lists.js?v=video-tools-20260927r"></script>
+    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ11-reset1-meta1-mi3-lists1-sup2-own1-wait1-frames3-video-tools-20260927l-video-tools-20260927m-video-tools-20260927n-video-tools-20260927o-gal1-video-tools-20260927p-video-tools-20260927q-video-tools-20260927r"></script>
     <style>
         .ai-page {
             background:
@@ -146,6 +146,27 @@
         html body .drawflow .drawflow-node[data-display-mode="small"] .nhead .nqual,
         html body .drawflow .drawflow-node[data-display-mode="small"] .nhead .ncap,
         html body .drawflow .drawflow-node[data-display-mode="small"] .nsize-auto { display: none !important; }
+        /* ---- recent renders gallery (bottom right, above the dock) ---- */
+        #recent-gallery { position: fixed; z-index: 25; right: 12px; bottom: calc(var(--dock-h) + 10px); width: 286px;
+            padding: 6px; border-radius: 12px; border: 1px solid rgba(255,255,255,.12); background: rgba(12,13,26,.92);
+            box-shadow: 0 10px 28px rgba(0,0,0,.45); font: 11px system-ui; color: #cfd2e4; contain: layout paint; }
+        #recent-gallery header { display: flex; align-items: center; gap: 6px; height: 22px; }
+        #recent-gallery .rg-toggle { border: 0; background: transparent; color: inherit; cursor: pointer; font: 600 11px system-ui; padding: 0 4px; }
+        #recent-gallery .rg-queue { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; }
+        #recent-gallery .rg-queue.rg-busy::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+            background: #38bdf8; margin-right: 5px; animation: rgpulse 1s infinite alternate; }
+        @keyframes rgpulse { from { opacity: .3; } to { opacity: 1; } }
+        #recent-gallery .rg-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 5px; height: 110px; }
+        #recent-gallery.collapsed { width: auto; }
+        #recent-gallery.collapsed .rg-strip { display: none; }
+        #recent-gallery .rg-cell { position: relative; width: 100%; height: 53px; padding: 0; border-radius: 6px; overflow: hidden; cursor: pointer;
+            border: 1px solid rgba(255,255,255,.1); background: #090a14; color: inherit; font-size: 18px; }
+        #recent-gallery .rg-cell img, #recent-gallery .rg-cell video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        #recent-gallery .rg-new { animation: rgin .45s ease-out; }
+        @keyframes rgin { from { transform: translateX(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+        .drawflow .drawflow-node.rl-flash { box-shadow: 0 0 0 3px #f59e0b !important; }
+        /* the socket legend sits left of the gallery */
+        .socket-legend { right: 310px !important; }
         /* ---- Post to Civitai dialog ---- */
         .civ-dialog { width: min(560px, 94vw); padding: 18px 20px; border: 1px solid rgba(255,255,255,.14);
             border-radius: 14px; background: #121327; color: #e9e9f4; font: 13px/1.4 system-ui;

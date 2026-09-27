@@ -146,6 +146,15 @@ async def _publish(client: httpx.AsyncClient, path: Path, mime: str) -> str:
     raise VideoToolError("publish failed")
 
 
+async def _count_frames(path: Path) -> int:
+    raw = await _run(FFPROBE, "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                     "stream=nb_read_frames", "-of", "csv=p=0", str(path))
+    try:
+        return int(raw.strip().splitlines()[0])
+    except (ValueError, IndexError):
+        return 0
+
+
 def _even(value: int) -> int:
     return max(2, int(value) // 2 * 2)
 
@@ -326,6 +335,22 @@ async def _scene_split(body: SceneSplitRequest, work: Path) -> Dict[str, Any]:
                           "start": round(start, 3), "end": round(end, 3), "seconds": round(end - start, 3),
                           "frames": frames, "clip_url": clip_url, "first_frame_url": first_url,
                           "middle_frame_url": scenes[seg["shot"]].get("middle_frame_url", ""), "label": label})
+        # Keyframe chain (2026-09-27): segment i runs from its first frame to the
+        # first frame of segment i+1 of the same scene (shared boundary), or to
+        # the scene's last frame. chain_frames counts both ends.
+        for index, item in enumerate(items):
+            nxt = items[index + 1] if index + 1 < len(items) else None
+            same = bool(nxt and nxt["shot"] == item["shot"])
+            item["next_same_scene"] = same
+            item["chain_frames"] = item["frames"] + 1 if same else item["frames"]
+            if same:
+                item["last_frame_url"] = nxt["first_frame_url"]
+            else:
+                last = work / f"last{index:03d}.png"
+                end = item["end_frame"] - 1
+                await _ff("-i", str(ref), "-vf", f"trim=start_frame={end}:end_frame={end + 1}", "-frames:v", "1",
+                          str(last))
+                item["last_frame_url"] = await _publish(client, last, "image/png")
     lines = [f"{header}. Detected cuts at: " + (", ".join(f"frame {f} ({_timecode(f / body.fps)})" for f in cut_frames)
                                                 or "none (one continuous scene)") + "."]
     for sc in scenes:
@@ -346,7 +371,8 @@ async def _scene_split(body: SceneSplitRequest, work: Path) -> Dict[str, Any]:
             "shots_json_string": json.dumps({"fps": body.fps, "frames": total_frames, "duration": round(duration, 3),
                                              "shots": [{k: item[k] for k in ("index", "shot", "part", "start_frame",
                                                                              "end_frame", "start", "end", "seconds",
-                                                                             "frames", "clip_url")}
+                                                                             "frames", "clip_url", "chain_frames",
+                                                                             "next_same_scene")}
                                                        for item in items]}, separators=(",", ":"))}
 
 
@@ -372,6 +398,13 @@ class ConcatRequest(BaseModel):
     out_height: int = Field(0, ge=0, le=4096)
     fps: int = Field(24, ge=8, le=60)
     trim: bool = True
+    # Summary (keyframe chain): segments share their boundary frame; each is
+    # fitted to chain_frames ("resample" keeps both ends for first+last-frame
+    # renders, "trim" cuts a start-frame render), then the duplicated boundary
+    # frame is dropped. source_url puts the original audio back.
+    chain: bool = False
+    fit: str = Field("trim", pattern="^(trim|resample)$")
+    source_url: str = Field("", max_length=4096)
 
     def columns(self) -> List[List[str]]:
         cols = [_as_list(self.clip), _as_list(self.clip_2), _as_list(self.clip_3)] + [list(c) for c in self.clips]
@@ -405,7 +438,10 @@ async def _concat(body: ConcatRequest, work: Path) -> Dict[str, Any]:
             pick, source = str(shot["clip_url"]), "source shot (no clip arrived)"
         if not pick:
             raise VideoToolError(f"shot {index + 1} has no clip")
-        chosen.append({"url": pick, "source": source, "frames": int(shot.get("frames") or 0)})
+        target = int(shot.get("chain_frames") or shot.get("frames") or 0) if body.chain else int(shot.get("frames") or 0)
+        drop_first = bool(body.chain and index > 0 and (shots[index - 1] if index - 1 < len(shots) else {}).get(
+            "next_same_scene"))
+        chosen.append({"url": pick, "source": source, "frames": target, "drop_first": drop_first})
     async with httpx.AsyncClient() as client:
         local = []
         for index, item in enumerate(chosen):
@@ -422,7 +458,13 @@ async def _concat(body: ConcatRequest, work: Path) -> Dict[str, Any]:
             out = work / f"norm{index:03d}.mp4"
             frames = item["frames"] if body.trim and item["frames"] else 0
             vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                  f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}")
+                  f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1")
+            if frames and body.chain and body.fit == "resample":
+                have = await _count_frames(path)
+                if have > 1 and have != frames:
+                    # Stretch/squeeze in time so the first and last frames survive.
+                    vf += f",setpts=PTS*{(frames - 1) / (have - 1):.6f}"
+            vf += f",fps={fps}"
             if frames:
                 # Hold the last frame when a clip is shorter than its shot.
                 vf += f",tpad=stop_mode=clone:stop={frames}"
@@ -431,14 +473,28 @@ async def _concat(body: ConcatRequest, work: Path) -> Dict[str, Any]:
                 args += ["-frames:v", str(frames)]
             await _ff(*args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
                       "-r", str(fps), str(out))
+            if item["drop_first"]:
+                cut = work / f"cut{index:03d}.mp4"
+                await _ff("-i", str(out), "-vf", "trim=start_frame=1,setpts=PTS-STARTPTS", "-c:v", "libx264",
+                          "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-r", str(fps), str(cut))
+                out = cut
             parts.append(out)
-            report.append({"shot": index + 1, "from": item["source"], "frames": frames or None})
+            report.append({"shot": index + 1, "from": item["source"], "frames": frames or None,
+                           "dropped_boundary_frame": item["drop_first"]})
         listing = work / "list.txt"
         listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
         joined = work / "joined.mp4"
         await _ff("-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", "-movflags", "+faststart",
                   str(joined))
         info = await _probe(joined)
+        if body.source_url.strip():
+            source = await _download(client, body.source_url, work / "audio_source.bin")
+            if (await _probe(source))["audio"]:
+                muxed = work / "joined_audio.mp4"
+                await _ff("-i", str(joined), "-i", str(source), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+                          "-c:a", "aac", "-b:a", "192k", "-t", f"{info['duration']:.3f}", "-movflags", "+faststart",
+                          str(muxed))
+                joined = muxed
         url = await _publish(client, joined, "video/mp4")
     return {"video_url_string": url, "width_int": width, "height_int": height, "fps_int": fps,
             "duration_float": round(info["duration"], 3), "shots_array": report}
@@ -475,7 +531,7 @@ async def _audio_mux(body: AudioMuxRequest, work: Path) -> Dict[str, Any]:
 # -------------------------------------------------------------------- jobs
 
 def _job_id(kind: str, payload: Dict[str, Any]) -> str:
-    raw = json.dumps({"kind": kind, "body": payload, "v": 1}, sort_keys=True, separators=(",", ":"))
+    raw = json.dumps({"kind": kind, "body": payload, "v": 2}, sort_keys=True, separators=(",", ":"))
     return "vt_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 

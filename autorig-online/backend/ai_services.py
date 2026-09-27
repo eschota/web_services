@@ -146,6 +146,8 @@ SERVICES: List[Dict[str, object]] = [
             {"type": IMAGE, "field": "first_frame_url_string", "title": "First frame (each)", "per_item": True},
             {"type": IMAGE, "field": "middle_frame_url_string", "title": "Middle frame (each)", "per_item": True},
             {"type": TEXT, "field": "shot_info_string", "title": "Shot info (each)", "per_item": True},
+            {"type": IMAGE, "field": "last_frame_url_string", "title": "Last frame (each, = next segment's first)",
+             "per_item": True},
             {"type": IMAGE, "field": "storyboard_url_string", "title": "Storyboard (scene middles)"},
             {"type": TEXT, "field": "scenes_text_string", "title": "Scenes (text)"},
             {"type": TEXT, "field": "shots_json_string", "title": "Shot list (for Concat)"},
@@ -164,6 +166,22 @@ SERVICES: List[Dict[str, object]] = [
             {"type": TEXT, "field": "shots_json", "required": False, "title": "Shot list (from Scene split)"},
         ],
         "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Joined video"}],
+    },
+    {
+        # Keyframe chain (2026-09-27): segments share their boundary frame;
+        # Summary fits each to its length, drops the duplicate boundary frame
+        # and joins them seamlessly, with the original audio when wired.
+        "id": "video_summary", "title": "Summary · seamless join", "path": "/nodes",
+        "api": "/api/ai/video-tools/concat", "status": "live", "list_sink": True,
+        "summary": ("Joins keyframe-chain segments into one seamless clip: each fitted to its length (resample keeps "
+                    "both keyframes), the shared boundary frame kept once, original audio under it."),
+        "inputs": [
+            {"type": VIDEO, "field": "clip", "required": True, "title": "Segments (each)"},
+            {"type": VIDEO, "field": "clip_2", "required": False, "title": "Segments 2 (if 1 missing)"},
+            {"type": TEXT, "field": "shots_json", "required": True, "title": "Shot list (from Scene split)"},
+            {"type": VIDEO, "field": "source_url", "required": False, "title": "Audio from (original)"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Seamless video"}],
     },
     {
         "id": "audio_from_source", "title": "Audio from source", "path": "/nodes",
@@ -747,9 +765,18 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "max_seconds", "title": "Only first N s", "type": "number", "min": 0, "max": 600, "step": 1,
          "default": 0, "help": "0 = whole video"},
     ],
+    "video_summary": [
+        {"name": "fit", "title": "Fit segments", "type": "select", "default": "resample",
+         "options": [{"value": "resample", "title": "Resample (first+last frame renders)"},
+                     {"value": "trim", "title": "Trim (start-frame renders)"}]},
+        {"name": "fps", "title": "FPS", "type": "number", "min": 8, "max": 60, "step": 1, "default": 24},
+    ],
     "video_concat": [
         {"name": "checkpoint", "title": "Model for all shots", "type": "model", "source": "checkpoints", "default": "",
          "help": "Empty = inherit. Set: overrides the model of every LTX / MiniMax video node wired into this Concat"},
+        {"name": "lora", "title": "Style (LoRA) for all shots", "type": "model", "source": "loras", "default": ""},
+        {"name": "lora_strength", "title": "Style strength", "type": "range", "min": 0, "max": 1.5, "step": 0.05,
+         "default": 0, "help": "0 leaves the workflow's own strength"},
         {"name": "loras", "title": "LoRA stack for all shots", "type": "lora_stack", "default": "",
          "help": "Empty = inherit. Set: replaces the LoRAs of the video nodes wired into this Concat (filtered by model family)"},
         {"name": "out_width", "title": "Width", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,

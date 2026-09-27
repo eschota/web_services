@@ -223,6 +223,7 @@
   }
 
   function recordResult(id, record) {
+    if (record && record.status === 'done' && looksLikeVideo(record.value)) scheduleAutoFrames();
     if (nodeCompare) record = nodeCompare.enhanceRecord(record, runState.get(String(id)));
     runState.set(String(id), record);
     if (nodeCompare) requestAnimationFrame(() => nodeCompare.refresh(String(id)));
@@ -639,8 +640,10 @@
       displayMode: params && params._display_mode,
       label: (params && params._label) || '',
       followInputSize: hasDimensions ? sizeFollowsInput(entry, params) : undefined,
+      framesAuto: parameterNames.has('frame_count') ? framesFollowInput(entry, params) : undefined,
       disabled: !!(params && params._disabled),
       when: (params && params._when && typeof params._when === 'object') ? params._when : null,
+      chainNext: (params && typeof params._chain_next === 'string') ? params._chain_next : '',
       // A node that can carry a standing instruction is born with the default
       // one, so a graph saved before this existed opens with it too.
       systemPrompt: entry.system_prompt_capable
@@ -1401,9 +1404,11 @@
       values._follow_input_size = meta(id).followInputSize;
       values._size_auto = meta(id).followInputSize;
     }
+    if (typeof meta(id)?.framesAuto === 'boolean') values._frames_auto = meta(id).framesAuto;
     if (meta(id)?.disabled) values._disabled = true;
     if (meta(id)?.x9) values._x9 = true;
     if (meta(id)?.when) values._when = meta(id).when;
+    if (meta(id)?.chainNext) values._chain_next = meta(id).chainNext;
     if (systemPromptService(id)) values._system_prompt = systemPromptOf(id);
     if (!element) return values;
     element.querySelectorAll('[data-param]').forEach(control => {
@@ -1961,6 +1966,29 @@
     return record && record.value ? String(record.value) : '';
   }
 
+  // Render outputs upstream of a node: a tool that only joins, muxes or cuts
+  // renders has no prompt or model of its own; the server reads them from
+  // these renders (render log), newest of the same kind first.
+  function nodeSourceUrls(id) {
+    const graph = graphFromCanvas();
+    const seen = new Set();
+    const urls = new Set();
+    const stack = [String(id)];
+    while (stack.length && seen.size < 200) {
+      const current = stack.pop();
+      if (seen.has(current)) continue;
+      seen.add(current);
+      const record = runState.get(current);
+      if (record) {
+        let text = '';
+        try { text = JSON.stringify(record); } catch (error) { text = ''; }
+        (text.match(/https:\/\/autorig\.online\/renderfin\/render\/[^"\s]+?\.(?:png|jpg|webp|mp4|webm)/g) || []).forEach(u => urls.add(u));
+      }
+      graph.links.filter(link => String(link.to) === current).forEach(link => stack.push(String(link.from)));
+    }
+    return [...urls].slice(0, 60);
+  }
+
   async function nodeResources(id) {
     const params = readParams(id);
     const item = meta(id) || {};
@@ -1997,11 +2025,25 @@
     const params = readParams(id);
     const resources = await nodeResources(id);
     const prompt = nodePromptText(id);
-    // The owner only presses Post: rating X and its confirmation are preset,
-    // draft/publish is whatever was chosen last time (draft until then).
+    // The owner only presses Post: the rating (Civitai's own five; R until a
+    // choice is remembered) and its confirmation are preset, draft/publish is
+    // whatever was chosen last time (draft until then).
     let lastMode = 'draft';
     try { lastMode = localStorage.getItem('civ.publishMode') === 'publish' ? 'publish' : 'draft'; } catch (error) { /* private mode */ }
-    const ratings = ['None', 'Soft', 'Mature', 'X'];
+    const ratings = [
+      ['PG', 'Safe for work. No naughty stuff'],
+      ['PG-13', 'Revealing clothing, violence, or light gore'],
+      ['R', 'Adult themes and situations, partial nudity, graphic violence, or death'],
+      ['X', 'Graphic nudity, adult objects, or settings'],
+      ['XXX', 'Overtly sexual or disturbing graphic content']];
+    const order = ratings.map(r => r[0]);
+    let rating = 'R';
+    try { const saved = localStorage.getItem('civ.rating'); if (order.includes(saved)) rating = saved; } catch (error) { /* private mode */ }
+    // A model or prompt that is plainly adult raises the preset, never lowers it.
+    const suggested = /porn|xxx|hentai|sex|cum|penis|pussy|nsfw/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'XXX'
+      : /nude|naked|nipple|topless|lewd|erotic|eros/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'X' : '';
+    let raisedNote = '';
+    if (suggested && order.indexOf(suggested) > order.indexOf(rating)) { raisedNote = `raised from ${rating} by the model/prompt`; rating = suggested; }
     let dialog = document.getElementById('civitai-post');
     if (dialog) dialog.remove();
     dialog = document.createElement('dialog');
@@ -2013,8 +2055,8 @@
       <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
       <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
       <label>Tags (comma separated; Civitai keeps the first 5, existing tags first)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
-      <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(r =>
-        `<label class="civ-seg-opt"><input type="radio" name="rating" value="${r}"${r === 'X' ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div></div>
+      <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(([r, tip]) =>
+        `<label class="civ-seg-opt" title="${esc(r + ': ' + tip)}"><input type="radio" name="rating" value="${r}"${r === rating ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div>${raisedNote ? `<i class="civ-rating-note">${esc(raisedNote)}</i>` : ''}</div>
       <label><input type="checkbox" name="confirm" checked> I checked the rating</label>
       <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
       <div><button type="button" class="civ-regen">↻ Write title, description and tags</button> <span class="civ-meta-state"></span></div>
@@ -2028,6 +2070,10 @@
     const out = dialog.querySelector('.civ-out');
     const metaState = dialog.querySelector('.civ-meta-state');
     const go = dialog.querySelector('.civ-go');
+    form.querySelectorAll('input[name=rating]').forEach(radio => radio.addEventListener('change', () => {
+      try { localStorage.setItem('civ.rating', form.rating.value); } catch (error) { /* private mode */ }
+      const note = form.querySelector('.civ-rating-note'); if (note) note.remove();
+    }));
     form.querySelectorAll('input[name=publish]').forEach(radio => radio.addEventListener('change', () => {
       try { localStorage.setItem('civ.publishMode', form.publish.value); } catch (error) { /* private mode */ }
     }));
@@ -2082,7 +2128,7 @@
         tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
         resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
           weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
-        publish, background: true, auto_meta: true,
+        publish, background: true, auto_meta: true, source_urls: nodeSourceUrls(id),
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
@@ -2274,6 +2320,176 @@
       if (host) attachCivitaiButton(host);
       if (added.querySelectorAll) added.querySelectorAll('.nout').forEach(attachCivitaiButton);
     }))).observe(document.documentElement, {childList: true, subtree: true});
+  }
+
+  /* ------------------------------------------------------ recent gallery */
+
+  /**
+   * The caller's last 10 finished renders, bottom right above the dock
+   * (owner, 2026-09-27): live every 5 s, click opens a lightbox (← →, Esc,
+   * open the node, copy link, Post to Civitai, drag onto the canvas as Media
+   * in). Collapses to a pill; the choice is remembered.
+   */
+  function installRecentGallery() {
+    if (document.getElementById('recent-gallery')) return;
+    const host = document.createElement('section');
+    host.id = 'recent-gallery';
+    host.setAttribute('aria-label', 'Your recent renders');
+    host.innerHTML = '<header><button type="button" class="rg-toggle" title="Show or hide your recent renders"></button>' +
+      '<span class="rg-queue">Queue: …</span></header><div class="rg-strip"></div>';
+    document.body.appendChild(host);
+    const strip = host.querySelector('.rg-strip');
+    const queueLabel = host.querySelector('.rg-queue');
+    const toggle = host.querySelector('.rg-toggle');
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('nodes.recentGallery') === 'collapsed'; } catch (error) { /* private mode */ }
+    const paintCollapsed = () => {
+      host.classList.toggle('collapsed', collapsed);
+      toggle.textContent = collapsed ? '▴ Recent' : '▾';
+    };
+    paintCollapsed();
+    toggle.addEventListener('click', () => {
+      collapsed = !collapsed;
+      try { localStorage.setItem('nodes.recentGallery', collapsed ? 'collapsed' : 'open'); } catch (error) { /* ignore */ }
+      paintCollapsed();
+    });
+    let items = [];
+    const shown = new Set();
+    const nodeForTask = taskId => {
+      let hit = null;
+      runState.forEach((record, id) => {
+        if (hit) return;
+        if (record && (record.task_id === taskId || String(record.value || '').indexOf(taskId) !== -1 ||
+            (Array.isArray(record.x9) && record.x9.some(cell => String(cell.value || '').indexOf(taskId) !== -1)))) hit = id;
+      });
+      return hit;
+    };
+    const thumb = item => {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'rg-cell';
+      cell.title = (item.box_string ? item.box_string + ' · ' : '') + new Date(item.at_unix_float * 1000).toLocaleTimeString();
+      if (item.kind_string === 'audio') cell.textContent = '🎵';
+      else {
+        const media = document.createElement(item.kind_string === 'video' ? 'video' : 'img');
+        media.src = item.url_string + (item.kind_string === 'video' ? '#t=0.1' : '');
+        if (media.tagName === 'VIDEO') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
+        else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = ''; }
+        cell.appendChild(media);
+      }
+      cell.draggable = true;
+      cell.addEventListener('dragstart', event => {
+        const spec = {kind: 'input', type: 'media', title: 'Media in', value: item.url_string};
+        event.dataTransfer.setData('application/x-autorig-node', JSON.stringify(spec));
+        event.dataTransfer.setData('text/plain', item.url_string);
+      });
+      cell.addEventListener('click', () => openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
+      return cell;
+    };
+    const paint = () => {
+      const fresh = items.filter(item => !shown.has(item.task_id_string));
+      strip.innerHTML = '';
+      items.forEach(item => {
+        const cell = thumb(item);
+        if (fresh.includes(item) && shown.size) cell.classList.add('rg-new');
+        strip.appendChild(cell);
+      });
+      items.forEach(item => shown.add(item.task_id_string));
+    };
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const response = await fetch('/api/ai/my-tasks?limit=10', {credentials: 'same-origin'});
+        if (!response.ok) return;
+        const data = await response.json();
+        const q = data.queue_object || {};
+        const mine = (q.mine_queued_int || 0) + (q.mine_running_int || 0);
+        queueLabel.textContent = 'Queue: ' + (q.queued_int || 0) + ' queued · ' + (q.running_int || 0) + ' running · yours ' + mine;
+        queueLabel.classList.toggle('rg-busy', !!q.mine_running_int);
+        const next = data.items_array || [];
+        if (next.map(item => item.task_id_string).join() !== items.map(item => item.task_id_string).join()) {
+          items = next;
+          paint();
+        }
+      } catch (error) { /* next poll */ }
+    };
+    poll();
+    setInterval(poll, 5000);
+
+    function openRecentLightbox(start) {
+      let dialog = document.getElementById('recent-lightbox');
+      if (!dialog) {
+        dialog = document.createElement('dialog');
+        dialog.id = 'recent-lightbox';
+        dialog.className = 'civ-dialog';
+        dialog.style.width = 'min(1100px, 96vw)';
+        dialog.innerHTML = '<div class="rl-stage" style="display:flex;align-items:center;justify-content:center;min-height:240px;overflow:auto"></div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:10px">' +
+          '<button type="button" data-rl="prev" title="Previous (←)">←</button><span class="rl-cap"></span>' +
+          '<button type="button" data-rl="next" title="Next (→)">→</button>' +
+          '<button type="button" data-rl="node">Open node</button><button type="button" data-rl="copy">Copy link</button>' +
+          '<button type="button" data-rl="civ">C↑ Post to Civitai</button><button type="button" data-rl="add">Add as Media in</button>' +
+          '<button type="button" data-rl="close" title="Close (Esc)">✕</button></div>';
+        document.body.appendChild(dialog);
+        dialog.addEventListener('click', event => {
+          const action = event.target && event.target.dataset && event.target.dataset.rl;
+          const item = items[dialog._index];
+          if (action === 'prev') dialog._show(dialog._index - 1);
+          if (action === 'next') dialog._show(dialog._index + 1);
+          if (action === 'close' || event.target === dialog) dialog.close();
+          if (!item) return;
+          if (action === 'copy') copyText(item.url_string).then(() => toast('Link copied.'));
+          if (action === 'node' || action === 'civ') {
+            const id = nodeForTask(item.task_id_string);
+            if (!id) { toast('That render is not from a node in this graph.'); return; }
+            if (action === 'civ') { dialog.close(); openCivitaiDialog(id); return; }
+            dialog.close();
+            if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds([id]);
+            const element = nodeElement(id);
+            if (element) { element.classList.add('rl-flash'); setTimeout(() => element.classList.remove('rl-flash'), 1600); }
+            toast('Selected the node that made it.');
+          }
+          if (action === 'add') {
+            const rect = document.getElementById('canvas').getBoundingClientRect();
+            const scale = Number(editor.zoom) || 1;
+            const x = (rect.width / 2 - editor.canvas_x) / scale, y = (rect.height / 2 - editor.canvas_y) / scale;
+            const nodeId = addInputNode('media', x, y, item.url_string);
+            if (nodeId) { toast('Added as a Media in node.'); dialog.close(); }
+          }
+        });
+        dialog.addEventListener('keydown', event => {
+          if (event.key === 'ArrowLeft') { event.preventDefault(); dialog._show(dialog._index - 1); }
+          if (event.key === 'ArrowRight') { event.preventDefault(); dialog._show(dialog._index + 1); }
+        });
+        dialog.addEventListener('close', () => { const clip = dialog.querySelector('video'); if (clip) clip.pause(); });
+      }
+      dialog._show = index => {
+        if (!items.length) return;
+        index = ((index % items.length) + items.length) % items.length;
+        dialog._index = index;
+        const item = items[index];
+        const stage = dialog.querySelector('.rl-stage');
+        stage.innerHTML = '';
+        const media = document.createElement(item.kind_string === 'video' ? 'video' : item.kind_string === 'audio' ? 'audio' : 'img');
+        media.src = item.url_string;
+        if (media.tagName !== 'IMG') { media.controls = true; media.autoplay = true; }
+        if (media.tagName === 'VIDEO') media.loop = true;
+        media.style.cssText = 'max-width:92vw;max-height:74vh;display:block;cursor:zoom-in';
+        if (media.tagName === 'IMG') media.addEventListener('click', () => {
+          const zoomed = media.style.maxWidth === 'none';
+          media.style.maxWidth = zoomed ? '92vw' : 'none';
+          media.style.maxHeight = zoomed ? '74vh' : 'none';
+          media.style.cursor = zoomed ? 'zoom-in' : 'zoom-out';
+        });
+        stage.appendChild(media);
+        dialog.querySelector('.rl-cap').textContent = (index + 1) + ' / ' + items.length + (item.box_string ? ' · ' + item.box_string : '');
+        const fromHere = !!nodeForTask(item.task_id_string);
+        dialog.querySelector('[data-rl="node"]').disabled = !fromHere;
+        dialog.querySelector('[data-rl="civ"]').disabled = !fromHere;
+      };
+      if (!dialog.open) dialog.showModal();
+      dialog._show(start < 0 ? 0 : start);
+    }
   }
 
   /* ---------------------------------------------------------- quick toolbar */
@@ -2698,7 +2914,8 @@
     window.AINodeLists.install({
       meta, nodeElement, runState, bodyFor, stableJson, runnerFor, runnerType, submitJson, splitMulti,
       upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
-      followInputSizeAtRun, startIncrementalService, graphFromCanvas, supersedeTasks: ids => supersedeTasks(ids),
+      followInputSizeAtRun, startIncrementalService, graphFromCanvas,
+      runGraph: keep => runGraph(keep), supersedeTasks: ids => supersedeTasks(ids),
       invalidate: id => invalidateNodeAndDownstream(id),
       epoch: () => canvasEpoch,
       get BUDGET_EXHAUSTED() { return BUDGET_EXHAUSTED; },
@@ -3169,6 +3386,190 @@
   }
 
   /** Auto-size nodes take the size of what actually arrived on the primary socket. */
+  /* ------------------------------------------------------------ auto frames */
+
+  /**
+   * Frames follow the input clip (owner rule 2026-09-27, like auto-size): a
+   * video node's frame count = the upstream clip's duration x 24 fps, snapped
+   * to the model's grid (min + n*step: 8n+1 for LTX) and clamped to its range
+   * (MiniMax H3 124-362 etc.). Source: the node's own driving/control clip,
+   * else its first-frame clip, else the nearest clip upstream. Manual with 🔓.
+   * Per-shot list items already take each shot's own length.
+   */
+  const OUTPUT_FPS = 24;
+  const VIDEO_SOCKET_ORDER = ['control_video_url', 'video_url', 'source_url', 'image', 'image_url_end'];
+  const clipDurationCache = new Map();
+
+  function framesFollowInput(entry, params) {
+    if (!params) return true;
+    if (typeof params._frames_auto === 'boolean') return params._frames_auto;
+    const declared = ((entry.params_array || []).find(item => item.name === 'frame_count') || {}).default;
+    const value = Number(params.frame_count);
+    return !(value > 0) || value === Number(declared);
+  }
+
+  function clipDuration(url) {
+    url = String(url || '').trim();
+    if (!/^https?:/.test(url)) return Promise.resolve(0);
+    if (!clipDurationCache.has(url)) {
+      clipDurationCache.set(url, (isCivitai(url) ? resolveMediaLink(url).then(r => r.type === 'video' ? r.url : '') : Promise.resolve(url))
+        .then(real => !real || !looksLikeVideo(real) && !isCivitai(url) ? 0 : new Promise(resolve => {
+          const clip = document.createElement('video');
+          clip.preload = 'metadata';
+          clip.muted = true;
+          const timer = setTimeout(() => resolve(0), 20000);
+          clip.onloadedmetadata = () => { clearTimeout(timer); resolve(Number(clip.duration) || 0); };
+          clip.onerror = () => { clearTimeout(timer); resolve(0); };
+          clip.src = real;
+        })).catch(() => 0));
+    }
+    return clipDurationCache.get(url);
+  }
+
+  /** The clip a node's frames follow: {url, from} or null. */
+  function frameSourceFor(id, graph) {
+    const byId = new Map(graph.nodes.map(node => [String(node.id), node]));
+    const valueOf = nodeId => {
+      const node = byId.get(String(nodeId));
+      if (!node) return '';
+      if (node.kind === KIND_INPUT) {
+        const field = nodeElement(nodeId) && nodeElement(nodeId).querySelector('[data-value]');
+        return String((field && field.value) || node.value || '');
+      }
+      const record = runState.get(String(nodeId));
+      return record && record.value && record.status === 'done' ? String(record.value) : '';
+    };
+    const labelOf = nodeId => {
+      const node = byId.get(String(nodeId)) || {};
+      return (node.params || {})._label || (serviceById(node.service) || {}).title || (node.kind === KIND_INPUT ? 'Media in' : String(nodeId));
+    };
+    const isClip = value => looksLikeVideo(value) || (isCivitai(value) && /\.(mp4|webm|mov)|video|transcode=true/i.test(value));
+    const into = graph.links.filter(link => String(link.to) === String(id));
+    // Fed per shot (Scene split or any list upstream): each item takes its own
+    // shot's length in the list runner, so there is no single number to show.
+    // A per-shot branch: Scene split somewhere upstream, not closed by Concat.
+    const perShotFrom = start => {
+      const seenUp = new Set();
+      let queue = [String(start)];
+      while (queue.length) {
+        const nodeId = queue.shift();
+        if (seenUp.has(nodeId)) continue;
+        seenUp.add(nodeId);
+        const from = byId.get(nodeId) || {};
+        const record = runState.get(nodeId);
+        if (from.service === 'scene_split' || (record && Array.isArray(record.items) && record.items.length)) return true;
+        if (from.service === 'video_concat') continue;
+        graph.links.filter(link => String(link.to) === nodeId).forEach(link => queue.push(String(link.from)));
+      }
+      return false;
+    };
+    const listFeed = into.find(link => perShotFrom(link.from));
+    if (listFeed && (meta(id) || {}).framesAuto !== false) return {perShot: true, from: labelOf(listFeed.from)};
+    for (const field of VIDEO_SOCKET_ORDER) {
+      const link = into.find(item => item.input === field);
+      if (!link) continue;
+      const value = valueOf(link.from);
+      if (isClip(value)) return {url: value, from: labelOf(link.from)};
+    }
+    // Nearest clip upstream (breadth first).
+    const seen = new Set([String(id)]);
+    let frontier = into.map(link => String(link.from));
+    for (let depth = 0; depth < 8 && frontier.length; depth += 1) {
+      const next = [];
+      for (const nodeId of frontier) {
+        if (seen.has(nodeId)) continue;
+        seen.add(nodeId);
+        const value = valueOf(nodeId);
+        if (isClip(value)) return {url: value, from: labelOf(nodeId)};
+        graph.links.filter(link => String(link.to) === nodeId).forEach(link => next.push(String(link.from)));
+      }
+      frontier = next;
+    }
+    return null;
+  }
+
+  function snapFrames(frames, control) {
+    const min = Number(control.min) || 9, max = Number(control.max) || 393, step = Number(control.step) || 8;
+    const wanted = Math.round(frames);
+    let snapped = min + Math.round((wanted - min) / step) * step;
+    snapped = Math.max(min, Math.min(max - ((max - min) % step), snapped));
+    return {value: snapped, capped: wanted > max, wanted};
+  }
+
+  function paintFramesRow(id, auto, text) {
+    const element = nodeElement(id);
+    const control = element && element.querySelector('[data-param="frame_count"]');
+    const label = control && control.closest('label, .nparam');
+    if (!label) return;
+    let row = element.querySelector('.nframes-auto');
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'nsize-auto nframes-auto';
+      row.innerHTML = '<button type="button" class="nsize-lock"></button><span class="nsize-text"></span>';
+      label.parentElement.insertBefore(row, label);
+      const button = row.querySelector('.nsize-lock');
+      ['mousedown', 'pointerdown', 'touchstart'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        const item = meta(id) || {};
+        item.framesAuto = !(item.framesAuto !== false);
+        invalidateNodeAndDownstream(id);
+        scheduleAutoFrames();
+      });
+    }
+    row.querySelector('.nsize-lock').textContent = auto ? '🔒 Auto' : '🔓 Manual';
+    row.querySelector('.nsize-lock').title = auto ? 'Frames follow the input clip. Click to set them by hand.' : 'Manual frames. Click to follow the input clip.';
+    row.querySelector('.nsize-text').textContent = text;
+    const box = control._aislider && control._aislider.box;
+    if (box) { box.style.pointerEvents = auto ? 'none' : ''; box.style.opacity = auto ? '.6' : ''; }
+  }
+
+  let autoFramesTimer = null;
+  function scheduleAutoFrames() {
+    clearTimeout(autoFramesTimer);
+    autoFramesTimer = setTimeout(refreshAutoFrames, 300);
+  }
+
+  async function refreshAutoFrames() {
+    if (!editor) return;
+    const graph = graphFromCanvas();
+    for (const node of graph.nodes) {
+      const id = String(node.id);
+      const item = meta(id);
+      const element = nodeElement(id);
+      const control = element && element.querySelector('[data-param="frame_count"]');
+      if (!item || !control || typeof item.framesAuto !== 'boolean') continue;
+      if (!item.framesAuto) { paintFramesRow(id, false, 'Manual · ' + control.value + ' frames'); continue; }
+      const source = frameSourceFor(id, graph);
+      if (!source) { paintFramesRow(id, true, 'Auto · no input clip — ' + control.value + ' frames'); continue; }
+      if (source.perShot) { paintFramesRow(id, true, 'Auto · per shot — each shot’s own length (from ' + source.from + ')'); continue; }
+      const seconds = await clipDuration(source.url);
+      if (!(seconds > 0)) { paintFramesRow(id, true, 'Auto · reading ' + source.from + '…'); continue; }
+      const fit = snapFrames(seconds * OUTPUT_FPS, control);
+      if (String(control.value) !== String(fit.value)) {
+        control.dataset.silentUpdate = 'yes';
+        control.value = String(fit.value);
+        control.dispatchEvent(new Event('input', {bubbles: true}));
+        delete control.dataset.silentUpdate;
+      }
+      paintFramesRow(id, true, 'Auto · ' + fit.value + ' (' + (fit.value / OUTPUT_FPS).toFixed(2) + ' s from ' + source.from + ')' +
+        (fit.capped ? ' — ' + fit.value + ' of ' + fit.wanted + ': split with Scene split' : ''));
+    }
+  }
+
+  /** At run time the clip that actually arrived decides. */
+  async function followInputFramesAtRun(node, resolved, params) {
+    if (!params || params.frame_count == null || params._frames_auto === false) return;
+    const item = meta(node.id);
+    if (item && item.framesAuto === false) return;
+    const clip = VIDEO_SOCKET_ORDER.map(field => resolved[field]).find(value => typeof value === 'string' && looksLikeVideo(value));
+    if (!clip) return;
+    const control = nodeElement(node.id) && nodeElement(node.id).querySelector('[data-param="frame_count"]');
+    if (!control) return;
+    const seconds = await clipDuration(clip);
+    if (seconds > 0) params.frame_count = snapFrames(seconds * OUTPUT_FPS, control).value;
+  }
+
   async function followInputSizeAtRun(node, resolved, params) {
     if (!params || params.width == null || params.height == null) return;
     if (params._follow_input_size === false || params._size_auto === false) return;
@@ -3538,13 +3939,18 @@
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-top:4px';
     pictures.forEach(field => {
       const url = String(outputs[field]);
-      const picture = document.createElement('img');
-      picture.src = url;
-      picture.loading = 'lazy';
-      picture.alt = picture.title = field.replace(/_url_string$/, '').replace(/_/g, ' ');
-      picture.style.cssText = 'width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:4px;cursor:zoom-in;background:#111';
-      picture.classList.add('preview-expandable');
-      picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', url); });
+      // outputsV7: a clip (Scene split's 24 fps reference) is a <video>, never a broken <img>.
+      const clip = looksLikeVideo(url);
+      const picture = document.createElement(clip ? 'video' : 'img');
+      picture.src = clip ? url + '#t=0.1' : url;
+      if (clip) { picture.muted = true; picture.preload = 'metadata'; picture.playsInline = true; picture.loop = true;
+        picture.addEventListener('mouseenter', () => picture.play().catch(() => {}));
+        picture.addEventListener('mouseleave', () => picture.pause()); }
+      else picture.loading = 'lazy';
+      picture.title = field.replace(/_url_string$/, '').replace(/_/g, ' ');
+      if (!clip) picture.alt = picture.title;
+      picture.style.cssText = 'width:100%;aspect-ratio:2/3;object-fit:contain;border-radius:4px;cursor:zoom-in;background:#111';
+      picture.addEventListener('click', event => { event.stopPropagation(); openPreview(clip ? 'video' : 'image', url); });
       grid.appendChild(picture);
     });
     host.appendChild(grid);
@@ -4343,6 +4749,7 @@
           }
           const params = {...(node.params || {})};
           await followInputSizeAtRun(node, resolved, params);
+          await followInputFramesAtRun(node, resolved, params);
           if (params._x9 && X9_SERVICES.has(node.service)) {
             try {
               const result = await runX9(id, node, resolved, fan, params, epoch, keepDone);
@@ -4662,6 +5069,8 @@
     }
     paintIsolation();
     restoreResults(graph.results, mapping);
+    scheduleAutoFrames();
+    setTimeout(scheduleAutoFrames, 4000);
     if (nodeGroups && nodeGroups.refreshSizes) {
       nodeGroups.refreshSizes();
       // Model pickers and system-prompt markers finish a beat later on some
@@ -4810,7 +5219,7 @@
     ['Inputs', ['input:media', 'input:text', 'input:avatar']],
     ['Vision / Text', ['vision', 'text']],
     ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
-    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'audio_from_source', 'video_control', 'upscale_video']],
+    ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'video_summary', 'audio_from_source', 'video_control', 'upscale_video']],
     ['Avatars', ['avatar_ready', 'avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
     ['Audio', ['music']],
@@ -4821,7 +5230,7 @@
     vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
     video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
-    scene_split: 'Scene split', video_concat: 'Concat shots', audio_from_source: 'Audio from source',
+    scene_split: 'Scene split', video_concat: 'Concat shots', video_summary: 'Summary', audio_from_source: 'Audio from source',
     upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_ready: 'Avatar (ready)', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
     control_canny: 'Canny', control_normal: 'Normal', music: 'Music', '3dmodel': '3D model',
@@ -5138,7 +5547,7 @@
     if (window.AINodePlacement) nodePlacement = window.AINodePlacement.install({
       editor, canvas:document.getElementById('canvas'),
       createNode:(spec, x, y) => spec.kind === 'input'
-        ? addInputNode(spec.type, x, y, '')
+        ? addInputNode(spec.type, x, y, spec.value || '')
         : addServiceNode(spec.service, x, y, null),
       getNodeElement:nodeElement,
       moveNode:moveNodeTo
@@ -5159,6 +5568,7 @@
     }
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
+    installRecentGallery();
     installMediaThrottle(document.getElementById('canvas'));
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
@@ -5195,6 +5605,18 @@
       if (target._acceptText(link)) event.preventDefault();
     });
     editor.on('connectionCreated', onConnectionCreated);
+    editor.on('connectionCreated', scheduleAutoFrames);
+    editor.on('connectionRemoved', scheduleAutoFrames);
+    document.getElementById('canvas').addEventListener('change', event => {
+      if (event.target && event.target.dataset && event.target.dataset.value !== undefined) scheduleAutoFrames();
+    });
+    document.getElementById('canvas').addEventListener('input', event => {
+      const control = event.target;
+      if (!control || !control.dataset || control.dataset.param !== 'frame_count' || control.dataset.silentUpdate === 'yes') return;
+      const node = control.closest('.drawflow-node');
+      const item = node && meta(node.id.replace(/^node-/, ''));
+      if (item && item.framesAuto) { item.framesAuto = false; scheduleAutoFrames(); }
+    });
     editor.on('connectionRemoved', connection => {
       if (connection && connection.input_id != null) {
         refreshReferenceSockets(connection.input_id);
