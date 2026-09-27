@@ -17,6 +17,7 @@
   let api = null;
   const PER_ITEM_PARALLEL = 3;
   const LIST_SINKS = new Set(['video_concat']);
+  const TRANSIENT = /unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
 
   function install(host) { api = host; }
 
@@ -294,6 +295,13 @@
         const i = next; next += 1;
         try {
           await processItem(i);
+          // One retry for a transient farm error (model unreachable, reset,
+          // gateway) so a single hiccup does not drop a shot.
+          if (items[i].status === 'failed' && TRANSIENT.test(items[i].error || '')) {
+            await sleep(10000);
+            items[i].status = 'queued'; items[i].error = '';
+            await processItem(i);
+          }
         } catch (error) {
           items[i].status = 'failed';
           items[i].error = String(error.message || error).slice(0, 400);
