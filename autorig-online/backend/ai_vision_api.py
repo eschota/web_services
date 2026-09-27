@@ -298,6 +298,9 @@ def _worker_entries() -> List[Tuple[Dict[str, object], Dict[str, object]]]:
     return pairs
 
 
+EXTRA_3D_WORKERS_FILE = os.getenv("AUTORIG_EXTRA_3D_WORKERS_FILE", "/srv/autorig/secrets/site-3d-extra-workers.json")
+
+
 def _load_hunyuan_workers() -> List[Dict[str, object]]:
     """Nodes allowed to run Hunyuan, which is a narrower set than AI Vision.
 
@@ -313,6 +316,18 @@ def _load_hunyuan_workers() -> List[Dict[str, object]]:
         if raw.get("canary_approved") is False:
             continue
         workers.append(entry)
+    # 3D-only boxes the site may use but Renderfin's character pipeline must not
+    # (worker-4090's local Hunyuan adapter, 2026-09-27). Same entry shape.
+    try:
+        extra = json.loads(pathlib.Path(EXTRA_3D_WORKERS_FILE).read_text(encoding="utf-8"))
+        for raw in (extra.get("workers") if isinstance(extra, dict) else extra) or []:
+            if raw.get("enabled") is False or not raw.get("url") or not raw.get("token"):
+                continue
+            workers.append({key: raw[key] for key in raw if key != "notes"})
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("Could not read %s", EXTRA_3D_WORKERS_FILE)
     return workers
 
 
