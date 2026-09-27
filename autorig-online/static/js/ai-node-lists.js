@@ -14,6 +14,7 @@
  */
 (function () {
   'use strict';
+  const ITEM_TASKS = new Map();
   let api = null;
   const PER_ITEM_PARALLEL = 3;
   const LIST_SINKS = new Set(['video_concat']);
@@ -212,11 +213,80 @@
    * ({ok, result} / {ok:false, error}) when this node is a list sink, runs per
    * item or is gated; returns null to let the ordinary path run it.
    */
+  // Outputs of Scene split that only exist per shot: a wire from one of them
+  // must never fall back to the node's single value (the storyboard PNG went
+  // to Wan/LTX as a "control video" when a cached Scsplit lost its list).
+  const PER_ITEM_FIELDS = new Set(['shot_clip_url_string', 'first_frame_url_string', 'middle_frame_url_string',
+    'shot_info_string']);
+  const GENERATORS = new Set(['video', 'video_control']);
+
+  /** Model / LoRA set on a Concat shots node, for the generators wired into it. */
+  function concatOverride(id) {
+    if (!api.graphFromCanvas) return null;
+    const graph = api.graphFromCanvas();
+    const byId = new Map(graph.nodes.map(node => [String(node.id), node]));
+    const out = {};
+    graph.links.filter(link => String(link.from) === String(id)).forEach(link => {
+      const target = byId.get(String(link.to));
+      if (!target || target.service !== 'video_concat') return;
+      const p = target.params || {};
+      if (String(p.checkpoint || '').trim() && !out.checkpoint) out.checkpoint = String(p.checkpoint).trim();
+      if (String(p.loras || '').trim() && !out.loras) out.loras = String(p.loras).trim();
+    });
+    return Object.keys(out).length ? out : null;
+  }
+
+  /** Badges: which generators a Concat drives, and on them where the model comes from. */
+  function paintOverrides() {
+    if (!api || !api.graphFromCanvas) return;
+    const graph = api.graphFromCanvas();
+    const byId = new Map(graph.nodes.map(node => [String(node.id), node]));
+    const label = node => ((node.params || {})._label || node.service || node.id).slice(0, 40);
+    graph.nodes.filter(node => node.service === 'video_concat').forEach(concat => {
+      const feeders = graph.links.filter(link => String(link.to) === String(concat.id))
+        .map(link => byId.get(String(link.from))).filter(Boolean);
+      const driven = feeders.filter(node => GENERATORS.has(node.service));
+      const fixed = feeders.filter(node => node.service !== 'video_concat' && !GENERATORS.has(node.service) &&
+        /video|wan|avatar/.test(node.service));
+      const p = concat.params || {};
+      const set = String(p.checkpoint || '').trim() || String(p.loras || '').trim();
+      const el = api.nodeElement(concat.id);
+      const head = el && el.querySelector('.nhead');
+      if (head) {
+        let badge = head.querySelector('.noverride');
+        if (!badge) { badge = document.createElement('span'); badge.className = 'noverride'; head.appendChild(badge); }
+        badge.textContent = set ? ' ⇧ model/LoRA → ' + driven.length : ' ⇧ inherit';
+        badge.title = (set ? 'Model / LoRAs set here override: ' : 'Model / LoRAs: inherit (empty) — set them here to override: ') +
+          (driven.map(label).join(', ') || 'no LTX/MiniMax generator wired') +
+          (fixed.length ? '. Not affected (own fixed model): ' + fixed.map(label).join(', ') : '');
+        badge.style.cssText = 'margin-left:4px;font:600 10px system-ui;color:' + (set ? '#22d3ee' : 'rgba(255,255,255,.55)');
+      }
+      driven.forEach(node => {
+        const gel = api.nodeElement(node.id);
+        const ghead = gel && gel.querySelector('.nhead');
+        if (!ghead) return;
+        let b = ghead.querySelector('.nfromconcat');
+        if (!set) { if (b) b.remove(); return; }
+        if (!b) { b = document.createElement('span'); b.className = 'nfromconcat'; ghead.appendChild(b); }
+        b.textContent = ' ⇩ model from Concat';
+        b.title = 'Model / LoRAs of this node are overridden by "' + label(concat) + '" for every shot';
+        b.style.cssText = 'margin-left:4px;font:600 10px system-ui;color:#22d3ee';
+      });
+    });
+  }
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    setInterval(() => { try { paintOverrides(); } catch (e) { /* display only */ } }, 3000);
+  }
+
   async function maybeRun(ctx) {
     const {id, node, feeds, upstreamRecords, pending, epoch, keepDone} = ctx;
     const params = Object.assign({}, node.params || {});
     const when = whenOf(params);
     const lists = feeds.map((link, index) => perItem(upstreamRecords[index] && upstreamRecords[index].result, link.output));
+    const lost = feeds.find((link, index) => PER_ITEM_FIELDS.has(link.output) && !lists[index]);
+    if (lost) {
+      return {ok: false, error: 'Scene split came back without its shot list (' + lost.output + ') — press Render again'};
+    }
     const sink = LIST_SINKS.has(node.service);
     if (!sink && !when && !lists.some(Boolean)) return null;
     const shared = {};
@@ -332,6 +402,11 @@
         const gate = gatePasses(when, gateResult, i);
         if (!gate.ok) { item.status = 'skipped'; item.error = gate.why; report(); return; }
         const itemParams = Object.assign({}, params);
+        if (GENERATORS.has(node.service)) {
+          const override = concatOverride(id);
+          if (override && override.checkpoint) itemParams.checkpoint = override.checkpoint;
+          if (override && override.loras) { itemParams.loras = override.loras; itemParams.lora = ''; delete itemParams.lora_strength; }
+        }
         if (item.meta && item.meta.frames && Number(itemParams.frame_count) > 0 && itemParams._frames_from_shot !== false) {
           itemParams.frame_count = frameCountFor(item.meta.frames, itemParams.frame_count);
         }
@@ -350,9 +425,18 @@
           const post = body._post_upscale;
           delete body._post_upscale;
           let finished;
+          // Supersession per shot: a newer body for the same node and shot
+          // stands down the older one while it is still queued.
+          const itemKey = String(id) + ':' + i;
+          const previousTask = ITEM_TASKS.get(itemKey);
+          if (previousTask && previousTask.sig !== sig && api.supersedeTasks) api.supersedeTasks([previousTask.taskId]);
+          const mineTask = {sig, taskId: ''};
+          ITEM_TASKS.set(itemKey, mineTask);
           try {
             const accepted = await api.submitJson(runner.api, body);
+            mineTask.taskId = accepted.task_id_string || '';
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
+            if (ITEM_TASKS.get(itemKey) !== mineTask) throw new Error('replaced by a newer render');
           } catch (error) {
             if (String(error.message || '').indexOf(api.BUDGET_EXHAUSTED) === -1) throw error;
             body = Object.assign({}, body, {max_output_tokens: Math.min(8192, (Number(body.max_output_tokens) || 1024) * 2)});

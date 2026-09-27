@@ -1683,6 +1683,7 @@
    * picture i -> clip i.
    */
   const X9_SERVICES = new Set(['image', 'qwen_image', 'video', 'video_control']);
+  const x9Active = new Map();
 
   function addX9Button(id, on) {
     const element = nodeElement(id);
@@ -1865,12 +1866,17 @@
       return {type: previous.type, value: previous.value, x9: previous.x9.map(cell => cell.value)};
     }
     const cells = bodies.map(body => ({seed: body.seed, status: 'queued', value: '', error: ''}));
+    const mine = {signature, tasks: []};
+    const older = x9Active.get(String(id));
+    if (older && older.signature !== signature) supersedeTasks(older.tasks);
+    x9Active.set(String(id), mine);
+    const current = () => x9Active.get(String(id)) === mine;
     const record = {status: 'running', type: runnerType(runner, ''), value: '', x9: cells,
                     pick: previous ? previous.pick : -1, x9sig: signature, started_at: Date.now() / 1000};
     runState.set(String(id), record);
     paintX9(id);
     const report = () => {
-      if (epoch !== canvasEpoch || !nodeElement(id)) return;
+      if (epoch !== canvasEpoch || !nodeElement(id) || !current()) return;
       const done = cells.filter(cell => cell.status === 'done').length;
       const failed = cells.filter(cell => cell.status === 'error').length;
       const running = cells.filter(cell => cell.status === 'running').length;
@@ -1886,6 +1892,8 @@
       delete body._post_upscale;
       try {
         const accepted = await submitJson(runner.api, body);
+        if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
+        if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
         cell.status = 'running';
         report();
         let {value} = splitMulti(await runner.finish(accepted, runner, null));
@@ -1900,6 +1908,11 @@
       }
       report();
     }));
+    if (!current()) {
+      // A newer X9 for this node owns the grid now; this set is stale.
+      throw new Error('replaced by a newer render');
+    }
+    x9Active.delete(String(id));
     const pick = x9Pick(record);
     if (pick < 0) {
       record.status = 'failed';
@@ -2685,7 +2698,7 @@
     window.AINodeLists.install({
       meta, nodeElement, runState, bodyFor, stableJson, runnerFor, runnerType, submitJson, splitMulti,
       upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
-      followInputSizeAtRun, startIncrementalService,
+      followInputSizeAtRun, startIncrementalService, graphFromCanvas, supersedeTasks: ids => supersedeTasks(ids),
       invalidate: id => invalidateNodeAndDownstream(id),
       epoch: () => canvasEpoch,
       get BUDGET_EXHAUSTED() { return BUDGET_EXHAUSTED; },
@@ -4078,9 +4091,47 @@
     } catch (error) { /* a run is still worth doing without a link */ }
   }
 
+  /**
+   * Job supersession (owner, 2026-09-27): a node rendered again with other
+   * settings while its previous job still waits in the farm queue — that job
+   * is stood down (the slot goes back) and the new one takes its place. A job
+   * already on a card finishes; its result is discarded as stale because the
+   * node's signature moved on.
+   */
+  let supersededCount = 0;
+  let supersedeToastTimer = null;
+  function supersedeTasks(taskIds) {
+    const ids = [...new Set((taskIds || []).filter(Boolean).map(String))];
+    if (!ids.length) return;
+    fetch('/api/ai/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task_ids: ids})})
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (!data) return;
+        supersededCount += Number(data.cancelled_int) || 0;
+        clearTimeout(supersedeToastTimer);
+        supersedeToastTimer = setTimeout(() => {
+          if (supersededCount) toast('Replaced ' + supersededCount + ' queued job' + (supersededCount === 1 ? '' : 's') + ' with the new settings.');
+          supersededCount = 0;
+        }, 1500);
+      }).catch(() => {});
+  }
+
+  function supersedeNode(idString, signature) {
+    const stale = [];
+    activeExecutions.forEach(execution => {
+      if (execution.id === idString && execution.signature !== signature && execution.taskId) stale.push(execution.taskId);
+    });
+    const restored = restoredExecutions.get(idString);
+    const record = runState.get(idString);
+    if (restored && record && record.task_id && record.status === 'running') stale.push(record.task_id);
+    supersedeTasks(stale);
+  }
+
   function startIncrementalService(id, node, resolved, params, signature, epoch, keepDone, graphSnapshot) {
     const idString = String(id);
     const key = executionKey(epoch, idString, signature);
+    supersedeNode(idString, signature);
     desiredSignatures.set(idString, signature);
 
     const restored = restoredExecutions.get(idString);
@@ -4130,9 +4181,11 @@
         if (completed.items && window.AINodeLists) requestAnimationFrame(() => window.AINodeLists.paint(idString));
         recordResult(idString, {status:'done', type:completed.type, value:completed.value,
           input_reference_url:completed.input_reference_url || (nodeCompare?.resolveReference(idString, graphSnapshot) || resolved.image || ''),
-          task_id:completed.task_id || '', outputs:completed.outputs || undefined});
+          task_id:completed.task_id || '', outputs:completed.outputs || undefined,
+          items:completed.items || undefined}); // listsV4: a cached Scene split keeps its shots
       }
-      return Promise.resolve({type: completed.type, value: completed.value, outputs: completed.outputs || null});
+      return Promise.resolve(Object.assign({type: completed.type, value: completed.value, outputs: completed.outputs || null},
+        completed.items ? {items: completed.items} : {}));
     }
 
     const version = (nodeRunVersions.get(idString) || 0) + 1;
@@ -4196,6 +4249,7 @@
     const byId = new Map(graph.nodes.map(node => [node.id, node]));
     try {
       const pending = new Map();
+      const pendingOpen = new Set();
       for (const id of order) {
         const node = byId.get(id);
         const feeds = graph.links.filter(link => link.to === id);
@@ -4205,6 +4259,15 @@
           if ((node.params || {})._disabled) {
             if (epoch === canvasEpoch && meta(id)) markState(id, 'bypassed — not run', 'nstate');
             return {ok:false, bypassed:true};
+          }
+          // Until its inputs arrive a node says what it is waiting for; the old
+          // "changed — render to update" read as "left out of this run".
+          if (node.kind === KIND_SERVICE && epoch === canvasEpoch && meta(id)) {
+            const waitingOn = [...new Set(feeds.filter(link => pendingOpen.has(link.from)).map(link => {
+              const from = byId.get(link.from) || {};
+              return ((from.params || {})._label || (serviceById(from.service) || {}).title || from.service || link.from).slice(0, 40);
+            }))];
+            if (waitingOn.length) markState(id, 'in this run · waiting for ' + waitingOn.join(', '), 'nstate running');
           }
           const upstreamRecords = await Promise.all(feeds.map(link => pending.get(link.from)));
           const superseded = node.kind === KIND_SERVICE &&
@@ -4303,6 +4366,8 @@
           }
         })();
         pending.set(id, start);
+        pendingOpen.add(id);
+        start.finally(() => pendingOpen.delete(id));
       }
       const settled = await Promise.all(pending.values());
       // Lists stream item by item; the run is over when every item is.
@@ -4512,7 +4577,7 @@
     accepted[runner.field] = record.value || '';
     try {
       const reporter = taskStateReporter(state, task, accepted);
-      const {value, outputs} = splitMulti(await runner.finish(accepted, runner, data => {
+      const {value, outputs, items: resumedItems} = splitMulti(await runner.finish(accepted, runner, data => {
         if (stillHere()) reporter(data);
       }));
       if (!stillHere()) return;
@@ -4522,8 +4587,9 @@
       showResult(outBox, runnerType(runner, value), value, outputs);
       recordResult(id, Object.assign({ status: 'done', type: runnerType(runner, value), value: value,
                          input_reference_url:record.input_reference_url || '', history:record.history || [],
-                         task_id: record.task_id || '' }, outputs ? {outputs} : {}));
-      return outputs ? {type:runnerType(runner, value), value, outputs} : {type:runnerType(runner, value), value};
+                         task_id: record.task_id || '' }, outputs ? {outputs} : {}, resumedItems ? {items: resumedItems} : {}));
+      if (resumedItems && window.AINodeLists) window.AINodeLists.paint(id);
+      return Object.assign({type:runnerType(runner, value), value}, outputs ? {outputs} : {}, resumedItems ? {items: resumedItems} : {});
     } catch (error) {
       if (!stillHere()) throw error;
       state.textContent = String(error.message || error);

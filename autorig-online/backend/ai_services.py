@@ -614,6 +614,10 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 gives a different piece each run"},
     ],
     "qwen_image": [
+        # The node's own text (owner, 2026-09-27): visible in every view; a
+        # wired prompt wins.
+        {"name": "prompt", "title": "What to draw or change", "type": "textarea",
+         "default": "", "help": "Leave empty if a prompt is wired in, or to remix the pictures"},
         # Automatic is the honest default: the wiring already says which of
         # the two models is meant. The explicit choices exist for the case
         # where a picture is wired in as a style reference but the person
@@ -744,6 +748,10 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "default": 0, "help": "0 = whole video"},
     ],
     "video_concat": [
+        {"name": "checkpoint", "title": "Model for all shots", "type": "model", "source": "checkpoints", "default": "",
+         "help": "Empty = inherit. Set: overrides the model of every LTX / MiniMax video node wired into this Concat"},
+        {"name": "loras", "title": "LoRA stack for all shots", "type": "lora_stack", "default": "",
+         "help": "Empty = inherit. Set: replaces the LoRAs of the video nodes wired into this Concat (filtered by model family)"},
         {"name": "out_width", "title": "Width", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,
          "help": "0 = size of the first clip"},
         {"name": "out_height", "title": "Height", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,
@@ -882,6 +890,8 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 gives a different picture each run"},
     ],
     "video": [
+        {"name": "prompt", "title": "What should happen", "type": "textarea",
+         "default": "", "help": "Leave empty if a prompt is wired in"},
         {"name": "width", "title": "Width", "type": "number", "default": 960, "min": 256, "max": 2048, "step": 2},
         {"name": "height", "title": "Height", "type": "number", "default": 540, "min": 256, "max": 2048, "step": 2},
         {"name": "checkpoint", "title": "Model", "type": "model",
