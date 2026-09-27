@@ -77,6 +77,8 @@ MODEL_PEERS: Dict[str, List[str]] = {}
 # ~3.4 MB/s each. So PEER_BOX downloads alone first ("waiting_peer" for the
 # rest) and is usable ~3x sooner; the others start when it is done.
 PEER_BOX = "f15"
+# States a sync agent owns (the VPS cannot poll those boxes).
+AGENT_STATES = {"agent", "agent_downloading", "agent_verifying", "agent_delete"}
 FINAL_STATES = {"ready", "failed", "hash_mismatch", "no_space", "no_route", "deleted",
                 "not_needed", "exists_different"}
 
@@ -617,7 +619,8 @@ async def _monitor(entry_id: str) -> None:
             if not entry or entry.get("state") != "active":
                 return
             pending = [b for b, s in (entry.get("box_states") or {}).items()
-                       if s.get("state") not in FINAL_STATES and s.get("state") != "waiting_peer"]
+                       if s.get("state") not in FINAL_STATES and s.get("state") not in AGENT_STATES
+                       and s.get("state") != "waiting_peer"]
             if pending:
                 results = await asyncio.gather(*(poll_box(entry, b) for b in pending))
                 for box, result in zip(pending, results):
@@ -671,7 +674,10 @@ async def start_downloads(entry_id: str, only: Optional[List[str]] = None) -> No
                                            "note": f"starts when {PEER_BOX} is done (shared uplink)"})
             continue
         if not _ssh_route(box):
-            await _set_box(entry_id, box, {"state": "no_route", "error": "the VPS has no SSH route to this box"})
+            # No SSH route (worker-4090): the box's own sync agent pulls it on
+            # its next run (every 5 min) through /api/ai/fleet-models/sync/*.
+            await _set_box(entry_id, box, {"state": "agent", "error": "",
+                                           "note": "pulled by the box's sync agent (every 5 min)"})
             continue
         if not url and not MODEL_PEERS.get(box):
             await _set_box(entry_id, box, {"state": "failed", "error": "no download link (Civitai refused the presign)"})
@@ -782,7 +788,8 @@ async def delete_model(entry_id: str) -> Dict[str, Any]:
         save_registry(data)
     boxes = sorted(set(entry.get("target_boxes") or []) | set((entry.get("box_states") or {}).keys()))
     results = await asyncio.gather(*(delete_on_box(entry, b) if _ssh_route(b)
-                                     else _const({"state": "deleted", "error": "no route: nothing was sent"})
+                                     else _const({"state": "agent_delete", "error": "",
+                                                  "note": "the box's sync agent deletes it on its next run"})
                                      for b in boxes))
     per_box = dict(zip(boxes, results))
     async with _lock:
@@ -871,6 +878,59 @@ class ModelAddBody(BaseModel):
     title: str = Field("", max_length=120)
     boxes: Optional[List[str]] = None
     hidden: bool = Field(False, description="Register but never offer it in pickers (tests)")
+
+
+@router.get("/api/ai/fleet-models/sync/manifest")
+async def api_agent_manifest(request: Request):
+    """What a box's sync agent should pull or delete (box key auth, as for LoRAs).
+
+    Only boxes the VPS cannot reach over SSH get items: the others are pushed
+    to (and staged on the shared uplink) by the VPS itself.
+    """
+    box = lm._authenticate_box(request)
+    items, remove = [], []
+    for entry in load_registry()["models"]:
+        state = ((entry.get("box_states") or {}).get(box) or {}).get("state")
+        if entry.get("state") == "active" and box in (entry.get("target_boxes") or []) \
+                and not _ssh_route(box) and state not in ("ready", "exists_different"):
+            items.append({"id": entry["id"], "file": entry["file"], "sha256": entry["sha256"],
+                          "size_bytes": int(entry.get("size_bytes") or 0), "subdir": MODEL_SUBDIR,
+                          "url": await _source_url(entry)})
+        elif entry.get("state") in ("removing", "removed") and state == "agent_delete":
+            remove.append({"id": entry["id"], "file": entry["file"], "sha256": entry["sha256"],
+                           "size_bytes": int(entry.get("size_bytes") or 0), "subdir": MODEL_SUBDIR})
+    return {"box_string": box, "items_array": items, "remove_array": remove,
+            "protected_array": sorted(workflow_files()), "server_time_unix_int": _now()}
+
+
+class AgentReport(BaseModel):
+    items: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+
+@router.post("/api/ai/fleet-models/sync/report")
+async def api_agent_report(body: AgentReport, request: Request):
+    box = lm._authenticate_box(request)
+    allowed = {"agent_downloading", "agent_verifying", "ready", "failed", "hash_mismatch",
+               "no_space", "exists_different", "deleted", "delete_failed"}
+    for entry_id, item in list(body.items.items())[:50]:
+        state = str(item.get("state") or "")
+        if state not in allowed:
+            continue
+        update = {"state": state, "error": str(item.get("error") or "")[:300]}
+        if item.get("bytes") is not None:
+            update["bytes"] = int(item.get("bytes") or 0)
+        entry = await _set_box(str(entry_id)[:120], box, update)
+        if entry and entry.get("state") == "active":
+            _sync_catalogue(entry)
+        if entry and entry.get("state") == "removing" and not any(
+                s.get("state") not in ("deleted",) for s in (entry.get("box_states") or {}).values()):
+            async with _lock:
+                data = load_registry()
+                for e in data["models"]:
+                    if e.get("id") == entry["id"]:
+                        e["state"] = "removed"
+                save_registry(data)
+    return {"success_bool": True, "server_time_unix_int": _now()}
 
 
 def build_admin_router(require_admin: Callable[..., Any]) -> APIRouter:

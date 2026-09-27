@@ -18,7 +18,7 @@ param([switch]$Install, [switch]$UserTask, [string]$Box = '', [string]$ComfyRoot
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$AgentVersion = 'lora-sync/2026-09-26-logscrub'
+$AgentVersion = 'lora-sync/2026-09-27-models'
 $Api = 'https://autorig.online/api/ai/loras/sync'
 # -HomeDir: a box without an elevated installer (worker-4090, the owner's
 # desktop) keeps its state under %LOCALAPPDATA% instead of ProgramData.
@@ -247,6 +247,74 @@ try {
         } catch { return $false }
     }
 
+    function ModelsDir() {
+        $f = Join-Path $Home_ 'models_dir.txt'
+        if (Test-Path $f) { return (Get-Content $f -TotalCount 1).Trim() }
+        return (Join-Path $ComfyRoot 'ComfyUI\models')
+    }
+    function ModelReport($id, $state, $bytes, $err) {
+        $body = @{ items = @{ $id = @{ state = $state; bytes = [int64]$bytes; error = [string]$err } } } | ConvertTo-Json -Depth 5 -Compress
+        try {
+            Invoke-RestMethod -Uri 'https://autorig.online/api/ai/fleet-models/sync/report' -Method Post -Headers $Headers `
+                -Body ([Text.Encoding]::UTF8.GetBytes($body)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 | Out-Null
+        } catch { Log ('model report failed: ' + $_.Exception.Message) }
+    }
+    function SyncModels() {
+        $m = Invoke-RestMethod -Uri 'https://autorig.online/api/ai/fleet-models/sync/manifest' -Headers $Headers -TimeoutSec 60
+        $root = ModelsDir
+        $protectedModels = @($m.protected_array)
+        foreach ($r in @($m.remove_array)) {
+            $dest = Join-Path (Join-Path $root $r.subdir) $r.file
+            if ($protectedModels -contains $r.file) { ModelReport $r.id 'delete_failed' 0 'a workflow template names this file'; continue }
+            if (-not (Test-Path -LiteralPath $dest)) { ModelReport $r.id 'deleted' 0 ''; continue }
+            if ((Get-Item -LiteralPath $dest).Length -ne [int64]$r.size_bytes) { ModelReport $r.id 'delete_failed' 0 'size differs: left in place'; continue }
+            try { Remove-Item -Force -LiteralPath $dest -ErrorAction Stop; Log ('model deleted: ' + $r.file); ModelReport $r.id 'deleted' 0 '' }
+            catch { ModelReport $r.id 'delete_failed' 0 ('in use: ' + $_.Exception.Message) }
+        }
+        $it = @($m.items_array) | Select-Object -First 1
+        if (-not $it) { return }
+        $dir = Join-Path $root $it.subdir
+        $tmp = Join-Path $root 'autorig_model_tmp'
+        New-Item -ItemType Directory -Force $dir, $tmp | Out-Null
+        $dest = Join-Path $dir $it.file
+        $part = Join-Path $tmp ($it.sha256 + '.part')
+        if (Test-Path -LiteralPath $dest) {
+            ModelReport $it.id 'agent_verifying' (Get-Item -LiteralPath $dest).Length ''
+            $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash.ToLower()
+            if ($h -eq $it.sha256) { ModelReport $it.id 'ready' $it.size_bytes ''; Log ('model already here: ' + $it.file) }
+            else { ModelReport $it.id 'exists_different' 0 ('a different ' + $it.file + ' is already here') }
+            return
+        }
+        $have = 0; if (Test-Path -LiteralPath $part) { $have = (Get-Item -LiteralPath $part).Length }
+        $drive = (Get-Item $dir).PSDrive.Name
+        if ((Get-PSDrive $drive).Free -lt ([int64]$it.size_bytes - $have + 10GB)) {
+            ModelReport $it.id 'no_space' 0 ('less than size + 10 GB free on ' + $drive + ':'); return
+        }
+        if (-not $it.url) { ModelReport $it.id 'failed' 0 'the site gave no download link'; return }
+        Log ('model download: ' + $it.file + ' (' + [math]::Round($it.size_bytes / 1GB, 1) + ' GB)')
+        $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+        $args_ = @('-sS', '-f', '-L', '-C', '-', '--connect-timeout', '10', '--retry', '3', '--retry-delay', '5',
+                   '--speed-time', '180', '--speed-limit', '20480', '-o', $part, $it.url)
+        $proc = Start-Process -FilePath $curl -ArgumentList $args_ -PassThru -WindowStyle Hidden
+        while (-not $proc.HasExited) {
+            Start-Sleep -Seconds 20
+            $b = 0; if (Test-Path -LiteralPath $part) { $b = (Get-Item -LiteralPath $part).Length }
+            ModelReport $it.id 'agent_downloading' $b ''
+        }
+        $b = 0; if (Test-Path -LiteralPath $part) { $b = (Get-Item -LiteralPath $part).Length }
+        if ($b -ne [int64]$it.size_bytes) {
+            if ($b -gt [int64]$it.size_bytes) { Remove-Item -Force -LiteralPath $part }
+            ModelReport $it.id 'failed' $b ('download stopped at ' + $b + ' bytes (curl exit ' + $proc.ExitCode + '); resumes next run')
+            return
+        }
+        ModelReport $it.id 'agent_verifying' $b ''
+        $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $part).Hash.ToLower()
+        if ($h -ne $it.sha256) { Remove-Item -Force -LiteralPath $part; ModelReport $it.id 'hash_mismatch' 0 ('downloaded file hashes to ' + $h.Substring(0, 12)); return }
+        Move-Item -Force -LiteralPath $part -Destination $dest
+        Log ('model installed: ' + $it.file)
+        ModelReport $it.id 'ready' $b ''
+    }
+
     function SaveHashes() {
         try { $cache | ConvertTo-Json -Depth 3 -Compress | Set-Content -Path $HashFile -Encoding utf8 } catch {}
     }
@@ -334,6 +402,15 @@ try {
     Log 'reporting'
     Report $items $inv
     Log ($Box + ': ' + @($manifest.items_array).Count + ' wanted, ' + $todo.Count + ' fetched, ' + $inv.Count + ' files listed')
+
+    # ---- base models (checkpoints / diffusion models) for boxes the VPS
+    # cannot push to over SSH (worker-4090). Same idea as the LoRAs: the site
+    # names what this box should hold (a short-lived signed link per file;
+    # the Civitai token never leaves the VPS), we check space, download with
+    # resume, verify SHA-256, then move the file into <models>\diffusion_models.
+    # One model per run: a 14 GB pull holds the mutex, and the next run picks
+    # up the next item. models_dir.txt overrides <ComfyRoot>\ComfyUI\models.
+    try { SyncModels } catch { Log ('model sync failed: ' + $_.Exception.Message) }
 } catch {
     Log ('sync failed: ' + $_.Exception.Message)
     exit 1
