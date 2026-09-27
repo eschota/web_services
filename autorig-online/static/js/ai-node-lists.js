@@ -606,12 +606,6 @@
       const box = document.createElement('div');
       box.style.cssText = 'position:relative;aspect-ratio:' + aspect.toFixed(4) + ';border-radius:4px;overflow:hidden;cursor:zoom-in;' +
         'background:rgba(255,255,255,.06);outline:1px solid ' + (item.status === 'failed' ? '#fb7185' : item.status === 'done' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.08)');
-      if (node.service === 'video_frame' && item.meta && item.meta.label) {
-        const cap = document.createElement('i');
-        cap.textContent = item.meta.label;
-        cap.style.cssText = 'position:absolute;z-index:1;left:2px;bottom:1px;font:600 8px system-ui;font-style:normal;color:#fff;text-shadow:0 0 3px #000';
-        box.appendChild(cap);
-      }
       box.title = 'Shot ' + (index + 1) + ' · ' + item.status + (item.error ? ': ' + item.error : '') + (item.meta && item.meta.label ? '\n' + item.meta.label : '');
       if (item.status === 'done') {
         const shown = scene && item.outputs ? item.outputs.first_frame_url_string : item.value;
@@ -624,8 +618,9 @@
         box.appendChild(label);
       }
       const tag = document.createElement('i');
-      tag.textContent = String(index + 1);
-      tag.style.cssText = 'position:absolute;left:3px;top:1px;font:700 9px system-ui;font-style:normal;color:#fff;text-shadow:0 0 3px #000';
+      // One corner chip: the index, plus the picture's label for Extract Frames.
+      tag.textContent = String(index + 1) + (node.service === 'video_frame' && item.meta && item.meta.label ? ' · ' + item.meta.label : '');
+      tag.style.cssText = 'position:absolute;z-index:1;left:2px;top:2px;padding:0 3px;border-radius:3px;background:rgba(0,0,0,.55);font:700 8px system-ui;font-style:normal;color:#fff;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       box.appendChild(tag);
       if (rerollable(node.service) && !scene) box.appendChild(cellTools(id, index, item));
       ['mousedown', 'pointerdown'].forEach(type => box.addEventListener(type, event => event.stopPropagation()));
@@ -898,6 +893,15 @@
 
   /** The ⎇ badge of a gated node; click to change or clear the condition. */
   function decorate(id, params) {
+    // A migrated "First frame" node (saved without a template) stays one picture.
+    const meta0 = api.meta(id) || {};
+    if (meta0.service === 'video_frame' && params && !params.template) {
+      const field = api.nodeElement(id) && api.nodeElement(id).querySelector('[data-param="template"]');
+      if (field) field.value = 'start_only';
+      // ...and the whole clip as one scene: exactly the old single first frame.
+      const scenes = api.nodeElement(id) && api.nodeElement(id).querySelector('[data-param="detect_scenes"]');
+      if (scenes && !params.detect_scenes) scenes.value = 'off';
+    }
     const element = api.nodeElement(id);
     const head = element && element.querySelector('.nhead');
     const item = api.meta(id);
