@@ -5787,23 +5787,72 @@
       onEditSystemPrompt:ids => openSystemPromptEditor(ids),
       systemPromptTargets,
       onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
+    // Ctrl+V / drop on the canvas (owner, 2026-09-27): copied nodes paste as
+    // nodes (ai-node-groups handles those first); a picture, clip or media
+    // link becomes a new Media in node at the pointer — or fills the selected
+    // Media in node. Several files stack at the pointer.
+    let lastPointer = null;
+    document.getElementById('canvas').addEventListener('mousemove', event => { lastPointer = [event.clientX, event.clientY]; }, {passive: true});
+    const graphPointAt = (clientX, clientY) => {
+      if (nodePlacement && nodePlacement.pointAt && clientX != null) return nodePlacement.pointAt(clientX, clientY);
+      const rect = document.getElementById('canvas').getBoundingClientRect();
+      const scale = Number(editor.zoom) || 1;
+      return {x: (rect.width / 2 - editor.canvas_x) / scale, y: (rect.height / 2 - editor.canvas_y) / scale};
+    };
+    const MEDIA_LINK = /^(https?:\/\/\S+|data:(image|video)\/[^,]+,)/i;
+    function mediaNodesAt(point, files, links) {
+      let made = 0;
+      files.forEach((file, index) => {
+        const id = addInputNode('media', point.x + index * 30, point.y + index * 60, '');
+        const element = id && nodeElement(id);
+        if (element && element._acceptImage) { element._acceptImage(file); made += 1; }
+      });
+      links.forEach((link, index) => {
+        const offset = files.length + index;
+        const id = addInputNode('media', point.x + offset * 30, point.y + offset * 60, link);
+        if (id) { made += 1; invalidateNodeAndDownstream(id); }
+      });
+      if (made) toast(made === 1 ? 'Added a Media in node.' : 'Added ' + made + ' Media in nodes.');
+      return made;
+    }
     document.addEventListener('paste', event => {
+      if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
+      if (!document.getElementById('canvas')) return;
       const items = [...(event.clipboardData?.items || [])];
-      const item = items.find(value => value.kind === 'file' && /^(image|video)\//.test(value.type));
+      const files = items.filter(value => value.kind === 'file' && /^(image|video)\//.test(value.type)).map(value => value.getAsFile()).filter(Boolean);
+      const text = (event.clipboardData ? event.clipboardData.getData('text/plain') : '').trim();
+      if (!files.length && /^AUTORIG_NODES_V1:/.test(text)) return;  // node paste is handled already
       const current = event.target.closest && event.target.closest('.drawflow-node');
-      const target = current || document.querySelector('#canvas .drawflow-node.selected');
-      if (item) {
-        if (!target || !target._acceptImage) { toast('Select a Media in node to paste an image or video.'); return; }
+      const target = current || document.querySelector('#canvas .drawflow-node.selected, #canvas .drawflow-node.multi-selected');
+      if (target && target._acceptImage && (files.length === 1 || (!files.length && MEDIA_LINK.test(text)))) {
         event.preventDefault();
-        target._acceptImage(item.getAsFile());
+        if (files.length) target._acceptImage(files[0]); else target._acceptText(text);
         return;
       }
-      // A copied link lands in the selected Media node; typing into a field
-      // keeps the browser's own paste.
-      const editing = event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || '');
-      if (editing || !target || !target._acceptText) return;
-      const link = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
-      if (target._acceptText(link)) event.preventDefault();
+      if (files.length || MEDIA_LINK.test(text)) {
+        event.preventDefault();
+        const point = graphPointAt(lastPointer && lastPointer[0], lastPointer && lastPointer[1]);
+        mediaNodesAt(point, files, files.length ? [] : [text]);
+        return;
+      }
+      if (text) toast('Clipboard has text, not a picture/clip link.');
+    });
+    const canvasElement = document.getElementById('canvas');
+    canvasElement.addEventListener('dragover', event => {
+      const types = [...(event.dataTransfer && event.dataTransfer.types || [])];
+      if (types.includes('application/x-autorig-node')) return;
+      if (types.includes('Files') || types.includes('text/uri-list')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
+    });
+    canvasElement.addEventListener('drop', event => {
+      if (event.defaultPrevented) return;
+      const types = [...(event.dataTransfer && event.dataTransfer.types || [])];
+      if (types.includes('application/x-autorig-node')) return;
+      if (event.target.closest && event.target.closest('.drawflow-node')) return;  // a Media node takes its own drops
+      const files = [...(event.dataTransfer.files || [])].filter(file => /^(image|video)\//.test(file.type));
+      const link = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain') || '').split(String.fromCharCode(10))[0].trim();
+      if (!files.length && !MEDIA_LINK.test(link)) return;
+      event.preventDefault();
+      mediaNodesAt(graphPointAt(event.clientX, event.clientY), files, files.length ? [] : [link]);
     });
     editor.on('connectionCreated', onConnectionCreated);
     editor.on('connectionCreated', scheduleAutoFrames);
