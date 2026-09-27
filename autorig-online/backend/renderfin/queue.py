@@ -331,6 +331,36 @@ def _host_managed_progress(
         "stale_at": stale_at,
     }
 
+def dispatch_order(tasks, now: Optional[float] = None) -> List[Any]:
+    """The waiting tasks in the order the pump dispatches them.
+
+    LIFO by submission burst: tasks submitted within LIFO_GROUP_SECONDS of the
+    previous one form a group (an X9 batch, a list run) that keeps its own
+    first-in order; groups go newest first. A task waiting longer than
+    STARVE_MINUTES jumps ahead of every group, oldest first, so nothing waits
+    forever behind a stream of new work.
+    """
+    waiting = sorted(
+        (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
+        key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
+    )
+    if not config.LIFO or len(waiting) < 2:
+        return waiting
+    now = time.time() if now is None else now
+    starving = [t for t in waiting if now - float(t.created_at or 0) > config.STARVE_MINUTES * 60]
+    rest = [t for t in waiting if now - float(t.created_at or 0) <= config.STARVE_MINUTES * 60]
+    groups: List[List[Any]] = []
+    for task in rest:
+        if groups and float(task.created_at or 0) - float(groups[-1][-1].created_at or 0) <= config.LIFO_GROUP_SECONDS:
+            groups[-1].append(task)
+        else:
+            groups.append([task])
+    ordered = list(starving)
+    for group in reversed(groups):
+        ordered.extend(group)
+    return ordered
+
+
 def pending_queue_position(tasks, task_id: str) -> Dict[str, int]:
     """1-based rank of a waiting task among everything else that is waiting.
 
@@ -340,10 +370,7 @@ def pending_queue_position(tasks, task_id: str) -> Dict[str, int]:
     place in the queue and gets position 0 — the caller then shows nothing
     rather than a stale number that only ever counted down to a lie.
     """
-    waiting = sorted(
-        (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
-        key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
-    )
+    waiting = dispatch_order(tasks)
     wanted = str(task_id or "")
     position = 0
     for index, task in enumerate(waiting):
@@ -1129,10 +1156,7 @@ class RenderQueue:
         return depths
 
     async def _dispatch_one(self) -> bool:
-        pending = sorted(
-            (t for t in self._tasks.values() if t.status == TASK_PENDING),
-            key=lambda t: t.created_at,
-        )
+        pending = dispatch_order(self._tasks.values())
         if not pending:
             return False
         depths = await self._queue_depths()
@@ -1588,6 +1612,7 @@ class RenderQueue:
         controlled_video = workflow_file in {
             "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
             "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json",
+            "gen_video_ltx25_crossview_by_url.json",
             "upscale_video_x2.json"}
         if bool(control_url) != controlled_video:
             raise comfy_adapter.ComfyRequestError(
