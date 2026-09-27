@@ -225,6 +225,7 @@ import httpx
 
 from ai_fleet import router as ai_fleet_router
 from ai_graph import router as ai_graph_router
+from ai_video_tools import router as ai_video_tools_router
 from ai_controlnet_api import router as ai_controlnet_router
 from ai_model_catalogue import router as ai_model_catalogue_router
 from ai_services import router as ai_services_router
@@ -1311,6 +1312,10 @@ app = FastAPI(
 
 # Add GZip compression for responses > 500 bytes.
 # GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
+from task_owner import TaskOwnerMiddleware
+
+# Inside GZip, so it reads plain JSON: records who submitted each render task.
+app.add_middleware(TaskOwnerMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 # Civitai pages and CDN previews as media inputs (civitai_media.py).
 from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
@@ -1321,6 +1326,9 @@ app.state.limiter = limiter
 
 app.include_router(ai_fleet_router)
 app.include_router(ai_graph_router)
+app.include_router(ai_video_tools_router)
+from ai_wan_image import router as ai_wan_image_router
+app.include_router(ai_wan_image_router)
 app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
@@ -1541,6 +1549,8 @@ app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))
 app.include_router(build_avatar_build_router(get_avatar_owner))
+from ai_avatar_ready import build_avatar_ready_router
+app.include_router(build_avatar_ready_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
 app.include_router(ai_graph_edits_router)
 app.include_router(ai_pipelines_router)

@@ -140,6 +140,10 @@ class NodeResult(BaseModel):
     x9: List[Dict[str, object]] = Field(default_factory=list, max_length=9)
     pick: int = -1
     x9sig: str = Field("", max_length=200000)
+    # For each shot (2026-09-27): a node run once per item of a list (Scene
+    # split and everything wired after it) keeps every item here:
+    # {status, type, value, outputs, error, sig, meta}.
+    items: List[Dict[str, object]] = Field(default_factory=list, max_length=64)
 
     @field_validator("input_reference_url")
     @classmethod
@@ -1431,8 +1435,24 @@ class CancelRequest(BaseModel):
     task_ids: List[str] = Field(default_factory=list)
 
 
+async def _caller_is_admin(request: Request) -> bool:
+    token = request.cookies.get("session")
+    if not token:
+        return False
+    try:
+        import auth
+        import config
+        import database
+        async for db in database.get_db():
+            user = await auth.get_user_by_session(db, token)
+            return bool(user and config.is_admin_email(user.email))
+    except Exception:
+        logger.exception("admin check for cancel failed")
+    return False
+
+
 @router.post("/api/ai/cancel")
-async def api_cancel(body: CancelRequest):
+async def api_cancel(body: CancelRequest, request: Request):
     """Stand down work that has not started, and leave alone work that has.
 
     A render still waiting for a card is pure waste once nobody wants it, and
@@ -1446,14 +1466,27 @@ async def api_cancel(body: CancelRequest):
 
     import ai_vision_api
 
+    import task_owner
+
     cancelled = 0
     running = 0
     unknown = 0
+    denied = 0
+    caller = task_owner.scope_identity(request.scope)
+    admin = None
     async with httpx.AsyncClient() as client:
         for task_id in body.task_ids[:64]:
             task_id = str(task_id).strip()
             if not task_id:
                 continue
+            # Only the task's submitter (same session / anon cookie) or an
+            # admin may stand it down (2026-09-27).
+            if task_owner.owner_of(task_id) != caller:
+                if admin is None:
+                    admin = await _caller_is_admin(request)
+                if not admin:
+                    denied += 1
+                    continue
             if "." in task_id:
                 # `<node>.<id>` is a converter task: AI or Hunyuan.
                 running += 1
@@ -1478,6 +1511,7 @@ async def api_cancel(body: CancelRequest):
         "cancelled_int": cancelled,
         "running_int": running,
         "unknown_int": unknown,
+        "denied_int": denied,
         "note_string": "Jobs already on a card are left to finish",
         "server_time_unix_int": int(time.time()),
     }
