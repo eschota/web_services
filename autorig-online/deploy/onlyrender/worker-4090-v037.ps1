@@ -139,6 +139,37 @@ if ((Test-Path "$ltx25\diffusion_models\minimax_h3_fl2va_pruned_int8_convrot.saf
     (Test-Path "$ltx25\vae\minimax_h3_audio_vae_fp32.safetensors") -and
     (Test-Path "$ltx25\loras\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors") -and
     (Test-ComfyNode 'MiniMaxH3ImageToVideo')) { $workflows += 'gen_video_minimax_h3_by_url.json' }
+# Fleet parity (2026-09-27): the nodes the fleet boxes use for T-pose/legacy
+# (RMBG), enhancement (TiledDiffusion, easy-use) and Qwen-Image 2512 (GGUF) are
+# now in runtime\custom_nodes, so this box also claims gen_image.json and the
+# canny token, the ControlNet map tokens, both Stable Audio 3 tokens and the
+# LTX-2.5 CrossView token - each only when its nodes and files answer.
+function Test-ComfyFile([string]$Class, [string]$InputName, [string]$File) {
+    try {
+        $info = Invoke-RestMethod "$comfyUrl/object_info/$Class" -TimeoutSec 20
+        $spec = $info.$Class.input.required.$InputName
+        if (-not $spec) { $spec = $info.$Class.input.optional.$InputName }
+        if ($spec[0] -eq 'COMBO') { return @($spec[1].options) -contains $File }
+        return @($spec[0]) -contains $File
+    } catch { return $false }
+}
+$zimage = (Test-ComfyFile 'UNETLoader' 'unet_name' 'z_image_turbo_fp8_e4m3fn.safetensors') -and
+          (Test-ComfyFile 'CLIPLoader' 'clip_name' 'qwen_3_4b.safetensors') -and (Test-ComfyFile 'VAELoader' 'vae_name' 'ae.safetensors')
+if ($zimage -and (Test-ComfyNode 'RMBG') -and (Test-ComfyNode 'TiledDiffusion') -and (Test-ComfyNode 'UnetLoaderGGUF') -and
+    (Test-ComfyNode 'easy cleanGpuUsed')) { $workflows += 'gen_image.json' }
+if ($zimage -and (Test-ComfyNode 'ZImageFunControlnet') -and (Test-ComfyNode 'TiledDiffusion') -and
+    (Test-ComfyNode 'UnetLoaderGGUF') -and (Test-ComfyFile 'UpscaleModelLoader' 'model_name' '4x_NMKD-Siax_200k.pth') -and
+    (Test-ComfyFile 'UpscaleModelLoader' 'model_name' 'RealESRGAN_x2.pth')) { $workflows += 'gen_image_control_canny.json' }
+foreach ($pair in @(@('gen_control_canny.json','CannyEdgePreprocessor'), @('gen_control_depth.json','DepthAnythingV2Preprocessor'),
+                    @('gen_control_normal.json','BAE-NormalMapPreprocessor'), @('gen_control_pose.json','OpenposePreprocessor'))) {
+    if (Test-ComfyNode $pair[1]) { $workflows += $pair[0] }
+}
+if (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'stable_audio_3_medium.safetensors') { $workflows += 'gen_music_sa3.json' }
+if (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'stable_audio_3_small_music.safetensors') { $workflows += 'gen_music_sa3_small.json' }
+if ($workflows -contains 'gen_animation_ltx25_by_url.json' -and (Test-ComfyNode 'LTXAddVideoICLoRAGuide')) {
+    $workflows += 'gen_video_ltx25_crossview_by_url.json'
+}
+$workflows = @($workflows | Select-Object -Unique)
 # Identity: renderfin ignores an empty map, and the old Schnell override must go.
 $overrides = @{'gen_image.json'='gen_image.json'}
 Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;workflow_overrides=$overrides;basic_auth=$false}
