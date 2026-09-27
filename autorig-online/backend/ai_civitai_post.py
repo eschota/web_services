@@ -72,6 +72,7 @@ POST_TAG_LIMIT = 5            # Civitai's post editor (src/server/common/constan
 MAX_RESOURCES = 10            # MAX_MANUAL_RESOURCES_PER_IMAGE
 MAX_CHECKPOINTS = 3           # MAX_MANUAL_CHECKPOINTS_PER_IMAGE
 TITLE_MAX = 120
+MAX_POST_FILES = 20           # files in one post (Civitai's post editor)
 COMFYUI_TOOL = "ComfyUI"
 UPSCALER_NAME = "RealESRGAN_x2"
 
@@ -99,6 +100,11 @@ class CivitaiResource(BaseModel):
     type: str = ""  # checkpoint | lora
 
 
+class CivitaiPostItem(BaseModel):
+    media_url: str = Field(..., max_length=4096)
+    source_urls: List[str] = Field(default_factory=list, max_length=60)
+
+
 class CivitaiPostRequest(BaseModel):
     media_url: str = Field(..., max_length=4096)
     title: str = Field("", max_length=300)
@@ -115,6 +121,8 @@ class CivitaiPostRequest(BaseModel):
     # node in the graph first. The field is accepted and ignored.
     upscale: bool = Field(False, description="Ignored: posts use the file as it is")
     generation: Dict[str, Any] = Field(default_factory=dict, description="seed, steps, sampler, cfg, model...")
+    extra_items: List[CivitaiPostItem] = Field(default_factory=list, max_length=MAX_POST_FILES - 1,
+                                               description="More files for the same post (one post, up to 20 files)")
     title_is_placeholder: bool = Field(False, description="The dialog still shows the node's label")
     source_urls: List[str] = Field(default_factory=list, max_length=60,
                                    description="Render outputs upstream of this node (for tools that only "
@@ -627,18 +635,96 @@ async def _probe_video(content: bytes) -> Dict[str, Any]:
     return result
 
 
-async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
-                      local: Optional[Path] = None, source_url: str = "",
-                      upscaled: bool = False, job: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+# ---------------------------------------------------------------- daily limit
+# Civitai counts every post.create against a daily quota (20/40 base, 60/120
+# at score >= 1000, 150/300 at >= 5000; the second figure for paid members) -
+# drafts, deleted posts and failed attempts included. It exposes no counter,
+# so the server keeps its own log of creates and, once Civitai answers "daily
+# limit", refuses to call post.create again until the window has passed.
+
+LIMIT_FILE = SCRATCH_DIR / "limits.json"
+RESUME_FILE = SCRATCH_DIR / "resume.json"
+DAILY_TIERS = "20 a day (40 for members); 60/120 at a score of 1000; 150/300 at 5000"
+
+
+def _read_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def _write_json(path: Path, value: Any) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(value), encoding="utf-8")
+        tmp.replace(path)
+    except Exception as error:
+        logger.info("civitai: could not write %s: %s", path, error)
+
+
+def _limits() -> Dict[str, Any]:
+    data = _read_json(LIMIT_FILE, {})
+    if "creates" not in data:
+        # First run: seed the log from the post jobs this server already made.
+        creates = [float(job.get("created_at") or 0) for job in JOBS.values() if job.get("post_id_int")]
+        data = {"creates": sorted(t for t in creates if t), "limited_until": 0}
+    return data
+
+
+def limit_state() -> Dict[str, Any]:
+    data = _limits()
+    now = time.time()
+    recent = [t for t in data.get("creates", []) if now - t < 86400]
+    until = float(data.get("limited_until") or 0)
+    limited = until > now
+    return {"limited_bool": limited, "retry_at_unix_float": until if limited else 0,
+            "retry_in_hours_float": round((until - now) / 3600, 1) if limited else 0,
+            "created_last_24h_int": len(recent), "tiers_string": DAILY_TIERS,
+            "message_string": (f"Civitai daily post limit reached - try again in ~{max(1, round((until - now) / 3600))} h"
+                               if limited else "")}
+
+
+def _note_create() -> None:
+    data = _limits()
+    now = time.time()
+    data["creates"] = [t for t in data.get("creates", []) if now - t < 86400] + [now]
+    _write_json(LIMIT_FILE, data)
+
+
+def _note_limit_hit() -> None:
+    data = _limits()
+    now = time.time()
+    recent = sorted(t for t in data.get("creates", []) if now - t < 86400)
+    # The window is a day from the calls it counted; the oldest one we know of
+    # frees first. Without any, wait a full day.
+    until = (recent[0] + 86400) if recent else now + 86400
+    data["limited_until"] = max(until, now + 3600)
+    _write_json(LIMIT_FILE, data)
+
+
+class DailyLimitError(RuntimeError):
+    pass
+
+
+def _resume_key(urls: List[str]) -> str:
+    import hashlib
+    return hashlib.sha1("\n".join(sorted(urls)).encode("utf-8")).hexdigest()[:20]
+
+
+# ---------------------------------------------------------------- one file
+
+async def prepare_item(client: httpx.AsyncClient, url: str, body: CivitaiPostRequest, sources: List[str],
+                       upscaled: bool, local: Optional[Path] = None) -> Dict[str, Any]:
+    """Download one file and build its meta, resources and techniques (no Civitai call)."""
     if local is not None:
-        content = local.read_bytes()
-        name = local.name
-        mime = "video/mp4"
+        content, name, mime = local.read_bytes(), local.name, "video/mp4"
     else:
-        picture = await client.get(body.media_url, timeout=300.0, follow_redirects=True)
+        picture = await client.get(url, timeout=300.0, follow_redirects=True)
         picture.raise_for_status()
         content = picture.content
-        name = Path(body.media_url.split("?", 1)[0]).name or "image.png"
+        name = Path(url.split("?", 1)[0]).name or "image.png"
         mime = picture.headers.get("content-type", "image/png").split(";")[0]
     is_video = mime.startswith("video/") or name.lower().endswith(VIDEO_SUFFIXES)
     width = height = 0
@@ -658,8 +744,7 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
         media_metadata.update(probe)
     elif width and height:
         media_metadata.update(width=width, height=height)
-    request, extra_requests = source_requests(source_url or body.media_url, body.source_urls,
-                                              "video" if is_video else "image")
+    request, extra_requests = source_requests(url, sources, "video" if is_video else "image")
     resources, notes = collect_resources(body.resources, request, dict(body.generation or {}))
     for other in extra_requests:
         more, more_notes = collect_resources([], other, {})
@@ -668,10 +753,17 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
                 resources.append(item)
         notes += [note for note in more_notes if note not in notes]
     meta = build_meta(body.prompt, request, dict(body.generation or {}), resources, upscaled, (width, height))
-    techniques = techniques_for(request, "video" if is_video else "image")
+    return {"url": url, "content": content, "name": name, "mime": mime, "is_video": is_video,
+            "width": width, "height": height, "media_metadata": media_metadata, "meta": meta,
+            "resources": resources, "notes": notes,
+            "techniques": techniques_for(request, "video" if is_video else "image")}
 
+
+async def upload_item(client: httpx.AsyncClient, item: Dict[str, Any], job: Optional[Dict[str, Any]],
+                      label: str) -> str:
+    """Put one file in Civitai's storage; answers the key post.addImage takes."""
     upload = await client.post(f"{CIVITAI_HOST}/api/v1/image-upload", headers=_headers(),
-                               json={"filename": name, "metadata": {}}, timeout=60.0)
+                               json={"filename": item["name"], "metadata": {}}, timeout=60.0)
     if upload.status_code >= 400:
         raise RuntimeError(f"image-upload: HTTP {upload.status_code}")
     ticket = upload.json()
@@ -679,9 +771,7 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
     image_key = ticket.get("id")
     if not target or not image_key:
         raise RuntimeError("image-upload: no upload URL")
-    # The ticket is a presigned object-storage URL: it takes a PUT of the raw
-    # bytes (a multipart POST answered 501). A Cloudflare Images direct-upload
-    # URL takes the multipart POST, so that is the second try.
+    content, mime = item["content"], item["mime"]
     total = len(content)
 
     async def chunks():
@@ -690,68 +780,146 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
             yield content[offset:offset + step]
             done = min(100, int((offset + step) * 100 / max(total, 1)))
             _job_update(job, progress_percent=done,
-                        stage_label=f"Uploading to Civitai {done}% of {total / 1048576:.1f} MB")
+                        stage_label=f"Uploading{label} to Civitai {done}% of {total / 1048576:.1f} MB")
 
-    _job_update(job, stage="uploading", stage_label="Uploading to Civitai 0%", progress_percent=0)
+    _job_update(job, stage="uploading", stage_label=f"Uploading{label} to Civitai 0%", progress_percent=0)
+    # A presigned object-storage URL takes a PUT of the raw bytes; a Cloudflare
+    # Images direct-upload URL takes the multipart POST, so that is the second try.
     sent = await client.put(target, content=chunks(), timeout=600.0,
                             headers={"Content-Type": mime, "Content-Length": str(total)})
     if sent.status_code >= 400:
-        retry = await client.post(target, files={"file": (name, content, mime)}, timeout=180.0)
+        retry = await client.post(target, files={"file": (item["name"], content, mime)}, timeout=180.0)
         if retry.status_code >= 400:
             raise RuntimeError(f"upload: PUT HTTP {sent.status_code}, POST HTTP {retry.status_code}")
-    _job_update(job, stage="posting", stage_label="Creating the post", progress_percent=None)
-    post = await _trpc(client, "post.create", {})
-    post_id = int(post["id"])
+    return str(image_key)
+
+
+async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
+                      local: Optional[Path] = None, source_url: str = "",
+                      upscaled: bool = False, job: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Upload every file first; create the post only when all uploads went through.
+
+    One post takes up to 20 files (the main output plus body.extra_items).
+    Nothing is created when anything fails before post.create. A failure after
+    it keeps the post and its id; the next attempt with the same files reuses
+    it instead of creating another (every create counts against Civitai's
+    daily quota, deleted drafts included)."""
+    entries = [{"media_url": source_url or body.media_url, "fetch_url": body.media_url,
+                "source_urls": body.source_urls}]
+    for extra in body.extra_items[:MAX_POST_FILES - 1]:
+        entries.append({"media_url": extra.media_url, "fetch_url": extra.media_url,
+                        "source_urls": extra.source_urls or body.source_urls})
+    items: List[Dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        _job_update(job, stage="preparing", stage_label=f"Reading file {index + 1} of {len(entries)}")
+        item = await prepare_item(client, entry["fetch_url"], body, entry["source_urls"], upscaled,
+                                  local if index == 0 else None)
+        item["source_url"] = entry["media_url"]
+        items.append(item)
+    for index, item in enumerate(items):
+        label = f" {index + 1}/{len(items)}" if len(items) > 1 else ""
+        item["key"] = await upload_item(client, item, job, label)
+
+    resume_key = _resume_key([item["source_url"] for item in items])
+    resume = _read_json(RESUME_FILE, {})
+    record = resume.get(resume_key) or {}
+    post_id = 0
+    if record.get("post_id"):
+        try:
+            existing = await _query(client, "post.get", {"id": int(record["post_id"])}) or {}
+            post_id = int(existing.get("id") or 0)
+        except Exception:
+            post_id = 0
+        if post_id:
+            _job_update(job, stage="posting", stage_label=f"Continuing post {post_id}")
+    if not post_id:
+        state = limit_state()
+        if state["limited_bool"]:
+            raise DailyLimitError(state["message_string"])
+        _job_update(job, stage="posting", stage_label="Creating the post", progress_percent=None)
+        try:
+            post = await _trpc(client, "post.create", {})
+        except RuntimeError as error:
+            if "daily limit" in str(error).lower() or "posting limit" in str(error).lower():
+                _note_limit_hit()
+                raise DailyLimitError(limit_state()["message_string"] or str(error)) from None
+            raise
+        _note_create()
+        post_id = int(post["id"])
+        record = {"post_id": post_id, "added": {}, "created_at": time.time()}
+        resume[resume_key] = record
+        _write_json(RESUME_FILE, resume)
     _job_update(job, post_id_int=post_id)
-    try:
-        image = await _trpc(client, "post.addImage", {
-            "postId": post_id, "url": image_key, "name": name, "width": width, "height": height,
-            "hash": None, "meta": meta, "index": 0, "mimeType": mime, "metadata": media_metadata,
-            "type": "video" if is_video else "image"})
-        image_id = int((image or {}).get("id") or 0)
-        extras = await attach_extras(client, image_id, resources, techniques) if image_id else {}
+
+    added: Dict[str, int] = dict(record.get("added") or {})
+    image_ids: List[int] = []
+    extras_errors: List[str] = []
+    for index, item in enumerate(items):
+        image_id = int(added.get(item["source_url"]) or 0)
+        if not image_id:
+            _job_update(job, stage="posting", stage_label=f"Adding file {index + 1} of {len(items)}")
+            image = await _trpc(client, "post.addImage", {
+                "postId": post_id, "url": item["key"], "name": item["name"], "width": item["width"],
+                "height": item["height"], "hash": None, "meta": item["meta"], "index": index,
+                "mimeType": item["mime"], "metadata": item["media_metadata"],
+                "type": "video" if item["is_video"] else "image"})
+            image_id = int((image or {}).get("id") or 0)
+            added[item["source_url"]] = image_id
+            record["added"] = added
+            resume[resume_key] = record
+            _write_json(RESUME_FILE, resume)
+        image_ids.append(image_id)
         if image_id:
-            await ensure_meta(client, image_id, meta)
-        tags = await pick_tags(client, list(body.tags) + ["autorig"])
-        for tag in tags:
-            try:
-                await _trpc(client, "post.addTag", {"id": post_id, "name": tag})
-            except Exception as error:  # a tag is not worth failing the post
-                logger.info("civitai tag %s: %s", tag, error)
-        update: Dict[str, Any] = {"id": post_id, "title": body.title.strip()[:TITLE_MAX] or None,
-                                  "detail": description_html(body.description, notes, upscaled)}
-        # A draft is a post.update WITHOUT publishedAt: null is refused and
-        # the post stays behind as an orphan draft (2026-09-27).
-        if body.publish:
-            update["publishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-            await _trpc(client, "post.update", update, superjson_meta={"publishedAt": ["Date"]})
-        else:
-            await _trpc(client, "post.update", update)
-    except Exception:
-        if not body.publish:  # never leave a half-built draft behind
-            try:
-                await _trpc(client, "post.delete", {"id": post_id})
-            except Exception as error:
-                logger.warning("civitai: could not remove failed draft %s: %s", post_id, error)
-        raise
+            extras = await attach_extras(client, image_id, item["resources"], item["techniques"])
+            extras_errors += extras.get("errors") or []
+            item["linked"] = extras.get("resources", [])
+            await ensure_meta(client, image_id, item["meta"])
+
+    tags = await pick_tags(client, list(body.tags) + ["autorig"])
+    for tag in tags:
+        try:
+            await _trpc(client, "post.addTag", {"id": post_id, "name": tag})
+        except Exception as error:  # a tag is not worth failing the post
+            logger.info("civitai tag %s: %s", tag, error)
+    notes: List[str] = []
+    for item in items:
+        notes += [note for note in item["notes"] if note not in notes]
+    update: Dict[str, Any] = {"id": post_id, "title": body.title.strip()[:TITLE_MAX] or None,
+                              "detail": description_html(body.description, notes, upscaled)}
+    # A draft is a post.update WITHOUT publishedAt: null is refused and the
+    # post stays behind as an orphan draft (2026-09-27).
+    if body.publish:
+        update["publishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        await _trpc(client, "post.update", update, superjson_meta={"publishedAt": ["Date"]})
+    else:
+        await _trpc(client, "post.update", update)
+    resume.pop(resume_key, None)
+    _write_json(RESUME_FILE, resume)
+
     try:
         read = await _query(client, "post.get", {"id": post_id}) or {}
         published = read.get("publishedAt")
     except Exception:
         published = "unknown"
-    result = {"success_bool": True, "post_id_int": post_id, "image_id_int": image_id,
+    first = items[0]
+    result = {"success_bool": True, "post_id_int": post_id, "image_id_int": image_ids[0] if image_ids else 0,
+              "image_ids_array": image_ids, "files_int": len(items),
               "draft_bool": not body.publish and not published,
-              "resources_array": (extras or {}).get("resources", []),
-              "tags_array": tags, "techniques_array": techniques, "meta_keys_array": sorted(meta),
+              "resources_array": first.get("linked", []),
+              "tags_array": tags, "techniques_array": first["techniques"], "meta_keys_array": sorted(first["meta"]),
               "post_url_string": f"{CIVITAI_HOST}/posts/{post_id}" + ("" if body.publish else "/edit")}
     if not body.publish and published:
         logger.error("civitai post %s is public although a draft was asked for", post_id)
         result["warning_string"] = "Civitai published this post although a draft was asked for — check it now"
         result["post_url_string"] = f"{CIVITAI_HOST}/posts/{post_id}"
-    if (extras or {}).get("errors"):
-        result["extras_errors_array"] = extras["errors"]
-    if image_id:
-        result.update(await apply_rating(client, image_id, body.nsfw_level))
+    if extras_errors:
+        result["extras_errors_array"] = extras_errors
+    ratings = [await apply_rating(client, image_id, body.nsfw_level) for image_id in image_ids if image_id]
+    if ratings:
+        result.update(ratings[0])
+        infos = sorted({r["rating_info_string"] for r in ratings if r.get("rating_info_string")})
+        if infos:
+            result["rating_info_string"] = "; ".join(infos)
     return result
 
 
@@ -999,6 +1167,9 @@ async def run_post(body: CivitaiPostRequest, job: Optional[Dict[str, Any]]) -> D
             answer["upscaled_url_string"] = upscaled
             logger.info("civitai post %s done: %s", answer.get("post_id_int"), answer.get("post_url_string"))
             return answer
+        except DailyLimitError as error:
+            return {"success_bool": False, "limited_bool": True, "reason_string": str(error),
+                    "limit": limit_state()}
         except Exception as error:
             logger.warning("civitai post failed: %s", error)
             return _manual(body, "Civitai did not accept the automatic post (" + str(error)[:200] +
@@ -1018,20 +1189,39 @@ def build_civitai_post_router(require_admin) -> APIRouter:
             raise HTTPException(status_code=400, detail={
                 "error_string": "media_required", "message_string": "Nothing to post"})
         kind = _kind(body.media_url)
+        state = limit_state()
+        if state["limited_bool"] and not body.dry_run:
+            return {"success_bool": False, "limited_bool": True, "reason_string": state["message_string"],
+                    "limit": state}
         if body.dry_run:
-            request = render_task(body.media_url).get("prompt") or {}
-            resources, notes = collect_resources(body.resources, request, dict(body.generation or {}))
-            return {"success_bool": True, "dry_run_bool": True, "kind_string": kind, "host_string": CIVITAI_HOST,
-                    "token_present_bool": bool(_token()), "resources_array": resources, "notes_array": notes,
-                    "meta": build_meta(body.prompt, request, dict(body.generation or {}), resources,
-                                       False, (0, 0)),
-                    "techniques_array": techniques_for(request, kind),
-                    "steps_array": (["POST /api/v1/image-upload", "PUT <uploadURL> (file)", "trpc post.create",
-                                     "trpc post.addImage (meta + civitaiResources)",
-                                     "trpc post.addResourceToImage (missing)", "trpc image.addTechniques/addTools",
-                                     f"trpc post.addTag x<={POST_TAG_LIMIT}",
-                                     "trpc post.update" + (" publishedAt" if body.publish else " (draft)")]
-                                    if kind != "audio" else ["mux audio onto a still -> mp4", "then as a clip"])}
+            # Builds every request and sends none to Civitai: files are read
+            # and described here, nothing is uploaded or created.
+            async with httpx.AsyncClient() as client:
+                planned = []
+                urls = [body.media_url] + [extra.media_url for extra in body.extra_items[:MAX_POST_FILES - 1]]
+                sources = [body.source_urls] + [extra.source_urls or body.source_urls
+                                                for extra in body.extra_items[:MAX_POST_FILES - 1]]
+                for index, (url, src) in enumerate(zip(urls, sources)):
+                    try:
+                        item = await prepare_item(client, url, body, src, False)
+                        planned.append({"index_int": index, "media_url_string": url, "kind_string":
+                                        "video" if item["is_video"] else "image",
+                                        "size_string": f"{item['width']}x{item['height']}",
+                                        "meta": item["meta"], "resources_array": item["resources"],
+                                        "notes_array": item["notes"], "techniques_array": item["techniques"],
+                                        "metadata": item["media_metadata"]})
+                    except Exception as error:
+                        planned.append({"index_int": index, "media_url_string": url, "error_string": str(error)[:200]})
+            return {"success_bool": True, "dry_run_bool": True, "host_string": CIVITAI_HOST,
+                    "token_present_bool": bool(_token()), "files_array": planned, "limit": state,
+                    "rating_level_int": rating_level(body.nsfw_level),
+                    "steps_array": [f"image-upload + PUT x{len(planned)} (all files first)",
+                                    "post.create x1 (only after every upload went through)",
+                                    f"post.addImage x{len(planned)} (meta + civitaiResources)",
+                                    "post.addResourceToImage (missing), image.addTechniques/addTools",
+                                    f"post.addTag x<={POST_TAG_LIMIT}",
+                                    "post.update" + (" publishedAt" if body.publish else " (draft)"),
+                                    "rating: scanner level read back; owner rating only when higher"]}
         if body.background:
             job = {"id": uuid.uuid4().hex[:12], "created_at": time.time(), "stage": "starting",
                    "stage_label": "Starting", "kind_string": kind, "media_url_string": body.media_url,
@@ -1057,6 +1247,10 @@ def build_civitai_post_router(require_admin) -> APIRouter:
             task.add_done_callback(_BACKGROUND.discard)
             return {"success_bool": True, "job_id_string": job["id"], "job": _public_job(job)}
         return await run_post(body, None)
+
+    @router.get("/api/ai/civitai/limit")
+    async def api_civitai_limit(_admin=Depends(require_admin)):
+        return dict(limit_state(), success_bool=True)
 
     @router.get("/api/ai/civitai/jobs")
     async def api_civitai_jobs(_admin=Depends(require_admin)):

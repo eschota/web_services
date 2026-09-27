@@ -2159,6 +2159,45 @@
     } catch (error) { return known; }
   }
 
+  const CIV_MEDIA = /^https?:\/\/[^\s"]+\.(png|jpe?g|webp|mp4|webm|mov|m4v)(\?[^\s"]*)?$/i;
+  // Every file a node shows: its value, its X9 cells and its list items.
+  function nodeOutputUrls(nodeId) {
+    const record = runState.get(String(nodeId));
+    if (!record) return [];
+    const urls = [];
+    const add = value => {
+      const url = value && typeof value === 'object' ? value.value : value;
+      if (typeof url === 'string' && CIV_MEDIA.test(url) && !urls.includes(url)) urls.push(url);
+    };
+    add(record.value);
+    (Array.isArray(record.x9) ? record.x9 : []).forEach(add);
+    (Array.isArray(record.items) ? record.items : []).forEach(add);
+    return urls;
+  }
+
+  // Other finished outputs the owner can add to the same post: this node's
+  // X9 cells / list items first, then every other node's output.
+  function civitaiCandidates(nodeId, mainUrl) {
+    const list = [];
+    const seen = new Set([mainUrl]);
+    const push = (url, from) => { if (!seen.has(url)) { seen.add(url); list.push({url, from}); } };
+    nodeOutputUrls(nodeId).forEach(url => push(url, String(nodeId)));
+    runState.forEach((record, otherId) => {
+      if (String(otherId) === String(nodeId)) return;
+      nodeOutputUrls(otherId).forEach(url => push(url, String(otherId)));
+    });
+    return list;
+  }
+
+  let civitaiLimit = null;
+  async function civitaiLimitState() {
+    try {
+      const response = await fetch('/api/ai/civitai/limit', {credentials: 'same-origin'});
+      civitaiLimit = response.ok ? await response.json() : null;
+    } catch (error) { civitaiLimit = null; }
+    return civitaiLimit;
+  }
+
   async function openCivitaiDialog(id) {
     const record = runState.get(String(id));
     const url = record && record.value;
@@ -2202,6 +2241,9 @@
       <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(([r, tip]) =>
         `<label class="civ-seg-opt" title="${esc(r + ': ' + tip)}"><input type="radio" name="rating" value="${r}"${r === rating ? ' checked' : ''}><span>${r}</span></label>`).join('')}</div>${raisedNote ? `<i class="civ-rating-note">${esc(raisedNote)}</i>` : ''}</div>
       <label><input type="checkbox" name="confirm" checked> I checked the rating</label>
+      <details class="civ-batch"><summary>Add more outputs to this post <span class="civ-batch-count"></span></summary>
+        <div class="civ-batch-grid"></div></details>
+      <div class="civ-limit" style="color:#aab0c8;font-size:12px"></div>
       <div>Resources: ${resources.length ? resources.map(r => `<a href="https://civitai.red/model-versions/${r.model_version_id}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join(', ') : '<i>none detected</i>'}</div>
       <div><button type="button" class="civ-regen">↻ Write title, description and tags</button> <span class="civ-meta-state"></span></div>
       <label><input type="radio" name="publish" value="draft"${lastMode === 'draft' ? ' checked' : ''}> Save as draft</label>
@@ -2259,7 +2301,36 @@
     };
     dialog.querySelector('.civ-regen').addEventListener('click', () => writeMeta(true));
     writeMeta(false);
+    const candidates = civitaiCandidates(id, url);
+    const grid = dialog.querySelector('.civ-batch-grid');
+    const batchBox = dialog.querySelector('.civ-batch');
+    if (!candidates.length) batchBox.hidden = true;
+    grid.innerHTML = candidates.slice(0, 60).map((c, i) => {
+      const video = /\.(mp4|webm|mov|m4v)(\?|$)/i.test(c.url);
+      return `<label class="civ-cell" title="${esc(c.url)}"><input type="checkbox" value="${i}">` +
+        (video ? `<video src="${esc(c.url)}" muted preload="metadata"></video>` : `<img src="${esc(c.url)}" loading="lazy" alt="">`) + '</label>';
+    }).join('');
+    const picked = () => [...grid.querySelectorAll('input:checked')].map(box => candidates[Number(box.value)]);
+    const syncBatch = () => {
+      const extra = picked();
+      grid.querySelectorAll('input:not(:checked)').forEach(box => { box.disabled = extra.length >= 19; });
+      dialog.querySelector('.civ-batch-count').textContent = extra.length ? `(${extra.length} added)` : '';
+      if (!civitaiLimit || !civitaiLimit.limited_bool) go.textContent = extra.length ? `Post ${extra.length + 1} as one post` : 'Post';
+    };
+    grid.addEventListener('change', syncBatch);
+    civitaiLimitState().then(limit => {
+      const line = dialog.querySelector('.civ-limit');
+      if (!limit) return;
+      if (limit.limited_bool) {
+        go.disabled = true;
+        go.textContent = 'Daily limit reached';
+        line.innerHTML = '<b style="color:#fbbf24">' + esc(limit.message_string) + '</b>';
+      } else {
+        line.textContent = `Posts created in the last 24 h: ${limit.created_last_24h_int} · Civitai allows ${limit.tiers_string}`;
+      }
+    });
     dialog.querySelector('.civ-go').addEventListener('click', async () => {
+      if (civitaiLimit && civitaiLimit.limited_bool) { out.textContent = civitaiLimit.message_string; return; }
       if (!form.rating.value || !form.confirm.checked) { out.textContent = 'Choose the rating and confirm it.'; return; }
       const publish = form.publish.value === 'publish';
       go.disabled = true;
@@ -2273,6 +2344,7 @@
         resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
           weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
         publish, background: true, auto_meta: true, source_urls: nodeSourceUrls(id),
+        extra_items: picked().slice(0, 19).map(c => ({media_url: c.url, source_urls: nodeSourceUrls(c.from)})),
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
@@ -2281,6 +2353,13 @@
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error((data.detail && (data.detail.message_string || data.detail)) || ('HTTP ' + response.status));
+        if (data.limited_bool) {
+          civitaiLimit = data.limit || {limited_bool: true, message_string: data.reason_string};
+          go.disabled = true;
+          go.textContent = 'Daily limit reached';
+          out.innerHTML = '<b style="color:#fbbf24">' + esc(data.reason_string || 'Civitai daily post limit reached') + '</b>';
+          return;
+        }
         if (data.job_id_string) {
           go.disabled = true;
           civitaiJobs.watch(data.job_id_string, id, job => { out.innerHTML = civitaiJobs.describe(job, true); });
