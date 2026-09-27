@@ -278,6 +278,9 @@ DELIVERY_TICK_SECONDS = float(os.getenv("RENDERFIN_DELIVERY_TICK_SECONDS", "5"))
 
 # Turntable rendering (character_gen stage 3)
 TURNTABLE_NODE = os.getenv("RENDERFIN_TURNTABLE_NODE", "node")
+# Owner rule 2026-09-27: a restart (every deploy) wipes the render queue and
+# stops what the boxes are rendering; graphs are re-run after server changes.
+WIPE_QUEUE_ON_START = os.getenv("RENDERFIN_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", "")
 TURNTABLE_SCRIPT = os.getenv(
     "RENDERFIN_TURNTABLE_SCRIPT",
     str(PACKAGE_DIR.parent.parent / "tools" / "renderfin" / "glb_turntable.mjs"),

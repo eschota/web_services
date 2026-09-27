@@ -225,6 +225,7 @@ import httpx
 
 from ai_fleet import router as ai_fleet_router
 from ai_graph import router as ai_graph_router
+from ai_video_tools import router as ai_video_tools_router
 from ai_controlnet_api import router as ai_controlnet_router
 from ai_model_catalogue import router as ai_model_catalogue_router
 from ai_services import router as ai_services_router
@@ -1188,6 +1189,22 @@ async def lifespan(app: FastAPI):
     global background_task_running
     
     # Startup
+    # Owner rule 2026-09-27: a site restart (every deploy) wipes the render
+    # queue too; renderfin does the same when it restarts itself.
+    if os.getenv("AUTORIG_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", ""):
+        async def _wipe_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/reset",
+                        params={"spare_non_graph": 1, "reason": "cancelled: server restarted — press Render again"}, timeout=120.0)
+                data = response.json()
+                print(f"[Startup] render queue wiped: {data.get('cancelled_queued_int')} queued, "
+                      f"{data.get('cancelled_running_int')} running; boxes {data.get('boxes_object')}")
+            except Exception as exc:
+                print(f"[Startup] render queue wipe skipped: {exc}")
+        asyncio.create_task(_wipe_render_queue_on_start())
     if AUTORIG_MIGRATION_READ_ONLY:
         # The staging database is migrated once offline before this mode is
         # enabled. Runtime startup performs no schema or filesystem writes.
@@ -1311,6 +1328,10 @@ app = FastAPI(
 
 # Add GZip compression for responses > 500 bytes.
 # GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
+from task_owner import TaskOwnerMiddleware
+
+# Inside GZip, so it reads plain JSON: records who submitted each render task.
+app.add_middleware(TaskOwnerMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 # Civitai pages and CDN previews as media inputs (civitai_media.py).
 from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
@@ -1321,6 +1342,9 @@ app.state.limiter = limiter
 
 app.include_router(ai_fleet_router)
 app.include_router(ai_graph_router)
+app.include_router(ai_video_tools_router)
+from ai_wan_image import router as ai_wan_image_router
+app.include_router(ai_wan_image_router)
 app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
@@ -1541,6 +1565,8 @@ app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))
 app.include_router(build_avatar_build_router(get_avatar_owner))
+from ai_avatar_ready import build_avatar_ready_router
+app.include_router(build_avatar_ready_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
 app.include_router(ai_graph_edits_router)
 app.include_router(ai_pipelines_router)
@@ -1573,6 +1599,13 @@ from ai_lora_manager import build_lora_admin_router, router as ai_lora_router
 
 app.include_router(ai_lora_router)
 app.include_router(build_lora_admin_router(require_admin))
+
+from ai_civitai_post import build_civitai_post_router
+
+app.include_router(build_civitai_post_router(require_admin))
+from ai_fleet_models import build_admin_router as build_fleet_models_admin_router, router as ai_fleet_models_router
+app.include_router(ai_fleet_models_router)
+app.include_router(build_fleet_models_admin_router(require_admin))
 
 
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (

@@ -1725,6 +1725,14 @@ def build_avatar_build_router(owner_dependency: Callable, *, builder: Optional[A
                 continue
             if job.get("finished") or (job.get("request") or {}).get("runner") == "cli":
                 continue
+            if os.getenv("AUTORIG_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", ""):
+                # Owner rule 2026-09-27: a restart ends the build; the next
+                # identical request (the next Render) starts it again.
+                job.update(status="failed", finished=True, error="cancelled: server restarted — press Render again")
+                _log(job, "cancelled: server restarted — press Render again")
+                get_builder().jobs.write(job)
+                logger.warning("avatar build %s closed by the restart wipe", job.get("job_id"))
+                continue
             logger.info("resuming avatar build %s", job.get("job_id"))
             get_builder().ensure_running(str(job.get("job_id")))
 

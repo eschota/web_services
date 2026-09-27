@@ -136,8 +136,16 @@ async def api_render_cancel_pending(request: Request) -> Dict[str, Any]:
     return await _queue(request).cancel_all_pending()
 
 
+@router.get("/api-render/last-start-wipe")
+async def api_render_last_start_wipe(request: Request) -> Dict[str, Any]:
+    """What the last start wiped (owner rule: every restart clears the queue)."""
+    return getattr(_queue(request), "last_start_wipe", None) or {"note_string": "no wipe at the last start"}
+
+
 @router.post("/api-render/reset")
-async def api_render_reset(request: Request, dry_run: int = Query(default=0)) -> Dict[str, Any]:
+async def api_render_reset(request: Request, dry_run: int = Query(default=0),
+                           spare_non_graph: int = Query(default=0),
+                           reason: str = Query(default="")) -> Dict[str, Any]:
     """Cancel everything queued and running and clear every box's ComfyUI queue.
 
     Localhost only, like cancel-pending: the site reaches it through an
@@ -148,7 +156,8 @@ async def api_render_reset(request: Request, dry_run: int = Query(default=0)) ->
     # endpoint) may reset the farm.
     if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
         raise HTTPException(status_code=403, detail="the farm reset is not public")
-    return await _queue(request).reset_farm(dry_run=bool(dry_run))
+    kwargs = {"reason": reason[:200]} if reason else {}
+    return await _queue(request).reset_farm(dry_run=bool(dry_run), spare_non_graph=bool(spare_non_graph), **kwargs)
 
 
 @router.post("/api-render")

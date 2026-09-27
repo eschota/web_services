@@ -517,6 +517,14 @@ class RenderQueue:
             self._client = httpx.AsyncClient(follow_redirects=True)
         await self._resurrect()
         await self._reconcile_terminal_leases()
+        if config.WIPE_QUEUE_ON_START:
+            try:
+                wiped = await self.reset_farm(reason="cancelled: server restarted — press Render again", spare_non_graph=True)
+                print(f"[Renderfin][Queue] START WIPE: cancelled {wiped.get('cancelled_queued_int')} queued, "
+                      f"{wiped.get('cancelled_running_int')} running; boxes {wiped.get('boxes_object')}")
+                self.last_start_wipe = {k: v for k, v in wiped.items() if k != "task_ids_array"}
+            except Exception as exc:
+                print(f"[Renderfin][Queue] START WIPE failed: {exc}")
         self._stopped.clear()
         self._pump_task = asyncio.create_task(self._pump())
 
@@ -695,8 +703,16 @@ class RenderQueue:
             "boxes_array": [s.render_server_name for s in self.registry.all()],
         }
 
+    @staticmethod
+    def _outside_the_farm_reset(task: RenderTask) -> bool:
+        """Hunyuan 3D conversions and the Telegram character pipeline are not
+        graph renders: a restart must not throw away their long jobs."""
+        return (str(task.workflow or "") == routing.WORKFLOW_IMAGE_TO_3D
+                or bool(getattr(task, "logical_owner_task_id", "")))
+
     async def reset_farm(self, *, dry_run: bool = False,
-                         reason: str = "cancelled: farm reset by an administrator") -> Dict[str, Any]:
+                         reason: str = "cancelled: farm reset by an administrator",
+                         spare_non_graph: bool = False) -> Dict[str, Any]:
         """Cancel every queued and running task and empty each box's ComfyUI queue.
 
         Only the render-worker ComfyUI instances in this registry are touched
@@ -711,6 +727,8 @@ class RenderQueue:
         for task_id in list(summary["task_ids_array"]):
             task = self._tasks.get(task_id)
             if task is None or task.status not in (TASK_PENDING, TASK_RENDERING):
+                continue
+            if spare_non_graph and self._outside_the_farm_reset(task):
                 continue
             was_running = task.status == TASK_RENDERING
             if await self.cancel(task_id, reason=reason):
@@ -1580,7 +1598,9 @@ class RenderQueue:
             name, data = await download_prepare_video(
                 self._client, control_url, prompt.frame_count,
                 # An enlargement keeps the clip's own length; no held tail.
-                allow_shorter=workflow_file == "upscale_video_x2.json")
+                allow_shorter=workflow_file == "upscale_video_x2.json",
+                # The enlarged clip keeps its sound (CreateVideo takes it from LoadVideo).
+                keep_audio=workflow_file == "upscale_video_x2.json")
             control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
