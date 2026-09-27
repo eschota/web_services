@@ -223,6 +223,7 @@
   }
 
   function recordResult(id, record) {
+    if (record && record.status === 'done' && looksLikeVideo(record.value)) scheduleAutoFrames();
     if (nodeCompare) record = nodeCompare.enhanceRecord(record, runState.get(String(id)));
     runState.set(String(id), record);
     if (nodeCompare) requestAnimationFrame(() => nodeCompare.refresh(String(id)));
@@ -639,6 +640,7 @@
       displayMode: params && params._display_mode,
       label: (params && params._label) || '',
       followInputSize: hasDimensions ? sizeFollowsInput(entry, params) : undefined,
+      framesAuto: parameterNames.has('frame_count') ? framesFollowInput(entry, params) : undefined,
       disabled: !!(params && params._disabled),
       when: (params && params._when && typeof params._when === 'object') ? params._when : null,
       // A node that can carry a standing instruction is born with the default
@@ -1401,6 +1403,7 @@
       values._follow_input_size = meta(id).followInputSize;
       values._size_auto = meta(id).followInputSize;
     }
+    if (typeof meta(id)?.framesAuto === 'boolean') values._frames_auto = meta(id).framesAuto;
     if (meta(id)?.disabled) values._disabled = true;
     if (meta(id)?.x9) values._x9 = true;
     if (meta(id)?.when) values._when = meta(id).when;
@@ -2698,7 +2701,7 @@
     window.AINodeLists.install({
       meta, nodeElement, runState, bodyFor, stableJson, runnerFor, runnerType, submitJson, splitMulti,
       upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
-      followInputSizeAtRun, startIncrementalService, supersedeTasks: ids => supersedeTasks(ids),
+      followInputSizeAtRun, startIncrementalService, graphFromCanvas, supersedeTasks: ids => supersedeTasks(ids),
       invalidate: id => invalidateNodeAndDownstream(id),
       epoch: () => canvasEpoch,
       get BUDGET_EXHAUSTED() { return BUDGET_EXHAUSTED; },
@@ -3169,6 +3172,190 @@
   }
 
   /** Auto-size nodes take the size of what actually arrived on the primary socket. */
+  /* ------------------------------------------------------------ auto frames */
+
+  /**
+   * Frames follow the input clip (owner rule 2026-09-27, like auto-size): a
+   * video node's frame count = the upstream clip's duration x 24 fps, snapped
+   * to the model's grid (min + n*step: 8n+1 for LTX) and clamped to its range
+   * (MiniMax H3 124-362 etc.). Source: the node's own driving/control clip,
+   * else its first-frame clip, else the nearest clip upstream. Manual with 🔓.
+   * Per-shot list items already take each shot's own length.
+   */
+  const OUTPUT_FPS = 24;
+  const VIDEO_SOCKET_ORDER = ['control_video_url', 'video_url', 'source_url', 'image', 'image_url_end'];
+  const clipDurationCache = new Map();
+
+  function framesFollowInput(entry, params) {
+    if (!params) return true;
+    if (typeof params._frames_auto === 'boolean') return params._frames_auto;
+    const declared = ((entry.params_array || []).find(item => item.name === 'frame_count') || {}).default;
+    const value = Number(params.frame_count);
+    return !(value > 0) || value === Number(declared);
+  }
+
+  function clipDuration(url) {
+    url = String(url || '').trim();
+    if (!/^https?:/.test(url)) return Promise.resolve(0);
+    if (!clipDurationCache.has(url)) {
+      clipDurationCache.set(url, (isCivitai(url) ? resolveMediaLink(url).then(r => r.type === 'video' ? r.url : '') : Promise.resolve(url))
+        .then(real => !real || !looksLikeVideo(real) && !isCivitai(url) ? 0 : new Promise(resolve => {
+          const clip = document.createElement('video');
+          clip.preload = 'metadata';
+          clip.muted = true;
+          const timer = setTimeout(() => resolve(0), 20000);
+          clip.onloadedmetadata = () => { clearTimeout(timer); resolve(Number(clip.duration) || 0); };
+          clip.onerror = () => { clearTimeout(timer); resolve(0); };
+          clip.src = real;
+        })).catch(() => 0));
+    }
+    return clipDurationCache.get(url);
+  }
+
+  /** The clip a node's frames follow: {url, from} or null. */
+  function frameSourceFor(id, graph) {
+    const byId = new Map(graph.nodes.map(node => [String(node.id), node]));
+    const valueOf = nodeId => {
+      const node = byId.get(String(nodeId));
+      if (!node) return '';
+      if (node.kind === KIND_INPUT) {
+        const field = nodeElement(nodeId) && nodeElement(nodeId).querySelector('[data-value]');
+        return String((field && field.value) || node.value || '');
+      }
+      const record = runState.get(String(nodeId));
+      return record && record.value && record.status === 'done' ? String(record.value) : '';
+    };
+    const labelOf = nodeId => {
+      const node = byId.get(String(nodeId)) || {};
+      return (node.params || {})._label || (serviceById(node.service) || {}).title || (node.kind === KIND_INPUT ? 'Media in' : String(nodeId));
+    };
+    const isClip = value => looksLikeVideo(value) || (isCivitai(value) && /\.(mp4|webm|mov)|video|transcode=true/i.test(value));
+    const into = graph.links.filter(link => String(link.to) === String(id));
+    // Fed per shot (Scene split or any list upstream): each item takes its own
+    // shot's length in the list runner, so there is no single number to show.
+    // A per-shot branch: Scene split somewhere upstream, not closed by Concat.
+    const perShotFrom = start => {
+      const seenUp = new Set();
+      let queue = [String(start)];
+      while (queue.length) {
+        const nodeId = queue.shift();
+        if (seenUp.has(nodeId)) continue;
+        seenUp.add(nodeId);
+        const from = byId.get(nodeId) || {};
+        const record = runState.get(nodeId);
+        if (from.service === 'scene_split' || (record && Array.isArray(record.items) && record.items.length)) return true;
+        if (from.service === 'video_concat') continue;
+        graph.links.filter(link => String(link.to) === nodeId).forEach(link => queue.push(String(link.from)));
+      }
+      return false;
+    };
+    const listFeed = into.find(link => perShotFrom(link.from));
+    if (listFeed && (meta(id) || {}).framesAuto !== false) return {perShot: true, from: labelOf(listFeed.from)};
+    for (const field of VIDEO_SOCKET_ORDER) {
+      const link = into.find(item => item.input === field);
+      if (!link) continue;
+      const value = valueOf(link.from);
+      if (isClip(value)) return {url: value, from: labelOf(link.from)};
+    }
+    // Nearest clip upstream (breadth first).
+    const seen = new Set([String(id)]);
+    let frontier = into.map(link => String(link.from));
+    for (let depth = 0; depth < 8 && frontier.length; depth += 1) {
+      const next = [];
+      for (const nodeId of frontier) {
+        if (seen.has(nodeId)) continue;
+        seen.add(nodeId);
+        const value = valueOf(nodeId);
+        if (isClip(value)) return {url: value, from: labelOf(nodeId)};
+        graph.links.filter(link => String(link.to) === nodeId).forEach(link => next.push(String(link.from)));
+      }
+      frontier = next;
+    }
+    return null;
+  }
+
+  function snapFrames(frames, control) {
+    const min = Number(control.min) || 9, max = Number(control.max) || 393, step = Number(control.step) || 8;
+    const wanted = Math.round(frames);
+    let snapped = min + Math.round((wanted - min) / step) * step;
+    snapped = Math.max(min, Math.min(max - ((max - min) % step), snapped));
+    return {value: snapped, capped: wanted > max, wanted};
+  }
+
+  function paintFramesRow(id, auto, text) {
+    const element = nodeElement(id);
+    const control = element && element.querySelector('[data-param="frame_count"]');
+    const label = control && control.closest('label, .nparam');
+    if (!label) return;
+    let row = element.querySelector('.nframes-auto');
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'nsize-auto nframes-auto';
+      row.innerHTML = '<button type="button" class="nsize-lock"></button><span class="nsize-text"></span>';
+      label.parentElement.insertBefore(row, label);
+      const button = row.querySelector('.nsize-lock');
+      ['mousedown', 'pointerdown', 'touchstart'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        const item = meta(id) || {};
+        item.framesAuto = !(item.framesAuto !== false);
+        invalidateNodeAndDownstream(id);
+        scheduleAutoFrames();
+      });
+    }
+    row.querySelector('.nsize-lock').textContent = auto ? '🔒 Auto' : '🔓 Manual';
+    row.querySelector('.nsize-lock').title = auto ? 'Frames follow the input clip. Click to set them by hand.' : 'Manual frames. Click to follow the input clip.';
+    row.querySelector('.nsize-text').textContent = text;
+    const box = control._aislider && control._aislider.box;
+    if (box) { box.style.pointerEvents = auto ? 'none' : ''; box.style.opacity = auto ? '.6' : ''; }
+  }
+
+  let autoFramesTimer = null;
+  function scheduleAutoFrames() {
+    clearTimeout(autoFramesTimer);
+    autoFramesTimer = setTimeout(refreshAutoFrames, 300);
+  }
+
+  async function refreshAutoFrames() {
+    if (!editor) return;
+    const graph = graphFromCanvas();
+    for (const node of graph.nodes) {
+      const id = String(node.id);
+      const item = meta(id);
+      const element = nodeElement(id);
+      const control = element && element.querySelector('[data-param="frame_count"]');
+      if (!item || !control || typeof item.framesAuto !== 'boolean') continue;
+      if (!item.framesAuto) { paintFramesRow(id, false, 'Manual · ' + control.value + ' frames'); continue; }
+      const source = frameSourceFor(id, graph);
+      if (!source) { paintFramesRow(id, true, 'Auto · no input clip — ' + control.value + ' frames'); continue; }
+      if (source.perShot) { paintFramesRow(id, true, 'Auto · per shot — each shot’s own length (from ' + source.from + ')'); continue; }
+      const seconds = await clipDuration(source.url);
+      if (!(seconds > 0)) { paintFramesRow(id, true, 'Auto · reading ' + source.from + '…'); continue; }
+      const fit = snapFrames(seconds * OUTPUT_FPS, control);
+      if (String(control.value) !== String(fit.value)) {
+        control.dataset.silentUpdate = 'yes';
+        control.value = String(fit.value);
+        control.dispatchEvent(new Event('input', {bubbles: true}));
+        delete control.dataset.silentUpdate;
+      }
+      paintFramesRow(id, true, 'Auto · ' + fit.value + ' (' + (fit.value / OUTPUT_FPS).toFixed(2) + ' s from ' + source.from + ')' +
+        (fit.capped ? ' — ' + fit.value + ' of ' + fit.wanted + ': split with Scene split' : ''));
+    }
+  }
+
+  /** At run time the clip that actually arrived decides. */
+  async function followInputFramesAtRun(node, resolved, params) {
+    if (!params || params.frame_count == null || params._frames_auto === false) return;
+    const item = meta(node.id);
+    if (item && item.framesAuto === false) return;
+    const clip = VIDEO_SOCKET_ORDER.map(field => resolved[field]).find(value => typeof value === 'string' && looksLikeVideo(value));
+    if (!clip) return;
+    const control = nodeElement(node.id) && nodeElement(node.id).querySelector('[data-param="frame_count"]');
+    if (!control) return;
+    const seconds = await clipDuration(clip);
+    if (seconds > 0) params.frame_count = snapFrames(seconds * OUTPUT_FPS, control).value;
+  }
+
   async function followInputSizeAtRun(node, resolved, params) {
     if (!params || params.width == null || params.height == null) return;
     if (params._follow_input_size === false || params._size_auto === false) return;
@@ -4181,9 +4368,11 @@
         if (completed.items && window.AINodeLists) requestAnimationFrame(() => window.AINodeLists.paint(idString));
         recordResult(idString, {status:'done', type:completed.type, value:completed.value,
           input_reference_url:completed.input_reference_url || (nodeCompare?.resolveReference(idString, graphSnapshot) || resolved.image || ''),
-          task_id:completed.task_id || '', outputs:completed.outputs || undefined});
+          task_id:completed.task_id || '', outputs:completed.outputs || undefined,
+          items:completed.items || undefined}); // listsV4: a cached Scene split keeps its shots
       }
-      return Promise.resolve({type: completed.type, value: completed.value, outputs: completed.outputs || null});
+      return Promise.resolve(Object.assign({type: completed.type, value: completed.value, outputs: completed.outputs || null},
+        completed.items ? {items: completed.items} : {}));
     }
 
     const version = (nodeRunVersions.get(idString) || 0) + 1;
@@ -4341,6 +4530,7 @@
           }
           const params = {...(node.params || {})};
           await followInputSizeAtRun(node, resolved, params);
+          await followInputFramesAtRun(node, resolved, params);
           if (params._x9 && X9_SERVICES.has(node.service)) {
             try {
               const result = await runX9(id, node, resolved, fan, params, epoch, keepDone);
@@ -4575,7 +4765,7 @@
     accepted[runner.field] = record.value || '';
     try {
       const reporter = taskStateReporter(state, task, accepted);
-      const {value, outputs} = splitMulti(await runner.finish(accepted, runner, data => {
+      const {value, outputs, items: resumedItems} = splitMulti(await runner.finish(accepted, runner, data => {
         if (stillHere()) reporter(data);
       }));
       if (!stillHere()) return;
@@ -4585,8 +4775,9 @@
       showResult(outBox, runnerType(runner, value), value, outputs);
       recordResult(id, Object.assign({ status: 'done', type: runnerType(runner, value), value: value,
                          input_reference_url:record.input_reference_url || '', history:record.history || [],
-                         task_id: record.task_id || '' }, outputs ? {outputs} : {}));
-      return outputs ? {type:runnerType(runner, value), value, outputs} : {type:runnerType(runner, value), value};
+                         task_id: record.task_id || '' }, outputs ? {outputs} : {}, resumedItems ? {items: resumedItems} : {}));
+      if (resumedItems && window.AINodeLists) window.AINodeLists.paint(id);
+      return Object.assign({type:runnerType(runner, value), value}, outputs ? {outputs} : {}, resumedItems ? {items: resumedItems} : {});
     } catch (error) {
       if (!stillHere()) throw error;
       state.textContent = String(error.message || error);
@@ -4659,6 +4850,8 @@
     }
     paintIsolation();
     restoreResults(graph.results, mapping);
+    scheduleAutoFrames();
+    setTimeout(scheduleAutoFrames, 4000);
     if (nodeGroups && nodeGroups.refreshSizes) {
       nodeGroups.refreshSizes();
       // Model pickers and system-prompt markers finish a beat later on some
@@ -5192,6 +5385,18 @@
       if (target._acceptText(link)) event.preventDefault();
     });
     editor.on('connectionCreated', onConnectionCreated);
+    editor.on('connectionCreated', scheduleAutoFrames);
+    editor.on('connectionRemoved', scheduleAutoFrames);
+    document.getElementById('canvas').addEventListener('change', event => {
+      if (event.target && event.target.dataset && event.target.dataset.value !== undefined) scheduleAutoFrames();
+    });
+    document.getElementById('canvas').addEventListener('input', event => {
+      const control = event.target;
+      if (!control || !control.dataset || control.dataset.param !== 'frame_count' || control.dataset.silentUpdate === 'yes') return;
+      const node = control.closest('.drawflow-node');
+      const item = node && meta(node.id.replace(/^node-/, ''));
+      if (item && item.framesAuto) { item.framesAuto = false; scheduleAutoFrames(); }
+    });
     editor.on('connectionRemoved', connection => {
       if (connection && connection.input_id != null) {
         refreshReferenceSockets(connection.input_id);
