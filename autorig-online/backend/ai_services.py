@@ -123,11 +123,57 @@ SERVICES: List[Dict[str, object]] = [
         "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "First frame"}],
     },
     {
+        # Scene-aware since 2026-09-27 (owner): adaptive cut detection on the
+        # per-frame change score, then the MIDDLE frame of every scene, numbered
+        # with timecodes, plus the scene list as text for Vision.
         "id": "video_storyboard", "title": "Video storyboard", "path": "/nodes",
-        "api": "/api/ai/video-reference", "status": "live",
-        "summary": "Five chronological frames for Vision to describe the scene and action.",
+        "api": "/api/ai/video-tools/scene-split", "status": "live",
+        "summary": "Scenes found by cut detection: the middle frame of each scene with its number and timecodes.",
         "inputs": [{"type": VIDEO, "field": "video_url", "required": True, "title": "Source video"}],
-        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Timeline image"}],
+        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Storyboard (scene middles)"},
+                    {"type": TEXT, "field": "scenes_text_string", "title": "Scenes (text)"}],
+    },
+    {
+        # Loop head (2026-09-27): every node wired after a per-shot output runs
+        # once per shot in the editor; Concat collects the list again.
+        "id": "scene_split", "title": "Scene split · for each shot", "path": "/nodes",
+        "api": "/api/ai/video-tools/scene-split", "status": "live", "list_source": True,
+        "summary": ("Cuts a video into shots (adaptive cut detection, long shots split to the frame limit). "
+                    "Nodes wired after an (each) output run once per shot."),
+        "inputs": [{"type": VIDEO, "field": "video_url", "required": True, "title": "Source video"}],
+        "outputs": [
+            {"type": VIDEO, "field": "shot_clip_url_string", "title": "Shot clip (each)", "per_item": True},
+            {"type": IMAGE, "field": "first_frame_url_string", "title": "First frame (each)", "per_item": True},
+            {"type": IMAGE, "field": "middle_frame_url_string", "title": "Middle frame (each)", "per_item": True},
+            {"type": TEXT, "field": "shot_info_string", "title": "Shot info (each)", "per_item": True},
+            {"type": IMAGE, "field": "storyboard_url_string", "title": "Storyboard (scene middles)"},
+            {"type": TEXT, "field": "scenes_text_string", "title": "Scenes (text)"},
+            {"type": TEXT, "field": "shots_json_string", "title": "Shot list (for Concat)"},
+            {"type": VIDEO, "field": "source_video_url_string", "title": "Reference 24 fps + audio"},
+        ],
+    },
+    {
+        "id": "video_concat", "title": "Concat shots", "path": "/nodes",
+        "api": "/api/ai/video-tools/concat", "status": "live", "list_sink": True,
+        "summary": ("Joins per-shot clips in shot order: per shot the first clip that arrived (Clips, then 2, then 3), "
+                    "trimmed to the shot length, one size and frame rate."),
+        "inputs": [
+            {"type": VIDEO, "field": "clip", "required": True, "title": "Clips (each shot)"},
+            {"type": VIDEO, "field": "clip_2", "required": False, "title": "Clips 2 (if 1 missing)"},
+            {"type": VIDEO, "field": "clip_3", "required": False, "title": "Clips 3 (if 1, 2 missing)"},
+            {"type": TEXT, "field": "shots_json", "required": False, "title": "Shot list (from Scene split)"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Joined video"}],
+    },
+    {
+        "id": "audio_from_source", "title": "Audio from source", "path": "/nodes",
+        "api": "/api/ai/video-tools/audio-mux", "status": "live",
+        "summary": "Puts the original video's audio under the new picture.",
+        "inputs": [
+            {"type": VIDEO, "field": "video_url", "required": True, "title": "New picture"},
+            {"type": VIDEO, "field": "source_url", "required": False, "title": "Audio from (original)"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Video with audio"}],
     },
     {
         "id": "video_control", "title": "Video motion transfer", "path": "/nodes",
@@ -186,6 +232,46 @@ SERVICES: List[Dict[str, object]] = [
         ],
     },
     {
+        # A saved Avatar on the builder's sockets (2026-09-27); with no Avatar
+        # wired it builds one from the picture/video (whichever is connected).
+        "id": "avatar_ready", "title": "Avatar (ready or build)", "path": "/nodes",
+        "api": "/api/ai/avatar-ready", "status": "live", "multi_output": True,
+        "summary": ("A saved Avatar (av_…@version, yours) out on the same sockets as the Avatar builder; "
+                    "with no Avatar wired, builds one from the picture or video."),
+        "inputs": [
+            {"type": AVATAR, "field": "avatar", "required": False, "title": "Ready Avatar (av_…@N)"},
+            {"type": IMAGE, "field": "image", "required": False, "title": "…or build from photo/video",
+             "also_accepts": [VIDEO]},
+        ],
+        "outputs": [
+            {"type": AVATAR, "field": "avatar_string", "title": "Avatar"},
+            {"type": IMAGE, "field": "front_url_string", "title": "Front", "view": "front"},
+            {"type": IMAGE, "field": "face_closeup_url_string", "title": "Face", "view": "face_closeup"},
+            {"type": IMAGE, "field": "full_body_url_string", "title": "Full body", "view": "full_body"},
+            {"type": IMAGE, "field": "three_quarter_left_url_string", "title": "3/4 left", "view": "three_quarter_left"},
+            {"type": IMAGE, "field": "three_quarter_right_url_string", "title": "3/4 right", "view": "three_quarter_right"},
+            {"type": IMAGE, "field": "profile_left_url_string", "title": "Profile left", "view": "profile_left"},
+            {"type": IMAGE, "field": "profile_right_url_string", "title": "Profile right", "view": "profile_right"},
+            {"type": IMAGE, "field": "back_url_string", "title": "Back", "view": "back"},
+            {"type": IMAGE, "field": "sheet_url_string", "title": "Sheet"},
+            {"type": IMAGE, "field": "source_frame_url_string", "title": "Source frame"},
+            {"type": TEXT, "field": "description_string", "title": "Description"},
+        ],
+    },
+    {
+        # Wan-Animate-2 from a plain picture, no saved Avatar (2026-09-27).
+        "id": "wan_image", "title": "Wan-Animate-2 · character picture", "path": "/nodes",
+        "api": "/api/ai/wan-animate", "status": "live", "slow": True,
+        "summary": "Animate a character picture (e.g. a Qwen keyframe) with the motion of a driving video (worker-4090).",
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True, "title": "Character picture / keyframe"},
+            {"type": VIDEO, "field": "control_video_url", "required": True, "title": "Driving video"},
+            {"type": TEXT, "field": "prompt", "required": False, "title": "Motion verbs"},
+            {"type": TEXT, "field": "character", "required": False, "title": "Character description"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Clip"}],
+    },
+    {
         "id": "avatar_video", "title": "Avatar video · Wan-Animate-2", "path": "/nodes",
         "api": "/api/ai/avatar-video", "status": "live", "slow": True,
         "summary": "Transfer action from a driving video to one or two saved Avatar characters.",
@@ -226,6 +312,10 @@ SERVICES: List[Dict[str, object]] = [
             # up submitting a request with no prompt at all.
             {"type": TEXT, "field": "prompt", "required": False,
              "title": "What to ask about it"},
+            # Facts to read the picture with (e.g. Scene split's scene list);
+            # the editor appends it to the question.
+            {"type": TEXT, "field": "context", "required": False,
+             "title": "Context (added to the question)"},
         ],
         "outputs": [
             {"type": TEXT, "field": "answer_string", "title": "Answer"},
@@ -524,6 +614,10 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 gives a different piece each run"},
     ],
     "qwen_image": [
+        # The node's own text (owner, 2026-09-27): visible in every view; a
+        # wired prompt wins.
+        {"name": "prompt", "title": "What to draw or change", "type": "textarea",
+         "default": "", "help": "Leave empty if a prompt is wired in, or to remix the pictures"},
         # Automatic is the honest default: the wiring already says which of
         # the two models is meant. The explicit choices exist for the case
         # where a picture is wired in as a style reference but the person
@@ -640,6 +734,32 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
              {"value": "klein", "title": "FLUX.2 klein 4B"},
              {"value": "none", "title": "No retry"},
          ]},
+    ],
+    "scene_split": [
+        {"name": "sensitivity", "title": "Cut sensitivity (z)", "type": "range", "min": 4, "max": 40, "step": 1,
+         "default": 12, "help": "A cut must stand this many robust deviations above the clip's typical change; lower = more cuts"},
+        {"name": "local_ratio", "title": "Jump vs neighbours", "type": "range", "min": 2, "max": 20, "step": 0.5,
+         "default": 6, "help": "A cut must be this many times the mean change of the surrounding half second"},
+        {"name": "max_frames", "title": "Max shot frames", "type": "number", "min": 9, "max": 393, "step": 8,
+         "default": 97, "help": "Longer shots are split into parts (97 = Wan-Animate / LTX limit at 24 fps)"},
+        {"name": "min_shot_seconds", "title": "Min shot (s)", "type": "number", "min": 0, "max": 5, "step": 0.1,
+         "default": 0.5, "help": "Cuts closer than this are ignored (flicker)"},
+        {"name": "max_seconds", "title": "Only first N s", "type": "number", "min": 0, "max": 600, "step": 1,
+         "default": 0, "help": "0 = whole video"},
+    ],
+    "video_concat": [
+        {"name": "out_width", "title": "Width", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,
+         "help": "0 = size of the first clip"},
+        {"name": "out_height", "title": "Height", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,
+         "help": "0 = size of the first clip"},
+        {"name": "fps", "title": "FPS", "type": "number", "min": 8, "max": 60, "step": 1, "default": 24},
+    ],
+    "wan_image": [
+        {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 960},
+        {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 544},
+        {"name": "frame_count", "title": "Frames", "type": "range", "min": 9, "max": 97, "step": 8, "default": 97},
+        {"name": "control_strength", "title": "Control strength", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 1},
+        {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
     ],
     "avatar_video": [
         {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048,
@@ -766,6 +886,8 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "step": 1, "default": 0, "help": "0 gives a different picture each run"},
     ],
     "video": [
+        {"name": "prompt", "title": "What should happen", "type": "textarea",
+         "default": "", "help": "Leave empty if a prompt is wired in"},
         {"name": "width", "title": "Width", "type": "number", "default": 960, "min": 256, "max": 2048, "step": 2},
         {"name": "height", "title": "Height", "type": "number", "default": 540, "min": 256, "max": 2048, "step": 2},
         {"name": "checkpoint", "title": "Model", "type": "model",

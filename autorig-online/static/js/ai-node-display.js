@@ -173,7 +173,10 @@
     element.style.setProperty('--display-port-floor', portFloor(element) + 'px');
     markBasicParams(element);
     const details = element.querySelector('.nparams');
-    if (details) details.open = mode !== 'small';
+    // The node's own prompt field stays open in S too (owner, 2026-09-27).
+    if (details) details.open = mode !== 'small' || !!details.querySelector('[data-param="prompt"]');
+    const title = element.querySelector('.nhead b');
+    if (title && !title.title) title.title = title.textContent;
     updateButton(element, mode);
     if (typeof options.updateConnections === 'function') {
       soon(() => options.updateConnections(nodeId(element)));
