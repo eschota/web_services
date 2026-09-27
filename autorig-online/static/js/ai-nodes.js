@@ -1850,7 +1850,23 @@
         const action = event.target && event.target.dataset && event.target.dataset.x9;
         if (action === 'prev') dialog._show(dialog._index - 1);
         if (action === 'next') dialog._show(dialog._index + 1);
-        if (action === 'use') { setX9Pick(dialog._node, dialog._index); toast('Cell ' + (dialog._index + 1) + ' is the output.'); }
+        if (action === 'use') {
+          setX9Pick(dialog._node, dialog._index);
+          // The node's Seed becomes that cell's seed (owner, 2026-09-27): with
+          // X9 off the same render is reproduced from the cache; with X9 on
+          // the next set starts from it. Set quietly: nothing is re-rendered.
+          const record = x9Record(dialog._node);
+          const cell = record && record.x9[dialog._index];
+          const field = nodeElement(dialog._node) && nodeElement(dialog._node).querySelector('[data-param="seed"]');
+          if (cell && field && cell.seed) {
+            field.dataset.silentUpdate = 'yes';
+            field.value = String(cell.seed);
+            field.dispatchEvent(new Event('input', {bubbles: true}));
+            field.dispatchEvent(new Event('change', {bubbles: true}));
+            delete field.dataset.silentUpdate;
+          }
+          toast('Cell ' + (dialog._index + 1) + ' is the output' + (cell && cell.seed ? '; Seed set to ' + cell.seed + '.' : '.'));
+        }
         if (action === 'close' || event.target === dialog) dialog.close();
       });
       dialog.addEventListener('keydown', event => {
