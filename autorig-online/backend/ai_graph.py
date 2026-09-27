@@ -1473,12 +1473,24 @@ async def api_my_tasks(request: Request, limit: int = 10):
     caller = task_owner.scope_identity(request.scope)
     limit = max(1, min(20, int(limit or 10)))
     rows = [(task, at) for task, at in task_owner.recent_for(caller, 60)
-            if _re.fullmatch(r"[0-9a-fA-F-]{36}", task)]
+            if _re.fullmatch(r"[0-9a-fA-F-]{36}", task) or _re.fullmatch(r"[A-Za-z0-9_-]{1,32}\.[0-9a-fA-F-]{36}", task)]
 
     async def status(client, task_id):
         cached = _MY_TASK_STATUS.get(task_id)
         if cached and cached.get("final"):
             return cached
+        if "." in task_id:
+            # A 3D job on a fleet node (<node>.<id>).
+            try:
+                row = (await client.get("http://127.0.0.1:8200/api/3dmodel/status/" + task_id, timeout=8.0)).json()
+            except Exception:
+                row = {}
+            done = bool(row.get("finished_bool"))
+            item = {"state": ("done" if row.get("model_url_string") else "failed") if done else "running",
+                    "url": row.get("model_url_string") or "", "poster": row.get("preview_url_string") or "",
+                    "box": row.get("node_string") or "", "final": done, "position": 0, "kind": "model3d"}
+            _MY_TASK_STATUS[task_id] = item
+            return item
         try:
             response = await client.get(ai_vision_api.RENDERFIN_BASE + "/api-render/tasks/" + task_id, timeout=8.0)
             row = response.json() if response.status_code == 200 else {}
@@ -1512,9 +1524,10 @@ async def api_my_tasks(request: Request, limit: int = 10):
             mine_running += 1
         elif item["state"] == "done" and item["url"] and len(items) < limit:
             url = str(item["url"])
-            kind = ("video" if _re.search(r"\.(mp4|webm|mov)(\?|$)", url, _re.I) else
+            kind = "model3d" if item.get("kind") == "model3d" else ("video" if _re.search(r"\.(mp4|webm|mov)(\?|$)", url, _re.I) else
                     "audio" if _re.search(r"\.(mp3|wav|flac|ogg|m4a)(\?|$)", url, _re.I) else "image")
             items.append({"task_id_string": task, "url_string": url, "kind_string": kind,
+                          "poster_string": item.get("poster", ""),
                           "box_string": item["box"], "at_unix_float": at})
     return {"success_bool": True, "items_array": items,
             "queue_object": {"queued_int": int(queue.get("queued_int") or 0),

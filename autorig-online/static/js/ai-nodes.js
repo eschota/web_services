@@ -2446,6 +2446,10 @@
       cell.className = 'rg-cell';
       cell.title = (item.box_string ? item.box_string + ' · ' : '') + new Date(item.at_unix_float * 1000).toLocaleTimeString();
       if (item.kind_string === 'audio') cell.textContent = '🎵';
+      else if (item.kind_string === 'model3d') {
+        if (item.poster_string) { const img = document.createElement('img'); img.src = item.poster_string; img.loading = 'lazy'; img.alt = '3D'; cell.appendChild(img); }
+        else cell.textContent = '🧊';
+      }
       else {
         const media = document.createElement(item.kind_string === 'video' ? 'video' : 'img');
         media.src = item.url_string + (item.kind_string === 'video' ? '#t=0.1' : '');
@@ -2459,7 +2463,9 @@
         event.dataTransfer.setData('application/x-autorig-node', JSON.stringify(spec));
         event.dataTransfer.setData('text/plain', item.url_string);
       });
-      cell.addEventListener('click', () => openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
+      cell.addEventListener('click', () => item.kind_string === 'model3d'
+        ? openModelLightbox(item.url_string, item.poster_string || '')
+        : openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
       return cell;
     };
     const paint = () => {
@@ -3440,7 +3446,10 @@
       if (!data) continue;
       if (report) report(data);
       if (data.finished_bool) {
-        if (data.model_url_string) return data.model_url_string;
+        if (data.model_url_string) {
+          return {value: data.model_url_string,
+                  outputs: {model_url_string: data.model_url_string, preview_url_string: data.preview_url_string || ''}};
+        }
         throw new Error(data.error_string || 'the node did not produce a model');
       }
     }
@@ -4032,7 +4041,122 @@
     host.appendChild(grid);
   }
 
+  /* ------------------------------------------------------------- 3D viewer */
+
+  /**
+   * A finished 3D model is shown in the node (owner, 2026-09-27): Google's
+   * <model-viewer> (orbit, zoom, pan, auto-rotate, lit, soft ground shadow),
+   * loaded from jsDelivr the first time a model is shown. The Preview picture
+   * is the poster until the GLB arrives; model-viewer itself waits until the
+   * element is on screen.
+   */
+  let modelViewerLoading = null;
+  function ensureModelViewer() {
+    if (window.customElements && customElements.get('model-viewer')) return Promise.resolve();
+    if (!modelViewerLoading) {
+      modelViewerLoading = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = 'https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js';
+        script.onload = () => resolve();
+        script.onerror = () => { modelViewerLoading = null; reject(new Error('the 3D viewer did not load')); };
+        document.head.appendChild(script);
+      });
+    }
+    return modelViewerLoading;
+  }
+
+  function modelViewerElement(url, poster, big) {
+    const viewer = document.createElement('model-viewer');
+    viewer.setAttribute('src', url);
+    if (poster) viewer.setAttribute('poster', poster);
+    ['camera-controls', 'auto-rotate', 'ar'].forEach(name => viewer.setAttribute(name, ''));
+    viewer.setAttribute('loading', 'lazy');
+    viewer.setAttribute('reveal', 'auto');
+    viewer.setAttribute('shadow-intensity', '1');
+    viewer.setAttribute('shadow-softness', '0.8');
+    viewer.setAttribute('exposure', '1');
+    viewer.setAttribute('environment-image', 'neutral');
+    viewer.setAttribute('auto-rotate-delay', '1500');
+    viewer.setAttribute('interaction-prompt', 'none');
+    viewer.style.cssText = 'width:100%;height:' + (big ? '72vh' : '220px') + ';background:radial-gradient(#23253d,#0b0c18);border-radius:8px;display:block';
+    ['mousedown', 'pointerdown', 'wheel', 'touchstart', 'dblclick'].forEach(type =>
+      viewer.addEventListener(type, event => event.stopPropagation(), {passive: type === 'touchstart'}));
+    return viewer;
+  }
+
+  function isGlb(url) { return /\.(glb|gltf)(\?|#|$)/i.test(String(url || '')); }
+
+  function openModelLightbox(url, poster) {
+    let dialog = document.getElementById('model-lightbox');
+    if (dialog) dialog.remove();
+    dialog = document.createElement('dialog');
+    dialog.id = 'model-lightbox';
+    dialog.className = 'civ-dialog';
+    dialog.style.width = 'min(1100px, 96vw)';
+    dialog.innerHTML = '<div class="ml-stage"></div><div style="display:flex;gap:8px;justify-content:center;margin-top:10px">' +
+      '<a class="ml-download" download>Download</a><button type="button" data-ml="copy">Copy link</button>' +
+      '<button type="button" data-ml="close" title="Close (Esc)">✕</button></div>';
+    document.body.appendChild(dialog);
+    dialog.querySelector('.ml-download').href = url;
+    dialog.querySelector('.ml-download').style.cssText = 'padding:8px 14px;border-radius:9px;border:1px solid rgba(255,255,255,.18);color:#7dd3fc;text-decoration:none';
+    dialog.addEventListener('click', event => {
+      const action = event.target && event.target.dataset && event.target.dataset.ml;
+      if (action === 'copy') copyText(url).then(() => toast('Link copied.'));
+      if (action === 'close' || event.target === dialog) dialog.close();
+    });
+    ensureModelViewer().then(() => dialog.querySelector('.ml-stage').appendChild(modelViewerElement(url, poster, true)))
+      .catch(error => { dialog.querySelector('.ml-stage').textContent = error.message; });
+    dialog.showModal();
+  }
+
+  function showModel(host, url, poster) {
+    const box = document.createElement('div');
+    box.className = 'nmodel';
+    box.style.cssText = 'position:relative';
+    if (!isGlb(url)) {
+      box.innerHTML = (poster ? '<img alt="3D preview" style="width:100%;border-radius:8px">' : '') +
+        '<div class="ntext">3D model: <a target="_blank" rel="noopener"></a></div>';
+      if (poster) box.querySelector('img').src = poster;
+      const link = box.querySelector('a'); link.href = url; link.textContent = url.split('/').pop();
+      host.appendChild(box);
+      return;
+    }
+    if (poster) {
+      const img = document.createElement('img');
+      img.src = poster; img.alt = '3D preview'; img.loading = 'lazy'; img.decoding = 'async';
+      img.style.cssText = 'width:100%;height:220px;object-fit:contain;background:#0b0c18;border-radius:8px;display:block';
+      box.appendChild(img);
+    }
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.textContent = '⤢';
+    open.title = 'Open the 3D viewer full size';
+    open.style.cssText = 'position:absolute;right:6px;bottom:6px;z-index:2;border:0;border-radius:6px;background:rgba(10,12,30,.8);color:#fff;cursor:pointer;padding:2px 7px';
+    ['mousedown', 'pointerdown'].forEach(type => open.addEventListener(type, event => event.stopPropagation()));
+    open.addEventListener('click', event => { event.stopPropagation(); openModelLightbox(url, poster); });
+    box.appendChild(open);
+    host.appendChild(box);
+    // The viewer replaces the poster once the node is on screen.
+    const start = () => ensureModelViewer().then(() => {
+      if (!box.isConnected) return;
+      const viewer = modelViewerElement(url, poster, false);
+      const still = box.querySelector('img');
+      if (still) still.replaceWith(viewer); else box.insertBefore(viewer, open);
+    }).catch(() => {});
+    if (typeof IntersectionObserver === 'undefined') { start(); return; }
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) { io.disconnect(); start(); }
+    });
+    io.observe(box);
+  }
+
   function showResult(host, type, value, outputs) {
+    if (type === 'model3d') {
+      host.innerHTML = '';
+      showModel(host, String(value || ''), (outputs && outputs.preview_url_string) || '');
+      return;
+    }
     host.innerHTML = '';
     if (type === 'text') {
       const block = document.createElement('div');
