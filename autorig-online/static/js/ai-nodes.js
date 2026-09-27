@@ -1596,19 +1596,39 @@
    * them): I isolate, B or M bypass. Ctrl+I / Ctrl+B / Ctrl+M / Ctrl+P too.
    * Ignored while typing.
    */
-  const HOTKEYS = {isolate: 'I or Ctrl+I', bypass: 'B / M or Ctrl+B / Ctrl+P'};
+  const HOTKEYS = {isolate: 'I or Ctrl+I', bypass: 'B / M or Ctrl+B / Ctrl+P', render: 'Space', reseed: 'R: new seed + render, Shift+R: new seed only'};
   function typingIn(target) {
     return !!(target && ((/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || '') && !target.readOnly) ||
       target.isContentEditable || (target.closest && target.closest('dialog, .mpick-panel'))));
   }
+  // By physical key (event.code), so a Russian layout works the same (2026-09-27).
   function hotkeyAction(event) {
-    if (event.altKey || event.shiftKey) return null;
-    const key = String(event.key || '').toLowerCase();
+    if (event.altKey) return null;
+    const code = String(event.code || '');
     const command = event.ctrlKey || event.metaKey;
-    if (key === 'i') return 'isolate';
-    if (key === 'b' || key === 'm') return 'bypass';
-    if (key === 'p' && command) return 'bypass';
+    if (code === 'Space' && !command && !event.shiftKey) return 'render';
+    if (code === 'KeyR' && !command) return event.shiftKey ? 'reseed' : 'reseed-run';
+    if (event.shiftKey) return null;
+    if (code === 'KeyI') return 'isolate';
+    if (code === 'KeyB' || code === 'KeyM') return 'bypass';
+    if (code === 'KeyP' && command) return 'bypass';
     return null;
+  }
+
+  /** A new random seed on every selected node that has one (X9 base seed too). */
+  function reseedSelected() {
+    const changed = [];
+    selectedIds().forEach(id => {
+      const element = nodeElement(id);
+      const field = element && element.querySelector('[data-param="seed"]');
+      if (!field || field.disabled || field.readOnly) return;
+      const top = Math.min(Number(field.max) || 2147483647, 2147483647);
+      field.value = String(1 + Math.floor(Math.random() * (top - 1)));
+      field.dispatchEvent(new Event('input', {bubbles: true}));
+      field.dispatchEvent(new Event('change', {bubbles: true}));
+      changed.push(id);
+    });
+    return changed;
   }
   window.addEventListener('keydown', event => {
     if (!document.getElementById('canvas')) return;
@@ -1619,8 +1639,24 @@
       if (action === 'bypass' && (event.ctrlKey || event.metaKey)) event.preventDefault();
       return;
     }
+    // In a lightbox or dialog, Space and R keep their own meaning (play/pause).
+    if ((action === 'render' || action.startsWith('reseed')) && document.querySelector('dialog[open]')) return;
+    if (action === 'render' && event.target && event.target.closest && event.target.closest('button, a, video, audio')) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (action === 'render') {
+      const run = document.getElementById('run');
+      if (run && !run.disabled) run.click();
+      return;
+    }
+    if (action.startsWith('reseed')) {
+      const changed = reseedSelected();
+      if (!changed.length) { toast('Select nodes with a seed first (R gives them new seeds).'); return; }
+      if (action === 'reseed') { toast('New seed on ' + changed.length + ' node' + (changed.length === 1 ? '' : 's') + ' (Shift+R: not queued).'); return; }
+      toast('New seed on ' + changed.length + ' node' + (changed.length === 1 ? '' : 's') + ' — queued.');
+      runGraph(true);
+      return;
+    }
     if (action === 'isolate') {
       const id = selectedNodeId();
       if (isolation && (!id || id === String(isolation.target))) toggleIsolation();
@@ -2524,7 +2560,7 @@
       if (isolation && String(isolation.target) === String(target)) toggleIsolation(); else toggleIsolation(target);
     });
     quickbar._bypass = quickButton('⏻', 'Enable / disable (bypass) this node (' + HOTKEYS.bypass + ')', () => toggleBypass([id()]));
-    quickbar._run = quickButton('▶', 'Run this branch: isolate it and render (keeps finished results)', () => {
+    quickbar._run = quickButton('▶', 'Run this branch: isolate it and render (keeps finished results). Space renders everything changed; ' + HOTKEYS.reseed, () => {
       const target = id();
       if (!target) return;
       if (!isolation || String(isolation.target) !== String(target)) toggleIsolation(target);
