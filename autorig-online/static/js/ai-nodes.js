@@ -99,6 +99,26 @@
     return epoch + ':' + String(id) + ':' + signature;
   }
 
+  /**
+   * Seed 0 means "pick one for me". It is picked once and written into the
+   * node, so the result is cached and a later Render (for example after
+   * wiring its output somewhere) does not roll a new picture (2026-09-27).
+   */
+  function fixRandomSeed(node, params) {
+    if (!params || !('seed' in params) || ![undefined, null, '', 0, '0'].includes(params.seed)) return;
+    const field = nodeElement(node.id) && nodeElement(node.id).querySelector('[data-param="seed"]');
+    if (!field) return;
+    const top = Math.min(Number(field.max) || 2147483647, 2147483647);
+    const seed = 1 + Math.floor(Math.random() * (top - 1));
+    params.seed = seed;
+    if (node.params) node.params.seed = seed;
+    field.dataset.silentUpdate = 'yes';
+    field.value = String(seed);
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+    delete field.dataset.silentUpdate;
+  }
+
   function reusableCompleted(service, body) {
     if (['vision', 'text', 'video_frame', 'video_storyboard'].includes(service) ||
         service.startsWith('control_')) return true;
@@ -4804,6 +4824,7 @@
             resolved[link.input] = value;
           }
           const params = {...(node.params || {})};
+          fixRandomSeed(node, params);
           await followInputSizeAtRun(node, resolved, params);
           await followInputFramesAtRun(node, resolved, params);
           if (params._x9 && X9_SERVICES.has(node.service)) {
