@@ -115,6 +115,7 @@ class CivitaiPostRequest(BaseModel):
     # node in the graph first. The field is accepted and ignored.
     upscale: bool = Field(False, description="Ignored: posts use the file as it is")
     generation: Dict[str, Any] = Field(default_factory=dict, description="seed, steps, sampler, cfg, model...")
+    title_is_placeholder: bool = Field(False, description="The dialog still shows the node's label")
     source_urls: List[str] = Field(default_factory=list, max_length=60,
                                    description="Render outputs upstream of this node (for tools that only "
                                                "join, mux or cut renders: their prompt, models and settings)")
@@ -750,10 +751,7 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
     if (extras or {}).get("errors"):
         result["extras_errors_array"] = extras["errors"]
     if image_id:
-        rating = await apply_rating(client, image_id, body.nsfw_level)
-        result.update(rating)
-        if rating.get("rating_note_string"):
-            result["warning_string"] = (result.get("warning_string", "") + " " + rating["rating_note_string"]).strip()
+        result.update(await apply_rating(client, image_id, body.nsfw_level))
     return result
 
 
@@ -765,35 +763,39 @@ async def _image_level(client: httpx.AsyncClient, image_id: int) -> Tuple[int, b
 
 
 async def apply_rating(client: httpx.AsyncClient, image_id: int, name: str) -> Dict[str, Any]:
-    """Send the owner's rating on the image and read back what Civitai shows.
+    """Settle the rating with Civitai's scanner, never against it.
 
-    For an owner (not a moderator) image.updateImageNsfwLevel files a rating
-    request with the owner's weight; Civitai's scanner level stays until its
-    reviewers settle it (measured 2026-09-27: XXX stayed XXX right after a
-    PG-13 request). A difference is reported, never silently accepted."""
+    The scanner's level comes first. Higher than the owner's choice: it is
+    adopted as it is (an owner request below the scanner only sits in review)
+    and reported as a plain note. Lower: the owner's rating is sent
+    (image.updateImageNsfwLevel), which can only raise it. Not scanned within
+    ~18 s: nothing is sent."""
     wanted = rating_level(name)
     answer: Dict[str, Any] = {"rating_requested_string": LEVEL_NAMES.get(wanted, name)}
     if not wanted:
         return answer
-    try:
-        await _trpc(client, "image.updateImageNsfwLevel", {"id": image_id, "nsfwLevel": wanted})
-    except Exception as error:
-        answer["rating_note_string"] = f"Civitai did not take the rating {LEVEL_NAMES[wanted]}: {str(error)[:120]}"
-        return answer
     level = 0
-    for _attempt in range(4):
-        await asyncio.sleep(3)
+    for _attempt in range(6):
         try:
             level, _locked = await _image_level(client, image_id)
         except Exception:
             level = 0
-        if level == wanted:
+        if level:
             break
-    answer["rating_on_civitai_string"] = LEVEL_NAMES.get(level, str(level) if level else "not rated yet")
-    if level and level != wanted:
-        answer["rating_note_string"] = (
-            f"Civitai's scanner rated it {LEVEL_NAMES.get(level, level)}; your {LEVEL_NAMES[wanted]} was sent "
-            f"as the owner's rating request and applies once Civitai's reviewers accept it.")
+        await asyncio.sleep(3)
+    if not level:
+        # Not scanned yet (or not readable): nothing to compare, nothing sent.
+        return answer
+    if level >= wanted:
+        answer["rating_on_civitai_string"] = LEVEL_NAMES.get(level, str(level))
+        if level > wanted:
+            answer["rating_info_string"] = f"Rated {LEVEL_NAMES.get(level, level)} by Civitai's scanner"
+        return answer
+    try:
+        await _trpc(client, "image.updateImageNsfwLevel", {"id": image_id, "nsfwLevel": wanted})
+    except Exception as error:
+        logger.info("civitai rating %s on %s: %s", wanted, image_id, error)
+    answer["rating_on_civitai_string"] = LEVEL_NAMES.get(wanted)
     return answer
 
 
@@ -822,44 +824,102 @@ async def _ask(client: httpx.AsyncClient, path: str, body: Dict[str, Any], timeo
     return str(data.get("answer_string") or "")
 
 
+# The farm's uncensored text/vision model: reasoning off, so an explicit clip
+# never ends as "the whole budget went to reasoning" with no answer - which is
+# what left post 31272978 with its node label as the title (2026-09-27: the
+# default 27B spent 2048 tokens thinking; Vision had refused the .mp4 sent as
+# image_url).
+META_MODEL = os.getenv("CIVITAI_META_MODEL", "qwen35-9b-uncensored")
+_STOP = {"a", "an", "the", "this", "that", "image", "picture", "clip", "video", "shows", "show", "showing",
+         "is", "are", "of", "in", "on", "with", "and", "at", "while", "her", "his", "their", "its", "it"}
+
+
+def fallback_title(*texts: str) -> str:
+    """A short title made locally from the caption or prompt: never a node label."""
+    for text in texts:
+        words = re.findall(r"[A-Za-z][A-Za-z'-]+", str(text or ""))
+        keep = [w for w in words if w.lower() not in _STOP][:6]
+        if len(keep) >= 2:
+            return " ".join(w.capitalize() for w in keep)[:TITLE_MAX]
+    return ""
+
+
+def fallback_tags(*texts: str) -> List[str]:
+    words: List[str] = []
+    for text in texts:
+        for w in re.findall(r"[A-Za-z][A-Za-z-]{3,}", str(text or "").lower()):
+            if w not in _STOP and w not in words:
+                words.append(w)
+    return words[:15]
+
+
+def _parse_meta(text: str) -> Dict[str, Any]:
+    match = re.search(r"\{.*\}", text or "", re.S)
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 async def generate_meta(body: "CivitaiMetaRequest") -> Dict[str, Any]:
     kind = _kind(body.media_url)
-    caption = ""
+    prompt = body.prompt.strip() or str((render_task(body.media_url).get("prompt") or {}).get("prompt") or "")
     async with httpx.AsyncClient() as client:
         caption = body.caption.strip()
         if kind in ("image", "video") and not caption:
-            try:
-                caption = await _ask(client, "/api/vision", dict({
-                    "prompt": "Describe this " + ("clip" if kind == "video" else "picture") +
-                              " in 3-4 sentences: who, what happens, setting, lighting, camera and style.",
-                    "image_url": body.media_url, "structured": True},
-                    **({"video_mode": "storyboard"} if kind == "video" else {})))
-            except Exception as error:
-                logger.info("civitai meta caption failed: %s", error)
+            ask = {"prompt": "Describe this " + ("clip" if kind == "video" else "picture") +
+                             " in 3-4 sentences: who, what happens, setting, lighting, camera and style.",
+                   "structured": True, "model": META_MODEL}
+            # A clip goes in as video_url: sent as image_url, Vision refused it.
+            ask.update({"video_url": body.media_url, "video_mode": "storyboard"} if kind == "video"
+                       else {"image_url": body.media_url})
+            for attempt in range(2):
+                try:
+                    caption = await _ask(client, "/api/vision", ask)
+                except Exception as error:
+                    logger.info("civitai meta caption failed: %s", error)
+                if caption:
+                    break
+                ask.pop("model", None)  # second try: the farm's default model
         if body.caption_only:
             return {"success_bool": bool(caption), "caption_string": caption, "title_string": "",
                     "description_string": caption, "tags_array": [], "tag_limit_int": POST_TAG_LIMIT}
-        text = await _ask(client, "/api/text2text", {
-            "system_prompt": META_SYSTEM, "structured": True,
-            "prompt": ("Generation prompt: " + (body.prompt or "(none)") + "\n"
-                       "What the output shows: " + (caption or "(no caption)") + "\n"
-                       "Made with: " + (", ".join(body.resources) or body.service or "AutoRig nodes"))})
-    match = re.search(r"\{.*\}", text, re.S)
-    meta: Dict[str, Any] = {}
-    if match:
-        try:
-            meta = json.loads(match.group(0))
-        except Exception:
-            meta = {}
+        source = ("Generation prompt: " + (prompt[:2500] or "(none)") + "\n"
+                  "What the output shows: " + (caption or "(no caption)") + "\n"
+                  "Made with: " + (", ".join(body.resources) or body.service or "AutoRig nodes"))
+        meta: Dict[str, Any] = {}
+        tries = [
+            {"system_prompt": META_SYSTEM, "structured": True, "prompt": source, "model": META_MODEL},
+            {"system_prompt": META_SYSTEM, "structured": True, "prompt": source, "model": META_MODEL},
+            {"prompt": 'Answer with JSON only: {"title": "3-8 word cinematic title", "description": '
+                       '"2 sentences", "tags": ["12 short lowercase tags"]}.\n' + source,
+             "structured": True, "max_output_tokens": -1},
+        ]
+        for attempt, ask in enumerate(tries):
+            try:
+                meta = _parse_meta(await _ask(client, "/api/text2text", ask))
+            except Exception as error:
+                logger.info("civitai meta text try %d failed: %s", attempt + 1, error)
+                meta = {}
+            if str(meta.get("title") or "").strip():
+                break
+            logger.info("civitai meta: no title on try %d for %s", attempt + 1, body.media_url)
     title = str(meta.get("title") or "").strip().strip('"')[:TITLE_MAX]
-    description = str(meta.get("description") or caption or body.prompt).strip()
+    generated = bool(title)
+    if not title:
+        title = fallback_title(caption, prompt)
+    description = str(meta.get("description") or caption or prompt).strip()
     tags: List[str] = []
-    for tag in meta.get("tags") or []:
+    for tag in (meta.get("tags") or []) or fallback_tags(caption, prompt):
         value = str(tag).strip().lower().lstrip("#")[:40]
         if value and value not in tags:
             tags.append(value)
-    return {"success_bool": bool(title), "title_string": title, "description_string": description,
-            "tags_array": tags[:15], "tag_limit_int": POST_TAG_LIMIT, "caption_string": caption}
+    return {"success_bool": bool(title), "generated_bool": generated, "title_string": title,
+            "description_string": description, "tags_array": tags[:15], "tag_limit_int": POST_TAG_LIMIT,
+            "caption_string": caption}
 
 
 _BACKGROUND: set = set()
@@ -867,7 +927,8 @@ _BACKGROUND: set = set()
 
 async def _auto_meta(body: CivitaiPostRequest, kind: str) -> CivitaiPostRequest:
     """Title/description/tags from the LLM when the dialog sent a placeholder title."""
-    if not body.auto_meta or body.title.strip().lower() not in GENERIC_TITLES:
+    placeholder = body.title.strip().lower() in GENERIC_TITLES or body.title_is_placeholder
+    if not body.auto_meta or not placeholder:
         return body
     try:
         meta = await generate_meta(CivitaiMetaRequest(

@@ -2040,8 +2040,10 @@
     let rating = 'R';
     try { const saved = localStorage.getItem('civ.rating'); if (order.includes(saved)) rating = saved; } catch (error) { /* private mode */ }
     // A model or prompt that is plainly adult raises the preset, never lowers it.
-    const suggested = /porn|xxx|hentai|sex|cum|penis|pussy|nsfw/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'XXX'
-      : /nude|naked|nipple|topless|lewd|erotic|eros/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'X' : '';
+    const adultText = [params.checkpoint, params.lora, params.loras, prompt, item.label,
+      resources.map(r => r.name).join(' ')].join(' ');
+    const suggested = /porn|xxx|hentai|\bsex|cum\b|cumshot|penis|pussy|vagina|blowjob|nsfw|eros\b|breast play|jiggle|nipple|orgasm|semen|spread/i.test(adultText) ? 'XXX'
+      : /nude|naked|topless|lewd|erotic|lingerie|boob|breast|ass\b|butt/i.test(adultText) ? 'X' : '';
     let raisedNote = '';
     if (suggested && order.indexOf(suggested) > order.indexOf(rating)) { raisedNote = `raised from ${rating} by the model/prompt`; rating = suggested; }
     let dialog = document.getElementById('civitai-post');
@@ -2052,7 +2054,7 @@
     const esc = value => escapeHtml(String(value || ''));
     dialog.innerHTML = `<form method="dialog" style="display:grid;gap:8px">
       <b style="font-size:15px">Post to Civitai (NoDeadLine)</b>
-      <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
+      <label>Title<input name="title" style="width:100%" value="" placeholder="written by the text model…"></label>
       <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
       <label>Tags (comma separated; Civitai keeps the first 5, existing tags first)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
       <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(([r, tip]) =>
@@ -2132,6 +2134,7 @@
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
+        body.title_is_placeholder = !String(body.title || '').trim();
         const response = await fetch('/api/ai/civitai/post', {method: 'POST', credentials: 'same-origin',
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
         const data = await response.json().catch(() => ({}));
@@ -2185,7 +2188,8 @@
       }
       if (job.stage === 'done') {
         html = (result.warning_string ? '<b style="color:#fb7185">' + esc(result.warning_string) + '</b><br>' : '') +
-          (result.draft_bool ? 'Draft saved: ' : 'Posted: ') + link(job) + ' · ' + clock(job.elapsed_seconds_float);
+          (result.draft_bool ? 'Draft saved: ' : 'Posted: ') + link(job) + ' · ' + clock(job.elapsed_seconds_float) +
+          (result.rating_info_string ? '<br><span style="color:#aab0c8">' + esc(result.rating_info_string) + '</span>' : '');
       } else if (job.stage === 'manual' || job.stage === 'failed' || job.stage === 'interrupted') {
         html = '<b style="color:#fb7185">' + esc(job.stage_label) + '</b>' +
           (result.download_url_string ? `<br><a href="${esc(result.download_url_string)}" target="_blank" rel="noopener" download>Download the file</a> · <a href="${esc(result.open_url_string)}" target="_blank" rel="noopener">Open Civitai's post page</a>` : '');
@@ -3939,13 +3943,18 @@
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-top:4px';
     pictures.forEach(field => {
       const url = String(outputs[field]);
-      const picture = document.createElement('img');
-      picture.src = url;
-      picture.loading = 'lazy';
-      picture.alt = picture.title = field.replace(/_url_string$/, '').replace(/_/g, ' ');
-      picture.style.cssText = 'width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:4px;cursor:zoom-in;background:#111';
-      picture.classList.add('preview-expandable');
-      picture.addEventListener('click', event => { event.stopPropagation(); openPreview('image', url); });
+      // outputsV7: a clip (Scene split's 24 fps reference) is a <video>, never a broken <img>.
+      const clip = looksLikeVideo(url);
+      const picture = document.createElement(clip ? 'video' : 'img');
+      picture.src = clip ? url + '#t=0.1' : url;
+      if (clip) { picture.muted = true; picture.preload = 'metadata'; picture.playsInline = true; picture.loop = true;
+        picture.addEventListener('mouseenter', () => picture.play().catch(() => {}));
+        picture.addEventListener('mouseleave', () => picture.pause()); }
+      else picture.loading = 'lazy';
+      picture.title = field.replace(/_url_string$/, '').replace(/_/g, ' ');
+      if (!clip) picture.alt = picture.title;
+      picture.style.cssText = 'width:100%;aspect-ratio:2/3;object-fit:contain;border-radius:4px;cursor:zoom-in;background:#111';
+      picture.addEventListener('click', event => { event.stopPropagation(); openPreview(clip ? 'video' : 'image', url); });
       grid.appendChild(picture);
     });
     host.appendChild(grid);
