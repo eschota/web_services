@@ -4247,6 +4247,7 @@
     const byId = new Map(graph.nodes.map(node => [node.id, node]));
     try {
       const pending = new Map();
+      const pendingOpen = new Set();
       for (const id of order) {
         const node = byId.get(id);
         const feeds = graph.links.filter(link => link.to === id);
@@ -4256,6 +4257,15 @@
           if ((node.params || {})._disabled) {
             if (epoch === canvasEpoch && meta(id)) markState(id, 'bypassed — not run', 'nstate');
             return {ok:false, bypassed:true};
+          }
+          // Until its inputs arrive a node says what it is waiting for; the old
+          // "changed — render to update" read as "left out of this run".
+          if (node.kind === KIND_SERVICE && epoch === canvasEpoch && meta(id)) {
+            const waitingOn = [...new Set(feeds.filter(link => pendingOpen.has(link.from)).map(link => {
+              const from = byId.get(link.from) || {};
+              return ((from.params || {})._label || (serviceById(from.service) || {}).title || from.service || link.from).slice(0, 40);
+            }))];
+            if (waitingOn.length) markState(id, 'in this run · waiting for ' + waitingOn.join(', '), 'nstate running');
           }
           const upstreamRecords = await Promise.all(feeds.map(link => pending.get(link.from)));
           const superseded = node.kind === KIND_SERVICE &&
@@ -4354,6 +4364,8 @@
           }
         })();
         pending.set(id, start);
+        pendingOpen.add(id);
+        start.finally(() => pendingOpen.delete(id));
       }
       const settled = await Promise.all(pending.values());
       // Lists stream item by item; the run is over when every item is.
