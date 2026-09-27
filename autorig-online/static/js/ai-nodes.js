@@ -1683,6 +1683,7 @@
    * picture i -> clip i.
    */
   const X9_SERVICES = new Set(['image', 'qwen_image', 'video', 'video_control']);
+  const x9Active = new Map();
 
   function addX9Button(id, on) {
     const element = nodeElement(id);
@@ -1865,12 +1866,17 @@
       return {type: previous.type, value: previous.value, x9: previous.x9.map(cell => cell.value)};
     }
     const cells = bodies.map(body => ({seed: body.seed, status: 'queued', value: '', error: ''}));
+    const mine = {signature, tasks: []};
+    const older = x9Active.get(String(id));
+    if (older && older.signature !== signature) supersedeTasks(older.tasks);
+    x9Active.set(String(id), mine);
+    const current = () => x9Active.get(String(id)) === mine;
     const record = {status: 'running', type: runnerType(runner, ''), value: '', x9: cells,
                     pick: previous ? previous.pick : -1, x9sig: signature, started_at: Date.now() / 1000};
     runState.set(String(id), record);
     paintX9(id);
     const report = () => {
-      if (epoch !== canvasEpoch || !nodeElement(id)) return;
+      if (epoch !== canvasEpoch || !nodeElement(id) || !current()) return;
       const done = cells.filter(cell => cell.status === 'done').length;
       const failed = cells.filter(cell => cell.status === 'error').length;
       const running = cells.filter(cell => cell.status === 'running').length;
@@ -1886,6 +1892,8 @@
       delete body._post_upscale;
       try {
         const accepted = await submitJson(runner.api, body);
+        if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
+        if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
         cell.status = 'running';
         report();
         let {value} = splitMulti(await runner.finish(accepted, runner, null));
@@ -1900,6 +1908,11 @@
       }
       report();
     }));
+    if (!current()) {
+      // A newer X9 for this node owns the grid now; this set is stale.
+      throw new Error('replaced by a newer render');
+    }
+    x9Active.delete(String(id));
     const pick = x9Pick(record);
     if (pick < 0) {
       record.status = 'failed';
@@ -4078,9 +4091,47 @@
     } catch (error) { /* a run is still worth doing without a link */ }
   }
 
+  /**
+   * Job supersession (owner, 2026-09-27): a node rendered again with other
+   * settings while its previous job still waits in the farm queue — that job
+   * is stood down (the slot goes back) and the new one takes its place. A job
+   * already on a card finishes; its result is discarded as stale because the
+   * node's signature moved on.
+   */
+  let supersededCount = 0;
+  let supersedeToastTimer = null;
+  function supersedeTasks(taskIds) {
+    const ids = [...new Set((taskIds || []).filter(Boolean).map(String))];
+    if (!ids.length) return;
+    fetch('/api/ai/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task_ids: ids})})
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (!data) return;
+        supersededCount += Number(data.cancelled_int) || 0;
+        clearTimeout(supersedeToastTimer);
+        supersedeToastTimer = setTimeout(() => {
+          if (supersededCount) toast('Replaced ' + supersededCount + ' queued job' + (supersededCount === 1 ? '' : 's') + ' with the new settings.');
+          supersededCount = 0;
+        }, 1500);
+      }).catch(() => {});
+  }
+
+  function supersedeNode(idString, signature) {
+    const stale = [];
+    activeExecutions.forEach(execution => {
+      if (execution.id === idString && execution.signature !== signature && execution.taskId) stale.push(execution.taskId);
+    });
+    const restored = restoredExecutions.get(idString);
+    const record = runState.get(idString);
+    if (restored && record && record.task_id && record.status === 'running') stale.push(record.task_id);
+    supersedeTasks(stale);
+  }
+
   function startIncrementalService(id, node, resolved, params, signature, epoch, keepDone, graphSnapshot) {
     const idString = String(id);
     const key = executionKey(epoch, idString, signature);
+    supersedeNode(idString, signature);
     desiredSignatures.set(idString, signature);
 
     const restored = restoredExecutions.get(idString);
@@ -4745,7 +4796,7 @@
     ['Vision / Text', ['vision', 'text']],
     ['Image', ['image', 'qwen_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
     ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'audio_from_source', 'video_control', 'upscale_video']],
-    ['Avatars', ['avatar_build', 'avatar_image', 'avatar_video']],
+    ['Avatars', ['avatar_ready', 'avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
     ['Audio', ['music']],
     ['Utility', ['3dmodel', 'action:arrange', 'action:fit', 'action:assistant']]
@@ -4756,7 +4807,7 @@
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
     video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
     scene_split: 'Scene split', video_concat: 'Concat shots', audio_from_source: 'Audio from source',
-    upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_image: 'Avatar scene',
+    upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_ready: 'Avatar (ready)', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
     control_canny: 'Canny', control_normal: 'Normal', music: 'Music', '3dmodel': '3D model',
     'action:arrange': 'Arrange', 'action:fit': 'Fit view', 'action:assistant': 'Assistant'
