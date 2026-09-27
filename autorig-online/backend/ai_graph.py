@@ -1451,6 +1451,78 @@ async def _caller_is_admin(request: Request) -> bool:
     return False
 
 
+_MY_TASK_STATUS: Dict[str, Dict[str, object]] = {}
+
+
+@router.get("/api/ai/my-tasks")
+async def api_my_tasks(request: Request, limit: int = 10):
+    """The caller's last finished render outputs and the farm queue (owner-scoped).
+
+    Ownership is the same as for /api/ai/cancel: the identity that submitted
+    the task (session, anon cookie, API key or address). Finished states are
+    cached, so polling every few seconds asks renderfin only about open tasks.
+    """
+    import asyncio as _asyncio
+    import re as _re
+
+    import httpx
+
+    import ai_vision_api
+    import task_owner
+
+    caller = task_owner.scope_identity(request.scope)
+    limit = max(1, min(20, int(limit or 10)))
+    rows = [(task, at) for task, at in task_owner.recent_for(caller, 60)
+            if _re.fullmatch(r"[0-9a-fA-F-]{36}", task)]
+
+    async def status(client, task_id):
+        cached = _MY_TASK_STATUS.get(task_id)
+        if cached and cached.get("final"):
+            return cached
+        try:
+            response = await client.get(ai_vision_api.RENDERFIN_BASE + "/api-render/tasks/" + task_id, timeout=8.0)
+            row = response.json() if response.status_code == 200 else {}
+        except Exception:
+            row = {}
+        raw = str(row.get("status_string") or row.get("status") or ("gone" if not row else "")).lower()
+        state = {"pending": "queued", "rendering": "running", "done": "done", "error": "failed",
+                 "cancelled": "cancelled"}.get(raw, raw)
+        item = {"state": state, "url": row.get("output_url_string") or row.get("output_url") or "",
+                "box": row.get("render_server_name") or "", "final": state in ("done", "failed", "cancelled", "gone"),
+                "position": int(row.get("queue_position_int") or 0)}
+        _MY_TASK_STATUS[task_id] = item
+        if len(_MY_TASK_STATUS) > 5000:
+            for key in list(_MY_TASK_STATUS)[:1000]:
+                _MY_TASK_STATUS.pop(key, None)
+        return item
+
+    async with httpx.AsyncClient() as client:
+        states = await _asyncio.gather(*(status(client, task) for task, _ in rows))
+        try:
+            fleet = (await client.get("http://127.0.0.1:8200/api/ai/fleet", timeout=8.0)).json()
+            queue = fleet.get("queue_object") or {}
+        except Exception:
+            queue = {}
+    items = []
+    mine_queued = mine_running = 0
+    for (task, at), item in zip(rows, states):
+        if item["state"] == "queued":
+            mine_queued += 1
+        elif item["state"] == "running":
+            mine_running += 1
+        elif item["state"] == "done" and item["url"] and len(items) < limit:
+            url = str(item["url"])
+            kind = ("video" if _re.search(r"\.(mp4|webm|mov)(\?|$)", url, _re.I) else
+                    "audio" if _re.search(r"\.(mp3|wav|flac|ogg|m4a)(\?|$)", url, _re.I) else "image")
+            items.append({"task_id_string": task, "url_string": url, "kind_string": kind,
+                          "box_string": item["box"], "at_unix_float": at})
+    return {"success_bool": True, "items_array": items,
+            "queue_object": {"queued_int": int(queue.get("queued_int") or 0),
+                             "running_int": int(queue.get("running_int") or 0),
+                             "mine_queued_int": mine_queued, "mine_running_int": mine_running},
+            "server_time_unix_int": int(time.time())}
+
+
 @router.post("/api/ai/cancel")
 async def api_cancel(body: CancelRequest, request: Request):
     """Stand down work that has not started, and leave alone work that has.

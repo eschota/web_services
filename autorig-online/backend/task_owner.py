@@ -66,6 +66,17 @@ def owner_of(task_id: str) -> str:
         return ""
 
 
+def recent_for(owner: str, limit: int = 40):
+    """Newest task ids this identity submitted."""
+    try:
+        with _lock:
+            rows = _db().execute("SELECT task_id, at FROM owners WHERE owner = ? ORDER BY at DESC LIMIT ?",
+                                 (owner, int(limit))).fetchall()
+        return [(row[0], float(row[1])) for row in rows]
+    except Exception:
+        return []
+
+
 def _cookies(headers: Dict[str, str]) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for part in (headers.get("cookie") or "").split(";"):

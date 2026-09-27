@@ -2322,6 +2322,176 @@
     }))).observe(document.documentElement, {childList: true, subtree: true});
   }
 
+  /* ------------------------------------------------------ recent gallery */
+
+  /**
+   * The caller's last 10 finished renders, bottom right above the dock
+   * (owner, 2026-09-27): live every 5 s, click opens a lightbox (← →, Esc,
+   * open the node, copy link, Post to Civitai, drag onto the canvas as Media
+   * in). Collapses to a pill; the choice is remembered.
+   */
+  function installRecentGallery() {
+    if (document.getElementById('recent-gallery')) return;
+    const host = document.createElement('section');
+    host.id = 'recent-gallery';
+    host.setAttribute('aria-label', 'Your recent renders');
+    host.innerHTML = '<header><button type="button" class="rg-toggle" title="Show or hide your recent renders"></button>' +
+      '<span class="rg-queue">Queue: …</span></header><div class="rg-strip"></div>';
+    document.body.appendChild(host);
+    const strip = host.querySelector('.rg-strip');
+    const queueLabel = host.querySelector('.rg-queue');
+    const toggle = host.querySelector('.rg-toggle');
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('nodes.recentGallery') === 'collapsed'; } catch (error) { /* private mode */ }
+    const paintCollapsed = () => {
+      host.classList.toggle('collapsed', collapsed);
+      toggle.textContent = collapsed ? '▴ Recent' : '▾';
+    };
+    paintCollapsed();
+    toggle.addEventListener('click', () => {
+      collapsed = !collapsed;
+      try { localStorage.setItem('nodes.recentGallery', collapsed ? 'collapsed' : 'open'); } catch (error) { /* ignore */ }
+      paintCollapsed();
+    });
+    let items = [];
+    const shown = new Set();
+    const nodeForTask = taskId => {
+      let hit = null;
+      runState.forEach((record, id) => {
+        if (hit) return;
+        if (record && (record.task_id === taskId || String(record.value || '').indexOf(taskId) !== -1 ||
+            (Array.isArray(record.x9) && record.x9.some(cell => String(cell.value || '').indexOf(taskId) !== -1)))) hit = id;
+      });
+      return hit;
+    };
+    const thumb = item => {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'rg-cell';
+      cell.title = (item.box_string ? item.box_string + ' · ' : '') + new Date(item.at_unix_float * 1000).toLocaleTimeString();
+      if (item.kind_string === 'audio') cell.textContent = '🎵';
+      else {
+        const media = document.createElement(item.kind_string === 'video' ? 'video' : 'img');
+        media.src = item.url_string + (item.kind_string === 'video' ? '#t=0.1' : '');
+        if (media.tagName === 'VIDEO') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
+        else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = ''; }
+        cell.appendChild(media);
+      }
+      cell.draggable = true;
+      cell.addEventListener('dragstart', event => {
+        const spec = {kind: 'input', type: 'media', title: 'Media in', value: item.url_string};
+        event.dataTransfer.setData('application/x-autorig-node', JSON.stringify(spec));
+        event.dataTransfer.setData('text/plain', item.url_string);
+      });
+      cell.addEventListener('click', () => openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
+      return cell;
+    };
+    const paint = () => {
+      const fresh = items.filter(item => !shown.has(item.task_id_string));
+      strip.innerHTML = '';
+      items.forEach(item => {
+        const cell = thumb(item);
+        if (fresh.includes(item) && shown.size) cell.classList.add('rg-new');
+        strip.appendChild(cell);
+      });
+      items.forEach(item => shown.add(item.task_id_string));
+    };
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const response = await fetch('/api/ai/my-tasks?limit=10', {credentials: 'same-origin'});
+        if (!response.ok) return;
+        const data = await response.json();
+        const q = data.queue_object || {};
+        const mine = (q.mine_queued_int || 0) + (q.mine_running_int || 0);
+        queueLabel.textContent = 'Queue: ' + (q.queued_int || 0) + ' queued · ' + (q.running_int || 0) + ' running · yours ' + mine;
+        queueLabel.classList.toggle('rg-busy', !!q.mine_running_int);
+        const next = data.items_array || [];
+        if (next.map(item => item.task_id_string).join() !== items.map(item => item.task_id_string).join()) {
+          items = next;
+          paint();
+        }
+      } catch (error) { /* next poll */ }
+    };
+    poll();
+    setInterval(poll, 5000);
+
+    function openRecentLightbox(start) {
+      let dialog = document.getElementById('recent-lightbox');
+      if (!dialog) {
+        dialog = document.createElement('dialog');
+        dialog.id = 'recent-lightbox';
+        dialog.className = 'civ-dialog';
+        dialog.style.width = 'min(1100px, 96vw)';
+        dialog.innerHTML = '<div class="rl-stage" style="display:flex;align-items:center;justify-content:center;min-height:240px;overflow:auto"></div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:10px">' +
+          '<button type="button" data-rl="prev" title="Previous (←)">←</button><span class="rl-cap"></span>' +
+          '<button type="button" data-rl="next" title="Next (→)">→</button>' +
+          '<button type="button" data-rl="node">Open node</button><button type="button" data-rl="copy">Copy link</button>' +
+          '<button type="button" data-rl="civ">C↑ Post to Civitai</button><button type="button" data-rl="add">Add as Media in</button>' +
+          '<button type="button" data-rl="close" title="Close (Esc)">✕</button></div>';
+        document.body.appendChild(dialog);
+        dialog.addEventListener('click', event => {
+          const action = event.target && event.target.dataset && event.target.dataset.rl;
+          const item = items[dialog._index];
+          if (action === 'prev') dialog._show(dialog._index - 1);
+          if (action === 'next') dialog._show(dialog._index + 1);
+          if (action === 'close' || event.target === dialog) dialog.close();
+          if (!item) return;
+          if (action === 'copy') copyText(item.url_string).then(() => toast('Link copied.'));
+          if (action === 'node' || action === 'civ') {
+            const id = nodeForTask(item.task_id_string);
+            if (!id) { toast('That render is not from a node in this graph.'); return; }
+            if (action === 'civ') { dialog.close(); openCivitaiDialog(id); return; }
+            dialog.close();
+            if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds([id]);
+            const element = nodeElement(id);
+            if (element) { element.classList.add('rl-flash'); setTimeout(() => element.classList.remove('rl-flash'), 1600); }
+            toast('Selected the node that made it.');
+          }
+          if (action === 'add') {
+            const rect = document.getElementById('canvas').getBoundingClientRect();
+            const scale = Number(editor.zoom) || 1;
+            const x = (rect.width / 2 - editor.canvas_x) / scale, y = (rect.height / 2 - editor.canvas_y) / scale;
+            const nodeId = addInputNode('media', x, y, item.url_string);
+            if (nodeId) { toast('Added as a Media in node.'); dialog.close(); }
+          }
+        });
+        dialog.addEventListener('keydown', event => {
+          if (event.key === 'ArrowLeft') { event.preventDefault(); dialog._show(dialog._index - 1); }
+          if (event.key === 'ArrowRight') { event.preventDefault(); dialog._show(dialog._index + 1); }
+        });
+        dialog.addEventListener('close', () => { const clip = dialog.querySelector('video'); if (clip) clip.pause(); });
+      }
+      dialog._show = index => {
+        if (!items.length) return;
+        index = ((index % items.length) + items.length) % items.length;
+        dialog._index = index;
+        const item = items[index];
+        const stage = dialog.querySelector('.rl-stage');
+        stage.innerHTML = '';
+        const media = document.createElement(item.kind_string === 'video' ? 'video' : item.kind_string === 'audio' ? 'audio' : 'img');
+        media.src = item.url_string;
+        if (media.tagName !== 'IMG') { media.controls = true; media.autoplay = true; }
+        if (media.tagName === 'VIDEO') media.loop = true;
+        media.style.cssText = 'max-width:92vw;max-height:74vh;display:block;cursor:zoom-in';
+        if (media.tagName === 'IMG') media.addEventListener('click', () => {
+          const zoomed = media.style.maxWidth === 'none';
+          media.style.maxWidth = zoomed ? '92vw' : 'none';
+          media.style.maxHeight = zoomed ? '74vh' : 'none';
+          media.style.cursor = zoomed ? 'zoom-in' : 'zoom-out';
+        });
+        stage.appendChild(media);
+        dialog.querySelector('.rl-cap').textContent = (index + 1) + ' / ' + items.length + (item.box_string ? ' · ' + item.box_string : '');
+        const fromHere = !!nodeForTask(item.task_id_string);
+        dialog.querySelector('[data-rl="node"]').disabled = !fromHere;
+        dialog.querySelector('[data-rl="civ"]').disabled = !fromHere;
+      };
+      if (!dialog.open) dialog.showModal();
+      dialog._show(start < 0 ? 0 : start);
+    }
+  }
+
   /* ---------------------------------------------------------- quick toolbar */
 
   let quickbar = null;
@@ -5372,7 +5542,7 @@
     if (window.AINodePlacement) nodePlacement = window.AINodePlacement.install({
       editor, canvas:document.getElementById('canvas'),
       createNode:(spec, x, y) => spec.kind === 'input'
-        ? addInputNode(spec.type, x, y, '')
+        ? addInputNode(spec.type, x, y, spec.value || '')
         : addServiceNode(spec.service, x, y, null),
       getNodeElement:nodeElement,
       moveNode:moveNodeTo
@@ -5393,6 +5563,7 @@
     }
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
+    installRecentGallery();
     installMediaThrottle(document.getElementById('canvas'));
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
