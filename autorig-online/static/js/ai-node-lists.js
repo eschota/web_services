@@ -667,6 +667,20 @@
     paint(id);
   }
 
+  /**
+   * "Use this" (X9 parity): keep the take on screen by locking the seed it was
+   * rendered with, so R (new node seed) and re-renders skip this segment.
+   */
+  function useTake(id, index) {
+    const record = api.runState.get(String(id));
+    const item = record && record.items && record.items[index];
+    if (!item || item.status !== 'done') return;
+    item.seed_override = item.seed_override || item.seed || newSeed();
+    api.recordResult(id, record);
+    paint(id);
+    api.toast('Segment ' + (index + 1) + ': this take is kept (seed ' + item.seed_override + ' locked; R skips it).');
+  }
+
   /** 🎲 / 🔒 overlay on a strip cell, with the seed. */
   function cellTools(id, index, item) {
     const bar = document.createElement('div');
@@ -707,6 +721,7 @@
         '<button type="button" data-ll="prev" title="Previous (←)">←</button><span class="llcap"></span>' +
         '<button type="button" data-ll="next" title="Next (→)">→</button>' +
         '<button type="button" data-ll="reroll" title="New seed & re-render this segment">🎲 New seed & re-render</button>' +
+        '<button type="button" data-ll="use" title="Keep this take: lock its seed (R and re-renders leave it alone)">Use this</button>' +
         '<button type="button" data-ll="lock" title="Lock / unlock this segment\'s seed">🔒 Lock seed</button>' +
         '<button type="button" data-ll="zoom0" title="Fit (0)">Fit</button>' +
         '<button type="button" data-ll="close" title="Close (Esc)">✕</button></div>';
@@ -741,6 +756,7 @@
         if (action === 'zoom0') dialog._reset();
         if (action === 'reroll') { rerollSegment(dialog._node, dialog._index, newSeed()); dialog._show(dialog._index); }
         if (action === 'lock') { toggleLock(dialog._node, dialog._index); dialog._show(dialog._index); }
+        if (action === 'use') { useTake(dialog._node, dialog._index); dialog._show(dialog._index); }
         if (action === 'close') dialog.close();
       });
       dialog.addEventListener('keydown', event => {
@@ -776,6 +792,7 @@
       dialog._reset();
       const tools = rerollable(node.service) && !scene;
       dialog.querySelector('[data-ll="reroll"]').hidden = !tools;
+      dialog.querySelector('[data-ll="use"]').hidden = !tools || item.status !== 'done';
       const lock = dialog.querySelector('[data-ll="lock"]');
       lock.hidden = !tools;
       lock.textContent = item.seed_override ? '🔓 Unlock seed ' + item.seed_override : '🔒 Lock seed';
