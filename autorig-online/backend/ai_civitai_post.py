@@ -106,6 +106,9 @@ class CivitaiPostRequest(BaseModel):
     # node in the graph first. The field is accepted and ignored.
     upscale: bool = Field(False, description="Ignored: posts use the file as it is")
     generation: Dict[str, Any] = Field(default_factory=dict, description="seed, steps, sampler, cfg, model...")
+    source_urls: List[str] = Field(default_factory=list, max_length=60,
+                                   description="Render outputs upstream of this node (for tools that only "
+                                               "join, mux or cut renders: their prompt, models and settings)")
     background: bool = Field(False, description="Answer at once with a job id; poll /api/ai/civitai/jobs/<id>")
     auto_meta: bool = Field(True, description="Write title/description/tags with the LLM when the title is "
                                               "empty or generic (Video, Image, ...)")
@@ -407,6 +410,51 @@ def build_meta(prompt: str, request: Dict[str, Any], generation: Dict[str, Any],
     return meta
 
 
+def source_requests(url: str, sources: List[str], kind: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """The render behind the posted file, or - for a file a tool made from renders
+    (joined shots, muxed audio, a cut) - the newest upstream render of the same
+    kind, plus every other upstream render for its models."""
+    own = render_task(url)
+    if own.get("prompt"):
+        return own["prompt"], []
+    found: List[Dict[str, Any]] = []
+    seen = set()
+    for source in sources[:60]:
+        task = render_task(source)
+        if task.get("prompt") and task.get("id") not in seen:
+            seen.add(task.get("id"))
+            found.append(task)
+    if not found:
+        return {}, []
+    video_ext = (".mp4", ".webm", ".mov")
+    same_kind = [t for t in found if str(t.get("output_url") or "").lower().endswith(video_ext) == (kind == "video")]
+    primary = max(same_kind or found, key=lambda t: float(t.get("created_at") or 0))
+    return primary["prompt"], [t["prompt"] for t in found if t is not primary]
+
+
+async def ensure_meta(client: httpx.AsyncClient, image_id: int, meta: Dict[str, Any]) -> None:
+    """Civitai keeps the meta sent with post.addImage, but a clip's scan can
+    replace it with the file's own (empty) metadata. Read it back; write it
+    again with post.updateImage when the prompt or the resources are gone."""
+    if not meta.get("prompt") and not meta.get("civitaiResources"):
+        return
+    for attempt in range(3):
+        try:
+            data = await _query(client, "image.getGenerationData", {"id": image_id}) or {}
+        except Exception:
+            data = {}
+        stored = data.get("meta") or {}
+        if (not meta.get("prompt") or stored.get("prompt")) and \
+                (not meta.get("civitaiResources") or stored.get("civitaiResources")):
+            return
+        try:
+            await _trpc(client, "post.updateImage", {"id": image_id, "meta": meta})
+        except Exception as error:
+            logger.info("civitai updateImage %s: %s", image_id, error)
+        await asyncio.sleep(3 * (attempt + 1))
+    logger.warning("civitai image %s: meta still missing after retries", image_id)
+
+
 def techniques_for(request: Dict[str, Any], kind: str) -> List[str]:
     kind_of = str(request.get("type") or "")
     workflow = str(request.get("workflow") or "") + " " + str(request.get("workflow_file") or "")
@@ -600,8 +648,15 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
         media_metadata.update(probe)
     elif width and height:
         media_metadata.update(width=width, height=height)
-    request = (render_task(source_url or body.media_url).get("prompt") or {})
+    request, extra_requests = source_requests(source_url or body.media_url, body.source_urls,
+                                              "video" if is_video else "image")
     resources, notes = collect_resources(body.resources, request, dict(body.generation or {}))
+    for other in extra_requests:
+        more, more_notes = collect_resources([], other, {})
+        for item in more:
+            if len(resources) < MAX_RESOURCES and all(r["model_version_id"] != item["model_version_id"] for r in resources):
+                resources.append(item)
+        notes += [note for note in more_notes if note not in notes]
     meta = build_meta(body.prompt, request, dict(body.generation or {}), resources, upscaled, (width, height))
     techniques = techniques_for(request, "video" if is_video else "image")
 
@@ -645,6 +700,8 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
             "type": "video" if is_video else "image"})
         image_id = int((image or {}).get("id") or 0)
         extras = await attach_extras(client, image_id, resources, techniques) if image_id else {}
+        if image_id:
+            await ensure_meta(client, image_id, meta)
         tags = await pick_tags(client, list(body.tags) + ["autorig"])
         for tag in tags:
             try:

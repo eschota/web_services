@@ -1964,6 +1964,29 @@
     return record && record.value ? String(record.value) : '';
   }
 
+  // Render outputs upstream of a node: a tool that only joins, muxes or cuts
+  // renders has no prompt or model of its own; the server reads them from
+  // these renders (render log), newest of the same kind first.
+  function nodeSourceUrls(id) {
+    const graph = graphFromCanvas();
+    const seen = new Set();
+    const urls = new Set();
+    const stack = [String(id)];
+    while (stack.length && seen.size < 200) {
+      const current = stack.pop();
+      if (seen.has(current)) continue;
+      seen.add(current);
+      const record = runState.get(current);
+      if (record) {
+        let text = '';
+        try { text = JSON.stringify(record); } catch (error) { text = ''; }
+        (text.match(/https:\/\/autorig\.online\/renderfin\/render\/[^"\s]+?\.(?:png|jpg|webp|mp4|webm)/g) || []).forEach(u => urls.add(u));
+      }
+      graph.links.filter(link => String(link.to) === current).forEach(link => stack.push(String(link.from)));
+    }
+    return [...urls].slice(0, 60);
+  }
+
   async function nodeResources(id) {
     const params = readParams(id);
     const item = meta(id) || {};
@@ -2085,7 +2108,7 @@
         tags: form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean), nsfw_level: form.rating.value,
         resources: resources.map(r => ({model_version_id: r.model_version_id, name: r.name, type: r.type || 'checkpoint',
           weight: typeof r.weight === 'number' && isFinite(r.weight) ? r.weight : null})),
-        publish, background: true, auto_meta: true,
+        publish, background: true, auto_meta: true, source_urls: nodeSourceUrls(id),
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
