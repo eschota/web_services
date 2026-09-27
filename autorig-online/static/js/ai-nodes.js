@@ -99,6 +99,26 @@
     return epoch + ':' + String(id) + ':' + signature;
   }
 
+  /**
+   * Seed 0 means "pick one for me". It is picked once and written into the
+   * node, so the result is cached and a later Render (for example after
+   * wiring its output somewhere) does not roll a new picture (2026-09-27).
+   */
+  function fixRandomSeed(node, params) {
+    if (!params || !('seed' in params) || ![undefined, null, '', 0, '0'].includes(params.seed)) return;
+    const field = nodeElement(node.id) && nodeElement(node.id).querySelector('[data-param="seed"]');
+    if (!field) return;
+    const top = Math.min(Number(field.max) || 2147483647, 2147483647);
+    const seed = 1 + Math.floor(Math.random() * (top - 1));
+    params.seed = seed;
+    if (node.params) node.params.seed = seed;
+    field.dataset.silentUpdate = 'yes';
+    field.value = String(seed);
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+    delete field.dataset.silentUpdate;
+  }
+
   function reusableCompleted(service, body) {
     if (['vision', 'text', 'video_frame', 'video_storyboard'].includes(service) ||
         service.startsWith('control_')) return true;
@@ -1596,19 +1616,39 @@
    * them): I isolate, B or M bypass. Ctrl+I / Ctrl+B / Ctrl+M / Ctrl+P too.
    * Ignored while typing.
    */
-  const HOTKEYS = {isolate: 'I or Ctrl+I', bypass: 'B / M or Ctrl+B / Ctrl+P'};
+  const HOTKEYS = {isolate: 'I or Ctrl+I', bypass: 'B / M or Ctrl+B / Ctrl+P', render: 'Space', reseed: 'R: new seed + render, Shift+R: new seed only'};
   function typingIn(target) {
     return !!(target && ((/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || '') && !target.readOnly) ||
       target.isContentEditable || (target.closest && target.closest('dialog, .mpick-panel'))));
   }
+  // By physical key (event.code), so a Russian layout works the same (2026-09-27).
   function hotkeyAction(event) {
-    if (event.altKey || event.shiftKey) return null;
-    const key = String(event.key || '').toLowerCase();
+    if (event.altKey) return null;
+    const code = String(event.code || '');
     const command = event.ctrlKey || event.metaKey;
-    if (key === 'i') return 'isolate';
-    if (key === 'b' || key === 'm') return 'bypass';
-    if (key === 'p' && command) return 'bypass';
+    if (code === 'Space' && !command && !event.shiftKey) return 'render';
+    if (code === 'KeyR' && !command) return event.shiftKey ? 'reseed' : 'reseed-run';
+    if (event.shiftKey) return null;
+    if (code === 'KeyI') return 'isolate';
+    if (code === 'KeyB' || code === 'KeyM') return 'bypass';
+    if (code === 'KeyP' && command) return 'bypass';
     return null;
+  }
+
+  /** A new random seed on every selected node that has one (X9 base seed too). */
+  function reseedSelected() {
+    const changed = [];
+    selectedIds().forEach(id => {
+      const element = nodeElement(id);
+      const field = element && element.querySelector('[data-param="seed"]');
+      if (!field || field.disabled || field.readOnly) return;
+      const top = Math.min(Number(field.max) || 2147483647, 2147483647);
+      field.value = String(1 + Math.floor(Math.random() * (top - 1)));
+      field.dispatchEvent(new Event('input', {bubbles: true}));
+      field.dispatchEvent(new Event('change', {bubbles: true}));
+      changed.push(id);
+    });
+    return changed;
   }
   window.addEventListener('keydown', event => {
     if (!document.getElementById('canvas')) return;
@@ -1619,8 +1659,24 @@
       if (action === 'bypass' && (event.ctrlKey || event.metaKey)) event.preventDefault();
       return;
     }
+    // In a lightbox or dialog, Space and R keep their own meaning (play/pause).
+    if ((action === 'render' || action.startsWith('reseed')) && document.querySelector('dialog[open]')) return;
+    if (action === 'render' && event.target && event.target.closest && event.target.closest('button, a, video, audio')) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (action === 'render') {
+      const run = document.getElementById('run');
+      if (run && !run.disabled) run.click();
+      return;
+    }
+    if (action.startsWith('reseed')) {
+      const changed = reseedSelected();
+      if (!changed.length) { toast('Select nodes with a seed first (R gives them new seeds).'); return; }
+      if (action === 'reseed') { toast('New seed on ' + changed.length + ' node' + (changed.length === 1 ? '' : 's') + ' (Shift+R: not queued).'); return; }
+      toast('New seed on ' + changed.length + ' node' + (changed.length === 1 ? '' : 's') + ' — queued.');
+      runGraph(true);
+      return;
+    }
     if (action === 'isolate') {
       const id = selectedNodeId();
       if (isolation && (!id || id === String(isolation.target))) toggleIsolation();
@@ -1814,7 +1870,23 @@
         const action = event.target && event.target.dataset && event.target.dataset.x9;
         if (action === 'prev') dialog._show(dialog._index - 1);
         if (action === 'next') dialog._show(dialog._index + 1);
-        if (action === 'use') { setX9Pick(dialog._node, dialog._index); toast('Cell ' + (dialog._index + 1) + ' is the output.'); }
+        if (action === 'use') {
+          setX9Pick(dialog._node, dialog._index);
+          // The node's Seed becomes that cell's seed (owner, 2026-09-27): with
+          // X9 off the same render is reproduced from the cache; with X9 on
+          // the next set starts from it. Set quietly: nothing is re-rendered.
+          const record = x9Record(dialog._node);
+          const cell = record && record.x9[dialog._index];
+          const field = nodeElement(dialog._node) && nodeElement(dialog._node).querySelector('[data-param="seed"]');
+          if (cell && field && cell.seed) {
+            field.dataset.silentUpdate = 'yes';
+            field.value = String(cell.seed);
+            field.dispatchEvent(new Event('input', {bubbles: true}));
+            field.dispatchEvent(new Event('change', {bubbles: true}));
+            delete field.dataset.silentUpdate;
+          }
+          toast('Cell ' + (dialog._index + 1) + ' is the output' + (cell && cell.seed ? '; Seed set to ' + cell.seed + '.' : '.'));
+        }
         if (action === 'close' || event.target === dialog) dialog.close();
       });
       dialog.addEventListener('keydown', event => {
@@ -2040,8 +2112,10 @@
     let rating = 'R';
     try { const saved = localStorage.getItem('civ.rating'); if (order.includes(saved)) rating = saved; } catch (error) { /* private mode */ }
     // A model or prompt that is plainly adult raises the preset, never lowers it.
-    const suggested = /porn|xxx|hentai|sex|cum|penis|pussy|nsfw/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'XXX'
-      : /nude|naked|nipple|topless|lewd|erotic|eros/i.test([params.checkpoint, params.lora, params.loras, prompt].join(' ')) ? 'X' : '';
+    const adultText = [params.checkpoint, params.lora, params.loras, prompt, item.label,
+      resources.map(r => r.name).join(' ')].join(' ');
+    const suggested = /porn|xxx|hentai|\bsex|cum\b|cumshot|penis|pussy|vagina|blowjob|nsfw|eros\b|breast play|jiggle|nipple|orgasm|semen|spread/i.test(adultText) ? 'XXX'
+      : /nude|naked|topless|lewd|erotic|lingerie|boob|breast|ass\b|butt/i.test(adultText) ? 'X' : '';
     let raisedNote = '';
     if (suggested && order.indexOf(suggested) > order.indexOf(rating)) { raisedNote = `raised from ${rating} by the model/prompt`; rating = suggested; }
     let dialog = document.getElementById('civitai-post');
@@ -2052,7 +2126,7 @@
     const esc = value => escapeHtml(String(value || ''));
     dialog.innerHTML = `<form method="dialog" style="display:grid;gap:8px">
       <b style="font-size:15px">Post to Civitai (NoDeadLine)</b>
-      <label>Title<input name="title" style="width:100%" value="${esc(item.label || (serviceById(item.service) || {}).title || '')}"></label>
+      <label>Title<input name="title" style="width:100%" value="" placeholder="written by the text model…"></label>
       <label>Description<textarea name="description" rows="4" style="width:100%">${esc(prompt)}</textarea></label>
       <label>Tags (comma separated; Civitai keeps the first 5, existing tags first)<input name="tags" style="width:100%" value="autorig, ${esc(item.service || '')}"></label>
       <div class="civ-rating-row"><span>Rating</span><div class="civ-seg" role="radiogroup" aria-label="Rating">${ratings.map(([r, tip]) =>
@@ -2132,6 +2206,7 @@
         generation: {seed: params.seed, steps: params.steps, sampler: params.sampler, cfg: params.cfg,
                      width: params.width, height: params.height, model: params.checkpoint}};
       try {
+        body.title_is_placeholder = !String(body.title || '').trim();
         const response = await fetch('/api/ai/civitai/post', {method: 'POST', credentials: 'same-origin',
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
         const data = await response.json().catch(() => ({}));
@@ -2185,7 +2260,8 @@
       }
       if (job.stage === 'done') {
         html = (result.warning_string ? '<b style="color:#fb7185">' + esc(result.warning_string) + '</b><br>' : '') +
-          (result.draft_bool ? 'Draft saved: ' : 'Posted: ') + link(job) + ' · ' + clock(job.elapsed_seconds_float);
+          (result.draft_bool ? 'Draft saved: ' : 'Posted: ') + link(job) + ' · ' + clock(job.elapsed_seconds_float) +
+          (result.rating_info_string ? '<br><span style="color:#aab0c8">' + esc(result.rating_info_string) + '</span>' : '');
       } else if (job.stage === 'manual' || job.stage === 'failed' || job.stage === 'interrupted') {
         html = '<b style="color:#fb7185">' + esc(job.stage_label) + '</b>' +
           (result.download_url_string ? `<br><a href="${esc(result.download_url_string)}" target="_blank" rel="noopener" download>Download the file</a> · <a href="${esc(result.open_url_string)}" target="_blank" rel="noopener">Open Civitai's post page</a>` : '');
@@ -2370,6 +2446,10 @@
       cell.className = 'rg-cell';
       cell.title = (item.box_string ? item.box_string + ' · ' : '') + new Date(item.at_unix_float * 1000).toLocaleTimeString();
       if (item.kind_string === 'audio') cell.textContent = '🎵';
+      else if (item.kind_string === 'model3d') {
+        if (item.poster_string) { const img = document.createElement('img'); img.src = item.poster_string; img.loading = 'lazy'; img.alt = '3D'; cell.appendChild(img); }
+        else cell.textContent = '🧊';
+      }
       else {
         const media = document.createElement(item.kind_string === 'video' ? 'video' : 'img');
         media.src = item.url_string + (item.kind_string === 'video' ? '#t=0.1' : '');
@@ -2383,7 +2463,9 @@
         event.dataTransfer.setData('application/x-autorig-node', JSON.stringify(spec));
         event.dataTransfer.setData('text/plain', item.url_string);
       });
-      cell.addEventListener('click', () => openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
+      cell.addEventListener('click', () => item.kind_string === 'model3d'
+        ? openModelLightbox(item.url_string, item.poster_string || '')
+        : openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
       return cell;
     };
     const paint = () => {
@@ -2520,7 +2602,7 @@
       if (isolation && String(isolation.target) === String(target)) toggleIsolation(); else toggleIsolation(target);
     });
     quickbar._bypass = quickButton('⏻', 'Enable / disable (bypass) this node (' + HOTKEYS.bypass + ')', () => toggleBypass([id()]));
-    quickbar._run = quickButton('▶', 'Run this branch: isolate it and render (keeps finished results)', () => {
+    quickbar._run = quickButton('▶', 'Run this branch: isolate it and render (keeps finished results). Space renders everything changed; ' + HOTKEYS.reseed, () => {
       const target = id();
       if (!target) return;
       if (!isolation || String(isolation.target) !== String(target)) toggleIsolation(target);
@@ -3364,7 +3446,10 @@
       if (!data) continue;
       if (report) report(data);
       if (data.finished_bool) {
-        if (data.model_url_string) return data.model_url_string;
+        if (data.model_url_string) {
+          return {value: data.model_url_string,
+                  outputs: {model_url_string: data.model_url_string, preview_url_string: data.preview_url_string || ''}};
+        }
         throw new Error(data.error_string || 'the node did not produce a model');
       }
     }
@@ -3956,7 +4041,122 @@
     host.appendChild(grid);
   }
 
+  /* ------------------------------------------------------------- 3D viewer */
+
+  /**
+   * A finished 3D model is shown in the node (owner, 2026-09-27): Google's
+   * <model-viewer> (orbit, zoom, pan, auto-rotate, lit, soft ground shadow),
+   * loaded from jsDelivr the first time a model is shown. The Preview picture
+   * is the poster until the GLB arrives; model-viewer itself waits until the
+   * element is on screen.
+   */
+  let modelViewerLoading = null;
+  function ensureModelViewer() {
+    if (window.customElements && customElements.get('model-viewer')) return Promise.resolve();
+    if (!modelViewerLoading) {
+      modelViewerLoading = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = 'https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js';
+        script.onload = () => resolve();
+        script.onerror = () => { modelViewerLoading = null; reject(new Error('the 3D viewer did not load')); };
+        document.head.appendChild(script);
+      });
+    }
+    return modelViewerLoading;
+  }
+
+  function modelViewerElement(url, poster, big) {
+    const viewer = document.createElement('model-viewer');
+    viewer.setAttribute('src', url);
+    if (poster) viewer.setAttribute('poster', poster);
+    ['camera-controls', 'auto-rotate', 'ar'].forEach(name => viewer.setAttribute(name, ''));
+    viewer.setAttribute('loading', 'lazy');
+    viewer.setAttribute('reveal', 'auto');
+    viewer.setAttribute('shadow-intensity', '1');
+    viewer.setAttribute('shadow-softness', '0.8');
+    viewer.setAttribute('exposure', '1');
+    viewer.setAttribute('environment-image', 'neutral');
+    viewer.setAttribute('auto-rotate-delay', '1500');
+    viewer.setAttribute('interaction-prompt', 'none');
+    viewer.style.cssText = 'width:100%;height:' + (big ? '72vh' : '220px') + ';background:radial-gradient(#23253d,#0b0c18);border-radius:8px;display:block';
+    ['mousedown', 'pointerdown', 'wheel', 'touchstart', 'dblclick'].forEach(type =>
+      viewer.addEventListener(type, event => event.stopPropagation(), {passive: type === 'touchstart'}));
+    return viewer;
+  }
+
+  function isGlb(url) { return /\.(glb|gltf)(\?|#|$)/i.test(String(url || '')); }
+
+  function openModelLightbox(url, poster) {
+    let dialog = document.getElementById('model-lightbox');
+    if (dialog) dialog.remove();
+    dialog = document.createElement('dialog');
+    dialog.id = 'model-lightbox';
+    dialog.className = 'civ-dialog';
+    dialog.style.width = 'min(1100px, 96vw)';
+    dialog.innerHTML = '<div class="ml-stage"></div><div style="display:flex;gap:8px;justify-content:center;margin-top:10px">' +
+      '<a class="ml-download" download>Download</a><button type="button" data-ml="copy">Copy link</button>' +
+      '<button type="button" data-ml="close" title="Close (Esc)">✕</button></div>';
+    document.body.appendChild(dialog);
+    dialog.querySelector('.ml-download').href = url;
+    dialog.querySelector('.ml-download').style.cssText = 'padding:8px 14px;border-radius:9px;border:1px solid rgba(255,255,255,.18);color:#7dd3fc;text-decoration:none';
+    dialog.addEventListener('click', event => {
+      const action = event.target && event.target.dataset && event.target.dataset.ml;
+      if (action === 'copy') copyText(url).then(() => toast('Link copied.'));
+      if (action === 'close' || event.target === dialog) dialog.close();
+    });
+    ensureModelViewer().then(() => dialog.querySelector('.ml-stage').appendChild(modelViewerElement(url, poster, true)))
+      .catch(error => { dialog.querySelector('.ml-stage').textContent = error.message; });
+    dialog.showModal();
+  }
+
+  function showModel(host, url, poster) {
+    const box = document.createElement('div');
+    box.className = 'nmodel';
+    box.style.cssText = 'position:relative';
+    if (!isGlb(url)) {
+      box.innerHTML = (poster ? '<img alt="3D preview" style="width:100%;border-radius:8px">' : '') +
+        '<div class="ntext">3D model: <a target="_blank" rel="noopener"></a></div>';
+      if (poster) box.querySelector('img').src = poster;
+      const link = box.querySelector('a'); link.href = url; link.textContent = url.split('/').pop();
+      host.appendChild(box);
+      return;
+    }
+    if (poster) {
+      const img = document.createElement('img');
+      img.src = poster; img.alt = '3D preview'; img.loading = 'lazy'; img.decoding = 'async';
+      img.style.cssText = 'width:100%;height:220px;object-fit:contain;background:#0b0c18;border-radius:8px;display:block';
+      box.appendChild(img);
+    }
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.textContent = '⤢';
+    open.title = 'Open the 3D viewer full size';
+    open.style.cssText = 'position:absolute;right:6px;bottom:6px;z-index:2;border:0;border-radius:6px;background:rgba(10,12,30,.8);color:#fff;cursor:pointer;padding:2px 7px';
+    ['mousedown', 'pointerdown'].forEach(type => open.addEventListener(type, event => event.stopPropagation()));
+    open.addEventListener('click', event => { event.stopPropagation(); openModelLightbox(url, poster); });
+    box.appendChild(open);
+    host.appendChild(box);
+    // The viewer replaces the poster once the node is on screen.
+    const start = () => ensureModelViewer().then(() => {
+      if (!box.isConnected) return;
+      const viewer = modelViewerElement(url, poster, false);
+      const still = box.querySelector('img');
+      if (still) still.replaceWith(viewer); else box.insertBefore(viewer, open);
+    }).catch(() => {});
+    if (typeof IntersectionObserver === 'undefined') { start(); return; }
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) { io.disconnect(); start(); }
+    });
+    io.observe(box);
+  }
+
   function showResult(host, type, value, outputs) {
+    if (type === 'model3d') {
+      host.innerHTML = '';
+      showModel(host, String(value || ''), (outputs && outputs.preview_url_string) || '');
+      return;
+    }
     host.innerHTML = '';
     if (type === 'text') {
       const block = document.createElement('div');
@@ -4748,6 +4948,7 @@
             resolved[link.input] = value;
           }
           const params = {...(node.params || {})};
+          fixRandomSeed(node, params);
           await followInputSizeAtRun(node, resolved, params);
           await followInputFramesAtRun(node, resolved, params);
           if (params._x9 && X9_SERVICES.has(node.service)) {
@@ -5229,7 +5430,7 @@
     'input:media': 'Media in', 'input:text': 'Text in', 'input:avatar': 'Avatar',
     vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
-    video_frame: 'First frame', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
+    video_frame: 'Extract Frames', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
     scene_split: 'Scene split', video_concat: 'Concat shots', video_summary: 'Summary', audio_from_source: 'Audio from source',
     upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_ready: 'Avatar (ready)', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',
@@ -5586,23 +5787,72 @@
       onEditSystemPrompt:ids => openSystemPromptEditor(ids),
       systemPromptTargets,
       onSetComparisonAnchor:id => nodeCompare && nodeCompare.setAnchor(id)});
+    // Ctrl+V / drop on the canvas (owner, 2026-09-27): copied nodes paste as
+    // nodes (ai-node-groups handles those first); a picture, clip or media
+    // link becomes a new Media in node at the pointer — or fills the selected
+    // Media in node. Several files stack at the pointer.
+    let lastPointer = null;
+    document.getElementById('canvas').addEventListener('mousemove', event => { lastPointer = [event.clientX, event.clientY]; }, {passive: true});
+    const graphPointAt = (clientX, clientY) => {
+      if (nodePlacement && nodePlacement.pointAt && clientX != null) return nodePlacement.pointAt(clientX, clientY);
+      const rect = document.getElementById('canvas').getBoundingClientRect();
+      const scale = Number(editor.zoom) || 1;
+      return {x: (rect.width / 2 - editor.canvas_x) / scale, y: (rect.height / 2 - editor.canvas_y) / scale};
+    };
+    const MEDIA_LINK = /^(https?:\/\/\S+|data:(image|video)\/[^,]+,)/i;
+    function mediaNodesAt(point, files, links) {
+      let made = 0;
+      files.forEach((file, index) => {
+        const id = addInputNode('media', point.x + index * 30, point.y + index * 60, '');
+        const element = id && nodeElement(id);
+        if (element && element._acceptImage) { element._acceptImage(file); made += 1; }
+      });
+      links.forEach((link, index) => {
+        const offset = files.length + index;
+        const id = addInputNode('media', point.x + offset * 30, point.y + offset * 60, link);
+        if (id) { made += 1; invalidateNodeAndDownstream(id); }
+      });
+      if (made) toast(made === 1 ? 'Added a Media in node.' : 'Added ' + made + ' Media in nodes.');
+      return made;
+    }
     document.addEventListener('paste', event => {
+      if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
+      if (!document.getElementById('canvas')) return;
       const items = [...(event.clipboardData?.items || [])];
-      const item = items.find(value => value.kind === 'file' && /^(image|video)\//.test(value.type));
+      const files = items.filter(value => value.kind === 'file' && /^(image|video)\//.test(value.type)).map(value => value.getAsFile()).filter(Boolean);
+      const text = (event.clipboardData ? event.clipboardData.getData('text/plain') : '').trim();
+      if (!files.length && /^AUTORIG_NODES_V1:/.test(text)) return;  // node paste is handled already
       const current = event.target.closest && event.target.closest('.drawflow-node');
-      const target = current || document.querySelector('#canvas .drawflow-node.selected');
-      if (item) {
-        if (!target || !target._acceptImage) { toast('Select a Media in node to paste an image or video.'); return; }
+      const target = current || document.querySelector('#canvas .drawflow-node.selected, #canvas .drawflow-node.multi-selected');
+      if (target && target._acceptImage && (files.length === 1 || (!files.length && MEDIA_LINK.test(text)))) {
         event.preventDefault();
-        target._acceptImage(item.getAsFile());
+        if (files.length) target._acceptImage(files[0]); else target._acceptText(text);
         return;
       }
-      // A copied link lands in the selected Media node; typing into a field
-      // keeps the browser's own paste.
-      const editing = event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || '');
-      if (editing || !target || !target._acceptText) return;
-      const link = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
-      if (target._acceptText(link)) event.preventDefault();
+      if (files.length || MEDIA_LINK.test(text)) {
+        event.preventDefault();
+        const point = graphPointAt(lastPointer && lastPointer[0], lastPointer && lastPointer[1]);
+        mediaNodesAt(point, files, files.length ? [] : [text]);
+        return;
+      }
+      if (text) toast('Clipboard has text, not a picture/clip link.');
+    });
+    const canvasElement = document.getElementById('canvas');
+    canvasElement.addEventListener('dragover', event => {
+      const types = [...(event.dataTransfer && event.dataTransfer.types || [])];
+      if (types.includes('application/x-autorig-node')) return;
+      if (types.includes('Files') || types.includes('text/uri-list')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
+    });
+    canvasElement.addEventListener('drop', event => {
+      if (event.defaultPrevented) return;
+      const types = [...(event.dataTransfer && event.dataTransfer.types || [])];
+      if (types.includes('application/x-autorig-node')) return;
+      if (event.target.closest && event.target.closest('.drawflow-node')) return;  // a Media node takes its own drops
+      const files = [...(event.dataTransfer.files || [])].filter(file => /^(image|video)\//.test(file.type));
+      const link = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain') || '').split(String.fromCharCode(10))[0].trim();
+      if (!files.length && !MEDIA_LINK.test(link)) return;
+      event.preventDefault();
+      mediaNodesAt(graphPointAt(event.clientX, event.clientY), files, files.length ? [] : [link]);
     });
     editor.on('connectionCreated', onConnectionCreated);
     editor.on('connectionCreated', scheduleAutoFrames);

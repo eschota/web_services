@@ -130,20 +130,30 @@ async def _download(client: httpx.AsyncClient, url: str, target: Path) -> Path:
     return target
 
 
+_PUBLISH_LOCK = asyncio.Lock()
+
+
 async def _publish(client: httpx.AsyncClient, path: Path, mime: str) -> str:
-    for attempt in range(3):
+    """Upload to the scratch store: one at a time, retried with backoff.
+
+    The scratch endpoint sits behind the site's rate limit; parallel jobs
+    publishing dozens of frames at once got non-JSON answers (2026-09-27).
+    """
+    last = ""
+    for attempt in range(8):
         try:
-            with path.open("rb") as handle:
-                response = await client.post(PUBLISH_URL, files={"file": (path.name, handle, mime)}, timeout=300)
+            async with _PUBLISH_LOCK:
+                with path.open("rb") as handle:
+                    response = await client.post(PUBLISH_URL, files={"file": (path.name, handle, mime)}, timeout=300)
+                await asyncio.sleep(0.35)
             data = response.json()
             if data.get("url"):
                 return str(data["url"])
-            raise VideoToolError(f"publish refused: {str(data)[:200]}")
+            last = f"refused: {str(data)[:200]}"
         except (httpx.HTTPError, ValueError) as exc:
-            if attempt == 2:
-                raise VideoToolError(f"publish failed: {exc}")
-            await asyncio.sleep(2 + attempt * 3)
-    raise VideoToolError("publish failed")
+            last = f"HTTP {getattr(locals().get('response'), 'status_code', '?')}: {exc}"
+        await asyncio.sleep(min(20, 1.5 * (attempt + 1) ** 1.5))
+    raise VideoToolError(f"publish failed after retries ({last})")
 
 
 async def _count_frames(path: Path) -> int:
@@ -587,6 +597,91 @@ def _submit(kind: str, body: BaseModel, worker) -> Dict[str, Any]:
             if _JOBS[key]["status"] in ("completed", "failed"):
                 _JOBS.pop(key, None)
     return _public(job)
+
+
+# ------------------------------------------------------------ extract frames
+
+class ExtractFramesRequest(BaseModel):
+    video_url: str = Field(..., min_length=8, max_length=4096)
+    # start_end (default) | start_middle_end | start_only | end_only | every_n | n_per_scene
+    template: str = Field("start_only", pattern="^(start_end|start_middle_end|start_only|end_only|every_n|n_per_scene)$")
+    detect_scenes: bool = True
+    n: int = Field(4, ge=1, le=64, description="every_n: step in frames; n_per_scene: frames per scene")
+    offset: int = Field(0, ge=0, le=48, description="skip this many frames after a cut / before the next one")
+    sensitivity: float = Field(12.0, ge=2.0, le=60.0)
+    local_ratio: float = Field(6.0, ge=1.5, le=50.0)
+    min_shot_seconds: float = Field(0.5, ge=0.0, le=10.0)
+    fps: int = Field(24, ge=8, le=60)
+    max_frames_out: int = Field(64, ge=1, le=64)
+
+
+def _pick_frames(start: int, end: int, template: str, n: int, offset: int):
+    """(frame, role) picks inside one scene [start, end)."""
+    last = end - 1
+    a = min(start + offset, last)
+    b = max(last - offset, a)
+    if template == "start_only":
+        return [(a, "start")]
+    if template == "end_only":
+        return [(b, "end")]
+    if template == "start_end":
+        return [(a, "start")] + ([(b, "end")] if b != a else [])
+    if template == "start_middle_end":
+        mid = (a + b) // 2
+        picks = [(a, "start"), (mid, "middle"), (b, "end")]
+        seen, out = set(), []
+        for frame, role in picks:
+            if frame not in seen:
+                seen.add(frame); out.append((frame, role))
+        return out
+    if template == "every_n":
+        return [(f, f"f{f}") for f in range(a, b + 1, max(1, n))]
+    # n_per_scene: evenly spaced, both ends included
+    if n <= 1 or b == a:
+        return [(a, "start")]
+    step = (b - a) / (n - 1)
+    frames = sorted({int(round(a + i * step)) for i in range(n)})
+    return [(f, f"{i + 1}/{len(frames)}") for i, f in enumerate(frames)]
+
+
+async def _extract_frames(body: ExtractFramesRequest, work: Path) -> Dict[str, Any]:
+    async with httpx.AsyncClient() as client:
+        raw = await _download(client, body.video_url, work / "source.bin")
+        ref = work / "reference.mp4"
+        await _ff("-i", str(raw), "-r", str(body.fps), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-an",
+                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(ref))
+        scores = await _frame_scores(ref, work)
+        total = len(scores) or 1
+        cuts: List[int] = []
+        if body.detect_scenes:
+            min_frames = max(1, int(round(body.min_shot_seconds * body.fps)))
+            cuts = detect_cuts(scores, body.fps, body.sensitivity, body.local_ratio, min_frames)["cuts"]
+        edges = [0] + cuts + [total]
+        frames = []
+        for scene, (start, end) in enumerate(zip(edges, edges[1:])):
+            for frame, role in _pick_frames(start, end, body.template, body.n, body.offset):
+                frames.append({"scene": scene, "frame": frame, "role": role})
+        frames = frames[:body.max_frames_out]
+        out = []
+        for index, item in enumerate(frames):
+            png = work / f"x{index:03d}.png"
+            await _ff("-i", str(ref), "-vf", f"trim=start_frame={item['frame']}:end_frame={item['frame'] + 1}",
+                      "-frames:v", "1", str(png))
+            url = await _publish(client, png, "image/png")
+            label = f"S{item['scene'] + 1} {item['role']}"
+            out.append(dict(item, url=url, label=label, time=round(item["frame"] / body.fps, 3),
+                            text=f"{label} · frame {item['frame']} · {_timecode(item['frame'] / body.fps)}"))
+    scenes = len(edges) - 1
+    text = (f"{scenes} scene{'s' if scenes != 1 else ''} · {total} frames · template {body.template} · "
+            f"{len(out)} pictures: " + ", ".join(f"{o['label']} (frame {o['frame']})" for o in out))
+    return {"frames_array": out, "count_int": len(out), "scenes_int": scenes, "cut_frames_array": cuts,
+            "frames_int": total, "fps_int": body.fps, "first_url_string": out[0]["url"] if out else "",
+            "frames_text_string": text}
+
+
+@router.post("/api/ai/video-tools/extract-frames")
+async def api_extract_frames(body: ExtractFramesRequest):
+    return _submit("extract_frames", body, _extract_frames)
 
 
 @router.post("/api/ai/video-tools/scene-split")

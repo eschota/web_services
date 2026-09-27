@@ -71,6 +71,19 @@
                          ' shot' + (data.count_int === 1 ? '' : 's') + ' · ' + data.frames_int + ' frames · ' +
                          data.duration_float + ' s' + (data.cuts_array && data.cuts_array.length ? ' · cuts at ' + data.cuts_array.join(', ') + ' s' : '')};
       }},
+    // Extract Frames (replaces "Video first frame" under the id video_frame).
+    video_frame: {api: '/api/ai/video-tools/extract-frames', field: 'first_url_string', type: 'image',
+      finish: async (accepted, runner, report) => {
+        const data = await pollVideoTool(accepted, runner, report);
+        const frames = data.frames_array || [];
+        return {value: data.first_url_string,
+                outputs: {image_url_string: data.first_url_string, frames_text_string: data.frames_text_string},
+                items: frames.map((f, i) => ({status: 'done', type: 'image', value: f.url, error: '',
+                  outputs: {frame_url_string: f.url, frame_info_string: f.text},
+                  meta: {label: f.label, index: i, scene: f.scene, frame: f.frame}})),
+                summary: data.scenes_int + ' scene' + (data.scenes_int === 1 ? '' : 's') + ' · ' + data.count_int +
+                         ' picture' + (data.count_int === 1 ? '' : 's') + ' · ' + data.frames_int + ' frames'};
+      }},
     video_storyboard: {api: '/api/ai/video-tools/scene-split', field: 'storyboard_url_string', type: 'image',
       finish: async (accepted, runner, report) => {
         const data = await pollVideoTool(accepted, runner, report);
@@ -143,6 +156,11 @@
   function adjustBody(serviceId, body) {
     if (serviceId === 'video_storyboard' || serviceId === 'scene_split') delete body.view;
     if (serviceId === 'video_summary') body.chain = true;
+    if (serviceId === 'video_frame') {
+      delete body.view;
+      body.template = body.template || 'start_only';  // a migrated First frame node
+      body.detect_scenes = body.detect_scenes !== 'off';
+    }
     if (serviceId === 'vision' && typeof body.context === 'string') {
       const context = body.context.trim();
       if (context) body.prompt = String(body.prompt || '').trim() + '\n\nContext (facts about what you see):\n' + context;
@@ -588,6 +606,12 @@
       const box = document.createElement('div');
       box.style.cssText = 'position:relative;aspect-ratio:' + aspect.toFixed(4) + ';border-radius:4px;overflow:hidden;cursor:zoom-in;' +
         'background:rgba(255,255,255,.06);outline:1px solid ' + (item.status === 'failed' ? '#fb7185' : item.status === 'done' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.08)');
+      if (node.service === 'video_frame' && item.meta && item.meta.label) {
+        const cap = document.createElement('i');
+        cap.textContent = item.meta.label;
+        cap.style.cssText = 'position:absolute;z-index:1;left:2px;bottom:1px;font:600 8px system-ui;font-style:normal;color:#fff;text-shadow:0 0 3px #000';
+        box.appendChild(cap);
+      }
       box.title = 'Shot ' + (index + 1) + ' · ' + item.status + (item.error ? ': ' + item.error : '') + (item.meta && item.meta.label ? '\n' + item.meta.label : '');
       if (item.status === 'done') {
         const shown = scene && item.outputs ? item.outputs.first_frame_url_string : item.value;

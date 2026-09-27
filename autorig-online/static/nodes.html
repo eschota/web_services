@@ -20,7 +20,7 @@
     <script src="/static/js/ai-node-display.js?v=20260923-sockets1-text2"></script>
     <script src="/static/js/ai-node-sockets.js?v=20260926-media2"></script>
     <script src="/static/js/ai-node-share.js?v=20260922-share"></script>
-    <script src="/static/js/ai-node-compare.js?v=20260926-media2-video-tools-20260927r"></script>
+    <script src="/static/js/ai-node-compare.js?v=20260926-media2-video-tools-20260927r-video-tools-20260927s-video-tools-20260927t-video-tools-20260927u"></script>
     <script src="/static/js/ai-graph-bridge.js?v=20260926-media2"></script>
     <script src="/static/js/ai-graph-agent.js?v=20260922-clone-agent7"></script>
     <script src="/static/js/ai-node-placement.js?v=20260927-ids1"></script>
@@ -29,8 +29,8 @@
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-node-lists.js?v=video-tools-20260927r"></script>
-    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ11-reset1-meta1-mi3-lists1-sup2-own1-wait1-frames3-video-tools-20260927l-video-tools-20260927m-video-tools-20260927n-video-tools-20260927o-gal1-video-tools-20260927p-video-tools-20260927q-video-tools-20260927r"></script>
+    <script src="/static/js/ai-node-lists.js?v=video-tools-20260927u"></script>
+    <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ12-reset1-meta1-mi3-lists1-sup2-own1-wait1-frames3-video-tools-20260927l-video-tools-20260927m-video-tools-20260927n-video-tools-20260927o-gal1-video-tools-20260927p-video-tools-20260927q-video-tools-20260927r-keys1-useseed1-video-tools-20260927s-seedfix1-model3d1-paste1-video-tools-20260927t-video-tools-20260927u"></script>
     <style>
         .ai-page {
             background:
@@ -167,6 +167,20 @@
         .drawflow .drawflow-node.rl-flash { box-shadow: 0 0 0 3px #f59e0b !important; }
         /* the socket legend sits left of the gallery */
         .socket-legend { right: 310px !important; }
+        /* ---- LoRA slots: the picker gets its own line (owner, 2026-09-27) ----
+           The weight slider, value, reset and remove squeezed the picker to
+           41 px, so the LoRA name had zero width and the thumbnail looked empty. */
+        html body .drawflow .drawflow-node .lslot { display: flex !important; flex-wrap: wrap; align-items: center; gap: 4px; }
+        html body .drawflow .drawflow-node .lslot > .mpick-slot { flex: 1 1 100%; min-width: 0; }
+        html body .drawflow .drawflow-node .lslot > .mpick-slot .mpick-button { width: 100%; min-width: 0; }
+        html body .drawflow .drawflow-node .lslot .mpick-choice { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+        html body .drawflow .drawflow-node .lslot .mpick-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        html body .drawflow .drawflow-node .lslot .aislider { flex: 1 1 auto; min-width: 60px; }
+        /* A LoRA without a preview picture still shows what it is. */
+        html body .drawflow .drawflow-node .lslot .mpick-thumb:not(.empty):not([style*="url("])::after,
+        .mpick-panel .mpick-item .mpick-thumb:not(.empty):not([style*="url("])::after {
+            content: 'LoRA'; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+            font: 700 7px/1 system-ui; letter-spacing: .04em; color: #c7b9ff; background: rgba(123,92,255,.18); border-radius: inherit; }
         /* ---- Post to Civitai dialog ---- */
         .civ-dialog { width: min(560px, 94vw); padding: 18px 20px; border: 1px solid rgba(255,255,255,.14);
             border-radius: 14px; background: #121327; color: #e9e9f4; font: 13px/1.4 system-ui;

@@ -116,11 +116,21 @@ def MULTIREF_INPUTS(total: int) -> List[Dict[str, object]]:
 
 SERVICES: List[Dict[str, object]] = [
     {
-        "id": "video_frame", "title": "Video first frame", "path": "/nodes",
-        "api": "/api/ai/video-reference", "status": "live",
-        "summary": "Extract the first frame of a driving video for scene and character editing.",
+        # Extract Frames (2026-09-27) replaces "Video first frame" under the same
+        # id, so saved graphs keep working: the first picture is still on
+        # image_url_string. Scenes are found with Scene split's detector (its own
+        # job; the Scene split pipeline is untouched).
+        "id": "video_frame", "title": "Extract Frames", "path": "/nodes",
+        "api": "/api/ai/video-tools/extract-frames", "status": "live", "list_source": True,
+        "summary": ("Pictures from a video by template (Start-End per scene by default): a gallery / list for "
+                    "per-item pipelines, plus the first picture for simple wiring."),
         "inputs": [{"type": VIDEO, "field": "video_url", "required": True, "title": "Source video"}],
-        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "First frame"}],
+        "outputs": [
+            {"type": IMAGE, "field": "image_url_string", "title": "First picture"},
+            {"type": IMAGE, "field": "frame_url_string", "title": "Pictures (each)", "per_item": True},
+            {"type": TEXT, "field": "frame_info_string", "title": "Picture info (each)", "per_item": True},
+            {"type": TEXT, "field": "frames_text_string", "title": "Pictures (text)"},
+        ],
     },
     {
         # Scene-aware since 2026-09-27 (owner): adaptive cut detection on the
@@ -752,6 +762,21 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
              {"value": "klein", "title": "FLUX.2 klein 4B"},
              {"value": "none", "title": "No retry"},
          ]},
+    ],
+    "video_frame": [
+        {"name": "template", "title": "Template", "type": "select", "default": "start_end",
+         "options": [{"value": "start_end", "title": "Start-End (per scene)"},
+                     {"value": "start_middle_end", "title": "Start-Middle-End (per scene)"},
+                     {"value": "start_only", "title": "Start only"},
+                     {"value": "end_only", "title": "End only"},
+                     {"value": "n_per_scene", "title": "N evenly spaced per scene"},
+                     {"value": "every_n", "title": "Every N frames"}]},
+        {"name": "detect_scenes", "title": "Detect scenes", "type": "select", "default": "on",
+         "options": [{"value": "on", "title": "On (per scene)"}, {"value": "off", "title": "Off (whole clip)"}]},
+        {"name": "n", "title": "N", "type": "number", "min": 1, "max": 64, "step": 1, "default": 4,
+         "help": "N per scene, or the step for Every N frames"},
+        {"name": "offset", "title": "Offset from cut", "type": "number", "min": 0, "max": 48, "step": 1, "default": 0,
+         "help": "Skip this many frames after a cut and before the next (transition blur)"},
     ],
     "scene_split": [
         {"name": "sensitivity", "title": "Cut sensitivity (z)", "type": "range", "min": 4, "max": 40, "step": 1,
