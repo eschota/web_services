@@ -147,6 +147,19 @@ def _grey_of(workflow: Dict[str, Any], node: str) -> str:
     return grey
 
 
+def _join_step(v: float, total: int) -> int:
+    """First step (0-based) a picture at strength v conditions (owner's bands, 2026-09-28).
+
+    0.85..1 -> from step 1 (all steps); 0.6..0.85 -> from step 2; 0.35..0.6 ->
+    from step 3; below -> from step 4; 0 -> never. Within a band the map
+    softening (backend) keeps the effect graded.
+    """
+    if v <= 0.0:
+        return total
+    step = 0 if v >= 0.85 else 1 if v >= 0.6 else 2 if v >= 0.35 else 3
+    return min(step, max(0, total - 1))
+
+
 def _qwen21_strength_schedule(workflow: Dict[str, Any], positive: Dict[str, Any],
                                scale_nodes: List[str], strengths: List[float]) -> None:
     """A picture at strength v joins only for the LAST v of the sampling steps.
@@ -168,7 +181,8 @@ def _qwen21_strength_schedule(workflow: Dict[str, Any], positive: Dict[str, Any]
     sigmas_text = str(((workflow.get("sigmas") or {}).get("inputs") or {}).get("sigmas") or "")
     total = max(1, len([x for x in sigmas_text.split(",") if x.strip()]) - 1) if sigmas_text else 8
     base = {k: v for k, v in positive.get("inputs", {}).items() if not k.startswith("images.")}
-    cuts = sorted({min(total - 1, max(1, round((1.0 - v) * total))) for v in s if 0.0 < v < 0.999})
+    joins_at = [_join_step(v, total) for v in s]
+    cuts = sorted({j for j in joins_at if 0 < j < total})
     bounds = [0] + cuts + [total]
     sigmas_ref = list(sample["inputs"]["sigmas"])
     latent = list(sample["inputs"]["latent_image"])
@@ -176,11 +190,10 @@ def _qwen21_strength_schedule(workflow: Dict[str, Any], positive: Dict[str, Any]
     for seg, (a, b) in enumerate(zip(bounds, bounds[1:]), start=1):
         if b <= a:
             continue
-        frac_start = a / total
         enc = f"refstrength_{seg}_encode"
         workflow[enc] = {"class_type": "TextEncodeQwenImage21", "inputs": dict(base)}
         for index, (node, v) in enumerate(zip(scale_nodes, s), start=1):
-            joins = v >= 0.999 or (v > 0.0 and frac_start >= (1.0 - v) - 1e-6)
+            joins = joins_at[index - 1] <= a
             workflow[enc]["inputs"][f"images.image_{index}"] = [node if joins else _grey_of(workflow, node), 0]
         g = f"refstrength_{seg}_guider"
         workflow[g] = {"class_type": "BasicGuider", "inputs": {"model": guider["inputs"]["model"], "conditioning": [enc, 0]}}

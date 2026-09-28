@@ -20,7 +20,43 @@
   const LIST_SINKS = new Set(['video_concat', 'video_summary']);
   const TRANSIENT = /server restarted|unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
 
-  function install(host) { api = host; }
+  function install(host) { api = host; watchCatalogue(); }
+
+  /* ------------------------------------------- stale catalogue guard */
+
+  // A tab opened before a deploy keeps the old socket lists: a wire drawn to
+  // "Frame 3" was read as whatever the old output 3 was (Extract Frames' text
+  // info), Vision got text instead of a picture and failed "Provide image_url"
+  // (2026-09-28), and the save was refused so the wire never reached the
+  // server. The page now notices a changed catalogue, says so, and holds Render
+  // until it is reloaded.
+  function socketSignature(data) {
+    return JSON.stringify((data.services_array || []).map(sv => [sv.id,
+      (sv.inputs || []).map(i => i.field), (sv.outputs || []).map(o => o.field)]));
+  }
+  let catalogueSig = null;
+  function watchCatalogue() {
+    if (typeof fetch === 'undefined' || typeof document === 'undefined' || !document.addEventListener) return;
+    const check = () => fetch('/api/ai/services', {cache: 'no-store'}).then(r => r.json()).then(data => {
+      const sig = socketSignature(data);
+      if (catalogueSig === null) { catalogueSig = sig; return; }
+      if (sig !== catalogueSig) staleBanner();
+    }).catch(() => {});
+    check();
+    setInterval(check, 60000);
+  }
+  function staleBanner() {
+    if (document.getElementById('stale-catalogue')) return;
+    const bar = document.createElement('div');
+    bar.id = 'stale-catalogue';
+    bar.style.cssText = 'position:fixed;z-index:10000;left:50%;top:8px;transform:translateX(-50%);padding:8px 14px;border-radius:8px;' +
+      'background:#b45309;color:#fff;font:600 13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.4);cursor:pointer';
+    bar.textContent = 'Nodes were updated on the server — reload this page before rendering or wiring (sockets changed). Click to reload.';
+    bar.addEventListener('click', () => location.reload());
+    document.body.appendChild(bar);
+    const run = document.getElementById('run');
+    if (run) { run.disabled = true; run.title = 'Reload the page first: the node catalogue changed on the server'; }
+  }
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -199,6 +235,7 @@
     const hints = [];
     order.forEach((url, i) => {
       const ch = channels.get(String(url));
+      if (strengths[i] <= 0) { hints.push('Ignore image ' + (i + 1) + ' (disabled).'); return; }
       if (strengths[i] < 0.8) {
         hints.push(ch ? 'Image ' + (i + 1) + ' is a ' + ch + ' map: use it only as a loose layout guide; draw the character from image 1.'
                       : 'Follow image ' + (i + 1) + ' only loosely.');
