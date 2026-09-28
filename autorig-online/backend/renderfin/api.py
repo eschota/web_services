@@ -136,6 +136,57 @@ async def api_render_cancel_pending(request: Request) -> Dict[str, Any]:
     return await _queue(request).cancel_all_pending()
 
 
+@router.get("/api-render/graph/{graph_id}")
+async def api_render_graph(request: Request, graph_id: str) -> Dict[str, Any]:
+    """This graph's share of the queue: its queued/running jobs and the rest."""
+    return _queue(request).graph_summary(graph_id)
+
+
+@router.post("/api-render/cancel-stale-graph")
+async def api_render_cancel_stale_graph(request: Request) -> Dict[str, Any]:
+    """Stand down queued jobs a saved graph no longer wants (2026-09-28).
+
+    Body: {"graph_id": ..., "wanted": {node_id: signature, ...}, "reason": ...}.
+    The site calls this after every save of a graph; it decides what "wanted"
+    means (present, not bypassed, current signature). Only queued jobs go;
+    a job on a card finishes and the editor drops a stale result itself.
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    graph_id = str(body.get("graph_id") or "").strip()
+    wanted = body.get("wanted")
+    if not graph_id or not isinstance(wanted, dict):
+        raise HTTPException(status_code=400, detail="graph_id and wanted{} are required")
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    return await _queue(request).cancel_stale_for_graph(
+        graph_id, {str(k): str(v) for k, v in wanted.items()}, reason=reason)
+
+
+@router.post("/api-render/cancel-graph")
+async def api_render_cancel_graph(request: Request) -> Dict[str, Any]:
+    """Stand down every queued job of one graph (the editor's button).
+
+    Body: {"graph_id": ..., "task_ids": [...optional subset...], "reason": ...}.
+    Ownership is the site's business (it passes the subset the caller owns).
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    graph_id = str(body.get("graph_id") or "").strip()
+    if not graph_id:
+        raise HTTPException(status_code=400, detail="graph_id is required")
+    task_ids = body.get("task_ids")
+    if task_ids is not None and not isinstance(task_ids, list):
+        raise HTTPException(status_code=400, detail="task_ids must be a list")
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    return await _queue(request).cancel_graph_pending(
+        graph_id, task_ids=[str(t) for t in task_ids] if task_ids is not None else None,
+        reason=reason)
+
+
 @router.get("/api-render/last-start-wipe")
 async def api_render_last_start_wipe(request: Request) -> Dict[str, Any]:
     """What the last start wiped (owner rule: every restart clears the queue)."""

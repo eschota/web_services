@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+import ai_graph_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -405,6 +406,7 @@ async def _uncached_camera_video(body: CameraVideoRequest) -> Dict[str, Any]:
         if body.seed:
             payload["noise_seed"] = int(body.seed)
         try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(RENDERFIN_BASE + "/api-render", json=payload,
                                          timeout=SUBMIT_TIMEOUT_SECONDS)
         except Exception:

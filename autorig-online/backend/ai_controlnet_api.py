@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+import ai_graph_context
 from ai_vision_api import (
     MAX_WAIT_SECONDS,
     SUBMIT_TIMEOUT_SECONDS,
@@ -179,6 +180,7 @@ async def _uncached_api_controlnet(body: ControlNetRequest):
             size = await probe_image_size(client, source)
         payload = renderfin_payload(body.channel, source, size)
         try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
             )

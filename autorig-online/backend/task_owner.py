@@ -36,6 +36,12 @@ def _db() -> sqlite3.Connection:
         _conn.execute("CREATE TABLE IF NOT EXISTS idem (key TEXT PRIMARY KEY, owner TEXT, path TEXT, body BLOB, at REAL)")
         _conn.execute("DELETE FROM idem WHERE at < ?", (time.time() - 24 * 3600,))
         _conn.execute("DELETE FROM owners WHERE at < ?", (time.time() - TTL_SECONDS,))
+        # Which graph node asked for a task (2026-09-28): the queue can then
+        # be told what a graph no longer needs, whichever tab submitted it.
+        _conn.execute("CREATE TABLE IF NOT EXISTS task_graph (task_id TEXT PRIMARY KEY, graph_id TEXT, "
+                      "node_id TEXT, session TEXT, at REAL)")
+        _conn.execute("CREATE INDEX IF NOT EXISTS task_graph_graph ON task_graph(graph_id)")
+        _conn.execute("DELETE FROM task_graph WHERE at < ?", (time.time() - TTL_SECONDS,))
         _conn.commit()
     return _conn
 
@@ -59,6 +65,39 @@ def record(task_id: str, owner: str) -> None:
             _db().commit()
     except Exception:
         logger.exception("task owner not recorded")
+
+
+def record_graph(task_id: str, graph_id: str, node_id: str, session: str) -> None:
+    if not task_id or not graph_id:
+        return
+    try:
+        with _lock:
+            _db().execute("INSERT OR REPLACE INTO task_graph (task_id, graph_id, node_id, session, at) "
+                          "VALUES (?, ?, ?, ?, ?)", (task_id, graph_id, node_id, session, time.time()))
+            _db().commit()
+    except Exception:
+        logger.exception("task graph link not recorded")
+
+
+def graph_of(task_id: str) -> Dict[str, str]:
+    try:
+        with _lock:
+            row = _db().execute("SELECT graph_id, node_id, session FROM task_graph WHERE task_id = ?",
+                                (task_id,)).fetchone()
+        return {"graph_id": row[0], "node_id": row[1], "session": row[2]} if row else {}
+    except Exception:
+        return {}
+
+
+def tasks_of_graph(graph_id: str, limit: int = 400):
+    """(task_id, node_id, session, at) of every task this graph asked for, newest first."""
+    try:
+        with _lock:
+            rows = _db().execute("SELECT task_id, node_id, session, at FROM task_graph WHERE graph_id = ? "
+                                 "ORDER BY at DESC LIMIT ?", (graph_id, int(limit))).fetchall()
+        return [(str(r[0]), str(r[1] or ""), str(r[2] or ""), float(r[3])) for r in rows]
+    except Exception:
+        return []
 
 
 def owner_of(task_id: str) -> str:
@@ -192,6 +231,11 @@ class TaskOwnerMiddleware:
             return await self.app(scope, receive, send)
         owner = scope_identity(scope)
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
+        # The route (and every renderfin submit site under it) reads which
+        # graph node this request renders for, so the farm task carries it.
+        import ai_graph_context
+        ai_graph_context.set_from_headers(headers)
+        graph_link = ai_graph_context.current()
         key = (headers.get("x-client-request-id") or "").strip()[:80]
         path = str(scope.get("path") or "")
         live_build = current_build() if key else ""
@@ -235,6 +279,9 @@ class TaskOwnerMiddleware:
                         task = data.get("task_id_string") if isinstance(data, dict) else None
                         if task:
                             record(str(task), owner)
+                            if graph_link.get("graph_id"):
+                                record_graph(str(task), graph_link.get("graph_id", ""),
+                                             graph_link.get("node_id", ""), graph_link.get("submit_session", ""))
                             if key:
                                 idem_put(key, owner, path, bytes(state["buf"]))
                     except Exception:

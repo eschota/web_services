@@ -863,7 +863,7 @@
           const mineTask = {sig, taskId: ''};
           ITEM_TASKS.set(itemKey, mineTask);
           try {
-            const accepted = await api.submitJson(runner.api, body);
+            const accepted = await api.submitJson(runner.api, body, undefined, {nodeId: id});
             mineTask.taskId = accepted.task_id_string || '';
             try { if (window.AINodeParams) item.params_used = window.AINodeParams.fromRecord(body, accepted); } catch (_) { /* display only */ }
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
@@ -871,11 +871,11 @@
           } catch (error) {
             if (String(error.message || '').indexOf(api.BUDGET_EXHAUSTED) === -1) throw error;
             body = Object.assign({}, body, {max_output_tokens: Math.min(8192, (Number(body.max_output_tokens) || 1024) * 2)});
-            const accepted = await api.submitJson(runner.api, body);
+            const accepted = await api.submitJson(runner.api, body, undefined, {nodeId: id});
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
           }
           let value = finished.value;
-          if (post && value) value = await api.upscaleClip2x(value, null);
+          if (post && value) value = await api.upscaleClip2x(value, null, id);
           if (!value) throw new Error('no result');
           Object.assign(item, {status: 'done', value, outputs: finished.outputs || null, type: api.runnerType(runner, value), sig,
                                seed: Number(itemParams.seed) || 0});

@@ -28,6 +28,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+import ai_graph_context
 from ai_vision_api import (
     MAX_WAIT_SECONDS,
     SUBMIT_TIMEOUT_SECONDS,
@@ -121,6 +122,7 @@ async def _run(service: str, payload: Dict[str, object], wait_seconds: Optional[
     """Submit one renderfin job and answer in the shape /api/controlnet uses."""
     async with httpx.AsyncClient() as client:
         try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(RENDERFIN_BASE + "/api-render", json=payload,
                                          timeout=SUBMIT_TIMEOUT_SECONDS)
         except Exception:

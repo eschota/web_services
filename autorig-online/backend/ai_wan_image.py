@@ -18,6 +18,7 @@ from ai_avatar_assets import validate_import_url
 from ai_avatar_video import CHECKPOINT, MAX_PADDED_PIXELS, WORKFLOW
 from ai_vision_api import RENDERFIN_BASE, SUBMIT_TIMEOUT_SECONDS
 from renderfin.video_input import VideoInputError, validate_video_url
+import ai_graph_context
 
 router = APIRouter()
 
@@ -75,7 +76,8 @@ async def wan_animate(body: WanImageRequest):
     async def submit():
         async with httpx.AsyncClient() as client:
             try:
-                response = await client.post(RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS)
+                sent = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
+                response = await client.post(RENDERFIN_BASE + "/api-render", json=sent, timeout=SUBMIT_TIMEOUT_SECONDS)
                 response.raise_for_status()
                 accepted = response.json()
             except (httpx.HTTPError, ValueError):

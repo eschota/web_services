@@ -44,6 +44,9 @@ from .registry import ServerRegistry
 # finite, so it stays usable when every box is unreadable.
 _UNKNOWN_DEPTH = 10_000
 _AVATAR_WORKFLOW = "gen_image_flux2_avatar.json"
+# Why a queued graph job was stood down (its error text; the editor shows it).
+GRAPH_STALE_REASON = "cancelled: the graph no longer needs this render"
+GRAPH_SUPERSEDED_REASON = "cancelled: this node was rendered again"
 
 
 def _utc_stamp(when: float) -> str:
@@ -657,7 +660,109 @@ class RenderQueue:
         )
         self._tasks[task.id] = task
         await self._persist(task)
+        # A node rendered again from another Render press (another tab, a
+        # reopened link) replaces what the same node still has waiting: two
+        # jobs for one socket would only ever keep the newer result.
+        if prompt.graph_id and prompt.node_id and prompt.submit_session:
+            stale = [
+                other.id for other in self._tasks.values()
+                if other.id != task.id and other.status == TASK_PENDING
+                and other.prompt.graph_id == prompt.graph_id
+                and other.prompt.node_id == prompt.node_id
+                and other.prompt.submit_session != prompt.submit_session
+            ]
+            for other_id in stale:
+                await self.cancel(other_id, reason=GRAPH_SUPERSEDED_REASON)
+            if stale:
+                print(f"[Renderfin][Queue] graph {prompt.graph_id} node {prompt.node_id}: "
+                      f"{len(stale)} queued job(s) replaced by a newer Render")
         return task
+
+    # ---------- graph binding (2026-09-28) ----------
+
+    def graph_tasks(self, graph_id: str) -> List[RenderTask]:
+        graph_id = str(graph_id or "")
+        if not graph_id:
+            return []
+        return [task for task in self.all_tasks() if task.prompt.graph_id == graph_id]
+
+    def graph_summary(self, graph_id: str) -> Dict[str, Any]:
+        """How much of the queue is this graph's, and how much is everybody else's."""
+        mine = self.graph_tasks(graph_id)
+        pending = [t for t in self._tasks.values() if t.status == TASK_PENDING]
+        rendering = [t for t in self._tasks.values() if t.status == TASK_RENDERING]
+        mine_pending = [t for t in mine if t.status == TASK_PENDING]
+        mine_rendering = [t for t in mine if t.status == TASK_RENDERING]
+        return {
+            "graph_id_string": str(graph_id or ""),
+            "queued_int": len(mine_pending),
+            "running_int": len(mine_rendering),
+            "other_queued_int": len(pending) - len(mine_pending),
+            "other_running_int": len(rendering) - len(mine_rendering),
+            "total_queued_int": len(pending),
+            "total_running_int": len(rendering),
+            "tasks_array": [
+                {"id": t.id, "status": t.status, "node_id_string": t.prompt.node_id,
+                 "node_signature_string": t.prompt.node_signature,
+                 "submit_session_string": t.prompt.submit_session,
+                 "workflow": t.workflow, "created_at": t.created_at}
+                for t in mine if t.status in (TASK_PENDING, TASK_RENDERING)
+            ],
+        }
+
+    async def cancel_stale_for_graph(
+        self, graph_id: str, wanted: Dict[str, str], *, reason: str = ""
+    ) -> Dict[str, Any]:
+        """Stand down this graph's queued jobs its current nodes do not want.
+
+        `wanted` maps every node the graph still runs (present, not bypassed)
+        to its current signature. A queued task whose node is missing from it,
+        or whose signature at submit time differs, renders something the graph
+        no longer shows, so it is cancelled. Running jobs are left alone: the
+        GPU minutes are spent and the editor discards a stale result itself.
+        A task submitted without a signature (an older editor, a node the
+        stored graph did not have yet) is judged by node presence only.
+        """
+        reason = reason or GRAPH_STALE_REASON
+        cancelled: List[Dict[str, str]] = []
+        kept = 0
+        for task in list(self._tasks.values()):
+            if task.status != TASK_PENDING or task.prompt.graph_id != str(graph_id or ""):
+                continue
+            node_id = task.prompt.node_id
+            current = wanted.get(node_id)
+            if current is None:
+                why = "node gone or bypassed"
+            elif task.prompt.node_signature and str(current) != task.prompt.node_signature:
+                why = "node changed"
+            else:
+                kept += 1
+                continue
+            if await self.cancel(task.id, reason=reason + " (" + why + ")"):
+                cancelled.append({"id": task.id, "node_id_string": node_id, "why_string": why})
+        if cancelled:
+            print(f"[Renderfin][Queue] graph {graph_id}: {len(cancelled)} stale queued job(s) "
+                  f"cancelled, {kept} kept")
+        return {"graph_id_string": str(graph_id or ""), "cancelled_int": len(cancelled),
+                "kept_int": kept, "cancelled_array": cancelled}
+
+    async def cancel_graph_pending(self, graph_id: str, *, task_ids: Optional[List[str]] = None,
+                                   reason: str = "") -> Dict[str, Any]:
+        """Stand down every queued job of a graph (or the listed subset of them)."""
+        reason = reason or "cancelled: this graph's queue was cleared"
+        allowed = set(task_ids) if task_ids is not None else None
+        cancelled = 0
+        for task in list(self._tasks.values()):
+            if task.status != TASK_PENDING or task.prompt.graph_id != str(graph_id or ""):
+                continue
+            if allowed is not None and task.id not in allowed:
+                continue
+            if await self.cancel(task.id, reason=reason):
+                cancelled += 1
+        running = sum(1 for t in self._tasks.values()
+                      if t.status == TASK_RENDERING and t.prompt.graph_id == str(graph_id or ""))
+        return {"graph_id_string": str(graph_id or ""), "cancelled_int": cancelled,
+                "running_untouched_int": running}
 
     def get(self, task_id: str) -> Optional[RenderTask]:
         return self._tasks.get(task_id)

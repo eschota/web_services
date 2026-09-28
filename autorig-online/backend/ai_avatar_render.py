@@ -12,6 +12,7 @@ import ai_request_cache
 from ai_avatars import AvatarOwner, AvatarStore, AvatarStoreError, resolve_avatar_identity
 from ai_avatar_assets import validate_import_url
 from ai_vision_api import RENDERFIN_BASE, SUBMIT_TIMEOUT_SECONDS
+import ai_graph_context
 
 
 class AvatarSceneRequest(BaseModel):
@@ -112,7 +113,8 @@ def build_avatar_render_router(owner_dependency: Callable, *, store=None):
         async def submit():
             async with httpx.AsyncClient() as client:
                 try:
-                    response = await client.post(RENDERFIN_BASE + "/api-render", json=payload,
+                    sent = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
+                    response = await client.post(RENDERFIN_BASE + "/api-render", json=sent,
                                                  timeout=SUBMIT_TIMEOUT_SECONDS)
                     response.raise_for_status()
                     accepted = response.json()

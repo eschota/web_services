@@ -85,6 +85,15 @@ class RenderPrompt(BaseModel):
     render_mode: str = ""
     # Music (renderfin.music): clip length in seconds; 0 = the default 30 s.
     audio_seconds: float = 0
+    # Which node of which saved /nodes graph asked for this (2026-09-28), the
+    # node's signature at submit time (computed by the site from the stored
+    # graph) and the Render press that sent it. Empty for anything that is
+    # not a graph node. A save whose node no longer matches stands the task
+    # down while it is still queued; see RenderQueue.cancel_stale_for_graph.
+    graph_id: str = ""
+    node_id: str = ""
+    node_signature: str = ""
+    submit_session: str = ""
 
     @field_validator("frame_count")
     @classmethod
@@ -240,6 +249,9 @@ class RenderTask(BaseModel):
             "error": self.error,
             "error_string": self.error,
             "user_name": self.prompt.user_name,
+            "graph_id_string": self.prompt.graph_id,
+            "node_id_string": self.prompt.node_id,
+            "submit_session_string": self.prompt.submit_session,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
