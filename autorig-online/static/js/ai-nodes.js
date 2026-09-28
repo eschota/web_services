@@ -1724,6 +1724,7 @@
     if (!document.getElementById('canvas')) return;
     const action = hotkeyAction(event);
     if (!action) return;
+    if (window.AILightbox && window.AILightbox.isOpen()) return;
     if (typingIn(event.target) || typingIn(document.activeElement)) {
       // Ctrl+P must still never open the print dialog on this page.
       if (action === 'bypass' && (event.ctrlKey || event.metaKey)) event.preventDefault();
@@ -1777,6 +1778,7 @@
     };
     const io = new IntersectionObserver(entries => entries.forEach(entry => {
       visible.set(entry.target, entry.isIntersecting);
+      if (entry.isIntersecting && entry.target.preload === 'none') entry.target.preload = 'metadata';
       apply(entry.target);
     }), {threshold: 0.2});
     const prep = element => {
@@ -1785,7 +1787,9 @@
         element.decoding = 'async';
       } else if (element.tagName === 'VIDEO' && !element._throttled) {
         element._throttled = true;
-        element.preload = 'metadata';
+        // Nothing is fetched for a clip nobody can see (63 clips on one graph
+        // made ~450 media requests while it opened, 2026-09-28).
+        element.preload = 'none';
         element.removeAttribute('autoplay');
         element.autoplay = false;
         // Code that calls play() on a new source must not wake a clip nobody sees.
@@ -1882,7 +1886,8 @@
       box.title = 'Seed ' + cell.seed + ' · ' + cell.status + (cell.error ? ': ' + cell.error : '') + ' — click to open';
       if (cell.status === 'done' && cell.value) {
         const media = document.createElement(looksLikeVideo(cell.value) ? 'video' : 'img');
-        media.src = cell.value;
+        media.src = media.tagName === 'IMG' && /^https:\/\/(autorig\.online|image\.civitai\.)/.test(cell.value)
+          ? '/api/ai/thumb?w=240&url=' + encodeURIComponent(cell.value) : cell.value;
         media.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
         if (media.tagName === 'VIDEO') { media.muted = true; media.loop = true; media.preload = 'metadata'; media.playsInline = true; }
         else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = 'Seed ' + cell.seed; }
@@ -1922,75 +1927,40 @@
   }
 
   function openX9Lightbox(id, start) {
-    const record = x9Record(id);
-    if (!record) return;
-    let dialog = document.getElementById('x9-lightbox');
-    if (!dialog) {
-      dialog = document.createElement('dialog');
-      dialog.id = 'x9-lightbox';
-      dialog.style.cssText = 'max-width:96vw;max-height:96vh;padding:10px;border:0;border-radius:12px;background:#0d0e1c;color:#fff';
-      dialog.innerHTML = '<div class="x9stage" style="display:flex;align-items:center;justify-content:center;min-width:300px;min-height:200px"></div>' +
-        '<div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:8px;font:13px system-ui">' +
-        '<button type="button" data-x9="prev" title="Previous (←)">←</button><span class="x9cap"></span>' +
-        '<button type="button" data-x9="next" title="Next (→)">→</button>' +
-        '<button type="button" data-x9="use" title="Use this one as the node output">Use this</button>' +
-        '<button type="button" data-x9="close" title="Close (Esc)">✕</button></div>';
-      document.body.appendChild(dialog);
-      dialog.addEventListener('click', event => {
-        const action = event.target && event.target.dataset && event.target.dataset.x9;
-        if (action === 'prev') dialog._show(dialog._index - 1);
-        if (action === 'next') dialog._show(dialog._index + 1);
-        if (action === 'use') {
-          setX9Pick(dialog._node, dialog._index);
-          // The node's Seed becomes that cell's seed (owner, 2026-09-27): with
-          // X9 off the same render is reproduced from the cache; with X9 on
-          // the next set starts from it. Set quietly: nothing is re-rendered.
-          const record = x9Record(dialog._node);
-          const cell = record && record.x9[dialog._index];
-          const field = nodeElement(dialog._node) && nodeElement(dialog._node).querySelector('[data-param="seed"]');
-          if (cell && field && cell.seed) {
-            field.dataset.silentUpdate = 'yes';
-            field.value = String(cell.seed);
-            field.dispatchEvent(new Event('input', {bubbles: true}));
-            field.dispatchEvent(new Event('change', {bubbles: true}));
-            delete field.dataset.silentUpdate;
-          }
-          toast('Cell ' + (dialog._index + 1) + ' is the output' + (cell && cell.seed ? '; Seed set to ' + cell.seed + '.' : '.'));
-        }
-        if (action === 'close' || event.target === dialog) dialog.close();
-      });
-      dialog.addEventListener('keydown', event => {
-        if (event.key === 'ArrowLeft') { event.preventDefault(); dialog._show(dialog._index - 1); }
-        if (event.key === 'ArrowRight') { event.preventDefault(); dialog._show(dialog._index + 1); }
-      });
-      dialog.addEventListener('close', () => { const clip = dialog.querySelector('video'); if (clip) clip.pause(); });
-    }
-    dialog._node = String(id);
-    dialog._show = index => {
-      const current = x9Record(dialog._node);
-      if (!current) return;
-      const count = current.x9.length;
-      index = ((index % count) + count) % count;
-      dialog._index = index;
-      const cell = current.x9[index];
-      const stage = dialog.querySelector('.x9stage');
-      stage.innerHTML = '';
-      if (cell.status === 'done' && cell.value) {
-        const media = document.createElement(looksLikeVideo(cell.value) ? 'video' : 'img');
-        media.src = cell.value;
-        media.style.cssText = 'max-width:92vw;max-height:80vh;display:block';
-        if (media.tagName === 'VIDEO') { media.controls = true; media.autoplay = true; media.loop = true; media.muted = true; }
-        stage.appendChild(media);
-        // The last cell looked at is the node's output (owner rule).
-        setX9Pick(dialog._node, index);
-      } else {
-        stage.textContent = cell.status === 'error' ? ('Seed ' + cell.seed + ' failed: ' + cell.error) : ('Seed ' + cell.seed + ': ' + cell.status);
+    if (!x9Record(id)) return;
+    const node = String(id);
+    const useCell = index => {
+      setX9Pick(node, index);
+      // The node's Seed becomes that cell's seed (owner, 2026-09-27): with
+      // X9 off the same render is reproduced from the cache; with X9 on
+      // the next set starts from it. Set quietly: nothing is re-rendered.
+      const record = x9Record(node);
+      const cell = record && record.x9[index];
+      const field = nodeElement(node) && nodeElement(node).querySelector('[data-param="seed"]');
+      if (cell && field && cell.seed) {
+        field.dataset.silentUpdate = 'yes';
+        field.value = String(cell.seed);
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        field.dispatchEvent(new Event('change', {bubbles: true}));
+        delete field.dataset.silentUpdate;
       }
-      dialog.querySelector('.x9cap').textContent = (index + 1) + ' / ' + count + ' · seed ' + cell.seed +
-        (x9Pick(current) === index ? ' · output' : '');
+      toast('Cell ' + (index + 1) + ' is the output' + (cell && cell.seed ? '; Seed set to ' + cell.seed + '.' : '.'));
     };
-    if (!dialog.open) dialog.showModal();
-    dialog._show(start);
+    window.AILightbox.open({
+      kind: 'x9', start,
+      count: () => { const r = x9Record(node); return r ? r.x9.length : 0; },
+      item: index => {
+        const record = x9Record(node);
+        const cell = record && record.x9[index];
+        if (!cell) return {};
+        return {url: cell.value, status: cell.status === 'done' ? 'done' : cell.status, seed: cell.seed, error: cell.error,
+                used: x9Pick(record) === index};
+      },
+      title: index => 'X9 · ' + ((meta(node) || {}).title || 'node') + ' · cell ' + (index + 1) + ' / 9',
+      actions: {use: useCell, useTip: 'Use this cell as the node output', post: () => openCivitaiDialog(node)},
+      // The last cell looked at is the node's output (owner rule).
+      onShow: index => { const r = x9Record(node); if (r && r.x9[index] && r.x9[index].status === 'done') setX9Pick(node, index); }
+    });
   }
 
   /** Nine seeds of one node, in parallel; `fan` pairs cell i with upstream cell i. */
@@ -2613,7 +2583,7 @@
       }
       else {
         const media = document.createElement(item.kind_string === 'video' ? 'video' : 'img');
-        media.src = item.url_string + (item.kind_string === 'video' ? '#t=0.1' : '');
+        media.src = item.kind_string === 'video' ? item.url_string + '#t=0.1' : '/api/ai/thumb?w=160&url=' + encodeURIComponent(item.url_string);
         if (media.tagName === 'VIDEO') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
         else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = ''; }
         cell.appendChild(media);
@@ -2624,9 +2594,7 @@
         event.dataTransfer.setData('application/x-autorig-node', JSON.stringify(spec));
         event.dataTransfer.setData('text/plain', item.url_string);
       });
-      cell.addEventListener('click', () => item.kind_string === 'model3d'
-        ? openModelLightbox(item.url_string, item.poster_string || '')
-        : openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
+      cell.addEventListener('click', () => openRecentLightbox(items.findIndex(other => other.task_id_string === item.task_id_string)));
       return cell;
     };
     const paint = () => {
@@ -2656,82 +2624,59 @@
         }
       } catch (error) { /* next poll */ }
     };
-    poll();
-    setInterval(poll, 5000);
+    // 5 s while the strip is open and the tab is in front; 30 s when it is
+    // folded; nothing while the tab is hidden (every tab polls).
+    let lastPoll = 0;
+    const tick = () => {
+      const every = collapsed ? 30000 : 5000;
+      if (!document.hidden && Date.now() - lastPoll >= every) { lastPoll = Date.now(); poll(); }
+    };
+    poll(); lastPoll = Date.now();
+    setInterval(tick, 5000);
 
     function openRecentLightbox(start) {
-      let dialog = document.getElementById('recent-lightbox');
-      if (!dialog) {
-        dialog = document.createElement('dialog');
-        dialog.id = 'recent-lightbox';
-        dialog.className = 'civ-dialog';
-        dialog.style.width = 'min(1100px, 96vw)';
-        dialog.innerHTML = '<div class="rl-stage" style="display:flex;align-items:center;justify-content:center;min-height:240px;overflow:auto"></div>' +
-          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:10px">' +
-          '<button type="button" data-rl="prev" title="Previous (←)">←</button><span class="rl-cap"></span>' +
-          '<button type="button" data-rl="next" title="Next (→)">→</button>' +
-          '<button type="button" data-rl="node">Open node</button><button type="button" data-rl="copy">Copy link</button>' +
-          '<button type="button" data-rl="civ">C↑ Post to Civitai</button><button type="button" data-rl="add">Add as Media in</button>' +
-          '<button type="button" data-rl="close" title="Close (Esc)">✕</button></div>';
-        document.body.appendChild(dialog);
-        dialog.addEventListener('click', event => {
-          const action = event.target && event.target.dataset && event.target.dataset.rl;
-          const item = items[dialog._index];
-          if (action === 'prev') dialog._show(dialog._index - 1);
-          if (action === 'next') dialog._show(dialog._index + 1);
-          if (action === 'close' || event.target === dialog) dialog.close();
-          if (!item) return;
-          if (action === 'copy') copyText(item.url_string).then(() => toast('Link copied.'));
-          if (action === 'node' || action === 'civ') {
-            const id = nodeForTask(item.task_id_string);
-            if (!id) { toast('That render is not from a node in this graph.'); return; }
-            if (action === 'civ') { dialog.close(); openCivitaiDialog(id); return; }
-            dialog.close();
-            if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds([id]);
-            const element = nodeElement(id);
-            if (element) { element.classList.add('rl-flash'); setTimeout(() => element.classList.remove('rl-flash'), 1600); }
-            toast('Selected the node that made it.');
-          }
-          if (action === 'add') {
-            const rect = document.getElementById('canvas').getBoundingClientRect();
-            const scale = Number(editor.zoom) || 1;
-            const x = (rect.width / 2 - editor.canvas_x) / scale, y = (rect.height / 2 - editor.canvas_y) / scale;
-            const nodeId = addInputNode('media', x, y, item.url_string);
-            if (nodeId) { toast('Added as a Media in node.'); dialog.close(); }
-          }
-        });
-        dialog.addEventListener('keydown', event => {
-          if (event.key === 'ArrowLeft') { event.preventDefault(); dialog._show(dialog._index - 1); }
-          if (event.key === 'ArrowRight') { event.preventDefault(); dialog._show(dialog._index + 1); }
-        });
-        dialog.addEventListener('close', () => { const clip = dialog.querySelector('video'); if (clip) clip.pause(); });
-      }
-      dialog._show = index => {
-        if (!items.length) return;
-        index = ((index % items.length) + items.length) % items.length;
-        dialog._index = index;
-        const item = items[index];
-        const stage = dialog.querySelector('.rl-stage');
-        stage.innerHTML = '';
-        const media = document.createElement(item.kind_string === 'video' ? 'video' : item.kind_string === 'audio' ? 'audio' : 'img');
-        media.src = item.url_string;
-        if (media.tagName !== 'IMG') { media.controls = true; media.autoplay = true; }
-        if (media.tagName === 'VIDEO') media.loop = true;
-        media.style.cssText = 'max-width:92vw;max-height:74vh;display:block;cursor:zoom-in';
-        if (media.tagName === 'IMG') media.addEventListener('click', () => {
-          const zoomed = media.style.maxWidth === 'none';
-          media.style.maxWidth = zoomed ? '92vw' : 'none';
-          media.style.maxHeight = zoomed ? '74vh' : 'none';
-          media.style.cursor = zoomed ? 'zoom-in' : 'zoom-out';
-        });
-        stage.appendChild(media);
-        dialog.querySelector('.rl-cap').textContent = (index + 1) + ' / ' + items.length + (item.box_string ? ' · ' + item.box_string : '');
-        const fromHere = !!nodeForTask(item.task_id_string);
-        dialog.querySelector('[data-rl="node"]').disabled = !fromHere;
-        dialog.querySelector('[data-rl="civ"]').disabled = !fromHere;
+      const addMedia = url => {
+        const rect = document.getElementById('canvas').getBoundingClientRect();
+        const scale = Number(editor.zoom) || 1;
+        const x = (rect.width / 2 - editor.canvas_x) / scale, y = (rect.height / 2 - editor.canvas_y) / scale;
+        if (addInputNode('media', x, y, url)) { toast('Added as a Media in node.'); return true; }
+        return false;
       };
-      if (!dialog.open) dialog.showModal();
-      dialog._show(start < 0 ? 0 : start);
+      const box = window.AILightbox.open({
+        kind: 'recent', start: start < 0 ? 0 : start,
+        count: () => items.length,
+        item: index => {
+          const item = items[index];
+          if (!item) return {};
+          const model = item.kind_string === 'model3d';
+          return {url: item.url_string, kind: model ? 'model' : item.kind_string === 'video' ? 'video' : item.kind_string === 'audio' ? 'audio' : 'image',
+                  thumb: model ? item.poster_string || '' : '', status: 'done',
+                  render: model && isGlb(item.url_string) ? host => ensureModelViewer().then(() => {
+                    const viewer = modelViewerElement(item.url_string, item.poster_string || '', true);
+                    viewer.style.height = '100%';
+                    host.appendChild(viewer);
+                  }) : null};
+        },
+        title: index => { const item = items[index]; return item ? 'Recent · ' + (item.box_string || item.kind_string || '') + ' · ' + new Date(item.at_unix_float * 1000).toLocaleTimeString() : ''; },
+        actions: {
+          post: index => { const id = nodeForTask(items[index].task_id_string); if (id) openCivitaiDialog(id); },
+          postHidden: index => !items[index] || !nodeForTask(items[index].task_id_string),
+          extra: [
+            {glyph: '◎', label: 'Select the node that made it', key: 'N',
+             hidden: index => !items[index] || !nodeForTask(items[index].task_id_string),
+             run: index => {
+               const id = nodeForTask(items[index].task_id_string);
+               if (!id) return;
+               box.close();
+               if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds([id]);
+               const element = nodeElement(id);
+               if (element) { element.classList.add('rl-flash'); setTimeout(() => element.classList.remove('rl-flash'), 1600); }
+               toast('Selected the node that made it.');
+             }},
+            {glyph: '＋', label: 'Add as Media in', key: 'M', run: index => { if (items[index] && addMedia(items[index].url_string)) box.close(); }}
+          ]
+        }
+      });
     }
   }
 
@@ -3170,6 +3115,7 @@
       upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
       followInputSizeAtRun, startIncrementalService, graphFromCanvas,
       runGraph: keep => runGraph(keep),
+      mapChannels: () => mapChannels(),
       updatePorts: id => { try { editor.updateConnectionNodes('node-' + id); } catch (e) { /* not drawn */ } },
       ROW_HEIGHT, HEADER_HEIGHT, supersedeTasks: ids => supersedeTasks(ids),
       invalidate: id => invalidateNodeAndDownstream(id),
@@ -3943,6 +3889,7 @@
 
   function bodyFor(serviceId, resolved, params) {
     const body = {};
+    const rawResolvedV10 = resolved;  // per-socket strengths read the original sockets
     // An empty LoRA slot carries a strength and nothing to apply it to.
     if (params && !String(params.lora || '').trim() && 'lora_strength' in params) {
       params = Object.assign({}, params);
@@ -4055,7 +4002,7 @@
         body._post_upscale = 2;
       }
     }
-    if (window.AINodeLists) window.AINodeLists.adjustBody(serviceId, body);
+    if (window.AINodeLists) window.AINodeLists.adjustBody(serviceId, body, rawResolvedV10, params);
     return body;
   }
 
@@ -4296,33 +4243,21 @@
   function isGlb(url) { return /\.(glb|gltf)(\?|#|$)/i.test(String(url || '')); }
 
   function openModelLightbox(url, poster) {
-    let dialog = document.getElementById('model-lightbox');
-    if (dialog) dialog.remove();
-    dialog = document.createElement('dialog');
-    dialog.id = 'model-lightbox';
-    dialog.className = 'civ-dialog';
-    dialog.style.width = 'min(1100px, 96vw)';
-    dialog.innerHTML = '<div class="ml-stage"></div><div style="display:flex;gap:8px;justify-content:center;margin-top:10px">' +
-      '<a class="ml-download" download>Download</a><button type="button" data-ml="copy">Copy link</button>' +
-      '<button type="button" data-ml="add">Add as Media in</button>' +
-      '<button type="button" data-ml="close" title="Close (Esc)">✕</button></div>';
-    document.body.appendChild(dialog);
-    dialog.querySelector('.ml-download').href = url;
-    dialog.querySelector('.ml-download').style.cssText = 'padding:8px 14px;border-radius:9px;border:1px solid rgba(255,255,255,.18);color:#7dd3fc;text-decoration:none';
-    dialog.addEventListener('click', event => {
-      const action = event.target && event.target.dataset && event.target.dataset.ml;
-      if (action === 'copy') copyText(url).then(() => toast('Link copied.'));
-      if (action === 'add') {
+    const box = window.AILightbox.open({
+      kind: 'model', url, kind_: 'model', status: 'done', thumb: poster,
+      title: () => '3D model · ' + String(url).split('/').pop().split('?')[0],
+      render: host => ensureModelViewer().then(() => {
+        const viewer = modelViewerElement(url, poster, true);
+        viewer.style.height = '100%';
+        host.appendChild(viewer);
+      }),
+      actions: {extra: [{glyph: '＋', label: 'Add as Media in', key: 'M', run: () => {
         const rect = document.getElementById('canvas').getBoundingClientRect();
         const scale = Number(editor.zoom) || 1;
         const nodeId = addInputNode('media', (rect.width / 2 - editor.canvas_x) / scale, (rect.height / 2 - editor.canvas_y) / scale, url);
-        if (nodeId) { toast('Added as a Media in node.'); dialog.close(); }
-      }
-      if (action === 'close' || event.target === dialog) dialog.close();
+        if (nodeId) { toast('Added as a Media in node.'); box.close(); }
+      }}]}
     });
-    ensureModelViewer().then(() => dialog.querySelector('.ml-stage').appendChild(modelViewerElement(url, poster, true)))
-      .catch(error => { dialog.querySelector('.ml-stage').textContent = error.message; });
-    dialog.showModal();
   }
 
   function showModel(host, url, poster) {
@@ -4560,43 +4495,8 @@
   }
 
   function openPreview(type, url) {
-    let dialog = document.getElementById('media-preview');
-    if (!dialog) {
-      dialog = document.createElement('dialog');
-      dialog.id = 'media-preview';
-      dialog.setAttribute('aria-label', 'Media preview');
-      document.body.appendChild(dialog);
-      dialog.addEventListener('click', event => {
-        if (event.target === dialog || event.target.classList.contains('media-stage')) dialog.close();
-      });
-      dialog.addEventListener('close', () => {
-        dialog.querySelectorAll('video').forEach(video => video.pause());
-        dialog.innerHTML = '';
-      });
-    }
-    dialog.innerHTML = '';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'media-close';
-    close.setAttribute('aria-label', 'Close preview (Escape)');
-    close.textContent = '\u00d7';
-    close.addEventListener('click', () => dialog.close());
-    const stage = document.createElement('div');
-    stage.className = 'media-stage';
-    const media = document.createElement(type === 'video' ? 'video' : 'img');
-    media.src = url;
-    if (type === 'video') {
-      media.autoplay = true; media.loop = true; media.muted = true;
-      media.playsInline = true; media.controls = true;
-    } else {
-      media.alt = 'Expanded preview';
-      media.addEventListener('click', () => dialog.close());
-    }
-    stage.appendChild(media);
-    dialog.append(stage, close);
-    dialog.showModal();
-    close.focus();
-    if (type === 'video') media.play().catch(() => {});
+    window.AILightbox.open({kind: 'preview', url, status: 'done', kind_: type,
+      title: () => String(url).split('/').pop().split('?')[0].slice(0, 80)});
   }
 
   /**

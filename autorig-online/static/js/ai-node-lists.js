@@ -155,7 +155,84 @@
   };
 
   /** Last-step changes to a request body (called at the end of bodyFor). */
-  function adjustBody(serviceId, body) {
+  /* ---------------------------------------- Qwen per-picture strength */
+
+  // A Strength slider (0..1) beside each connected picture socket of a
+  // Qwen-Image node. The value rides as param rs_1..rs_3 (socket order); the
+  // server schedules a weaker picture over fewer sampling steps, a weak control
+  // map is also softened, and the prompt is told to follow it loosely.
+  const RS_FIELDS = {image: 1, reference_2: 2, reference_3: 3};
+
+  function applyRefStrength(serviceId, body, resolved, params) {
+    if (serviceId !== 'qwen_image' || !resolved || !params) return;
+    const channels = api.mapChannels ? api.mapChannels() : new Map();
+    const byUrl = new Map();
+    Object.keys(RS_FIELDS).forEach(field => {
+      const url = resolved[field];
+      if (!url) return;
+      const v = Number(params['rs_' + RS_FIELDS[field]]);
+      byUrl.set(String(url), Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1);
+    });
+    Object.keys(body).filter(k => /^rs_\d$/.test(k)).forEach(k => delete body[k]);
+    if (![...byUrl.values()].some(v => v < 0.999)) return;
+    const order = [body.image_url || body.image_base64 || ''].concat(body.reference_image_urls || []).filter(Boolean);
+    const strengths = order.map(url => byUrl.has(String(url)) ? byUrl.get(String(url)) : 1);
+    body.reference_strengths = strengths;
+    body.reference_attenuate = order.map((url, i) => !!channels.get(String(url)) && strengths[i] < 0.999);
+    const hints = [];
+    order.forEach((url, i) => {
+      const ch = channels.get(String(url));
+      if (strengths[i] < 0.8) hints.push('Follow image ' + (i + 1) + (ch ? ' (the ' + ch + ' map)' : '') + ' only loosely.');
+    });
+    if (hints.length) body.prompt = [String(body.prompt || '').trim(), hints.join(' ')].filter(Boolean).join(' ');
+  }
+
+  function paintRefStrength(id) {
+    const node = api.meta(id) || {};
+    if (node.service !== 'qwen_image') return;
+    const element = api.nodeElement(id);
+    if (!element || !api.graphFromCanvas) return;
+    const wired = new Set(api.graphFromCanvas().links.filter(l => String(l.to) === String(id)).map(l => l.input));
+    const rows = [...element.querySelectorAll('.nports .pin')];
+    (node.inFields || []).forEach((field, index) => {
+      const k = RS_FIELDS[field];
+      const row = rows[index];
+      if (!k || !row) return;
+      let box = element.querySelector('.nrs-' + k);
+      if (!box) {
+        box = document.createElement('span');
+        box.className = 'nrs nrs-' + k;
+        box.style.cssText = 'display:inline-flex;align-items:center;gap:2px;margin-left:6px;font:600 9px system-ui;opacity:.9';
+        const input = document.createElement('input');
+        input.type = 'range'; input.min = '0'; input.max = '1'; input.step = '0.05'; input.value = '1';
+        input.dataset.param = 'rs_' + k;
+        input.title = 'Strength of image ' + k + ' (1 = full; lower = it shapes only the early steps; a map is also softened)';
+        input.style.cssText = 'width:56px;height:10px';
+        const out = document.createElement('b');
+        out.textContent = '1.00';
+        input.addEventListener('input', () => { out.textContent = Number(input.value).toFixed(2); });
+        input.addEventListener('change', () => { out.textContent = Number(input.value).toFixed(2); api.invalidate(id); });
+        ['mousedown', 'pointerdown', 'touchstart'].forEach(t => input.addEventListener(t, e => e.stopPropagation()));
+        box.appendChild(input); box.appendChild(out);
+        box._out = out; box._input = input;
+        row.appendChild(box);
+      }
+      box.style.display = wired.has(field) ? 'inline-flex' : 'none';
+      box._out.textContent = Number(box._input.value).toFixed(2);
+    });
+  }
+
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    setInterval(() => {
+      try {
+        if (!api || !api.graphFromCanvas) return;
+        api.graphFromCanvas().nodes.filter(n => n.service === 'qwen_image').forEach(n => paintRefStrength(n.id));
+      } catch (e) { /* display only */ }
+    }, 1500);
+  }
+
+  function adjustBody(serviceId, body, resolved, params) {
+    applyRefStrength(serviceId, body, resolved, params);
     if (serviceId === 'video_storyboard' || serviceId === 'scene_split') delete body.view;
     if (serviceId === 'video_summary') body.chain = true;
     if (serviceId === 'video_frame') {
@@ -836,99 +913,38 @@
     return bar;
   }
 
-  /** The X9-style lightbox for list outputs: zoom, pan, ←/→, Esc, video plays, 🎲 / 🔒. */
   function openListLightbox(id, start) {
-    let dialog = document.getElementById('list-lightbox');
-    if (!dialog) {
-      dialog = document.createElement('dialog');
-      dialog.id = 'list-lightbox';
-      dialog.style.cssText = 'width:96vw;height:94vh;max-width:96vw;max-height:94vh;padding:10px;border:0;border-radius:12px;background:#0d0e1c;color:#fff;overflow:hidden';
-      dialog.innerHTML = '<div class="llstage" style="position:relative;width:100%;height:calc(100% - 44px);overflow:hidden;cursor:grab;display:flex;align-items:center;justify-content:center"></div>' +
-        '<div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:8px;font:13px system-ui">' +
-        '<button type="button" data-ll="prev" title="Previous (←)">←</button><span class="llcap"></span>' +
-        '<button type="button" data-ll="next" title="Next (→)">→</button>' +
-        '<button type="button" data-ll="reroll" title="New seed & re-render this segment">🎲 New seed & re-render</button>' +
-        '<button type="button" data-ll="use" title="Keep this take: lock its seed (R and re-renders leave it alone)">Use this</button>' +
-        '<button type="button" data-ll="lock" title="Lock / unlock this segment\'s seed">🔒 Lock seed</button>' +
-        '<button type="button" data-ll="zoom0" title="Fit (0)">Fit</button>' +
-        '<button type="button" data-ll="close" title="Close (Esc)">✕</button></div>';
-      document.body.appendChild(dialog);
-      const stage = dialog.querySelector('.llstage');
-      const view = {z: 1, x: 0, y: 0, drag: null};
-      const apply = () => { const m = stage.firstChild; if (m) m.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.z})`; };
-      dialog._reset = () => { view.z = 1; view.x = 0; view.y = 0; apply(); };
-      stage.addEventListener('wheel', e => {
-        e.preventDefault();
-        const k = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        view.z = Math.min(12, Math.max(0.5, view.z * k)); apply();
-      }, {passive: false});
-      stage.addEventListener('pointerdown', e => { view.drag = {x: e.clientX - view.x, y: e.clientY - view.y}; stage.style.cursor = 'grabbing'; stage.setPointerCapture(e.pointerId); });
-      stage.addEventListener('pointermove', e => { if (!view.drag) return; view.x = e.clientX - view.drag.x; view.y = e.clientY - view.drag.y; apply(); });
-      stage.addEventListener('pointerup', () => { view.drag = null; stage.style.cursor = 'grab'; });
-      // pinch
-      const touches = new Map();
-      let pinch = 0;
-      stage.addEventListener('touchmove', e => {
-        if (e.touches.length !== 2) return;
-        e.preventDefault();
-        const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        if (pinch) { view.z = Math.min(12, Math.max(0.5, view.z * d / pinch)); apply(); }
-        pinch = d;
-      }, {passive: false});
-      stage.addEventListener('touchend', () => { pinch = 0; touches.clear(); });
-      dialog.addEventListener('click', event => {
-        const action = event.target && event.target.dataset && event.target.dataset.ll;
-        if (action === 'prev') dialog._show(dialog._index - 1);
-        if (action === 'next') dialog._show(dialog._index + 1);
-        if (action === 'zoom0') dialog._reset();
-        if (action === 'reroll') { rerollSegment(dialog._node, dialog._index, newSeed()); dialog._show(dialog._index); }
-        if (action === 'lock') { toggleLock(dialog._node, dialog._index); dialog._show(dialog._index); }
-        if (action === 'use') { useTake(dialog._node, dialog._index); dialog._show(dialog._index); }
-        if (action === 'close') dialog.close();
-      });
-      dialog.addEventListener('keydown', event => {
-        if (event.key === 'ArrowLeft') { event.preventDefault(); dialog._show(dialog._index - 1); }
-        if (event.key === 'ArrowRight') { event.preventDefault(); dialog._show(dialog._index + 1); }
-        if (event.key === '0') dialog._reset();
-      });
-      dialog.addEventListener('close', () => { const clip = dialog.querySelector('video'); if (clip) clip.pause(); });
-    }
-    dialog._node = String(id);
-    dialog._show = index => {
-      const record = api.runState.get(dialog._node);
-      if (!record || !record.items || !record.items.length) return;
-      const count = record.items.length;
-      index = ((index % count) + count) % count;
-      dialog._index = index;
-      const item = record.items[index];
-      const stage = dialog.querySelector('.llstage');
-      stage.innerHTML = '';
-      const node = api.meta(dialog._node) || {};
-      const scene = node.service === 'scene_split';
-      const url = scene ? item.value : item.value;
-      if (item.status === 'done' && url && /^https?:/.test(url)) {
-        const media = document.createElement(api.looksLikeVideo(url) ? 'video' : 'img');
-        media.src = url;
-        media.style.cssText = 'max-width:100%;max-height:100%;display:block;transform-origin:center center;user-select:none;pointer-events:none';
-        if (media.tagName === 'VIDEO') { media.controls = false; media.autoplay = true; media.loop = true; media.muted = true; media.playsInline = true; }
-        media.draggable = false;
-        stage.appendChild(media);
-      } else {
-        stage.textContent = 'Segment ' + (index + 1) + ': ' + item.status + (item.error ? ' — ' + item.error : '');
+    const node = String(id);
+    const items = () => { const r = api.runState.get(node); return r && Array.isArray(r.items) ? r.items : []; };
+    const info = () => api.meta(node) || {};
+    const tools = () => rerollable(info().service) && info().service !== 'scene_split';
+    window.AILightbox.open({
+      kind: 'list', start, aspect: ASPECTS.get(node) || 0,
+      count: () => items().length,
+      item: index => {
+        const item = items()[index];
+        if (!item) return {};
+        const scene = info().service === 'scene_split';
+        const status = item.status === 'done' ? 'done' : item.status === 'failed' ? 'error' : item.status === 'skipped' ? 'error' : item.status;
+        const url = String(item.value || '');
+        const text = item.type === 'text' || (url && !/^https?:/.test(url));
+        return {url: text ? '' : url, text: text ? url : '', kind: text ? 'text' : '', status,
+                thumb: scene && item.outputs ? item.outputs.first_frame_url_string : '',
+                seed: item.seed_override || item.seed, locked: !!item.seed_override, used: !!item.seed_override && item.status === 'done',
+                error: item.status === 'skipped' ? 'skipped' + (item.error ? ': ' + item.error : '') : item.error};
+      },
+      title: index => {
+        const item = items()[index] || {};
+        const word = info().service === 'video_frame' ? 'Frame' : info().service === 'scene_split' ? 'Shot' : 'Segment';
+        return word + ' ' + (index + 1) + '/' + items().length + (item.meta && item.meta.label ? ' · ' + item.meta.label : '');
+      },
+      actions: {
+        reseed: index => rerollSegment(node, index, newSeed()), reseedHidden: () => !tools(),
+        use: tools() ? index => useTake(node, index) : null,
+        useTip: 'Keep this take: lock its seed (R and re-renders leave it alone)',
+        lock: tools() ? index => toggleLock(node, index) : null
       }
-      dialog._reset();
-      const tools = rerollable(node.service) && !scene;
-      dialog.querySelector('[data-ll="reroll"]').hidden = !tools;
-      dialog.querySelector('[data-ll="use"]').hidden = !tools || item.status !== 'done';
-      const lock = dialog.querySelector('[data-ll="lock"]');
-      lock.hidden = !tools;
-      lock.textContent = item.seed_override ? '🔓 Unlock seed ' + item.seed_override : '🔒 Lock seed';
-      dialog.querySelector('.llcap').textContent = 'Segment ' + (index + 1) + ' / ' + count +
-        ((item.seed_override || item.seed) ? ' · seed ' + (item.seed_override || item.seed) : '') +
-        (item.meta && item.meta.label ? ' · ' + item.meta.label : '');
-    };
-    if (!dialog.open) dialog.showModal();
-    dialog._show(start);
+    });
   }
 
   /**
@@ -1001,6 +1017,7 @@
 
   /** The ⎇ badge of a gated node; click to change or clear the condition. */
   function decorate(id, params) {
+    try { paintRefStrength(id); } catch (e) { /* not drawn yet */ }
     // A migrated "First frame" node (saved without a template) stays one picture.
     const meta0 = api.meta(id) || {};
     if (meta0.service === 'video_frame' && params && !params.template) {
