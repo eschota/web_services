@@ -891,6 +891,9 @@ async def api_sync_manifest(request: Request):
               if e.get("state") == "removed"
               and not any(o.get("file") == e["file"] and o.get("state") != "removed"
                           for o in data["loras"])]
+    remove += [{"file": e["file"], "sha256": old} for e in data["loras"]
+               if e.get("state") != "removed" and box in target_boxes(e, data)
+               for old in (e.get("superseded_sha256") or [])[-8:] if old != e.get("sha256")]
     cleanup = [c for c in (data.get("cleanup") or {}).get(box, []) if isinstance(c, dict)]
     return {"box_string": box, "items_array": items, "remove_array": remove,
             "cleanup_array": cleanup, "protected_array": sorted(protected_files()),
@@ -1561,6 +1564,54 @@ def build_lora_admin_router(require_admin: Callable[..., Any]) -> APIRouter:
     return admin
 
 
+async def publish_local(path: str, *, entry_id: str, title: str, base: str, trigger: str = "",
+                        strength: Optional[float] = None, only_boxes: Optional[List[str]] = None,
+                        version: str = "", file_name: str = "") -> Dict[str, Any]:
+    """A LoRA file that exists only here (a training run): register it, or
+    replace the bytes of an existing local entry under the same id and file
+    name so graphs that name it keep working. The old bytes are recorded as
+    superseded; the boxes move them to their trash and fetch the new ones."""
+    src = pathlib.Path(path)
+    digest = hashlib.sha256()
+    with open(src, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    sha = digest.hexdigest()
+    family = family_for_base(base)
+    if not family:
+        raise ResolveError("unknown_base", f"Base model '{base}' is not one the farm knows")
+    _path("blobs").mkdir(parents=True, exist_ok=True)
+    blob = _path("blobs") / sha
+    if not blob.is_file():
+        tmp = blob.with_suffix(".tmp")
+        import shutil
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, blob)
+    async with _lock:
+        data = load_registry()
+        entry = next((e for e in data["loras"] if e.get("id") == entry_id), None)
+        if entry is None:
+            entry = {"id": entry_id, "file": safe_file_name(file_name or src.name), "added_at": _now(),
+                     "added_by": "local", "superseded_sha256": [], "aliases": []}
+            data["loras"].append(entry)
+        elif (entry.get("source") or {}).get("kind") != "local":
+            raise ResolveError("not_local", "Only a local entry can be replaced this way")
+        if entry.get("sha256") and entry["sha256"] != sha:
+            entry.setdefault("superseded_sha256", []).append(entry["sha256"])
+        entry.update(sha256=sha, size_bytes=src.stat().st_size, family=family, base=base,
+                     services=services_for_family(family), title=title, version=version,
+                     page="", nsfw=False, trained_words=[trigger] if trigger else [],
+                     recommended_strength=strength, preview=entry.get("preview", ""),
+                     source={"kind": "local", "path": str(src)}, state="active", updated_at=_now(),
+                     mirror={"state": "ready", "bytes": src.stat().st_size, "error": "", "updated_at": _now()})
+        entry["aliases"] = sorted({a for a in (title, entry["file"].rsplit(".", 1)[0]) if a})
+        if only_boxes:
+            entry["boxes"] = list(only_boxes)
+        save_registry(data)
+    return {"success_bool": True, "lora_object": _entry_view(entry, load_registry()),
+            "kick_object": await kick_boxes()}
+
+
 def _cli(argv: List[str]) -> int:
     """Operator entry point on the VPS (runs as the autorig user, env from the service)."""
     import argparse
@@ -1572,6 +1623,16 @@ def _cli(argv: List[str]) -> int:
     add.add_argument("--force", action="store_true")
     sub.add_parser("list", help="show every LoRA and its per-box state")
     sub.add_parser("kick", help="ask every reachable box to sync now")
+    loc = sub.add_parser("local", help="register or replace a LoRA from a local file (training runs)")
+    loc.add_argument("path")
+    loc.add_argument("--id", required=True)
+    loc.add_argument("--title", required=True)
+    loc.add_argument("--base", required=True)
+    loc.add_argument("--trigger", default="")
+    loc.add_argument("--strength", type=float, default=None)
+    loc.add_argument("--boxes", default="")
+    loc.add_argument("--version", default="")
+    loc.add_argument("--file", default="")
     args = parser.parse_args(argv)
 
     async def run() -> Any:
@@ -1582,6 +1643,11 @@ def _cli(argv: List[str]) -> int:
             return result
         if args.cmd == "kick":
             return await kick_boxes()
+        if args.cmd == "local":
+            return await publish_local(args.path, entry_id=args.id, title=args.title, base=args.base,
+                                       trigger=args.trigger, strength=args.strength,
+                                       only_boxes=[b for b in args.boxes.split(",") if b] or None,
+                                       version=args.version, file_name=args.file)
         data = load_registry()
         return [_entry_view(e, data) for e in data["loras"] if e.get("state") != "removed"]
 
