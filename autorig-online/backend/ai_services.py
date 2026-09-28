@@ -835,7 +835,8 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "options": [{"value": "24h", "title": "24 hours"}, {"value": "week", "title": "Week"},
                      {"value": "month", "title": "Month"}, {"value": "year", "title": "Year"},
                      {"value": "all", "title": "All time"}]},
-        {"name": "nsfw", "title": "NSFW level", "type": "select", "default": "none",
+        # New Search nodes start at X (owner, 2026-09-28); saved nodes keep theirs.
+        {"name": "nsfw", "title": "NSFW level", "type": "select", "default": "x",
          "options": [{"value": "none", "title": "None"}, {"value": "soft", "title": "Soft"},
                      {"value": "mature", "title": "Mature"}, {"value": "x", "title": "X"}]},
         {"name": "sort", "title": "Sort (Popular)", "type": "select", "default": "reactions",
@@ -844,6 +845,8 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
                      {"value": "newest", "title": "Newest"}]},
         {"name": "seed", "title": "Seed (Random)", "type": "number", "min": 0, "max": 9007199254740991,
          "step": 1, "default": 0, "help": "Random picks from the top of the period by this seed; R gives a new one"},
+        {"name": "unique_authors", "title": "One per author", "type": "select", "default": "on",
+         "options": [{"value": "on", "title": "On"}, {"value": "off", "title": "Off (exactly the site's list)"}]},
     ],
     "video_frame": [
         {"name": "template", "title": "Template", "type": "select", "default": "start_end",

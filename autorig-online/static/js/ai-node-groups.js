@@ -1203,6 +1203,8 @@
       // page text. By physical key, so a Russian layout copies too.
       if (command && !event.shiftKey && !event.altKey && (event.code === 'KeyC' || String(event.key).toLowerCase() === 'c') && selected.size &&
           !textSelectedIn(document.activeElement) &&
+          // A focused textarea keeps Ctrl+C for itself (owner, 2026-09-28).
+          !(document.activeElement && document.activeElement.tagName === 'TEXTAREA') &&
           !(event.target && event.target.closest && event.target.closest('dialog[open]')) &&
           !String(window.getSelection ? window.getSelection() : '').trim()) {
         event.preventDefault();
@@ -1231,6 +1233,7 @@
       if (!copyRequested) {
         // A copy from the menu or another route: text fields and selected page text keep theirs.
         if (textSelectedIn(document.activeElement)) return;
+        if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') return;
         if (!textFieldTarget(document.activeElement) && String(window.getSelection ? window.getSelection() : '').trim()) return;
         if (textFieldTarget(document.activeElement) && !selected.size) return;
       }

@@ -2535,6 +2535,88 @@
    * open the node, copy link, Post to Civitai, drag onto the canvas as Media
    * in). Collapses to a pill; the choice is remembered.
    */
+  /* ------------------------------------------------ delete a wire (owner, 2026-09-28)
+     Hovering a wire highlights it (a ~10 px band around the line counts);
+     middle-click — or Alt+click on a touchpad — removes that link, and Ctrl+Z
+     puts it back. Middle-drag on empty canvas still pans. */
+  function installWireDelete() {
+    const canvas = document.getElementById('canvas');
+    if (!canvas) return;
+    const style = document.createElement('style');
+    style.textContent = '#canvas .connection .main-path.wire-hover{stroke-width:7px!important;' +
+      'filter:brightness(1.7) drop-shadow(0 0 5px rgba(165,180,252,.9));cursor:pointer}';
+    document.head.appendChild(style);
+    const removed = [];
+    let hovered = null;
+    const OFFSETS = [[0, 0], [5, 0], [-5, 0], [0, 5], [0, -5], [4, 4], [-4, -4], [4, -4], [-4, 4], [10, 0], [-10, 0], [0, 10], [0, -10]];
+    function wireAt(x, y) {
+      for (const [dx, dy] of OFFSETS) {
+        const hit = document.elementsFromPoint(x + dx, y + dy).find(el => el.classList && el.classList.contains('main-path'));
+        if (hit) return hit;
+      }
+      return null;
+    }
+    function setHover(path) {
+      if (hovered === path) return;
+      if (hovered) hovered.classList.remove('wire-hover');
+      hovered = path;
+      if (hovered) hovered.classList.add('wire-hover');
+    }
+    function linkOf(path) {
+      const svg = path && path.closest('svg.connection');
+      if (!svg) return null;
+      const cls = [...svg.classList];
+      const pick = re => { const c = cls.find(name => re.test(name)); return c ? c.match(re)[1] : null; };
+      const from = pick(/^node_out_node-(.+)$/), to = pick(/^node_in_node-(.+)$/);
+      const output = cls.find(name => /^output_\d+$/.test(name)), input = cls.find(name => /^input_\d+$/.test(name));
+      return from && to && output && input ? {from, to, output, input} : null;
+    }
+    function removeWire(path) {
+      const link = linkOf(path);
+      if (!link) return false;
+      setHover(null);
+      editor.removeSingleConnection(link.from, link.to, link.output, link.input);
+      removed.push(link);
+      if (removed.length > 50) removed.shift();
+      toast('Link removed (Ctrl+Z to undo)');
+      return true;
+    }
+    let pending = 0;
+    canvas.addEventListener('pointermove', event => {
+      if (event.buttons) return;
+      if (pending) return;
+      pending = requestAnimationFrame(() => {
+        pending = 0;
+        const onNode = event.target.closest && event.target.closest('.drawflow-node');
+        setHover(onNode ? null : wireAt(event.clientX, event.clientY));
+      });
+    });
+    canvas.addEventListener('pointerleave', () => setHover(null));
+    const intercept = event => {
+      const middle = event.button === 1;
+      const alt = event.button === 0 && event.altKey;
+      if (!middle && !alt) return;
+      const path = hovered || wireAt(event.clientX, event.clientY);
+      if (!path) return;          // empty canvas: middle-drag pans as before
+      event.preventDefault();     // no autoscroll, no middle-click paste
+      event.stopImmediatePropagation();
+      if (event.type === 'pointerdown') removeWire(path);
+    };
+    ['pointerdown', 'mousedown'].forEach(type => canvas.addEventListener(type, intercept, true));
+    canvas.addEventListener('auxclick', event => { if (event.button === 1) event.preventDefault(); }, true);
+    document.addEventListener('keydown', event => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.code !== 'KeyZ') return;
+      if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
+      const link = removed.pop();
+      if (!link) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!nodeElement(link.from) || !nodeElement(link.to)) { toast('That link cannot come back: a node is gone.'); return; }
+      editor.addConnection(link.from, link.to, link.output, link.input);
+      toast('Link restored.');
+    }, true);
+  }
+
   // ?safe=1 (owner, 2026-09-28): open a graph without saved results, the
   // recent gallery or remembered UI state, to rescue a graph that hangs a tab.
   const SAFE_MODE = (() => { try { return new URLSearchParams(location.search).get('safe') === '1'; } catch (_) { return false; } })();
@@ -5950,6 +6032,7 @@
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
     if (!SAFE_MODE) installRecentGallery();
+    installWireDelete();
     installMediaThrottle(document.getElementById('canvas'));
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
