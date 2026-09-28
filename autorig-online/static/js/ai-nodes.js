@@ -831,7 +831,32 @@
     if (!used) { toast('No parameters recorded for this node yet — render it once.'); return; }
     paramsDialog(used, ((meta(id) || {}).label || (serviceById((meta(id) || {}).service) || {}).title || 'Node') + ' · parameters used', id);
   }
-  window.AINodeParams = {show: showNodeParams, dialog: paramsDialog, fromRecord: paramsUsed};
+  // The lightbox's info panel: what a node / result is, and its actions.
+  function nodeInfo(nodeId, used) {
+    const item = meta(nodeId) || {};
+    const record = runState.get(String(nodeId)) || {};
+    return {node: item.label || (serviceById(item.service) || {}).title || 'Node', params: used || null,
+            graphUrl: graphId ? location.origin + '/nodes?g=' + graphId : '', civitaiUrl: record.civitai_url || ''};
+  }
+  function usePromptIn(nodeId, prompt) {
+    const element = nodeElement(nodeId);
+    const field = element && element.querySelector('textarea[data-param="prompt"]');
+    if (!field) { toast('This node has no prompt field.'); return; }
+    graphFromCanvas().links.filter(link => String(link.to) === String(nodeId) && link.input === 'prompt').forEach(link => {
+      const from = meta(link.from), to = meta(link.to);
+      const out = from ? from.outFields.indexOf(link.output) : -1, inp = to ? to.inFields.indexOf(link.input) : -1;
+      if (out >= 0 && inp >= 0) editor.removeSingleConnection(String(link.from), String(link.to), 'output_' + (out + 1), 'input_' + (inp + 1));
+    });
+    field.value = prompt || '';
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+  }
+  function openNode(nodeId) {
+    if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds([String(nodeId)]);
+    const element = nodeElement(nodeId);
+    if (element) { element.classList.add('rl-flash'); setTimeout(() => element.classList.remove('rl-flash'), 1600); }
+  }
+  window.AINodeParams = {show: showNodeParams, dialog: paramsDialog, fromRecord: paramsUsed, info: nodeInfo, usePrompt: usePromptIn, openNode};
   // For ai-autoreload.js (owner, 2026-09-28): autosave and save-then-reload
   // when the site restarts or is updated.
   window.AINodesHost = {
@@ -2221,13 +2246,11 @@
         const cell = record && record.x9[index];
         if (!cell) return {};
         return {url: cell.value, status: cell.status === 'done' ? 'done' : cell.status, seed: cell.seed, error: cell.error,
-                used: x9Pick(record) === index};
+                used: x9Pick(record) === index, info: nodeInfo(node, cell.params_used)};
       },
       title: index => 'X9 · ' + ((meta(node) || {}).title || 'node') + ' · cell ' + (index + 1) + ' / 9',
       actions: {use: useCell, useTip: 'Use this cell as the node output', post: () => openCivitaiDialog(node),
-        extra: [{glyph: 'ⓘ', label: 'Parameters used (this cell)', key: 'P',
-                 hidden: index => { const r = x9Record(node); return !(r && r.x9[index] && r.x9[index].params_used); },
-                 run: index => { const r = x9Record(node); paramsDialog(r.x9[index].params_used, 'X9 cell ' + (index + 1) + ' · parameters used', node); }}]},
+        usePrompt: (index, prompt) => usePromptIn(node, prompt), openNode: () => openNode(node)},
       // The last cell looked at is the node's output (owner rule).
       onShow: index => { const r = x9Record(node); if (r && r.x9[index] && r.x9[index].status === 'done') setX9Pick(node, index); }
     });
@@ -4924,8 +4947,14 @@
   }
 
   function openPreview(type, url) {
+    let owner = null;
+    runState.forEach((record, id) => { if (!owner && record && record.value === url) owner = id; });
+    const record = owner ? runState.get(owner) : null;
     window.AILightbox.open({kind: 'preview', url, status: 'done', kind_: type,
-      title: () => String(url).split('/').pop().split('?')[0].slice(0, 80)});
+      info: owner ? nodeInfo(owner, record.params_used) : null,
+      actions: owner ? {usePrompt: (i, prompt) => usePromptIn(owner, prompt), openNode: () => openNode(owner),
+                        post: () => openCivitaiDialog(owner)} : {},
+      title: () => owner ? nodeInfo(owner).node + ' · result' : String(url).split('/').pop().split('?')[0].slice(0, 80)});
   }
 
   /**

@@ -121,6 +121,31 @@
     opacity: 0; transition: opacity .2s ease; pointer-events: none; }
   .alb-toast.alb-show { opacity: 1; }
 
+  .alb.alb-info-open .alb-stage { right: 360px; }
+  .alb.alb-info-open .alb-edge.next { right: 360px; }
+  .alb-info { position: absolute; top: 64px; right: 12px; bottom: calc(var(--alb-strip-h, 84px) + 12px); width: 336px; z-index: 3;
+    border-radius: 14px; padding: 12px 14px; overflow: auto; font-size: 12.5px; line-height: 1.45; display: none; }
+  .alb.alb-info-open .alb-info { display: block; }
+  .alb-info h4 { margin: 0 0 6px; font-size: 13px; }
+  .alb-info .alb-prompt { white-space: pre-wrap; max-height: 30vh; overflow: auto; padding: 8px 10px; border-radius: 9px;
+    background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08); font-size: 12.5px; }
+  .alb-info table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .alb-info th { text-align: left; color: var(--text-secondary, #9aa0b5); font-weight: 500; padding: 2px 8px 2px 0; vertical-align: top; white-space: nowrap; }
+  .alb-info td { padding: 2px 0; word-break: break-word; }
+  .alb-info .alb-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .alb-info .alb-acts button { padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06);
+    color: inherit; cursor: pointer; font: 600 12px system-ui; }
+  .alb-info .alb-acts button:hover { background: rgba(99,102,241,.35); }
+  .alb-info .alb-muted { color: var(--text-secondary, #9aa0b5); }
+  .alb-dlmenu { position: absolute; z-index: 6; min-width: 230px; padding: 6px; border-radius: 12px; display: none; }
+  .alb-dlmenu.on { display: block; }
+  .alb-dlmenu button { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent;
+    color: inherit; cursor: pointer; font: 600 13px system-ui; }
+  .alb-dlmenu button:hover { background: rgba(255,255,255,.1); }
+  .alb-dlmenu button:disabled { opacity: .45; cursor: default; }
+  .alb-dlmenu small { display: block; font-weight: 400; color: var(--text-secondary, #9aa0b5); }
+  @media (max-width: 1100px) { .alb.alb-info-open .alb-stage, .alb.alb-info-open .alb-edge.next { right: 0; }
+    .alb-info { left: 12px; right: 12px; width: auto; top: auto; max-height: 45vh; } }
   @media (max-width: 600px) {
     .alb { --alb-strip-h: 64px; }
     .alb-btn { min-width: 36px; height: 36px; padding: 0 7px; }
@@ -144,7 +169,8 @@
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
     fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
-    one: '<path d="M8 20V4l-3 3M16 20V4l-3 3"/>',
+    one: '<rect x="3" y="5" width="18" height="14" rx="2"/><text x="12" y="15.2" text-anchor="middle" font-size="7.5" font-weight="700" font-family="system-ui,sans-serif" fill="currentColor" stroke="none">1:1</text>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
     download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
     link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
     post: '<path d="M12 19V6M6 12l6-6 6 6"/>'
@@ -202,12 +228,15 @@
         '<button type="button" class="alb-seed" data-alb="seed" data-tip="Copy seed"></button>' +
         '<span class="alb-sep"></span>' +
         btn('fit', 'fit', 'Fit / 1:1 (wheel or pinch to zoom)', 'F') +
-        '<a class="alb-btn" data-alb="download" data-tip="Download" data-key="D" aria-label="Download (D)" download target="_blank" rel="noopener">' + svg('download') + '</a>' +
+        '<button type="button" class="alb-btn" data-alb="download" data-tip="Download" data-key="D" aria-label="Download (D)">' + svg('download') + '</button>' +
         btn('copy', 'link', 'Copy link', 'C') +
         btn('post', 'post', 'Post to Civitai (draft)', '') +
         '<span class="alb-extra" style="display:contents"></span>' +
+        '<span class="alb-sep"></span>' + btn('info', 'info', 'Info & parameters', 'I') +
       '</div>' +
       '<div class="alb-strip alb-chrome" role="listbox" aria-label="Items"></div>' +
+      '<aside class="alb-info alb-glass" aria-label="Info and parameters"></aside>' +
+      '<div class="alb-dlmenu alb-glass" role="menu"></div>' +
       '<div class="alb-tip" role="tooltip"></div>';
     document.body.appendChild(dialog);
     wire();
@@ -359,11 +388,12 @@
     const url = item.url && /^https?:|^\//.test(item.url) ? item.url : '';
     const download = q('download');
     download.hidden = actions.download === false || !url;
-    if (url) download.href = url;
     q('copy').hidden = actions.copy === false || !url;
     q('post').hidden = !actions.post || (actions.postHidden && actions.postHidden(state.index));
     q('fit').hidden = !done || !!item.render || item.kind === 'audio' || item.kind === 'text';
     syncFitButton();
+    q('info').classList.toggle('alb-on', dialog.classList.contains('alb-info-open'));
+    paintInfo();
     const extra = dialog.querySelector('.alb-extra');
     extra.innerHTML = '';
     (actions.extra || []).forEach((entry, index) => {
@@ -468,6 +498,147 @@
     paintStrip(false);
   }
 
+  /* ------------------------------------------------------------ info panel */
+  const esc = value => String(value).replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[ch]);
+  const fetched = new Map();   // url -> {size, type, w, h} ; task -> render status
+  function lookup(key, fn) {
+    if (!fetched.has(key)) fetched.set(key, fn().catch(() => null));
+    return fetched.get(key);
+  }
+  function paintInfo() {
+    const panel = dialog.querySelector('.alb-info');
+    if (!dialog.classList.contains('alb-info-open')) return;
+    const item = current();
+    const info = item.info || {};
+    const used = info.params || {};
+    const url = item.url || '';
+    const row = (label, value, id) => '<tr><th>' + esc(label) + '</th><td' + (id ? ' data-f="' + id + '"' : '') + '>' +
+      (value === undefined || value === null || value === '' ? '<span class="alb-muted">—</span>' : esc(value)) + '</td></tr>';
+    const loras = [used.lora ? used.lora + (used.lora_strength ? ' · ' + used.lora_strength : '') : '']
+      .concat(Array.isArray(used.loras) ? used.loras.map(l => (l.name || l.file) + ' · ' + (l.strength_model ?? l.weight ?? '')) : [])
+      .concat(typeof used.loras === 'string' && used.loras ? [used.loras] : []).filter(Boolean).join(', ');
+    const acts = [];
+    if (used.prompt) acts.push('<button type="button" data-i="copy">Copy prompt</button>');
+    if (Object.keys(used).length) acts.push('<button type="button" data-i="json">Copy params JSON</button>');
+    if (used.prompt && state.actions.usePrompt) acts.push('<button type="button" data-i="use">Use this prompt</button>');
+    if (state.actions.post) acts.push('<button type="button" data-i="post">Post to Civitai</button>');
+    if (state.actions.openNode) acts.push('<button type="button" data-i="node">Open node</button>');
+    panel.innerHTML =
+      '<h4>' + esc(info.node || state.title(state.index) || 'Result') + '</h4>' +
+      '<div class="alb-muted" style="margin-bottom:8px">' + esc(used.checkpoint || used.model || info.model || '') + '</div>' +
+      (used.prompt ? '<div class="alb-muted">Final prompt</div><div class="alb-prompt">' + esc(used.prompt) + '</div>' :
+        '<div class="alb-muted">No parameters were recorded for this result (rendered before they were kept, or not a render).</div>') +
+      '<table>' +
+      row('Negative', used.negative_prompt) + row('Seed', used.seed ?? item.seed) + row('Steps', used.steps) + row('CFG', used.cfg) +
+      row('Sampler', [used.sampler, used.scheduler].filter(Boolean).join(' · ')) + row('LoRAs', loras) +
+      row('Size', '', 'size') + row('File', '', 'file') + row('Frames', used.frame_count) +
+      row('Render box', '', 'box') + row('Render time', '', 'time') + row('Task', used.task_id) + row('Created', used.recorded_at ? new Date(used.recorded_at).toLocaleString() : '') +
+      (info.graphUrl ? '<tr><th>Graph</th><td><a href="' + esc(info.graphUrl) + '" target="_blank" rel="noopener">open</a></td></tr>' : '') +
+      (info.civitaiUrl ? '<tr><th>Civitai</th><td><a href="' + esc(info.civitaiUrl) + '" target="_blank" rel="noopener">post</a></td></tr>' : '') +
+      '</table><div class="alb-acts">' + acts.join('') + '</div>';
+    panel.onclick = event => {
+      const b = event.target.closest('[data-i]');
+      if (!b) return;
+      if (b.dataset.i === 'copy') copy(used.prompt).then(() => flash('Prompt copied'));
+      if (b.dataset.i === 'json') copy(JSON.stringify(used, null, 2)).then(() => flash('Parameters copied'));
+      if (b.dataset.i === 'use') { state.actions.usePrompt(state.index, used.prompt); flash('Prompt placed in the node'); }
+      if (b.dataset.i === 'post') { dialog.close(); state.actions.post(state.index); }
+      if (b.dataset.i === 'node') { dialog.close(); state.actions.openNode(state.index); }
+    };
+    const set = (field, text) => { const cell = panel.querySelector('[data-f="' + field + '"]'); if (cell && text) cell.textContent = text; };
+    const index = state.index;
+    if (/^https?:|^\//.test(url)) {
+      const abs = new URL(url, location.href).href;
+      if (!/\.(mp4|webm|mov)(\?|#|$)/i.test(abs)) {
+        lookup('size:' + abs, () => fetch('/api/ai/media-size?url=' + encodeURIComponent(abs)).then(r => r.ok ? r.json() : null))
+          .then(d => { if (d && state.index === index) set('size', d.width_int + ' × ' + d.height_int); });
+      } else {
+        const clip = dialog.querySelector('.alb-stage video');
+        if (clip && clip.videoWidth) set('size', clip.videoWidth + ' × ' + clip.videoHeight + (clip.duration ? ' · ' + clip.duration.toFixed(1) + ' s' : ''));
+      }
+      if (new URL(abs).origin === location.origin) {
+        lookup('head:' + abs, () => fetch(abs, {method: 'HEAD'}).then(r => r.ok ? {len: Number(r.headers.get('content-length')) || 0, type: r.headers.get('content-type') || ''} : null))
+          .then(d => { if (d && state.index === index) set('file', (d.type.split(';')[0] || '') + (d.len ? ' · ' + (d.len / 1048576).toFixed(2) + ' MB' : '')); });
+      }
+    }
+    if (used.task_id) {
+      lookup('task:' + used.task_id, () => fetch('/api/ai/render-status/' + encodeURIComponent(used.task_id)).then(r => r.ok ? r.json() : null))
+        .then(d => {
+          if (!d || state.index !== index) return;
+          set('box', d.node_string || '');
+          if (d.started_at_unix_float && d.created_at_unix_float) set('time', 'queued ' + Math.round(d.started_at_unix_float - d.created_at_unix_float) + ' s' +
+            (used.render_seconds ? ' · rendered ' + Math.round(used.render_seconds) + ' s' : ''));
+        });
+    }
+  }
+
+  /* -------------------------------------------------------------- downloads */
+  function fileBase() {
+    const item = current();
+    const used = (item.info || {}).params || {};
+    const name = String((item.info || {}).node || state.title(state.index) || 'autorig').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'autorig';
+    const seed = used.seed ?? item.seed;
+    return name + (seed ? '_seed' + seed : '');
+  }
+  function toggleDownloadMenu() {
+    const menu = dialog.querySelector('.alb-dlmenu');
+    if (menu.classList.contains('on')) { menu.classList.remove('on'); return; }
+    const item = current();
+    const url = item.url || '';
+    const video = /\.(mp4|webm|mov)(\?|#|$)/i.test(url) || item.kind === 'video';
+    const same = (() => { try { return new URL(url, location.href).origin === location.origin; } catch (_) { return false; } })();
+    const ext = (url.split('?')[0].match(/\.([a-z0-9]{3,4})$/i) || [, video ? 'mp4' : 'png'])[1].toUpperCase();
+    menu.innerHTML = '<button type="button" data-as="original">Original (' + esc(ext) + ')<small>the file exactly as rendered</small></button>' +
+      (video
+        ? '<button type="button" data-as="frame"' + (same ? '' : ' disabled') + '>First frame as JPG<small>' + (same ? 'full size' : 'only for files on this site') + '</small></button>'
+        : '<button type="button" data-as="jpg"' + (same ? '' : ' disabled') + '>JPG, high quality<small>' + (same ? 'full size, quality 95' : 'only for files on this site') + '</small></button>');
+    const b = dialog.querySelector('[data-alb="download"]').getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(innerWidth - 250, b.left - 90)) + 'px';
+    menu.style.bottom = (innerHeight - b.top + 8) + 'px';
+    menu.classList.add('on');
+  }
+  function save(blobOrUrl, name) {
+    const a = document.createElement('a');
+    a.href = typeof blobOrUrl === 'string' ? blobOrUrl : URL.createObjectURL(blobOrUrl);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    if (typeof blobOrUrl !== 'string') setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  }
+  async function downloadAs(kind) {
+    dialog.querySelector('.alb-dlmenu').classList.remove('on');
+    const item = current();
+    const url = new URL(item.url, location.href).href;
+    try {
+      if (kind === 'original') {
+        const ext = (url.split('?')[0].match(/\.([a-z0-9]{3,4})$/i) || [, 'png'])[1];
+        const blob = await (await fetch(url)).blob();
+        return save(blob, fileBase() + '.' + ext);
+      }
+      flash('Preparing the full-size JPG…');
+      const canvas = document.createElement('canvas');
+      if (kind === 'jpg') {
+        // A detached Image with an onload handler loads the ORIGINAL (the
+        // media gate never swaps it for a thumbnail).
+        const img = new Image();
+        await new Promise((ok, fail) => { img.onload = ok; img.onerror = fail; img.src = url; });
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+      } else {
+        const clip = document.createElement('video');
+        clip.muted = true; clip.preload = 'auto';
+        await new Promise((ok, fail) => { clip.onloadeddata = ok; clip.onerror = fail; clip.src = url; });
+        await new Promise(ok => { clip.onseeked = ok; clip.currentTime = 0.05; });
+        canvas.width = clip.videoWidth; canvas.height = clip.videoHeight;
+        canvas.getContext('2d').drawImage(clip, 0, 0);
+      }
+      const blob = await new Promise(ok => canvas.toBlob(ok, 'image/jpeg', 0.95));
+      save(blob, fileBase() + '_' + canvas.width + 'x' + canvas.height + (kind === 'frame' ? '_frame1' : '') + '.jpg');
+    } catch (error) {
+      flash('Download failed: ' + (error && error.message || 'the file could not be read'));
+    }
+  }
+
   /* ----------------------------------------------------------- interaction */
   function run(action, source) {
     const actions = state.actions || {};
@@ -479,9 +650,11 @@
     if (action === 'fit') return toggleFit();
     if (action === 'seed' && item.seed) return copy(String(item.seed)).then(() => flash('Seed ' + item.seed + ' copied'));
     if (action === 'copy' && item.url) return copy(new URL(item.url, location.href).href).then(() => flash('Link copied'));
-    if (action === 'download' && item.url && source !== 'click') {
-      const link = dialog.querySelector('[data-alb="download"]');
-      if (!link.hidden) link.click();
+    if (action === 'download' && item.url) return toggleDownloadMenu();
+    if (action === 'info') {
+      dialog.classList.toggle('alb-info-open');
+      try { localStorage.setItem('alb.info', dialog.classList.contains('alb-info-open') ? '1' : '0'); } catch (_) { /* private */ }
+      paintChrome();
       return;
     }
     if (action === 'reseed' && actions.reseed && !dialog.querySelector('[data-alb="reseed"]').hidden) { actions.reseed(i); flash('New seed — rendering'); return later(); }
@@ -520,12 +693,13 @@
   function wire() {
     const stage = dialog.querySelector('.alb-stage');
     dialog.addEventListener('click', event => {
-      const target = event.target.closest('[data-alb],.alb-thumb');
+      const target = event.target.closest('[data-alb],.alb-thumb,[data-as]');
+      if (target && target.dataset && target.dataset.as) { event.preventDefault(); downloadAs(target.dataset.as); return; }
       if (!target) return;
       if (target.classList.contains('alb-thumb')) { show(Number(target.dataset.index)); return; }
       const action = target.dataset.alb;
       if (action === 'extra') { const entry = state.actions.extra[Number(target.dataset.extra)]; if (entry) { entry.run(state.index); later(); } return; }
-      if (action === 'download') { wake(); return; }
+      if (action === 'dl') { downloadAs(target.dataset.as); return; }
       event.preventDefault();
       run(action, 'click');
     });
@@ -542,7 +716,7 @@
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key;
       const map = {ArrowLeft: 'prev', ArrowRight: 'next'};
-      const code = {KeyR: 'reseed', KeyL: 'lock', KeyF: 'fit', KeyD: 'download', KeyC: 'copy'};
+      const code = {KeyR: 'reseed', KeyL: 'lock', KeyF: 'fit', KeyD: 'download', KeyC: 'copy', KeyI: 'info'};
       let action = map[key] || code[event.code];
       if (key === 'Enter' && !(event.target.closest && event.target.closest('button,a'))) action = 'use';
       if (key === 'Tab') { trap(event); return; }
@@ -655,6 +829,9 @@
       returnFocus: document.activeElement, keyboard: false
     };
     dialog.dataset.kind = options.kind || '';
+    let infoPref = null;
+    try { infoPref = localStorage.getItem('alb.info'); } catch (_) { /* private */ }
+    dialog.classList.toggle('alb-info-open', infoPref === null ? innerWidth > 1100 : infoPref === '1');
     paintStrip(true);
     dialog.showModal();
     show(Number(options.start) || 0);

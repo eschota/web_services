@@ -465,7 +465,10 @@
 
   /* ------------------------------------------------------------- lists */
 
-  function isList(result) { return !!(result && Array.isArray(result.items) && result.items.length); }
+  function isList(result) {
+    return !!(result && Array.isArray(result.items) && result.items.length &&
+              result.items.every(item => item && typeof item === 'object' && ITEM_STATES.has(item.status)));
+  }
 
   /** Does this wire carry item i of a list (true) or one shared value (false)? */
   function perItem(upstream, field) {
@@ -728,6 +731,9 @@
     }
     const count = Math.max(1, ...feeds.map((link, index) => lists[index] ? upstreamRecords[index].result.items.length : 0),
       isList(gateResult) ? gateResult.items.length : 0);
+    if (count > LIST_CAP && (api.meta(id) || {}).service !== 'civitai_search') {
+      return {ok: false, error: 'the list has ' + count + ' items; at most ' + LIST_CAP + ' per node — split it (e.g. Max shots / fewer frames)'};
+    }
     try {
       // Streamed: the node answers at once and each item resolves on its own,
       // so shot 1 goes on to the next node while shot 2 is still rendering.
@@ -863,7 +869,7 @@
           const mineTask = {sig, taskId: ''};
           ITEM_TASKS.set(itemKey, mineTask);
           try {
-            const accepted = await api.submitJson(runner.api, body);
+            const accepted = await api.submitJson(runner.api, body, undefined, {nodeId: id});
             mineTask.taskId = accepted.task_id_string || '';
             try { if (window.AINodeParams) item.params_used = window.AINodeParams.fromRecord(body, accepted); } catch (_) { /* display only */ }
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
@@ -871,11 +877,11 @@
           } catch (error) {
             if (String(error.message || '').indexOf(api.BUDGET_EXHAUSTED) === -1) throw error;
             body = Object.assign({}, body, {max_output_tokens: Math.min(8192, (Number(body.max_output_tokens) || 1024) * 2)});
-            const accepted = await api.submitJson(runner.api, body);
+            const accepted = await api.submitJson(runner.api, body, undefined, {nodeId: id});
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
           }
           let value = finished.value;
-          if (post && value) value = await api.upscaleClip2x(value, null);
+          if (post && value) value = await api.upscaleClip2x(value, null, id);
           if (!value) throw new Error('no result');
           Object.assign(item, {status: 'done', value, outputs: finished.outputs || null, type: api.runnerType(runner, value), sig,
                                seed: Number(itemParams.seed) || 0});
@@ -1103,6 +1109,7 @@
         return {url: text ? '' : url, text: text ? url : '', kind: text ? 'text' : '', status,
                 thumb: scene && item.outputs ? item.outputs.first_frame_url_string : '',
                 seed: item.seed_override || item.seed, locked: !!item.seed_override, used: !!item.seed_override && item.status === 'done',
+                info: window.AINodeParams && window.AINodeParams.info ? window.AINodeParams.info(node, item.params_used) : null,
                 error: item.status === 'skipped' ? 'skipped' + (item.error ? ': ' + item.error : '') : item.error};
       },
       title: index => {
@@ -1115,12 +1122,10 @@
         reseed: index => rerollSegment(node, index, newSeed()), reseedHidden: () => !tools(),
         use: tools() ? index => useTake(node, index) : null,
         useTip: 'Keep this take: lock its seed (R and re-renders leave it alone)',
+        usePrompt: (index, prompt) => window.AINodeParams && window.AINodeParams.usePrompt(node, prompt),
+        openNode: () => window.AINodeParams && window.AINodeParams.openNode(node),
         lock: tools() ? index => toggleLock(node, index) : null,
-        extra: [{glyph: 'ⓘ', label: 'Parameters used', key: 'P',
-                 hidden: index => !(items()[index] || {}).params_used,
-                 run: index => window.AINodeParams && window.AINodeParams.dialog(items()[index].params_used,
-                   'Item ' + (index + 1) + ' · parameters used', null)},
-                {glyph: '↗', label: 'Open on Civitai', key: 'O',
+        extra: [{glyph: '↗', label: 'Open on Civitai', key: 'O',
                  hidden: index => !((items()[index] || {}).meta || {}).link,
                  run: index => { const link = ((items()[index] || {}).meta || {}).link; if (link) window.open(link, '_blank', 'noopener'); }}]
       }
@@ -1209,8 +1214,27 @@
   }
 
   /** A saved list result reopened from a link. Returns true when handled. */
+  // A real list item always carries a status; anything else (a bare {value}
+  // written by a test, a string) is not a list and is dropped on load, so a
+  // node fed by one picture never shows a phantom gallery (2026-09-28).
+  const LIST_CAP = 64;
+  const ITEM_STATES = new Set(['queued', 'running', 'done', 'failed', 'skipped', 'stale']);
+  function validItems(id, items) {
+    if (!Array.isArray(items) || !items.length) return false;
+    const service = (api.meta(id) || {}).service || '';
+    const cap = service === 'civitai_search' ? 512 : LIST_CAP;
+    return items.length <= cap && items.every(item => item && typeof item === 'object' && ITEM_STATES.has(item.status));
+  }
+
   function restore(id, record, state) {
     if (!record || !Array.isArray(record.items) || !record.items.length) return false;
+    if (!validItems(id, record.items)) {
+      // Bogus list state on a node: forget it and let the node show its single result.
+      delete record.items;
+      delete record.summary;
+      api.recordResult(id, record);
+      return false;
+    }
     if (record.status === 'running') {
       record.status = record.items.some(item => item.status === 'done') ? 'stale' : 'failed';
       record.error = 'interrupted — Render again (finished shots are reused)';
