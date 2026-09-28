@@ -269,9 +269,10 @@
     var media = value.indexOf('http://') === 0 || value.indexOf('https://') === 0;
     var inner;
     if (media && type === 'video') {
-      inner = '<video muted loop playsinline preload="metadata" src="' + escapeAttr(value) + '"></video>';
+      // No bytes until the tile is on screen (a page of clips downloaded ~44 MB, 2026-09-28).
+      inner = '<video muted loop playsinline preload="none" data-lazy-src="' + escapeAttr(value) + '"></video>';
     } else if (media && (type === 'image' || type.indexOf('control_') === 0)) {
-      inner = '<img loading="lazy" decoding="async" alt="" src="' + escapeAttr(value) + '">';
+      inner = '<img loading="lazy" decoding="async" alt="" src="' + escapeAttr('/api/ai/thumb?w=480&url=' + encodeURIComponent(value)) + '">';
     } else if (media) {
       inner = '<div class="wf-none"><span class="big">' + (TYPE_ICONS[type] || '🗂️') + '</span>' +
               escapeHtml(typeTitle(type)) + '</div>';
@@ -428,6 +429,22 @@
       try { element.currentTime = 0; } catch (error) { /* not seekable yet */ }
     });
   }
+  // Clips get their address, and their first frame, only when their tile is visible.
+  var lazyClips = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) { return; }
+      var clip = entry.target;
+      lazyClips.unobserve(clip);
+      if (clip.dataset.lazySrc && !clip.getAttribute('src')) { clip.preload = 'metadata'; clip.src = clip.dataset.lazySrc + '#t=0.1'; }
+    });
+  }, {rootMargin: '200px'});
+  function watchClips() {
+    Array.prototype.forEach.call(grid.querySelectorAll('video[data-lazy-src]:not([src])'), function (clip) {
+      if (lazyClips) { lazyClips.observe(clip); } else { clip.src = clip.dataset.lazySrc; }
+    });
+  }
+  new MutationObserver(watchClips).observe(grid, {childList: true, subtree: true});
+  watchClips();
   grid.addEventListener('mouseover', function (event) { playFrom(event.target); });
   grid.addEventListener('mouseout', function (event) {
     var card = event.target.closest ? event.target.closest('.wf-card') : null;

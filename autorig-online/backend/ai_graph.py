@@ -1455,6 +1455,49 @@ async def _caller_is_admin(request: Request) -> bool:
 
 _MY_TASK_STATUS: Dict[str, Dict[str, object]] = {}
 
+_THUMB_DIR = pathlib.Path(os.getenv("AUTORIG_THUMB_DIR", "/srv/autorig/data/var/thumbs"))
+_THUMB_HOSTS = ("https://autorig.online/", "https://image.civitai.com/", "https://image.civitai.red/")
+
+
+@router.get("/api/ai/thumb")
+async def api_thumb(url: str, w: int = 360):
+    """A small JPEG of a picture, cached on disk (2026-09-28).
+
+    Library tiles and gallery cells showed full-size renders (up to 4096 px,
+    several MB each): one /workflows page downloaded ~47 MB.
+    """
+    import hashlib as _hashlib
+    from fastapi.responses import FileResponse, RedirectResponse
+
+    w = max(64, min(1024, int(w or 360)))
+    if not url.startswith(_THUMB_HOSTS):
+        raise HTTPException(status_code=400, detail="unsupported address")
+    key = _hashlib.sha256(f"{w}|{url}".encode("utf-8")).hexdigest()
+    path = _THUMB_DIR / key[:2] / (key + ".jpg")
+    if path.is_file():
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=604800"})
+    import httpx
+    try:
+        local = url.replace("https://autorig.online/", "http://127.0.0.1:8200/") if url.startswith("https://autorig.online/api/") else url
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            response = await client.get(local, timeout=30.0)
+        if response.status_code != 200 or len(response.content) > 64 * 1024 * 1024:
+            return RedirectResponse(url)
+        from io import BytesIO
+
+        from PIL import Image
+        with Image.open(BytesIO(response.content)) as picture:
+            picture = picture.convert("RGB")
+            picture.thumbnail((w, w * 2))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            picture.save(tmp, "JPEG", quality=82, optimize=True)
+            tmp.replace(path)
+    except Exception:
+        logger.info("thumbnail failed for %s", url[:120])
+        return RedirectResponse(url)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=604800"})
+
 
 @router.get("/api/ai/my-tasks")
 async def api_my_tasks(request: Request, limit: int = 10):

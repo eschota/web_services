@@ -1777,6 +1777,7 @@
     };
     const io = new IntersectionObserver(entries => entries.forEach(entry => {
       visible.set(entry.target, entry.isIntersecting);
+      if (entry.isIntersecting && entry.target.preload === 'none') entry.target.preload = 'metadata';
       apply(entry.target);
     }), {threshold: 0.2});
     const prep = element => {
@@ -1785,7 +1786,9 @@
         element.decoding = 'async';
       } else if (element.tagName === 'VIDEO' && !element._throttled) {
         element._throttled = true;
-        element.preload = 'metadata';
+        // Nothing is fetched for a clip nobody can see (63 clips on one graph
+        // made ~450 media requests while it opened, 2026-09-28).
+        element.preload = 'none';
         element.removeAttribute('autoplay');
         element.autoplay = false;
         // Code that calls play() on a new source must not wake a clip nobody sees.
@@ -1882,7 +1885,8 @@
       box.title = 'Seed ' + cell.seed + ' · ' + cell.status + (cell.error ? ': ' + cell.error : '') + ' — click to open';
       if (cell.status === 'done' && cell.value) {
         const media = document.createElement(looksLikeVideo(cell.value) ? 'video' : 'img');
-        media.src = cell.value;
+        media.src = media.tagName === 'IMG' && /^https:\/\/(autorig\.online|image\.civitai\.)/.test(cell.value)
+          ? '/api/ai/thumb?w=240&url=' + encodeURIComponent(cell.value) : cell.value;
         media.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
         if (media.tagName === 'VIDEO') { media.muted = true; media.loop = true; media.preload = 'metadata'; media.playsInline = true; }
         else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = 'Seed ' + cell.seed; }
@@ -2613,7 +2617,7 @@
       }
       else {
         const media = document.createElement(item.kind_string === 'video' ? 'video' : 'img');
-        media.src = item.url_string + (item.kind_string === 'video' ? '#t=0.1' : '');
+        media.src = item.kind_string === 'video' ? item.url_string + '#t=0.1' : '/api/ai/thumb?w=160&url=' + encodeURIComponent(item.url_string);
         if (media.tagName === 'VIDEO') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
         else { media.loading = 'lazy'; media.decoding = 'async'; media.alt = ''; }
         cell.appendChild(media);
@@ -2656,8 +2660,15 @@
         }
       } catch (error) { /* next poll */ }
     };
-    poll();
-    setInterval(poll, 5000);
+    // 5 s while the strip is open and the tab is in front; 30 s when it is
+    // folded; nothing while the tab is hidden (every tab polls).
+    let lastPoll = 0;
+    const tick = () => {
+      const every = collapsed ? 30000 : 5000;
+      if (!document.hidden && Date.now() - lastPoll >= every) { lastPoll = Date.now(); poll(); }
+    };
+    poll(); lastPoll = Date.now();
+    setInterval(tick, 5000);
 
     function openRecentLightbox(start) {
       let dialog = document.getElementById('recent-lightbox');
@@ -3169,7 +3180,9 @@
       meta, nodeElement, runState, bodyFor, stableJson, runnerFor, runnerType, submitJson, splitMulti,
       upscaleClip2x, recordResult, looksLikeVideo, toast, openPreview, outputValue, adaptMediaValue,
       followInputSizeAtRun, startIncrementalService, graphFromCanvas,
-      runGraph: keep => runGraph(keep), supersedeTasks: ids => supersedeTasks(ids),
+      runGraph: keep => runGraph(keep),
+      updatePorts: id => { try { editor.updateConnectionNodes('node-' + id); } catch (e) { /* not drawn */ } },
+      ROW_HEIGHT, HEADER_HEIGHT, supersedeTasks: ids => supersedeTasks(ids),
       invalidate: id => invalidateNodeAndDownstream(id),
       epoch: () => canvasEpoch,
       get BUDGET_EXHAUSTED() { return BUDGET_EXHAUSTED; },
