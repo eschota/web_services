@@ -20,7 +20,43 @@
   const LIST_SINKS = new Set(['video_concat', 'video_summary']);
   const TRANSIENT = /server restarted|unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
 
-  function install(host) { api = host; }
+  function install(host) { api = host; watchCatalogue(); }
+
+  /* ------------------------------------------- stale catalogue guard */
+
+  // A tab opened before a deploy keeps the old socket lists: a wire drawn to
+  // "Frame 3" was read as whatever the old output 3 was (Extract Frames' text
+  // info), Vision got text instead of a picture and failed "Provide image_url"
+  // (2026-09-28), and the save was refused so the wire never reached the
+  // server. The page now notices a changed catalogue, says so, and holds Render
+  // until it is reloaded.
+  function socketSignature(data) {
+    return JSON.stringify((data.services_array || []).map(sv => [sv.id,
+      (sv.inputs || []).map(i => i.field), (sv.outputs || []).map(o => o.field)]));
+  }
+  let catalogueSig = null;
+  function watchCatalogue() {
+    if (typeof fetch === 'undefined' || typeof document === 'undefined' || !document.addEventListener) return;
+    const check = () => fetch('/api/ai/services', {cache: 'no-store'}).then(r => r.json()).then(data => {
+      const sig = socketSignature(data);
+      if (catalogueSig === null) { catalogueSig = sig; return; }
+      if (sig !== catalogueSig) staleBanner();
+    }).catch(() => {});
+    check();
+    setInterval(check, 60000);
+  }
+  function staleBanner() {
+    if (document.getElementById('stale-catalogue')) return;
+    const bar = document.createElement('div');
+    bar.id = 'stale-catalogue';
+    bar.style.cssText = 'position:fixed;z-index:10000;left:50%;top:8px;transform:translateX(-50%);padding:8px 14px;border-radius:8px;' +
+      'background:#b45309;color:#fff;font:600 13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.4);cursor:pointer';
+    bar.textContent = 'Nodes were updated on the server — reload this page before rendering or wiring (sockets changed). Click to reload.';
+    bar.addEventListener('click', () => location.reload());
+    document.body.appendChild(bar);
+    const run = document.getElementById('run');
+    if (run) { run.disabled = true; run.title = 'Reload the page first: the node catalogue changed on the server'; }
+  }
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -57,7 +93,87 @@
     'three_quarter_left_url_string', 'three_quarter_right_url_string', 'profile_left_url_string',
     'profile_right_url_string', 'back_url_string', 'sheet_url_string', 'source_frame_url_string', 'description_string'];
 
+  /* ------------------------------------------- ControlNet map adjust */
+
+  // Contrast / levels / gamma / blur / invert on the map nodes: the server makes
+  // the map and applies them (/api/ai/video-tools/map), so the adjusted map is
+  // the node's output. While a slider moves, the node previews the change on the
+  // unadjusted map with CSS filters; "tint" only colours that preview.
+  const MAP_KEYS = ['contrast', 'black', 'white', 'gamma', 'blur', 'invert'];
+  function mapSig(body) { return MAP_KEYS.map(k => k + '=' + body[k]).join('&'); }
+  const mapRunnerFor = channel => ({api: '/api/ai/video-tools/map', field: 'image_url_string', type: 'control_' + channel,
+    finish: async (accepted, runner, report) => {
+      const data = await pollVideoTool(accepted, runner, report);
+      return {value: data.image_url_string,
+              outputs: {image_url_string: data.image_url_string, source_map_url_string: data.source_map_url_string || data.image_url_string,
+                        adjust_string: data.applied_object ? mapSig(data.applied_object) : ''}};
+    }});
+
+  function mapControls(element) {
+    const read = name => { const c = element.querySelector('[data-param="' + name + '"]'); return c ? c.value : ''; };
+    return {contrast: Number(read('contrast') || 1), black: Number(read('black') || 0), white: Number(read('white') || 255),
+            gamma: Number(read('gamma') || 1), blur: Number(read('blur') || 0), invert: read('invert') === 'on', tint: read('_tint') || 'none'};
+  }
+
+  function paintMapPreview(id) {
+    const element = api.nodeElement(id);
+    if (!element) return;
+    const img = element.querySelector('.nout > img');
+    if (!img) return;
+    const record = api.runState.get(String(id)) || {};
+    const outputs = record.outputs || {};
+    const c = mapControls(element);
+    const sig = mapSig({contrast: c.contrast, black: c.black, white: c.white, gamma: c.gamma, blur: c.blur, invert: c.invert});
+    const rendered = outputs.adjust_string === sig;
+    const source = outputs.source_map_url_string;
+    // Rendered with these settings: show the real output. Otherwise preview the
+    // settings on the unadjusted map (approximate: levels/gamma as brightness).
+    if (!rendered && source && img.dataset.preview !== source) { img.dataset.preview = source; img.src = source; }
+    if (rendered && outputs.image_url_string && img.dataset.preview !== outputs.image_url_string) {
+      img.dataset.preview = outputs.image_url_string; img.src = outputs.image_url_string;
+    }
+    const filters = [];
+    if (!rendered) {
+      const span = Math.max(1, c.white - c.black) / 255;
+      filters.push('contrast(' + (c.contrast / span).toFixed(3) + ')');
+      filters.push('brightness(' + (Math.pow(0.5, 1 / c.gamma) / 0.5 - (c.black - (255 - c.white)) / 510).toFixed(3) + ')');
+      if (c.blur > 0) filters.push('blur(' + (c.blur / 100 * Math.max(img.clientWidth, img.clientHeight)).toFixed(1) + 'px)');
+      if (c.invert) filters.push('invert(1)');
+    }
+    if (c.tint === 'warm') filters.push('sepia(0.8) saturate(2)');
+    if (c.tint === 'cool') filters.push('sepia(0.6) hue-rotate(170deg) saturate(2)');
+    if (c.tint === 'false') filters.push('sepia(1) saturate(6) hue-rotate(-40deg)');
+    img.style.filter = filters.join(' ');
+    let note = element.querySelector('.nmapnote');
+    if (!note) { note = document.createElement('small'); note.className = 'nmapnote'; img.parentNode.insertBefore(note, img.nextSibling); }
+    note.textContent = rendered || !source ? '' : 'preview — Render to apply these settings';
+    note.style.cssText = 'display:block;font:600 10px system-ui;color:#f59e0b;margin-top:2px';
+  }
+
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('input', event => {
+      const node = event.target && event.target.closest && event.target.closest('.drawflow-node');
+      if (!node || !api) return;
+      const id = node.id.replace(/^node-/, '');
+      if (/^control_/.test((api.meta(id) || {}).service || '')) paintMapPreview(id);
+    }, true);
+    document.addEventListener('change', event => {
+      const node = event.target && event.target.closest && event.target.closest('.drawflow-node');
+      if (!node || !api) return;
+      const id = node.id.replace(/^node-/, '');
+      if (/^control_/.test((api.meta(id) || {}).service || '')) paintMapPreview(id);
+    }, true);
+    setInterval(() => {
+      try {
+        if (!api || !api.graphFromCanvas) return;
+        api.graphFromCanvas().nodes.filter(n => /^control_/.test(n.service || '')).forEach(n => paintMapPreview(n.id));
+      } catch (e) { /* display only */ }
+    }, 2000);
+  }
+
   const RUNNERS = {
+    control_pose: mapRunnerFor('pose'), control_depth: mapRunnerFor('depth'), control_canny: mapRunnerFor('canny'),
+    control_normal: mapRunnerFor('normal'),
     scene_split: {api: '/api/ai/video-tools/scene-split', field: 'storyboard_url_string', type: 'image',
       finish: async (accepted, runner, report) => {
         const data = await pollVideoTool(accepted, runner, report);
@@ -70,6 +186,24 @@
                 summary: data.scenes_int + ' scene' + (data.scenes_int === 1 ? '' : 's') + ' · ' + data.count_int +
                          ' shot' + (data.count_int === 1 ? '' : 's') + ' · ' + data.frames_int + ' frames · ' +
                          data.duration_float + ' s' + (data.cuts_array && data.cuts_array.length ? ' · cuts at ' + data.cuts_array.join(', ') + ' s' : '')};
+      }},
+    // Search · Civitai (2026-09-28): answers at once (server cache 10 min).
+    civitai_search: {api: '/api/ai/civitai-search', field: 'image_url_string', type: 'image',
+      finish: async (accepted) => {
+        const data = accepted || {};
+        if (!data.success_bool) throw new Error((data.detail && data.detail.message_string) || 'Civitai search failed');
+        const found = data.items_array || [];
+        const kind = data.kind_string === 'video' ? 'video' : 'image';
+        const outputs = {image_url_string: found[0] ? found[0].url_string : '', items_text_string: data.items_text_string || ''};
+        found.slice(0, FRAME_SOCKETS).forEach((f, i) => { outputs['frame_' + (i + 1) + '_url_string'] = f.url_string; });
+        return {value: outputs.image_url_string, type: kind, outputs,
+                frameLabels: found.map(f => ({label: '@' + f.author_string, url: f.url_string})),
+                items: found.map((f, i) => ({status: 'done', type: kind, value: f.url_string, error: '',
+                  outputs: {media_url_string: f.url_string, media_info_string: f.info_string},
+                  meta: {label: '@' + f.author_string + ' · ♥ ' + f.reactions_int, index: i, link: f.link_string,
+                         author: f.author_string, reactions: f.reactions_int, prompt: f.prompt_string, info: f.info_string,
+                         width: f.width_int, height: f.height_int}})),
+                summary: data.summary_string || ''};
       }},
     // Extract Frames (replaces "Video first frame" under the id video_frame).
     video_frame: {api: '/api/ai/video-tools/extract-frames', field: 'first_url_string', type: 'image',
@@ -117,7 +251,7 @@
         throw new Error('the Avatar build did not finish in time');
       }},
     // Normal map had no runner in the page (pose/depth/canny only).
-    control_normal: {api: '/api/controlnet', field: 'image_url_string', type: 'control_normal',
+    control_normal_legacy: {api: '/api/controlnet', field: 'image_url_string', type: 'control_normal',
       finish: async (accepted) => {
         const url = accepted.image_url_string;
         for (let attempt = 0; attempt < 400; attempt += 1) {
@@ -159,7 +293,8 @@
 
   // A Strength slider (0..1) beside each connected picture socket of a
   // Qwen-Image node. The value rides as param rs_1..rs_3 (socket order); the
-  // server schedules a weaker picture over fewer sampling steps, a weak control
+  // server lets a weaker picture join only for the last part of the sampling
+  // steps (the layout stays free), a weak control
   // map is also softened, and the prompt is told to follow it loosely.
   const RS_FIELDS = {image: 1, reference_2: 2, reference_3: 3};
 
@@ -174,15 +309,35 @@
       byUrl.set(String(url), Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1);
     });
     Object.keys(body).filter(k => /^rs_\d$/.test(k)).forEach(k => delete body[k]);
+    if (!body.image_url && !body.image_base64) return;
+    let order = [body.image_url || body.image_base64 || ''].concat(body.reference_image_urls || []).filter(Boolean);
+    // Control maps last, the character (the first non-map picture) first, and
+    // the prompt's "image N" renumbered to match: with a map in slot 1 Qwen
+    // redrew the map's subject and ignored the character (2026-09-28).
+    if (order.some(url => channels.get(String(url))) && order.some(url => !channels.get(String(url)))) {
+      const sorted = order.filter(url => !channels.get(String(url))).concat(order.filter(url => channels.get(String(url))));
+      if (sorted.some((url, i) => url !== order[i])) {
+        const renumber = new Map(order.map((url, i) => [i + 1, sorted.indexOf(url) + 1]));
+        body.prompt = String(body.prompt || '').replace(/\b([Ii]mage|[Pp]icture) (\d)\b/g,
+          (m, word, n) => word + ' ' + (renumber.get(Number(n)) || n));
+        if (body.image_base64) { delete body.image_base64; }
+        body.image_url = sorted[0];
+        body.reference_image_urls = sorted.slice(1);
+        order = sorted;
+      }
+    }
     if (![...byUrl.values()].some(v => v < 0.999)) return;
-    const order = [body.image_url || body.image_base64 || ''].concat(body.reference_image_urls || []).filter(Boolean);
     const strengths = order.map(url => byUrl.has(String(url)) ? byUrl.get(String(url)) : 1);
     body.reference_strengths = strengths;
     body.reference_attenuate = order.map((url, i) => !!channels.get(String(url)) && strengths[i] < 0.999);
     const hints = [];
     order.forEach((url, i) => {
       const ch = channels.get(String(url));
-      if (strengths[i] < 0.8) hints.push('Follow image ' + (i + 1) + (ch ? ' (the ' + ch + ' map)' : '') + ' only loosely.');
+      if (strengths[i] <= 0) { hints.push('Ignore image ' + (i + 1) + ' (disabled).'); return; }
+      if (strengths[i] < 0.8) {
+        hints.push(ch ? 'Image ' + (i + 1) + ' is a ' + ch + ' map: use it only as a loose layout guide; draw the character from image 1.'
+                      : 'Follow image ' + (i + 1) + ' only loosely.');
+      }
     });
     if (hints.length) body.prompt = [String(body.prompt || '').trim(), hints.join(' ')].filter(Boolean).join(' ');
   }
@@ -232,6 +387,12 @@
   }
 
   function adjustBody(serviceId, body, resolved, params) {
+    if (/^control_/.test(serviceId)) {
+      body.invert = body.invert === 'on' || body.invert === true;
+      ['contrast', 'black', 'white', 'gamma', 'blur'].forEach(k => { if (body[k] === undefined) delete body[k]; });
+      if (body.black === 0) body.black = 0;
+
+    }
     applyRefStrength(serviceId, body, resolved, params);
     if (serviceId === 'video_storyboard' || serviceId === 'scene_split') delete body.view;
     if (serviceId === 'video_summary') body.chain = true;
@@ -406,7 +567,7 @@
   // a node wired there receives that one picture and runs once. The socket
   // rows show "k · S1 start" + a thumbnail; unused rows are hidden, and a wired
   // socket past the current count stays visible as "missing" (the link is kept).
-  const FRAME_SOCKETS = 12;
+  const FRAME_SOCKETS = 20;  // Extract Frames uses 12, Search up to 20
   const PROBES = new Map();   // node id -> {key, frames}
 
   function frameLabelsOf(id) {
@@ -435,6 +596,7 @@
     const ports = [...element.querySelectorAll('.outputs .output')];
     const frames = frameLabelsOf(id);
     const wired = wiredFrameSockets(id);
+    const search = (api.meta(id) || {}).service === 'civitai_search';
     const count = frames ? frames.length : 0;
     let changed = false;
     for (let k = 1; k <= FRAME_SOCKETS; k += 1) {
@@ -450,18 +612,21 @@
       port.style.display = show ? '' : 'none';
       row.textContent = '';
       if (have) {
-        const img = document.createElement('img');
-        img.src = frames[k - 1].url;
+        const clip = api.looksLikeVideo(frames[k - 1].url);
+        const img = document.createElement(clip ? 'video' : 'img');
+        if (clip) { img.muted = true; img.preload = 'metadata'; img.src = frames[k - 1].url + '#t=0.1'; }
+        else img.src = /^https:[/][/]image[.]civitai[.]com[/]/.test(frames[k - 1].url)
+          ? '/api/ai/thumb?w=64&url=' + encodeURIComponent(frames[k - 1].url) : frames[k - 1].url;
         img.style.cssText = 'width:16px;height:16px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px';
         row.appendChild(img);
         row.appendChild(document.createTextNode(k + ' · ' + frames[k - 1].label));
-        row.title = 'Frame ' + k + ': ' + frames[k - 1].label + ' — a node wired here gets this one picture';
+        row.title = (search ? 'Item ' : 'Frame ') + k + ': ' + frames[k - 1].label + ' — a node wired here gets this one ' + (search ? 'item' : 'picture');
       } else if (wired.has(k)) {
         row.appendChild(document.createTextNode(k + ' · missing'));
         row.style.color = '#fb7185';
         row.title = 'Frame ' + k + ' is not produced by the current template/clip; the wire is kept';
       } else {
-        row.appendChild(document.createTextNode('Frame ' + k));
+        row.appendChild(document.createTextNode((search ? 'Item ' : 'Frame ') + k));
       }
       if (have) row.style.color = '';
     }
@@ -502,6 +667,7 @@
           probeExtract(n.id);
           paintFrameSockets(n.id);
         });
+        api.graphFromCanvas().nodes.filter(n => n.service === 'civitai_search').forEach(n => paintFrameSockets(n.id));
       } catch (e) { /* display only */ }
     }, 2500);
   }
@@ -749,7 +915,9 @@
     }
     const video = api.looksLikeVideo(value);
     const media = document.createElement(video ? 'video' : 'img');
-    media.src = value;
+    // Civitai originals are several MB each: the grid shows a cached thumbnail.
+    media.src = !video && /^https:[/][/]image[.]civitai[.]com[/]/.test(String(value))
+      ? '/api/ai/thumb?w=240&url=' + encodeURIComponent(value) : value;
     media.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;background:#0b0c18';
     if (video) { media.muted = true; media.loop = true; media.preload = 'metadata'; media.playsInline = true;
       media.addEventListener('mouseenter', () => media.play().catch(() => {}));
@@ -791,7 +959,8 @@
       const box = document.createElement('div');
       box.style.cssText = 'position:relative;aspect-ratio:' + aspect.toFixed(4) + ';border-radius:4px;overflow:hidden;cursor:zoom-in;' +
         'background:rgba(255,255,255,.06);outline:1px solid ' + (item.status === 'failed' ? '#fb7185' : item.status === 'done' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.08)');
-      box.title = 'Shot ' + (index + 1) + ' · ' + item.status + (item.error ? ': ' + item.error : '') + (item.meta && item.meta.label ? '\n' + item.meta.label : '');
+      box.title = (item.meta && item.meta.info) ? (index + 1) + '. ' + item.meta.info :
+        'Shot ' + (index + 1) + ' · ' + item.status + (item.error ? ': ' + item.error : '') + (item.meta && item.meta.label ? '\n' + item.meta.label : '');
       if (item.status === 'done') {
         const shown = scene && item.outputs ? item.outputs.first_frame_url_string : item.value;
         box.appendChild(cellMedia(shown, scene ? 'image' : item.type));
@@ -804,7 +973,7 @@
       }
       const tag = document.createElement('i');
       // One corner chip: the index, plus the picture's label for Extract Frames.
-      tag.textContent = String(index + 1) + (node.service === 'video_frame' && item.meta && item.meta.label ? ' · ' + item.meta.label : '');
+      tag.textContent = String(index + 1) + ((node.service === 'video_frame' || node.service === 'civitai_search') && item.meta && item.meta.label ? ' · ' + item.meta.label : '');
       tag.style.cssText = 'position:absolute;z-index:1;left:2px;top:2px;padding:0 3px;border-radius:3px;background:rgba(0,0,0,.55);font:700 8px system-ui;font-style:normal;color:#fff;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       box.appendChild(tag);
       if (rerollable(node.service) && !scene) box.appendChild(cellTools(id, index, item));
@@ -935,16 +1104,48 @@
       },
       title: index => {
         const item = items()[index] || {};
-        const word = info().service === 'video_frame' ? 'Frame' : info().service === 'scene_split' ? 'Shot' : 'Segment';
+        const word = info().service === 'video_frame' ? 'Frame' : info().service === 'scene_split' ? 'Shot' :
+          info().service === 'civitai_search' ? 'Civitai' : 'Segment';
         return word + ' ' + (index + 1) + '/' + items().length + (item.meta && item.meta.label ? ' · ' + item.meta.label : '');
       },
       actions: {
         reseed: index => rerollSegment(node, index, newSeed()), reseedHidden: () => !tools(),
         use: tools() ? index => useTake(node, index) : null,
         useTip: 'Keep this take: lock its seed (R and re-renders leave it alone)',
-        lock: tools() ? index => toggleLock(node, index) : null
+        lock: tools() ? index => toggleLock(node, index) : null,
+        extra: [{glyph: '↗', label: 'Open on Civitai', key: 'O',
+                 hidden: index => !((items()[index] || {}).meta || {}).link,
+                 run: index => { const link = ((items()[index] || {}).meta || {}).link; if (link) window.open(link, '_blank', 'noopener'); }}]
       }
     });
+  }
+
+  /** Search · Civitai: "↻ Refresh" skips the 10-minute server cache once. */
+  function searchRefreshButton(id) {
+    if ((api.meta(id) || {}).service !== 'civitai_search') return;
+    const element = api.nodeElement(id);
+    const head = element && element.querySelector('.nhead');
+    if (!head || head.querySelector('.nsearch-refresh')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nsearch-refresh';
+    button.textContent = '↻';
+    button.title = 'Refresh: fetch Civitai again now (results are otherwise cached for 10 minutes)';
+    button.style.cssText = 'border:1px solid rgba(255,255,255,.18);background:transparent;color:inherit;border-radius:6px;cursor:pointer;padding:0 6px;margin-left:4px';
+    ['mousedown', 'pointerdown', 'touchstart', 'dblclick'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const graph = api.graphFromCanvas();
+      const node = graph.nodes.find(n => String(n.id) === String(id));
+      const body = Object.assign({}, (node && node.params) || {}, {refresh: true});
+      Object.keys(body).forEach(key => { if (key.startsWith('_')) delete body[key]; });
+      button.disabled = true;
+      fetch('/api/ai/civitai-search', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+        .then(r => r.json()).then(() => { api.invalidate(id); api.toast('Civitai refreshed — Render to use the new results.'); })
+        .catch(() => api.toast('Civitai did not answer.'))
+        .finally(() => { button.disabled = false; });
+    });
+    head.appendChild(button);
   }
 
   /**
@@ -1018,6 +1219,7 @@
   /** The ⎇ badge of a gated node; click to change or clear the condition. */
   function decorate(id, params) {
     try { paintRefStrength(id); } catch (e) { /* not drawn yet */ }
+    try { searchRefreshButton(id); } catch (e) { /* not drawn yet */ }
     // A migrated "First frame" node (saved without a template) stays one picture.
     const meta0 = api.meta(id) || {};
     if (meta0.service === 'video_frame' && params && !params.template) {

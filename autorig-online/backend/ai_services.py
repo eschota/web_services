@@ -116,6 +116,42 @@ def MULTIREF_INPUTS(total: int) -> List[Dict[str, object]]:
 
 SERVICES: List[Dict[str, object]] = [
     {
+        # Search (owner, 2026-09-28): popular or random Civitai pictures and
+        # clips, one per author, as media sockets (Item 1..N, like Extract
+        # Frames) plus a fan-out list and the metadata as text.
+        "id": "civitai_search", "title": "Search · Civitai", "path": "/nodes",
+        "api": "/api/ai/civitai-search", "status": "live", "list_source": True,
+        "summary": ("Popular or random pictures / clips from Civitai (one per author) as media inputs, "
+                    "with author, link, reactions and prompt."),
+        "inputs": [],
+        "outputs": [
+            {"type": MEDIA, "field": "frame_1_url_string", "title": "Item 1", "frame_socket": 1},
+            {"type": MEDIA, "field": "frame_2_url_string", "title": "Item 2", "frame_socket": 2},
+            {"type": MEDIA, "field": "frame_3_url_string", "title": "Item 3", "frame_socket": 3},
+            {"type": MEDIA, "field": "frame_4_url_string", "title": "Item 4", "frame_socket": 4},
+            {"type": MEDIA, "field": "frame_5_url_string", "title": "Item 5", "frame_socket": 5},
+            {"type": MEDIA, "field": "frame_6_url_string", "title": "Item 6", "frame_socket": 6},
+            {"type": MEDIA, "field": "frame_7_url_string", "title": "Item 7", "frame_socket": 7},
+            {"type": MEDIA, "field": "frame_8_url_string", "title": "Item 8", "frame_socket": 8},
+            {"type": MEDIA, "field": "frame_9_url_string", "title": "Item 9", "frame_socket": 9},
+            {"type": MEDIA, "field": "frame_10_url_string", "title": "Item 10", "frame_socket": 10},
+            {"type": MEDIA, "field": "frame_11_url_string", "title": "Item 11", "frame_socket": 11},
+            {"type": MEDIA, "field": "frame_12_url_string", "title": "Item 12", "frame_socket": 12},
+            {"type": MEDIA, "field": "frame_13_url_string", "title": "Item 13", "frame_socket": 13},
+            {"type": MEDIA, "field": "frame_14_url_string", "title": "Item 14", "frame_socket": 14},
+            {"type": MEDIA, "field": "frame_15_url_string", "title": "Item 15", "frame_socket": 15},
+            {"type": MEDIA, "field": "frame_16_url_string", "title": "Item 16", "frame_socket": 16},
+            {"type": MEDIA, "field": "frame_17_url_string", "title": "Item 17", "frame_socket": 17},
+            {"type": MEDIA, "field": "frame_18_url_string", "title": "Item 18", "frame_socket": 18},
+            {"type": MEDIA, "field": "frame_19_url_string", "title": "Item 19", "frame_socket": 19},
+            {"type": MEDIA, "field": "frame_20_url_string", "title": "Item 20", "frame_socket": 20},
+            {"type": MEDIA, "field": "image_url_string", "title": "First item"},
+            {"type": MEDIA, "field": "media_url_string", "title": "Items (each) · fan-out list", "per_item": True},
+            {"type": TEXT, "field": "media_info_string", "title": "Item info (each)", "per_item": True},
+            {"type": TEXT, "field": "items_text_string", "title": "Items (text)"},
+        ],
+    },
+    {
         # Extract Frames (2026-09-27) replaces "Video first frame" under the same
         # id, so saved graphs keep working: the first picture is still on
         # image_url_string. Scenes are found with Scene split's detector (its own
@@ -788,6 +824,27 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
              {"value": "none", "title": "No retry"},
          ]},
     ],
+    "civitai_search": [
+        {"name": "mode", "title": "Search", "type": "select", "default": "images_popular",
+         "options": [{"value": "images_popular", "title": "Images · Popular"},
+                     {"value": "videos_popular", "title": "Videos · Popular"},
+                     {"value": "images_random", "title": "Images · Random"},
+                     {"value": "videos_random", "title": "Videos · Random"}]},
+        {"name": "count", "title": "Count", "type": "number", "min": 1, "max": 20, "step": 1, "default": 3},
+        {"name": "period", "title": "Period", "type": "select", "default": "24h",
+         "options": [{"value": "24h", "title": "24 hours"}, {"value": "week", "title": "Week"},
+                     {"value": "month", "title": "Month"}, {"value": "year", "title": "Year"},
+                     {"value": "all", "title": "All time"}]},
+        {"name": "nsfw", "title": "NSFW level", "type": "select", "default": "none",
+         "options": [{"value": "none", "title": "None"}, {"value": "soft", "title": "Soft"},
+                     {"value": "mature", "title": "Mature"}, {"value": "x", "title": "X"}]},
+        {"name": "sort", "title": "Sort (Popular)", "type": "select", "default": "reactions",
+         "options": [{"value": "reactions", "title": "Most reactions"},
+                     {"value": "comments", "title": "Most comments"},
+                     {"value": "newest", "title": "Newest"}]},
+        {"name": "seed", "title": "Seed (Random)", "type": "number", "min": 0, "max": 9007199254740991,
+         "step": 1, "default": 0, "help": "Random picks from the top of the period by this seed; R gives a new one"},
+    ],
     "video_frame": [
         {"name": "template", "title": "Template", "type": "select", "default": "start_end",
          "options": [{"value": "start_end", "title": "Start-End (per scene)"},
@@ -1152,3 +1209,24 @@ PARAMS["camera_orbit_video"] = [
     {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 544},
     {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
 ]
+
+
+# Map adjustments (2026-09-28): the processed map is the node's output (server
+# side, /api/ai/video-tools/map); the node previews it live. "tint" colours the
+# preview only and never reaches the map.
+MAP_ADJUST_PARAMS = [
+    {"name": "contrast", "title": "Contrast", "type": "range", "min": 0, "max": 3, "step": 0.05, "default": 1},
+    {"name": "black", "title": "Black point", "type": "range", "min": 0, "max": 254, "step": 1, "default": 0},
+    {"name": "white", "title": "White point", "type": "range", "min": 1, "max": 255, "step": 1, "default": 255},
+    {"name": "gamma", "title": "Gamma", "type": "range", "min": 0.2, "max": 3, "step": 0.05, "default": 1},
+    {"name": "blur", "title": "Blur (% of long side)", "type": "range", "min": 0, "max": 10, "step": 0.1, "default": 0},
+    {"name": "invert", "title": "Invert", "type": "select", "default": "off",
+     "options": [{"value": "off", "title": "Off"}, {"value": "on", "title": "On"}]},
+    {"name": "_tint", "title": "Preview tint (display only)", "type": "select", "default": "none",
+     "options": [{"value": "none", "title": "None"}, {"value": "warm", "title": "Warm"}, {"value": "cool", "title": "Cool"},
+                 {"value": "false", "title": "False colour"}]},
+]
+for _channel in ("pose", "depth", "canny", "normal"):
+    PARAMS.setdefault("control_" + _channel, [])
+    PARAMS["control_" + _channel] = [p for p in PARAMS["control_" + _channel]
+                                     if p["name"] not in {q["name"] for q in MAP_ADJUST_PARAMS}] + MAP_ADJUST_PARAMS

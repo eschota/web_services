@@ -5572,7 +5572,7 @@
   const TOOL_ICONS = {
     upscale2x: '⏫', music: '🎵', 'input:media': '🏞️', 'input:image': '🏞️', 'input:video': '📹', 'input:text': '✏️', 'input:avatar': '👤',
     vision: '👁️', text: '📝', image: '🖼️', video: '🎬', '3dmodel': '🧊',
-    video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃', scene_split: '✂️', video_concat: '🔗', audio_from_source: '🔊',
+    civitai_search: '🔎', video_frame: '⏮️', video_storyboard: '🎞️', video_control: '🏃', scene_split: '✂️', video_concat: '🔗', audio_from_source: '🔊',
     avatar_image: '🎭', avatar_video: '📽️', avatar_from_image: '🪪',
     upscale: '🔎', detail_enhance: '✨', face_fix: '🙂', upscale_video: '📺',
     qwen_image: '🖌️', camera_orbit_image: '🔄', camera_orbit_video: '🎥'
@@ -5599,7 +5599,7 @@
   const DOCK_GROUPS = [
     ['Inputs', ['input:media', 'input:text', 'input:avatar']],
     ['Vision / Text', ['vision', 'text']],
-    ['Image', ['image', 'qwen_image', 'camera_orbit_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
+    ['Image', ['civitai_search', 'image', 'qwen_image', 'camera_orbit_image', 'upscale2x', 'upscale', 'detail_enhance', 'face_fix']],
     ['Video', ['video', 'video_frame', 'video_storyboard', 'scene_split', 'video_concat', 'video_summary', 'audio_from_source', 'video_control', 'camera_orbit_video', 'upscale_video']],
     ['Avatars', ['avatar_ready', 'avatar_build', 'avatar_image', 'avatar_video']],
     ['Control maps', ['control_pose', 'control_depth', 'control_canny', 'control_normal']],
@@ -5610,7 +5610,7 @@
     'input:media': 'Media in', 'input:text': 'Text in', 'input:avatar': 'Avatar',
     vision: 'Vision', text: 'Text', image: 'Image', qwen_image: 'Qwen-Image', camera_orbit_image: 'Camera orbit', camera_orbit_video: 'Camera re-shoot', upscale2x: 'Upscale 2×',
     upscale: 'Upscale', detail_enhance: 'Detail', face_fix: 'Face fix', video: 'Video',
-    video_frame: 'Extract Frames', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
+    civitai_search: 'Search · Civitai', video_frame: 'Extract Frames', video_storyboard: 'Storyboard', video_control: 'Motion transfer',
     scene_split: 'Scene split', video_concat: 'Concat shots', video_summary: 'Summary', audio_from_source: 'Audio from source',
     upscale_video: 'Upscale video', avatar_build: 'Avatar builder', avatar_ready: 'Avatar (ready)', avatar_image: 'Avatar scene',
     avatar_video: 'Avatar video', avatar_from_image: 'Avatar from picture', control_pose: 'Pose', control_depth: 'Depth',

@@ -1189,6 +1189,22 @@ async def lifespan(app: FastAPI):
     global background_task_running
     
     # Startup
+    # Owner rule 2026-09-27: a site restart (every deploy) wipes the render
+    # queue too; renderfin does the same when it restarts itself.
+    if os.getenv("AUTORIG_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", ""):
+        async def _wipe_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/reset",
+                        params={"spare_non_graph": 1, "reason": "cancelled: server restarted — press Render again"}, timeout=120.0)
+                data = response.json()
+                print(f"[Startup] render queue wiped: {data.get('cancelled_queued_int')} queued, "
+                      f"{data.get('cancelled_running_int')} running; boxes {data.get('boxes_object')}")
+            except Exception as exc:
+                print(f"[Startup] render queue wipe skipped: {exc}")
+        asyncio.create_task(_wipe_render_queue_on_start())
     if AUTORIG_MIGRATION_READ_ONLY:
         # The staging database is migrated once offline before this mode is
         # enabled. Runtime startup performs no schema or filesystem writes.
@@ -1321,6 +1337,9 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
 app.add_middleware(CivitaiMediaMiddleware)
 app.include_router(civitai_media_router)
+# Search node: popular / random Civitai media (ai_civitai_search.py, 2026-09-28).
+from ai_civitai_search import router as civitai_search_router
+app.include_router(civitai_search_router)
 
 app.state.limiter = limiter
 
