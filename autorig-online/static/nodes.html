@@ -32,9 +32,10 @@
     <script src="/static/js/ai-node-lora-stack.js?v=27c79b4399"></script>
     <script src="/static/js/ai-render-quality.js?v=ada0d7f728"></script>
     <script src="/static/js/ai-lightbox.js?v=39e15b1b86"></script>
-    <script src="/static/js/ai-node-lists.js?v=d7d49d3799"></script>
+    <script src="/static/js/ai-node-lists.js?v=fe2f5a1693"></script>
     <script src="/static/js/ai-textfields.js?v=cb2cdee6af"></script>
-    <script src="/static/js/ai-nodes.js?v=e73298f7db"></script>
+    <script src="/static/js/ai-nodes.js?v=2a505fb96d"></script>
+    <script src="/static/js/ai-autoreload.js?v=19c86137ff"></script>
     <style>
         .ai-page {
             background:
@@ -156,7 +157,10 @@
             box-shadow: 0 10px 28px rgba(0,0,0,.45); font: 11px system-ui; color: #cfd2e4; contain: layout paint; }
         #recent-gallery header { display: flex; align-items: center; gap: 6px; height: 22px; }
         #recent-gallery .rg-toggle { border: 0; background: transparent; color: inherit; cursor: pointer; font: 600 11px system-ui; padding: 0 4px; }
-        #recent-gallery .rg-queue { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; }
+        #recent-gallery .rg-queue { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; flex: 1 1 auto; min-width: 0; }
+        #recent-gallery .rg-cancel-graph { flex: 0 0 auto; border: 1px solid rgba(248,113,113,.5); background: rgba(127,29,29,.35); color: #fecaca;
+            border-radius: 7px; padding: 2px 7px; font: 600 10px system-ui; cursor: pointer; white-space: nowrap; }
+        #recent-gallery .rg-cancel-graph:disabled { opacity: .5; cursor: default; }
         #recent-gallery .rg-queue.rg-busy::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
             background: #38bdf8; margin-right: 5px; animation: rgpulse 1s infinite alternate; }
         @keyframes rgpulse { from { opacity: .3; } to { opacity: 1; } }

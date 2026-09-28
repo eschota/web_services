@@ -648,6 +648,60 @@ def _stored_path(graph_id: str) -> pathlib.Path:
     return path
 
 
+ARCHIVE_MANIFEST = "archived.json"
+
+
+def _archive_manifest() -> List[Dict[str, object]]:
+    try:
+        data = json.loads((GRAPH_DIR / ARCHIVE_SUBDIR / ARCHIVE_MANIFEST).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except Exception:
+        logger.exception("Could not read the graph archive manifest")
+        return []
+    return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+
+
+def _write_archive_manifest(rows: List[Dict[str, object]]) -> None:
+    folder = GRAPH_DIR / ARCHIVE_SUBDIR
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / ARCHIVE_MANIFEST).write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _archive(graph_id: str, *, kept_id: str = "", note: str = "") -> Dict[str, object]:
+    """Move a graph out of the library, recoverably: its link still opens.
+
+    Nothing is deleted. The file goes to archive/ (where _stored_path finds it
+    for GET and PUT), and the manifest says when, why and which graph was
+    kept in its place, so `restore` can put it back.
+    """
+    source = _path_for(graph_id)
+    if not source.exists():
+        raise HTTPException(status_code=404, detail={
+            "error_string": "graph_not_found",
+            "message_string": f"No graph saved as '{graph_id}' in the library"})
+    folder = GRAPH_DIR / ARCHIVE_SUBDIR
+    folder.mkdir(parents=True, exist_ok=True)
+    source.replace(folder / source.name)
+    rows = [row for row in _archive_manifest() if str(row.get("id")) != graph_id]
+    entry = {"id": graph_id, "archived_at_unix_int": int(time.time()),
+             "kept_id_string": kept_id, "note_string": note}
+    rows.append(entry)
+    _write_archive_manifest(rows)
+    return entry
+
+
+def _unarchive(graph_id: str, *, note: str = "") -> bool:
+    archived = GRAPH_DIR / ARCHIVE_SUBDIR / f"{graph_id}.json"
+    if not archived.exists():
+        return False
+    archived.replace(_path_for(graph_id))
+    rows = [row for row in _archive_manifest() if str(row.get("id")) != graph_id]
+    _write_archive_manifest(rows)
+    logger.info("graph %s restored from the archive (%s)", graph_id, note)
+    return True
+
+
 def _new_id(payload: str) -> str:
     """Short, content-derived, and stable: saving the same graph twice gives
     the same link instead of littering the store with copies."""
@@ -764,11 +818,15 @@ async def api_graph_save(graph: Graph):
         raise HTTPException(status_code=500, detail={
             "error_string": "graph_not_saved",
             "message_string": "The graph store did not accept the file"}) from None
+    queue = {"cancelled_int": 0}
+    if existing is not None:
+        queue = await reconcile_graph_queue(graph_id, body, why="saved")
     return {
         "success_bool": True,
         "graph_id_string": graph_id,
         "deep_link_string": f"/nodes?g={graph_id}",
         "revision_int": stored["revision_int"],
+        "queue_cancelled_int": queue["cancelled_int"],
         "server_time_unix_int": int(time.time()),
     }
 
@@ -795,6 +853,126 @@ def _node_signature(node: Dict[str, object]) -> str:
     """Everything that makes a node's result valid, minus where it is drawn."""
     return json.dumps({key: value for key, value in node.items() if key not in {"x", "y"}},
                       ensure_ascii=False, sort_keys=True)
+
+
+# ------------------------------------------------- queue binding (2026-09-28)
+#
+# Every render a node submits carries the graph id, the node id and the node's
+# signature (ai_graph_context). After a save, the queue is asked to stand down
+# what the saved graph no longer wants: nodes that are gone or bypassed, and
+# nodes whose signature moved (their own params, or anything upstream).
+
+# Params that change how a node is drawn, never what it renders.
+_UI_ONLY_PARAMS = {"_display_mode", "_node_size", "_label", "_tint"}
+
+
+def _plain(value):
+    """JSON with integral floats as ints, so 0 and 0.0 are one value."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
+def node_signatures(graph: Dict[str, object]) -> Dict[str, str]:
+    """Signature of every node the graph runs: {node id: sha1}.
+
+    A signature covers the node's service and params (minus drawing-only
+    ones), the graph's render quality (it scales every size) and, through
+    its inbound links, the signatures of everything upstream — so a changed
+    prompt three nodes up changes this node too. Bypassed nodes are left out:
+    they do not run, and neither does anything that waits on them. A cycle
+    cannot occur (validate() refuses them), but a broken link is tolerated.
+    """
+    nodes = {str(node.get("id")): node for node in (graph.get("nodes") or []) if isinstance(node, dict)}
+    inbound: Dict[str, List[tuple]] = {}
+    for link in graph.get("links") or []:
+        if not isinstance(link, dict):
+            continue
+        inbound.setdefault(str(link.get("to")), []).append(
+            (str(link.get("input") or ""), str(link.get("output") or ""), str(link.get("from"))))
+    quality = str(graph.get("render_quality") or "normal")
+    memo: Dict[str, Optional[str]] = {}
+
+    def signature(node_id: str, trail: frozenset) -> Optional[str]:
+        if node_id in memo:
+            return memo[node_id]
+        node = nodes.get(node_id)
+        if node is None or node_id in trail:
+            memo[node_id] = None
+            return None
+        params = node.get("params") if isinstance(node.get("params"), dict) else {}
+        if params.get("_disabled"):
+            memo[node_id] = None
+            return None
+        feeds = []
+        for field, output, source in sorted(inbound.get(node_id, [])):
+            upstream = signature(source, trail | {node_id})
+            feeds.append([field, output, upstream or "missing:" + source])
+        identity = {
+            "kind": str(node.get("kind") or ""),
+            "service": node.get("service"),
+            "entity_type": node.get("entity_type"),
+            "value": node.get("value") if node.get("kind") == NODE_INPUT else None,
+            "params": _plain({k: v for k, v in params.items() if k not in _UI_ONLY_PARAMS}),
+            "quality": quality,
+            "inputs": feeds,
+        }
+        digest = hashlib.sha1(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        memo[node_id] = digest
+        return digest
+
+    out: Dict[str, str] = {}
+    for node_id, node in nodes.items():
+        if str(node.get("kind") or NODE_SERVICE) != NODE_SERVICE:
+            continue
+        digest = signature(node_id, frozenset())
+        if digest:
+            out[node_id] = digest
+    return out
+
+
+def stored_node_signature(graph_id: str, node_id: str) -> str:
+    """The current signature of one node of a stored graph ('' if unknown)."""
+    if not SAFE_ID_RE.match(str(graph_id or "")):
+        return ""
+    stored = _read_stored(_stored_path(graph_id))
+    if not stored:
+        return ""
+    return node_signatures(stored.get("graph") or {}).get(str(node_id), "")
+
+
+async def reconcile_graph_queue(graph_id: str, graph: Dict[str, object], *, why: str = "saved") -> Dict[str, object]:
+    """Tell the farm what this graph still wants; it cancels the rest.
+
+    Best effort: a save must succeed even when the queue is unreachable, so
+    a failure here is logged and reported, never raised.
+    """
+    import httpx
+
+    import ai_vision_api
+
+    wanted = node_signatures(graph)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                ai_vision_api.RENDERFIN_BASE + "/api-render/cancel-stale-graph",
+                json={"graph_id": graph_id, "wanted": wanted,
+                      "reason": "cancelled: the graph was " + why + " and no longer needs this render"},
+                timeout=20.0)
+            payload = response.json() if response.status_code == 200 else {}
+    except Exception:
+        logger.warning("Could not reconcile the render queue for graph %s", graph_id)
+        return {"cancelled_int": 0, "kept_int": 0, "reached_bool": False}
+    cancelled = int(payload.get("cancelled_int") or 0)
+    if cancelled:
+        logger.info("graph %s %s: %s stale queued job(s) cancelled, %s kept",
+                    graph_id, why, cancelled, payload.get("kept_int"))
+    return {"cancelled_int": cancelled, "kept_int": int(payload.get("kept_int") or 0),
+            "reached_bool": True}
 
 
 def _carry_results(previous: Dict[str, object], body: Dict[str, object]) -> Dict[str, object]:
@@ -877,17 +1055,23 @@ async def api_graph_update(graph_id: str, graph: Graph, request: Request):
     stored.setdefault("saved_at_unix_int", now)
     try:
         path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+        if path.parent.name == ARCHIVE_SUBDIR:
+            # An edit brings an archived graph back into the library.
+            _unarchive(graph_id, note="restored by an edit")
     except Exception:
         logger.exception("Could not update graph %s", graph_id)
         raise HTTPException(status_code=500, detail={
             "error_string": "graph_not_saved",
             "message_string": "The graph store did not accept the file"}) from None
+    # The queue keeps only what the saved graph still wants (2026-09-28).
+    queue = await reconcile_graph_queue(graph_id, body, why="saved")
     return {
         "success_bool": True,
         "graph_id_string": graph_id,
         "deep_link_string": f"/nodes?g={graph_id}",
         "updated_bool": True,
         "revision_int": current_revision + 1,
+        "queue_cancelled_int": queue["cancelled_int"],
         "server_time_unix_int": now,
     }
 
@@ -1509,6 +1693,14 @@ def _size_path(url: str):
     return _THUMB_DIR / "size" / key[:2] / (key + ".json")
 
 
+@router.get("/api/ai/build")
+async def api_build():
+    """Live editor build and this backend's start time (ai-autoreload.js polls it)."""
+    import task_owner
+    return {"success_bool": True, "build_string": task_owner.current_build(),
+            "started_at_float": task_owner.PROCESS_START, "server_time_unix_int": int(time.time())}
+
+
 @router.get("/api/ai/media-size")
 async def api_media_size(url: str):
     """The ORIGINAL pixel size of a picture the editor shows as a thumbnail.
@@ -1557,7 +1749,7 @@ async def api_media_size(url: str):
 
 
 @router.get("/api/ai/my-tasks")
-async def api_my_tasks(request: Request, limit: int = 10):
+async def api_my_tasks(request: Request, limit: int = 10, graph: str = ""):
     """The caller's last finished render outputs and the farm queue (owner-scoped).
 
     Ownership is the same as for /api/ai/cancel: the identity that submitted
@@ -1617,6 +1809,22 @@ async def api_my_tasks(request: Request, limit: int = 10):
             queue = fleet.get("queue_object") or {}
         except Exception:
             queue = {}
+        # The open graph's own share of the line (2026-09-28): the panel says
+        # "this graph: N · other: M" so a queue full of somebody else's, or of
+        # a closed tab's, work is told apart from this one's.
+        graph_share: Dict[str, object] = {}
+        graph_id = str(graph or "").strip()
+        if graph_id and SAFE_ID_RE.match(graph_id):
+            try:
+                response = await client.get(ai_vision_api.RENDERFIN_BASE + "/api-render/graph/" + graph_id,
+                                            timeout=8.0)
+                share = response.json() if response.status_code == 200 else {}
+                graph_share = {"graph_queued_int": int(share.get("queued_int") or 0),
+                               "graph_running_int": int(share.get("running_int") or 0),
+                               "other_queued_int": int(share.get("other_queued_int") or 0),
+                               "other_running_int": int(share.get("other_running_int") or 0)}
+            except Exception:
+                graph_share = {}
     items = []
     mine_queued = mine_running = 0
     for (task, at), item in zip(rows, states):
@@ -1634,7 +1842,8 @@ async def api_my_tasks(request: Request, limit: int = 10):
     return {"success_bool": True, "items_array": items,
             "queue_object": {"queued_int": int(queue.get("queued_int") or 0),
                              "running_int": int(queue.get("running_int") or 0),
-                             "mine_queued_int": mine_queued, "mine_running_int": mine_running},
+                             "mine_queued_int": mine_queued, "mine_running_int": mine_running,
+                             **graph_share},
             "server_time_unix_int": int(time.time())}
 
 
@@ -1702,6 +1911,113 @@ async def api_cancel(body: CancelRequest, request: Request):
         "note_string": "Jobs already on a card are left to finish",
         "server_time_unix_int": int(time.time()),
     }
+
+
+# ----------------------------------------------------- a graph's queue share
+
+@router.get("/api/ai/graphs/{graph_id}/queue")
+async def api_graph_queue(graph_id: str):
+    """This graph's queued/running jobs against everybody else's."""
+    import httpx
+
+    import ai_vision_api
+
+    _path_for(graph_id)  # validates the id
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(ai_vision_api.RENDERFIN_BASE + "/api-render/graph/" + graph_id,
+                                        timeout=8.0)
+            payload = response.json() if response.status_code == 200 else {}
+    except Exception:
+        payload = {}
+    return {"success_bool": bool(payload), **payload, "server_time_unix_int": int(time.time())}
+
+
+@router.post("/api/ai/graphs/{graph_id}/cancel-queue")
+async def api_graph_cancel_queue(graph_id: str, request: Request):
+    """The editor's "Cancel this graph's queue": every queued job of the graph
+    the caller submitted (all of them for an admin). Running jobs finish."""
+    import httpx
+
+    import ai_vision_api
+    import task_owner
+
+    _path_for(graph_id)
+    caller = task_owner.scope_identity(request.scope)
+    admin = await _caller_is_admin(request)
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(ai_vision_api.RENDERFIN_BASE + "/api-render/graph/" + graph_id,
+                                        timeout=8.0)
+            summary = response.json() if response.status_code == 200 else {}
+        except Exception:
+            raise HTTPException(status_code=502, detail={
+                "error_string": "queue_unreachable",
+                "message_string": "The render queue did not answer"}) from None
+        queued = [row["id"] for row in summary.get("tasks_array") or [] if row.get("status") == "Pending"]
+        mine = queued if admin else [tid for tid in queued if task_owner.owner_of(tid) == caller]
+        denied = len(queued) - len(mine)
+        result: Dict[str, object] = {"cancelled_int": 0, "running_untouched_int": 0}
+        if mine:
+            try:
+                response = await client.post(ai_vision_api.RENDERFIN_BASE + "/api-render/cancel-graph",
+                                             json={"graph_id": graph_id, "task_ids": mine,
+                                                   "reason": "cancelled: this graph's queue was cleared"},
+                                             timeout=30.0)
+                result = response.json() if response.status_code == 200 else result
+            except Exception:
+                raise HTTPException(status_code=502, detail={
+                    "error_string": "queue_unreachable",
+                    "message_string": "The render queue did not answer"}) from None
+    return {"success_bool": True, "graph_id_string": graph_id,
+            "cancelled_int": int(result.get("cancelled_int") or 0),
+            "running_untouched_int": int(result.get("running_untouched_int") or 0),
+            "denied_int": denied, "server_time_unix_int": int(time.time())}
+
+
+# ------------------------------------------------------- archive (recoverable)
+
+@router.get("/api/ai/graph-archive")
+async def api_graphs_archived(request: Request):
+    """What the archive holds and how each entry got there (admin)."""
+    if not await _caller_is_admin(request):
+        raise HTTPException(status_code=403, detail={
+            "error_string": "admin_only", "message_string": "Administrators only"})
+    rows = _archive_manifest()
+    for row in rows:
+        stored = _read_stored(GRAPH_DIR / ARCHIVE_SUBDIR / f"{row.get('id')}.json")
+        row["name_string"] = str(((stored or {}).get("graph") or {}).get("name") or "")
+        row["present_bool"] = stored is not None
+    return {"success_bool": True, "archived_array": rows, "server_time_unix_int": int(time.time())}
+
+
+@router.post("/api/ai/graphs/{graph_id}/archive")
+async def api_graph_archive(graph_id: str, request: Request, kept: str = "", note: str = ""):
+    """Hide a graph from the library without deleting it (admin). Its link
+    still opens; POST .../restore or any edit brings it back."""
+    if not await _caller_is_admin(request):
+        raise HTTPException(status_code=403, detail={
+            "error_string": "admin_only", "message_string": "Administrators only"})
+    if any(str(v) == graph_id for v in _aliases().values()):
+        raise HTTPException(status_code=409, detail={
+            "error_string": "graph_has_alias",
+            "message_string": "A graph with a named link (/nodes/<slug>) is not archived"})
+    entry = _archive(graph_id, kept_id=str(kept or "")[:64], note=str(note or "")[:200])
+    return {"success_bool": True, **entry, "server_time_unix_int": int(time.time())}
+
+
+@router.post("/api/ai/graphs/{graph_id}/restore")
+async def api_graph_restore(graph_id: str, request: Request):
+    """Put an archived graph back into the library (admin)."""
+    if not await _caller_is_admin(request):
+        raise HTTPException(status_code=403, detail={
+            "error_string": "admin_only", "message_string": "Administrators only"})
+    _path_for(graph_id)
+    if not _unarchive(graph_id, note="restored by an administrator"):
+        raise HTTPException(status_code=404, detail={
+            "error_string": "graph_not_archived",
+            "message_string": f"No archived graph '{graph_id}'"})
+    return {"success_bool": True, "graph_id_string": graph_id, "server_time_unix_int": int(time.time())}
 
 
 # -------------------------------------------------------------- cache purging

@@ -190,8 +190,12 @@ async def api_model_catalogue(service: Optional[str] = None):
         annotated = []
         for entry in checkpoints:
             runners = ai_lora_manager.workflow_boxes(str(entry.get("workflow") or ""))
+            # No box advertising the workflow by name is "unknown", not "none":
+            # Qwen-Image jobs are routed by a scheduling token, not by workflow
+            # names, so an empty set made every Qwen LoRA read "waiting for the
+            # render computers" (2026-09-28).
             annotated.append(dict(entry, runnable_workers=sorted(runners))
-                             if runners is not None else entry)
+                             if runners else entry)
         checkpoints = annotated
     except Exception:
         logger.exception("Could not read which computers run each checkpoint")

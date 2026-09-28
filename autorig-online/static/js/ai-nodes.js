@@ -65,6 +65,12 @@
   const runRequests = new Set();
   let nextRunRequestId = 0;
   let canvasEpoch = 1;
+  // Which Render press a submit belongs to (owner, 2026-09-28): one value per
+  // tab per Render, sent as X-Submit-Session. The farm stands down a node's
+  // older queued job when the same node is rendered again from another press.
+  const TAB_SESSION = (window.crypto && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8)
+    : 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  let runSession = TAB_SESSION + ':0';
   const pendingImageUploads = new Map();
   const pendingModelSelections = new Map();
   let graphId = null;
@@ -826,6 +832,32 @@
     paramsDialog(used, ((meta(id) || {}).label || (serviceById((meta(id) || {}).service) || {}).title || 'Node') + ' · parameters used', id);
   }
   window.AINodeParams = {show: showNodeParams, dialog: paramsDialog, fromRecord: paramsUsed};
+  // For ai-autoreload.js (owner, 2026-09-28): autosave and save-then-reload
+  // when the site restarts or is updated.
+  window.AINodesHost = {
+    graphId: () => graphId,
+    stale: () => graphStale,
+    signature: () => {
+      const graph = toStoredIds(graphFromCanvas());
+      delete graph.results;
+      return stableJson(graph);
+    },
+    save: async () => {
+      const result = await persistGraph();
+      if (result.response.ok) adoptSavedId(result.data);
+      return result;
+    },
+    viewport: () => ({x: Number(editor.canvas_x) || 0, y: Number(editor.canvas_y) || 0, zoom: Number(editor.zoom) || 1}),
+    setViewport: v => {
+      if (!v) return;
+      editor.canvas_x = v.x; editor.canvas_y = v.y; editor.zoom = v.zoom;
+      editor.precanvas.style.transform = 'translate(' + v.x + 'px, ' + v.y + 'px) scale(' + v.zoom + ')';
+    },
+    selection: () => selectedIds(),
+    select: ids => { if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds(ids); },
+    toast: message => toast(message),
+    load: graph => loadGraph(JSON.parse(JSON.stringify(graph)))
+  };
 
   /** "sent: <final prompt>" under a generator's prompt field, from the server's answer. */
   function paintSentPrompt(id, accepted) {
@@ -2246,7 +2278,7 @@
       try {
         let value = '';
         for (let round = 0; ; round += 1) {
-          const accepted = await submitJson(runner.api, body);
+          const accepted = await submitJson(runner.api, body, undefined, {nodeId: id});
           if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
           try { cell.params_used = paramsUsed(body, accepted); } catch (_) { /* display only */ }
           if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
@@ -2260,7 +2292,7 @@
             throw error;
           }
         }
-        if (post && value) value = await upscaleClip2x(value, null);
+        if (post && value) value = await upscaleClip2x(value, null, id);
         if (!value) throw new Error('no result');
         cell.value = value;
         cell.status = 'done';
@@ -2869,10 +2901,26 @@
     host.id = 'recent-gallery';
     host.setAttribute('aria-label', 'Your recent renders');
     host.innerHTML = '<header><button type="button" class="rg-toggle" title="Show or hide your recent renders"></button>' +
-      '<span class="rg-queue">Queue: …</span></header><div class="rg-strip"></div>';
+      '<span class="rg-queue">Queue: …</span>' +
+      '<button type="button" class="rg-cancel-graph" hidden title="Stand down every queued job of this graph (running ones finish)">Cancel this graph\'s queue</button>' +
+      '</header><div class="rg-strip"></div>';
     document.body.appendChild(host);
     const strip = host.querySelector('.rg-strip');
     const queueLabel = host.querySelector('.rg-queue');
+    const cancelGraph = host.querySelector('.rg-cancel-graph');
+    cancelGraph.addEventListener('click', async () => {
+      if (!graphId) return;
+      cancelGraph.disabled = true;
+      try {
+        const response = await fetch('/api/ai/graphs/' + encodeURIComponent(graphId) + '/cancel-queue', {method: 'POST', credentials: 'same-origin'});
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error((data.detail || {}).message_string || 'The queue could not be reached');
+        toast((data.cancelled_int || 0) + ' queued job(s) of this graph stood down; ' + (data.running_untouched_int || 0) + ' rendering and left to finish' +
+          (data.denied_int ? '; ' + data.denied_int + ' submitted by somebody else were left' : '') + '.');
+        runRequests.forEach(token => { token.cancelled = true; });
+      } catch (error) { toast(String(error.message || error)); }
+      finally { cancelGraph.disabled = false; }
+    });
     const toggle = host.querySelector('.rg-toggle');
     let collapsed = false;
     try { collapsed = localStorage.getItem('nodes.recentGallery') === 'collapsed'; } catch (error) { /* private mode */ }
@@ -2936,13 +2984,18 @@
     const poll = async () => {
       if (document.hidden) return;
       try {
-        const response = await fetch('/api/ai/my-tasks?limit=10', {credentials: 'same-origin'});
+        const response = await fetch('/api/ai/my-tasks?limit=10' + (graphId ? '&graph=' + encodeURIComponent(graphId) : ''), {credentials: 'same-origin'});
         if (!response.ok) return;
         const data = await response.json();
         const q = data.queue_object || {};
         const mine = (q.mine_queued_int || 0) + (q.mine_running_int || 0);
-        queueLabel.textContent = 'Queue: ' + (q.queued_int || 0) + ' queued · ' + (q.running_int || 0) + ' running · yours ' + mine;
+        const thisGraph = graphId && q.graph_queued_int != null
+          ? ' · this graph: ' + (q.graph_queued_int || 0) + (q.graph_running_int ? '+' + q.graph_running_int + ' running' : '') +
+            ' · other: ' + ((q.other_queued_int || 0) + (q.other_running_int || 0))
+          : '';
+        queueLabel.textContent = 'Queue: ' + (q.queued_int || 0) + ' queued · ' + (q.running_int || 0) + ' running · yours ' + mine + thisGraph;
         queueLabel.classList.toggle('rg-busy', !!q.mine_running_int);
+        cancelGraph.hidden = !(graphId && (q.graph_queued_int || 0) > 0);
         const next = data.items_array || [];
         if (next.map(item => item.task_id_string).join() !== items.map(item => item.task_id_string).join()) {
           items = next;
@@ -3638,7 +3691,24 @@
     if (run) { run.disabled = true; run.title = 'Reload the page first: the editor was updated'; }
   }
 
-  async function submitJson(url, body, onRetry) {
+  /**
+   * Headers that tie a submit to its graph node (owner, 2026-09-28): the
+   * saved graph, the node's stored id and this Render press. The server keeps
+   * them on the farm task; a save that drops or changes the node cancels the
+   * job while it still waits, whichever tab submitted it.
+   */
+  function graphContextHeaders(context) {
+    const headers = {};
+    const nodeId = context && context.nodeId != null ? String(context.nodeId) : '';
+    if (!graphId || !nodeId) return headers;
+    const stored = storedIdMap().get(nodeId) || nodeId;
+    headers['X-Graph-Id'] = graphId;
+    headers['X-Node-Id'] = stored;
+    headers['X-Submit-Session'] = runSession;
+    return headers;
+  }
+
+  async function submitJson(url, body, onRetry, context) {
     const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
       : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
     let outageTries = 0;
@@ -3647,7 +3717,8 @@
       try {
         response = await pacedSubmitFetch(url, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json', 'X-Client-Request-Id': requestId, 'X-Editor-Build': EDITOR_BUILD},
+          headers: Object.assign({'Content-Type': 'application/json', 'X-Client-Request-Id': requestId, 'X-Editor-Build': EDITOR_BUILD},
+            graphContextHeaders(context)),
           body: JSON.stringify(body)
         });
       } catch (error) {
@@ -4176,9 +4247,9 @@
   const VIDEO_SAMPLERS = new Set(['video', 'video_control', 'avatar_video']);
 
   /** Clip at half-HD -> x2 through /api/upscale2x (the post step of a big target). */
-  async function upscaleClip2x(url, state) {
+  async function upscaleClip2x(url, state, nodeId) {
     if (state) { state.textContent = 'upscaling 2× (half-HD render → target size)…'; state.className = 'nstate running'; }
-    const accepted = await submitJson('/api/upscale2x', {video_url: url});
+    const accepted = await submitJson('/api/upscale2x', {video_url: url}, undefined, nodeId != null ? {nodeId} : undefined);
     return pollForFile(accepted, {field: 'output_url_string', type: 'video'}, null);
   }
 
@@ -4407,7 +4478,7 @@
           ? `server restarting — retrying in ${Math.ceil(retry.delay / 1000)}s`
           : `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
         state.className = 'nstate running';
-      });
+      }, {nodeId: id});
       execution.taskId = accepted.task_id_string || '';
       try { paintSentPrompt(id, accepted); } catch (_) { /* display only */ }
       try { pendingParams.set(String(id), paramsUsed(submitBody, accepted)); } catch (_) { /* display only */ }
@@ -4431,7 +4502,7 @@
         ({value, outputs, items: listItems, summary: listSummary} = splitMulti(await runner.finish(accepted, runner,
           taskStateReporter(state, task, accepted, execution))));
         if (postUpscale && value) {
-          value = await upscaleClip2x(value, executionIsCurrent(execution) ? state : null);
+          value = await upscaleClip2x(value, executionIsCurrent(execution) ? state : null, id);
           if (outputs && outputs.video_url_string) outputs.video_url_string = value;
         }
       } catch (error) {
@@ -5115,13 +5186,16 @@
       });
       const data = await response.json().catch(() => ({}));
       if (response.status === 409 && (data.detail || {}).error_string === 'graph_stale') {
+        // Never fork: a stale tab neither saves nor renders until reloaded.
         graphStale = true;
-        if (window.confirm('This graph was changed in another tab or by an agent. Your tab holds an older copy and was not saved.\n\nReload now to get the latest version?')) {
-          location.reload();
-        }
+        const run = document.getElementById('run');
+        if (run) { run.title = 'Reload the page first: this graph was changed elsewhere'; }
         return { response, data, created: false };
       }
-      if (response.status !== 404 && response.status !== 409) {
+      if (response.status !== 404) {
+        // Only a graph that no longer exists anywhere (404) becomes a new
+        // document below; every other refusal (409 stale/template, 428
+        // older editor, 400, 5xx) is reported, never turned into a copy.
         if (response.ok && data.revision_int != null) graphRevision = data.revision_int;
         return { response, data, created: false };
       }
@@ -5172,8 +5246,13 @@
   async function ensureSaved() {
     try {
       const { response, data } = await persistGraph();
-      if (response.ok) adoptSavedId(data);
-    } catch (error) { /* a run is still worth doing without a link */ }
+      if (response.ok) { adoptSavedId(data); return {ok: true}; }
+      const detail = (data && data.detail) || {};
+      return {ok: false, stale: detail.error_string === 'graph_stale' || response.status === 428,
+              reason: detail.message_string || ('HTTP ' + response.status)};
+    } catch (error) {
+      return {ok: false, stale: false, reason: String(error && error.message || error)};
+    }
   }
 
   /**
@@ -5323,12 +5402,25 @@
       inputValues.set(node.id, field ? field.value.trim() : '');
     });
     const token = {cancelled:false, id:++nextRunRequestId};
+    // Autosave first (owner, 2026-09-28): the farm judges every job against
+    // the STORED graph, so what renders must be what is saved. A tab whose
+    // copy is stale does not render: it would queue jobs for a graph nobody
+    // can see, and its save would fork a copy. Reload instead.
+    const saved = await ensureSaved();
+    if (!saved.ok) {
+      if (saved.stale) {
+        if (window.confirm('This graph was changed in another tab or by an agent. This tab holds an older copy, so it was not saved and will not render.\n\nReload now to get the latest version?')) location.reload();
+      } else {
+        toast('Not rendered: the graph could not be saved (' + (saved.reason || 'save failed') + ').');
+      }
+      return;
+    }
+    runSession = TAB_SESSION + ':' + token.id;
     graph.nodes.filter(node => node.kind === KIND_SERVICE).forEach(node => {
       latestPlannedRequests.set(String(node.id), token.id);
     });
     runRequests.add(token);
     refreshRunningControls();
-    await ensureSaved();
     // Nodes whose inputs are all ready run together: the two clips and the 3D
     // model come off the same picture and there is no reason to queue them.
     const byId = new Map(graph.nodes.map(node => [node.id, node]));
@@ -5863,6 +5955,10 @@
     const { response, data } = await persistGraph();
     if (!response.ok) {
       const detail = data.detail || {};
+      if (detail.error_string === 'graph_stale' || response.status === 428) {
+        if (window.confirm('This graph was changed in another tab or by an agent. Your tab holds an older copy and was not saved.\n\nReload now to get the latest version?')) location.reload();
+        return;
+      }
       toast(detail.message_string || 'The graph was not saved.');
       return;
     }
