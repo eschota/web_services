@@ -126,7 +126,7 @@
   /** Why a LoRA cannot go with this checkpoint ('' when it can). */
   function familyMismatch(entry, checkpoint) {
     if (!entry || !checkpoint || loraFits(checkpoint, entry)) return '';
-    return 'not for ' + (checkpoint.base || checkpoint.title || checkpoint.family);
+    return 'not compatible with ' + (checkpoint.title || checkpoint.base || checkpoint.family) + ' — removed from render';
   }
 
   /** Another version of the same Civitai model made for this checkpoint's family. */
@@ -266,6 +266,7 @@
       });
       watchValue(firstHidden, () => render(state));
       firstSlot.addEventListener('click', () => setTimeout(() => filterPanel(firstSlot), 0), true);
+      firstSlot.addEventListener('mpick-filter', () => filterPanel(firstSlot));
 
       // The stack row: the raw tag field and its "+" menu stay in the DOM
       // (they are what gets saved) but the slots replace them on screen.
@@ -340,9 +341,8 @@
       box.classList.toggle('lslot-bad', !!mismatch);
       note.classList.toggle('lslot-note-bad', !!mismatch);
       if (mismatch) {
-        note.textContent = '⛔ ' + mismatch;
-        note.title = (entry.title || entry.file) + ' is ' + (entry.base || entry.family) +
-          '; it is ' + mismatch + ' and is left out of the render.';
+        note.textContent = mismatch;
+        note.title = (entry.title || entry.file) + ' is for ' + (entry.base || entry.family) + ': ' + mismatch + '.';
         note.hidden = false;
         return;
       }
@@ -405,6 +405,7 @@
         }
       });
       host.addEventListener('click', () => setTimeout(() => filterPanel(host), 0), true);
+      host.addEventListener('mpick-filter', () => filterPanel(host));
       weightBox.addEventListener('change', () => {
         slot.weight = clampWeight(weightBox.value, slot.weight);
         weightBox.value = String(slot.weight);
@@ -437,7 +438,7 @@
         // Another family is never listed, not even the one a slot still holds
         // (that slot shows its own ⛔ mark); a LoRA already stacked is listed
         // only in its own slot.
-        const foreign = entry && checkpoint && !loraFits(checkpoint, entry);
+        const foreign = entry && checkpoint && !loraFits(checkpoint, entry) && panel.dataset.showAll !== '1';
         const duplicate = taken.has(file) && item !== own;
         item.hidden = !!(foreign || duplicate);
       });

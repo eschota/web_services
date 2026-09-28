@@ -783,14 +783,10 @@
           if (name === 'checkpoint') {
             applySamplingPolicy(id, entry?.sampling_policy_object || entry?.sampling_policy || {});
             refreshModeOptions(id, entry);
-            const loraField = element.querySelector('[data-param="lora"]');
-            const loraPicker = element.querySelector('[data-model-param="lora"]')?._picker;
-            const left = entry?.family, right = loraPicker?.entry?.family;
-            if (loraField?.value && left && right && left !== right &&
-                !(['pony','sdxl'].includes(left) && ['pony','sdxl'].includes(right))) {
-              loraField.value = ''; loraPicker.value = '';
-              toast('The previous LoRA belongs to another model family and was cleared.');
-            }
+            // A LoRA of another family is kept on its row, marked red
+            // "not compatible with <model> — removed from render", and left
+            // out of the request (AINodeLoraStack.filterBody) — owner, 2026-09-28.
+            // It used to be cleared here, which lost the choice on a model switch.
           }
           const pending = applyRecommended(id, entry);
           pendingModelSelections.set(String(id), pending);

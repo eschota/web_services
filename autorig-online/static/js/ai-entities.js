@@ -562,6 +562,10 @@
       .mpick-item.chosen { background:rgba(123,92,255,.26); }
       .mpick-item.blocked { opacity:.45; cursor:not-allowed; }
       .mpick-item .mpick-thumb { width:52px; height:52px; flex:0 0 52px; }
+      .mpick-item[hidden] { display:none !important; }
+      .mpick-foot { display:flex; align-items:center; gap:6px; margin:6px 4px 2px; padding-top:6px;
+        border-top:1px solid rgba(255,255,255,.08); font-size:11px; color:#8b90a8; cursor:pointer; user-select:none; }
+      .mpick-foot input { margin:0; accent-color:#7b5cff; }
       .mpick-text { min-width:0; overflow-wrap:anywhere; }
       .mpick-text b { display:block; font-size:12.5px; font-weight:600; }
       .mpick-text i, .mpick-text u, .mpick-text s {
@@ -704,11 +708,17 @@
     };
   }
 
+  // Kept 60 s, not for the life of the tab: LoRAs and models are installed
+  // while the editor is open (/lora), and a new picker must list them.
+  const modelCatalogueAt = {};
   async function loadModels(serviceId) {
-    if (modelCatalogue[serviceId]) return modelCatalogue[serviceId];
+    if (modelCatalogue[serviceId] && Date.now() - (modelCatalogueAt[serviceId] || 0) < 60000) {
+      return modelCatalogue[serviceId];
+    }
     const response = await fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(serviceId));
     const data = await response.json();
     modelCatalogue[serviceId] = data;
+    modelCatalogueAt[serviceId] = Date.now();
     return data;
   }
 
@@ -736,7 +746,8 @@
 
   function modelPicker(host, serviceId, kind, options) {
     const settings = options || {};
-    const state = { value: settings.value || '', entries: [], checkpoints: [] };
+    // showAll: the debugging switch at the bottom of the panel; never saved.
+    const state = { value: settings.value || '', entries: [], checkpoints: [], showAll: false };
     // Added, not assigned: the node editor marks its slots with `mpick-slot`
     // and looks them up again to restore a saved choice, so overwriting the
     // class list quietly broke reopening a graph with a model on it.
@@ -788,17 +799,42 @@
     // own stacking context, so a later card paints over the open panel no
     // matter how high its z-index is. Lifting the card that owns the picker is
     // the only thing that actually works.
-    function setOpen(open) {
-      if (open && kind === 'loras') {
-        panel.querySelectorAll('.mpick-item[data-model-file]').forEach(item => {
-          const entry = state.entries.find(value => value.file === item.dataset.modelFile);
-          if (!entry) return;
-          const reason = loraCompatibilityReason(entry);
-          item.disabled = entry.usable === false || !!reason;
-          item.classList.toggle('blocked', item.disabled);
+    /**
+     * Owner rule 2026-09-28: a picker lists only what this node can run — a
+     * LoRA that fits the selected model and is on a computer that runs it, a
+     * model that is usable. The rest is hidden, not greyed; "Show all" at the
+     * bottom brings it back greyed, for debugging. The current choice always
+     * stays visible (its row says what is wrong with it).
+     */
+    function refreshItems() {
+      let hidden = 0;
+      panel.querySelectorAll('.mpick-item[data-model-file]').forEach(item => {
+        const file = item.dataset.modelFile;
+        if (!file) return;
+        const entry = state.entries.find(value => value.file === file);
+        if (!entry) return;
+        const reason = entry.usable === false
+          ? (entry.unusable_reason || 'Not runnable on the farm')
+          : loraCompatibilityReason(entry);
+        const chosen = file === state.value;
+        item.disabled = !!reason;
+        item.classList.toggle('blocked', !!reason);
+        item.hidden = !!reason && !chosen && !state.showAll;
+        if (item.hidden) hidden += 1;
+        if (kind === 'loras') {
           item.title = reason || (entry.title || entry.file) + ' — ' + entry.file + '. ' + (entry.recommended_from || '');
-        });
+        }
+      });
+      panel.dataset.showAll = state.showAll ? '1' : '';
+      const foot = panel.querySelector('.mpick-foot');
+      if (foot) {
+        foot.querySelector('span').textContent = state.showAll ? 'Show all (debug)' :
+          'Show all (debug)' + (hidden ? ' · ' + hidden + ' hidden' : '');
       }
+    }
+
+    function setOpen(open) {
+      if (open) refreshItems();
       panel.hidden = !open;
       const card = host.closest('.ai-card') || host.closest('.drawflow-node');
       if (card) card.classList.toggle('mpick-open', open);
@@ -808,7 +844,11 @@
       if (kind !== 'loras') return '';
       const scope = host.closest('.drawflow-node, .ai-card') || document;
       const field = scope.querySelector('[data-param="checkpoint"], [name="checkpoint"], #checkpoint');
-      const base = state.checkpoints.find(item => item.file === field?.value);
+      // No model chosen yet: the one the node renders with by default.
+      const service = serviceId === 'video_concat' ? 'video' : serviceId;
+      const base = state.checkpoints.find(item => item.file === field?.value) ||
+        (!field?.value ? state.checkpoints.find(item => item.usable !== false &&
+          ((item.default_for_services || []).includes(service) || item.qwen_image_default || item.default === true)) : null);
       if (!loraFitsCheckpoint(base, entry)) {
         return 'This LoRA requires ' + (entry.base || entry.family) + '. Choose a compatible checkpoint first.';
       }
@@ -916,6 +956,16 @@
         panel.appendChild(none);
       }
       state.entries.forEach(entry => panel.appendChild(row(entry)));
+      const foot = document.createElement('label');
+      foot.className = 'mpick-foot';
+      foot.innerHTML = '<input type="checkbox"><span>Show all (debug)</span>';
+      foot.querySelector('input').addEventListener('change', event => {
+        state.showAll = event.target.checked;
+        refreshItems();
+        // The LoRA stack filters its own panels again with the new setting.
+        panel.dispatchEvent(new CustomEvent('mpick-filter', {bubbles: true}));
+      });
+      panel.appendChild(foot);
       if (kind === 'checkpoints' && !state.value) {
         // Saved graphs apply their hidden checkpoint and LoRA values in the
         // same turn that mounts this picker, before this promise callback.
@@ -950,6 +1000,7 @@
         state.value = v;
         panel.querySelectorAll('.mpick-item').forEach(item => item.classList.toggle('chosen', item.dataset.modelFile === v));
         paintButton();
+        if (!panel.hidden) refreshItems();
       }
     };
   }
