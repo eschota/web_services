@@ -35,7 +35,13 @@
   const ORIG = Symbol('orig');
   let active = 0;
   const queue = [];
-  const failed = new Set();
+  // A failed address is retried after 10 s: a render's file is often linked
+  // a moment before it lands, and a permanent "failed" kept nodes blank until
+  // a reload (owner, 2026-09-28).
+  const failed = new Map();   // url -> time of failure
+  const FAIL_TTL = 10000;
+  const LOAD_TIMEOUT = 15000;
+  const isFailed = url => { const at = failed.get(url); if (!at) return false; if (Date.now() - at > FAIL_TTL) { failed.delete(url); return false; } return true; };
 
   function inDialog(el) { return !!(el.closest && el.closest('dialog, .alb, #media-preview, .tf-modal, .mpick-panel')); }
 
@@ -64,7 +70,9 @@
       sizes.set(url, fetch('/api/ai/media-size?url=' + encodeURIComponent(url))
         .then(r => r.ok ? r.json() : null)
         .then(d => d && d.width_int && d.height_int ? {w: d.width_int, h: d.height_int} : null)
-        .catch(() => null));
+        .catch(() => null)
+        // Not known yet (the file may not have landed): ask again next time.
+        .then(size => { if (!size) sizes.delete(url); return size; }));
     }
     return sizes.get(url);
   }
@@ -72,19 +80,30 @@
 
   function start(el) {
     const url = el[ORIG];
-    if (failed.has(url)) { el.classList.add('media-missing'); return; }
+    if (isFailed(url)) {
+      el.classList.add('media-missing');
+      setTimeout(() => { if (el[ORIG] === url && el.isConnected) { el.classList.remove('media-missing'); queue.push(el); pump(); } }, FAIL_TTL + 50);
+      return;
+    }
+    el.classList.remove('media-missing');
     active += 1;
     let done = false;
     const finish = ok => {
       if (done) return;
       done = true;
       active -= 1;
-      if (!ok) { failed.add(url); el.classList.add('media-missing'); }
+      if (!ok) { failed.set(url, Date.now()); el.classList.add('media-missing'); }
       pump();
     };
     if (el.tagName === 'IMG') {
       el.addEventListener('load', () => finish(true), {once: true});
-      el.addEventListener('error', () => finish(false), {once: true});
+      el.addEventListener('error', () => {
+        // A thumbnail that failed: the original once, then give up for 10 s.
+        if (el[ORIG] === url && el[SHOWN] && !el._triedOriginal) { el._triedOriginal = true; el[SHOWN] = null; imgSrc.set.call(el, url); return; }
+        finish(false);
+      });
+      // A load that never answers frees its slot and shows the original.
+      setTimeout(() => { if (!done && el[ORIG] === url) { el[SHOWN] = null; imgSrc.set.call(el, url); finish(true); } }, LOAD_TIMEOUT);
       const thumb = thumbFor(el, url);
       if (thumb === url) { el[SHOWN] = null; imgSrc.set.call(el, url); return; }
       // The thumbnail goes on only once the original's size is known, so any
@@ -99,7 +118,7 @@
       if (!el.autoplay && !el.getAttribute('preload')) el.preload = 'metadata';
       el.addEventListener('loadedmetadata', () => finish(true), {once: true});
       el.addEventListener('error', () => finish(false), {once: true});
-      setTimeout(() => finish(true), 8000);   // a slow clip never blocks the queue
+      setTimeout(() => finish(true), LOAD_TIMEOUT);   // a slow clip never blocks the queue
       mediaSrc.set.call(el, url);
     }
   }
@@ -166,6 +185,8 @@
   function defer(el, url) {
     el[ORIG] = url;
     el[SHOWN] = null;
+    el._triedOriginal = false;
+    failed.delete(url);   // a new result at an address that failed before: try again
     // A detached picture with an onload handler is a size probe: the original, now.
     if (el.tagName === 'IMG' && el.onload && !el.isConnected) { imgSrc.set.call(el, url); return; }
     // Watched once it is on the page. Elements are often built first and put
@@ -175,7 +196,19 @@
     const waits = [0, 150, 600, 1500];
     const check = step => {
       if (el[ORIG] !== url) return;
-      if (el.isConnected) { seen.observe(el); return; }
+      if (el.isConnected) {
+        // A new src on an element already on screen (a finished render in a
+        // node): load now, ahead of the queue — no wait for the observer.
+        const r = el.getBoundingClientRect();
+        const onScreen = r.width > 0 && r.bottom > -300 && r.right > -300 && r.top < innerHeight + 300 && r.left < innerWidth + 300;
+        if (settled && onScreen && !(el.tagName === 'VIDEO' && tooSmall(el))) {
+          seen.unobserve(el); small.delete(el);
+          if (active < MAX_ACTIVE + 2) start(el); else { queue.unshift(el); pump(); }
+          return;
+        }
+        seen.observe(el);
+        return;
+      }
       if (step + 1 < waits.length) { setTimeout(() => check(step + 1), waits[step + 1] - waits[step]); return; }
       if (el.tagName === 'IMG') imgSrc.set.call(el, url);
       // A clip size / length probe listens through onloadedmetadata; a clip a
