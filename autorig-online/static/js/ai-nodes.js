@@ -720,6 +720,64 @@
 
   const QWEN_DEFAULT_CHECKPOINT = 'qwen_image_2.1_int8_convrot.safetensors';
 
+  const PROMPT_EDIT_SERVICES = new Set(['image', 'video', 'qwen_image']);
+
+  /** "sent: <final prompt>" under a generator's prompt field, from the server's answer. */
+  function paintSentPrompt(id, accepted) {
+    const element = nodeElement(id);
+    const item = meta(id);
+    if (!element || !item || !PROMPT_EDIT_SERVICES.has(item.service) || !accepted) return;
+    const sent = String((accepted.effective_params_object || {}).prompt || accepted.prompt_string || '').trim();
+    if (!sent) return;
+    const field = element.querySelector('textarea[data-param="prompt"]');
+    const row = field && (field.closest('.nparam') || field.parentNode);
+    if (!row) return;
+    let box = element.querySelector('.nsent');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'nsent';
+      box.style.cssText = 'margin:2px 0 6px;font:10.5px/1.35 ui-monospace,Consolas,monospace;color:#a5b4fc;opacity:.9;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer';
+      box.addEventListener('mousedown', event => event.stopPropagation());
+      box.addEventListener('click', event => {
+        event.stopPropagation();
+        if (window.AITextFields && window.AITextFields.open) {
+          const holder = document.createElement('div');
+          holder.className = 'ntext';
+          holder.textContent = box.dataset.full || '';
+          element.appendChild(holder);
+          window.AITextFields.open(holder);
+          holder.remove();
+        }
+      });
+      row.insertAdjacentElement('afterend', box);
+    }
+    box.dataset.full = sent;
+    box.textContent = 'sent: ' + sent;
+    box.title = sent;
+  }
+
+  /** "What should happen / edit the incoming prompt" while a prompt is wired in. */
+  function paintPromptLabels() {
+    if (!editor) return;
+    let graph;
+    try { graph = graphFromCanvas(); } catch (_) { return; }
+    const wired = new Set(graph.links.filter(link => link.input === 'prompt').map(link => String(link.to)));
+    graph.nodes.forEach(node => {
+      if (!PROMPT_EDIT_SERVICES.has(node.service)) return;
+      const element = nodeElement(node.id);
+      const field = element && element.querySelector('textarea[data-param="prompt"]');
+      const label = field && field.closest('label') && field.closest('label').querySelector(':scope > span');
+      if (!label) return;
+      if (!label.dataset.base) label.dataset.base = label.textContent;
+      const on = wired.has(String(node.id));
+      const text = on ? label.dataset.base + ' / edit the incoming prompt' : label.dataset.base;
+      if (label.textContent !== text) label.textContent = text;
+      field.placeholder = on ? 'Instruction for the incoming prompt, any language (e.g. "she blows a kiss at the end")' : '';
+    });
+  }
+  setInterval(() => { try { paintPromptLabels(); } catch (_) { /* display only */ } }, 1500);
+
   /* --------------------------------------------- node resize (owner, 2026-09-28)
      A handle in the node's bottom-right corner: dragging it sets the node's
      width, and the extra height goes to the node's text fields (shared
@@ -4092,6 +4150,11 @@
       .sort((a, b) => Number(a.match[1]) - Number(b.match[1]))
       .map(item => resolved[item.field]);
     if (references.length) body.reference_image_urls = references;
+    // Owner rule 2026-09-28: in Image / Video / Qwen-Image the typed text is an
+    // instruction applied to a wired prompt (the server's text LLM rewrites
+    // it), not replaced by it; alone it is the prompt (translated if needed).
+    const typedPrompt = PROMPT_EDIT_SERVICES.has(serviceId) ? String((params || {}).prompt || '').trim() : '';
+    if (PROMPT_EDIT_SERVICES.has(serviceId) && 'prompt_translate' in body) body.prompt_translate = body.prompt_translate !== 'off';
     Object.keys(resolved).forEach(field => {
       const value = resolved[field];
       if (/^reference_\d+$/.test(field)) return;
@@ -4114,6 +4177,7 @@
         body[field] = value;
       }
     });
+    if (typedPrompt && typeof resolved.prompt === 'string' && resolved.prompt.trim()) body.prompt_edit = typedPrompt;
     // A control map wired into a picture socket is a reference, not a photo:
     // say which picture it is and what to take from it.
     if (mapHints) {
@@ -4206,6 +4270,7 @@
         state.className = 'nstate running';
       });
       execution.taskId = accepted.task_id_string || '';
+      try { paintSentPrompt(id, accepted); } catch (_) { /* display only */ }
       if (executionIsCurrent(execution)) state.textContent = 'queued — waiting for a worker';
       // Recorded before the wait, not after: the whole point is that a link
       // opened mid-render knows which task to carry on watching.

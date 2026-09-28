@@ -266,6 +266,10 @@ class QwenImageRequest(BaseModel):
     cfg: Optional[float] = Field(None, ge=0, le=30, description="0 keeps the workflow's own")
     seed: Optional[int] = Field(None, ge=0, le=9007199254740991)
     checkpoint: Optional[str] = Field(None, description="Installed GGUF quantisation")
+    prompt_edit: Optional[str] = Field(None, max_length=4000, description=(
+        "An instruction applied to `prompt` by the text LLM before rendering (any language); "
+        "alone it is the prompt"))
+    prompt_translate: Optional[bool] = Field(True, description="Translate a non-English prompt to English")
     lora: Optional[str] = Field(None, description="Style LoRA file (catalogue); first in the stack")
     lora_strength: Optional[float] = Field(None, ge=-2, le=2, description="Weight of `lora`; empty = 1")
     loras: Optional[str] = Field(None, max_length=4000,
@@ -380,6 +384,9 @@ async def api_qwen_image(body: QwenImageRequest):
 
 
 async def _uncached_qwen_image(body: QwenImageRequest):
+    import ai_prompt_edit
+    edited, _edit = await ai_prompt_edit.resolve(body.prompt, body.prompt_edit, body.prompt_translate)
+    body = body.model_copy(update={"prompt": edited})
     extras = extra_references(body)
     has_image = bool(str(body.image_url or "").strip() or str(body.image_base64 or "").strip()
                      or extras)

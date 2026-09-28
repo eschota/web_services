@@ -697,6 +697,9 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         # wired prompt wins.
         {"name": "prompt", "title": "What to draw or change", "type": "textarea",
          "default": "", "help": "Leave empty if a prompt is wired in, or to remix the pictures"},
+        {"name": "prompt_translate", "title": "Translate to English", "type": "select", "default": "on",
+         "options": [{"value": "on", "title": "On"}, {"value": "off", "title": "Off"}],
+         "help": "A typed prompt that is not English is translated before rendering"},
         # Automatic is the honest default: the wiring already says which of
         # the two models is meant. The explicit choices exist for the case
         # where a picture is wired in as a style reference but the person
@@ -970,6 +973,9 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         # Typed on the node when nothing is wired in; a wired prompt wins.
         {"name": "prompt", "title": "What to draw", "type": "textarea",
          "default": "", "help": "Leave empty if a prompt is wired in"},
+        {"name": "prompt_translate", "title": "Translate to English", "type": "select", "default": "on",
+         "options": [{"value": "on", "title": "On"}, {"value": "off", "title": "Off"}],
+         "help": "A typed prompt that is not English is translated before rendering"},
         {"name": "control_strength", "title": "Control strength", "type": "range", "min": 0, "max": 2, "step": 0.05, "default": 0.8},
         {"name": "control_start", "title": "Control start", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 0.0},
         {"name": "control_end", "title": "Control end", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 1.0},
@@ -1030,6 +1036,9 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
     "video": [
         {"name": "prompt", "title": "What should happen", "type": "textarea",
          "default": "", "help": "Leave empty if a prompt is wired in"},
+        {"name": "prompt_translate", "title": "Translate to English", "type": "select", "default": "on",
+         "options": [{"value": "on", "title": "On"}, {"value": "off", "title": "Off"}],
+         "help": "A typed prompt that is not English is translated before rendering"},
         {"name": "width", "title": "Width", "type": "number", "default": 960, "min": 256, "max": 2048, "step": 2},
         {"name": "height", "title": "Height", "type": "number", "default": 540, "min": 256, "max": 2048, "step": 2},
         {"name": "checkpoint", "title": "Model", "type": "model",

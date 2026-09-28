@@ -1574,6 +1574,10 @@ class ImageRequest(BaseModel):
     # and comes back as "prompt must not be empty" instead of FastAPI's
     # "Field required", which reads like the caller used the wrong field name.
     prompt: str = Field("", description="What to draw; <lora:NAME:WEIGHT> tags pick LoRAs")
+    prompt_edit: Optional[str] = Field(None, max_length=4000, description=(
+        "An instruction applied to `prompt` by the text LLM before rendering (any language); "
+        "alone it is the prompt"))
+    prompt_translate: Optional[bool] = Field(True, description="Translate a non-English prompt to English")
     system_prompt: Optional[str] = Field(None, max_length=12000, description=(
         "Used only when prompt is empty and pictures are given; {images} = image 1..N"))
     image_url: Optional[str] = Field(None, description="Reference image URL")
@@ -1784,6 +1788,8 @@ async def api_image(body: ImageRequest):
 
 async def _uncached_api_image(body: ImageRequest):
     """Prompt (and optionally a reference picture) into a generated image."""
+    import ai_prompt_edit
+    body.prompt, _edit = await ai_prompt_edit.resolve(body.prompt, body.prompt_edit, body.prompt_translate)
     if not str(body.prompt or "").strip():
         fallback = default_image_prompt(body)
         if not fallback:
@@ -1960,6 +1966,10 @@ async def _uncached_api_image(body: ImageRequest):
         }
 
 class VideoRequest(BaseModel):
+    prompt_edit: Optional[str] = Field(None, max_length=4000, description=(
+        "An instruction applied to `prompt` by the text LLM before rendering (any language); "
+        "alone it is the prompt"))
+    prompt_translate: Optional[bool] = Field(True, description="Translate a non-English prompt to English")
     control_video_url: Optional[str] = Field(None, description="Driving MP4 for whole-sequence motion guidance")
     control_channel: Optional[str] = Field(None, pattern="^(canny|pose|depth)$")
     control_strength: float = Field(0.8, ge=0, le=1)
@@ -2036,6 +2046,8 @@ async def _uncached_api_video(body: VideoRequest):
     Renderfin treats a request with an image and no `type` as an animation, so
     the frame is what selects the workflow; the caller never names one.
     """
+    import ai_prompt_edit
+    body.prompt, _edit = await ai_prompt_edit.resolve(body.prompt, body.prompt_edit, body.prompt_translate)
     if bool(body.control_video_url) != bool(body.control_channel):
         raise HTTPException(400, detail="Choose both a driving video and its control channel")
     if body.control_video_url:
