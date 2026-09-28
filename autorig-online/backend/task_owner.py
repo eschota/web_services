@@ -146,6 +146,32 @@ def idem_get(key: str, owner: str, path: str):
         return None
 
 
+def idem_delete(key: str) -> None:
+    try:
+        with _lock:
+            _db().execute("DELETE FROM idem WHERE key = ?", (key,))
+            _db().commit()
+    except Exception:
+        logger.exception("idempotent answer not forgotten")
+
+
+async def _replay_still_valid(stored: bytes) -> bool:
+    """A replay may only name a task the farm still has (queued, rendering, done)."""
+    try:
+        data = json.loads(bytes(stored).decode("utf-8"))
+        task = str(data.get("task_id_string") or "") if isinstance(data, dict) else ""
+    except Exception:
+        return True
+    if not task:
+        return True
+    try:
+        import ai_request_cache
+        alive = await ai_request_cache.task_alive(task)
+    except Exception:
+        return True
+    return alive is not False
+
+
 def _stored_before_start(key: str) -> bool:
     """A request id answered before this process started: its task was wiped."""
     try:
@@ -255,6 +281,12 @@ class TaskOwnerMiddleware:
                 return
         if key:
             stored = idem_get(key, owner, path)
+            if stored is not None and not await _replay_still_valid(stored):
+                # The first answer named a task that has since been cancelled
+                # or lost (a wipe, a supersession, a purge): replaying it would
+                # hand the retry a dead task. Forget it and submit afresh.
+                idem_delete(key)
+                stored = None
             if stored is not None:
                 await send({"type": "http.response.start", "status": 200,
                             "headers": [(b"content-type", b"application/json"),

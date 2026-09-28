@@ -163,6 +163,37 @@ def _redact_response(value: Any) -> Any:
     return value
 
 
+_FARM_DEAD_STATES = {"error", "failed", "cancelled", "canceled"}
+
+
+async def task_alive(task_id: str) -> bool | None:
+    """Is this farm task still queued, rendering or done? None = farm did not answer.
+
+    Only renderfin tasks (uuids) are checked; a `<node>.<id>` LLM task is
+    tracked elsewhere and is reported alive.
+    """
+    task_id = str(task_id or "")
+    if not task_id or "." in task_id:
+        return True
+    try:
+        import httpx
+
+        base = os.getenv("RENDERFIN_INTERNAL_URL", "http://127.0.0.1:8210").rstrip("/")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(base + "/api-render/tasks/" + task_id, timeout=6.0)
+    except Exception:
+        return None
+    if response.status_code == 404:
+        return False
+    if response.status_code != 200:
+        return None
+    try:
+        row = response.json()
+    except ValueError:
+        return None
+    return str(row.get("status_string") or row.get("status") or "").lower() not in _FARM_DEAD_STATES
+
+
 def _requires_explicit_seed(service: str) -> bool:
     name = service.lower()
     if "vision" in name or "control" in name or "text" in name:
@@ -293,6 +324,43 @@ class AIRequestCache:
                 ),
             )
 
+    def _state_of(self, cache_key: str) -> str:
+        with self._connect() as db:
+            row = db.execute("SELECT state FROM ai_request_cache WHERE cache_key = ?", (cache_key,)).fetchone()
+        return str(row["state"]).lower() if row is not None else ""
+
+    def forget(self, cache_key: str) -> None:
+        with self._connect() as db:
+            db.execute("DELETE FROM ai_request_cache WHERE cache_key = ?", (cache_key,))
+
+    async def _still_wanted(self, cache_key: str, cached: Mapping[str, Any]) -> bool:
+        """A hit that is not yet completed is checked against the farm.
+
+        A task cancelled without anybody polling it (a restart wipe, a save
+        that stood it down, a farm reset) leaves its row 'accepted' forever;
+        handing that task back would answer "press Render again" with the
+        very task the press was meant to replace (owner bug 2026-09-28).
+        A cancelled, failed or unknown task is dropped and treated as a miss.
+        """
+        try:
+            state = await asyncio.to_thread(self._state_of, cache_key)
+        except sqlite3.Error:
+            state = ""
+        if state in _SUCCESS_STATES or _status(cached) in _SUCCESS_STATES:
+            return True
+        task_id = _task_id(cached)
+        if not task_id:
+            return True
+        alive = await task_alive(task_id)
+        if alive is None:
+            return True  # the farm did not answer: keep the hit rather than double-submit
+        if not alive:
+            try:
+                await asyncio.to_thread(self.forget, cache_key)
+            except sqlite3.Error:
+                pass
+        return alive
+
     async def run_cached(
         self,
         service: str,
@@ -312,7 +380,7 @@ class AIRequestCache:
             cached = await asyncio.to_thread(self._lookup, cache_key)
         except sqlite3.Error:
             cached = None
-        if cached is not None:
+        if cached is not None and await self._still_wanted(cache_key, cached):
             return cached
 
         lock = await self._lock_for(cache_key)
@@ -322,7 +390,7 @@ class AIRequestCache:
                     cached = await asyncio.to_thread(self._lookup, cache_key)
                 except sqlite3.Error:
                     cached = None
-                if cached is not None:
+                if cached is not None and await self._still_wanted(cache_key, cached):
                     return cached
                 generation = self._generation
                 result = submit_async_callback()
