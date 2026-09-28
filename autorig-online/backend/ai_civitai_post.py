@@ -1050,16 +1050,23 @@ async def apply_rating(client: httpx.AsyncClient, image_id: int, name: str,
     if not wanted:
         return answer
     level = 0
-    for _attempt in range(6):
+    # A clip's scan can take a minute; the owner's rating is decided against it.
+    for _attempt in range(30):
         try:
             level, _locked = await _image_level(client, image_id)
         except Exception:
             level = 0
         if level:
             break
-        await asyncio.sleep(3)
+        await asyncio.sleep(4)
     if not level:
-        # Not scanned yet (or not readable): nothing to compare, nothing sent.
+        # Still not scanned after ~2 min: nothing to compare against, so the
+        # owner's rating goes in as it is (the same vote the site's rating badge sends).
+        try:
+            await _trpc(client, "image.updateImageNsfwLevel", {"id": image_id, "nsfwLevel": wanted})
+        except Exception as error:
+            logger.info("civitai rating %s on %s: %s", wanted, image_id, error)
+        answer["rating_on_civitai_string"] = "not scanned yet"
         return answer
     if level >= wanted:
         answer["rating_on_civitai_string"] = LEVEL_NAMES.get(level, str(level))
