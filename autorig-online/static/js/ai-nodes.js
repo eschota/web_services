@@ -856,7 +856,9 @@
     selection: () => selectedIds(),
     select: ids => { if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds(ids); },
     toast: message => toast(message),
-    load: graph => loadGraph(JSON.parse(JSON.stringify(graph)))
+    load: graph => loadGraph(JSON.parse(JSON.stringify(graph))),
+    // The whole graph document with results, in stored ids (ai-undo.js).
+    full: () => toStoredIds(graphFromCanvas()),
   };
 
   /** "sent: <final prompt>" under a generator's prompt field, from the server's answer. */
@@ -2876,15 +2878,8 @@
     };
     ['pointerdown', 'mousedown'].forEach(type => canvas.addEventListener(type, intercept, true));
     canvas.addEventListener('auxclick', event => { if (event.button === 1) event.preventDefault(); }, true);
-    document.addEventListener('keydown', event => {
-      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.code !== 'KeyZ') return;
-      if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
-      const undo = (window.AIUndo || []).pop();
-      if (!undo) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      undo();
-    }, true);
+    // Ctrl+Z is the graph-wide undo now (ai-undo.js): a removed wire is one
+    // of its steps like any other edit.
   }
 
   // ?safe=1 (owner, 2026-09-28): open a graph without saved results, the
@@ -5248,8 +5243,11 @@
       const { response, data } = await persistGraph();
       if (response.ok) { adoptSavedId(data); return {ok: true}; }
       const detail = (data && data.detail) || {};
-      return {ok: false, stale: detail.error_string === 'graph_stale' || response.status === 428,
-              reason: detail.message_string || ('HTTP ' + response.status)};
+      // FastAPI answers a validation failure (422) with a list of errors.
+      const first = Array.isArray(detail) && detail[0] ? detail[0] : null;
+      const reason = first ? ('HTTP 422 ' + [].concat(first.loc || []).join('.') + ': ' + (first.msg || '')).slice(0, 200)
+        : (detail.message_string || ('HTTP ' + response.status));
+      return {ok: false, stale: detail.error_string === 'graph_stale' || response.status === 428, reason};
     } catch (error) {
       return {ok: false, stale: false, reason: String(error && error.message || error)};
     }
@@ -5410,10 +5408,11 @@
     if (!saved.ok) {
       if (saved.stale) {
         if (window.confirm('This graph was changed in another tab or by an agent. This tab holds an older copy, so it was not saved and will not render.\n\nReload now to get the latest version?')) location.reload();
-      } else {
-        toast('Not rendered: the graph could not be saved (' + (saved.reason || 'save failed') + ').');
+        return;
       }
-      return;
+      // Any other refusal (validation, store error, network) is a warning:
+      // the canvas still renders; only a true stale-revision conflict stops it.
+      toast('Rendering without saving — the graph could not be saved: ' + (saved.reason || 'save failed'));
     }
     runSession = TAB_SESSION + ':' + token.id;
     graph.nodes.filter(node => node.kind === KIND_SERVICE).forEach(node => {
