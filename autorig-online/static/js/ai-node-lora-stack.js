@@ -489,6 +489,92 @@
         slot.weightBox.hidden = !slot.file;
       });
       state.row.classList.toggle('lstack-empty', !state.slots.length);
+      paintTriggers(state);
+    }
+
+    /* ------------------------------------------------ trigger words
+       Owner rule 2026-09-28: every selected LoRA's primary trigger word leads
+       the prompt the server renders (the backend prepends it, so the API and
+       the editor agree). This shows the result under the prompt field
+       ("sent: sura, …") and offers the LoRAs' other trained words as chips
+       that append to the prompt. A LoRA at weight 0 or of another family adds
+       nothing. */
+    function primaryTrigger(entry) {
+      return String(((entry && entry.triggers) || [])[0] || '').trim();
+    }
+
+    function activeLoras(state) {
+      const checkpoint = checkpointEntry(state);
+      const out = [];
+      const add = (file, weight) => {
+        if (!file) return;
+        const entry = loras(state).find(item => item.file === file);
+        if (!entry || (checkpoint && familyMismatch(entry, checkpoint))) return;
+        if (weight !== null && Number(weight) === 0) return;
+        if (!out.includes(entry)) out.push(entry);
+      };
+      // Slot 1's weight 0 means "the workflow's own strength", so it counts.
+      add(state.firstHidden.value, null);
+      state.slots.forEach(slot => add(slot.file, slot.weight));
+      return out;
+    }
+
+    function paintTriggers(state) {
+      const prompt = state.element.querySelector('[data-param="prompt"]');
+      if (!prompt) return;
+      const row = prompt.closest('.nparam') || prompt.parentNode;
+      let box = state.element.querySelector('.ltrig');
+      if (!box) {
+        box = document.createElement('div');
+        box.className = 'ltrig';
+        row.insertAdjacentElement('afterend', box);
+        prompt.addEventListener('input', () => paintTriggers(state));
+        box.addEventListener('mousedown', event => event.stopPropagation());
+      }
+      const entries = activeLoras(state);
+      const text = String(prompt.value || '').trim();
+      const folded = text.toLowerCase();
+      const lead = [];
+      entries.forEach(entry => {
+        const word = primaryTrigger(entry);
+        if (word && !folded.includes(word.toLowerCase()) && !lead.some(item => item.toLowerCase() === word.toLowerCase())) lead.push(word);
+      });
+      const extras = [];
+      entries.forEach(entry => (entry.trained_words || []).forEach(word => {
+        word = String(word || '').trim();
+        if (!word || word === primaryTrigger(entry) || /[\[\]{}<>:]/.test(word) || /^see |description/i.test(word)) return;
+        if (folded.includes(word.toLowerCase()) || extras.includes(word)) return;
+        extras.push(word);
+      }));
+      box.hidden = !entries.length;
+      box.innerHTML = '';
+      if (!entries.length) return;
+      const sent = document.createElement('div');
+      sent.className = 'ltrig-sent';
+      sent.textContent = 'sent: ' + (lead.length ? lead.join(', ') + ', ' : '') + (text || '‹incoming prompt›');
+      sent.title = lead.length ? 'Trigger words of the selected LoRAs are put in front of the prompt when it renders.'
+        : 'The prompt already holds the trigger words of the selected LoRAs.';
+      box.appendChild(sent);
+      if (extras.length) {
+        const chips = document.createElement('div');
+        chips.className = 'ltrig-chips';
+        extras.slice(0, 8).forEach(word => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'ltrig-chip';
+          chip.textContent = '+ ' + word;
+          chip.title = 'Append "' + word + '" to the prompt';
+          chip.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            const current = String(prompt.value || '').trim();
+            prompt.value = current ? current.replace(/[,\s]*$/, '') + ', ' + word : word;
+            prompt.dispatchEvent(new Event('input', {bubbles: true}));
+            prompt.dispatchEvent(new Event('change', {bubbles: true}));
+          });
+          chips.appendChild(chip);
+        });
+        box.appendChild(chips);
+      }
     }
 
     function setNote(note, text) {

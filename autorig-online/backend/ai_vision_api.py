@@ -298,6 +298,9 @@ def _worker_entries() -> List[Tuple[Dict[str, object], Dict[str, object]]]:
     return pairs
 
 
+EXTRA_3D_WORKERS_FILE = os.getenv("AUTORIG_EXTRA_3D_WORKERS_FILE", "/srv/autorig/secrets/site-3d-extra-workers.json")
+
+
 def _load_hunyuan_workers() -> List[Dict[str, object]]:
     """Nodes allowed to run Hunyuan, which is a narrower set than AI Vision.
 
@@ -313,6 +316,18 @@ def _load_hunyuan_workers() -> List[Dict[str, object]]:
         if raw.get("canary_approved") is False:
             continue
         workers.append(entry)
+    # 3D-only boxes the site may use but Renderfin's character pipeline must not
+    # (worker-4090's local Hunyuan adapter, 2026-09-27). Same entry shape.
+    try:
+        extra = json.loads(pathlib.Path(EXTRA_3D_WORKERS_FILE).read_text(encoding="utf-8"))
+        for raw in (extra.get("workers") if isinstance(extra, dict) else extra) or []:
+            if raw.get("enabled") is False or not raw.get("url") or not raw.get("token"):
+                continue
+            workers.append({key: raw[key] for key in raw if key != "notes"})
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("Could not read %s", EXTRA_3D_WORKERS_FILE)
     return workers
 
 
@@ -1797,9 +1812,12 @@ async def _uncached_api_image(body: ImageRequest):
                 raise HTTPException(status_code=400, detail={
                     "error_string": "control_model_incompatible",
                     "message_string": str(exc)}) from None
-        if trigger_prefix:
-            import ai_model_defaults
-            prompt = ai_model_defaults.add_triggers(prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
+        # Triggers: the checkpoint's and the single LoRA's (trigger_prefix),
+        # then every stacked LoRA's primary word, in stack order.
+        import ai_model_defaults
+        prompt = ai_model_defaults.add_triggers(
+            prompt, [{"triggers": [part.strip()]} for part in trigger_prefix.split(",") if part.strip()]
+            + [item.entry for item in lora_stack])
         payload: Dict[str, object] = {
             "prompt": prompt, "main_size_width": int(body.width or 960),
             "main_size_height": int(body.height or 540),
@@ -2049,7 +2067,10 @@ async def _uncached_api_video(body: VideoRequest):
         if video_prompt and str(video_prompt).strip():
             rendered_prompt = _validate_prompt(video_prompt)
             import ai_model_defaults
-            payload["prompt"] = ai_model_defaults.add_triggers(rendered_prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
+            payload["prompt"] = ai_model_defaults.add_triggers(
+                rendered_prompt,
+                [{"triggers": [part.strip()]} for part in trigger_prefix.split(",") if part.strip()]
+                + [item.entry for item in lora_stack])
         if body.frame_count:
             payload["frame_count"] = int(body.frame_count)
         payload.update(model_payload)
@@ -2146,6 +2167,36 @@ async def api_3dmodel_docs():
     }
 
 
+# A Hunyuan box refuses a job at once when its disk is short ("Hunyuan disk
+# gate failed: 12.8 GiB free; 15 GiB required", f13 2026-09-27). Such a box is
+# skipped for a while, and a job it refused is sent to the next box under the
+# same task id, so the graph node keeps waiting instead of failing.
+DISK_GATE_COOLDOWN_SECONDS = 30 * 60
+_3D_DISK_REFUSED: Dict[str, float] = {}
+_3D_JOBS: Dict[str, Dict[str, object]] = {}
+
+
+def _disk_refused(node_key: str) -> bool:
+    return time.time() - _3D_DISK_REFUSED.get(node_key, 0.0) < DISK_GATE_COOLDOWN_SECONDS
+
+
+async def _pick_3d_worker(client: httpx.AsyncClient, exclude: List[str]) -> Optional[Dict[str, object]]:
+    workers = [w for w in _load_hunyuan_workers()
+               if _node_key(w) not in exclude and not _disk_refused(_node_key(w))]
+    probes = await asyncio.gather(*(_node_is_free(client, w) for w in workers), return_exceptions=True)
+    candidates = []
+    for worker, probe in zip(workers, probes):
+        if isinstance(probe, Exception) or not isinstance(probe, tuple):
+            continue
+        ok, info = probe
+        if ok:
+            candidates.append((int((info or {}).get("load") or 0), worker))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
 @router.post("/api/3dmodel")
 async def api_3dmodel(body: ModelRequest):
     """Turn a picture into a 3D model on a farm node cleared for Hunyuan."""
@@ -2164,23 +2215,11 @@ async def api_3dmodel(body: ModelRequest):
             raise HTTPException(status_code=503, detail={
                 "error_string": "no_3d_node_available",
                 "message_string": "No farm node is currently cleared for 3D generation"})
-        probes = await asyncio.gather(
-            *(_node_is_free(client, worker) for worker in workers),
-            return_exceptions=True,
-        )
-        candidates = []
-        for worker, probe in zip(workers, probes):
-            if isinstance(probe, Exception) or not isinstance(probe, tuple):
-                continue
-            ok, info = probe
-            if ok:
-                candidates.append((int((info or {}).get("load") or 0), worker))
-        if not candidates:
+        worker = await _pick_3d_worker(client, [])
+        if worker is None:
             raise HTTPException(status_code=503, detail={
                 "error_string": "no_3d_node_available",
                 "message_string": "No 3D-capable node answered; try again shortly"})
-        candidates.sort(key=lambda item: item[0])
-        worker = candidates[0][1]
 
         payload: Dict[str, object] = {"image_url": picture}
         if body.quality:
@@ -2188,6 +2227,8 @@ async def api_3dmodel(body: ModelRequest):
         if body.background_method:
             payload["background_method"] = str(body.background_method).strip().lower()
         worker_task_id = await _submit(client, worker, "/generate-3d", payload)
+        _3D_JOBS[f"{_node_key(worker)}.{worker_task_id}"] = {
+            "payload": payload, "tried": [_node_key(worker)], "current": ""}
         return {
             "success_bool": True,
             "task_id_string": f"{_node_key(worker)}.{worker_task_id}",
@@ -2203,6 +2244,31 @@ async def api_3dmodel(body: ModelRequest):
 @router.get("/api/3dmodel/status/{task_id}")
 async def api_3dmodel_status(task_id: str):
     """Hunyuan has its own status path, so 3D tasks cannot share /api/ai/status."""
+    job = _3D_JOBS.get(str(task_id))
+    answer = await _3dmodel_status_of(str((job or {}).get("current") or task_id))
+    if job is not None and answer.get("status_string") == "failed" \
+            and "disk gate" in str(answer.get("error_string") or "").lower():
+        _3D_DISK_REFUSED[str(answer.get("node_string") or "")] = time.time()
+        async with httpx.AsyncClient() as client:
+            worker = await _pick_3d_worker(client, list(job["tried"]))
+            if worker is not None:
+                try:
+                    new_id = await _submit(client, worker, "/generate-3d", dict(job["payload"]))
+                except Exception:
+                    new_id = ""
+                if new_id:
+                    job["tried"].append(_node_key(worker))
+                    job["current"] = f"{_node_key(worker)}.{new_id}"
+                    logger.warning("3D job %s: %s refused at the disk gate, moved to %s",
+                                   task_id, answer.get("node_string"), job["current"])
+                    answer = await _3dmodel_status_of(str(job["current"]))
+    if job is not None and job.get("current"):
+        answer["rerouted_to_string"] = str(job["current"])
+    answer["task_id_string"] = str(task_id)
+    return answer
+
+
+async def _3dmodel_status_of(task_id: str):
     node_key, _, worker_task_id = str(task_id).partition(".")
     if not node_key or not worker_task_id:
         raise HTTPException(status_code=400, detail={

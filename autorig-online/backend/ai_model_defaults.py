@@ -319,16 +319,38 @@ def resolve(checkpoint: Optional[Mapping[str, object]],
     return effective
 
 
+def primary_trigger(words: Iterable[object]) -> str:
+    """The first usable trigger word of a LoRA, or "".
+
+    Placeholders authors put in the trained-words list ("see LoRA
+    description", "head_swap: FACE: [Face Description]") are not words to
+    prepend, so they are skipped.
+    """
+    for word in words or []:
+        text = str(word or "").strip()
+        low = text.casefold()
+        if (not text or len(text) > 60 or any(ch in text for ch in "[]{}<>:")
+                or low.startswith("see ") or "description" in low):
+            continue
+        return text
+    return ""
+
+
 def add_triggers(prompt: str, entries: Iterable[Optional[Mapping[str, object]]]) -> str:
-    """Prefix missing catalogue trigger words once, case-insensitively."""
+    """Prefix each entry's primary trigger word once, in order, case-insensitively.
+
+    Owner rule 2026-09-28: a selected LoRA's trigger word goes in front of the
+    prompt ("sura, " + prompt); only the primary word of a LoRA with several,
+    and none that the prompt already contains.
+    """
     text = str(prompt or "").strip()
     folded = text.casefold()
-    missing = []
+    missing: list = []
     for entry in entries:
         if not entry:
             continue
-        for trigger in entry.get("triggers") or []:
-            trigger = str(trigger or "").strip()
-            if trigger and trigger.casefold() not in folded and trigger not in missing:
-                missing.append(trigger)
+        trigger = primary_trigger(entry.get("triggers") or [])
+        if trigger and trigger.casefold() not in folded and \
+                trigger.casefold() not in (item.casefold() for item in missing):
+            missing.append(trigger)
     return ", ".join(missing + ([text] if text else []))

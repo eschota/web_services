@@ -300,8 +300,8 @@ async def _attenuate_maps(pictures: List[str], strengths: List[float], flags: Li
                 response.raise_for_status()
                 image = Image.open(io.BytesIO(response.content)).convert("RGB")
                 weak = 1.0 - s
-                grey = Image.new("RGB", image.size, (128, 128, 128))
-                image = Image.blend(image, grey, min(0.9, weak * 1.1))
+                # blur only (2026-09-28): a weaker map is only blurred, its tones
+                # are never changed (a grey blend fogged the whole picture).
                 image = image.filter(ImageFilter.GaussianBlur(radius=weak * 0.035 * max(image.size)))
                 buf = io.BytesIO()
                 image.save(buf, "PNG")
@@ -368,7 +368,7 @@ def _qwen_lora_stack(body: "QwenImageRequest", checkpoint: str):
     prompt, stack, _override = ai_vision_api._lora_stack_request(SERVICE_ID, body.prompt, tags, "")
     if stack:
         ai_vision_api._check_stack_family(stack, checkpoint)
-    return prompt, [item.as_payload() for item in stack]
+    return prompt, [item.as_payload() for item in stack], [item.entry for item in stack]
 
 
 @router.post("/api/qwen-image")
@@ -403,8 +403,10 @@ async def _uncached_qwen_image(body: QwenImageRequest):
         checkpoint = installed[0] if installed else ""
 
     lora_stack = _qwen_lora_stack(body, checkpoint)
+    trigger_entries: list = []
     if lora_stack is not None:
         body = body.model_copy(update={"prompt": lora_stack[0]})
+        trigger_entries = lora_stack[2]
         lora_stack = lora_stack[1]
 
     source = ""
@@ -442,6 +444,10 @@ async def _uncached_qwen_image(body: QwenImageRequest):
     turbo21 = is_generation21(checkpoint)
     final_prompt = compose_prompt(body.prompt, body.system_prompt,
                                   len(pictures) if mode == "edit" else 0)
+    if trigger_entries:
+        # A selected LoRA's primary trigger word leads the prompt (owner, 2026-09-28).
+        import ai_model_defaults
+        final_prompt = ai_model_defaults.add_triggers(final_prompt, trigger_entries)
     payload: Dict[str, object] = {
         "prompt": final_prompt,
         "negative_prompt": "" if turbo21 else str(body.negative_prompt or "").strip(),

@@ -513,8 +513,15 @@ async def _download_to_mirror(entry_id: str) -> None:
         async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(60.0, read=120.0)) as client:
             async with client.stream("GET", url, headers=headers) as response:
                 if response.status_code in (401, 403):
+                    await response.aread()
+                    try:
+                        why = response.json()
+                    except ValueError:
+                        why = {}
+                    until = str((why or {}).get("deadline") or "")[:10]
                     raise ResolveError("download_denied",
-                                       "Civitai refused the download (early access or login-only file)")
+                                       "Civitai refused the download (early access or login-only file)"
+                                       + (f"; early access ends {until}" if until else ""))
                 if response.status_code >= 400:
                     raise ResolveError("download_failed", f"download answered HTTP {response.status_code}")
                 with open(part, "wb") as handle:
@@ -718,6 +725,9 @@ def lora_box_state(entry: Dict[str, Any], box: str, cfg: Dict[str, Any],
         return {"state": "excluded"}
     if targets is not None and box not in targets:
         return {"state": "not_needed"}
+    mirror = entry.get("mirror") or {}
+    if mirror.get("state") == "failed":
+        return {"state": "failed", "error": "the VPS could not fetch it: " + str(mirror.get("error") or "")}
     if not report:
         return {"state": "no_agent"}
     reported = (report.get("items") or {}).get(entry["id"]) or {}
@@ -749,6 +759,11 @@ def ready_boxes(entry: Dict[str, Any], data: Optional[Dict[str, Any]] = None) ->
 _catalogue_cache: Dict[str, Any] = {"at": 0.0, "entries": []}
 
 
+def _primary_trigger(words: List[Any]) -> str:
+    import ai_model_defaults
+    return ai_model_defaults.primary_trigger(words)
+
+
 def catalogue_entries() -> List[Dict[str, Any]]:
     """Managed LoRAs as model-catalogue entries (kept 20 s)."""
     where = str(_lora_dir())
@@ -778,10 +793,12 @@ def catalogue_entries() -> List[Dict[str, Any]]:
             "kind": "lora", "family": entry.get("family") or "", "file": entry["file"],
             "title": entry.get("title") or entry["file"], "version": entry.get("version") or "",
             "base": entry.get("base") or "", "nsfw": bool(entry.get("nsfw")),
-            # Trigger words are shown, not injected: Civitai users write them
-            # into the prompt themselves, and a silently prefixed word would
-            # make a reproduced prompt differ from the one it came from.
-            "triggers": [], "trained_words": entry.get("trained_words") or [],
+            # Owner rule 2026-09-28: the primary trigger word is prepended to
+            # the prompt of every render that uses the LoRA (the final prompt
+            # is what the task and its Civitai post record). The other trained
+            # words are offered as chips in the editor.
+            "triggers": [w for w in [_primary_trigger(entry.get("trained_words") or [])] if w],
+            "trained_words": entry.get("trained_words") or [],
             "page": entry.get("page") or "", "preview": entry.get("preview") or "",
             "services": entry.get("services") or [], "usable": bool(ready),
             "unusable_reason": reason, "validated_workers": ready, "ready_workers": ready,
@@ -881,6 +898,9 @@ async def api_sync_manifest(request: Request):
               if e.get("state") == "removed"
               and not any(o.get("file") == e["file"] and o.get("state") != "removed"
                           for o in data["loras"])]
+    remove += [{"file": e["file"], "sha256": old} for e in data["loras"]
+               if e.get("state") != "removed" and box in target_boxes(e, data)
+               for old in (e.get("superseded_sha256") or [])[-8:] if old != e.get("sha256")]
     cleanup = [c for c in (data.get("cleanup") or {}).get(box, []) if isinstance(c, dict)]
     return {"box_string": box, "items_array": items, "remove_array": remove,
             "cleanup_array": cleanup, "protected_array": sorted(protected_files()),
@@ -1497,6 +1517,39 @@ def build_lora_admin_router(require_admin: Callable[..., Any]) -> APIRouter:
         _spawn(kick_boxes())
         return {"success_bool": True, "note_string": "moved to the box's lora_trash folder on its next sync"}
 
+    @admin.post("/api/ai/loras/{entry_id}/upload")
+    async def api_upload(entry_id: str, request: Request, _admin=Depends(require_admin)):
+        """The file itself, for a LoRA Civitai will not hand the site (early
+        access bought by the owner): raw request body, verified against the
+        registered SHA-256, then mirrored and synced like a download."""
+        data = load_registry()
+        entry = next((e for e in data["loras"] if e.get("id") == entry_id and e.get("state") != "removed"), None)
+        if not entry:
+            raise HTTPException(status_code=404, detail="no such LoRA")
+        _path("blobs").mkdir(parents=True, exist_ok=True)
+        part = _path("blobs") / f"{entry['sha256']}.upload"
+        digest = hashlib.sha256()
+        written = 0
+        try:
+            with open(part, "wb") as handle:
+                async for chunk in request.stream():
+                    written += len(chunk)
+                    if written > MAX_LORA_BYTES:
+                        raise HTTPException(status_code=413, detail="too large for a LoRA")
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if digest.hexdigest() != entry["sha256"]:
+                raise HTTPException(status_code=400, detail={
+                    "error_string": "hash_mismatch",
+                    "message_string": f"that file hashes to {digest.hexdigest()[:12]}…, "
+                                      f"the registered one is {entry['sha256'][:12]}…"})
+            os.replace(part, _path("blobs") / entry["sha256"])
+        finally:
+            part.unlink(missing_ok=True)
+        await _set_mirror(entry_id, "ready", written, "")
+        _spawn(kick_boxes())
+        return {"success_bool": True, "bytes_int": written}
+
     @admin.post("/api/ai/loras/kick")
     async def api_kick(_admin=Depends(require_admin)):
         return {"success_bool": True, "boxes_object": await kick_boxes()}
@@ -1518,6 +1571,54 @@ def build_lora_admin_router(require_admin: Callable[..., Any]) -> APIRouter:
     return admin
 
 
+async def publish_local(path: str, *, entry_id: str, title: str, base: str, trigger: str = "",
+                        strength: Optional[float] = None, only_boxes: Optional[List[str]] = None,
+                        version: str = "", file_name: str = "") -> Dict[str, Any]:
+    """A LoRA file that exists only here (a training run): register it, or
+    replace the bytes of an existing local entry under the same id and file
+    name so graphs that name it keep working. The old bytes are recorded as
+    superseded; the boxes move them to their trash and fetch the new ones."""
+    src = pathlib.Path(path)
+    digest = hashlib.sha256()
+    with open(src, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    sha = digest.hexdigest()
+    family = family_for_base(base)
+    if not family:
+        raise ResolveError("unknown_base", f"Base model '{base}' is not one the farm knows")
+    _path("blobs").mkdir(parents=True, exist_ok=True)
+    blob = _path("blobs") / sha
+    if not blob.is_file():
+        tmp = blob.with_suffix(".tmp")
+        import shutil
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, blob)
+    async with _lock:
+        data = load_registry()
+        entry = next((e for e in data["loras"] if e.get("id") == entry_id), None)
+        if entry is None:
+            entry = {"id": entry_id, "file": safe_file_name(file_name or src.name), "added_at": _now(),
+                     "added_by": "local", "superseded_sha256": [], "aliases": []}
+            data["loras"].append(entry)
+        elif (entry.get("source") or {}).get("kind") != "local":
+            raise ResolveError("not_local", "Only a local entry can be replaced this way")
+        if entry.get("sha256") and entry["sha256"] != sha:
+            entry.setdefault("superseded_sha256", []).append(entry["sha256"])
+        entry.update(sha256=sha, size_bytes=src.stat().st_size, family=family, base=base,
+                     services=services_for_family(family), title=title, version=version,
+                     page="", nsfw=False, trained_words=[trigger] if trigger else [],
+                     recommended_strength=strength, preview=entry.get("preview", ""),
+                     source={"kind": "local", "path": str(src)}, state="active", updated_at=_now(),
+                     mirror={"state": "ready", "bytes": src.stat().st_size, "error": "", "updated_at": _now()})
+        entry["aliases"] = sorted({a for a in (title, entry["file"].rsplit(".", 1)[0]) if a})
+        if only_boxes:
+            entry["boxes"] = list(only_boxes)
+        save_registry(data)
+    return {"success_bool": True, "lora_object": _entry_view(entry, load_registry()),
+            "kick_object": await kick_boxes()}
+
+
 def _cli(argv: List[str]) -> int:
     """Operator entry point on the VPS (runs as the autorig user, env from the service)."""
     import argparse
@@ -1529,6 +1630,16 @@ def _cli(argv: List[str]) -> int:
     add.add_argument("--force", action="store_true")
     sub.add_parser("list", help="show every LoRA and its per-box state")
     sub.add_parser("kick", help="ask every reachable box to sync now")
+    loc = sub.add_parser("local", help="register or replace a LoRA from a local file (training runs)")
+    loc.add_argument("path")
+    loc.add_argument("--id", required=True)
+    loc.add_argument("--title", required=True)
+    loc.add_argument("--base", required=True)
+    loc.add_argument("--trigger", default="")
+    loc.add_argument("--strength", type=float, default=None)
+    loc.add_argument("--boxes", default="")
+    loc.add_argument("--version", default="")
+    loc.add_argument("--file", default="")
     args = parser.parse_args(argv)
 
     async def run() -> Any:
@@ -1539,6 +1650,11 @@ def _cli(argv: List[str]) -> int:
             return result
         if args.cmd == "kick":
             return await kick_boxes()
+        if args.cmd == "local":
+            return await publish_local(args.path, entry_id=args.id, title=args.title, base=args.base,
+                                       trigger=args.trigger, strength=args.strength,
+                                       only_boxes=[b for b in args.boxes.split(",") if b] or None,
+                                       version=args.version, file_name=args.file)
         data = load_registry()
         return [_entry_view(e, data) for e in data["loras"] if e.get("state") != "removed"]
 
