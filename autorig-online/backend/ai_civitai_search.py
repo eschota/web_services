@@ -39,9 +39,12 @@ API = "https://civitai.com/api/v1/images"   # kept for reference; the feed below
 SITE = "https://civitai.red"
 FEED = SITE + "/api/trpc/image.getInfinite"
 CDN = "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
-# The site's browsing-level bits: PG 1, PG-13 2, R 4, X 8, XXX 16. A level
-# shows everything up to and including it, like the site's checkboxes.
-LEVELS = {"none": 1, "soft": 1 | 2, "mature": 1 | 2 | 4, "x": 1 | 2 | 4 | 8 | 16}
+# The site's browsing-level bits: PG 1, PG-13 2, R 4, X 8, XXX 16 — the same
+# checkboxes as civitai.red's browsing-level menu. Each option is exactly those
+# levels (owner, 2026-09-28): "up to X" ranked by reactions over 24 h is almost
+# all PG on the site too (74 PG / 26 other in the top 100), so X means the
+# X and XXX boxes; "All levels" is everything.
+LEVELS = {"none": 1, "soft": 2, "mature": 4, "x": 8 | 16, "all": 1 | 2 | 4 | 8 | 16}
 # What civitai.red sends for an anonymous visitor (captured 2026-09-28).
 EXCLUDED_TAG_IDS = [5161, 5162, 5188, 5249, 130818, 130820, 133182, 130401, 110980]
 CLIENT_VERSION = "5.1.142"
@@ -51,7 +54,7 @@ POOL_TARGET = 200          # unique-author items a random pick is drawn from
 MAX_PAGES = 6              # 100 per page
 PERIODS = {"24h": "Day", "day": "Day", "week": "Week", "month": "Month", "year": "Year", "all": "AllTime"}
 SORTS = {"reactions": "Most Reactions", "comments": "Most Comments", "newest": "Newest"}
-NSFW = {"none": "None", "soft": "Soft", "mature": "Mature", "x": "X"}
+NSFW = {"none": "None", "soft": "Soft", "mature": "Mature", "x": "X", "all": "All"}
 MODES = {"images_popular", "videos_popular", "images_random", "videos_random"}
 
 _cache: Dict[Tuple, Tuple[float, List[Dict[str, Any]]]] = {}
@@ -62,7 +65,7 @@ class SearchRequest(BaseModel):
     mode: str = Field("images_popular", description="images_popular, videos_popular, images_random, videos_random")
     count: int = Field(3, ge=1, le=MAX_COUNT)
     period: str = Field("24h", description="24h, week, month, year, all")
-    nsfw: str = Field("none", description="none, soft, mature, x")
+    nsfw: str = Field("none", description="none (PG), soft (PG-13), mature (R), x (X+XXX), all")
     sort: str = Field("reactions", description="reactions, comments, newest (popular modes)")
     seed: Optional[int] = Field(None, ge=0, le=9007199254740991, description="random modes: the pick")
     refresh: bool = Field(False, description="ignore the 10-minute cache")
@@ -237,7 +240,7 @@ async def api_civitai_search(body: SearchRequest):
     label = {"Day": "24 h", "Week": "week", "Month": "month", "Year": "year", "AllTime": "all time"}[period]
     summary = (f"{len(items)} {'clip' if kind == 'video' else 'picture'}{'' if len(items) == 1 else 's'} · "
                f"{'random of top ' + str(len(pool)) + ' · seed ' + str(seed) if randomised else sort.lower()} · "
-               f"{label} · NSFW up to {nsfw} · " + ("one per author" if unique else "as listed") +
+               f"{label} · " + {"None": "PG", "Soft": "PG-13", "Mature": "R", "X": "X + XXX", "All": "all levels"}[nsfw] + " · " + ("one per author" if unique else "as listed") +
                " · matches civitai.red" + ("" if level == 1 else " (signed-in view)"))
     return {
         "success_bool": True,

@@ -837,8 +837,9 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
                      {"value": "all", "title": "All time"}]},
         # New Search nodes start at X (owner, 2026-09-28); saved nodes keep theirs.
         {"name": "nsfw", "title": "NSFW level", "type": "select", "default": "x",
-         "options": [{"value": "none", "title": "None"}, {"value": "soft", "title": "Soft"},
-                     {"value": "mature", "title": "Mature"}, {"value": "x", "title": "X"}]},
+         "options": [{"value": "none", "title": "None (PG)"}, {"value": "soft", "title": "Soft (PG-13)"},
+                     {"value": "mature", "title": "Mature (R)"}, {"value": "x", "title": "X (X + XXX)"},
+                     {"value": "all", "title": "All levels"}]},
         {"name": "sort", "title": "Sort (Popular)", "type": "select", "default": "reactions",
          "options": [{"value": "reactions", "title": "Most reactions"},
                      {"value": "comments", "title": "Most comments"},
