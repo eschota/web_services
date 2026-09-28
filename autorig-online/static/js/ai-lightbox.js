@@ -566,8 +566,9 @@
         .then(d => {
           if (!d || state.index !== index) return;
           set('box', d.node_string || '');
-          if (d.started_at_unix_float && d.created_at_unix_float) set('time', 'queued ' + Math.round(d.started_at_unix_float - d.created_at_unix_float) + ' s' +
-            (used.render_seconds ? ' · rendered ' + Math.round(used.render_seconds) + ' s' : ''));
+          const queued = d.started_at_unix_float && d.created_at_unix_float ? Math.round(d.started_at_unix_float - d.created_at_unix_float) : null;
+          const rendered = d.render_seconds_float ? Math.round(d.render_seconds_float) : null;
+          set('time', [rendered !== null ? 'rendered ' + rendered + ' s' : '', queued !== null ? 'queued ' + queued + ' s' : ''].filter(Boolean).join(' · '));
         });
     }
   }

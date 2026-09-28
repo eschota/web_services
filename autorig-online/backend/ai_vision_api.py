@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
+import ai_graph_context
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,10 @@ async def api_render_task_status(task_id: str):
             "error_string": row.get("error_string") or row.get("error") or "",
             "started_at_unix_float": row.get("started_at") or 0,
             "created_at_unix_float": row.get("created_at") or 0,
+            # When the box finished and how long it rendered (lightbox info).
+            "finished_at_unix_float": row.get("finished_at") or 0,
+            "render_seconds_float": (round(float(row["finished_at"]) - float(row["started_at"]), 1)
+                                     if row.get("finished_at") and row.get("started_at") else 0),
             # Where in the line this job is, so "queued" can say how long a
             # wait it is. Zero while it is not waiting: running, or finished.
             "queue_position_int": int(row.get("queue_position_int") or 0),
@@ -1917,6 +1922,7 @@ async def _uncached_api_image(body: ImageRequest):
             payload["noise_seed"] = int(body.seed)
         _lora_dispatch_gate(payload)
         try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
             )
@@ -2153,6 +2159,7 @@ async def _uncached_api_video(body: VideoRequest):
             payload["noise_seed"] = int(body.seed)
         _lora_dispatch_gate(payload)
         try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload,
                 timeout=SUBMIT_TIMEOUT_SECONDS,
