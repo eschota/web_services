@@ -107,6 +107,16 @@ def idem_get(key: str, owner: str, path: str):
         return None
 
 
+def _stored_before_start(key: str) -> bool:
+    """A request id answered before this process started: its task was wiped."""
+    try:
+        with _lock:
+            row = _db().execute("SELECT at FROM idem WHERE key = ?", (key,)).fetchone()
+        return bool(row) and float(row[0]) < PROCESS_START
+    except Exception:
+        return False
+
+
 def idem_put(key: str, owner: str, path: str, body: bytes) -> None:
     try:
         with _lock:
@@ -115,6 +125,44 @@ def idem_put(key: str, owner: str, path: str, body: bytes) -> None:
             _db().commit()
     except Exception:
         logger.exception("idempotent answer not stored")
+
+
+# The editor build this release serves: the same content hash the page puts in
+# ai-nodes.js?v= (tools/version_assets.py). A render submitted by an editor
+# (it sends X-Client-Request-Id) from another build is refused, so a tab opened
+# before a deploy cannot put back jobs the restart wiped (owner, 2026-09-28).
+_build_cache = {"key": None, "value": ""}
+
+
+def current_build() -> str:
+    """The ?v= the LIVE /nodes page gives ai-nodes.js (what a fresh tab sends).
+
+    Read through /srv/autorig/current, not this module's own release folder:
+    a static-only deploy switches the page without restarting this process.
+    Re-read whenever the page file changes.
+    """
+    import os
+    import pathlib
+    import re
+    live = pathlib.Path("/srv/autorig/current/autorig-online/static/nodes.html")
+    page = live if live.exists() else pathlib.Path(__file__).resolve().parent.parent / "static" / "nodes.html"
+    try:
+        real = os.path.realpath(page)
+        key = (real, os.stat(real).st_mtime)
+        if _build_cache["key"] != key:
+            found = re.search(r'/static/js/ai-nodes\.js\?v=([^"&]+)"', pathlib.Path(real).read_text(encoding="utf-8"))
+            _build_cache.update(key=key, value=found.group(1) if found else "")
+        return _build_cache["value"]
+    except Exception:
+        return ""
+
+
+PROCESS_START = time.time()
+
+
+def _refuse(code: str, message: str) -> bytes:
+    return json.dumps({"detail": {"error_string": code, "message_string": message,
+                                  "current_build_string": current_build()}}).encode("utf-8")
 
 
 class TaskOwnerMiddleware:
@@ -129,6 +177,21 @@ class TaskOwnerMiddleware:
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
         key = (headers.get("x-client-request-id") or "").strip()[:80]
         path = str(scope.get("path") or "")
+        live_build = current_build() if key else ""
+        if key and live_build:
+            build = (headers.get("x-editor-build") or "").strip()
+            refusal = None
+            if build != live_build:
+                refusal = _refuse("editor_outdated", "This editor is older than the site — reload the page")
+            elif _stored_before_start(key):
+                refusal = _refuse("cancelled_by_restart",
+                                  "This render was cancelled by a server restart — press Render again")
+            if refusal is not None:
+                await send({"type": "http.response.start", "status": 409,
+                            "headers": [(b"content-type", b"application/json"),
+                                        (b"content-length", str(len(refusal)).encode("ascii"))]})
+                await send({"type": "http.response.body", "body": refusal})
+                return
         if key:
             stored = idem_get(key, owner, path)
             if stored is not None:

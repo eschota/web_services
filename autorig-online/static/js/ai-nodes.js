@@ -3613,6 +3613,28 @@
    * of failing the node (2026-09-27).
    */
   const RESTART_RETRY_MS = [2000, 4000, 8000, 12000, 16000, 20000];
+  // The editor build (the content hash in this script's own ?v=): the server
+  // refuses renders from an older build (owner, 2026-09-28: tabs opened before
+  // a deploy resubmitted jobs a restart had wiped).
+  const EDITOR_BUILD = (() => {
+    try {
+      const tag = document.querySelector('script[src*="/static/js/ai-nodes.js"]');
+      return tag ? (new URL(tag.src, location.href).searchParams.get('v') || '') : '';
+    } catch (_) { return ''; }
+  })();
+  function outdatedBanner() {
+    if (document.getElementById('editor-outdated')) return;
+    const bar = document.createElement('div');
+    bar.id = 'editor-outdated';
+    bar.style.cssText = 'position:fixed;z-index:10001;left:50%;top:8px;transform:translateX(-50%);padding:9px 16px;border-radius:9px;' +
+      'background:#b91c1c;color:#fff;font:600 13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.4);cursor:pointer';
+    bar.textContent = 'This editor is older than the site — renders are refused. Click to reload the page.';
+    bar.addEventListener('click', () => location.reload());
+    document.body.appendChild(bar);
+    const run = document.getElementById('run');
+    if (run) { run.disabled = true; run.title = 'Reload the page first: the editor was updated'; }
+  }
+
   async function submitJson(url, body, onRetry) {
     const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
       : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
@@ -3622,7 +3644,7 @@
       try {
         response = await pacedSubmitFetch(url, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json', 'X-Client-Request-Id': requestId},
+          headers: {'Content-Type': 'application/json', 'X-Client-Request-Id': requestId, 'X-Editor-Build': EDITOR_BUILD},
           body: JSON.stringify(body)
         });
       } catch (error) {
@@ -3654,6 +3676,8 @@
         continue;
       }
       if (!response.ok) {
+        const code = parsed.data && parsed.data.detail && parsed.data.detail.error_string;
+        if (response.status === 409 && code === 'editor_outdated') outdatedBanner();
         if (parsed.data) throw new Error(describeError(parsed.data, response.status));
         throw new Error(nonJsonHttpError(response, parsed.text));
       }
