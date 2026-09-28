@@ -541,7 +541,7 @@ async def _audio_mux(body: AudioMuxRequest, work: Path) -> Dict[str, Any]:
 # -------------------------------------------------------------------- jobs
 
 def _job_id(kind: str, payload: Dict[str, Any]) -> str:
-    raw = json.dumps({"kind": kind, "body": payload, "v": 2}, sort_keys=True, separators=(",", ":"))
+    raw = json.dumps({"kind": kind, "body": payload, "v": 3}, sort_keys=True, separators=(",", ":"))
     return "vt_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
@@ -682,6 +682,102 @@ async def _extract_frames(body: ExtractFramesRequest, work: Path) -> Dict[str, A
 @router.post("/api/ai/video-tools/extract-frames")
 async def api_extract_frames(body: ExtractFramesRequest):
     return _submit("extract_frames", body, _extract_frames)
+
+
+# ------------------------------------------------------ control map + adjust
+
+class MapRequest(BaseModel):
+    """A ControlNet map (/api/controlnet) with the node's adjustments applied.
+
+    The adjusted map is the node's output, so what flows downstream (and what an
+    API caller gets) is exactly what the node previews. Defaults change nothing.
+    """
+    model_config = {"extra": "ignore"}
+    channel: str = Field(..., pattern="^(pose|depth|canny|normal)$")
+    image_url: str = Field("", max_length=4096)
+    width: Optional[int] = Field(None, ge=64, le=2048)
+    height: Optional[int] = Field(None, ge=64, le=2048)
+    contrast: float = Field(1.0, ge=0.0, le=4.0)
+    black: int = Field(0, ge=0, le=254)
+    white: int = Field(255, ge=1, le=255)
+    gamma: float = Field(1.0, ge=0.1, le=5.0)
+    blur: float = Field(0.0, ge=0.0, le=20.0, description="% of the long side")
+    invert: bool = False
+    # The editor's settings signature, echoed back so the node knows which
+    # settings its output was made with (not part of the job key).
+    adjust_sig: str = Field("", max_length=400, exclude=True)
+
+
+def _adjust_map(data: bytes, body: MapRequest) -> bytes:
+    import io
+    from PIL import Image, ImageFilter
+    image = Image.open(io.BytesIO(data)).convert("RGB")
+    lo, hi = min(body.black, body.white - 1), max(body.white, body.black + 1)
+    span = float(hi - lo)
+    lut = []
+    for v in range(256):
+        x = min(1.0, max(0.0, (v - lo) / span))           # levels
+        x = x ** (1.0 / body.gamma)                           # gamma
+        x = 0.5 + (x - 0.5) * body.contrast                   # contrast around mid-grey
+        x = min(1.0, max(0.0, x))
+        if body.invert:
+            x = 1.0 - x
+        lut.append(int(round(x * 255)))
+    image = image.point(lut * 3)
+    if body.blur > 0:
+        image = image.filter(ImageFilter.GaussianBlur(radius=body.blur / 100.0 * max(image.size)))
+    buf = io.BytesIO()
+    image.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _map_is_default(body: MapRequest) -> bool:
+    return (abs(body.contrast - 1) < 1e-6 and body.black == 0 and body.white == 255 and abs(body.gamma - 1) < 1e-6
+            and body.blur <= 0 and not body.invert)
+
+
+async def _control_map(body: MapRequest, work: Path) -> Dict[str, Any]:
+    payload = {"channel": body.channel, "image_url": body.image_url}
+    if body.width and body.height:
+        payload.update(width=body.width, height=body.height)
+    async with httpx.AsyncClient() as client:
+        accepted = (await client.post(INTERNAL_BASE + "/api/controlnet", json=payload, timeout=120)).json()
+        url = str(accepted.get("image_url_string") or "")
+        task = str(accepted.get("task_id_string") or "")
+        if not url:
+            raise VideoToolError(f"the map was not accepted: {str(accepted)[:300]}")
+        for _ in range(360):
+            if task:
+                status = (await client.get(INTERNAL_BASE + "/api/ai/render-status/" + task, timeout=30)).json()
+                state = status.get("status_string")
+                if state in ("failed", "cancelled"):
+                    raise VideoToolError(status.get("error_string") or state)
+                if state == "completed":
+                    url = status.get("output_url_string") or url
+                    break
+            elif (await client.head(url, timeout=30)).status_code == 200:
+                break
+            await asyncio.sleep(2.5)
+        else:
+            raise VideoToolError("the map did not land in time")
+        if _map_is_default(body):
+            return {"image_url_string": url, "source_map_url_string": url, "adjusted_bool": False,
+                    "applied_object": {k: getattr(body, k) for k in ("contrast", "black", "white", "gamma", "blur", "invert")}}
+        raw = work / "map.png"
+        await _download(client, url, raw)
+        out = work / "map_adjusted.png"
+        out.write_bytes(_adjust_map(raw.read_bytes(), body))
+        adjusted = await _publish(client, out, "image/png")
+    return {"image_url_string": adjusted, "source_map_url_string": url, "adjusted_bool": True,
+            "applied_object": {k: getattr(body, k) for k in ("contrast", "black", "white", "gamma", "blur", "invert")}}
+
+
+INTERNAL_BASE = os.getenv("AUTORIG_INTERNAL_URL", "http://127.0.0.1:8200")
+
+
+@router.post("/api/ai/video-tools/map")
+async def api_control_map(body: MapRequest):
+    return _submit("control_map", body, _control_map)
 
 
 @router.post("/api/ai/video-tools/scene-split")

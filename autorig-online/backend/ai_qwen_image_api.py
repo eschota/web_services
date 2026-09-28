@@ -300,8 +300,8 @@ async def _attenuate_maps(pictures: List[str], strengths: List[float], flags: Li
                 response.raise_for_status()
                 image = Image.open(io.BytesIO(response.content)).convert("RGB")
                 weak = 1.0 - s
-                grey = Image.new("RGB", image.size, (128, 128, 128))
-                image = Image.blend(image, grey, min(0.9, weak * 1.1))
+                # blur only (2026-09-28): a weaker map is only blurred, its tones
+                # are never changed (a grey blend fogged the whole picture).
                 image = image.filter(ImageFilter.GaussianBlur(radius=weak * 0.035 * max(image.size)))
                 buf = io.BytesIO()
                 image.save(buf, "PNG")

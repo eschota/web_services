@@ -93,7 +93,87 @@
     'three_quarter_left_url_string', 'three_quarter_right_url_string', 'profile_left_url_string',
     'profile_right_url_string', 'back_url_string', 'sheet_url_string', 'source_frame_url_string', 'description_string'];
 
+  /* ------------------------------------------- ControlNet map adjust */
+
+  // Contrast / levels / gamma / blur / invert on the map nodes: the server makes
+  // the map and applies them (/api/ai/video-tools/map), so the adjusted map is
+  // the node's output. While a slider moves, the node previews the change on the
+  // unadjusted map with CSS filters; "tint" only colours that preview.
+  const MAP_KEYS = ['contrast', 'black', 'white', 'gamma', 'blur', 'invert'];
+  function mapSig(body) { return MAP_KEYS.map(k => k + '=' + body[k]).join('&'); }
+  const mapRunnerFor = channel => ({api: '/api/ai/video-tools/map', field: 'image_url_string', type: 'control_' + channel,
+    finish: async (accepted, runner, report) => {
+      const data = await pollVideoTool(accepted, runner, report);
+      return {value: data.image_url_string,
+              outputs: {image_url_string: data.image_url_string, source_map_url_string: data.source_map_url_string || data.image_url_string,
+                        adjust_string: data.applied_object ? mapSig(data.applied_object) : ''}};
+    }});
+
+  function mapControls(element) {
+    const read = name => { const c = element.querySelector('[data-param="' + name + '"]'); return c ? c.value : ''; };
+    return {contrast: Number(read('contrast') || 1), black: Number(read('black') || 0), white: Number(read('white') || 255),
+            gamma: Number(read('gamma') || 1), blur: Number(read('blur') || 0), invert: read('invert') === 'on', tint: read('_tint') || 'none'};
+  }
+
+  function paintMapPreview(id) {
+    const element = api.nodeElement(id);
+    if (!element) return;
+    const img = element.querySelector('.nout > img');
+    if (!img) return;
+    const record = api.runState.get(String(id)) || {};
+    const outputs = record.outputs || {};
+    const c = mapControls(element);
+    const sig = mapSig({contrast: c.contrast, black: c.black, white: c.white, gamma: c.gamma, blur: c.blur, invert: c.invert});
+    const rendered = outputs.adjust_string === sig;
+    const source = outputs.source_map_url_string;
+    // Rendered with these settings: show the real output. Otherwise preview the
+    // settings on the unadjusted map (approximate: levels/gamma as brightness).
+    if (!rendered && source && img.dataset.preview !== source) { img.dataset.preview = source; img.src = source; }
+    if (rendered && outputs.image_url_string && img.dataset.preview !== outputs.image_url_string) {
+      img.dataset.preview = outputs.image_url_string; img.src = outputs.image_url_string;
+    }
+    const filters = [];
+    if (!rendered) {
+      const span = Math.max(1, c.white - c.black) / 255;
+      filters.push('contrast(' + (c.contrast / span).toFixed(3) + ')');
+      filters.push('brightness(' + (Math.pow(0.5, 1 / c.gamma) / 0.5 - (c.black - (255 - c.white)) / 510).toFixed(3) + ')');
+      if (c.blur > 0) filters.push('blur(' + (c.blur / 100 * Math.max(img.clientWidth, img.clientHeight)).toFixed(1) + 'px)');
+      if (c.invert) filters.push('invert(1)');
+    }
+    if (c.tint === 'warm') filters.push('sepia(0.8) saturate(2)');
+    if (c.tint === 'cool') filters.push('sepia(0.6) hue-rotate(170deg) saturate(2)');
+    if (c.tint === 'false') filters.push('sepia(1) saturate(6) hue-rotate(-40deg)');
+    img.style.filter = filters.join(' ');
+    let note = element.querySelector('.nmapnote');
+    if (!note) { note = document.createElement('small'); note.className = 'nmapnote'; img.parentNode.insertBefore(note, img.nextSibling); }
+    note.textContent = rendered || !source ? '' : 'preview — Render to apply these settings';
+    note.style.cssText = 'display:block;font:600 10px system-ui;color:#f59e0b;margin-top:2px';
+  }
+
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('input', event => {
+      const node = event.target && event.target.closest && event.target.closest('.drawflow-node');
+      if (!node || !api) return;
+      const id = node.id.replace(/^node-/, '');
+      if (/^control_/.test((api.meta(id) || {}).service || '')) paintMapPreview(id);
+    }, true);
+    document.addEventListener('change', event => {
+      const node = event.target && event.target.closest && event.target.closest('.drawflow-node');
+      if (!node || !api) return;
+      const id = node.id.replace(/^node-/, '');
+      if (/^control_/.test((api.meta(id) || {}).service || '')) paintMapPreview(id);
+    }, true);
+    setInterval(() => {
+      try {
+        if (!api || !api.graphFromCanvas) return;
+        api.graphFromCanvas().nodes.filter(n => /^control_/.test(n.service || '')).forEach(n => paintMapPreview(n.id));
+      } catch (e) { /* display only */ }
+    }, 2000);
+  }
+
   const RUNNERS = {
+    control_pose: mapRunnerFor('pose'), control_depth: mapRunnerFor('depth'), control_canny: mapRunnerFor('canny'),
+    control_normal: mapRunnerFor('normal'),
     scene_split: {api: '/api/ai/video-tools/scene-split', field: 'storyboard_url_string', type: 'image',
       finish: async (accepted, runner, report) => {
         const data = await pollVideoTool(accepted, runner, report);
@@ -153,7 +233,7 @@
         throw new Error('the Avatar build did not finish in time');
       }},
     // Normal map had no runner in the page (pose/depth/canny only).
-    control_normal: {api: '/api/controlnet', field: 'image_url_string', type: 'control_normal',
+    control_normal_legacy: {api: '/api/controlnet', field: 'image_url_string', type: 'control_normal',
       finish: async (accepted) => {
         const url = accepted.image_url_string;
         for (let attempt = 0; attempt < 400; attempt += 1) {
@@ -289,6 +369,12 @@
   }
 
   function adjustBody(serviceId, body, resolved, params) {
+    if (/^control_/.test(serviceId)) {
+      body.invert = body.invert === 'on' || body.invert === true;
+      ['contrast', 'black', 'white', 'gamma', 'blur'].forEach(k => { if (body[k] === undefined) delete body[k]; });
+      if (body.black === 0) body.black = 0;
+
+    }
     applyRefStrength(serviceId, body, resolved, params);
     if (serviceId === 'video_storyboard' || serviceId === 'scene_split') delete body.view;
     if (serviceId === 'video_summary') body.chain = true;

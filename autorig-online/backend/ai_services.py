@@ -674,6 +674,16 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "checkpoint", "title": "Model", "type": "model",
          "source": "checkpoints", "default": "",
          "help": "Leave empty: Qwen-Image 2.1 turbo is the only edit model. Old edit files are redirected to it"},
+        # Style LoRAs (owner, 2026-09-28): the shared LoRA stack. Only LoRAs of
+        # the selected model's line are offered (2.1 vs 2511/2512); they chain
+        # onto the model loader beside the turbo LoRA.
+        {"name": "lora", "title": "Style (LoRA)", "type": "model",
+         "source": "loras", "default": ""},
+        {"name": "lora_strength", "title": "Style strength", "type": "range",
+         "min": 0, "max": 2, "step": 0.05, "default": 1,
+         "help": "Weight of the first LoRA"},
+        {"name": "loras", "title": "LoRA stack", "type": "lora_stack", "default": "",
+         "help": "<lora:NAME:WEIGHT> tags, applied in order; also accepted in the prompt"},
         # In edit mode these follow the picture that came in unless they are
         # set: an edit that silently reframed the source to 960x540 was the
         # single most confusing thing about the first version of this node.
@@ -1142,3 +1152,24 @@ PARAMS["camera_orbit_video"] = [
     {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 544},
     {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
 ]
+
+
+# Map adjustments (2026-09-28): the processed map is the node's output (server
+# side, /api/ai/video-tools/map); the node previews it live. "tint" colours the
+# preview only and never reaches the map.
+MAP_ADJUST_PARAMS = [
+    {"name": "contrast", "title": "Contrast", "type": "range", "min": 0, "max": 3, "step": 0.05, "default": 1},
+    {"name": "black", "title": "Black point", "type": "range", "min": 0, "max": 254, "step": 1, "default": 0},
+    {"name": "white", "title": "White point", "type": "range", "min": 1, "max": 255, "step": 1, "default": 255},
+    {"name": "gamma", "title": "Gamma", "type": "range", "min": 0.2, "max": 3, "step": 0.05, "default": 1},
+    {"name": "blur", "title": "Blur (% of long side)", "type": "range", "min": 0, "max": 10, "step": 0.1, "default": 0},
+    {"name": "invert", "title": "Invert", "type": "select", "default": "off",
+     "options": [{"value": "off", "title": "Off"}, {"value": "on", "title": "On"}]},
+    {"name": "_tint", "title": "Preview tint (display only)", "type": "select", "default": "none",
+     "options": [{"value": "none", "title": "None"}, {"value": "warm", "title": "Warm"}, {"value": "cool", "title": "Cool"},
+                 {"value": "false", "title": "False colour"}]},
+]
+for _channel in ("pose", "depth", "canny", "normal"):
+    PARAMS.setdefault("control_" + _channel, [])
+    PARAMS["control_" + _channel] = [p for p in PARAMS["control_" + _channel]
+                                     if p["name"] not in {q["name"] for q in MAP_ADJUST_PARAMS}] + MAP_ADJUST_PARAMS
