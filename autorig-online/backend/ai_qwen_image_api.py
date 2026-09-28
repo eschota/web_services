@@ -301,8 +301,8 @@ async def _attenuate_maps(pictures: List[str], strengths: List[float], flags: Li
                 image = Image.open(io.BytesIO(response.content)).convert("RGB")
                 weak = 1.0 - s
                 grey = Image.new("RGB", image.size, (128, 128, 128))
-                image = Image.blend(image, grey, min(0.8, weak * 0.7))
-                image = image.filter(ImageFilter.GaussianBlur(radius=weak * 0.01 * max(image.size)))
+                image = Image.blend(image, grey, min(0.9, weak * 1.1))
+                image = image.filter(ImageFilter.GaussianBlur(radius=weak * 0.035 * max(image.size)))
                 buf = io.BytesIO()
                 image.save(buf, "PNG")
                 out[i] = await _publish_inline_image(client, buf.getvalue())
@@ -350,7 +350,6 @@ async def api_qwen_image_docs():
     }
 
 
-@router.post("/api/qwen-image")
 def _qwen_lora_stack(body: "QwenImageRequest", checkpoint: str):
     """(prompt without tags, [renderfin stack entries]) or None when no LoRA is asked for.
 
@@ -372,6 +371,7 @@ def _qwen_lora_stack(body: "QwenImageRequest", checkpoint: str):
     return prompt, [item.as_payload() for item in stack]
 
 
+@router.post("/api/qwen-image")
 async def api_qwen_image(body: QwenImageRequest):
     import ai_request_cache
     return await ai_request_cache.run_cached(
@@ -451,6 +451,10 @@ async def _uncached_qwen_image(body: QwenImageRequest):
         "main_size_height": height,
     }
     strengths = [max(0.0, min(1.0, float(v))) for v in (body.reference_strengths or [])][:len(pictures)]
+    # softening-only for maps: a softened control map keeps every step (its
+    # strength is in the softening); a map at 0 stays disabled (grey all steps).
+    flags = list(body.reference_attenuate or [])
+    strengths = [1.0 if (i < len(flags) and flags[i] and v > 0.0) else v for i, v in enumerate(strengths)]
     weakened = turbo21 and any(v < 0.999 for v in strengths)
     if len(pictures) > 1 or (weakened and pictures):
         # The output follows image 1, the one the prompt edits; the others are
