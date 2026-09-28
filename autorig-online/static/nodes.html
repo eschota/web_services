@@ -18,7 +18,7 @@
     <script src="/static/vendor/drawflow/drawflow.min.js?v=1c21c8b7aa"></script>
     <script src="/static/js/ai-tooltip.js?v=cecc0fc0a9"></script>
     <script src="/static/js/ai-entities.js?v=d2474f5f0e"></script>
-    <script src="/static/js/ai-node-groups.js?v=18424ee9d2"></script>
+    <script src="/static/js/ai-node-groups.js?v=5eb844de6d"></script>
     <script src="/static/js/ai-node-display.js?v=0adadea81a"></script>
     <script src="/static/js/ai-node-sockets.js?v=5404affeb8"></script>
     <script src="/static/js/ai-node-share.js?v=4060fe88d6"></script>
@@ -34,7 +34,7 @@
     <script src="/static/js/ai-lightbox.js?v=39e15b1b86"></script>
     <script src="/static/js/ai-node-lists.js?v=6378dd6f1d"></script>
     <script src="/static/js/ai-textfields.js?v=cb2cdee6af"></script>
-    <script src="/static/js/ai-nodes.js?v=16621ab8a1"></script>
+    <script src="/static/js/ai-nodes.js?v=ed6bfdd0b4"></script>
     <style>
         .ai-page {
             background:
@@ -538,6 +538,10 @@
         /* Search · Civitai: its item gallery only (no history strip / A-B compare) */
         .drawflow .drawflow-node.svc-civitai_search .node-history-strip,
         .drawflow .drawflow-node.svc-civitai_search .node-compare-ab { display: none !important; }
+        /* Shift-drag copy ghost (ai-node-groups.js) */
+        .drawflow .drawflow-node.copy-ghost { outline: 2px dashed #a5b4fc; outline-offset: 3px; }
+        .drawflow .drawflow-node.copy-ghost::after { content: '+ copy'; position: absolute; top: -26px; left: 8px; padding: 2px 8px;
+            border-radius: 999px; background: #6366f1; color: #fff; font: 700 12px system-ui; pointer-events: none; }
         /* Node resize handle (ai-nodes.js installResizeHandle) */
         .drawflow .drawflow-node > .nresize { position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px; z-index: 5;
             cursor: nwse-resize; opacity: .35; border-radius: 0 0 10px 0;

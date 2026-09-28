@@ -2648,8 +2648,12 @@
       if (!link) return false;
       setHover(null);
       editor.removeSingleConnection(link.from, link.to, link.output, link.input);
-      removed.push(link);
-      if (removed.length > 50) removed.shift();
+      (window.AIUndo = window.AIUndo || []).push(() => {
+        if (!nodeElement(link.from) || !nodeElement(link.to)) { toast('That link cannot come back: a node is gone.'); return; }
+        editor.addConnection(link.from, link.to, link.output, link.input);
+        toast('Link restored.');
+      });
+      if (window.AIUndo.length > 50) window.AIUndo.shift();
       toast('Link removed (Ctrl+Z to undo)');
       return true;
     }
@@ -2679,13 +2683,11 @@
     document.addEventListener('keydown', event => {
       if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.code !== 'KeyZ') return;
       if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
-      const link = removed.pop();
-      if (!link) return;
+      const undo = (window.AIUndo || []).pop();
+      if (!undo) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!nodeElement(link.from) || !nodeElement(link.to)) { toast('That link cannot come back: a node is gone.'); return; }
-      editor.addConnection(link.from, link.to, link.output, link.input);
-      toast('Link restored.');
+      undo();
     }, true);
   }
 

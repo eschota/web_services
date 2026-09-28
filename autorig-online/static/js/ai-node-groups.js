@@ -254,6 +254,91 @@
       document.removeEventListener('mouseup', endMarquee, true);
     }
 
+    /* Shift-drag copies (owner, 2026-09-28): Shift + click still adds / removes
+       the node from the selection; Shift + drag beyond 4 px copies the node
+       (or the selection it belongs to) — settings and incoming links, no
+       results — and drags the copy; the original stays. Releasing Shift before
+       the drop turns it into a plain move; Ctrl+Z removes the copy. */
+    function beginShiftGesture(event, id) {
+      const start = {x: event.clientX, y: event.clientY};
+      let copy = null;       // {ids: [...copies], originals: Map(id -> {x, y}), startX, startY}
+      const move = moveEvent => {
+        if (!copy) {
+          if (Math.hypot(moveEvent.clientX - start.x, moveEvent.clientY - start.y) < 4) return;
+          copy = startCopy(id, start);
+          if (!copy) { cleanup(); return; }
+        }
+        moveEvent.preventDefault();
+        updateGroupDrag(moveEvent);
+        copy.ids.forEach(cid => { const el = nodeElement(cid); if (el) el.classList.toggle('copy-ghost', moveEvent.shiftKey); });
+      };
+      const up = upEvent => {
+        cleanup();
+        if (!copy) { toggleSelection(id); return; }
+        updateGroupDrag(upEvent);
+        groupDrag = null;
+        copy.ids.forEach(cid => { const el = nodeElement(cid); if (el) el.classList.remove('copy-ghost'); });
+        if (!upEvent.shiftKey) {
+          // Shift let go mid-drag: this was a move after all.
+          const data = editor.drawflow.drawflow[editor.module].data;
+          const zoom = Number(editor.zoom) || 1;
+          const dx = (upEvent.clientX - start.x) / zoom, dy = (upEvent.clientY - start.y) / zoom;
+          copy.ids.forEach(cid => editor.removeNodeId('node-' + cid));
+          onNodesRemoved(copy.ids);
+          selected.clear();
+          copy.originals.forEach((pos, oid) => {
+            const el = nodeElement(oid);
+            if (!el || !data[oid]) return;
+            el.style.left = (pos.x + dx) + 'px'; el.style.top = (pos.y + dy) + 'px';
+            data[oid].pos_x = pos.x + dx; data[oid].pos_y = pos.y + dy;
+            editor.updateConnectionNodes('node-' + oid);
+            selected.add(oid);
+          });
+          paintSelection();
+          return;
+        }
+        const ids = copy.ids.slice();
+        pushUndo(() => {
+          const alive = ids.filter(cid => nodeElement(cid));
+          alive.forEach(cid => editor.removeNodeId('node-' + cid));
+          if (alive.length) onNodesRemoved(alive);
+          toast('Copy removed.');
+        });
+        toast((ids.length === 1 ? 'Node' : ids.length + ' nodes') + ' copied (Ctrl+Z to undo).');
+      };
+      const cleanup = () => {
+        document.removeEventListener('mousemove', move, true);
+        document.removeEventListener('mouseup', up, true);
+      };
+      document.addEventListener('mousemove', move, true);
+      document.addEventListener('mouseup', up, true);
+    }
+
+    function startCopy(id, start) {
+      const ids = selected.has(id) ? Array.from(selected) : [id];
+      const before = new Set(selected);
+      selected.clear(); ids.forEach(item => selected.add(item));
+      const payload = clipboardPayload();
+      selected.clear(); before.forEach(item => selected.add(item));
+      if (!payload) return null;
+      const data = editor.drawflow.drawflow[editor.module].data;
+      const originals = new Map(ids.filter(item => data[item]).map(item => [item, {x: data[item].pos_x, y: data[item].pos_y}]));
+      const mapping = pastePayload(payload, {dx: 0, dy: 0, quiet: true});
+      if (!mapping || !mapping.size) return null;
+      // The copies are now the selection; the group drag moves them.
+      beginGroupDrag({clientX: start.x, clientY: start.y});
+      document.removeEventListener('mousemove', updateGroupDrag, true);
+      document.removeEventListener('mouseup', endGroupDrag, true);
+      return {ids: Array.from(mapping.values()), originals};
+    }
+
+    // One undo stack for editor gestures (copies, removed wires): Ctrl+Z.
+    function pushUndo(fn) {
+      const stack = (window.AIUndo = window.AIUndo || []);
+      stack.push(fn);
+      if (stack.length > 50) stack.shift();
+    }
+
     function beginGroupDrag(event, node) {
       const ids = Array.from(selected);
       const data = editor.export().drawflow.Home.data;
@@ -339,6 +424,13 @@
       const id = numericId(node);
       // Shift on the display-mode button means "every node", not "add this
       // one to the selection"; that control answers the click itself.
+      if (event.shiftKey && !event.ctrlKey && !event.metaKey && !editableTarget(event.target) &&
+          !(event.target.closest && event.target.closest('.node-display-mode, .input, .output, .nresize'))) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        beginShiftGesture(event, id);
+        return;
+      }
       if ((event.ctrlKey || event.metaKey || event.shiftKey) &&
           !(event.target.closest && event.target.closest('.node-display-mode'))) {
         event.preventDefault();
@@ -544,7 +636,7 @@
       return { restored, missing };
     }
 
-    function pastePayload(payload) {
+    function pastePayload(payload, place) {
       const currentCount = allNodeElements().length;
       if (currentCount + payload.nodes.length > nodeLimit) {
         toast('The graph is limited to ' + nodeLimit + ' nodes.'); return;
@@ -555,7 +647,8 @@
       const minX = Math.min.apply(null, xs), minY = Math.min.apply(null, ys);
       const maxX = Math.max.apply(null, xs), maxY = Math.max.apply(null, ys);
       let offsetX = 80 * (++pasteCount), offsetY = 80 * pasteCount;
-      if (!samePage) {
+      if (place) { pasteCount -= 1; offsetX = place.dx || 0; offsetY = place.dy || 0; }
+      else if (!samePage) {
         const bounds = canvas.getBoundingClientRect();
         const centerX = (bounds.width / 2 - Number(editor.canvas_x || 0)) / (Number(editor.zoom) || 1);
         const centerY = (bounds.height / 2 - Number(editor.canvas_y || 0)) / (Number(editor.zoom) || 1);
@@ -589,6 +682,7 @@
       selected.clear();
       mapping.forEach(id => selected.add(id));
       paintSelection();
+      if (place && place.quiet) return mapping;
       toast(mapping.size + ' nodes pasted' +
         (external.restored ? '; ' + external.restored + ' incoming link' + (external.restored === 1 ? '' : 's') + ' restored' : '') +
         (external.missing ? '; ' + external.missing + ' incoming link' + (external.missing === 1 ? '' : 's') + ' unavailable' : '') + '.');
