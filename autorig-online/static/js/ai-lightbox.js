@@ -619,12 +619,20 @@
       flash('Preparing the full-size JPG…');
       const canvas = document.createElement('canvas');
       if (kind === 'jpg') {
-        // A detached Image with an onload handler loads the ORIGINAL (the
-        // media gate never swaps it for a thumbnail).
-        const img = new Image();
-        await new Promise((ok, fail) => { img.onload = ok; img.onerror = fail; img.src = url; });
-        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-        canvas.getContext('2d').drawImage(img, 0, 0);
+        // The ORIGINAL output file's bytes, decoded as they are: no <img>, so
+        // neither the media gate nor a thumbnail can stand in for it
+        // (owner, 2026-09-29: an Upscale x2 JPG came out at the input size).
+        const response = await fetch(url, {cache: 'no-store'});
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const bitmap = await createImageBitmap(await response.blob());
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+        try {
+          const real = await (await fetch('/api/ai/media-size?url=' + encodeURIComponent(url))).json();
+          if (real && real.width_int && (real.width_int !== bitmap.width || real.height_int !== bitmap.height)) {
+            flash('Warning: file is ' + real.width_int + '×' + real.height_int + ' but decoded ' + bitmap.width + '×' + bitmap.height);
+          }
+        } catch (_) { /* the size check is advisory */ }
       } else {
         const clip = document.createElement('video');
         clip.muted = true; clip.preload = 'auto';

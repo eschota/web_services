@@ -884,6 +884,17 @@
     load: graph => loadGraph(JSON.parse(JSON.stringify(graph))),
     // The whole graph document with results, in stored ids (ai-undo.js).
     full: () => toStoredIds(graphFromCanvas()),
+    // Auto-render (ai-autoreload.js): the Continue run, leaving failed and
+    // unchanged nodes alone; ids are stored ids.
+    autoRender: skipStoredIds => {
+      autoSkip = new Set();
+      (skipStoredIds || []).forEach(stored => {
+        nodeMeta.forEach((item, key) => { if (item && (item.storedId === stored || String(key) === String(stored))) autoSkip.add(String(key)); });
+      });
+      return runGraph('auto');
+    },
+    running: () => runRequests.size > 0,
+    cancelTasks: ids => supersedeTasks(ids),
   };
 
   /** "sent: <final prompt>" under a generator's prompt field, from the server's answer. */
@@ -5407,6 +5418,7 @@
   }
 
   /** Add the current graph snapshot to the live queue. */
+  let autoSkip = new Set();
   async function runGraph(keepDone) {
     // Say up front when most of the graph will not run: an isolated branch or
     // bypassed nodes look like "Render did nothing" otherwise (2026-09-27).
@@ -5465,6 +5477,8 @@
             if (epoch === canvasEpoch && meta(id)) markState(id, 'bypassed — not run', 'nstate');
             return {ok:false, bypassed:true};
           }
+          // Auto-render leaves a failed node alone until it is changed.
+          if (keepDone === 'auto' && autoSkip.has(String(id))) return {ok:false, skipped:true};
           // Until its inputs arrive a node says what it is waiting for; the old
           // "changed — render to update" read as "left out of this run".
           if (node.kind === KIND_SERVICE && epoch === canvasEpoch && meta(id)) {
