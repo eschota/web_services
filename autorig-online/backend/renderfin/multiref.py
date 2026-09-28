@@ -149,43 +149,61 @@ def _grey_of(workflow: Dict[str, Any], node: str) -> str:
 
 def _qwen21_strength_schedule(workflow: Dict[str, Any], positive: Dict[str, Any],
                                scale_nodes: List[str], strengths: List[float]) -> None:
-    """Image i conditions only the first strengths[i] of the sampling schedule.
+    """A picture at strength v joins only for the LAST v of the sampling steps.
 
-    Qwen-Image 2.1 has no per-reference weight: every picture goes through one
-    encoder into one conditioning. The schedule is split at each distinct
-    strength; each segment gets its own encoder holding only the pictures still
-    active there, limited with ConditioningSetTimestepRange and combined for the
-    guider. The empty latent keeps coming from the full encoder (image 1's size).
+    Qwen-Image 2.1 has no per-reference weight. The step schedule is split at
+    each distinct 1 - v and sampled in consecutive passes; in each pass every
+    picture keeps its place (same token count) and a picture that has not joined
+    yet is a flat mid-grey copy of itself. The early passes, which fix the
+    layout, therefore run without a weak picture, so a low strength frees the
+    composition while the picture still shapes the details at the end.
     """
     s = [max(0.0, min(1.0, float(strengths[i]) if i < len(strengths) and strengths[i] is not None else 1.0))
          for i in range(len(scale_nodes))]
-    if all(v >= 0.999 for v in s):
+    if all(v >= 0.999 for v in s):  # nothing weakened: the template as is
         return
+    sample = _anchor(workflow, "sample", "SamplerCustomAdvanced")
     guider = _anchor(workflow, "guider", "BasicGuider")
+    decode = workflow.get("decode") or {}
+    sigmas_text = str(((workflow.get("sigmas") or {}).get("inputs") or {}).get("sigmas") or "")
+    total = max(1, len([x for x in sigmas_text.split(",") if x.strip()]) - 1) if sigmas_text else 8
     base = {k: v for k, v in positive.get("inputs", {}).items() if not k.startswith("images.")}
-    points = sorted({v for v in s if 0.0 < v < 0.999}) + [1.0]
-    start, combined, segment = 0.0, None, 0
-    for end in points:
-        segment += 1
-        enc = f"refstrength_{segment}_encode"
+    cuts = sorted({min(total - 1, max(1, round((1.0 - v) * total))) for v in s if 0.0 < v < 0.999})
+    bounds = [0] + cuts + [total]
+    sigmas_ref = list(sample["inputs"]["sigmas"])
+    latent = list(sample["inputs"]["latent_image"])
+    last_sample = None
+    for seg, (a, b) in enumerate(zip(bounds, bounds[1:]), start=1):
+        if b <= a:
+            continue
+        frac_start = a / total
+        enc = f"refstrength_{seg}_encode"
         workflow[enc] = {"class_type": "TextEncodeQwenImage21", "inputs": dict(base)}
-        # Every segment keeps all pictures in their places (same token count,
-        # so the combined conditionings stay compatible); a picture past its
-        # strength is replaced by a flat mid-grey copy of the same size.
         for index, (node, v) in enumerate(zip(scale_nodes, s), start=1):
-            workflow[enc]["inputs"][f"images.image_{index}"] = [node if v >= end - 1e-6 else _grey_of(workflow, node), 0]
-        rng = f"refstrength_{segment}_range"
-        workflow[rng] = {"class_type": "ConditioningSetTimestepRange",
-                         "inputs": {"conditioning": [enc, 0], "start": round(start, 4), "end": round(end, 4)}}
-        if combined is None:
-            combined = [rng, 0]
+            joins = v >= 0.999 or (v > 0.0 and frac_start >= (1.0 - v) - 1e-6)
+            workflow[enc]["inputs"][f"images.image_{index}"] = [node if joins else _grey_of(workflow, node), 0]
+        g = f"refstrength_{seg}_guider"
+        workflow[g] = {"class_type": "BasicGuider", "inputs": {"model": guider["inputs"]["model"], "conditioning": [enc, 0]}}
+        # sigmas for steps a..b of the original schedule
+        if b < total:
+            split = f"refstrength_{seg}_split"
+            workflow[split] = {"class_type": "SplitSigmas", "inputs": {"sigmas": sigmas_ref, "step": b - a}}
+            seg_sigmas, rest = [split, 0], [split, 1]
         else:
-            comb = f"refstrength_{segment}_combine"
-            workflow[comb] = {"class_type": "ConditioningCombine",
-                              "inputs": {"conditioning_1": combined, "conditioning_2": [rng, 0]}}
-            combined = [comb, 0]
-        start = end
-    guider.setdefault("inputs", {})["conditioning"] = combined
+            seg_sigmas, rest = sigmas_ref, None
+        smp = f"refstrength_{seg}_sample"
+        noise = sample["inputs"]["noise"] if last_sample is None else [f"refstrength_{seg}_nonoise", 0]
+        if last_sample is not None:
+            workflow[f"refstrength_{seg}_nonoise"] = {"class_type": "DisableNoise", "inputs": {}}
+        workflow[smp] = {"class_type": "SamplerCustomAdvanced",
+                         "inputs": {"noise": noise, "guider": [g, 0], "sampler": sample["inputs"]["sampler"],
+                                    "sigmas": seg_sigmas, "latent_image": latent}}
+        latent = [smp, 0]
+        last_sample = smp
+        if rest is not None:
+            sigmas_ref = rest
+    if last_sample and isinstance(decode.get("inputs"), dict):
+        decode["inputs"]["samples"] = [last_sample, 0]
 
 
 def inject_qwen21_references(workflow: Dict[str, Any], filenames: List[str],

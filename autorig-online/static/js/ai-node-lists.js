@@ -159,7 +159,8 @@
 
   // A Strength slider (0..1) beside each connected picture socket of a
   // Qwen-Image node. The value rides as param rs_1..rs_3 (socket order); the
-  // server schedules a weaker picture over fewer sampling steps, a weak control
+  // server lets a weaker picture join only for the last part of the sampling
+  // steps (the layout stays free), a weak control
   // map is also softened, and the prompt is told to follow it loosely.
   const RS_FIELDS = {image: 1, reference_2: 2, reference_3: 3};
 
@@ -174,15 +175,34 @@
       byUrl.set(String(url), Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1);
     });
     Object.keys(body).filter(k => /^rs_\d$/.test(k)).forEach(k => delete body[k]);
+    if (!body.image_url && !body.image_base64) return;
+    let order = [body.image_url || body.image_base64 || ''].concat(body.reference_image_urls || []).filter(Boolean);
+    // Control maps last, the character (the first non-map picture) first, and
+    // the prompt's "image N" renumbered to match: with a map in slot 1 Qwen
+    // redrew the map's subject and ignored the character (2026-09-28).
+    if (order.some(url => channels.get(String(url))) && order.some(url => !channels.get(String(url)))) {
+      const sorted = order.filter(url => !channels.get(String(url))).concat(order.filter(url => channels.get(String(url))));
+      if (sorted.some((url, i) => url !== order[i])) {
+        const renumber = new Map(order.map((url, i) => [i + 1, sorted.indexOf(url) + 1]));
+        body.prompt = String(body.prompt || '').replace(/\b([Ii]mage|[Pp]icture) (\d)\b/g,
+          (m, word, n) => word + ' ' + (renumber.get(Number(n)) || n));
+        if (body.image_base64) { delete body.image_base64; }
+        body.image_url = sorted[0];
+        body.reference_image_urls = sorted.slice(1);
+        order = sorted;
+      }
+    }
     if (![...byUrl.values()].some(v => v < 0.999)) return;
-    const order = [body.image_url || body.image_base64 || ''].concat(body.reference_image_urls || []).filter(Boolean);
     const strengths = order.map(url => byUrl.has(String(url)) ? byUrl.get(String(url)) : 1);
     body.reference_strengths = strengths;
     body.reference_attenuate = order.map((url, i) => !!channels.get(String(url)) && strengths[i] < 0.999);
     const hints = [];
     order.forEach((url, i) => {
       const ch = channels.get(String(url));
-      if (strengths[i] < 0.8) hints.push('Follow image ' + (i + 1) + (ch ? ' (the ' + ch + ' map)' : '') + ' only loosely.');
+      if (strengths[i] < 0.8) {
+        hints.push(ch ? 'Image ' + (i + 1) + ' is a ' + ch + ' map: use it only as a loose layout guide; draw the character from image 1.'
+                      : 'Follow image ' + (i + 1) + ' only loosely.');
+      }
     });
     if (hints.length) body.prompt = [String(body.prompt || '').trim(), hints.join(' ')].filter(Boolean).join(' ');
   }
