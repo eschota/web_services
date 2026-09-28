@@ -4462,6 +4462,9 @@
   }
 
   function showResult(host, type, value, outputs) {
+    // Search shows one gallery of its items (ai-node-lists paint), no main preview.
+    const owner = host && host.closest && host.closest('.drawflow-node');
+    if (owner && owner.classList.contains('svc-civitai_search')) { host.innerHTML = ''; return; }
     if (type === 'model3d') {
       host.innerHTML = '';
       showModel(host, String(value || ''), (outputs && outputs.preview_url_string) || '');
@@ -5224,7 +5227,9 @@
                 }
               }
             }
-            if (upstream.media) {
+            // Search · Civitai items are media like Media in: a picture socket
+            // gets a clip's first frame (owner, 2026-09-28: Depth got an .mp4).
+            if (upstream.media || (meta(link.from) || {}).service === 'civitai_search') {
               try {
                 value = await adaptMediaValue(value, node.service, link.input);
               } catch (error) {

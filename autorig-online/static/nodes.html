@@ -34,7 +34,7 @@
     <script src="/static/js/ai-lightbox.js?v=39e15b1b86"></script>
     <script src="/static/js/ai-node-lists.js?v=6378dd6f1d"></script>
     <script src="/static/js/ai-textfields.js?v=cb2cdee6af"></script>
-    <script src="/static/js/ai-nodes.js?v=8bd759c5eb"></script>
+    <script src="/static/js/ai-nodes.js?v=16621ab8a1"></script>
     <style>
         .ai-page {
             background:
@@ -535,6 +535,9 @@
         /* A LoRA of another family: dimmed, struck through, left out of the render. */
         .lslot.lslot-bad .mpick-button { border-color: rgba(248,113,113,.6); opacity: .6; }
         .lslot.lslot-bad .mpick-label { text-decoration: line-through; }
+        /* Search · Civitai: its item gallery only (no history strip / A-B compare) */
+        .drawflow .drawflow-node.svc-civitai_search .node-history-strip,
+        .drawflow .drawflow-node.svc-civitai_search .node-compare-ab { display: none !important; }
         /* Node resize handle (ai-nodes.js installResizeHandle) */
         .drawflow .drawflow-node > .nresize { position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px; z-index: 5;
             cursor: nwse-resize; opacity: .35; border-radius: 0 0 10px 0;
