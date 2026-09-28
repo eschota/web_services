@@ -921,6 +921,32 @@ def _plain(value):
     return value
 
 
+# Params the editor itself rewrites while a Render runs: a 0 seed becomes the
+# random seed actually used, an auto size follows the input picture, an auto
+# frame count follows the clip, an empty checkpoint is filled with the default.
+# None of these is a person changing the node, so none may move its signature
+# (2026-09-29: every X9 job was cancelled by the autosave that followed it).
+_RUNTIME_PARAMS = {"seed"}
+_AUTO_SIZE_FLAGS = ("_size_auto", "_follow_input_size")
+
+
+def _signature_params(params: Dict[str, object]) -> Dict[str, object]:
+    out: Dict[str, object] = {}
+    auto_size = any(params.get(flag) for flag in _AUTO_SIZE_FLAGS)
+    auto_frames = bool(params.get("_frames_auto"))
+    for key, value in params.items():
+        if key in _UI_ONLY_PARAMS or key in _RUNTIME_PARAMS:
+            continue
+        if value in ("", None):
+            continue  # unset: the editor fills it at run time
+        if auto_size and key in ("width", "height"):
+            continue
+        if auto_frames and key == "frame_count":
+            continue
+        out[key] = value
+    return _plain(out)
+
+
 def node_signatures(graph: Dict[str, object]) -> Dict[str, str]:
     """Signature of every node the graph runs: {node id: sha1}.
 
@@ -961,7 +987,7 @@ def node_signatures(graph: Dict[str, object]) -> Dict[str, str]:
             "service": node.get("service"),
             "entity_type": node.get("entity_type"),
             "value": node.get("value") if node.get("kind") == NODE_INPUT else None,
-            "params": _plain({k: v for k, v in params.items() if k not in _UI_ONLY_PARAMS}),
+            "params": _signature_params(params),
             "quality": quality,
             "inputs": feeds,
         }

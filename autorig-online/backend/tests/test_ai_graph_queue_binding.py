@@ -71,6 +71,21 @@ class NodeSignatureTests(unittest.TestCase):
         self.assertEqual(ai_graph.node_signatures(one)["b"], ai_graph.node_signatures(two)["b"])
 
 
+    def test_runtime_params_the_editor_rewrites_do_not_move_the_signature(self):
+        base = _graph()
+        base["nodes"][1]["params"].update({"seed": 0, "checkpoint": "krea2_turbo.safetensors", "lora": "", "_size_auto": True, "height": 448, "frame_count": 25, "_frames_auto": True})
+        run = _graph()
+        run["nodes"][1]["params"].update({"seed": 1456845360, "checkpoint": "krea2_turbo.safetensors", "_size_auto": True,
+                                          "width": 544, "height": 960, "frame_count": 97, "_frames_auto": True})
+        self.assertEqual(ai_graph.node_signatures(base)["b"], ai_graph.node_signatures(run)["b"])
+        manual = _graph()
+        manual["nodes"][1]["params"].update({"_size_auto": False, "width": 544})
+        self.assertNotEqual(ai_graph.node_signatures(base)["b"], ai_graph.node_signatures(manual)["b"])
+        model = _graph()
+        model["nodes"][1]["params"].update({"checkpoint": "other.safetensors"})
+        self.assertNotEqual(ai_graph.node_signatures(run)["b"], ai_graph.node_signatures(model)["b"])
+
+
 class StoredSignatureAndReconcileTests(unittest.TestCase):
     def setUp(self):
         self._dir = tempfile.TemporaryDirectory()
