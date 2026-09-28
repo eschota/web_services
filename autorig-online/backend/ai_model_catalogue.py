@@ -121,14 +121,45 @@ def known_file(name: str, kind: Optional[str] = None) -> Optional[Dict[str, obje
     return None
 
 
+SERVICE_ALIASES = {"video_concat": "video"}
+
+
+def _qwen_picker(checkpoints: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    """Qwen-Image models for the node: usable ones, the default (2.1 turbo) first.
+
+    A generate-only file says so in its title, so nobody picks it to edit.
+    """
+    out = []
+    for entry in checkpoints:
+        if not entry.get("usable"):
+            continue
+        modes = entry.get("qwen_image_modes")
+        if isinstance(modes, (list, tuple)) and list(modes) == ["generate"]:
+            title = str(entry.get("title") or entry.get("file") or "")
+            if "generate only" not in title.lower():
+                entry = dict(entry, title=title + " (generate only — edits run on 2.1)")
+        out.append(entry)
+    out.sort(key=lambda entry: 0 if entry.get("qwen_image_default") else 1)
+    return out
+
+
 @router.get("/api/ai/model-catalogue")
 async def api_model_catalogue(service: Optional[str] = None):
     """Checkpoints and LoRAs with their pictures, optionally for one service."""
     all_entries = entries()
+    # Concat shots picks the model / LoRAs for the video nodes it collects.
+    service = SERVICE_ALIASES.get(service or "", service)
     if service:
+        # An unusable model is still shown greyed out, but only in the pickers
+        # of the service it belongs to: a Qwen-Image node listed a video model
+        # the farm cannot run (owner, 2026-09-28). An entry that names no
+        # service at all stays visible everywhere, as before.
         checkpoints = [e for e in all_entries
                        if e.get("kind") == "checkpoint"
-                       and (service in (e.get("services") or []) or not e.get("usable"))]
+                       and (service in (e.get("services") or [])
+                            or (not e.get("usable") and not (e.get("services") or [])))]
+        if service == "qwen_image":
+            checkpoints = _qwen_picker(checkpoints)
         loras = [e for e in all_entries
                  if e.get("kind") == "lora" and service in (e.get("services") or [])]
     else:

@@ -155,6 +155,24 @@ def model_family(entry: Optional[Mapping[str, object]]) -> str:
     return ""
 
 
+def qwen_line(entry: Optional[Mapping[str, object]]) -> str:
+    """Which Qwen-Image line an entry belongs to: "2.1" or "classic".
+
+    Qwen-Image 2.1 is a new architecture; LoRAs for the original Qwen-Image,
+    Qwen-Image-Edit (2509/2511) and 2512 do not load onto it, nor the reverse
+    (owner, 2026-09-28).
+    """
+    if not entry:
+        return ""
+    if str(entry.get("qwen_image_generation") or "").strip() == "2.1":
+        return "2.1"
+    text = (str(entry.get("base") or "") + " " + str(entry.get("title") or "")).lower()
+    compact = text.replace(" ", "").replace("-", "").replace("_", "")
+    if "qwenimage2.1" in compact or "qwen2.1" in compact or "qwenimage21" in compact:
+        return "2.1"
+    return "classic"
+
+
 def compatible(checkpoint: Optional[Mapping[str, object]],
                lora: Optional[Mapping[str, object]]) -> bool:
     """Whether the selected files share a model architecture.
@@ -173,6 +191,8 @@ def compatible(checkpoint: Optional[Mapping[str, object]],
     # the 2.3 adapter). The reverse is not promised, so it stays refused.
     if (left, right) in FORWARD_COMPATIBLE_LORAS:
         return True
+    if left == right == "qwen_image":
+        return qwen_line(checkpoint) == qwen_line(lora)
     return left == right
 
 

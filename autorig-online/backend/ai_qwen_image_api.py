@@ -266,10 +266,49 @@ class QwenImageRequest(BaseModel):
     cfg: Optional[float] = Field(None, ge=0, le=30, description="0 keeps the workflow's own")
     seed: Optional[int] = Field(None, ge=0, le=9007199254740991)
     checkpoint: Optional[str] = Field(None, description="Installed GGUF quantisation")
+    lora: Optional[str] = Field(None, description="Style LoRA file (catalogue); first in the stack")
+    lora_strength: Optional[float] = Field(None, ge=-2, le=2, description="Weight of `lora`; empty = 1")
+    loras: Optional[str] = Field(None, max_length=4000,
+                                 description="More LoRAs as <lora:NAME:WEIGHT> tags, applied in order")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
     reference_image_urls: Optional[List[str]] = Field(
         None, description=("More pictures after image_url, in order (image 2, image 3); "
                            "3 in all. A video URL stands for its first frame"))
+    # Influence 0..1 of image 1, 2, 3 (default 1). Below 1 a picture conditions
+    # only the first part of the sampling schedule (renderfin.multiref).
+    reference_strengths: Optional[List[float]] = Field(
+        None, description="Per-picture influence 0..1 for image 1..3 (Qwen-Image 2.1); 1 = full")
+    # Control maps below full strength are also softened before encoding:
+    # blended toward mid-grey and blurred by (1 - strength).
+    reference_attenuate: Optional[List[bool]] = Field(
+        None, description="Per picture: soften this (control-map) picture by its strength")
+
+
+async def _attenuate_maps(pictures: List[str], strengths: List[float], flags: List[bool]) -> List[str]:
+    """A control map at strength s < 1 is blended toward mid-grey and blurred by (1 - s)."""
+    import io
+    from PIL import Image, ImageFilter
+    from ai_vision_api import _publish_inline_image
+    out = list(pictures)
+    async with httpx.AsyncClient() as client:
+        for i, url in enumerate(pictures):
+            s = max(0.0, min(1.0, float(strengths[i]) if i < len(strengths) else 1.0))
+            if not (i < len(flags) and flags[i]) or s >= 0.999:
+                continue
+            try:
+                response = await client.get(url, timeout=60, follow_redirects=True)
+                response.raise_for_status()
+                image = Image.open(io.BytesIO(response.content)).convert("RGB")
+                weak = 1.0 - s
+                grey = Image.new("RGB", image.size, (128, 128, 128))
+                image = Image.blend(image, grey, min(0.8, weak * 0.7))
+                image = image.filter(ImageFilter.GaussianBlur(radius=weak * 0.01 * max(image.size)))
+                buf = io.BytesIO()
+                image.save(buf, "PNG")
+                out[i] = await _publish_inline_image(client, buf.getvalue())
+            except Exception:  # keep the original map rather than fail the edit
+                continue
+    return out
 
 
 def extra_references(body: "QwenImageRequest") -> List[str]:
@@ -312,6 +351,27 @@ async def api_qwen_image_docs():
 
 
 @router.post("/api/qwen-image")
+def _qwen_lora_stack(body: "QwenImageRequest", checkpoint: str):
+    """(prompt without tags, [renderfin stack entries]) or None when no LoRA is asked for.
+
+    The single `lora` goes first with `lora_strength` (empty = 1), then the
+    `loras` tags, then tags in the prompt. Every file must be a catalogue LoRA
+    for this service and of the selected model's Qwen line.
+    """
+    single = str(body.lora or "").strip()
+    tags = str(body.loras or "").strip()
+    if not single and not tags and "<lora:" not in str(body.prompt or ""):
+        return None
+    import ai_vision_api
+    if single:
+        weight = 1.0 if body.lora_strength is None else float(body.lora_strength)
+        tags = (f"<lora:{single}:{weight:g}> " + tags).strip()
+    prompt, stack, _override = ai_vision_api._lora_stack_request(SERVICE_ID, body.prompt, tags, "")
+    if stack:
+        ai_vision_api._check_stack_family(stack, checkpoint)
+    return prompt, [item.as_payload() for item in stack]
+
+
 async def api_qwen_image(body: QwenImageRequest):
     import ai_request_cache
     return await ai_request_cache.run_cached(
@@ -342,6 +402,11 @@ async def _uncached_qwen_image(body: QwenImageRequest):
         installed = installed_checkpoints(mode)
         checkpoint = installed[0] if installed else ""
 
+    lora_stack = _qwen_lora_stack(body, checkpoint)
+    if lora_stack is not None:
+        body = body.model_copy(update={"prompt": lora_stack[0]})
+        lora_stack = lora_stack[1]
+
     source = ""
     explicit_size = bool(body.width and body.height)
     if explicit_size:
@@ -371,6 +436,9 @@ async def _uncached_qwen_image(body: QwenImageRequest):
                 # be working at a size nobody asked for.
                 width, height = _fit_source(*await _source_size(client, source))
 
+    if mode == "edit" and body.reference_attenuate and body.reference_strengths:
+        pictures = await _attenuate_maps(pictures, body.reference_strengths, body.reference_attenuate)
+        source = pictures[0] if pictures else source
     turbo21 = is_generation21(checkpoint)
     final_prompt = compose_prompt(body.prompt, body.system_prompt,
                                   len(pictures) if mode == "edit" else 0)
@@ -382,15 +450,25 @@ async def _uncached_qwen_image(body: QwenImageRequest):
         "main_size_width": width,
         "main_size_height": height,
     }
-    if len(pictures) > 1:
+    strengths = [max(0.0, min(1.0, float(v))) for v in (body.reference_strengths or [])][:len(pictures)]
+    weakened = turbo21 and any(v < 0.999 for v in strengths)
+    if len(pictures) > 1 or (weakened and pictures):
         # The output follows image 1, the one the prompt edits; the others are
-        # what it borrows from.
+        # what it borrows from. A weakened picture needs the multi template,
+        # which is where the per-picture schedule is built.
         payload["type"] = TYPE21_EDIT_MULTI if turbo21 else TYPE_EDIT_MULTI
         payload["reference_image_urls"] = pictures
+        if weakened:
+            payload["reference_strengths"] = strengths
     elif source:
         payload["image_url"] = source
     if checkpoint:
         payload["checkpoint"] = checkpoint
+    if lora_stack:
+        # Chained onto the model loader (renderfin apply_lora_stack), beside
+        # the 2.1 turbo LoRA or after the GGUF loader. Never payload["lora"]:
+        # that replaces the template's own LoRA, which is the turbo one.
+        payload["loras"] = lora_stack
     if body.steps and not turbo21:
         payload["steps"] = int(body.steps)
     if body.cfg and not turbo21:

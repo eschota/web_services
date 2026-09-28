@@ -116,11 +116,36 @@ def MULTIREF_INPUTS(total: int) -> List[Dict[str, object]]:
 
 SERVICES: List[Dict[str, object]] = [
     {
-        "id": "video_frame", "title": "Video first frame", "path": "/nodes",
-        "api": "/api/ai/video-reference", "status": "live",
-        "summary": "Extract the first frame of a driving video for scene and character editing.",
+        # Extract Frames (2026-09-27) replaces "Video first frame" under the same
+        # id, so saved graphs keep working: the first picture is still on
+        # image_url_string. Scenes are found with Scene split's detector (its own
+        # job; the Scene split pipeline is untouched).
+        "id": "video_frame", "title": "Extract Frames", "path": "/nodes",
+        "api": "/api/ai/video-tools/extract-frames", "status": "live", "list_source": True,
+        "summary": ("Pictures from a video by template (Start-End per scene by default): a gallery / list for "
+                    "per-item pipelines, plus the first picture for simple wiring."),
         "inputs": [{"type": VIDEO, "field": "video_url", "required": True, "title": "Source video"}],
-        "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "First frame"}],
+        # One plain picture socket per extracted frame (primary, 2026-09-27):
+        # a node wired to frame k gets exactly that picture and runs once.
+        # Labels ("1 · S1 start") and visibility follow the result / probe.
+        "outputs": [
+            {"type": IMAGE, "field": "frame_1_url_string", "title": "Frame 1", "frame_socket": 1},
+            {"type": IMAGE, "field": "frame_2_url_string", "title": "Frame 2", "frame_socket": 2},
+            {"type": IMAGE, "field": "frame_3_url_string", "title": "Frame 3", "frame_socket": 3},
+            {"type": IMAGE, "field": "frame_4_url_string", "title": "Frame 4", "frame_socket": 4},
+            {"type": IMAGE, "field": "frame_5_url_string", "title": "Frame 5", "frame_socket": 5},
+            {"type": IMAGE, "field": "frame_6_url_string", "title": "Frame 6", "frame_socket": 6},
+            {"type": IMAGE, "field": "frame_7_url_string", "title": "Frame 7", "frame_socket": 7},
+            {"type": IMAGE, "field": "frame_8_url_string", "title": "Frame 8", "frame_socket": 8},
+            {"type": IMAGE, "field": "frame_9_url_string", "title": "Frame 9", "frame_socket": 9},
+            {"type": IMAGE, "field": "frame_10_url_string", "title": "Frame 10", "frame_socket": 10},
+            {"type": IMAGE, "field": "frame_11_url_string", "title": "Frame 11", "frame_socket": 11},
+            {"type": IMAGE, "field": "frame_12_url_string", "title": "Frame 12", "frame_socket": 12},
+            {"type": IMAGE, "field": "image_url_string", "title": "First picture"},
+            {"type": IMAGE, "field": "frame_url_string", "title": "Pictures (each) · fan-out list", "per_item": True},
+            {"type": TEXT, "field": "frame_info_string", "title": "Picture info (each)", "per_item": True},
+            {"type": TEXT, "field": "frames_text_string", "title": "Pictures (text)"},
+        ],
     },
     {
         # Scene-aware since 2026-09-27 (owner): adaptive cut detection on the
@@ -146,6 +171,8 @@ SERVICES: List[Dict[str, object]] = [
             {"type": IMAGE, "field": "first_frame_url_string", "title": "First frame (each)", "per_item": True},
             {"type": IMAGE, "field": "middle_frame_url_string", "title": "Middle frame (each)", "per_item": True},
             {"type": TEXT, "field": "shot_info_string", "title": "Shot info (each)", "per_item": True},
+            {"type": IMAGE, "field": "last_frame_url_string", "title": "Last frame (each, = next segment's first)",
+             "per_item": True},
             {"type": IMAGE, "field": "storyboard_url_string", "title": "Storyboard (scene middles)"},
             {"type": TEXT, "field": "scenes_text_string", "title": "Scenes (text)"},
             {"type": TEXT, "field": "shots_json_string", "title": "Shot list (for Concat)"},
@@ -164,6 +191,22 @@ SERVICES: List[Dict[str, object]] = [
             {"type": TEXT, "field": "shots_json", "required": False, "title": "Shot list (from Scene split)"},
         ],
         "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Joined video"}],
+    },
+    {
+        # Keyframe chain (2026-09-27): segments share their boundary frame;
+        # Summary fits each to its length, drops the duplicate boundary frame
+        # and joins them seamlessly, with the original audio when wired.
+        "id": "video_summary", "title": "Summary · seamless join", "path": "/nodes",
+        "api": "/api/ai/video-tools/concat", "status": "live", "list_sink": True,
+        "summary": ("Joins keyframe-chain segments into one seamless clip: each fitted to its length (resample keeps "
+                    "both keyframes), the shared boundary frame kept once, original audio under it."),
+        "inputs": [
+            {"type": VIDEO, "field": "clip", "required": True, "title": "Segments (each)"},
+            {"type": VIDEO, "field": "clip_2", "required": False, "title": "Segments 2 (if 1 missing)"},
+            {"type": TEXT, "field": "shots_json", "required": True, "title": "Shot list (from Scene split)"},
+            {"type": VIDEO, "field": "source_url", "required": False, "title": "Audio from (original)"},
+        ],
+        "outputs": [{"type": VIDEO, "field": "video_url_string", "title": "Seamless video"}],
     },
     {
         "id": "audio_from_source", "title": "Audio from source", "path": "/nodes",
@@ -631,6 +674,16 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "checkpoint", "title": "Model", "type": "model",
          "source": "checkpoints", "default": "",
          "help": "Leave empty: Qwen-Image 2.1 turbo is the only edit model. Old edit files are redirected to it"},
+        # Style LoRAs (owner, 2026-09-28): the shared LoRA stack. Only LoRAs of
+        # the selected model's line are offered (2.1 vs 2511/2512); they chain
+        # onto the model loader beside the turbo LoRA.
+        {"name": "lora", "title": "Style (LoRA)", "type": "model",
+         "source": "loras", "default": ""},
+        {"name": "lora_strength", "title": "Style strength", "type": "range",
+         "min": 0, "max": 2, "step": 0.05, "default": 1,
+         "help": "Weight of the first LoRA"},
+        {"name": "loras", "title": "LoRA stack", "type": "lora_stack", "default": "",
+         "help": "<lora:NAME:WEIGHT> tags, applied in order; also accepted in the prompt"},
         # In edit mode these follow the picture that came in unless they are
         # set: an edit that silently reframed the source to 960x540 was the
         # single most confusing thing about the first version of this node.
@@ -735,6 +788,21 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
              {"value": "none", "title": "No retry"},
          ]},
     ],
+    "video_frame": [
+        {"name": "template", "title": "Template", "type": "select", "default": "start_end",
+         "options": [{"value": "start_end", "title": "Start-End (per scene)"},
+                     {"value": "start_middle_end", "title": "Start-Middle-End (per scene)"},
+                     {"value": "start_only", "title": "Start only"},
+                     {"value": "end_only", "title": "End only"},
+                     {"value": "n_per_scene", "title": "N evenly spaced per scene"},
+                     {"value": "every_n", "title": "Every N frames"}]},
+        {"name": "detect_scenes", "title": "Detect scenes", "type": "select", "default": "on",
+         "options": [{"value": "on", "title": "On (per scene)"}, {"value": "off", "title": "Off (whole clip)"}]},
+        {"name": "n", "title": "N", "type": "number", "min": 1, "max": 64, "step": 1, "default": 4,
+         "help": "N per scene, or the step for Every N frames"},
+        {"name": "offset", "title": "Offset from cut", "type": "number", "min": 0, "max": 48, "step": 1, "default": 0,
+         "help": "Skip this many frames after a cut and before the next (transition blur)"},
+    ],
     "scene_split": [
         {"name": "sensitivity", "title": "Cut sensitivity (z)", "type": "range", "min": 4, "max": 40, "step": 1,
          "default": 12, "help": "A cut must stand this many robust deviations above the clip's typical change; lower = more cuts"},
@@ -747,7 +815,20 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
         {"name": "max_seconds", "title": "Only first N s", "type": "number", "min": 0, "max": 600, "step": 1,
          "default": 0, "help": "0 = whole video"},
     ],
+    "video_summary": [
+        {"name": "fit", "title": "Fit segments", "type": "select", "default": "resample",
+         "options": [{"value": "resample", "title": "Resample (first+last frame renders)"},
+                     {"value": "trim", "title": "Trim (start-frame renders)"}]},
+        {"name": "fps", "title": "FPS", "type": "number", "min": 8, "max": 60, "step": 1, "default": 24},
+    ],
     "video_concat": [
+        {"name": "checkpoint", "title": "Model for all shots", "type": "model", "source": "checkpoints", "default": "",
+         "help": "Empty = inherit. Set: overrides the model of every LTX / MiniMax video node wired into this Concat"},
+        {"name": "lora", "title": "Style (LoRA) for all shots", "type": "model", "source": "loras", "default": ""},
+        {"name": "lora_strength", "title": "Style strength", "type": "range", "min": 0, "max": 1.5, "step": 0.05,
+         "default": 0, "help": "0 leaves the workflow's own strength"},
+        {"name": "loras", "title": "LoRA stack for all shots", "type": "lora_stack", "default": "",
+         "help": "Empty = inherit. Set: replaces the LoRAs of the video nodes wired into this Concat (filtered by model family)"},
         {"name": "out_width", "title": "Width", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,
          "help": "0 = size of the first clip"},
         {"name": "out_height", "title": "Height", "type": "number", "min": 0, "max": 4096, "step": 2, "default": 0,
@@ -1003,3 +1084,71 @@ async def api_ai_services():
         },
         "server_time_unix_int": int(time.time()),
     }
+
+
+# ------------------------------------------------------------ Camera orbit
+#
+# (2026-09-27) See the same subject from another camera position.
+# Image: Qwen-Image 2.1 turbo with a written camera prompt (preset or
+# yaw/pitch/zoom). Video: LTX-2.5 + CrossView-Prompt IC-LoRA re-shoots a clip
+# from a new angle (worker-4090). ai_camera_orbit_api.
+import ai_camera_orbit_api as _camera_api  # noqa: E402
+
+SERVICES.append({
+    "id": "camera_orbit_image", "title": "Camera orbit · image", "path": "/nodes",
+    "api": "/api/camera-orbit/image", "status": "live",
+    "summary": ("The same subject from another camera position: orbit left/right up to the back "
+                "view, high/low angle, dolly in/out. Qwen-Image 2.1 turbo; a clip gives its first frame."),
+    "inputs": [
+        {"type": IMAGE, "field": "image", "required": True, "title": "Picture or clip",
+         "also_accepts": [VIDEO]},
+        {"type": TEXT, "field": "prompt", "required": False, "title": "Extra description"},
+    ],
+    "outputs": [
+        {"type": IMAGE, "field": "image_url_string", "title": "New view"},
+        {"type": TEXT, "field": "prompt_string", "title": "Camera prompt"},
+    ],
+})
+SERVICES.append({
+    "id": "camera_orbit_video", "title": "Camera orbit · video", "path": "/nodes",
+    "api": "/api/camera-orbit/video", "status": "live", "slow": True,
+    "summary": ("Re-shoot a clip from a new camera angle (same action): LTX-2.5 + CrossView IC-LoRA. "
+                "Frontal sector up to ~60°; chain two nodes for a bigger move. worker-4090."),
+    "inputs": [
+        {"type": VIDEO, "field": "video_url", "required": True, "title": "Clip to re-shoot"},
+    ],
+    "outputs": [
+        {"type": VIDEO, "field": "video_url_string", "title": "New angle clip"},
+        {"type": TEXT, "field": "prompt_string", "title": "Camera prompt"},
+    ],
+})
+PARAMS["camera_orbit_image"] = [
+    {"name": "preset", "title": "Camera", "type": "select", "default": "orbit_right_45",
+     "options": [{"value": k, "title": t} for k, t in _camera_api.IMAGE_PRESET_TITLES.items()]},
+    {"name": "yaw", "title": "Yaw °", "type": "range", "min": -180, "max": 180, "step": 15, "default": 0,
+     "help": "Custom only: + = camera orbits to the right, 180 = back view"},
+    {"name": "pitch", "title": "Pitch °", "type": "range", "min": -60, "max": 90, "step": 5, "default": 0,
+     "help": "Custom only: + = camera above looking down, - = below looking up"},
+    {"name": "zoom", "title": "Zoom", "type": "range", "min": 0.25, "max": 4, "step": 0.25, "default": 1,
+     "help": "Custom only: >1 closer (dolly in), <1 further (dolly out)"},
+    {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 960},
+    {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 1, "default": 540},
+    {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1,
+     "default": 0, "help": "0 gives a different picture each run"},
+]
+PARAMS["camera_orbit_video"] = [
+    {"name": "azimuth", "title": "Orbit", "type": "select", "default": "to the right",
+     "options": [{"value": v, "title": v} for v in _camera_api.AZIMUTHS],
+     "help": "slightly ~15°, to the ~30°, far ~50° (frontal sector only)"},
+    {"name": "elevation", "title": "Height", "type": "select", "default": "same height",
+     "options": [{"value": v, "title": v} for v in _camera_api.ELEVATIONS]},
+    {"name": "distance", "title": "Distance", "type": "select", "default": "same distance",
+     "options": [{"value": v, "title": v} for v in _camera_api.DISTANCES]},
+    {"name": "strength", "title": "LoRA strength", "type": "range", "min": 0.5, "max": 2.5, "step": 0.1,
+     "default": 1.5, "help": "1.5 measured best on distilled LTX-2.5; lower = closer to the source"},
+    {"name": "frame_count", "title": "Frames", "type": "number", "min": 0, "max": 193, "step": 8, "default": 0,
+     "help": "0 = the clip's length (8k+1, up to 193)"},
+    {"name": "width", "title": "Width", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 960},
+    {"name": "height", "title": "Height", "type": "number", "min": 256, "max": 2048, "step": 2, "default": 544},
+    {"name": "seed", "title": "Seed", "type": "number", "min": 0, "max": 9007199254740991, "step": 1, "default": 0},
+]
