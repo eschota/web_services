@@ -12,6 +12,28 @@
     return !!target.closest('input, textarea, select, button, [contenteditable="true"], dialog, .mpick-panel, .media-stage');
   }
 
+  // Copy / paste of nodes steps aside only for real text fields (owner,
+  // 2026-09-28): a focused button or node still copies the selected nodes.
+  function textFieldTarget(target) {
+    if (!target || !target.closest) return false;
+    if (target.isContentEditable) return true;
+    const field = target.closest('textarea, select, [contenteditable="true"], input');
+    if (!field) return false;
+    return field.tagName !== 'INPUT' || !/^(button|submit|reset|checkbox|radio|range|color|file|image)$/i.test(field.type || '');
+  }
+
+  // A text field with nothing selected has nothing of its own to copy, so
+  // Ctrl+C there still copies the selected nodes (a focused link field of a
+  // Media in node used to copy its link instead).
+  function textSelectedIn(target) {
+    if (!target) return false;
+    if (/^(INPUT|TEXTAREA)$/.test(target.tagName || '')) {
+      try { return target.selectionStart !== target.selectionEnd; } catch (_) { return true; }
+    }
+    if (target.isContentEditable || target.tagName === 'SELECT') return !!String(window.getSelection ? window.getSelection() : '').trim();
+    return false;
+  }
+
   function numericId(element) {
     const id = String(element && element.id || '');
     return id.indexOf('node-') === 0 ? id.slice(5) : '';
@@ -399,24 +421,51 @@
       return { version: VERSION, source: pageKey, nodes, links, external_inputs: externalInputs };
     }
 
+    // The last copied nodes also live here. `pending` means the system
+    // clipboard refused them, so the next Ctrl+V pastes these, not whatever
+    // link the system clipboard still holds.
+    const internalClipboard = { payload: null, pending: false };
+    let copyRequested = false;
+
     function writeClipboard(event) {
       const payload = clipboardPayload();
       if (!payload) return false;
       const text = TEXT_PREFIX + JSON.stringify(payload);
       if (text.length > MAX_CLIPBOARD_BYTES) { toast('Selection is too large to copy.'); return false; }
+      internalClipboard.payload = payload;
+      const count = payload.nodes.length + (payload.nodes.length === 1 ? ' node' : ' nodes');
       if (event && event.clipboardData) {
         event.preventDefault();
+        event.stopImmediatePropagation();
         event.clipboardData.setData(MIME, JSON.stringify(payload));
         event.clipboardData.setData('text/plain', text);
-        toast(payload.nodes.length + ' nodes copied.');
+        internalClipboard.pending = false;
+        toast(count + ' copied.');
         return true;
       }
+      internalClipboard.pending = true;
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => toast(payload.nodes.length + ' nodes copied.'),
-          () => toast('Clipboard access was refused.'));
+        navigator.clipboard.writeText(text).then(() => { internalClipboard.pending = false; toast(count + ' copied.'); },
+          () => toast(count + ' copied (this page only: clipboard access was refused).'));
         return true;
       }
-      return false;
+      toast(count + ' copied (this page only).');
+      return true;
+    }
+
+    // Ctrl+C with nodes selected: the copy event carries the data at once and
+    // needs no permission; if the browser does not fire it, the async
+    // clipboard; if that is refused, the page's own clipboard.
+    function copySelection() {
+      pruneSelection();
+      if (!selected.size) return false;
+      copyRequested = true;
+      let fired = false;
+      try { fired = document.execCommand('copy'); } catch (_) { fired = false; }
+      const handled = !copyRequested;
+      copyRequested = false;
+      if (!fired || !handled) writeClipboard(null);
+      return true;
     }
 
     function parsePayload(raw) {
@@ -573,7 +622,9 @@
     }
 
     async function pasteFromSystemClipboard() {
+      if (internalClipboard.pending && internalClipboard.payload) { internalClipboard.pending = false; return !!pastePayload(internalClipboard.payload); }
       if (!navigator.clipboard || !navigator.clipboard.readText) {
+        if (internalClipboard.payload) return !!pastePayload(internalClipboard.payload);
         toast('Use Ctrl+V to paste copied nodes.'); return false;
       }
       try {
@@ -581,19 +632,29 @@
         if (!payload) { toast('The clipboard does not contain AutoRig nodes.'); return false; }
         return !!pastePayload(payload);
       } catch (_) {
+        if (internalClipboard.payload) return !!pastePayload(internalClipboard.payload);
         toast('Clipboard access was refused. Use Ctrl+V instead.'); return false;
       }
     }
 
+    // Copied nodes win over link / picture detection: this listener runs in
+    // the capture phase, before the media paste, and stops it.
     function onPaste(event) {
-      if (editableTarget(event.target)) return;
-      const items = Array.from(event.clipboardData && event.clipboardData.items || []);
-      if (items.some(item => String(item.type || '').indexOf('image/') === 0)) return;
-      const raw = (event.clipboardData && (event.clipboardData.getData(MIME) || event.clipboardData.getData('text/plain'))) || '';
-      const payload = parsePayload(raw);
+      if (event.target && event.target.closest && event.target.closest('dialog[open]')) return;
+      const data = event.clipboardData;
+      const raw = (data && (data.getData(MIME) || data.getData('text/plain'))) || '';
+      // Copied nodes never belong in a text field: they land on the canvas
+      // even when a field has focus. Anything else in a field stays the field's.
+      let payload = parsePayload(raw.trim());
+      const inField = textFieldTarget(event.target) || textFieldTarget(document.activeElement);
+      // The system clipboard refused the last copy and still holds the older
+      // link or picture: the page's own copy is the newer one.
+      if (!payload && !inField && internalClipboard.pending && internalClipboard.payload) payload = internalClipboard.payload;
       if (!payload) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      internalClipboard.pending = false;
+      if (inField && document.activeElement && document.activeElement.blur) document.activeElement.blur();
       pastePayload(payload);
     }
 
@@ -1136,13 +1197,21 @@
         if (!editableTarget(event.target)) { event.preventDefault(); event.stopImmediatePropagation(); }
         return;
       }
-      if (editableTarget(event.target)) return;
       const command = event.ctrlKey || event.metaKey;
-      if (command && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); }
-      if (command && event.key.toLowerCase() === 'c' && selected.size) {
+      // Ctrl+C copies the selected nodes whatever the clipboard holds and
+      // wherever focus is, except in a text field, a dialog or over selected
+      // page text. By physical key, so a Russian layout copies too.
+      if (command && !event.shiftKey && !event.altKey && (event.code === 'KeyC' || String(event.key).toLowerCase() === 'c') && selected.size &&
+          !textSelectedIn(document.activeElement) &&
+          !(event.target && event.target.closest && event.target.closest('dialog[open]')) &&
+          !String(window.getSelection ? window.getSelection() : '').trim()) {
         event.preventDefault();
-        if (!document.execCommand('copy')) writeClipboard(null);
+        event.stopImmediatePropagation();
+        copySelection();
+        return;
       }
+      if (editableTarget(event.target)) return;
+      if (command && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); }
       if (command && event.key.toLowerCase() === 'd' && selected.size) {
         event.preventDefault(); event.stopImmediatePropagation(); duplicateSelection();
       }
@@ -1159,8 +1228,13 @@
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('keyup', onKeyUp, true);
     function onCopy(event) {
-      if (editableTarget(event.target) || editableTarget(document.activeElement)) return;
-      writeClipboard(event);
+      if (!copyRequested) {
+        // A copy from the menu or another route: text fields and selected page text keep theirs.
+        if (textSelectedIn(document.activeElement)) return;
+        if (!textFieldTarget(document.activeElement) && String(window.getSelection ? window.getSelection() : '').trim()) return;
+        if (textFieldTarget(document.activeElement) && !selected.size) return;
+      }
+      if (writeClipboard(event)) copyRequested = false;
     }
 
     document.addEventListener('copy', onCopy, true);
