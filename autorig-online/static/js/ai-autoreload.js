@@ -178,7 +178,10 @@
     }
     // Only the changed nodes and what depends on them run; everything else
     // (including failed or stale nodes nobody touched) stays as it is.
-    const skip = now.nodes.map(n => String(n.id)).filter(id => !affected.has(id));
+    // Inputs (Media in, Text in) are never skipped: an unchanged input is what
+    // the changed node reads, and a skipped one reports "input did not
+    // arrive: not in the run" (2026-09-29: auto-render rendered nothing).
+    const skip = now.nodes.filter(n => n.kind === 'service').map(n => String(n.id)).filter(id => !affected.has(id));
     lastRendered = now;
     toast('Auto-render: ' + jobs + ' job' + (jobs === 1 ? '' : 's') + ' queued');
     try { await host.autoRender(skip); } catch (_) { /* the run reports itself */ }

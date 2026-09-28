@@ -5535,7 +5535,18 @@
             return {ok:false, bypassed:true};
           }
           // Auto-render leaves a failed node alone until it is changed.
-          if (keepDone === 'auto' && autoSkip.has(String(id))) return {ok:false, skipped:true};
+          // Only a service node is ever left out of an auto run; an input
+          // always answers, or the node that reads it cannot run.
+          if (keepDone === 'auto' && autoSkip.has(String(id)) && node.kind === KIND_SERVICE) {
+            // A skipped node that already has a result hands it on, so only
+            // the changed nodes and what depends on them actually render.
+            const prior = runState.get(String(id));
+            if (prior && prior.status === 'done' && prior.value) {
+              return {ok:true, result:Object.assign({type:prior.type, value:prior.value, outputs:prior.outputs || null},
+                                                    prior.items ? {items:prior.items} : {})};
+            }
+            return {ok:false, skipped:true};
+          }
           // Until its inputs arrive a node says what it is waiting for; the old
           // "changed — render to update" read as "left out of this run".
           if (node.kind === KIND_SERVICE && epoch === canvasEpoch && meta(id)) {
