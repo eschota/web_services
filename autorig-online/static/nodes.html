@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/static/css/styles.css">
     <link rel="stylesheet" href="/static/vendor/drawflow/drawflow.min.css">
     <script src="/static/vendor/drawflow/drawflow.min.js"></script>
+    <script src="/static/js/ai-tooltip.js?v=tip1"></script>
     <script src="/static/js/ai-entities.js?v=20260926-catalogue-ttl"></script>
     <script src="/static/js/ai-node-groups.js?v=20260926-halfhd1-copy1"></script>
     <script src="/static/js/ai-node-display.js?v=20260923-sockets1-text2"></script>
@@ -29,7 +30,7 @@
     <script src="/static/js/ai-node-slider.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-node-lora-stack.js?v=20260926-slider4"></script>
     <script src="/static/js/ai-render-quality.js?v=20260926-draft1"></script>
-    <script src="/static/js/ai-lightbox.js?v=lb1"></script>
+    <script src="/static/js/ai-lightbox.js?v=lb2"></script>
     <script src="/static/js/ai-node-lists.js?v=video-tools-20260928f"></script>
     <script src="/static/js/ai-nodes.js?v=20260927-perf2-maps3-x9b-ids1-civ13-reset1-meta1-mi3-lists1-sup2-own1-wait1-frames3-video-tools-20260927l-video-tools-20260927m-video-tools-20260927n-video-tools-20260927o-gal1-video-tools-20260927p-video-tools-20260927q-video-tools-20260927r-keys1-useseed1-video-tools-20260927s-seedfix1-model3d1-paste1-video-tools-20260927t-video-tools-20260927u-video-tools-20260927v-video-tools-20260927w-media3d1-camorbit1-idem2-video-tools-20260927x-perf4-video-tools-20260928a-lb1-video-tools-20260928b-video-tools-20260928c-video-tools-20260928d-video-tools-20260928e-video-tools-20260928f"></script>
     <style>
@@ -172,11 +173,22 @@
            The weight slider, value, reset and remove squeezed the picker to
            41 px, so the LoRA name had zero width and the thumbnail looked empty. */
         html body .drawflow .drawflow-node .lslot { display: flex !important; flex-wrap: wrap; align-items: center; gap: 4px; }
-        html body .drawflow .drawflow-node .lslot > .mpick-slot { flex: 1 1 100%; min-width: 0; }
-        html body .drawflow .drawflow-node .lslot > .mpick-slot .mpick-button { width: 100%; min-width: 0; }
+        /* Every slot the same (owner, 2026-09-28): slot 1 wraps its picker in
+           .mpick-slot, slots 2+ in .lslot-pick; both take a full line, the
+           name wraps to two lines, and slider · value · reset · swap · remove
+           share the line below. Shared by every node with a LoRA stack. */
+        html body .drawflow .drawflow-node .lslot > .mpick-slot,
+        html body .drawflow .drawflow-node .lslot > .lslot-pick { flex: 1 1 100% !important; width: 100%; min-width: 0; display: block; order: 0; }
+        html body .drawflow .drawflow-node .lslot > .mpick-slot .mpick-button,
+        html body .drawflow .drawflow-node .lslot > .lslot-pick .mpick-button { width: 100%; min-width: 0; height: auto; min-height: 34px; padding-top: 4px; padding-bottom: 4px; }
         html body .drawflow .drawflow-node .lslot .mpick-choice { min-width: 0; flex: 1 1 auto; overflow: hidden; }
-        html body .drawflow .drawflow-node .lslot .mpick-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        html body .drawflow .drawflow-node .lslot .aislider { flex: 1 1 auto; min-width: 60px; }
+        html body .drawflow .drawflow-node .lslot .mpick-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+            overflow: hidden; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; text-align: left; }
+        html body .drawflow .drawflow-node .lslot .aislider { flex: 1 1 auto; min-width: 60px; order: 1; }
+        html body .drawflow .drawflow-node .lslot > output, html body .drawflow .drawflow-node .lslot > .aislider-reset,
+        html body .drawflow .drawflow-node .lslot > .lslot-swap, html body .drawflow .drawflow-node .lslot > .lslot-remove { order: 2; flex: 0 0 auto; }
+        html body .drawflow .drawflow-node .lslot > .lslot-note { order: 3; }
+        html body .drawflow .drawflow-node .lstack-first > .lslot { flex: 1 1 0; }
         /* A LoRA without a preview picture still shows what it is. */
         html body .drawflow .drawflow-node .lslot .mpick-thumb:not(.empty):not([style*="url("])::after,
         .mpick-panel .mpick-item .mpick-thumb:not(.empty):not([style*="url("])::after {

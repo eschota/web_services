@@ -93,7 +93,7 @@
   .alb-seed[hidden] { display: none; }
 
   .alb-tip { position: fixed; z-index: 10; padding: 5px 8px; border-radius: 8px; background: rgba(10,10,18,.95); color: #fff;
-    font: 12px Inter, system-ui, sans-serif; white-space: nowrap; pointer-events: none; border: 1px solid rgba(255,255,255,.1);
+    font: 500 14px Inter, system-ui, sans-serif; white-space: nowrap; pointer-events: none; border: 1px solid rgba(255,255,255,.12);
     transform: translate(-50%, -100%); opacity: 0; transition: opacity .12s ease; }
   .alb-tip.alb-show { opacity: 1; }
   .alb-tip kbd { margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,.14); font: 11px ui-monospace, Consolas, monospace; }
