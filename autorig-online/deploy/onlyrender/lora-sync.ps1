@@ -18,7 +18,7 @@ param([switch]$Install, [switch]$UserTask, [string]$Box = '', [string]$ComfyRoot
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$AgentVersion = 'lora-sync/2026-09-27-models'
+$AgentVersion = 'lora-sync/2026-09-28-replace'
 $Api = 'https://autorig.online/api/ai/loras/sync'
 # -HomeDir: a box without an elevated installer (worker-4090, the owner's
 # desktop) keeps its state under %LOCALAPPDATA% instead of ProgramData.
@@ -237,8 +237,20 @@ try {
         if ($useAuth) { $args_ += @('-H', ('Authorization: Bearer ' + $Key), '-H', ('X-AutoRig-Box: ' + $Box)) }
         $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
         if (Test-Path $curl) {
-            & $curl @args_ $url 2>&1 | Out-Null
-            return ($LASTEXITCODE -eq 0 -and (Test-Path $dest))
+            if (-not $script:ProgressId) {
+                & $curl @args_ $url 2>&1 | Out-Null
+                return ($LASTEXITCODE -eq 0 -and (Test-Path $dest))
+            }
+            $quoted = @($args_ + @($url)) | ForEach-Object { '"' + ([string]$_ -replace '"', '\"') + '"' }
+            $proc = Start-Process -FilePath $curl -ArgumentList ($quoted -join ' ') -PassThru -WindowStyle Hidden
+            while (-not $proc.HasExited) {
+                Start-Sleep -Seconds 20
+                $b = 0; if (Test-Path $dest) { $b = (Get-Item $dest).Length }
+                $items[$script:ProgressId] = @{ state = 'downloading'; bytes = [int64]$b }
+                Report $items $inv
+            }
+            $proc.WaitForExit()
+            return ($proc.ExitCode -eq 0 -and (Test-Path $dest))
         }
         try {
             if ($useAuth) { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dest -Headers $Headers -TimeoutSec 3600 }
@@ -345,8 +357,13 @@ try {
         $target = Join-Path $Loras $it.file
         $have = $inv | Where-Object { $_.dir -eq $Loras -and $_.name -eq $it.file } | Select-Object -First 1
         if ($have) {
-            if ($have.sha256 -eq $it.sha256) { $items[$it.id] = @{ state = 'ready' } }
-            else { $items[$it.id] = @{ state = 'hash_mismatch'; error = ('a different ' + $it.file + ' is already here') } }
+            if ($have.sha256 -eq $it.sha256) { $items[$it.id] = @{ state = 'ready' }; continue }
+            if (@($it.replace_sha256) -contains $have.sha256) {
+                $todo += $it
+                $items[$it.id] = @{ state = 'downloading'; bytes = 0 }
+                continue
+            }
+            $items[$it.id] = @{ state = 'hash_mismatch'; error = ('a different ' + $it.file + ' is already here') }
             continue
         }
         # The same bytes under another name (a Civitai vs Hugging Face file
@@ -374,6 +391,7 @@ try {
             continue
         }
         $ok = $false; $from = ''
+        $script:ProgressId = $it.id
         foreach ($peer in @($it.peers)) {
             if (-not $peer) { continue }
             if ((Fetch $peer $part $false) -and ((Get-FileHash -Algorithm SHA256 -LiteralPath $part).Hash.ToLower() -eq $it.sha256)) {
@@ -389,6 +407,7 @@ try {
                 $items[$it.id] = @{ state = 'failed'; error = 'download failed' }
             }
         }
+        $script:ProgressId = $null
         if ($ok) {
             Move-Item -Force -LiteralPath $part -Destination $target
             $items[$it.id] = @{ state = 'ready' }
