@@ -723,6 +723,90 @@ def _resume_key(urls: List[str]) -> str:
     return hashlib.sha1("\n".join(sorted(urls)).encode("utf-8")).hexdigest()[:20]
 
 
+
+# ---------------------------------------------------------------- blurhash
+# Civitai's web client computes a 4x4 blurhash of every picture (and of a
+# clip's first frame) and sends it as `hash` with post.addImage; the feeds use
+# it as the placeholder. Our posts went out with hash null (2026-09-28).
+
+_B83 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~"
+
+
+def _b83(value: int, length: int) -> str:
+    return "".join(_B83[(value // (83 ** (length - i - 1))) % 83] for i in range(length))
+
+
+def blurhash_of(image, nx: int = 4, ny: int = 4) -> str:
+    """Blurhash (https://blurha.sh) of a PIL image, the same 4x4 size Civitai uses."""
+    import numpy as np
+    small = image.convert("RGB").resize((64, 64))
+    rgb = np.asarray(small, dtype=np.float64) / 255.0
+    lin = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    h, w, _ = lin.shape
+    ys, xs = np.arange(h), np.arange(w)
+    factors = []
+    for j in range(ny):
+        for i in range(nx):
+            basis = np.outer(np.cos(np.pi * j * ys / h), np.cos(np.pi * i * xs / w))
+            norm = 1.0 if (i == 0 and j == 0) else 2.0
+            factors.append(norm * (lin * basis[:, :, None]).sum(axis=(0, 1)) / (w * h))
+    dc, ac = factors[0], factors[1:]
+
+    def to_srgb(v: float) -> int:
+        v = min(1.0, max(0.0, v))
+        return int(round((v * 12.92 if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055) * 255))
+
+    out = _b83((nx - 1) + (ny - 1) * 9, 1)
+    if ac:
+        actual = max(abs(float(c)) for f in ac for c in f)
+        quant = int(max(0, min(82, int(actual * 166 - 0.5))))
+        maximum = (quant + 1) / 166
+        out += _b83(quant, 1)
+    else:
+        maximum = 1.0
+        out += _b83(0, 1)
+    out += _b83((to_srgb(dc[0]) << 16) + (to_srgb(dc[1]) << 8) + to_srgb(dc[2]), 4)
+
+    def sign_pow(v: float) -> float:
+        return (abs(v) ** 0.5) * (1 if v >= 0 else -1)
+
+    for f in ac:
+        q = [int(max(0, min(18, int(sign_pow(float(c) / maximum) * 9 + 9.5)))) for c in f]
+        out += _b83(q[0] * 19 * 19 + q[1] * 19 + q[2], 2)
+    return out
+
+
+async def media_blurhash(content: bytes, is_video: bool) -> Optional[str]:
+    """Blurhash of a picture, or of a clip's first frame (ffmpeg)."""
+    from io import BytesIO
+    from PIL import Image
+    try:
+        if not is_video:
+            with Image.open(BytesIO(content)) as image:
+                return blurhash_of(image)
+        SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+        handle, path = tempfile.mkstemp(suffix=".mp4", dir=SCRATCH_DIR)
+        try:
+            with os.fdopen(handle, "wb") as out:
+                out.write(content)
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-loglevel", "error", "-i", path, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            frame, _err = await process.communicate()
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        if not frame:
+            return None
+        with Image.open(BytesIO(frame)) as image:
+            return blurhash_of(image)
+    except Exception as error:
+        logger.info("civitai: blurhash failed: %s", error)
+        return None
+
+
 # ---------------------------------------------------------------- one file
 
 async def prepare_item(client: httpx.AsyncClient, url: str, body: CivitaiPostRequest, sources: List[str],
@@ -754,6 +838,9 @@ async def prepare_item(client: httpx.AsyncClient, url: str, body: CivitaiPostReq
         media_metadata.update(probe)
     elif width and height:
         media_metadata.update(width=width, height=height)
+    blur = await media_blurhash(content, is_video)
+    if blur:
+        media_metadata["hash"] = blur
     request, extra_requests = source_requests(url, sources, "video" if is_video else "image")
     resources, notes = collect_resources(body.resources, request, dict(body.generation or {}))
     for other in extra_requests:
@@ -763,7 +850,7 @@ async def prepare_item(client: httpx.AsyncClient, url: str, body: CivitaiPostReq
                 resources.append(item)
         notes += [note for note in more_notes if note not in notes]
     meta = build_meta(body.prompt, request, dict(body.generation or {}), resources, upscaled, (width, height))
-    return {"url": url, "content": content, "name": name, "mime": mime, "is_video": is_video,
+    return {"url": url, "content": content, "name": name, "mime": mime, "is_video": is_video, "hash": blur,
             "width": width, "height": height, "media_metadata": media_metadata, "meta": meta,
             "resources": resources, "notes": notes,
             "techniques": techniques_for(request, "video" if is_video else "image")}
@@ -870,7 +957,7 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
             _job_update(job, stage="posting", stage_label=f"Adding file {index + 1} of {len(items)}")
             image = await _trpc(client, "post.addImage", {
                 "postId": post_id, "url": item["key"], "name": item["name"], "width": item["width"],
-                "height": item["height"], "hash": None, "meta": item["meta"], "index": index,
+                "height": item["height"], "hash": item.get("hash"), "meta": item["meta"], "index": index,
                 "mimeType": item["mime"], "metadata": item["media_metadata"],
                 "type": "video" if item["is_video"] else "image"})
             image_id = int((image or {}).get("id") or 0)
