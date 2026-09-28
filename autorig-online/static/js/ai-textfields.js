@@ -4,8 +4,12 @@
  * answer (.ntext) gets
  *   - twice the old type size (16 px at zoom 1; never under 13 px on screen
  *     when the canvas is zoomed out), comfortable line height and padding;
- *   - auto-grow to its content instead of an inner scrollbar, up to 60 % of
- *     the window, and only then a scrollbar;
+ *   - a fixed height inside the node (owner correction, same day: text never
+ *     changes the node's size); longer text scrolls inside the field with the
+ *     wheel / touchpad / keys, with no visible scrollbar and a soft fade at
+ *     the edge where more text is; the wheel scrolls the text only when there
+ *     is more text that way, otherwise it zooms the canvas as usual;
+ *   - the full width of the node;
  *   - ⧉ copy, ⤢ open in a large editor (Esc closes, Ctrl+Enter applies), Aa
  *     monospace (off by default, remembered), and a character / word count;
  *   - editing that never drags the node: pointer presses inside the text stay
@@ -23,13 +27,24 @@
   const style = document.createElement('style');
   style.textContent = `
   #canvas .drawflow { --tf-size: ${BASE}px; }
-  .tf-wrap { position: relative; display: block; width: 100%; }
+  .tf-wrap { position: relative; display: block; width: 100%; flex: 1 1 100%; min-width: 0; box-sizing: border-box; }
+  .nparam > .tf-wrap { flex-basis: 100%; }
+  .nout > .tf-wrap, .ninput > .tf-wrap { width: 100%; }
   .drawflow .drawflow-node:not([data-display-mode="small"]) textarea.tf, .drawflow .drawflow-node:not([data-display-mode="small"]) .ntext.tf {
     font-size: var(--tf-size) !important; line-height: 1.5 !important; padding: 10px 12px 22px !important;
     border-radius: 10px !important; box-sizing: border-box; width: 100%; resize: none !important;
-    overflow-y: hidden; max-height: none !important; -webkit-line-clamp: unset !important; display: block !important;
+    overflow-y: auto !important; max-height: none !important; -webkit-line-clamp: unset !important; display: block !important;
+    height: 150px; min-height: 48px; scrollbar-width: none; overscroll-behavior: contain;
     font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
-    user-select: text; cursor: text; scrollbar-width: thin; }
+    user-select: text; cursor: text; }
+  .drawflow .drawflow-node .ntext.tf { height: 190px !important; }
+  .drawflow .drawflow-node .tf::-webkit-scrollbar { display: none; }
+  .drawflow .drawflow-node .tf.tf-more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent); }
+  .drawflow .drawflow-node .tf.tf-more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 2.2em), transparent);
+    mask-image: linear-gradient(to top, #000 calc(100% - 2.2em), transparent); }
+  .drawflow .drawflow-node .tf.tf-more-up.tf-more-down { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 2.2em, #000 calc(100% - 2.2em), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 2.2em, #000 calc(100% - 2.2em), transparent); }
   .drawflow .drawflow-node .tf.tf-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; }
   .drawflow .drawflow-node textarea.tf::placeholder { color: rgba(203,213,245,.55); opacity: 1; }
   .drawflow .drawflow-node textarea.tf:focus { outline: 2px solid rgba(129,140,248,.7); outline-offset: 0; }
@@ -86,18 +101,12 @@
 
   function fit(el) {
     if (!el.isConnected) return;
-    // The window's share, in canvas pixels (the node is scaled by the zoom).
-    const max = Math.max(120, window.innerHeight * MAX_FRACTION / (lastZoom || zoom()));
-    if (el.tagName === 'TEXTAREA') {
-      el.style.height = 'auto';
-      const need = el.scrollHeight + 2;
-      el.style.height = Math.min(need, max) + 'px';
-      el.style.overflowY = need > max ? 'auto' : 'hidden';
-    } else {
-      el.style.maxHeight = max + 'px';
-      el.style.setProperty('max-height', max + 'px', 'important');
-      el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
-    }
+    // The height is the node's, not the text's: only the edge fades and the
+    // count follow the text.
+    const up = el.scrollTop > 1;
+    const down = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+    el.classList.toggle('tf-more-up', up);
+    el.classList.toggle('tf-more-down', down);
     const wrap = el.parentElement;
     const count = wrap && wrap.querySelector(':scope > .tf-count');
     if (count) count.textContent = counts(textOf(el));
@@ -229,6 +238,15 @@
     } else {
       new MutationObserver(() => fit(el)).observe(el, {childList: true, characterData: true, subtree: true});
     }
+    el.addEventListener('scroll', () => fit(el), {passive: true});
+    // The wheel scrolls the text only when there is more text that way;
+    // otherwise it reaches the canvas (zoom) untouched.
+    el.addEventListener('wheel', event => {
+      const dy = event.deltaY;
+      const canDown = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+      const canUp = el.scrollTop > 1;
+      if ((dy > 0 && canDown) || (dy < 0 && canUp)) event.stopPropagation();
+    }, {passive: true});
     requestAnimationFrame(() => fit(el));
   }
 
