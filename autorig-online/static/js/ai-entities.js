@@ -715,12 +715,17 @@
     if (modelCatalogue[serviceId] && Date.now() - (modelCatalogueAt[serviceId] || 0) < 60000) {
       return modelCatalogue[serviceId];
     }
-    const response = await fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(serviceId));
-    const data = await response.json();
-    modelCatalogue[serviceId] = data;
-    modelCatalogueAt[serviceId] = Date.now();
-    return data;
+    // One request per service at a time: a 65-node graph mounts a picker per
+    // node in the same turn and used to send 20-35 identical requests.
+    if (modelCatalogueInFlight[serviceId]) return modelCatalogueInFlight[serviceId];
+    const pending = fetch('/api/ai/model-catalogue?service=' + encodeURIComponent(serviceId))
+      .then(response => response.json())
+      .then(data => { modelCatalogue[serviceId] = data; modelCatalogueAt[serviceId] = Date.now(); return data; })
+      .finally(() => { delete modelCatalogueInFlight[serviceId]; });
+    modelCatalogueInFlight[serviceId] = pending;
+    return pending;
   }
+  const modelCatalogueInFlight = {};
 
   /**
    * Whether a LoRA loads onto a checkpoint — the backend's rule

@@ -79,6 +79,7 @@
   let unplacedNodes = [];
   let unplacedLinks = [];
   let unplacedResults = {};
+  let safeSavedResults = null;
   let loadMapping = new Map();
   const LEGACY_MEDIA_INPUTS = ['image', 'video'];
   let resultsTimer = null;
@@ -298,9 +299,10 @@
   }
 
   function pushResults() {
-    if (!graphId) return;
+    if (!graphId || safeSavedResults) return;
     clearTimeout(resultsTimer);
     resultsTimer = setTimeout(() => {
+      if (safeSavedResults) return;  // safe mode never overwrites saved results
       const body = {};
       const map = storedIdMap();
       runState.forEach((value, key) => { body[map.get(String(key)) || key] = value; });
@@ -2533,6 +2535,14 @@
    * open the node, copy link, Post to Civitai, drag onto the canvas as Media
    * in). Collapses to a pill; the choice is remembered.
    */
+  // ?safe=1 (owner, 2026-09-28): open a graph without saved results, the
+  // recent gallery or remembered UI state, to rescue a graph that hangs a tab.
+  const SAFE_MODE = (() => { try { return new URLSearchParams(location.search).get('safe') === '1'; } catch (_) { return false; } })();
+  if (SAFE_MODE) {
+    try { ['nodes.recentGallery', 'civ.rating', 'civ.publishMode'].forEach(key => localStorage.removeItem(key)); } catch (_) { /* private mode */ }
+    setTimeout(() => toast('Safe mode: saved results, the recent gallery and remembered UI state are not loaded. Remove ?safe=1 to leave it.'), 1500);
+  }
+
   function installRecentGallery() {
     if (document.getElementById('recent-gallery')) return;
     const host = document.createElement('section');
@@ -4735,6 +4745,7 @@
    */
   async function persistGraph() {
     const graph = toStoredIds(graphFromCanvas());
+    if (safeSavedResults) graph.results = Object.assign({}, safeSavedResults, graph.results || {});
     if (graphId) {
       if (graphStale) {
         return { response: {ok: false, status: 409}, data: {detail: {error_string: 'graph_stale',
@@ -5209,6 +5220,30 @@
    */
   function restoreResults(results, mapping) {
     Object.keys(results || {}).forEach(originalId => {
+      try { restoreOneResult(results, mapping, originalId); }
+      catch (error) { console.error('Result of node ' + originalId + ' failed to restore', error); }
+    });
+  }
+
+  /** A saved node that failed to draw: an error card where it stood. Saves keep the node. */
+  function showBrokenNode(node, error) {
+    const host = document.querySelector('#canvas .drawflow');
+    if (!host) return;
+    const card = document.createElement('div');
+    card.className = 'nerror-card';
+    card.style.cssText = 'position:absolute;left:' + (Number(node.x) || 0) + 'px;top:' + (Number(node.y) || 0) + 'px;width:260px;' +
+      'padding:12px 14px;border-radius:12px;border:1px dashed #fb7185;background:rgba(60,12,24,.9);color:#fecdd3;font:12px/1.4 system-ui;z-index:2';
+    const title = document.createElement('b');
+    title.textContent = '⚠ ' + (node.service || node.entity_type || 'node') + ' #' + node.id + ' could not be drawn';
+    const text = document.createElement('div');
+    text.textContent = String(error && error.message || error).slice(0, 300) + ' — it is kept in the graph unchanged.';
+    text.style.marginTop = '6px';
+    card.append(title, text);
+    host.appendChild(card);
+  }
+
+  function restoreOneResult(results, mapping, originalId) {
+    {
       const record = results[originalId];
       const id = mapping.get(originalId);
       const element = id && nodeElement(id);
@@ -5274,7 +5309,7 @@
       restoredExecutions.set(String(id), registration);
       refreshRunningControls();
       registration.promise.catch(() => {});
-    });
+    }
   }
 
   async function resumeNode(id, record, registration) {
@@ -5344,10 +5379,28 @@
     unplacedNodes = [];
     unplacedLinks = [];
     unplacedResults = {};
+    document.querySelectorAll('#canvas .nerror-card').forEach(card => card.remove());
+    const broken = [];
     (graph.nodes || []).forEach(node => {
-      const id = node.kind === KIND_INPUT
-        ? addInputNode(node.entity_type, node.x, node.y, node.value, node.params)
-        : addServiceNode(node.service, node.x, node.y, node.params);
+      // One node that throws while it is drawn must not stop the rest of the
+      // graph from opening (owner, 2026-09-28). It is kept exactly as saved
+      // (unplacedNodes go back into every save) and shown as an error card.
+      let id = null;
+      const before = new Set(Object.keys((editor.drawflow.drawflow[editor.module] || {}).data || {}));
+      try {
+        id = node.kind === KIND_INPUT
+          ? addInputNode(node.entity_type, node.x, node.y, node.value, node.params)
+          : addServiceNode(node.service, node.x, node.y, node.params);
+      } catch (error) {
+        console.error('Node ' + node.id + ' (' + (node.service || node.entity_type) + ') failed to load', error);
+        Object.keys((editor.drawflow.drawflow[editor.module] || {}).data || {})
+          .filter(key => !before.has(key)).forEach(key => {
+            try { editor.removeNodeId('node-' + key); } catch (_) { /* half-built */ }
+            nodeMeta.delete(String(key));
+          });
+        id = null;
+        broken.push({node, error});
+      }
       if (id) {
         mapping.set(node.id, id);
         // Stored ids stay what they were: API patches, caches and results
@@ -5362,6 +5415,7 @@
       }
     });
     loadMapping = mapping;
+    broken.forEach(({node, error}) => showBrokenNode(node, error));
     if (unplacedNodes.length) {
       toast(unplacedNodes.length + ' node(s) of a type this page does not know are kept as they are — reload the page to see them.');
     }
@@ -5378,7 +5432,8 @@
       const outIndex = Math.max(0, fromMeta.outFields.indexOf(link.output));
       const inIndex = toMeta.inFields.indexOf(link.input);
       if (inIndex < 0) return;
-      editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1));
+      try { editor.addConnection(from, to, 'output_' + (outIndex + 1), 'input_' + (inIndex + 1)); }
+      catch (error) { console.error('Link ' + link.from + ' -> ' + link.to + ' failed to load', error); }
     });
     comparisonAnchorId = String(mapping.get(graph.comparison_anchor_id) || '');
     isolation = null;
@@ -5391,7 +5446,10 @@
       isolation = {target: String(mapping.get(String(graph.isolation.target))), prior};
     }
     paintIsolation();
-    restoreResults(graph.results, mapping);
+    // Safe mode keeps the saved results aside and writes them back untouched.
+    safeSavedResults = SAFE_MODE ? Object.assign({}, graph.results || {}) : null;
+    if (!SAFE_MODE) try { restoreResults(graph.results, mapping); }
+    catch (error) { console.error('Restoring results failed', error); toast('Some saved results could not be shown: ' + error.message); }
     scheduleAutoFrames();
     setTimeout(scheduleAutoFrames, 4000);
     if (nodeGroups && nodeGroups.refreshSizes) {
@@ -5891,7 +5949,7 @@
     }
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
     installWheelZoom();
-    installRecentGallery();
+    if (!SAFE_MODE) installRecentGallery();
     installMediaThrottle(document.getElementById('canvas'));
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
