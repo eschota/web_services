@@ -158,6 +158,23 @@ def current_build() -> str:
 
 
 PROCESS_START = time.time()
+_file_cache = {"key": None, "value": ""}
+
+
+def _live_file_hash() -> str:
+    """sha1[:10] of the live ai-nodes.js: a page stamped by version_assets.py sends it."""
+    import hashlib
+    import os
+    path = "/srv/autorig/current/autorig-online/static/js/ai-nodes.js"
+    try:
+        real = os.path.realpath(path)
+        key = (real, os.stat(real).st_mtime)
+        if _file_cache["key"] != key:
+            with open(real, "rb") as handle:
+                _file_cache.update(key=key, value=hashlib.sha1(handle.read()).hexdigest()[:10])
+        return _file_cache["value"]
+    except Exception:
+        return ""
 
 
 def _refuse(code: str, message: str) -> bytes:
@@ -181,7 +198,7 @@ class TaskOwnerMiddleware:
         if key and live_build:
             build = (headers.get("x-editor-build") or "").strip()
             refusal = None
-            if build != live_build:
+            if build != live_build and build != _live_file_hash():
                 refusal = _refuse("editor_outdated", "This editor is older than the site — reload the page")
             elif _stored_before_start(key):
                 refusal = _refuse("cancelled_by_restart",

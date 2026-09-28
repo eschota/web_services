@@ -3626,10 +3626,13 @@
     if (document.getElementById('editor-outdated')) return;
     const bar = document.createElement('div');
     bar.id = 'editor-outdated';
-    bar.style.cssText = 'position:fixed;z-index:10001;left:50%;top:8px;transform:translateX(-50%);padding:9px 16px;border-radius:9px;' +
-      'background:#b91c1c;color:#fff;font:600 13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.4);cursor:pointer';
-    bar.textContent = 'This editor is older than the site — renders are refused. Click to reload the page.';
-    bar.addEventListener('click', () => location.reload());
+    bar.setAttribute('role', 'alert');
+    bar.style.cssText = 'position:fixed;z-index:10001;left:50%;top:10px;transform:translateX(-50%);display:flex;gap:14px;align-items:center;' +
+      'padding:10px 12px 10px 18px;border-radius:12px;background:#1e1b4b;border:1px solid #818cf8;color:#fff;font:600 14px system-ui;' +
+      'box-shadow:0 8px 30px rgba(0,0,0,.5)';
+    bar.innerHTML = '<span>The site was updated — reload to keep rendering. Your graph and results are saved.</span>' +
+      '<button type="button" style="padding:8px 18px;border:0;border-radius:9px;background:#6366f1;color:#fff;font:700 14px system-ui;cursor:pointer">Reload</button>';
+    bar.querySelector('button').addEventListener('click', () => location.reload());
     document.body.appendChild(bar);
     const run = document.getElementById('run');
     if (run) { run.disabled = true; run.title = 'Reload the page first: the editor was updated'; }
@@ -3677,7 +3680,13 @@
       }
       if (!response.ok) {
         const code = parsed.data && parsed.data.detail && parsed.data.detail.error_string;
-        if (response.status === 409 && code === 'editor_outdated') outdatedBanner();
+        if (response.status === 409 && code === 'editor_outdated') {
+          // Not a node failure: nothing is marked failed or skipped. The run
+          // simply stops here (this promise never settles) and the banner asks
+          // for a reload, after which the saved graph and results come back.
+          outdatedBanner();
+          return new Promise(() => {});
+        }
         if (parsed.data) throw new Error(describeError(parsed.data, response.status));
         throw new Error(nonJsonHttpError(response, parsed.text));
       }
