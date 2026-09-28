@@ -12,9 +12,13 @@
  *     whole file, unless something plays them;
  *   - at most 6 media downloads run at once; the same address is never asked
  *     for twice in a row by the gate; a 404 becomes a placeholder, not retries.
- * `el.src` still reads the original address, so code that opens or copies it
- * is unaffected. An element that is never put on the page (a size probe)
- * loads as before.
+ * The gate changes only what an element DISPLAYS, never a value the graph
+ * uses (owner, 2026-09-28: a 960x1472 render read as "160x245"): `src` and
+ * `currentSrc` read the original address, and `naturalWidth/Height` report
+ * the ORIGINAL's pixel size (from /api/ai/media-size, cached per address) —
+ * a thumbnail is shown only once that size is known, else the original is.
+ * An element that is never put on the page (a size probe) loads the
+ * original at once.
  */
 (function () {
   'use strict';
@@ -53,6 +57,19 @@
     }
   }
 
+  // Original pixel sizes, per address (one request each).
+  const sizes = new Map();
+  function originalSize(url) {
+    if (!sizes.has(url)) {
+      sizes.set(url, fetch('/api/ai/media-size?url=' + encodeURIComponent(url))
+        .then(r => r.ok ? r.json() : null)
+        .then(d => d && d.width_int && d.height_int ? {w: d.width_int, h: d.height_int} : null)
+        .catch(() => null));
+    }
+    return sizes.get(url);
+  }
+  const SHOWN = Symbol('shown');   // the original size of a thumbnail on show
+
   function start(el) {
     const url = el[ORIG];
     if (failed.has(url)) { el.classList.add('media-missing'); return; }
@@ -68,7 +85,15 @@
     if (el.tagName === 'IMG') {
       el.addEventListener('load', () => finish(true), {once: true});
       el.addEventListener('error', () => finish(false), {once: true});
-      imgSrc.set.call(el, thumbFor(el, url));
+      const thumb = thumbFor(el, url);
+      if (thumb === url) { el[SHOWN] = null; imgSrc.set.call(el, url); return; }
+      // The thumbnail goes on only once the original's size is known, so any
+      // load handler reading naturalWidth sees the real size.
+      originalSize(url).then(size => {
+        if (el[ORIG] !== url) return;
+        el[SHOWN] = size;
+        imgSrc.set.call(el, size ? thumb : url);
+      });
     } else {
       if (!el.autoplay && el.preload !== 'none') el.preload = 'metadata';
       if (!el.autoplay && !el.getAttribute('preload')) el.preload = 'metadata';
@@ -140,6 +165,9 @@
 
   function defer(el, url) {
     el[ORIG] = url;
+    el[SHOWN] = null;
+    // A detached picture with an onload handler is a size probe: the original, now.
+    if (el.tagName === 'IMG' && el.onload && !el.isConnected) { imgSrc.set.call(el, url); return; }
     // Watched once it is on the page. Elements are often built first and put
     // in later (or thrown away by a repaint), so a detached one is looked at
     // again; only one still detached after 3 s is a probe (a size read) and
@@ -175,6 +203,15 @@
     });
   }
   patch(HTMLImageElement.prototype, imgSrc);
+  const natW = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth');
+  const natH = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalHeight');
+  const cur = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'currentSrc');
+  Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {configurable: true, enumerable: true,
+    get() { return this[SHOWN] ? this[SHOWN].w : natW.get.call(this); }});
+  Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', {configurable: true, enumerable: true,
+    get() { return this[SHOWN] ? this[SHOWN].h : natH.get.call(this); }});
+  Object.defineProperty(HTMLImageElement.prototype, 'currentSrc', {configurable: true, enumerable: true,
+    get() { return this[ORIG] || cur.get.call(this); }});
   patch(HTMLMediaElement.prototype, mediaSrc);
   Element.prototype.setAttribute = function (name, value) {
     if ((this instanceof HTMLImageElement || this instanceof HTMLMediaElement) && String(name).toLowerCase() === 'src' && gated(value)) {

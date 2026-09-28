@@ -1499,6 +1499,59 @@ async def api_thumb(url: str, w: int = 360):
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=604800"})
 
 
+def _size_path(url: str):
+    import hashlib as _hashlib
+    key = _hashlib.sha256(("size|" + url).encode("utf-8")).hexdigest()
+    return _THUMB_DIR / "size" / key[:2] / (key + ".json")
+
+
+@router.get("/api/ai/media-size")
+async def api_media_size(url: str):
+    """The ORIGINAL pixel size of a picture the editor shows as a thumbnail.
+
+    The media gate (static/js/ai-media-governor.js) displays /api/ai/thumb
+    copies; a size read from the displayed element would be the thumbnail's
+    (a 960x1472 render showed "160x245" and auto-size used it). This reads the
+    original's header (first 256 KB, the whole file only if needed), cached.
+    """
+    import json as _json
+    if not url.startswith(_THUMB_HOSTS):
+        raise HTTPException(status_code=400, detail="unsupported address")
+    path = _size_path(url)
+    if path.is_file():
+        try:
+            return _json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    import httpx
+    from io import BytesIO
+
+    from PIL import Image
+    local = url.replace("https://autorig.online/", "http://127.0.0.1:8200/") if url.startswith("https://autorig.online/api/") else url
+    size = None
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        for headers in ({"Range": "bytes=0-262143"}, {}):
+            try:
+                response = await client.get(local, headers=headers, timeout=30.0)
+                if response.status_code not in (200, 206):
+                    continue
+                with Image.open(BytesIO(response.content)) as picture:
+                    size = picture.size
+                break
+            except Exception:
+                continue
+    if not size:
+        raise HTTPException(status_code=404, detail={"error_string": "size_unknown",
+                                                     "message_string": "The picture could not be read"})
+    answer = {"success_bool": True, "url_string": url, "width_int": int(size[0]), "height_int": int(size[1])}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_json.dumps(answer), encoding="utf-8")
+    except Exception:
+        pass
+    return answer
+
+
 @router.get("/api/ai/my-tasks")
 async def api_my_tasks(request: Request, limit: int = 10):
     """The caller's last finished render outputs and the farm queue (owner-scoped).
