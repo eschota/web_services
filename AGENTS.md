@@ -165,29 +165,30 @@ Active production wiring:
 For AutoRig changes, touch only `autorig-online/...` unless the user asks for
 cross-service work.
 
-### YouTube channel upload API
+### YouTube channel integrations
 
-- The owner channel is `U3d Indie Game Developer` (`@unlim3d`), channel ID
-  `UCpCN8wm6UXr8Ke_m-zSaThQ`. Google OAuth must be completed while signed in
-  as `cgteamorg@gmail.com`; select that Brand Account in Google's chooser and
-  check `channel_id` in the first upload response.
-- OAuth uses only the `youtube.upload` scope and the production callback
-  `https://autorig.online/api/oauth/youtube/callback`. Never put client secrets
-  or refresh tokens in Git, browser storage, task output, or logs. Refresh
-  tokens are stored in the server database `youtube_credentials` row. Use
-  `YOUTUBE_GOOGLE_CLIENT_ID` and `YOUTUBE_GOOGLE_CLIENT_SECRET` for this
-  integration; keep AutoRig sign-in's `GOOGLE_CLIENT_ID` and
-  `GOOGLE_CLIENT_SECRET` unchanged.
+- AutoRig is its own service and must keep its existing YouTube destination and
+  background upload behavior. Its automatic uploader reads only the
+  `youtube_credentials` row and `AUTORIG_YOUTUBE_CLIENT_ID/SECRET` (falling back
+  to its original `GOOGLE_CLIENT_ID/SECRET`). Never authorize or save U3D tokens
+  into this row, and never route AutoRig task uploads to U3D.
+- U3D (`U3d Indie Game Developer`, `@unlim3d`, channel ID
+  `UCpCN8wm6UXr8Ke_m-zSaThQ`) is a separate provider integration, only for
+  agents the owner explicitly enables. It has a separate OAuth callback at
+  `https://autorig.online/api/oauth/u3d-youtube/callback`, separate
+  `u3d_youtube_credentials` storage, and `U3D_YOUTUBE_CLIENT_ID/SECRET`.
+  Provision agent access only through the explicit `U3D_YOUTUBE_AGENT_KEYS`
+  allowlist. Agents authenticate with `Authorization: Bearer <U3D_AGENT_KEY>`;
+  this credential is independent from AutoRig admin API keys. The owner can
+  copy it from `/dev/youtube` while signed in as an administrator. The stable
+  machine-readable contract is `/dev/youtube/skill.md`.
+- Both integrations use only the `youtube.upload` scope. Never put client
+  secrets or refresh tokens in Git, browser storage, task output, or logs.
 - `/dev` is the separate Telegram Developer Validator and must remain available.
-  Link its YouTube upload card to `/dev/youtube`; Nginx serves the AutoRig docs
-  there and proxies `POST /dev/api/youtube/videos` to the authenticated backend.
-  The route accepts a video file plus
-  title, description, optional comma-separated tags, and `privacy_status`.
-  Require an admin session or an API key owned by an admin; never make this
-  endpoint available to anonymous or ordinary user keys. Default visibility is
-  `public`, matching the owner's request. YouTube may force private visibility
-  until the API project passes its compliance audit; never claim public status
-  without checking the uploaded video's actual state.
+  Link the independent U3D provider docs at `/dev/youtube`; Nginx proxies
+  `POST /dev/api/youtube/videos` to the provider-only endpoint. It accepts a
+  video file plus title, description, optional comma-separated tags, and
+  `privacy_status`. Default visibility is `public`; report the actual response.
 - YouTube classifies Shorts from the uploaded video's aspect ratio and length;
   the API has no Shorts flag. Check current YouTube rules before giving
   duration/format guidance. Long-form videos use the same resumable upload API.

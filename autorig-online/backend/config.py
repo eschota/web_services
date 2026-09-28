@@ -67,28 +67,33 @@ GOOGLE_CLIENT_SECRET = os.getenv(
     "GOOGLE_CLIENT_SECRET",
     "your-google-client-secret-here"
 )
-# Keep the YouTube OAuth client separate so setting up uploads cannot break
-# AutoRig's existing Google sign-in OAuth client.
-YOUTUBE_GOOGLE_CLIENT_ID = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID).strip()
-YOUTUBE_GOOGLE_CLIENT_SECRET = os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET).strip()
+# AutoRig's background channel is bound to its original YouTube OAuth client.
+AUTORIG_YOUTUBE_CLIENT_ID = os.getenv("AUTORIG_YOUTUBE_CLIENT_ID", GOOGLE_CLIENT_ID).strip()
+AUTORIG_YOUTUBE_CLIENT_SECRET = os.getenv("AUTORIG_YOUTUBE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET).strip()
+U3D_YOUTUBE_CLIENT_ID = os.getenv("U3D_YOUTUBE_CLIENT_ID", "").strip()
+U3D_YOUTUBE_CLIENT_SECRET = os.getenv("U3D_YOUTUBE_CLIENT_SECRET", "").strip()
+U3D_YOUTUBE_AGENT_KEYS = tuple(
+    key.strip() for key in os.getenv("U3D_YOUTUBE_AGENT_KEYS", "").split(",") if key.strip()
+)
 GOOGLE_REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI",
     f"{APP_URL}/auth/callback"
 )
 
-# YouTube Data API (same Google OAuth client; separate redirect URI + scope youtube.upload)
-YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
-    "YOUTUBE_OAUTH_REDIRECT_URI",
+# AutoRig YouTube OAuth remains separate from the U3D provider account.
+AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
+    "AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI",
     f"{APP_URL.rstrip('/')}/api/oauth/youtube/callback",
+)
+U3D_YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
+    "U3D_YOUTUBE_OAUTH_REDIRECT_URI",
+    f"{APP_URL.rstrip('/')}/api/oauth/u3d-youtube/callback",
 )
 # Auto-uploads are always public (not unlisted / not link-only). Not overridable via env.
 YOUTUBE_UPLOAD_PRIVACY = "public"
 
 # OAuth callback guard: only persist credentials for the owner's intended channel.
-YOUTUBE_EXPECTED_CHANNEL_ID = os.getenv(
-    "YOUTUBE_EXPECTED_CHANNEL_ID",
-    "UCpCN8wm6UXr8Ke_m-zSaThQ",
-).strip()
+U3D_YOUTUBE_EXPECTED_CHANNEL_ID = os.getenv("U3D_YOUTUBE_EXPECTED_CHANNEL_ID", "UCpCN8wm6UXr8Ke_m-zSaThQ").strip()
 
 # Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()

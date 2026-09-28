@@ -107,20 +107,9 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;">YouTube uploads</h2>
-                <p style="color: var(--text-secondary); line-height: 1.6;">Connect the channel once through the admin YouTube OAuth flow. The refresh token is stored server-side. This upload endpoint accepts only administrator sessions or API keys owned by an administrator. Create a key while signed in to an admin account on this page.</p>
-                <p style="color: var(--text-secondary); line-height: 1.6;">Uploads default to <code>public</code>. YouTube may still force uploads from a new or unverified API project to remain private until the project passes its compliance audit.</p>
-                <p style="color: var(--text-secondary); line-height: 1.6;">Shorts are classified by YouTube from the video itself, not by an API flag. For standard channels, square or vertical videos up to three minutes are categorized as Shorts under YouTube's current rules. A landscape video or a longer video is long-form.</p>
-                <pre style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5;"><code>curl -X POST "$BASE/dev/api/youtube/videos" \
-  -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
-  -F "file=@short-or-long-video.mp4;type=video/mp4" \
-  -F "title=Video title" \
-  -F "description=Video description" \
-  -F "tags=3D,game development,AutoRig" \
-  -F "privacy_status=public"
-
-# Response: {"ok":true,"video_id":"...","url":"https://www.youtube.com/watch?v=...","privacy_status":"public","requested_privacy_status":"public","channel_id":"UCpCN8wm6UXr8Ke_m-zSaThQ","channel_matches_expected":true}</code></pre>
-                <p style="color: var(--text-muted); font-size: 0.9rem;">Maximum upload size defaults to 4096 MB and can be changed with <code>YOUTUBE_API_UPLOAD_MAX_MB</code>. The file is removed from the server after the upload attempt.</p>
+                <h2 style="margin-top: 0;">U3D YouTube provider</h2>
+                <p style="color: var(--text-secondary); line-height: 1.6;">U3D uploads use a dedicated provider key and isolated OAuth credentials. An AutoRig admin API key is neither required nor accepted. Open the provider page for the ready curl example, live readiness status, admin-only key copy button, and agent skill.</p>
+                <p><a class="btn btn-secondary" href="/dev/youtube">Open U3D YouTube API</a> <a class="btn btn-ghost" href="/dev/youtube/skill.md">Agent skill.md</a></p>
             </div>
 
             <div class="sr-only visually-hidden" aria-hidden="true" style="position:absolute;left:-10000px; width:1px;height:1px;overflow:hidden;">
@@ -201,8 +190,8 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                     "GET /api/task/{task_id} until status is done or error",
                     "GET /api/task/{task_id}/cached-files for file list",
                     "Download GLB/FBX via GET /api/task/{task_id}/prepared.glb, animations.glb, animations.fbx, model.glb",
-                    "POST /dev/api/youtube/videos — multipart upload for administrator-owned API keys; fields: file, title, description, tags (comma-separated), privacy_status (private|unlisted|public); defaults to public, subject to YouTube project audit restrictions",
-                    "Shorts classification is automatic from video aspect ratio and duration; no Shorts flag is sent by the API"
+                    "POST /dev/api/youtube/videos — isolated U3D provider API; authenticate with Authorization: Bearer <U3D_AGENT_KEY>, never with an AutoRig admin API key; multipart fields: file, title, description, tags, privacy_status",
+                    "U3D uploads never change AutoRig's own automatic YouTube channel; Shorts classification is automatic from video aspect ratio and duration"
                 ],
                 paths: [
                     "/api/task/create",
@@ -214,8 +203,9 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                     "/api/task/{task_id}/cached-files",
                     "/api/user/api-keys",
                     "/dev/api/youtube/videos",
-                    "/api/admin/youtube/oauth/start",
-                    "/api/admin/youtube/status"
+                    "/dev/api/youtube/status",
+                    "/dev/youtube/skill.md",
+                    "/api/admin/u3d-youtube/oauth/start"
                 ]
             };
             const jsonEl = document.getElementById('autorig-api-agent-brief');

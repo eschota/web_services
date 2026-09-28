@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>U3D YouTube Upload API · AutoRig</title>
+  <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+  <style>
+    main{padding:3rem 0}.api-card{padding:2rem;margin-top:1rem}.ok{color:#4ade80}.bad{color:#fb7185}
+    pre{background:var(--bg-secondary);padding:1rem;border-radius:8px;overflow:auto;line-height:1.5}
+    code{word-break:break-word}.actions{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center}
+  </style>
+</head>
+<body data-layout-free3d-init="none">
+  <div id="site-header"></div>
+  <main><div class="container" style="max-width:980px">
+    <section class="card api-card">
+      <h1 style="margin-top:0">U3D YouTube Upload API</h1>
+      <p>Отдельный провайдер загрузки на <strong>U3d Indie Game Developer</strong> (<code>@unlim3d</code>). Он не использует канал, OAuth-токен или автоматическую очередь AutoRig.</p>
+      <p id="provider-status">Проверяю готовность API…</p>
+      <div class="actions">
+        <a class="btn btn-secondary" href="/dev/youtube/skill.md">Открыть skill.md для агента</a>
+        <button class="btn btn-secondary" id="copy-skill">Скопировать ссылку на skill</button>
+        <button class="btn btn-primary" id="copy-key">Скопировать U3D agent key</button>
+      </div>
+      <p id="key-message" style="color:var(--text-muted)">Ключ показывается только администратору AutoRig и не является admin API key.</p>
+    </section>
+
+    <section class="card api-card">
+      <h2 style="margin-top:0">Инструкция агенту</h2>
+      <p>Передайте агенту прямую ссылку <code>https://autorig.online/dev/youtube/skill.md</code> и отдельный U3D agent key. На любом компьютере используется один и тот же API-контракт.</p>
+      <pre><code>curl -X POST "https://autorig.online/dev/api/youtube/videos" \
+  -H "Authorization: Bearer U3D_AGENT_KEY" \
+  -F "file=@video.mp4;type=video/mp4" \
+  -F "title=Video title" \
+  -F "description=Video description" \
+  -F "tags=3D,game development" \
+  -F "privacy_status=public"</code></pre>
+      <p>Успех: HTTP 201, <code>channel_matches_expected: true</code> и фактический <code>privacy_status</code> в ответе. Shorts и длинные ролики идут через один endpoint.</p>
+    </section>
+  </div></main>
+  <div id="site-footer"></div>
+  <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+  <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+  <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+  <script>
+    const statusEl = document.getElementById('provider-status');
+    const messageEl = document.getElementById('key-message');
+    async function loadStatus(){
+      try{
+        const r=await fetch('/dev/api/youtube/status',{cache:'no-store'}); const s=await r.json();
+        statusEl.className=s.ready?'ok':'bad';
+        statusEl.textContent=s.ready?'API готов: OAuth, канал и доступ агента подключены.':'API ещё не готов: '+[
+          !s.oauth_connected&&'OAuth token',!s.oauth_client_configured&&'OAuth client',!s.agent_access_configured&&'agent key'
+        ].filter(Boolean).join(', ');
+      }catch(e){statusEl.className='bad';statusEl.textContent='Не удалось проверить статус API.'}
+    }
+    document.getElementById('copy-skill').addEventListener('click',async()=>{
+      await navigator.clipboard.writeText('https://autorig.online/dev/youtube/skill.md');
+      messageEl.textContent='Ссылка на skill скопирована.';
+    });
+    document.getElementById('copy-key').addEventListener('click',async()=>{
+      const r=await fetch('/dev/api/youtube/agent-key',{credentials:'same-origin',cache:'no-store'});
+      if(!r.ok){messageEl.textContent=r.status===401?'Войдите в AutoRig как администратор.':'Ключ недоступен: HTTP '+r.status;return}
+      const data=await r.json(); await navigator.clipboard.writeText(data.api_key);
+      messageEl.textContent='U3D agent key скопирован. Не публикуйте его и не сохраняйте в Git.';
+    });
+    loadStatus();
+  </script>
+</body>
+</html>

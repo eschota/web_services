@@ -684,8 +684,17 @@ class RigCompletionEvent(Base):
 
 
 class YoutubeCredentials(Base):
-    """Single-row store for YouTube channel OAuth (refresh token for uploads)."""
+    """AutoRig's own YouTube channel OAuth for automatic task uploads."""
     __tablename__ = "youtube_credentials"
+
+    id = Column(Integer, primary_key=True)  # always 1
+    refresh_token = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class U3dYoutubeCredentials(Base):
+    """Separate U3D channel OAuth used only by the explicit provider upload API."""
+    __tablename__ = "u3d_youtube_credentials"
 
     id = Column(Integer, primary_key=True)  # always 1
     refresh_token = Column(Text, nullable=False)
