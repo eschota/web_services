@@ -24,13 +24,16 @@ from typing import Any, Dict, List
 # Renderfin `type` values. The public API names them; nothing else does.
 TYPE_KLEIN = "image_multiref"
 TYPE_QWEN = "qwen_image_edit_multi"
+TYPE_QWEN21 = "qwen_image21_edit_multi"
 
 WORKFLOW_KLEIN = "gen_image_flux2_klein_multiref.json"
 WORKFLOW_QWEN = "qwen_image_edit_multi.json"
+WORKFLOW_QWEN21 = "qwen_image21_edit_multi.json"
 
 MULTIREF_WORKFLOWS = {
     TYPE_KLEIN: WORKFLOW_KLEIN,
     TYPE_QWEN: WORKFLOW_QWEN,
+    TYPE_QWEN21: WORKFLOW_QWEN21,
 }
 MULTIREF_TYPES = frozenset(MULTIREF_WORKFLOWS)
 
@@ -38,6 +41,7 @@ MULTIREF_TYPES = frozenset(MULTIREF_WORKFLOWS)
 REFERENCE_LIMITS = {
     WORKFLOW_KLEIN: (1, 4),
     WORKFLOW_QWEN: (1, 3),
+    WORKFLOW_QWEN21: (1, 3),
 }
 
 
@@ -133,11 +137,117 @@ def inject_qwen_references(workflow: Dict[str, Any], filenames: List[str]) -> No
         negative["inputs"][f"image{index}"] = [scale_node, 0]
 
 
+def _grey_of(workflow: Dict[str, Any], node: str) -> str:
+    """A flat 50 % grey image the size of `node`: (x + (1 - x)) / 2."""
+    inv, grey = f"{node}_invert", f"{node}_grey"
+    if grey not in workflow:
+        workflow[inv] = {"class_type": "ImageInvert", "inputs": {"image": [node, 0]}}
+        workflow[grey] = {"class_type": "ImageBlend", "inputs": {"image1": [node, 0], "image2": [inv, 0],
+                                                                 "blend_factor": 0.5, "blend_mode": "normal"}}
+    return grey
+
+
+def _join_step(v: float, total: int) -> int:
+    """First step (0-based) a picture at strength v conditions (owner's bands, 2026-09-28).
+
+    0.85..1 -> from step 1 (all steps); 0.6..0.85 -> from step 2; 0.35..0.6 ->
+    from step 3; below -> from step 4; 0 -> never. Within a band the map
+    softening (backend) keeps the effect graded.
+    """
+    if v <= 0.0:
+        return total
+    step = 0 if v >= 0.85 else 1 if v >= 0.6 else 2 if v >= 0.35 else 3
+    return min(step, max(0, total - 1))
+
+
+def _qwen21_strength_schedule(workflow: Dict[str, Any], positive: Dict[str, Any],
+                               scale_nodes: List[str], strengths: List[float]) -> None:
+    """A picture at strength v joins only for the LAST v of the sampling steps.
+
+    Qwen-Image 2.1 has no per-reference weight. The step schedule is split at
+    each distinct 1 - v and sampled in consecutive passes; in each pass every
+    picture keeps its place (same token count) and a picture that has not joined
+    yet is a flat mid-grey copy of itself. The early passes, which fix the
+    layout, therefore run without a weak picture, so a low strength frees the
+    composition while the picture still shapes the details at the end.
+    """
+    s = [max(0.0, min(1.0, float(strengths[i]) if i < len(strengths) and strengths[i] is not None else 1.0))
+         for i in range(len(scale_nodes))]
+    if all(v >= 0.999 for v in s):  # nothing weakened: the template as is
+        return
+    sample = _anchor(workflow, "sample", "SamplerCustomAdvanced")
+    guider = _anchor(workflow, "guider", "BasicGuider")
+    decode = workflow.get("decode") or {}
+    sigmas_text = str(((workflow.get("sigmas") or {}).get("inputs") or {}).get("sigmas") or "")
+    total = max(1, len([x for x in sigmas_text.split(",") if x.strip()]) - 1) if sigmas_text else 8
+    base = {k: v for k, v in positive.get("inputs", {}).items() if not k.startswith("images.")}
+    joins_at = [_join_step(v, total) for v in s]
+    cuts = sorted({j for j in joins_at if 0 < j < total})
+    bounds = [0] + cuts + [total]
+    sigmas_ref = list(sample["inputs"]["sigmas"])
+    latent = list(sample["inputs"]["latent_image"])
+    last_sample = None
+    for seg, (a, b) in enumerate(zip(bounds, bounds[1:]), start=1):
+        if b <= a:
+            continue
+        enc = f"refstrength_{seg}_encode"
+        workflow[enc] = {"class_type": "TextEncodeQwenImage21", "inputs": dict(base)}
+        for index, (node, v) in enumerate(zip(scale_nodes, s), start=1):
+            joins = joins_at[index - 1] <= a
+            workflow[enc]["inputs"][f"images.image_{index}"] = [node if joins else _grey_of(workflow, node), 0]
+        g = f"refstrength_{seg}_guider"
+        workflow[g] = {"class_type": "BasicGuider", "inputs": {"model": guider["inputs"]["model"], "conditioning": [enc, 0]}}
+        # sigmas for steps a..b of the original schedule
+        if b < total:
+            split = f"refstrength_{seg}_split"
+            workflow[split] = {"class_type": "SplitSigmas", "inputs": {"sigmas": sigmas_ref, "step": b - a}}
+            seg_sigmas, rest = [split, 0], [split, 1]
+        else:
+            seg_sigmas, rest = sigmas_ref, None
+        smp = f"refstrength_{seg}_sample"
+        noise = sample["inputs"]["noise"] if last_sample is None else [f"refstrength_{seg}_nonoise", 0]
+        if last_sample is not None:
+            workflow[f"refstrength_{seg}_nonoise"] = {"class_type": "DisableNoise", "inputs": {}}
+        workflow[smp] = {"class_type": "SamplerCustomAdvanced",
+                         "inputs": {"noise": noise, "guider": [g, 0], "sampler": sample["inputs"]["sampler"],
+                                    "sigmas": seg_sigmas, "latent_image": latent}}
+        latent = [smp, 0]
+        last_sample = smp
+        if rest is not None:
+            sigmas_ref = rest
+    if last_sample and isinstance(decode.get("inputs"), dict):
+        decode["inputs"]["samples"] = [last_sample, 0]
+
+
+def inject_qwen21_references(workflow: Dict[str, Any], filenames: List[str],
+                             strengths: List[float] = None) -> None:
+    """Wire the pictures into images.image_1..N of TextEncodeQwenImage21.
+
+    Qwen-Image-2.1 has one encoder that emits both conditionings and the empty
+    latent on image 1's size; there is no CFG, so there is no negative twin.
+    Viggle's turbo was trained with up to three references.
+    """
+    check_reference_count(WORKFLOW_QWEN21, len(filenames))
+    positive = _anchor(workflow, "positive", "TextEncodeQwenImage21")
+    inputs = positive.setdefault("inputs", {})
+    for key in [key for key in inputs if key.startswith("images.")]:
+        inputs.pop(key, None)
+    scale_nodes = []
+    for index, filename in enumerate(filenames, start=1):
+        scale_node = _load_and_scale(workflow, "multiref", index, filename, 1.0, 16)
+        inputs[f"images.image_{index}"] = [scale_node, 0]
+        scale_nodes.append(scale_node)
+    if strengths:
+        _qwen21_strength_schedule(workflow, positive, scale_nodes, strengths)
+
+
 def inject_references(workflow_file: str, workflow: Dict[str, Any],
-                      filenames: List[str]) -> None:
+                      filenames: List[str], strengths: List[float] = None) -> None:
     if workflow_file == WORKFLOW_KLEIN:
         inject_klein_references(workflow, filenames)
     elif workflow_file == WORKFLOW_QWEN:
         inject_qwen_references(workflow, filenames)
+    elif workflow_file == WORKFLOW_QWEN21:
+        inject_qwen21_references(workflow, filenames, strengths)
     else:
         raise ValueError(f"{workflow_file} does not take reference images")

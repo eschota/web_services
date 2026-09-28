@@ -203,9 +203,14 @@
 
     function positionControls(element) {
       const box = mediaBox(element);
-      if (!box) return;
       const ab = element.querySelector(':scope > .node-compare-ab');
       const history = element.querySelector(':scope > .node-history-strip');
+      // abHiddenV7: without a laid-out picture the controls would sit at the
+      // node's top-left over its title; keep them hidden until there is one.
+      const visible = !!(box && box.width > 8 && box.height > 8);
+      if (ab) ab.style.visibility = visible ? '' : 'hidden';
+      if (history) history.style.visibility = visible ? '' : 'hidden';
+      if (!visible) return;
       if (ab) {
         ab.style.left = Math.max(box.left + 4, box.left + box.width - ab.offsetWidth - 6) + 'px';
         ab.style.top = Math.max(box.top + 4, box.top + box.height - ab.offsetHeight - 6) + 'px';

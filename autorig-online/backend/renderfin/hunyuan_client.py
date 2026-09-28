@@ -34,7 +34,23 @@ WORKER_INFLIGHT_CAP = int(os.getenv("RENDERFIN_HUNYUAN_INFLIGHT_CAP", "1"))
 # dispatched - starts timing out while the fleet is nominally healthy. Keep this
 # many boxes out of generation's reach so the rest of the service keeps moving;
 # generations queue on our side instead, which costs them nothing.
-RESERVED_FOR_OTHER_WORK = int(os.getenv("RENDERFIN_HUNYUAN_RESERVED_WORKERS", "1"))
+RESERVED_FOR_OTHER_WORK = int(os.getenv("RENDERFIN_HUNYUAN_RESERVED_WORKERS", "2"))
+
+# AutoRig-only converter boxes: ``worker_endpoints.pool`` value and the matching
+# ``/server-status`` capability mode. They run rig tasks but have no retopo/DCC
+# toolchain and no Hunyuan runtime, so they are never part of the shared
+# full-converter reserve. Kept as literals so this package stays importable
+# without the AutoRig backend modules.
+RIG_ONLY_POOL = "rig_only"
+RIG_ONLY_CAPABILITY_MODE = "only_rig"
+
+
+def _is_rig_only(value: Any) -> bool:
+    return str(value or "").strip().lower().replace("-", "_") in {
+        RIG_ONLY_POOL,
+        RIG_ONLY_CAPABILITY_MODE,
+    }
+
 
 _ORDINARY_QUEUE_CACHE: Tuple[float, bool] = (0.0, False)
 _ORDINARY_ACTIVE_STATES = {
@@ -100,6 +116,34 @@ class NoWorkerAvailable(RuntimeError):
 
 class HunyuanClientError(RuntimeError):
     pass
+
+
+class SubmissionOutcomeUnknown(HunyuanClientError):
+    """The generate-3d POST may have been accepted by one exact worker.
+
+    A response timeout/protocol loss after request transmission is not a
+    capacity failure and must never rotate the worker or the durable workload
+    identity.  The caller persists ``worker`` and replays the same
+    ``workload_request_id`` until the host's idempotency ledger returns the
+    accepted task identity.
+    """
+
+    def __init__(self, worker: Dict[str, Any], message: str):
+        super().__init__(message)
+        self.worker = dict(worker or {})
+
+
+def supports_submission_idempotency(status: Any) -> bool:
+    """Read the explicit v1 host-ledger capability from server-status."""
+    if not isinstance(status, dict):
+        return False
+    if status.get("submission_idempotency_v1") is True:
+        return True
+    for key in ("capabilities", "capability_by_key", "feature_flags"):
+        value = status.get(key)
+        if isinstance(value, dict) and value.get("submission_idempotency_v1") is True:
+            return True
+    return False
 
 
 def ordinary_conversion_waiting(*, force_refresh: bool = False) -> bool:
@@ -250,6 +294,10 @@ def full_converter_registry(
     Missing legacy schema falls back to the Hunyuan registry. Any other read
     failure also keeps the conservative, smaller registry rather than
     inventing capacity.
+
+    Rows in the ``rig_only`` pool are skipped: those boxes run Auto Rig without
+    the retopo/DCC toolchain, so they are not interchangeable capacity for the
+    N-1 cross-pipeline reserve.
     """
     configured = list(pool if pool is not None else workers())
     registry = [
@@ -268,9 +316,20 @@ def full_converter_registry(
             timeout=0.5,
         )
         try:
-            rows = connection.execute(
-                "SELECT url FROM worker_endpoints WHERE enabled = 1"
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    "SELECT url, pool FROM worker_endpoints WHERE enabled = 1"
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if "no such column" not in str(exc).lower():
+                    raise
+                # Legacy schema predating the capability pool column.
+                rows = [
+                    (url, None)
+                    for (url,) in connection.execute(
+                        "SELECT url FROM worker_endpoints WHERE enabled = 1"
+                    ).fetchall()
+                ]
         finally:
             connection.close()
     except sqlite3.OperationalError as exc:
@@ -292,7 +351,9 @@ def full_converter_registry(
         for worker in registry
         if str(worker.get("name") or "").strip()
     }
-    for (raw_url,) in rows:
+    for raw_url, raw_pool in rows:
+        if _is_rig_only(raw_pool):
+            continue
         url = _converter_status_base(str(raw_url or ""))
         name = _converter_name_from_url(url)
         if not url or not name or name.lower() in by_name:
@@ -442,7 +503,7 @@ async def pick_worker(
         if not hunyuan.get("enabled") or not hunyuan.get("installed"):
             continue
         worker_pool = str(worker.get("pool") or "shared_converter")
-        if worker_pool != "dedicated" and _status_is_full_converter(status):
+        if worker_pool != "dedicated" and _status_is_healthy_full_converter(status):
             shared_full_statuses[str(worker["name"])] = status
         if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
             at_capacity.append(worker["name"])
@@ -504,7 +565,7 @@ async def pick_worker(
             for worker, result in zip(missing_capacity_workers, capacity_results):
                 if isinstance(result, Exception) or not isinstance(result, dict):
                     continue
-                if _status_is_full_converter(result):
+                if _status_is_healthy_full_converter(result):
                     shared_full_statuses[str(worker["name"])] = result
         background_occupied = _background_occupied_workers(
             capacity_registry,
@@ -549,10 +610,12 @@ async def submit(
     queue_class: str = "interactive",
     in_flight: Optional[Dict[str, int]] = None,
     excluded: Optional[set[str]] = None,
+    worker_override: Optional[Dict[str, Any]] = None,
+    workload_lease: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, str], str]:
     """Create a generation task. Returns (worker, status_url)."""
     try:
-        worker = await pick_worker(
+        worker = worker_override or await pick_worker(
             client,
             in_flight,
             excluded,
@@ -591,14 +654,54 @@ async def submit(
             else "interactive"
         ),
     }
+    if isinstance(workload_lease, dict) and workload_lease.get("lease_id_string"):
+        body.update(
+            {
+                "workload_class": str(
+                    workload_lease.get("workload_class_string")
+                    or (
+                        "collection_background"
+                        if body["queue_class"] == "collection_background"
+                        else "hunyuan"
+                    )
+                ),
+                "workload_lease_id": str(workload_lease.get("lease_id_string") or ""),
+                "workload_request_id": str(workload_lease.get("request_id_string") or ""),
+                "physical_resource_id": str(
+                    workload_lease.get("physical_resource_id_string") or ""
+                ),
+            }
+        )
     if seed:
         body["seed"] = int(seed) & 0xFFFFFFFF
-    resp = await client.post(
-        f"{worker['url']}/api-converter-glb/generate-3d",
-        json=body,
-        headers=_headers(worker),
-        timeout=30.0,
-    )
+    endpoint = f"{worker['url']}/api-converter-glb/generate-3d"
+    try:
+        resp = await client.post(
+            endpoint,
+            json=body,
+            headers=_headers(worker),
+            timeout=30.0,
+        )
+    except httpx.ConnectTimeout:
+        # No TCP connection was established, so the host could not have
+        # accepted this request.  This remains an ordinary transport failure.
+        raise
+    except httpx.ConnectError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise SubmissionOutcomeUnknown(
+            worker,
+            f"generate-3d submission outcome unknown on {worker['name']}: "
+            f"{exc.__class__.__name__}",
+        ) from exc
+    except httpx.RequestError as exc:
+        # RemoteProtocolError/ReadError/WriteError can happen after the server
+        # durably accepted the body but before its response reached us.
+        raise SubmissionOutcomeUnknown(
+            worker,
+            f"generate-3d submission outcome unknown on {worker['name']}: "
+            f"{exc.__class__.__name__}",
+        ) from exc
     if resp.status_code in (401, 403):
         # The box re-provisions its token on restart, so ours goes stale
         # without anything being wrong with the job. Same class as an empty
@@ -724,7 +827,7 @@ async def shared_full_background_capacity(
     for worker, result in zip(shared, results):
         if isinstance(result, Exception) or not isinstance(result, dict):
             continue
-        if _status_is_full_converter(result):
+        if _status_is_healthy_full_converter(result):
             statuses[str(worker["name"])] = result
     occupied = _background_occupied_workers(shared, statuses)
     if occupied is None:
@@ -778,10 +881,16 @@ def _status_proves_hunyuan_idle(status: Dict[str, Any], task_id: str) -> bool:
 
 
 def _status_is_full_converter(status: Dict[str, Any]) -> bool:
-    """Fail closed when a Hunyuan-only node is presented as a shared worker."""
+    """Fail closed when a Hunyuan-only or rig-only node is presented as shared."""
     capabilities = status.get("capabilities")
     flags = status.get("feature_flags")
     if not isinstance(capabilities, dict) or not isinstance(flags, dict):
+        return False
+    if _is_rig_only(capabilities.get("mode")) or capabilities.get(
+        "legacy_conversion"
+    ) is False:
+        # An Auto-Rig-only box has no retopo/DCC toolchain and no Hunyuan
+        # runtime; it can never serve as the interactive full-converter reserve.
         return False
     return (
         str(capabilities.get("mode") or "").strip().lower() == "full"
@@ -790,6 +899,21 @@ def _status_is_full_converter(status: Dict[str, Any]) -> bool:
         == "full"
         and flags.get("legacy_conversion_enabled") is True
     )
+
+
+def _status_is_healthy_full_converter(status: Dict[str, Any]) -> bool:
+    """Count only slots that can actually serve as the interactive reserve."""
+    if not _status_is_full_converter(status):
+        return False
+    if status.get("maintenance") is True:
+        return False
+    preflight = status.get("asset_preflight")
+    if isinstance(preflight, dict) and preflight.get("healthy") is False:
+        return False
+    stuck = status.get("stuck_tasks")
+    if isinstance(stuck, (dict, list, tuple, set)) and bool(stuck):
+        return False
+    return True
 
 
 async def _preempt_hunyuan_candidate(
@@ -852,6 +976,64 @@ async def _preempt_hunyuan_candidate(
         if remaining > 0:
             await asyncio.sleep(min(1.0, remaining))
     return None
+
+
+async def preempt_bound_task(
+    client: httpx.AsyncClient,
+    worker: Dict[str, Any],
+    status_url: str,
+    *,
+    backend_task_id: str,
+    requester_workload_class: str,
+    deadline_seconds: float = 60.0,
+) -> str:
+    """Preempt one exact centrally leased Hunyuan task.
+
+    Returns ``completed`` when natural completion wins or ``preempted`` only
+    after the worker reports an empty Hunyuan slot.
+    """
+    task_id = status_url.rstrip("/").rsplit("/", 1)[-1]
+    if not task_id:
+        raise RuntimeError("bound Hunyuan task id is missing")
+    deadline = time.monotonic() + max(1.0, min(60.0, deadline_seconds))
+    request_id = str(uuid.uuid4())
+    response = await client.post(
+        f"{worker['url']}/api-converter-glb/control/tasks/{task_id}/preempt",
+        json={
+            "backend_task_id": backend_task_id,
+            "preemption_request_id": request_id,
+            "requester_workload_class": requester_workload_class,
+        },
+        headers=_headers(worker),
+        timeout=min(15.0, max(1.0, deadline - time.monotonic())),
+    )
+    if response.status_code == 409:
+        try:
+            conflict = response.json()
+        except ValueError:
+            conflict = {}
+        if str(conflict.get("error") or "") != "task_already_completed":
+            raise RuntimeError(f"Hunyuan preempt rejected: {response.text[:200]}")
+    elif response.status_code not in {200, 202}:
+        raise RuntimeError(f"Hunyuan preempt HTTP {response.status_code}")
+    outcome = "completed" if response.status_code == 409 else ""
+    while time.monotonic() < deadline:
+        task_response = await client.get(
+            status_url,
+            headers=_headers(worker),
+            timeout=min(12.0, max(1.0, deadline - time.monotonic())),
+        )
+        if task_response.status_code == 200:
+            status = str(task_response.json().get("status") or "")
+            if status == "Completed":
+                outcome = "completed"
+            elif status == "Preempted":
+                outcome = "preempted"
+        status_payload = await server_status(client, worker)
+        if outcome and status_payload and _status_proves_hunyuan_idle(status_payload, task_id):
+            return outcome
+        await asyncio.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    raise TimeoutError("Hunyuan preempt did not prove an empty slot")
 
 
 async def preempt_background_hunyuan_many(
@@ -960,6 +1142,7 @@ async def wait_for_model(
     *,
     timeout: Optional[float] = None,
     on_progress=None,
+    on_poll=None,
 ) -> Dict[str, Any]:
     """Poll until Completed; returns the final status payload (with output_urls)."""
     deadline = time.time() + (timeout or config.HUNYUAN_TIMEOUT_SECONDS)
@@ -967,6 +1150,8 @@ async def wait_for_model(
     misses = 0
     unreachable = 0
     while time.time() < deadline:
+        if on_poll is not None:
+            await on_poll()
         try:
             resp = await client.get(status_url, headers=_headers(worker), timeout=30.0)
         except Exception as exc:

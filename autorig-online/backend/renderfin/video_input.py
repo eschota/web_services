@@ -173,7 +173,9 @@ def _validate_container_probe(
         raise VideoInputError("ffprobe found no container")
     formats = {part.strip().lower() for part in str(format_row.get("format_name") or "").split(",")}
     if not formats.intersection(allowed_formats):
-        raise VideoInputError(error_message)
+        # Content is sniffed by ffprobe, not by the address: say what arrived.
+        raise VideoInputError(f"{error_message} (got {sorted(formats) or 'nothing'}; a picture wired "
+                              "into a video socket, or a page instead of a file?)")
     try:
         duration = float(format_row.get("duration") or 0)
     except (TypeError, ValueError) as exc:

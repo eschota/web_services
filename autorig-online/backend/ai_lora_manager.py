@@ -732,6 +732,13 @@ def lora_box_state(entry: Dict[str, Any], box: str, cfg: Dict[str, Any],
         return {"state": "no_agent"}
     reported = (report.get("items") or {}).get(entry["id"]) or {}
     stale = _now() - int(report.get("reported_at") or 0) > BOX_STALE_SECONDS
+    if have and str(have.get("sha256") or "").lower() in (entry.get("superseded_sha256") or []):
+        out = {"state": "updating", "version_note": "previous version stays in use until the new one arrives"}
+        if reported.get("state") == "downloading" and reported.get("bytes"):
+            out["bytes"] = int(reported["bytes"])
+        if entry.get("size_bytes") and out.get("bytes"):
+            out["percent"] = round(100.0 * min(out["bytes"], entry["size_bytes"]) / entry["size_bytes"], 1)
+        return out
     if have and have.get("sha256") and str(have["sha256"]).lower() != entry["sha256"]:
         return {"state": "hash_mismatch",
                 "error": f"a different file called {entry['file']} is already on the box"}
@@ -740,6 +747,8 @@ def lora_box_state(entry: Dict[str, Any], box: str, cfg: Dict[str, Any],
         out = {"state": state, "error": str(reported.get("error") or "")}
         if reported.get("bytes"):
             out["bytes"] = int(reported["bytes"])
+            if entry.get("size_bytes"):
+                out["percent"] = round(100.0 * min(out["bytes"], entry["size_bytes"]) / entry["size_bytes"], 1)
         if stale:
             out["stale"] = True
         return out
@@ -749,7 +758,7 @@ def lora_box_state(entry: Dict[str, Any], box: str, cfg: Dict[str, Any],
 def ready_boxes(entry: Dict[str, Any], data: Optional[Dict[str, Any]] = None) -> List[str]:
     out = []
     for box, cfg in boxes(data).items():
-        if lora_box_state(entry, box, cfg, box_report(box)).get("state") == "ready":
+        if lora_box_state(entry, box, cfg, box_report(box)).get("state") in ("ready", "updating"):
             out.append(box)
     return out
 
@@ -786,12 +795,26 @@ def catalogue_entries() -> List[Dict[str, Any]]:
             reason = ("the VPS could not fetch it: " + str(mirror.get("error"))
                       if mirror.get("state") == "failed"
                       else "waiting for the render computers to download it")
+        progress = []
+        for box in sorted(target_boxes(entry, data)):
+            st = lora_box_state(entry, box, boxes(data).get(box, {}), box_report(box))
+            if st.get("state") in ("updating", "downloading", "queued"):
+                pct = st.get("percent")
+                progress.append(f"{box} {pct:g}%" if pct is not None else f"{box} {st['state']}")
+        if progress and not reason:
+            reason = ""
+        download_note = ("downloading " + (entry.get("version") or "new version") + ": " + " · ".join(progress)
+                         + (" (previous version in use)" if ready else "")) if progress else ""
+        if not ready and progress:
+            reason = download_note
         recommended = {}
         if entry.get("recommended_strength"):
             recommended["strength"] = float(entry["recommended_strength"])
         out.append({
             "kind": "lora", "family": entry.get("family") or "", "file": entry["file"],
-            "title": entry.get("title") or entry["file"], "version": entry.get("version") or "",
+            "title": entry.get("title") or entry["file"],
+            "version": " · ".join(x for x in (entry.get("version") or "", download_note) if x),
+            "download_note": download_note,
             "base": entry.get("base") or "", "nsfw": bool(entry.get("nsfw")),
             # Owner rule 2026-09-28: the primary trigger word is prepended to
             # the prompt of every render that uses the LoRA (the final prompt
@@ -891,6 +914,7 @@ async def api_sync_manifest(request: Request):
             "id": entry["id"], "file": entry["file"], "sha256": entry["sha256"],
             "size_bytes": entry.get("size_bytes") or 0,
             "url": f"{PUBLIC_BASE}/api/ai/loras/sync/blob/{entry['sha256']}",
+            "replace_sha256": list(entry.get("superseded_sha256") or [])[-8:],
             "peers": [peer.rstrip("/") + "/" + urllib.parse.quote(entry["file"])
                       for peer in cfg.get("peers") or []] + ([cdn] if cdn else []),
         })
@@ -898,9 +922,6 @@ async def api_sync_manifest(request: Request):
               if e.get("state") == "removed"
               and not any(o.get("file") == e["file"] and o.get("state") != "removed"
                           for o in data["loras"])]
-    remove += [{"file": e["file"], "sha256": old} for e in data["loras"]
-               if e.get("state") != "removed" and box in target_boxes(e, data)
-               for old in (e.get("superseded_sha256") or [])[-8:] if old != e.get("sha256")]
     cleanup = [c for c in (data.get("cleanup") or {}).get(box, []) if isinstance(c, dict)]
     return {"box_string": box, "items_array": items, "remove_array": remove,
             "cleanup_array": cleanup, "protected_array": sorted(protected_files()),

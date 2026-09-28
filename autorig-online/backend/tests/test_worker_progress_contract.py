@@ -117,6 +117,8 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
             video_url=None,
             viewer_prepared_glb_url=None,
             viewer_animations_glb_url=None,
+            workload_lease_id=None,
+            preemption_state="none",
             last_progress_at=None,
             error_message=None,
             owner_type="agent",
@@ -140,6 +142,8 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
             tasks, "_mark_task_worker_failed_if_reported", AsyncMock(return_value=False)
         ), patch.object(
             tasks, "check_video_availability", AsyncMock(return_value=(False, None))
+        ), patch(
+            "artifact_cache.enqueue_artifact_cache", AsyncMock()
         ), patch.object(
             tasks, "_schedule_task_error_notification"
         ):
@@ -181,6 +185,42 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.status, "done")
 
+    async def test_finalized_v2_without_optional_preview_reconciles_and_completes(self):
+        task = self.task()
+        concrete = [
+            "https://worker/model_hdrp.unitypackage",
+            "https://worker/model.glb",
+        ]
+        result, _db = await self._run(
+            task,
+            {
+                "completion_contract_version": 2,
+                "status": "Completed",
+                "finalized": True,
+            },
+            ready=([], 0),
+            concrete=(concrete, None, None),
+        )
+        self.assertEqual(result.status, "done")
+        self.assertEqual(result.output_urls, concrete)
+        self.assertEqual(result.ready_count, len(concrete))
+        self.assertFalse(result.video_ready)
+
+    async def test_legacy_concrete_outputs_still_require_preview_evidence(self):
+        task = self.task()
+        concrete = [
+            "https://worker/model_hdrp.unitypackage",
+            "https://worker/model.glb",
+        ]
+        result, _db = await self._run(
+            task,
+            {"status": "Completed"},
+            ready=([], 0),
+            concrete=(concrete, None, None),
+        )
+        self.assertEqual(result.status, "processing")
+        self.assertEqual(result.output_urls, ["https://worker/expected.glb"])
+
     async def test_v1_fallback_can_complete_from_ready_urls(self):
         task = self.task(status="queued")
         result, _db = await self._run(
@@ -213,7 +253,11 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "done")
 
     async def test_worker_finalization_failure_sets_central_error(self):
-        task = self.task()
+        task = self.task(
+            preemption_state="requested",
+            preemption_request_id="recall-1",
+            preemption_worker_boot_id="boot-1",
+        )
         result, db = await self._run(
             task,
             {
@@ -225,6 +269,9 @@ class ManagerCompletionGateTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.status, "error")
         self.assertIn("100k:max missing", result.error_message)
+        self.assertEqual(result.preemption_state, "none")
+        self.assertIsNone(result.preemption_request_id)
+        self.assertIsNone(result.preemption_worker_boot_id)
         db.commit.assert_awaited_once()
 
     async def test_post_timeout_recovery_persists_worker_v2_declaration(self):

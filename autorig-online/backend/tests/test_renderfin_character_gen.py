@@ -1,5 +1,5 @@
 import asyncio
-import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import time
 
-from renderfin import character_gen, config, hunyuan_client
+from renderfin import character_gen, config, glb_quality, hunyuan_client, workload_lease
 from renderfin.character_gen import CharacterGenManager
 from renderfin.models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
@@ -96,6 +96,111 @@ class HunyuanAdmissionOrderTests(unittest.TestCase):
         )
 
 
+class QualityRetryContractTests(unittest.TestCase):
+    def test_rejected_glb_archive_failure_does_not_mask_quality_error(self):
+        job = CharacterGenJob(id="quality-job")
+        error = glb_quality.GlbQualityError(
+            "semantic_geometry_corrupt",
+            "sparse character geometry",
+        )
+
+        with patch.object(
+            character_gen,
+            "_archive_rejected_glb",
+            side_effect=OSError("disk pressure"),
+        ):
+            archived = character_gen._archive_rejected_glb_best_effort(
+                job,
+                b"bad-glb",
+                error,
+                source="test-worker",
+            )
+
+        self.assertIsNone(archived)
+
+    def test_semantic_glb_rejection_retries_hunyuan_with_new_seed(self):
+        async def scenario():
+            manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+            manager._persist = AsyncMock()
+            job = CharacterGenJob(
+                stage=CHARGEN_STAGE_HUNYUAN,
+                hunyuan_task_id="https://worker/status/old",
+                hunyuan_seed=123,
+                hunyuan_worker="f12",
+                hunyuan_worker_url="https://worker",
+                glb_url="https://autorig.online/old.glb",
+            )
+            error = glb_quality.GlbQualityError(
+                "semantic_geometry_corrupt",
+                "sparse character geometry",
+                details={"report": {"ok": False}},
+            )
+
+            with patch.object(character_gen, "RETRY_BACKOFF_SECONDS", (0.0,)):
+                await manager._handle_stage_error(job, error)
+
+            self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+            self.assertEqual(job.attempts[CHARGEN_STAGE_HUNYUAN], 1)
+            self.assertEqual(job.hunyuan_task_id, "")
+            self.assertEqual(job.hunyuan_seed, 0)
+            self.assertEqual(job.glb_url, "")
+            self.assertEqual(job.error, "")
+
+        run(scenario())
+
+    def test_structural_glb_rejection_rotates_worker_attempt_neutral(self):
+        async def scenario():
+            manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+            manager._persist = AsyncMock()
+            job = CharacterGenJob(
+                stage=CHARGEN_STAGE_HUNYUAN,
+                hunyuan_task_id="https://worker/status/old",
+                hunyuan_seed=123,
+                hunyuan_worker="f12",
+                hunyuan_worker_url="https://worker",
+            )
+            error = glb_quality.GlbQualityError(
+                "glb_length_mismatch", "truncated GLB"
+            )
+
+            await manager._handle_stage_error(job, error)
+
+            self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+            self.assertEqual(job.attempts, {})
+            self.assertEqual(job.hunyuan_task_id, "")
+            self.assertEqual(job.hunyuan_seed, 0)
+            self.assertIn("f12", job.hunyuan_worker_cooldowns)
+            self.assertGreater(job.retry_at, time.time())
+
+        run(scenario())
+
+    def test_turntable_quality_rejection_rewinds_to_hunyuan(self):
+        async def scenario():
+            manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+            manager._persist = AsyncMock()
+            job = CharacterGenJob(
+                stage=CHARGEN_STAGE_TURNTABLE,
+                hunyuan_task_id="old-completed-task",
+                hunyuan_seed=456,
+                glb_url="https://autorig.online/old.glb",
+            )
+            error = glb_quality.GlbQualityError(
+                "semantic_geometry_corrupt",
+                "sparse character geometry",
+                details={"report": {"ok": False}},
+            )
+
+            with patch.object(character_gen, "RETRY_BACKOFF_SECONDS", (0.0,)):
+                await manager._handle_stage_error(job, error)
+
+            self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+            self.assertEqual(job.attempts[CHARGEN_STAGE_HUNYUAN], 1)
+            self.assertEqual(job.hunyuan_task_id, "")
+            self.assertEqual(job.glb_url, "")
+
+        run(scenario())
+
+
 class _Env:
     def __init__(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -112,19 +217,14 @@ class _Env:
             patch.object(config, "HUNYUAN_WORKERS_FILE", root / "no-workers.json"),
             patch.object(config, "HUNYUAN_WORKERS", []),
             patch.object(config, "HUNYUAN_API_TOKEN", ""),
-            # The converter path serialises admission on a cross-process file
-            # lock that the live backend's scheduler also takes and holds for the
-            # whole of a farm probe. A test queued behind production for those
-            # seconds times out in _wait_stage: give the tests a lock of their own.
-            patch.dict(
-                os.environ,
-                {"AUTORIG_FLEET_ADMISSION_LOCK": str(root / "fleet-admission.lock")},
+            # Most orchestration tests intentionally use tiny fake GLB bytes;
+            # the validator itself and integration retry contract are covered
+            # by dedicated tests below.
+            patch.object(
+                glb_quality,
+                "validate_glb_bytes",
+                return_value={"schema": "test.glb-quality", "ok": True},
             ),
-            # The ordinary-queue verdict is cached for a few seconds and comes from
-            # whatever queue database sits at the default path; neither the cache
-            # nor a live database may carry over from one test to the next.
-            patch.object(config, "AUTORIG_QUEUE_DB_PATH", root / "no-autorig-queue.db"),
-            patch.object(hunyuan_client, "_ORDINARY_QUEUE_CACHE", (0.0, False)),
         ]
 
     def __enter__(self):
@@ -208,6 +308,246 @@ async def _idle_job(manager, **fields):
 
 
 class HunyuanConverterPathTests(unittest.TestCase):
+    def test_hunyuan_post_response_loss_replays_same_request_without_duplicate(self):
+        async def scenario():
+            import httpx
+
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    worker = {
+                        "name": "f12",
+                        "url": "https://converter-f12.example",
+                        "token": "worker-token",
+                        "physical_node": "machine_12121212121212121212121212121212",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
+                        "workload_role": "ai_vision_primary",
+                        "pool": "dedicated",
+                    }
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        isolated_url="https://autorig.online/render/input.png",
+                    )
+                    posted = []
+                    accepted_by_request = {}
+
+                    def handler(request: httpx.Request) -> httpx.Response:
+                        url = str(request.url)
+                        if url.endswith("/api-converter-glb/server-status"):
+                            return httpx.Response(
+                                200,
+                                json={
+                                    "hunyuan": {
+                                        "enabled": True,
+                                        "installed": True,
+                                        "service_state": "idle",
+                                    },
+                                    "physical_node": "machine_12121212121212121212121212121212",
+                                    "workload_role": "ai_vision_primary",
+                                    "capabilities": {
+                                        "submission_idempotency_v1": True
+                                    },
+                                },
+                            )
+                        if url.endswith("/api-converter-glb/generate-3d"):
+                            body = json.loads(request.content.decode("utf-8"))
+                            posted.append((url, body))
+                            request_id = body["workload_request_id"]
+                            task_id = accepted_by_request.setdefault(request_id, "h-one")
+                            if len(posted) == 1:
+                                # The host accepted/durably indexed the task,
+                                # but its HTTP response never reached way-fr.
+                                raise httpx.ReadTimeout(
+                                    "accepted response lost", request=request
+                                )
+                            return httpx.Response(
+                                202,
+                                json={"task_id": task_id, "status": "Pending"},
+                            )
+                        return httpx.Response(404)
+
+                    transport = httpx.MockTransport(handler)
+                    real_client = httpx.AsyncClient
+
+                    def patched_client(*args, **kwargs):
+                        kwargs["transport"] = transport
+                        return real_client(*args, **kwargs)
+
+                    lease = {
+                        "lease_id_string": "lease-hunyuan-response-loss",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
+                        "node_id_string": "f12",
+                        "workload_class_string": "hunyuan",
+                    }
+
+                    async def acquire_exact(_client, **kwargs):
+                        return {
+                            **lease,
+                            "request_id_string": kwargs["request_id"],
+                        }
+
+                    release = AsyncMock(return_value=True)
+                    with patch.object(
+                        hunyuan_client, "workers", return_value=[worker]
+                    ), patch.object(
+                        hunyuan_client, "pick_worker", new=AsyncMock(return_value=worker)
+                    ), patch.object(
+                        manager, "_require_hunyuan_admission", new=AsyncMock()
+                    ), patch.object(
+                        workload_lease, "enabled", return_value=True
+                    ), patch.object(
+                        workload_lease, "acquire", new=AsyncMock(side_effect=acquire_exact)
+                    ) as acquire, patch.object(
+                        workload_lease,
+                        "heartbeat",
+                        new=AsyncMock(
+                            side_effect=[
+                                workload_lease.WorkloadLeaseTerminal(
+                                    {
+                                        "status_string": "lease_terminal",
+                                        "lease_by_key": {"state_string": "expired"},
+                                    }
+                                ),
+                                {},
+                            ]
+                        ),
+                    ) as heartbeat, patch.object(
+                        hunyuan_client,
+                        "wait_for_model",
+                        new=AsyncMock(
+                            return_value={"output_urls": {"model": "model.glb"}}
+                        ),
+                    ), patch.object(
+                        hunyuan_client,
+                        "download_model",
+                        new=AsyncMock(return_value=b"glTF-response-loss"),
+                    ), patch.object(
+                        manager, "_release_hunyuan_workload", new=release
+                    ), patch.object(
+                        character_gen.httpx,
+                        "AsyncClient",
+                        side_effect=patched_client,
+                    ):
+                        with self.assertRaises(
+                            hunyuan_client.SubmissionOutcomeUnknown
+                        ) as caught:
+                            await manager._stage_hunyuan_converter(job)
+                        await manager._handle_stage_error(job, caught.exception)
+
+                        self.assertEqual("submission_unknown", job.hunyuan_workload_lease_state)
+                        self.assertEqual("f12", job.hunyuan_worker)
+                        self.assertEqual(worker["url"], job.hunyuan_worker_url)
+                        self.assertEqual("", job.hunyuan_task_id)
+                        persisted_request_id = job.hunyuan_workload_request_id
+                        self.assertTrue(persisted_request_id.startswith("rhy_"))
+                        self.assertEqual(
+                            "lease-hunyuan-response-loss",
+                            job.hunyuan_workload_lease_id,
+                        )
+                        self.assertEqual({}, job.attempts)
+                        release.assert_not_awaited()
+
+                        await manager._stage_hunyuan_converter(job)
+
+                    self.assertEqual(1, acquire.await_count)
+                    self.assertGreaterEqual(heartbeat.await_count, 1)
+                    self.assertEqual(2, len(posted))
+                    self.assertEqual(1, len(accepted_by_request))
+                    self.assertEqual(posted[0][0], posted[1][0])
+                    for field in (
+                        "backend_task_id",
+                        "workload_request_id",
+                        "workload_lease_id",
+                        "physical_resource_id",
+                        "queue_class",
+                    ):
+                        self.assertEqual(posted[0][1][field], posted[1][1][field])
+                    self.assertEqual(
+                        persisted_request_id,
+                        posted[1][1]["workload_request_id"],
+                    )
+                    self.assertEqual(
+                        "lease-hunyuan-response-loss",
+                        posted[1][1]["workload_lease_id"],
+                    )
+                    self.assertTrue(job.hunyuan_task_id.endswith("/h-one"))
+                    self.assertTrue(job.glb_url.endswith(f"/{job.id}.glb"))
+                    release.assert_awaited_once_with(
+                        job, outcome="completed", new_request=False
+                    )
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_hunyuan_broker_refuses_legacy_listener_without_idempotency_capability(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    worker = {
+                        "name": "legacy-f12",
+                        "url": "https://legacy-f12.example",
+                        "token": "worker-token",
+                        "physical_node": "f12",
+                        "pool": "dedicated",
+                    }
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        isolated_url="https://autorig.online/render/input.png",
+                    )
+                    acquire = AsyncMock()
+                    submit = AsyncMock()
+                    with patch.object(
+                        hunyuan_client, "pick_worker", new=AsyncMock(return_value=worker)
+                    ), patch.object(
+                        hunyuan_client,
+                        "server_status",
+                        new=AsyncMock(
+                            return_value={
+                                "hunyuan": {
+                                    "enabled": True,
+                                    "installed": True,
+                                    "service_state": "idle",
+                                },
+                                "capabilities": {"mode": "full"},
+                            }
+                        ),
+                    ), patch.object(
+                        workload_lease, "enabled", return_value=True
+                    ), patch.object(
+                        workload_lease, "acquire", new=acquire
+                    ), patch.object(
+                        hunyuan_client, "submit", new=submit
+                    ):
+                        with self.assertRaises(
+                            hunyuan_client.NoWorkerAvailable
+                        ) as caught:
+                            await manager._stage_hunyuan_converter(job)
+
+                    self.assertIn("submission_idempotency_v1", str(caught.exception))
+                    self.assertEqual("", job.hunyuan_workload_request_id)
+                    self.assertEqual("", job.hunyuan_workload_lease_id)
+                    self.assertEqual("", job.hunyuan_worker_url)
+                    acquire.assert_not_awaited()
+                    submit.assert_not_awaited()
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_unreadable_worker_registry_parks_without_comfy_backlog(self):
         async def scenario():
             with _Env():
@@ -853,6 +1193,30 @@ class StageDeadlineTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_long_wait_persists_new_stage_clock_before_restart(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                await manager._persisted_stage_budget(job, 3600.0)
+                started_at = job.stage_started_at
+                await manager.stop()
+
+                manager2 = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager2.start()
+                try:
+                    revived = manager2.get(job.id)
+                    self.assertEqual(revived.timed_stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertAlmostEqual(revived.stage_started_at, started_at, delta=0.01)
+                    self.assertLess(manager2._stage_budget(revived, 3600.0), 3600.0)
+                finally:
+                    await manager2.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_exhausted_window_leaves_no_time(self):
         async def scenario():
             with _Env():
@@ -989,6 +1353,83 @@ class EmptyFleetTests(unittest.TestCase):
                     await queue.stop()
 
         run(scenario())
+
+    def test_structural_low_lod_limit_is_terminal_without_retry_or_attempt(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    message = (
+                        "generation failed on f13: "
+                        "MODEL_INPUT_UNSUPPORTED[LOW_LOD_STRUCTURAL_FLOOR]: "
+                        "minimum=1973 target=1000 components=1973"
+                    )
+                    for queue_class in ("interactive", "collection_background"):
+                        job = await _idle_job(
+                            manager,
+                            stage=CHARGEN_STAGE_HUNYUAN,
+                            queue_class=queue_class,
+                            collection_guid=(
+                                "collection-1"
+                                if queue_class == "collection_background"
+                                else ""
+                            ),
+                            hunyuan_task_id="https://converter-f13/status/task-1",
+                            hunyuan_worker="f13",
+                        )
+                        job.stage_started_at = time.time() - 120
+                        job.timed_stage = CHARGEN_STAGE_HUNYUAN
+                        await manager._handle_stage_error(job, RuntimeError(message))
+                        self.assertEqual(job.stage, CHARGEN_STAGE_FAILED)
+                        self.assertEqual(job.error, message)
+                        self.assertEqual(job.last_error, message)
+                        self.assertEqual(job.attempts, {})
+                        self.assertEqual(job.retry_at, 0)
+                        self.assertEqual(job.stage_started_at, 0)
+                        self.assertEqual(job.timed_stage, "")
+                        self.assertEqual(
+                            job.hunyuan_task_id,
+                            "https://converter-f13/status/task-1",
+                        )
+                        self.assertEqual(job.hunyuan_worker, "f13")
+                        self.assertFalse(
+                            character_gen._failed_on_recoverable_infrastructure(job)
+                        )
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_structural_low_lod_code_requires_exact_consistent_payload(self):
+        valid = (
+            "generation failed on f13: "
+            "MODEL_INPUT_UNSUPPORTED[LOW_LOD_STRUCTURAL_FLOOR]: "
+            "minimum=1973 target=1000 components=1973"
+        )
+        self.assertTrue(character_gen._is_model_terminal_failure(valid))
+        self.assertFalse(character_gen._is_farm_breakage(valid))
+        for invalid in (
+            valid + " forged",
+            valid.replace("minimum=1973", "minimum=999"),
+            valid.replace("target=1000", "target=0"),
+            valid.replace("components=1973", "components=0"),
+            valid.replace("minimum=1973", "minimum=1001").replace(
+                "components=1973", "components=5000"
+            ),
+            valid.replace("MODEL_INPUT_UNSUPPORTED", "model_input_unsupported"),
+            valid.replace("minimum=1973", "minimum=1973  "),
+            valid.replace("target=1000", "target=1000\n"),
+            " " + valid,
+            valid + " ",
+            valid + "\n",
+            "Low-LOD structural floor 1973 exceeds triangle target 1000",
+            "Vertex-PBR manifest is missing",
+        ):
+            with self.subTest(message=invalid):
+                self.assertFalse(character_gen._is_model_terminal_failure(invalid))
 
     def test_collection_comfy_5xx_parks_and_releases_failed_render(self):
         async def scenario():
@@ -1404,6 +1845,240 @@ class EmptyFleetTests(unittest.TestCase):
                     self.assertEqual(job.hunyuan_worker, "")
                     self.assertGreater(job.retry_at, time.time())
                     await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_expired_central_hunyuan_lease_exactly_preempts_before_retry(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        hunyuan_task_id="https://f7/status/h-expired",
+                        hunyuan_worker="f7",
+                    )
+                    job.hunyuan_workload_lease_id = "lease-expired"
+                    job.hunyuan_workload_request_id = "request-expired"
+                    job.hunyuan_workload_physical_resource_id = "raptor"
+                    await manager._persist(job)
+                    worker = {
+                        "name": "f7",
+                        "url": "https://f7",
+                        "token": "worker-token",
+                    }
+                    exact_preempt = AsyncMock(return_value="preempted")
+                    with patch.object(
+                        hunyuan_client, "worker_for_url", return_value=worker
+                    ), patch.object(
+                        hunyuan_client,
+                        "preempt_bound_task",
+                        new=exact_preempt,
+                    ):
+                        await manager._handle_stage_error(
+                            job,
+                            workload_lease.WorkloadLeaseTerminal(
+                                {
+                                    "status_string": "lease_terminal",
+                                    "lease_by_key": {"state_string": "expired"},
+                                }
+                            ),
+                        )
+                    exact_preempt.assert_awaited_once()
+                    self.assertEqual(job.attempts, {})
+                    self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertEqual(job.hunyuan_task_id, "")
+                    self.assertEqual(job.hunyuan_worker, "")
+                    self.assertEqual(job.hunyuan_workload_lease_id, "")
+                    self.assertEqual(job.preemption_count, 1)
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_hunyuan_download_failure_retains_lease_until_artifact_persisted(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    status_url = "https://f12/status/h-artifact"
+                    worker = {
+                        "name": "f12",
+                        "url": "https://f12",
+                        "token": "worker-token",
+                        "physical_node": "machine_12121212121212121212121212121212",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
+                        "workload_role": "ai_vision_primary",
+                        "pool": "dedicated",
+                    }
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        hunyuan_task_id=status_url,
+                        hunyuan_worker="f12",
+                    )
+                    job.hunyuan_workload_lease_id = "lease-artifact"
+                    job.hunyuan_workload_request_id = "request-artifact"
+                    job.hunyuan_workload_physical_resource_id = (
+                        "machine_12121212121212121212121212121212"
+                    )
+                    job.hunyuan_workload_node_id = "f12"
+                    job.hunyuan_workload_lease_state = "active"
+                    await manager._persist(job)
+
+                    premature_release = AsyncMock(return_value=True)
+                    with patch.object(
+                        manager,
+                        "_release_hunyuan_workload",
+                        new=premature_release,
+                    ):
+                        await manager._handle_stage_error(
+                            job,
+                            hunyuan_client.HunyuanClientError(
+                                "model download failed on f12: connection reset"
+                            ),
+                        )
+
+                    premature_release.assert_not_awaited()
+                    self.assertEqual(job.hunyuan_task_id, status_url)
+                    self.assertEqual(job.hunyuan_workload_lease_id, "lease-artifact")
+                    self.assertEqual(job.hunyuan_workload_request_id, "request-artifact")
+                    self.assertEqual(job.hunyuan_workload_lease_state, "artifact_pending")
+                    self.assertLessEqual(
+                        job.retry_at - time.time(),
+                        character_gen.HUNYUAN_ARTIFACT_RETRY_SECONDS + 1,
+                    )
+
+                    release_snapshots = []
+
+                    async def release_after_persist(
+                        release_job, *, outcome: str, new_request: bool
+                    ):
+                        glb_path = (
+                            config.RENDER_DIR
+                            / release_job.user_name
+                            / f"{release_job.id}.glb"
+                        )
+                        release_snapshots.append(
+                            (outcome, new_request, release_job.glb_url, glb_path.read_bytes())
+                        )
+                        release_job.hunyuan_workload_lease_id = ""
+                        return True
+
+                    with patch.object(
+                        hunyuan_client, "worker_for_url", return_value=worker
+                    ), patch.object(
+                        hunyuan_client,
+                        "server_status",
+                        new=AsyncMock(return_value={}),
+                    ), patch.object(
+                        manager,
+                        "_ensure_hunyuan_workload",
+                        new=AsyncMock(return_value={"lease_id_string": "lease-artifact"}),
+                    ), patch.object(
+                        hunyuan_client,
+                        "wait_for_model",
+                        new=AsyncMock(
+                            return_value={"output_urls": {"model": "model.glb"}}
+                        ),
+                    ), patch.object(
+                        hunyuan_client,
+                        "download_model",
+                        new=AsyncMock(return_value=b"glTF-artifact"),
+                    ), patch.object(
+                        workload_lease, "enabled", return_value=True
+                    ), patch.object(
+                        manager,
+                        "_release_hunyuan_workload",
+                        new=release_after_persist,
+                    ):
+                        await manager._stage_hunyuan_converter(job)
+
+                    self.assertEqual(
+                        release_snapshots,
+                        [("completed", False, job.glb_url, b"glTF-artifact")],
+                    )
+                    self.assertTrue(job.glb_url.endswith(f"/{job.id}.glb"))
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_hunyuan_artifact_pending_completed_wins_central_preemption(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    worker = {
+                        "name": "f12",
+                        "url": "https://f12",
+                        "token": "worker-token",
+                        "physical_node": "machine_12121212121212121212121212121212",
+                        "physical_resource_id_string": "machine_12121212121212121212121212121212",
+                        "workload_role": "ai_vision_primary",
+                        "pool": "dedicated",
+                    }
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        hunyuan_task_id="https://f12/status/h-completed-wins",
+                        hunyuan_worker="f12",
+                    )
+                    job.hunyuan_workload_lease_id = "lease-completed-wins"
+                    job.hunyuan_workload_request_id = "request-completed-wins"
+                    job.hunyuan_workload_physical_resource_id = (
+                        "machine_12121212121212121212121212121212"
+                    )
+                    job.hunyuan_workload_node_id = "f12"
+                    await manager._persist(job)
+                    release = AsyncMock(return_value=True)
+                    with patch.object(
+                        workload_lease, "enabled", return_value=True
+                    ), patch.object(
+                        workload_lease,
+                        "heartbeat",
+                        new=AsyncMock(
+                            side_effect=workload_lease.WorkloadPreempted(
+                                {"status_string": "preemption_requested"}
+                            )
+                        ),
+                    ), patch.object(
+                        hunyuan_client,
+                        "preempt_bound_task",
+                        new=AsyncMock(return_value="completed"),
+                    ), patch.object(
+                        manager,
+                        "_release_hunyuan_workload",
+                        new=release,
+                    ):
+                        lease = await manager._ensure_hunyuan_workload(
+                            job,
+                            AsyncMock(),
+                            worker,
+                            {
+                                "physical_node": "machine_12121212121212121212121212121212",
+                                "workload_role": "ai_vision_primary",
+                            },
+                        )
+
+                    release.assert_not_awaited()
+                    self.assertEqual(lease["lease_id_string"], "lease-completed-wins")
+                    self.assertEqual(job.hunyuan_workload_lease_id, "lease-completed-wins")
+                    self.assertEqual(job.hunyuan_task_id, "https://f12/status/h-completed-wins")
+                    self.assertEqual(job.hunyuan_workload_lease_state, "artifact_pending")
                 finally:
                     await manager.stop()
                     await queue.stop()

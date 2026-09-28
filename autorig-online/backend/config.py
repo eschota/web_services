@@ -38,7 +38,7 @@ AUTORIG_MIGRATION_READ_ONLY = os.getenv("AUTORIG_MIGRATION_READ_ONLY", "0").stri
 ARTIFACT_CACHE_ROOT = os.getenv("ARTIFACT_CACHE_ROOT", "/var/autorig/artifact-cache").strip()
 ARTIFACT_CACHE_FULL_HOURS = max(24, int(os.getenv("ARTIFACT_CACHE_FULL_HOURS", "24")))
 ARTIFACT_CACHE_SOFT_CAP_GB = float(os.getenv("ARTIFACT_CACHE_SOFT_CAP_GB", "250"))
-ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("ARTIFACT_CACHE_RESERVE_GB", "120"))
+ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("ARTIFACT_CACHE_RESERVE_GB", "65"))
 ARTIFACT_CACHE_CONCURRENCY = max(1, min(2, int(os.getenv("ARTIFACT_CACHE_CONCURRENCY", "2"))))
 
 # =============================================================================
@@ -67,28 +67,33 @@ GOOGLE_CLIENT_SECRET = os.getenv(
     "GOOGLE_CLIENT_SECRET",
     "your-google-client-secret-here"
 )
-# Keep the YouTube OAuth client separate so setting up uploads cannot break
-# AutoRig's existing Google sign-in OAuth client.
-YOUTUBE_GOOGLE_CLIENT_ID = os.getenv("YOUTUBE_GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID).strip()
-YOUTUBE_GOOGLE_CLIENT_SECRET = os.getenv("YOUTUBE_GOOGLE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET).strip()
+# AutoRig's background channel is bound to its original YouTube OAuth client.
+AUTORIG_YOUTUBE_CLIENT_ID = os.getenv("AUTORIG_YOUTUBE_CLIENT_ID", GOOGLE_CLIENT_ID).strip()
+AUTORIG_YOUTUBE_CLIENT_SECRET = os.getenv("AUTORIG_YOUTUBE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET).strip()
+U3D_YOUTUBE_CLIENT_ID = os.getenv("U3D_YOUTUBE_CLIENT_ID", "").strip()
+U3D_YOUTUBE_CLIENT_SECRET = os.getenv("U3D_YOUTUBE_CLIENT_SECRET", "").strip()
+U3D_YOUTUBE_AGENT_KEYS = tuple(
+    key.strip() for key in os.getenv("U3D_YOUTUBE_AGENT_KEYS", "").split(",") if key.strip()
+)
 GOOGLE_REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI",
     f"{APP_URL}/auth/callback"
 )
 
-# YouTube Data API (same Google OAuth client; separate redirect URI + scope youtube.upload)
-YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
-    "YOUTUBE_OAUTH_REDIRECT_URI",
+# AutoRig YouTube OAuth remains separate from the U3D provider account.
+AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
+    "AUTORIG_YOUTUBE_OAUTH_REDIRECT_URI",
     f"{APP_URL.rstrip('/')}/api/oauth/youtube/callback",
+)
+U3D_YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
+    "U3D_YOUTUBE_OAUTH_REDIRECT_URI",
+    f"{APP_URL.rstrip('/')}/api/oauth/u3d-youtube/callback",
 )
 # Auto-uploads are always public (not unlisted / not link-only). Not overridable via env.
 YOUTUBE_UPLOAD_PRIVACY = "public"
 
 # OAuth callback guard: only persist credentials for the owner's intended channel.
-YOUTUBE_EXPECTED_CHANNEL_ID = os.getenv(
-    "YOUTUBE_EXPECTED_CHANNEL_ID",
-    "UCpCN8wm6UXr8Ke_m-zSaThQ",
-).strip()
+U3D_YOUTUBE_EXPECTED_CHANNEL_ID = os.getenv("U3D_YOUTUBE_EXPECTED_CHANNEL_ID", "UCpCN8wm6UXr8Ke_m-zSaThQ").strip()
 
 # Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()
@@ -226,6 +231,27 @@ GUMROAD_PRODUCT_CREDITS = {
     "autorig-1000": 1000,
 }
 
+# AutoRig's public paid offer is a recurring monthly membership, not a credit
+# pack.  Legacy credit products remain in ``GUMROAD_PRODUCT_CREDITS`` so old
+# purchases and refunds can still be reconciled, but new checkout traffic is
+# allowed to use only this product.
+AUTORIG_SUBSCRIPTION_PRODUCT_KEY = os.getenv(
+    "AUTORIG_SUBSCRIPTION_PRODUCT_KEY", "autorig-unlimited-monthly"
+).strip().lower()
+AUTORIG_SUBSCRIPTION_PRODUCT_KEYS = frozenset(
+    key.strip().lower()
+    for key in os.getenv(
+        "AUTORIG_SUBSCRIPTION_PRODUCT_KEYS",
+        f"{AUTORIG_SUBSCRIPTION_PRODUCT_KEY},autorig-unlimited",
+    ).split(",")
+    if key.strip()
+)
+AUTORIG_SUBSCRIPTION_PRICE_USD = float(os.getenv("AUTORIG_SUBSCRIPTION_PRICE_USD", "20"))
+GUMROAD_WEBHOOK_SECRET = os.getenv("GUMROAD_WEBHOOK_SECRET", "").strip()
+
+# Public checkout allowlist.  Do not add the legacy credit-pack keys here.
+AUTORIG_PUBLIC_CHECKOUT_PRODUCT_KEYS = frozenset({AUTORIG_SUBSCRIPTION_PRODUCT_KEY})
+
 # Gumroad product_permalink -> USD minimum price for the Blender plugin ABCD test.
 BLENDER_PLUGIN_AB_VARIANTS = {
     "blender-plugin-10": 10,
@@ -235,12 +261,18 @@ BLENDER_PLUGIN_AB_VARIANTS = {
     "blender-plugin": 100,
 }
 
-# Gumroad product_permalinks (lowercase) that count toward /buy-credits donation progress
-AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
+# Legacy AutoRig credit products remain recognizable for old receipts and
+# delayed webhooks, but are no longer accepted by the public checkout route.
+AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS = frozenset(
     k.strip().lower()
     for k in GUMROAD_PRODUCT_CREDITS
     if str(k).strip().lower().startswith("autorig-")
     or str(k).strip().lower() == "oneclick-30-credits"
+)
+
+# Products included in the historical revenue/progress aggregate.
+AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
+    set(AUTORIG_LEGACY_CREDIT_PRODUCT_KEYS) | set(AUTORIG_SUBSCRIPTION_PRODUCT_KEYS)
 )
 
 # Public donation thermometer on buy-credits (USD)
@@ -329,7 +361,7 @@ SUPPORT_CHAT_MESSAGE_MAX_CHARS = int(os.getenv("SUPPORT_CHAT_MESSAGE_MAX_CHARS",
 # Set AUTOMATIC_TASK_DB_DELETION=1 to restore legacy automatic DB row deletion.
 AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
 
-MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "2.5"))  # Critical free-space floor for background cleanup
+MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "60"))  # Critical free-space floor for background cleanup
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
 # The original upload is the only thing a finished task can be rebuilt from.
@@ -348,6 +380,12 @@ DISK_CLEANUP_USED_PERCENT = float(
 DISK_CLEANUP_TARGET_BUFFER_GB = float(
     os.getenv("DISK_CLEANUP_TARGET_BUFFER_GB", "0.75")
 )  # Extra free-space margin above the used-percent threshold after cleanup
+DISK_RECOVERY_FREE_GB = float(
+    os.getenv("DISK_RECOVERY_FREE_GB", "65")
+)  # Clear an active disk-pressure incident only after this hysteresis target
+DISK_ALERT_REMINDER_HOURS = max(
+    1.0, float(os.getenv("DISK_ALERT_REMINDER_HOURS", "24"))
+)
 GLB_CACHE_MAX_GB = float(
     os.getenv("GLB_CACHE_MAX_GB", "6.0")
 )  # Hard cap for regenerable static/glb_cache during periodic cleanup
@@ -365,7 +403,7 @@ VIDEO_CACHE_MIN_AGE_HOURS = float(
 )  # Pressure-triggered preview retention; requires poster/viewer fallback
 
 # Before each new task: try to reach at least this much free space on /
-NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
+NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "60"))
 # If ZIP purge is not enough: delete oldest done/error tasks, but free at most this many GB from disk in that phase
 # (must be >= typical gap to NEW_TASK_MIN_FREE_GB or Telegram low-disk alerts will repeat)
 NEW_TASK_PURGE_TASKS_MAX_FREED_GB = float(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "8"))

@@ -1,0 +1,17 @@
+{
+  "model":{"class_type":"UNETLoader","inputs":{"unet_name":"qwen_image_2.1_int8_convrot.safetensors","weight_dtype":"default"}},
+  "turbo":{"class_type":"LoraLoaderModelOnly","inputs":{"model":["model",0],"lora_name":"Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors","strength_model":1.0}},
+  "cache":{"class_type":"QwenImage21Cache","inputs":{"model":["turbo",0],"device":"auto","dtype":"default"}},
+  "clip":{"class_type":"CLIPLoader","inputs":{"clip_name":"qwen3vl_8b_int8_convrot.safetensors","type":"qwen_image","device":"default"}},
+  "vae":{"class_type":"VAELoader","inputs":{"vae_name":"qwen_image_2.1_vae_bf16.safetensors"}},
+  "reference_image":{"class_type":"LoadImage","inputs":{"image":"$image"}},
+  "reference_scale":{"class_type":"ImageScaleToTotalPixels","inputs":{"image":["reference_image",0],"upscale_method":"area","megapixels":1.0,"resolution_steps":16}},
+  "positive":{"class_type":"TextEncodeQwenImage21","inputs":{"clip":["clip",0],"prompt":"$prompt","negative_prompt":"","vae":["vae",0],"resolution":1024,"images.image_1":["reference_scale",0]}},
+  "guider":{"class_type":"BasicGuider","inputs":{"model":["cache",0],"conditioning":["positive",0]}},
+  "noise":{"class_type":"RandomNoise","inputs":{"noise_seed":42}},
+  "sampler":{"class_type":"KSamplerSelect","inputs":{"sampler_name":"euler"}},
+  "sigmas":{"class_type":"ManualSigmas","inputs":{"sigmas":"1.00000, 0.96775, 0.93336, 0.85719, 0.66676, 0.40010, 0.00000"}},
+  "sample":{"class_type":"SamplerCustomAdvanced","inputs":{"noise":["noise",0],"guider":["guider",0],"sampler":["sampler",0],"sigmas":["sigmas",0],"latent_image":["positive",2]}},
+  "decode":{"class_type":"VAEDecode","inputs":{"samples":["sample",0],"vae":["vae",0]}},
+  "save":{"class_type":"SaveImage","inputs":{"images":["decode",0],"filename_prefix":"$output_url"}}
+}

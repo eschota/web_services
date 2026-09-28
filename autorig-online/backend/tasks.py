@@ -22,9 +22,18 @@ from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
 from task_timeout_contract import task_hard_timeout_reference
 from collection_retry_policy import collection_error_retry_due
-from task_priority import normalize_queue_class, preemption_in_progress
+from task_priority import (
+    TRANSIENT_DISPATCH_COOLDOWN_SECONDS,
+    normalize_queue_class,
+    preemption_in_progress,
+)
 from scheduler_wakeup import notify_scheduler
 from animal_submission_policy import animal_detection_accepted
+from input_normalization import (
+    InputNormalizationDeferred,
+    InputNormalizationError,
+    normalize_task_input,
+)
 from worker_artifact_urls import (
     canonical_worker_artifact_url,
     viewer_artifact_kind,
@@ -44,6 +53,14 @@ from workers import (
     task_visible_on_worker_refs,
     find_worker_queue_status_for_task,
     quarantine_worker,
+    get_worker_workload_status,
+    worker_supports_submission_idempotency,
+)
+from workload_broker import (
+    acquire_task_workload_lease,
+    autorig_workload_broker_enabled,
+    heartbeat_task_workload_lease,
+    release_task_workload_lease,
 )
 
 
@@ -194,7 +211,7 @@ def _is_transient_worker_dispatch_error(error: Optional[str]) -> bool:
     msg = (error or "").strip().lower()
     if not msg:
         return False
-    if re.search(r"http\s+(429|5\d\d)\b", msg):
+    if re.search(r"http\s+(423|429|5\d\d)\b", msg):
         return True
     return any(
         marker in msg
@@ -207,6 +224,27 @@ def _is_transient_worker_dispatch_error(error: Optional[str]) -> bool:
             "temporar",
             "read error",
             "server disconnected",
+            "capacity wait",
+            "higher_priority_waiting",
+        )
+    )
+
+
+def _is_capacity_worker_dispatch_error(error: Optional[str]) -> bool:
+    """Admission waits are healthy and must not quarantine a worker."""
+    msg = (error or "").strip().lower()
+    if re.search(r"http\s+423\b", msg):
+        return True
+    return any(
+        marker in msg
+        for marker in (
+            "gpu_busy",
+            "gpu busy",
+            "gpu_leased",
+            "capacity_wait",
+            "capacity wait",
+            "autorig_reserve",
+            "preemption_requested",
         )
     )
 
@@ -591,12 +629,24 @@ async def create_conversion_task(
     return task, None
 
 
-async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) -> Tuple[Task, Optional[str]]:
+async def start_task_on_worker(
+    db: AsyncSession,
+    task: Task,
+    worker_url: str,
+    *,
+    admission_locked: bool = False,
+) -> Tuple[Task, Optional[str]]:
     """
     Start a queued (status=created) task on a specific worker.
     Workers accept GLB, FBX, OBJ directly via input_url.
     Returns: (task, error_message)
     """
+    replaying_unknown_submission = bool(
+        task.workload_lease_id
+        and task.worker_api
+        and str(task.workload_lease_state or "")
+        in {"submission_unknown", "preemption_requested"}
+    )
     pk = getattr(task, "pipeline_kind", None) or "rig"
     if pk not in ("rig", "convert"):
         pk = "rig"
@@ -635,12 +685,19 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
                 "Please retry the upload so AI animal detection can finish."
             )
             task.updated_at = datetime.utcnow()
+            await release_task_workload_lease(
+                db, task, outcome="released", admission_locked=admission_locked
+            )
             await db.commit()
             await db.refresh(task)
             _schedule_task_error_notification(task.id)
             return task, task.error_message
 
-    source_ok, source_detail, source_permanent = await preflight_task_source(task.input_url)
+    source_ok, source_detail, source_permanent = (True, "", False)
+    if not replaying_unknown_submission:
+        source_ok, source_detail, source_permanent = await preflight_task_source(
+            task.input_url
+        )
     if not source_ok:
         error = await _apply_source_preflight_failure(
             db,
@@ -648,18 +705,82 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             source_detail,
             permanent=source_permanent,
         )
+        if task.status == "error" or task.workload_lease_id:
+            await release_task_workload_lease(
+                db,
+                task,
+                outcome="released",
+                clear_for_retry=task.status != "error",
+                admission_locked=admission_locked,
+            )
         return task, error
 
-    # Reserve the worker only after all deterministic task metadata is valid.
-    # Otherwise malformed metadata or an unreachable source looks like a
-    # worker-side failure and can quarantine healthy capacity.
-    task.worker_api = worker_url
-    task.status = "processing"
-    task.source_next_retry_at = None
-    task.processing_started_at = datetime.utcnow()
-    task.updated_at = task.processing_started_at
-    await db.commit()
-    await db.refresh(task)
+    if not replaying_unknown_submission:
+        try:
+            normalized = await asyncio.to_thread(
+                normalize_task_input, task.input_url
+            )
+        except InputNormalizationDeferred as exc:
+            task.status = "created"
+            task.worker_api = None
+            task.worker_task_id = None
+            task.processing_started_at = None
+            task.error_message = None
+            task.dispatch_not_before = datetime.utcnow() + timedelta(seconds=60)
+            task.updated_at = datetime.utcnow()
+            await release_task_workload_lease(
+                db,
+                task,
+                outcome="released",
+                clear_for_retry=True,
+                admission_locked=admission_locked,
+            )
+            await db.commit()
+            await db.refresh(task)
+            print(f"[InputNormalize] Deferred task {task.id}: {exc}")
+            return task, str(exc)
+        except InputNormalizationError as exc:
+            task.status = "error"
+            task.worker_api = None
+            task.worker_task_id = None
+            task.processing_started_at = None
+            task.error_message = str(exc)
+            task.updated_at = datetime.utcnow()
+            await release_task_workload_lease(
+                db, task, outcome="released", admission_locked=admission_locked
+            )
+            await db.commit()
+            await db.refresh(task)
+            _schedule_task_error_notification(task.id)
+            return task, task.error_message
+        if normalized.changed:
+            try:
+                settings = json.loads(task.viewer_settings or "{}")
+            except Exception:
+                settings = {}
+            if not isinstance(settings, dict):
+                settings = {}
+            previous_normalization = settings.get("input_normalization")
+            if isinstance(previous_normalization, dict) and previous_normalization:
+                history = settings.get("input_normalization_history")
+                if not isinstance(history, list):
+                    history = []
+                if previous_normalization not in history:
+                    history.append(previous_normalization)
+                settings["input_normalization_history"] = history[-8:]
+            settings["input_normalization"] = normalized.record
+            task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+            task.input_url = normalized.effective_url
+            task.input_bytes = int(
+                normalized.record.get("derived_bytes") or task.input_bytes or 0
+            ) or None
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            print(
+                f"[InputNormalize] task {task.id} meshopt decoded -> "
+                f"{normalized.effective_url}"
+            )
 
     # Best-effort: generate LLM poster metadata from the pre-convert preview
     # (browser preflight render, else the renderfin turntable frame) so the
@@ -668,21 +789,22 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     # and the listing. Fully non-fatal and time-bounded: a slow/absent preview
     # or OpenAI outage must never delay or fail dispatch.
     poster_metadata = None
-    try:
-        from content_moderation import build_pre_convert_metadata_sync
+    if not replaying_unknown_submission:
+        try:
+            from content_moderation import build_pre_convert_metadata_sync
 
-        poster_metadata = await asyncio.wait_for(
-            asyncio.to_thread(
-                build_pre_convert_metadata_sync,
-                task.id,
-                task.input_url,
-                task_type_for_worker,
-            ),
-            timeout=45,
-        )
-    except Exception as _meta_err:
-        print(f"[PreConvertMeta] skipped for task {task.id}: {_meta_err}")
-        poster_metadata = None
+            poster_metadata = await asyncio.wait_for(
+                asyncio.to_thread(
+                    build_pre_convert_metadata_sync,
+                    task.id,
+                    task.input_url,
+                    task_type_for_worker,
+                ),
+                timeout=45,
+            )
+        except Exception as _meta_err:
+            print(f"[PreConvertMeta] skipped for task {task.id}: {_meta_err}")
+            poster_metadata = None
     if poster_metadata:
         print(
             f"[PreConvertMeta] task {task.id} ATTACHED pk={pk} "
@@ -713,6 +835,61 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             f"guid={task.collection_guid} member={task.collection_index}/{task.collection_size}"
         )
 
+    workload_lease: Dict[str, Any] = {}
+    if autorig_workload_broker_enabled():
+        try:
+            node_status = await get_worker_workload_status(worker_url)
+        except Exception as exc:
+            task.status = "created"
+            if not task.workload_lease_id:
+                task.worker_api = None
+            task.processing_started_at = None
+            task.dispatch_not_before = datetime.utcnow() + timedelta(seconds=5)
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            return task, f"workload capacity wait: worker status unavailable: {exc}"
+        if not worker_supports_submission_idempotency(node_status):
+            # Never send central lease/request identity to a legacy listener:
+            # without a durable host ledger a lost response cannot be replayed
+            # safely.  Existing ambiguity remains pinned and waits for the
+            # exact host capability to return; fresh work tries another node.
+            task.status = "created"
+            if not replaying_unknown_submission:
+                task.worker_api = None
+            task.processing_started_at = None
+            task.dispatch_not_before = datetime.utcnow() + timedelta(seconds=5)
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            return (
+                task,
+                "workload capacity wait: worker_missing_submission_idempotency_v1",
+            )
+        acquired, workload_result = await acquire_task_workload_lease(
+            db,
+            task,
+            worker_url,
+            node_status,
+            admission_locked=admission_locked,
+        )
+        if not acquired:
+            if task.workload_lease_id:
+                await release_task_workload_lease(
+                    db,
+                    task,
+                    outcome="preempted",
+                    clear_for_retry=True,
+                    admission_locked=admission_locked,
+                )
+            task.status = "created"
+            task.worker_api = None
+            task.processing_started_at = None
+            task.error_message = None
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            reason = str(workload_result.get("status_string") or "capacity_wait")
+            return task, f"workload capacity wait: {reason}"
+        workload_lease = workload_result
+
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,
@@ -728,11 +905,34 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         metadata=worker_metadata or None,
         backend_task_id=task.id,
         queue_class=normalize_queue_class(getattr(task, "queue_class", None)),
+        workload_lease=workload_lease or None,
     )
     if not result.success:
         error = result.error or "Worker dispatch failed"
+        if result.unknown_outcome and task.workload_lease_id and task.worker_api:
+            # Persist the same central/worker identity and retry the same POST.
+            # The upgraded worker's durable idempotency ledger will either
+            # replay its accepted response or accept this one exact request;
+            # no lease/request rotation is allowed while the outcome is
+            # ambiguous.
+            task.status = "created"
+            task.worker_task_id = None
+            task.workload_lease_state = "submission_unknown"
+            task.processing_started_at = None
+            task.dispatch_not_before = datetime.utcnow() + timedelta(seconds=5)
+            task.error_message = None
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            print(
+                f"[Tasks] Preserved ambiguous worker submission {task.id} "
+                f"on {task.worker_api} for exact replay"
+            )
+            return task, error
         if _is_transient_worker_dispatch_error(error):
-            quarantine_worker(worker_url, reason=f"dispatch_failed:{error[:120]}")
+            capacity_wait = _is_capacity_worker_dispatch_error(error)
+            if not capacity_wait:
+                quarantine_worker(worker_url, reason=f"dispatch_failed:{error[:120]}")
             task.status = "created"
             task.worker_api = None
             task.worker_task_id = None
@@ -746,6 +946,29 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             task.video_url = None
             task.error_message = None
             task.processing_started_at = None
+            terminal_outcome = (
+                "preempted"
+                if str(task.workload_lease_state or "") == "preemption_requested"
+                else "released"
+            )
+            await release_task_workload_lease(
+                db,
+                task,
+                outcome=terminal_outcome,
+                clear_for_retry=True,
+                admission_locked=admission_locked,
+            )
+            if capacity_wait:
+                # A short admission cooldown prevents a hot loop without
+                # consuming source/retry budgets or changing task identity.
+                task.dispatch_not_before = datetime.utcnow() + timedelta(seconds=5)
+            else:
+                # A timeout/5xx can be input-specific even when the worker
+                # reports healthy.  Do not let one FIFO head serialize the
+                # entire interactive queue or hammer a quarantined endpoint.
+                task.dispatch_not_before = datetime.utcnow() + timedelta(
+                    seconds=TRANSIENT_DISPATCH_COOLDOWN_SECONDS
+                )
             task.updated_at = datetime.utcnow()
             await db.commit()
             await db.refresh(task)
@@ -755,6 +978,9 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         task.status = "error"
         task.error_message = error
         task.updated_at = datetime.utcnow()
+        await release_task_workload_lease(
+            db, task, outcome="released", admission_locked=admission_locked
+        )
         await db.commit()
         await db.refresh(task)
         _schedule_task_error_notification(task.id)
@@ -772,11 +998,29 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     await persist_validated_worker_viewer_artifacts(task, result)
     task.total_count = len(result.output_urls)
     task.status = "processing"
+    # Queue/processing split in metrics and Telegram depends on this stamp;
+    # it was only ever cleared on reset paths and never set here.
+    task.processing_started_at = datetime.utcnow()
     # Start stale timer from (re)dispatch moment, not from original task creation time.
     task.last_progress_at = datetime.utcnow()
     task.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(task)
+
+    if str(task.workload_lease_state or "") == "preemption_requested":
+        # Unknown POST outcome has now been resolved to the exact host task.
+        # Honour the already-durable higher-priority broker recall only after
+        # that binding is persisted, so the control endpoint can target one
+        # proven worker process and Completed can still win the race.
+        from task_priority import preempt_background_task
+
+        task.preemption_state = "requested"
+        task.preemption_request_id = task.preemption_request_id or str(uuid.uuid4())
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+        asyncio.create_task(
+            preempt_background_task(task.id, broker_requested=True)
+        )
     
     # Telegram notification (fire-and-forget) - now we have progress_page
     try:
@@ -880,7 +1124,20 @@ def _restore_worker_api_from_progress_page(task: Task) -> bool:
     return True
 
 
-def _worker_outputs_look_complete(urls: List[str]) -> bool:
+def _worker_outputs_look_complete(
+    urls: List[str],
+    *,
+    require_preview: bool = True,
+) -> bool:
+    """Return whether the concrete worker artifact set is usable.
+
+    Completion-contract v2 makes the worker's finalized terminal state the
+    source of truth.  Standard converters may intentionally finish without a
+    Unity preview video/poster, so those optional preview files must not keep a
+    finalized task bound to an otherwise idle worker forever.  Legacy workers
+    still need the historical preview evidence because they do not provide the
+    stronger terminal contract.
+    """
     names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
     has_video = any(
         n.endswith("_rig_preview.mp4")
@@ -895,7 +1152,11 @@ def _worker_outputs_look_complete(urls: List[str]) -> bool:
         or n.endswith(".zip")
         for n in names
     )
-    return has_video and has_poster and has_download
+    if not has_download:
+        return False
+    if not require_preview:
+        return True
+    return has_video and has_poster
 
 
 async def _fetch_concrete_worker_artifacts(
@@ -1250,12 +1511,20 @@ def _schedule_task_error_notification(task_id: str) -> None:
         print(f"[Telegram] Failed to schedule error notification for task {task_id}: {e}")
 
 
+def _clear_terminal_preemption_state(task: Task) -> None:
+    """A terminal worker result owns the race and closes any pending recall."""
+    task.preemption_state = "none"
+    task.preemption_request_id = None
+    task.preemption_worker_boot_id = None
+
+
 async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> bool:
     failure = await _fetch_worker_failure_message(task)
     if not failure:
         return False
     task.status = "error"
     task.error_message = f"Worker failed: {failure}"
+    _clear_terminal_preemption_state(task)
     task.updated_at = datetime.utcnow()
     await db.commit()
     print(f"[Tasks] Worker reported terminal failure for {task.id}: {failure}")
@@ -1299,6 +1568,31 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         task.updated_at = datetime.utcnow()
         print(f"[Tasks] Restored worker_api from progress_page for task {task.id}: {task.worker_api}")
 
+    lease_node_status = None
+    if task.workload_lease_id and task.worker_api:
+        try:
+            lease_node_status = await get_worker_workload_status(task.worker_api)
+        except Exception as exc:
+            print(f"[Tasks] workload node heartbeat unavailable for {task.id}: {exc}")
+    lease_code, lease_status = await heartbeat_task_workload_lease(
+        db, task, lease_node_status
+    )
+    if (
+        lease_code == 423
+        and str(lease_status.get("status_string") or "") == "preemption_requested"
+        and task.status == "processing"
+        and not preemption_in_progress(task)
+    ):
+        from task_priority import preempt_background_task
+
+        task.preemption_state = "requested"
+        task.preemption_request_id = task.preemption_request_id or str(uuid.uuid4())
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+        asyncio.create_task(
+            preempt_background_task(task.id, broker_requested=True)
+        )
+
     # Track if task just completed
     was_processing = task.status == "processing"
     previous_ready_count = task.ready_count
@@ -1314,7 +1608,9 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     if contract_v2 and finalization_failure:
         task.status = "error"
         task.error_message = f"Worker failed: {finalization_failure}"
+        _clear_terminal_preemption_state(task)
         task.updated_at = datetime.utcnow()
+        await release_task_workload_lease(db, task, outcome="released")
         await db.commit()
         await db.refresh(task)
         _schedule_task_error_notification(task.id)
@@ -1377,7 +1673,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         if (
             task.status not in ("done", "error")
             and concrete_urls
-            and _worker_outputs_look_complete(concrete_urls)
+            and _worker_outputs_look_complete(
+                concrete_urls,
+                require_preview=not (contract_v2 and worker_finalized),
+            )
             and not completion_probe_unavailable
             and (not contract_v2 or worker_finalized)
         ):
@@ -1401,6 +1700,7 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
 
     if task.status not in ("done", "error") and task.guid and task.worker_api:
         if await _mark_task_worker_failed_if_reported(db, task):
+            await release_task_workload_lease(db, task, outcome="released")
             await db.refresh(task)
             return task
     
@@ -1426,6 +1726,9 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
                         task.video_url = video_url
                         task.updated_at = datetime.utcnow()
 
+    if task.status in ("done", "error"):
+        _clear_terminal_preemption_state(task)
+
     if task.status == "done":
         from artifact_cache import enqueue_artifact_cache
 
@@ -1438,6 +1741,13 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
                 task.video_ready
                 and (not video_was_ready or previous_video_url != task.video_url)
             ),
+        )
+
+    if task.status in ("done", "error") and task.workload_lease_id:
+        await release_task_workload_lease(
+            db,
+            task,
+            outcome="completed" if task.status == "done" else "released",
         )
 
     await db.commit()
@@ -1598,6 +1908,9 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> bool:
     if preemption_in_progress(task):
         print(f"[Priority] Refusing admin requeue during preemption: {task.id}")
         return False
+    await release_task_workload_lease(
+        db, task, outcome="released", clear_for_retry=True
+    )
     task.status = "created"
     task.ready_count = 0
     task.ready_urls = []
@@ -1637,6 +1950,9 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     if preemption_in_progress(task):
         print(f"[Priority] Skipping stale reset during preemption: {task.id}")
         return False
+    await release_task_workload_lease(
+        db, task, outcome="released", clear_for_retry=True
+    )
     
     # Check if we've exceeded max restarts
     current_restarts = task.restart_count or 0

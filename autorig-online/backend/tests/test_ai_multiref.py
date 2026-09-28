@@ -325,7 +325,7 @@ class SocketTests(unittest.TestCase):
         image = ai_services.service("image")
         fields = [item["field"] for item in image["inputs"]]
         self.assertEqual(fields[:5], ["prompt", "image", "control_pose", "control_depth", "control_canny"])
-        self.assertEqual(fields[5:], ["reference_2", "reference_3", "reference_4"])
+        self.assertEqual(fields[5:], ["reference_2", "reference_3"])
         qwen = [item["field"] for item in ai_services.service("qwen_image")["inputs"]]
         self.assertEqual(qwen, ["prompt", "image", "reference_2", "reference_3"])
 
@@ -349,3 +349,45 @@ class SocketTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QwenImage21TurboTemplateTests(unittest.TestCase):
+    """Qwen-Image-2.1 + Viggle turbo templates (2026-09-26)."""
+
+    def _load(self, name):
+        from renderfin import templating
+        text = (Path(__file__).resolve().parents[1] / "renderfin" / "assets" / "workflows" / name).read_text(encoding="utf-8")
+        return templating.render_workflow_text(
+            text, width=1024, height=768, prompt="make it snow", negative_prompt="",
+            image_filename="in.png", output_prefix="task/out", seed=7)
+
+    def test_every_turbo_template_parses_with_six_sigmas_and_no_cfg(self):
+        for name in ("qwen_image21_generate.json", "qwen_image21_edit.json",
+                     "qwen_image21_edit_multi.json"):
+            workflow = self._load(name)
+            sigmas = workflow["sigmas"]["inputs"]["sigmas"].split(",")
+            self.assertEqual(len(sigmas), 7, name)          # 6 steps + the final 0
+            self.assertEqual(workflow["guider"]["class_type"], "BasicGuider")
+            self.assertEqual(workflow["noise"]["inputs"]["noise_seed"], 7)
+            self.assertEqual(workflow["turbo"]["inputs"]["strength_model"], 1.0)
+
+    def test_the_multi_template_takes_one_to_three_pictures_in_order(self):
+        workflow = self._load("qwen_image21_edit_multi.json")
+        multiref.inject_references("qwen_image21_edit_multi.json", workflow, ["a.png", "b.png", "c.png"])
+        inputs = workflow["positive"]["inputs"]
+        for index, name in enumerate(("a.png", "b.png", "c.png"), start=1):
+            scale = inputs[f"images.image_{index}"][0]
+            image = workflow[scale]["inputs"]["image"][0]
+            self.assertEqual(workflow[image]["inputs"]["image"], name)
+        with self.assertRaises(ValueError):
+            multiref.inject_references("qwen_image21_edit_multi.json", self._load("qwen_image21_edit_multi.json"), ["a", "b", "c", "d"])
+
+    def test_the_turbo_types_route_to_their_templates(self):
+        from renderfin import routing
+        from renderfin.models import RenderPrompt
+        for ptype, expected in (("qwen_image21", "qwen_image21_generate.json"),
+                                ("qwen_image21_edit", "qwen_image21_edit.json"),
+                                ("qwen_image21_edit_multi", "qwen_image21_edit_multi.json")):
+            self.assertEqual(routing.resolve_workflow_file(RenderPrompt(type=ptype, prompt="x"))[0], expected)
+            self.assertEqual(routing.scheduling_token(RenderPrompt(type=ptype, prompt="x")),
+                             routing.QWEN_IMAGE_SCHEDULING_TOKEN)

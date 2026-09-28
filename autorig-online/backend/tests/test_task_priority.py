@@ -14,6 +14,7 @@ from task_priority import (
     QUEUE_CLASS_BACKGROUND,
     QUEUE_CLASS_INTERACTIVE,
     background_dispatch_budget,
+    dispatch_released_interactive,
     dispatch_sort_key,
     normalize_queue_class,
     select_preemption_victims,
@@ -146,11 +147,36 @@ class QueueClassTests(unittest.TestCase):
         )
         self.assertEqual(candidates, [oldest])
 
+    def test_transient_cooldown_yields_fifo_head_to_next_task(self):
+        now = datetime.utcnow()
+        oldest = SimpleNamespace(
+            id="oldest",
+            status="created",
+            source_attempt_count=0,
+            dispatch_not_before=now + timedelta(seconds=600),
+        )
+        newer = SimpleNamespace(
+            id="newer",
+            status="created",
+            source_attempt_count=0,
+            dispatch_not_before=None,
+        )
+        candidates = [oldest, newer]
+
+        async def reject(task_row):
+            return task_row, "worker timeout"
+
+        accepted = asyncio.run(
+            task_priority.dispatch_fifo_candidate(candidates, reject)
+        )
+        self.assertFalse(accepted)
+        self.assertEqual(candidates, [newer])
+
 
 class ReserveTests(unittest.TestCase):
     def test_background_can_use_at_most_n_minus_one(self):
         workers = [object(), object(), object(), object()]
-        self.assertEqual(background_dispatch_budget(workers, 0), 3)
+        self.assertEqual(background_dispatch_budget(workers, 0), 2)
 
     def test_background_never_uses_only_worker(self):
         self.assertEqual(background_dispatch_budget([object()], 0), 0)
@@ -163,6 +189,47 @@ class ReserveTests(unittest.TestCase):
         new = SimpleNamespace(feature_flags={"collection_preemption_v1": True})
         self.assertFalse(worker_supports_preemption(old))
         self.assertTrue(worker_supports_preemption(new))
+
+    def test_released_slots_dispatch_interactive_fifo_in_same_cycle(self):
+        oldest = SimpleNamespace(
+            id="user-oldest", status="created", source_attempt_count=0
+        )
+        newer = SimpleNamespace(
+            id="user-newer", status="created", source_attempt_count=0
+        )
+        candidates = [oldest, newer]
+        workers = [
+            SimpleNamespace(url="https://converter-f1.example/api-converter-glb"),
+            SimpleNamespace(url="https://converter-reserve.example/api-converter-glb"),
+            SimpleNamespace(url="https://converter-f13.example/api-converter-glb/"),
+        ]
+        calls = []
+
+        async def start(task_row, worker):
+            calls.append((task_row.id, worker.url))
+            task_row.status = "processing"
+            return task_row, None
+
+        dispatched = asyncio.run(
+            dispatch_released_interactive(
+                candidates,
+                workers,
+                {
+                    "https://converter-f1.example/api-converter-glb/",
+                    "HTTPS://CONVERTER-F13.EXAMPLE/api-converter-glb",
+                },
+                start,
+            )
+        )
+        self.assertEqual(dispatched, 2)
+        self.assertEqual(
+            calls,
+            [
+                ("user-oldest", workers[0].url),
+                ("user-newer", workers[2].url),
+            ],
+        )
+        self.assertEqual(candidates, [])
 
 
 class VictimSelectionTests(unittest.TestCase):
@@ -194,6 +261,7 @@ class PreemptionRecoveryTests(unittest.TestCase):
         reboot=False,
         recovering=False,
         initial_worker_status="Processing",
+        initial_task_visible=True,
     ):
         import database
 
@@ -257,7 +325,11 @@ class PreemptionRecoveryTests(unittest.TestCase):
                         ),
                         "processing_tasks": (
                             []
-                            if released or initial_worker_status == "Pending"
+                            if (
+                                released
+                                or initial_worker_status == "Pending"
+                                or not initial_task_visible
+                            )
                             else [{"task_id": "worker-1", "status": "Processing"}]
                         ),
                         "pending_tasks": (
@@ -325,6 +397,14 @@ class PreemptionRecoveryTests(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(row.status, "processing")
         self.assertEqual(row.worker_task_id, "worker-1")
+
+    def test_completed_before_first_recall_probe_clears_request_without_quarantine(self):
+        result, row, _ = self._run("Completed", initial_task_visible=False)
+        self.assertFalse(result)
+        self.assertEqual(row.status, "processing")
+        self.assertEqual(row.worker_task_id, "worker-1")
+        self.assertEqual(row.preemption_state, "none")
+        self.assertIsNone(row.preemption_request_id)
 
     def test_worker_reboot_requeues_only_after_boot_change_and_empty_slot_proof(self):
         result, row, _ = self._run("", reboot=True)

@@ -331,6 +331,36 @@ def _host_managed_progress(
         "stale_at": stale_at,
     }
 
+def dispatch_order(tasks, now: Optional[float] = None) -> List[Any]:
+    """The waiting tasks in the order the pump dispatches them.
+
+    LIFO by submission burst: tasks submitted within LIFO_GROUP_SECONDS of the
+    previous one form a group (an X9 batch, a list run) that keeps its own
+    first-in order; groups go newest first. A task waiting longer than
+    STARVE_MINUTES jumps ahead of every group, oldest first, so nothing waits
+    forever behind a stream of new work.
+    """
+    waiting = sorted(
+        (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
+        key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
+    )
+    if not config.LIFO or len(waiting) < 2:
+        return waiting
+    now = time.time() if now is None else now
+    starving = [t for t in waiting if now - float(t.created_at or 0) > config.STARVE_MINUTES * 60]
+    rest = [t for t in waiting if now - float(t.created_at or 0) <= config.STARVE_MINUTES * 60]
+    groups: List[List[Any]] = []
+    for task in rest:
+        if groups and float(task.created_at or 0) - float(groups[-1][-1].created_at or 0) <= config.LIFO_GROUP_SECONDS:
+            groups[-1].append(task)
+        else:
+            groups.append([task])
+    ordered = list(starving)
+    for group in reversed(groups):
+        ordered.extend(group)
+    return ordered
+
+
 def pending_queue_position(tasks, task_id: str) -> Dict[str, int]:
     """1-based rank of a waiting task among everything else that is waiting.
 
@@ -340,10 +370,7 @@ def pending_queue_position(tasks, task_id: str) -> Dict[str, int]:
     place in the queue and gets position 0 — the caller then shows nothing
     rather than a stale number that only ever counted down to a lie.
     """
-    waiting = sorted(
-        (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
-        key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
-    )
+    waiting = dispatch_order(tasks)
     wanted = str(task_id or "")
     position = 0
     for index, task in enumerate(waiting):
@@ -517,6 +544,14 @@ class RenderQueue:
             self._client = httpx.AsyncClient(follow_redirects=True)
         await self._resurrect()
         await self._reconcile_terminal_leases()
+        if config.WIPE_QUEUE_ON_START:
+            try:
+                wiped = await self.reset_farm(reason="cancelled: server restarted — press Render again", spare_non_graph=True)
+                print(f"[Renderfin][Queue] START WIPE: cancelled {wiped.get('cancelled_queued_int')} queued, "
+                      f"{wiped.get('cancelled_running_int')} running; boxes {wiped.get('boxes_object')}")
+                self.last_start_wipe = {k: v for k, v in wiped.items() if k != "task_ids_array"}
+            except Exception as exc:
+                print(f"[Renderfin][Queue] START WIPE failed: {exc}")
         self._stopped.clear()
         self._pump_task = asyncio.create_task(self._pump())
 
@@ -695,8 +730,16 @@ class RenderQueue:
             "boxes_array": [s.render_server_name for s in self.registry.all()],
         }
 
+    @staticmethod
+    def _outside_the_farm_reset(task: RenderTask) -> bool:
+        """Hunyuan 3D conversions and the Telegram character pipeline are not
+        graph renders: a restart must not throw away their long jobs."""
+        return (str(task.workflow or "") == routing.WORKFLOW_IMAGE_TO_3D
+                or bool(getattr(task, "logical_owner_task_id", "")))
+
     async def reset_farm(self, *, dry_run: bool = False,
-                         reason: str = "cancelled: farm reset by an administrator") -> Dict[str, Any]:
+                         reason: str = "cancelled: farm reset by an administrator",
+                         spare_non_graph: bool = False) -> Dict[str, Any]:
         """Cancel every queued and running task and empty each box's ComfyUI queue.
 
         Only the render-worker ComfyUI instances in this registry are touched
@@ -711,6 +754,8 @@ class RenderQueue:
         for task_id in list(summary["task_ids_array"]):
             task = self._tasks.get(task_id)
             if task is None or task.status not in (TASK_PENDING, TASK_RENDERING):
+                continue
+            if spare_non_graph and self._outside_the_farm_reset(task):
                 continue
             was_running = task.status == TASK_RENDERING
             if await self.cancel(task_id, reason=reason):
@@ -1111,10 +1156,7 @@ class RenderQueue:
         return depths
 
     async def _dispatch_one(self) -> bool:
-        pending = sorted(
-            (t for t in self._tasks.values() if t.status == TASK_PENDING),
-            key=lambda t: t.created_at,
-        )
+        pending = dispatch_order(self._tasks.values())
         if not pending:
             return False
         depths = await self._queue_depths()
@@ -1570,6 +1612,7 @@ class RenderQueue:
         controlled_video = workflow_file in {
             "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
             "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json",
+            "gen_video_ltx25_crossview_by_url.json",
             "upscale_video_x2.json"}
         if bool(control_url) != controlled_video:
             raise comfy_adapter.ComfyRequestError(
@@ -1631,7 +1674,8 @@ class RenderQueue:
         if is_avatar_workflow:
             _inject_avatar_reference_images(workflow, reference_filenames)
         elif is_multiref_workflow:
-            multiref.inject_references(workflow_file, workflow, reference_filenames)
+            multiref.inject_references(workflow_file, workflow, reference_filenames,
+                                       list(getattr(prompt, "reference_strengths", None) or []))
         apply_runtime_settings(workflow, prompt, width, height)
         if music.is_music(prompt):
             music.apply_music_settings(workflow, prompt)

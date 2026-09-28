@@ -7,9 +7,13 @@ service can resume interrupted jobs after a restart.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import re
 import time
+import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,7 +22,7 @@ import httpx
 
 from fleet_admission import fleet_admission_lock
 
-from . import config, hunyuan_client, turntable
+from . import config, glb_quality, hunyuan_client, turntable, workload_lease
 from .models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
@@ -30,9 +34,12 @@ from .models import (
     CHARGEN_STAGE_TURNTABLE,
     TASK_DONE,
     TASK_ERROR,
+    TASK_PENDING,
+    TASK_RENDERING,
     CharacterGenJob,
     SentMessage,
     RenderPrompt,
+    RenderServer,
 )
 from .queue import RenderQueue
 
@@ -47,6 +54,94 @@ CREATE INDEX IF NOT EXISTS idx_chargen_stage ON chargen_jobs(stage);
 """
 
 _ACTIVE_STAGES = (CHARGEN_STAGE_FLUX, CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_TURNTABLE)
+
+
+def _atomic_artifact_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.quality-part")
+    try:
+        with temporary.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(str(temporary), str(path))
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _archive_rejected_glb(
+    job: CharacterGenJob,
+    data: bytes,
+    exc: glb_quality.GlbQualityError,
+    *,
+    source: str,
+) -> Path:
+    root = config.DATA_DIR / "rejected" / "glb" / job.id
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    target = root / f"{stamp}_r{int(job.artifact_revision or 0)}_{uuid.uuid4().hex}"
+    target.mkdir(parents=False, exist_ok=False)
+    report = {
+        "schema": "renderfin.rejected_glb.v1",
+        "job_id": job.id,
+        "artifact_revision": int(job.artifact_revision or 0),
+        "collection_guid": job.collection_guid or None,
+        "collection_index": int(job.collection_index or 0) or None,
+        "hunyuan_worker": job.hunyuan_worker or None,
+        "hunyuan_task_id": job.hunyuan_task_id or None,
+        "source": source,
+        "file_bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "error": exc.as_dict(),
+    }
+    _atomic_artifact_bytes(target / "model.glb", data)
+    _atomic_artifact_bytes(
+        target / "report.json",
+        (json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(
+            "utf-8"
+        ),
+    )
+    return target
+
+
+def _archive_rejected_glb_best_effort(
+    job: CharacterGenJob,
+    data: bytes,
+    exc: glb_quality.GlbQualityError,
+    *,
+    source: str,
+) -> Optional[Path]:
+    """Preserve rejection evidence without masking the quality failure.
+
+    Archiving can itself fail under the exact disk-pressure conditions where a
+    fail-closed validator matters most.  The caller must still raise the
+    original ``GlbQualityError`` so its terminal lease is released and the
+    logical job follows the quality retry path instead of leaking a binding.
+    """
+
+    try:
+        return _archive_rejected_glb(job, data, exc, source=source)
+    except Exception as archive_exc:
+        print(
+            f"[Renderfin][CharGen] rejected GLB archive failed for {job.id} "
+            f"from {source}: {archive_exc}"
+        )
+        return None
+
+
+@asynccontextmanager
+async def _gpu_admission_guard():
+    # The central broker owns the cross-process lock when enabled. Taking the
+    # legacy file lock before its HTTP call deadlocks the broker on the same
+    # lock. Disabled deployments retain the old serialization path.
+    if workload_lease.enabled():
+        yield
+    else:
+        async with fleet_admission_lock():
+            yield
 
 # A stage waits on a queue task, so its ceiling MUST exceed the queue's own
 # ceiling - otherwise the stage gives up while the task keeps holding a worker,
@@ -64,11 +159,21 @@ HUNYUAN_STAGE_TIMEOUT = float(
 # Automatic stage recovery: how many times a stage retries itself before the
 # job is reported as failed, and how long to wait between attempts.
 MAX_STAGE_ATTEMPTS = int(os.getenv("RENDERFIN_CHARGEN_STAGE_ATTEMPTS", "3"))
+MAX_GLB_QUALITY_ATTEMPTS = int(
+    os.getenv("RENDERFIN_CHARGEN_GLB_QUALITY_ATTEMPTS", "5")
+)
 RETRY_BACKOFF_SECONDS = (30.0, 120.0, 600.0)
 # An empty 3D fleet says nothing about the job, so waiting is free and giving
 # up is wrong: the user pressed the button and is owed the result whenever the
 # farm comes back. These waits do not count against the job's attempts.
 FLEET_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_FLEET_WAIT", "300"))
+HUNYUAN_ARTIFACT_RETRY_SECONDS = max(
+    5.0,
+    min(
+        60.0,
+        float(os.getenv("RENDERFIN_HUNYUAN_ARTIFACT_RETRY_SECONDS", "30")),
+    ),
+)
 # Waiting for a busy box to free up is ordinary queueing, so it is re-checked
 # far more often than a farm that is actually down.
 SLOT_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_SLOT_WAIT", "60"))
@@ -119,10 +224,25 @@ _FARM_BREAKAGE_MARKERS = (
     "blender vertex-pbr pipeline failed",
 )
 
+_MODEL_TERMINAL_ERROR_RE = re.compile(
+    r"(?:generation failed on [A-Za-z0-9._-]+: )?"
+    r"MODEL_INPUT_UNSUPPORTED\[LOW_LOD_STRUCTURAL_FLOOR\]: "
+    r"minimum=([0-9]{1,9}) target=([0-9]{1,9}) components=([0-9]{1,9})"
+)
+
 
 def _is_farm_breakage(text: str) -> bool:
     low = (text or "").lower()
     return any(marker in low for marker in _FARM_BREAKAGE_MARKERS)
+
+
+def _is_model_terminal_failure(text: str) -> bool:
+    """Match only stable worker codes that prove an input-specific limit."""
+    match = _MODEL_TERMINAL_ERROR_RE.fullmatch(str(text or ""))
+    if match is None:
+        return False
+    minimum, target, components = (int(value) for value in match.groups())
+    return minimum >= components > 0 and minimum > target > 0
 
 
 def _is_hunyuan_capacity_wait(text: str) -> bool:
@@ -258,6 +378,7 @@ class CharacterGenManager:
         await self._db.commit()
         await self._load()
         await self._backfill_seq()
+        await self._reconcile_hunyuan_terminal_leases()
         for job in self._jobs.values():
             if job.stage in _ACTIVE_STAGES and not job.retry_at:
                 print(f"[Renderfin][CharGen] resuming job {job.id} at stage {job.stage}")
@@ -269,6 +390,7 @@ class CharacterGenManager:
         while not self._stopped.is_set():
             try:
                 now = time.time()
+                await self._reconcile_hunyuan_terminal_leases()
                 for job in list(self._jobs.values()):
                     if (
                         job.stage == CHARGEN_STAGE_FAILED
@@ -547,6 +669,13 @@ class CharacterGenManager:
             return None
         job.stage = CHARGEN_STAGE_SUBMITTED
         if task_id:
+            previous_task_id = str(job.submitted_task_id or "")
+            if previous_task_id and previous_task_id != str(task_id):
+                job.superseded_task_ids = list(
+                    dict.fromkeys(
+                        [*(job.superseded_task_ids or []), previous_task_id]
+                    )
+                )
             job.submitted_task_id = str(task_id)
         await self._persist(job)
         return job
@@ -851,6 +980,7 @@ class CharacterGenManager:
             # the previous 3D attempt is the reason we are here: never re-poll it
             job.hunyuan_task_id = ""
             job.hunyuan_worker = ""
+            job.hunyuan_worker_url = ""
         else:
             job.stage = CHARGEN_STAGE_FLUX
             # keep following the previous render only if it is still alive
@@ -885,6 +1015,7 @@ class CharacterGenManager:
         # a regenerated image invalidates everything downstream
         job.hunyuan_task_id = ""
         job.hunyuan_worker = ""
+        job.hunyuan_worker_url = ""
         job.glb_url = ""
         job.video_url = ""
         job.error = ""
@@ -936,6 +1067,198 @@ class CharacterGenManager:
         job.last_error = str(exc)[:1000]
         job.hunyuan_waiting_for_capacity = False
 
+        if stage == CHARGEN_STAGE_HUNYUAN and job.hunyuan_workload_lease_id:
+            if isinstance(exc, hunyuan_client.SubmissionOutcomeUnknown):
+                # The host may already own this exact request.  Preserve the
+                # worker/request/lease triple and replay it; no attempt,
+                # cooldown, central release, or worker rotation is safe until
+                # the worker's idempotency ledger resolves the ambiguity.
+                worker_name = str(exc.worker.get("name") or "")
+                if worker_name:
+                    job.hunyuan_worker = worker_name
+                job.hunyuan_workload_lease_state = "submission_unknown"
+                job.retry_at = time.time() + SLOT_WAIT_SECONDS
+                job.stage_started_at = 0
+                job.timed_stage = ""
+                job.error = ""
+                await self._persist(job)
+                print(
+                    f"[Renderfin][CharGen] job {job.id} preserving ambiguous "
+                    f"Hunyuan submission on {job.hunyuan_worker} for exact replay"
+                )
+                return
+            message = str(exc).lower()
+            terminal_generation_failure = (
+                isinstance(exc, hunyuan_client.HunyuanClientError)
+                and (
+                    "generation failed" in message
+                    or "completed without model" in message
+                )
+            )
+            terminal_artifact_failure = (
+                isinstance(exc, hunyuan_client.HunyuanClientError)
+                and "model download" in message
+            )
+            if terminal_generation_failure:
+                # Worker status proved terminal; no process can overlap retry.
+                released = await self._release_hunyuan_workload(
+                    job, outcome="released", new_request=True
+                )
+                if not released:
+                    job.retry_at = time.time() + FLEET_WAIT_SECONDS
+                    job.error = ""
+                    await self._persist(job)
+                    return
+            elif terminal_artifact_failure:
+                # Host generation is Completed, but central completion is not
+                # durable until the GLB bytes and job.glb_url are persisted.
+                # Keep the exact status URL/request/lease binding and poll it
+                # frequently enough to renew the central lease while retrying
+                # only artifact transport.  Releasing here creates a window in
+                # which a restart or retry can submit a duplicate generation.
+                job.hunyuan_workload_lease_state = "artifact_pending"
+                job.retry_at = time.time() + HUNYUAN_ARTIFACT_RETRY_SECONDS
+                job.error = ""
+                await self._persist(job)
+                print(
+                    f"[Renderfin][CharGen] job {job.id} Hunyuan completed; "
+                    "retrying only artifact retrieval"
+                )
+                return
+            elif isinstance(
+                exc,
+                (
+                    hunyuan_client.TaskVanished,
+                    hunyuan_client.WorkerUnreachable,
+                    workload_lease.WorkloadLeaseTerminal,
+                ),
+            ) or (
+                isinstance(exc, hunyuan_client.HunyuanClientError)
+                and "generation timed out" in message
+            ):
+                # Route loss/timeout is not proof that the child stopped.
+                # Exact preempt+empty-slot confirmation is the only safe way
+                # to retire the binding; otherwise park it in place.
+                worker = hunyuan_client.worker_for_url(job.hunyuan_task_id)
+                outcome = ""
+                if worker is not None and job.hunyuan_task_id:
+                    try:
+                        async with httpx.AsyncClient(follow_redirects=True) as client:
+                            outcome = await hunyuan_client.preempt_bound_task(
+                                client,
+                                worker,
+                                job.hunyuan_task_id,
+                                backend_task_id=job.id,
+                                requester_workload_class="ai_vision",
+                            )
+                    except Exception as recovery_exc:
+                        print(
+                            f"[Renderfin][CharGen] exact Hunyuan recovery "
+                            f"deferred for {job.id}: {recovery_exc}"
+                        )
+                if outcome == "preempted":
+                    released = await self._release_hunyuan_workload(
+                        job, outcome="preempted", new_request=True
+                    )
+                    if not released:
+                        job.retry_at = time.time() + FLEET_WAIT_SECONDS
+                        job.error = ""
+                        await self._persist(job)
+                        return
+                    exc = hunyuan_client.TaskPreempted(
+                        f"exactly preempted stale Hunyuan binding for {job.id}"
+                    )
+                elif outcome == "completed":
+                    await self._release_hunyuan_workload(
+                        job, outcome="completed", new_request=False
+                    )
+                    job.retry_at = time.time() + FLEET_WAIT_SECONDS
+                    job.error = ""
+                    await self._persist(job)
+                    return
+                else:
+                    job.retry_at = time.time() + FLEET_WAIT_SECONDS
+                    job.error = ""
+                    await self._persist(job)
+                    return
+
+        if stage == CHARGEN_STAGE_HUNYUAN and _is_model_terminal_failure(str(exc)):
+            # The worker proved that preserving every disconnected component
+            # cannot satisfy the strict low-LOD triangle contract. Another GPU
+            # cannot change that topology, and a generic missing-manifest label
+            # would otherwise revive the same expensive generation forever.
+            # The terminal worker binding is retained for diagnostics, matching
+            # the ordinary exhausted-attempt path below.
+            job.error = job.last_error
+            job.stage = CHARGEN_STAGE_FAILED
+            job.retry_at = 0
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} terminal model contract "
+                f"failure at {stage}: {exc}"
+            )
+            return
+
+        if (
+            stage == CHARGEN_STAGE_FLUX
+            and "render artifact quality rejected" in str(exc).lower()
+        ):
+            # The input/prompt remains valid; the renderer returned no genuine
+            # task-owned bundle. Queue-level worker cooldown rotates this same
+            # logical collection member without consuming its model attempts.
+            for attr in ("flux_task_id", "flux_task_id_b"):
+                task_id = getattr(job, attr)
+                previous = self.queue.get(task_id) if task_id else None
+                if previous is None or previous.status == TASK_ERROR:
+                    setattr(job, attr, "")
+            job.retry_at = time.time() + SLOT_WAIT_SECONDS
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} rejected a bad Flux "
+                "bundle; retrying on another renderer"
+            )
+            return
+
+        glb_quality_failure = isinstance(exc, glb_quality.GlbQualityError)
+        if glb_quality_failure and stage == CHARGEN_STAGE_TURNTABLE:
+            # A legacy or externally-written GLB can reach turntable without
+            # the download gate. Rewind to Hunyuan, not turntable: rendering
+            # the same bad geometry again can never heal it.
+            stage = CHARGEN_STAGE_HUNYUAN
+            job.stage = CHARGEN_STAGE_HUNYUAN
+        if glb_quality_failure and exc.code != "semantic_geometry_corrupt":
+            # A malformed/textureless GLB is a worker/post-process contract
+            # failure. Rotate that worker and retry without charging the
+            # character's stochastic quality budget.
+            failed_worker = str(job.hunyuan_worker or "")
+            if failed_worker:
+                cooldown_until = time.time() + FARM_WORKER_COOLDOWN_SECONDS
+                cooldowns = dict(job.hunyuan_worker_cooldowns or {})
+                cooldowns[failed_worker] = cooldown_until
+                job.hunyuan_worker_cooldowns = cooldowns
+                self._farm_worker_cooldowns[failed_worker] = cooldown_until
+            job.hunyuan_task_id = ""
+            job.hunyuan_seed = 0
+            job.hunyuan_worker = ""
+            job.hunyuan_worker_url = ""
+            job.glb_url = ""
+            job.video_url = ""
+            job.retry_at = time.time() + SLOT_WAIT_SECONDS
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} rejected malformed GLB "
+                f"({exc.code}); rotating worker without spending an attempt"
+            )
+            return
+
         if _is_farm_breakage(str(exc)) or _is_collection_infrastructure_failure(
             job, str(exc)
         ):
@@ -965,6 +1288,7 @@ class CharacterGenManager:
                     self._farm_worker_cooldowns[failed_worker] = cooldown_until
                 job.hunyuan_task_id = ""
                 job.hunyuan_worker = ""
+                job.hunyuan_worker_url = ""
             elif stage == CHARGEN_STAGE_FLUX:
                 # Only discard terminal/missing render handles. A rare stage
                 # timeout while Comfy still owns the prompt must not create a
@@ -997,6 +1321,7 @@ class CharacterGenManager:
             self._input_fetch_worker_cooldowns[exc.worker_name] = cooldown_until
             job.hunyuan_task_id = ""
             job.hunyuan_worker = ""
+            job.hunyuan_worker_url = ""
             job.retry_at = time.time() + RETRY_BACKOFF_SECONDS[0]
             job.stage_started_at = 0
             job.timed_stage = ""
@@ -1017,6 +1342,7 @@ class CharacterGenManager:
             # an attempt: a crashing box would otherwise exhaust every job
             job.hunyuan_task_id = ""
             job.hunyuan_worker = ""
+            job.hunyuan_worker_url = ""
             if isinstance(exc, hunyuan_client.TaskPreempted):
                 cooldown = 300.0
                 job.preemption_count = int(job.preemption_count or 0) + 1
@@ -1062,7 +1388,12 @@ class CharacterGenManager:
         job.attempts = attempts
         count = attempts[stage]
 
-        if count >= MAX_STAGE_ATTEMPTS:
+        attempt_limit = (
+            MAX_GLB_QUALITY_ATTEMPTS
+            if glb_quality_failure
+            else MAX_STAGE_ATTEMPTS
+        )
+        if count >= attempt_limit:
             job.error = job.last_error
             job.stage = CHARGEN_STAGE_FAILED
             job.retry_at = 0
@@ -1076,7 +1407,12 @@ class CharacterGenManager:
         # drop references to the dead attempt so the retry starts clean
         if stage == CHARGEN_STAGE_HUNYUAN:
             job.hunyuan_task_id = ""
+            job.hunyuan_seed = 0
             job.hunyuan_worker = ""
+            job.hunyuan_worker_url = ""
+            if glb_quality_failure:
+                job.glb_url = ""
+                job.video_url = ""
         elif stage == CHARGEN_STAGE_FLUX:
             previous = self.queue.get(job.flux_task_id) if job.flux_task_id else None
             if previous is None or previous.status == TASK_ERROR:
@@ -1108,21 +1444,82 @@ class CharacterGenManager:
             job.stage_started_at = now
         return max(0.0, ceiling - (now - job.stage_started_at))
 
-    async def _await_render(self, task_id: str, timeout: float):
+    async def _persisted_stage_budget(
+        self, job: CharacterGenJob, ceiling: float
+    ) -> float:
+        """Persist a newly-started deadline before entering a long wait."""
+        previous = (job.timed_stage, job.stage_started_at)
+        budget = self._stage_budget(job, ceiling)
+        if (job.timed_stage, job.stage_started_at) != previous:
+            await self._persist(job)
+        return budget
+
+    async def _await_render(
+        self, job: CharacterGenJob, task_id: str, ceiling: float
+    ):
+        while True:
+            task = self.queue.get(task_id)
+            if task is None:
+                raise KeyError(task_id)
+            if task.status == TASK_PENDING:
+                # Capacity waiting is not stage execution. Clear an old clock
+                # after central preemption and persist before sleeping.
+                if job.stage_started_at or job.timed_stage:
+                    job.stage_started_at = 0
+                    job.timed_stage = ""
+                    await self._persist(job)
+                await asyncio.sleep(1.0)
+                continue
+            if task.status == TASK_DONE:
+                return task
+            if task.status != TASK_RENDERING:
+                raise RuntimeError(
+                    f"render task {task_id} failed: {task.error or task.status}"
+                )
+            if job.timed_stage != job.stage or not job.stage_started_at:
+                job.timed_stage = job.stage
+                job.stage_started_at = float(task.started_at or time.time())
+                await self._persist(job)
+            timeout = max(
+                0.0, ceiling - (time.time() - float(job.stage_started_at or 0))
+            )
+            break
         task = await self.queue.wait_for(task_id, timeout=timeout)
         if task.status != TASK_DONE:
             raise RuntimeError(f"render task {task_id} failed: {task.error or task.status}")
         return task
 
+    async def _enqueue_managed_render(
+        self, job: CharacterGenJob, prompt: RenderPrompt
+    ):
+        try:
+            return await self.queue.enqueue(
+                prompt,
+                queue_class=job.queue_class,
+                logical_owner_task_id=job.id,
+            )
+        except TypeError as exc:
+            # Compatibility for third-party/test queue implementations while
+            # the production RenderQueue contract rolls forward.
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            task = await self.queue.enqueue(prompt)
+            if hasattr(task, "queue_class"):
+                task.queue_class = job.queue_class
+            if hasattr(task, "logical_owner_task_id"):
+                task.logical_owner_task_id = job.id
+            return task
+
     async def _enqueue_flux(self, job: CharacterGenJob, prompt: str, mask_url: str = ""):
-        return await self.queue.enqueue(
+        return await self._enqueue_managed_render(
+            job,
             RenderPrompt(
                 prompt=prompt,
                 negative_prompt=job.negative_prompt,
                 image_url=mask_url or job.mask_url,
                 type="t_pose",
                 user_name=job.user_name,
-            )
+            ),
         )
 
     async def _stage_flux(self, job: CharacterGenJob) -> None:
@@ -1144,27 +1541,34 @@ class CharacterGenManager:
             await self._persist(job)
 
         task = await self._await_render(
-            job.flux_task_id, self._stage_budget(job, FLUX_STAGE_TIMEOUT)
+            job,
+            job.flux_task_id,
+            FLUX_STAGE_TIMEOUT,
         )
         job.image_url = task.output_url
         isolated = task.extra_outputs.get("isolated")
         if not isolated:
-            # Hunyuan works far better on a matted character; say so instead of
-            # silently feeding it the full frame.
-            job.warning = "RMBG isolated render missing; using the full frame for 3D"
-            print(f"[Renderfin][CharGen] job {job.id} WARNING: {job.warning}")
-        job.isolated_url = isolated or task.output_url
+            raise RuntimeError(
+                "render artifact quality rejected: required RMBG isolated "
+                "t-pose output is missing"
+            )
+        job.isolated_url = isolated
 
         if job.flux_task_id_b:
             # a failed second variant must not sink the job: one image is enough
             try:
                 task_b = await self._await_render(
-                    job.flux_task_id_b, self._stage_budget(job, FLUX_STAGE_TIMEOUT)
+                    job,
+                    job.flux_task_id_b,
+                    FLUX_STAGE_TIMEOUT,
                 )
                 job.image_url_b = task_b.output_url
-                job.isolated_url_b = (
-                    task_b.extra_outputs.get("isolated") or task_b.output_url
-                )
+                job.isolated_url_b = task_b.extra_outputs.get("isolated") or ""
+                if not job.isolated_url_b:
+                    raise RuntimeError(
+                        "render artifact quality rejected: variant B RMBG "
+                        "isolated t-pose output is missing"
+                    )
             except Exception as exc:
                 print(f"[Renderfin][CharGen] job {job.id} variant B failed: {exc}")
                 job.flux_task_id_b = ""
@@ -1217,6 +1621,295 @@ class CharacterGenManager:
         await self._persist(job)
         print(f"[Renderfin][CharGen] job {job.id} hunyuan done -> {job.glb_url}")
 
+    def _hunyuan_lease_server(
+        self,
+        worker: Dict[str, Any],
+        status: Optional[Dict[str, Any]],
+    ) -> RenderServer:
+        status = status or {}
+        arbiter = status.get("gpu_arbiter") or status.get("arbiter_by_key") or {}
+        if not isinstance(arbiter, dict):
+            arbiter = {}
+        control = (
+            status.get("workload_control")
+            if isinstance(status.get("workload_control"), dict)
+            else {}
+        )
+        expected_physical = str(
+            worker.get("physical_resource_id_string") or ""
+        ).strip().lower()
+        reported_physical = str(
+            status.get("physical_node")
+            or status.get("physical_resource_id_string")
+            or control.get("physical_node")
+            or ""
+        ).strip().lower()
+        expected_role = workload_lease.canonical_workload_role(
+            worker.get("workload_role")
+        )
+        reported_role = workload_lease.canonical_workload_role(
+            status.get("workload_role")
+            or status.get("workload_role_string")
+            or control.get("workload_role")
+        )
+        identity_verified = bool(
+            workload_lease.verified_machine_role(
+                expected_physical, expected_role
+            )
+            and expected_physical == reported_physical
+            and expected_role == reported_role
+        )
+        physical = reported_physical if identity_verified else ""
+        return RenderServer(
+            render_server_name=str(worker.get("name") or physical),
+            render_server_url=str(worker.get("url") or ""),
+            status="online",
+            managed_workload=True,
+            node_id_string=str(worker.get("name") or physical),
+            physical_resource_id_string=physical,
+            full_converter_bool=(
+                str(worker.get("pool") or "shared_converter") != "dedicated"
+            ),
+            ai_capable_bool=bool(status.get("ai_capable_bool") is True),
+            reserve_role_string=reported_role or "maintenance",
+            arbiter_online_bool=bool(
+                arbiter.get("online_bool") is True
+                or status.get("arbiter_ready_bool") is True
+            ),
+            arbiter_accepting_ai_vision_bool=bool(
+                arbiter.get("accepting_ai_vision_bool") is True
+                or status.get("accepting_ai_vision_bool") is True
+            ),
+            workload_identity_verified_bool=identity_verified,
+        )
+
+    async def _clear_hunyuan_workload(
+        self,
+        job: CharacterGenJob,
+        *,
+        new_request: bool,
+    ) -> None:
+        job.hunyuan_workload_request_id = (
+            f"rhy_{uuid.uuid4().hex}" if new_request else job.hunyuan_workload_request_id
+        )
+        job.hunyuan_workload_lease_id = ""
+        job.hunyuan_workload_physical_resource_id = ""
+        job.hunyuan_workload_node_id = ""
+        job.hunyuan_workload_lease_state = "waiting" if new_request else ""
+        job.hunyuan_workload_heartbeat_at = 0
+        await self._persist(job)
+
+    async def _release_hunyuan_workload(
+        self,
+        job: CharacterGenJob,
+        *,
+        outcome: str,
+        new_request: bool,
+    ) -> bool:
+        release_confirmed = not workload_lease.enabled() or not job.hunyuan_workload_lease_id
+        if workload_lease.enabled() and job.hunyuan_workload_lease_id:
+            try:
+                async with httpx.AsyncClient(follow_redirects=True) as broker_client:
+                    await workload_lease.release(
+                        broker_client,
+                        lease_id=job.hunyuan_workload_lease_id,
+                        owner_task_id=job.id,
+                        request_id=job.hunyuan_workload_request_id,
+                        outcome=outcome,
+                    )
+                    release_confirmed = True
+            except Exception as exc:
+                print(
+                    f"[Renderfin][CharGen] Hunyuan lease release {job.id} "
+                    f"deferred to TTL: {exc}"
+                )
+        if not release_confirmed:
+            job.hunyuan_workload_lease_state = f"{outcome}_release_pending"
+            await self._persist(job)
+            return False
+        await self._clear_hunyuan_workload(job, new_request=new_request)
+        if not new_request:
+            job.hunyuan_workload_lease_state = outcome
+            await self._persist(job)
+        return True
+
+    async def _reconcile_hunyuan_terminal_leases(self) -> None:
+        """Retry lost-response release after GLB was durably persisted."""
+        for job in list(self._jobs.values()):
+            if not (job.glb_url and job.hunyuan_workload_lease_id):
+                continue
+            try:
+                await self._release_hunyuan_workload(
+                    job, outcome="completed", new_request=False
+                )
+            except Exception as exc:
+                print(
+                    f"[Renderfin][CharGen] terminal Hunyuan lease reconciliation "
+                    f"deferred for {job.id}: {exc}"
+                )
+
+    async def _ensure_hunyuan_workload(
+        self,
+        job: CharacterGenJob,
+        client: httpx.AsyncClient,
+        worker: Dict[str, Any],
+        status: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not workload_lease.enabled():
+            return {}
+        lease_server = self._hunyuan_lease_server(worker, status)
+        _node_id, physical = workload_lease.server_identity(lease_server)
+        if not physical:
+            raise hunyuan_client.NoWorkerAvailable(
+                "Hunyuan worker physical identity/role is not verified"
+            )
+        if job.hunyuan_workload_lease_id:
+            if job.hunyuan_workload_physical_resource_id != physical:
+                raise hunyuan_client.NoWorkerAvailable(
+                    "persisted Hunyuan lease is bound to another physical GPU"
+                )
+            try:
+                await workload_lease.heartbeat(
+                    client,
+                    lease_id=job.hunyuan_workload_lease_id,
+                    owner_task_id=job.id,
+                    request_id=job.hunyuan_workload_request_id,
+                    server=lease_server,
+                )
+            except workload_lease.WorkloadLeaseTerminal:
+                if (
+                    not job.hunyuan_task_id
+                    and str(job.hunyuan_workload_lease_state or "")
+                    in {"submitting", "submission_unknown", "preemption_requested"}
+                ):
+                    # TTL expiry is not proof that an accepted POST does not
+                    # exist on the host.  Preserve and replay the exact host
+                    # request; the host ledger remains authoritative for this
+                    # ambiguous transition.
+                    job.hunyuan_workload_lease_state = "submission_unknown"
+                    await self._persist(job)
+                    return {
+                        "lease_id_string": job.hunyuan_workload_lease_id,
+                        "request_id_string": job.hunyuan_workload_request_id,
+                        "physical_resource_id_string": job.hunyuan_workload_physical_resource_id,
+                        "node_id_string": job.hunyuan_workload_node_id,
+                        "workload_class_string": (
+                            "collection_background"
+                            if job.queue_class == "collection_background"
+                            else "hunyuan"
+                        ),
+                    }
+                raise
+            except workload_lease.WorkloadPreempted:
+                if (
+                    not job.hunyuan_task_id
+                    and str(job.hunyuan_workload_lease_state or "")
+                    in {"submitting", "submission_unknown", "preemption_requested"}
+                ):
+                    # We cannot safely release a possibly-accepted host job
+                    # before its worker task id is known. Replay the exact
+                    # request first; the host ledger supplies that id, then
+                    # the ordinary exact-preempt path below can run.
+                    job.hunyuan_workload_lease_state = "preemption_requested"
+                    job.hunyuan_workload_heartbeat_at = time.time()
+                    await self._persist(job)
+                    return {
+                        "lease_id_string": job.hunyuan_workload_lease_id,
+                        "request_id_string": job.hunyuan_workload_request_id,
+                        "physical_resource_id_string": job.hunyuan_workload_physical_resource_id,
+                        "node_id_string": job.hunyuan_workload_node_id,
+                        "workload_class_string": (
+                            "collection_background"
+                            if job.queue_class == "collection_background"
+                            else "hunyuan"
+                        ),
+                    }
+                if job.hunyuan_task_id:
+                    try:
+                        outcome = await hunyuan_client.preempt_bound_task(
+                            client,
+                            worker,
+                            job.hunyuan_task_id,
+                            backend_task_id=job.id,
+                            requester_workload_class="ai_vision",
+                        )
+                    except Exception as exc:
+                        raise hunyuan_client.NoWorkerAvailable(
+                            "central Hunyuan preemption is awaiting exact host proof"
+                        ) from exc
+                    if outcome == "completed":
+                        # Completed-wins: retain the lease until artifact bytes
+                        # and their durable URL are persisted by the caller.
+                        job.hunyuan_workload_lease_state = "artifact_pending"
+                        await self._persist(job)
+                        return {
+                            "lease_id_string": job.hunyuan_workload_lease_id,
+                            "request_id_string": job.hunyuan_workload_request_id,
+                            "physical_resource_id_string": job.hunyuan_workload_physical_resource_id,
+                            "node_id_string": job.hunyuan_workload_node_id,
+                            "workload_class_string": (
+                                "collection_background"
+                                if job.queue_class == "collection_background"
+                                else "hunyuan"
+                            ),
+                        }
+                released = await self._release_hunyuan_workload(
+                    job, outcome="preempted", new_request=True
+                )
+                if not released:
+                    raise hunyuan_client.NoWorkerAvailable(
+                        "central Hunyuan preemption release is awaiting confirmation"
+                    )
+                raise hunyuan_client.TaskPreempted(
+                    f"central Hunyuan lease preempted before submit on {worker['name']}"
+                )
+            job.hunyuan_workload_lease_state = "active"
+            job.hunyuan_workload_heartbeat_at = time.time()
+            await self._persist(job)
+            return {
+                "lease_id_string": job.hunyuan_workload_lease_id,
+                "request_id_string": job.hunyuan_workload_request_id,
+                "physical_resource_id_string": job.hunyuan_workload_physical_resource_id,
+                "node_id_string": job.hunyuan_workload_node_id,
+                "workload_class_string": (
+                    "collection_background"
+                    if job.queue_class == "collection_background"
+                    else "hunyuan"
+                ),
+            }
+        if not job.hunyuan_workload_request_id:
+            job.hunyuan_workload_request_id = f"rhy_{uuid.uuid4().hex}"
+            job.hunyuan_workload_lease_state = "waiting"
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            await self._persist(job)
+        lease = await workload_lease.acquire(
+            client,
+            server=lease_server,
+            workload_class=(
+                "collection_background"
+                if job.queue_class == "collection_background"
+                else "hunyuan"
+            ),
+            owner_task_id=job.id,
+            request_id=job.hunyuan_workload_request_id,
+            metadata={
+                "stage": "hunyuan",
+                "queue_class": job.queue_class,
+                "collection_guid": job.collection_guid,
+            },
+        )
+        job.hunyuan_workload_lease_id = str(lease.get("lease_id_string") or "")
+        job.hunyuan_workload_physical_resource_id = str(
+            lease.get("physical_resource_id_string") or physical
+        )
+        job.hunyuan_workload_node_id = str(lease.get("node_id_string") or "")
+        job.hunyuan_workload_lease_state = "active"
+        job.hunyuan_workload_heartbeat_at = time.time()
+        # Persist before POST generate-3d; restart resumes this exact binding.
+        await self._persist(job)
+        return lease
+
     async def _stage_hunyuan_converter(self, job: CharacterGenJob) -> None:
         """Preferred path: the converter workers' Hunyuan3D 2.1 PBR API (per-box token)."""
         async with httpx.AsyncClient(follow_redirects=True) as client:
@@ -1230,66 +1923,288 @@ class CharacterGenManager:
                         f"{job.hunyuan_task_id} is gone, resubmitting"
                     )
                     job.hunyuan_task_id = ""
-            if worker is None:
+                    job.hunyuan_worker = ""
+                    job.hunyuan_worker_url = ""
+            elif job.hunyuan_workload_lease_id and (
+                job.hunyuan_worker_url or job.hunyuan_worker
+            ):
+                # A lost POST response has no status URL yet.  Resolve the
+                # exact persisted worker by name instead of running the load
+                # balancer again and potentially posting to another GPU.
+                worker = next(
+                    (
+                        candidate
+                        for candidate in hunyuan_client.workers()
+                        if (
+                            job.hunyuan_worker_url
+                            and str(candidate.get("url") or "").rstrip("/")
+                            == job.hunyuan_worker_url.rstrip("/")
+                        )
+                        or (
+                            not job.hunyuan_worker_url
+                            and str(candidate.get("name") or "") == job.hunyuan_worker
+                        )
+                    ),
+                    None,
+                )
+                if worker is None:
+                    raise hunyuan_client.NoWorkerAvailable(
+                        f"persisted Hunyuan worker {job.hunyuan_worker} is not configured; "
+                        "retaining the exact submission identity"
+                    )
+            if not job.hunyuan_task_id:
+                if not job.hunyuan_seed:
+                    job.hunyuan_seed = uuid.uuid4().int & 0xFFFFFFFF or 1
+                    await self._persist(job)
                 # The lock is held until the job is written down, so the
                 # slot count the next job reads already includes this one.
                 # A separate "claimed but not yet persisted" counter is the
                 # obvious alternative and it leaks: any path that skips its
                 # release marks a worker busy forever, which is exactly what
                 # happened - an idle box reported at capacity with no job.
-                async with self._submit_lock, fleet_admission_lock():
-                    await self._require_hunyuan_admission(job)
-                    worker, status_url = await hunyuan_client.submit(
-                        client,
-                        image_url=job.isolated_url,
-                        backend_task_id=job.id,
-                        queue_class=job.queue_class,
-                        in_flight=self.in_flight_by_worker(),
-                        excluded={
-                            name
-                            for name, until in {
-                                **self._farm_worker_cooldowns,
-                                **self._input_fetch_worker_cooldowns,
-                                **(job.hunyuan_worker_cooldowns or {}),
-                            }.items()
-                            if float(until or 0) > time.time()
-                        },
+                async with self._submit_lock, _gpu_admission_guard():
+                    replaying_unknown = bool(
+                        worker is not None
+                        and job.hunyuan_workload_lease_id
+                        and str(job.hunyuan_workload_lease_state or "")
+                        in {"submitting", "submission_unknown", "preemption_requested"}
                     )
+                    if not replaying_unknown:
+                        await self._require_hunyuan_admission(job)
+                    excluded = {
+                        name
+                        for name, until in {
+                            **self._farm_worker_cooldowns,
+                            **self._input_fetch_worker_cooldowns,
+                            **(job.hunyuan_worker_cooldowns or {}),
+                        }.items()
+                        if float(until or 0) > time.time()
+                    }
+                    if worker is None:
+                        worker = await hunyuan_client.pick_worker(
+                            client,
+                            in_flight=self.in_flight_by_worker(),
+                            excluded=excluded,
+                            queue_class=job.queue_class,
+                        )
+                    try:
+                        status = await hunyuan_client.server_status(client, worker)
+                    except Exception as exc:
+                        if replaying_unknown:
+                            raise hunyuan_client.SubmissionOutcomeUnknown(
+                                worker,
+                                f"cannot probe exact Hunyuan worker before replay: {exc}",
+                            ) from exc
+                        raise
+                    if (
+                        workload_lease.enabled()
+                        and not hunyuan_client.supports_submission_idempotency(status)
+                    ):
+                        raise hunyuan_client.NoWorkerAvailable(
+                            f"{worker['name']} lacks submission_idempotency_v1; "
+                            "central Hunyuan dispatch is fail-closed"
+                        )
+                    try:
+                        central_lease = await self._ensure_hunyuan_workload(
+                            job, client, worker, status
+                        )
+                    except workload_lease.WorkloadCapacityWait as exc:
+                        raise hunyuan_client.NoWorkerAvailable(
+                            f"central workload capacity wait: {exc.status}"
+                        ) from exc
+                    # Persist the chosen host before POST.  If the response is
+                    # lost, a restart can now replay only this host with the
+                    # same central request and lease ids.
+                    job.hunyuan_worker = str(worker.get("name") or "")
+                    job.hunyuan_worker_url = str(worker.get("url") or "").rstrip("/")
+                    if job.hunyuan_workload_lease_state != "preemption_requested":
+                        job.hunyuan_workload_lease_state = "submitting"
+                    await self._persist(job)
+                    try:
+                        worker, status_url = await hunyuan_client.submit(
+                            client,
+                            image_url=job.isolated_url,
+                            seed=job.hunyuan_seed,
+                            backend_task_id=job.id,
+                            queue_class=job.queue_class,
+                            in_flight=self.in_flight_by_worker(),
+                            excluded=excluded,
+                            worker_override=worker,
+                            workload_lease=central_lease,
+                        )
+                    except hunyuan_client.SubmissionOutcomeUnknown:
+                        job.hunyuan_workload_lease_state = "submission_unknown"
+                        await self._persist(job)
+                        raise
+                    except Exception:
+                        await self._release_hunyuan_workload(
+                            job, outcome="released", new_request=True
+                        )
+                        raise
                     # store the status_url so a service restart can resume polling
                     job.hunyuan_task_id = status_url
                     job.hunyuan_worker = worker["name"]
+                    job.hunyuan_worker_url = str(worker.get("url") or "").rstrip("/")
                     job.hunyuan_waiting_for_capacity = False
                     await self._persist(job)
                 print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker['name']}")
+            status = await hunyuan_client.server_status(client, worker)
+            if job.hunyuan_workload_lease_state != "completed":
+                try:
+                    await self._ensure_hunyuan_workload(job, client, worker, status)
+                except workload_lease.WorkloadCapacityWait as exc:
+                    raise hunyuan_client.NoWorkerAvailable(
+                        f"central workload capacity wait: {exc.status}"
+                    ) from exc
+
+            async def _heartbeat_hunyuan_lease():
+                if not job.hunyuan_workload_lease_id:
+                    return
+                lease_server = self._hunyuan_lease_server(worker, status)
+                try:
+                    await workload_lease.heartbeat(
+                        client,
+                        lease_id=job.hunyuan_workload_lease_id,
+                        owner_task_id=job.id,
+                        request_id=job.hunyuan_workload_request_id,
+                        server=lease_server,
+                    )
+                    job.hunyuan_workload_heartbeat_at = time.time()
+                except workload_lease.WorkloadPreempted as exc:
+                    outcome = await hunyuan_client.preempt_bound_task(
+                        client,
+                        worker,
+                        job.hunyuan_task_id,
+                        backend_task_id=job.id,
+                        requester_workload_class=(
+                            exc.requester_workload_class or "autorig_interactive"
+                        ),
+                    )
+                    released = await self._release_hunyuan_workload(
+                        job,
+                        outcome=outcome,
+                        new_request=(outcome == "preempted"),
+                    )
+                    if not released:
+                        raise hunyuan_client.NoWorkerAvailable(
+                            "central Hunyuan terminal release is awaiting confirmation"
+                        )
+                    if outcome == "preempted":
+                        raise hunyuan_client.TaskPreempted(
+                            f"central broker preempted Hunyuan on {worker['name']}"
+                        )
             payload = await hunyuan_client.wait_for_model(
                 client,
                 worker,
                 job.hunyuan_task_id,
-                timeout=self._stage_budget(job, HUNYUAN_STAGE_TIMEOUT),
+                timeout=await self._persisted_stage_budget(
+                    job, HUNYUAN_STAGE_TIMEOUT
+                ),
+                on_poll=_heartbeat_hunyuan_lease,
             )
             model_url = str((payload.get("output_urls") or {}).get("model"))
             data = await hunyuan_client.download_model(client, worker, model_url)
-        user_dir = config.RENDER_DIR / job.user_name
-        user_dir.mkdir(parents=True, exist_ok=True)
-        glb_path = user_dir / f"{job.id}.glb"
-        glb_path.write_bytes(data)
-        job.glb_url = f"{config.PUBLIC_BASE_URL}/render/{job.user_name}/{job.id}.glb"
+            try:
+                quality_report = glb_quality.validate_glb_bytes(
+                    data,
+                    policy=glb_quality.HUNYUAN_STANDARD_PBR_POLICY,
+                )
+            except glb_quality.GlbQualityError as exc:
+                archived = _archive_rejected_glb_best_effort(
+                    job, data, exc, source=f"converter:{worker['name']}"
+                )
+                job.glb_quality_rejection_count = int(
+                    job.glb_quality_rejection_count or 0
+                ) + 1
+                job.glb_quality_report = dict(
+                    (exc.details or {}).get("report") or exc.as_dict()
+                )
+                await self._persist(job)
+                # wait_for_model has proved the worker task terminal. Release
+                # its exact central lease before the retry is allowed to pick
+                # another worker/seed; otherwise two generations can overlap.
+                if job.hunyuan_workload_lease_id:
+                    released = await self._release_hunyuan_workload(
+                        job, outcome="completed", new_request=True
+                    )
+                    if not released:
+                        raise hunyuan_client.NoWorkerAvailable(
+                            "invalid GLB archived but terminal Hunyuan lease "
+                            "release is awaiting confirmation"
+                        ) from exc
+                print(
+                    f"[Renderfin][CharGen] job {job.id} rejected GLB from "
+                    f"{worker['name']} ({exc.code}); "
+                    f"archive={archived or 'unavailable'}"
+                )
+                raise
+            user_dir = config.RENDER_DIR / job.user_name
+            user_dir.mkdir(parents=True, exist_ok=True)
+            glb_path = user_dir / f"{job.id}.glb"
+            _atomic_artifact_bytes(glb_path, data)
+            job.glb_quality_report = quality_report
+            job.glb_url = (
+                f"{config.PUBLIC_BASE_URL}/render/{job.user_name}/{job.id}.glb"
+            )
+            # Durable artifact identity before release: if the service dies in
+            # the next instruction, the same logical job resumes from this GLB
+            # instead of submitting a duplicate Hunyuan process.
+            await self._persist(job)
+            if job.hunyuan_workload_lease_id:
+                await self._release_hunyuan_workload(
+                    job, outcome="completed", new_request=False
+                )
 
     async def _stage_hunyuan_comfy(self, job: CharacterGenJob) -> None:
         """Fallback: ComfyUI image_to_3d workflow via the render queue."""
         if not job.hunyuan_task_id or self.queue.get(job.hunyuan_task_id) is None:
-            task = await self.queue.enqueue(
+            task = await self._enqueue_managed_render(
+                job,
                 RenderPrompt(
                     image_url=job.isolated_url,
                     type="image_to_3d",
                     user_name=job.user_name,
-                )
+                    noise_seed=(
+                        job.hunyuan_seed
+                        or (uuid.uuid4().int & 0xFFFFFFFF)
+                        or 1
+                    ),
+                ),
             )
+            if not job.hunyuan_seed:
+                job.hunyuan_seed = int(task.prompt.noise_seed or 0)
             job.hunyuan_task_id = task.id
             await self._persist(job)
         task = await self._await_render(
-            job.hunyuan_task_id, self._stage_budget(job, HUNYUAN_STAGE_TIMEOUT)
+            job,
+            job.hunyuan_task_id,
+            HUNYUAN_STAGE_TIMEOUT,
         )
+        glb_path = Path(task.output_path) if task.output_path else None
+        if glb_path is None or not glb_path.is_file():
+            raise RuntimeError("generated Comfy GLB is missing from central storage")
+        data = glb_path.read_bytes()
+        try:
+            job.glb_quality_report = glb_quality.validate_glb_bytes(
+                data,
+                policy=glb_quality.HUNYUAN_STANDARD_PBR_POLICY,
+            )
+        except glb_quality.GlbQualityError as exc:
+            archived = _archive_rejected_glb_best_effort(
+                job, data, exc, source="comfy-image-to-3d"
+            )
+            job.glb_quality_rejection_count = int(
+                job.glb_quality_rejection_count or 0
+            ) + 1
+            job.glb_quality_report = dict(
+                (exc.details or {}).get("report") or exc.as_dict()
+            )
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} rejected Comfy GLB "
+                f"({exc.code}); archive={archived or 'unavailable'}"
+            )
+            raise
         job.glb_url = task.output_url
 
     async def _stage_turntable(self, job: CharacterGenJob) -> None:
@@ -1304,6 +2219,30 @@ class CharacterGenManager:
                 glb_path = config.RENDER_DIR / job.glb_url[len(prefix):]
         if glb_path is None or not glb_path.is_file():
             raise RuntimeError("generated glb not found on disk")
+
+        data = glb_path.read_bytes()
+        try:
+            job.glb_quality_report = glb_quality.validate_glb_bytes(
+                data,
+                policy=glb_quality.HUNYUAN_STANDARD_PBR_POLICY,
+            )
+        except glb_quality.GlbQualityError as exc:
+            archived = _archive_rejected_glb_best_effort(
+                job, data, exc, source="turntable-preflight"
+            )
+            job.glb_quality_rejection_count = int(
+                job.glb_quality_rejection_count or 0
+            ) + 1
+            job.glb_quality_report = dict(
+                (exc.details or {}).get("report") or exc.as_dict()
+            )
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} turntable preflight "
+                f"rejected GLB ({exc.code}); "
+                f"archive={archived or 'unavailable'}"
+            )
+            raise
 
         out_path = config.RENDER_DIR / job.user_name / f"{job.id}_turntable.mp4"
         await turntable.render_turntable(glb_path, out_path)

@@ -145,11 +145,24 @@
    "crop": "center"
   }
  },
+ "driving_chunks": {
+  "class_type": "RebatchImages",
+  "inputs": {
+   "images": [
+    "driving_scale",
+    0
+   ],
+   "batch_size": 16
+  },
+  "_meta": {
+   "title": "Canny in chunks of 16 frames: the whole clip at once ran a 24 GB card out of memory (640x960x257, 2026-09-27)"
+  }
+ },
  "control_processor": {
   "class_type": "Canny",
   "inputs": {
    "image": [
-    "driving_scale",
+    "driving_chunks",
     0
    ],
    "low_threshold": 0.4,
@@ -158,7 +171,17 @@
   "_meta": {
    "title": "AUTORIG_CONTROL_PROCESSOR_CANNY"
   }
+ }, "control_joined": {
+  "class_type": "RebatchImages",
+  "inputs": {
+   "images": [
+    "control_processor",
+    0
+   ],
+   "batch_size": 4096
+  }
  },
+
  "video_latent": {
   "class_type": "EmptyLTXVLatentVideo",
   "inputs": {
@@ -215,7 +238,7 @@
     2
    ],
    "image": [
-    "control_processor",
+    "control_joined",
     0
    ],
    "frame_idx": 0,

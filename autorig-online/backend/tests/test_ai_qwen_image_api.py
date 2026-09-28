@@ -33,6 +33,8 @@ REPO_CATALOGUE = BACKEND.parent / "deploy" / "ai-models" / "model_catalogue.json
 
 GENERATE_GGUF = "qwen-image-2512-Q3_K_S.gguf"
 EDIT_GGUF = "qwen-image-edit-2511-Q3_K_S.gguf"
+# Default since 2026-09-26: Qwen-Image-2.1 + Viggle 6-step turbo, both modes.
+TURBO21 = "qwen_image_2.1_int8_convrot.safetensors"
 
 
 def _with_repo_catalogue(test):
@@ -139,9 +141,10 @@ class CheckpointTests(unittest.TestCase):
         self.assertIsNone(
             ai_model_catalogue.known_file("qwen-image-2.1-Q4_K_M.gguf", "checkpoint"))
 
-    def test_one_installed_model_is_offered_per_mode(self):
-        self.assertEqual(ai_qwen_image_api.installed_checkpoints("generate"), [GENERATE_GGUF])
-        self.assertEqual(ai_qwen_image_api.installed_checkpoints("edit"), [EDIT_GGUF])
+    def test_the_turbo_default_comes_first_and_the_ggufs_stay_offered(self):
+        self.assertEqual(ai_qwen_image_api.installed_checkpoints("generate"),
+                         [TURBO21, GENERATE_GGUF])
+        self.assertEqual(ai_qwen_image_api.installed_checkpoints("edit"), [TURBO21, EDIT_GGUF])
 
     def test_a_retired_model_is_never_offered_as_installed(self):
         self.assertNotIn("qwen-image-2.1-Q4_K_M.gguf",
@@ -187,7 +190,7 @@ class PayloadTests(unittest.IsolatedAsyncioTestCase):
     async def test_text_alone_asks_for_the_generation_template(self):
         answer = await self._call(prompt="a lighthouse at dusk")
         _, payload, _ = self.sent[-1]
-        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE_GENERATE)
+        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE21_GENERATE)
         self.assertNotIn("image_url", payload)
         self.assertEqual((payload["main_size_width"], payload["main_size_height"]),
                          ai_qwen_image_api.DEFAULT_SIZE)
@@ -197,7 +200,7 @@ class PayloadTests(unittest.IsolatedAsyncioTestCase):
         answer = await self._call(prompt="make it snow",
                                   image_url="https://example.test/in.png")
         _, payload, _ = self.sent[-1]
-        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE_EDIT)
+        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE21_EDIT)
         self.assertEqual(payload["image_url"], "https://example.test/in.png")
         self.assertEqual(answer["mode_string"], "edit")
 
@@ -218,7 +221,7 @@ class PayloadTests(unittest.IsolatedAsyncioTestCase):
         await self._call(prompt="a lighthouse", mode="generate",
                          image_url="https://example.test/in.png")
         _, payload, _ = self.sent[-1]
-        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE_GENERATE)
+        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE21_GENERATE)
         self.assertNotIn("image_url", payload)
 
     async def test_the_model_is_named_even_when_nobody_picked_one(self):
@@ -228,10 +231,37 @@ class PayloadTests(unittest.IsolatedAsyncioTestCase):
         # ComfyUI-GGUF nor the weights, and the render fails there.
         await self._call(prompt="a lighthouse")
         _, payload, _ = self.sent[-1]
-        self.assertEqual(payload["checkpoint"], GENERATE_GGUF)
+        self.assertEqual(payload["checkpoint"], TURBO21)
         await self._call(prompt="make it snow", image_url="https://example.test/in.png")
         _, payload, _ = self.sent[-1]
-        self.assertEqual(payload["checkpoint"], EDIT_GGUF)
+        self.assertEqual(payload["checkpoint"], TURBO21)
+
+    async def test_a_named_old_edit_gguf_is_redirected_to_the_turbo(self):
+        # One edit model since 2026-09-26: the 2511 file stays on the boxes for
+        # rollback, but a request naming it runs on 2.1 turbo and is told so.
+        answer = await self._call(prompt="make it snow", image_url="https://example.test/in.png",
+                                  checkpoint=EDIT_GGUF)
+        _, payload, _ = self.sent[-1]
+        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE21_EDIT)
+        self.assertEqual(payload["checkpoint"], TURBO21)
+        self.assertIn("retired", answer["deprecation_string"])
+
+    async def test_the_turbo_drops_steps_cfg_and_negative(self):
+        # Its 6-sigma schedule and CFG-free guider are fixed by the model card.
+        await self._call(prompt="a lighthouse", steps=24, cfg=3.5, seed=7,
+                         negative_prompt="blurry")
+        _, payload, _ = self.sent[-1]
+        for key in ("steps", "cfg"):
+            self.assertNotIn(key, payload)
+        self.assertEqual(payload["negative_prompt"], "")
+        self.assertEqual(payload["noise_seed"], 7)
+
+    async def test_several_pictures_use_the_turbo_multi_template(self):
+        await self._call(prompt="the cat from image 2 on the sofa of image 1",
+                         image_url="https://example.test/a.png",
+                         reference_image_urls=["https://example.test/b.png"])
+        _, payload, _ = self.sent[-1]
+        self.assertEqual(payload["type"], ai_qwen_image_api.TYPE21_EDIT_MULTI)
 
     async def test_zeros_are_left_out_so_the_template_keeps_its_own_values(self):
         await self._call(prompt="a lighthouse", steps=0, cfg=0, seed=0)

@@ -740,6 +740,43 @@ const App = {
                 return { view_id_string: view.id, ...data };
             };
             const preflightRender = capture(views[0]);
+            // Hair, loose clothing and pose, from the four side renders on one
+            // sheet. Runs alongside the rig-type check; the review waits for it.
+            this._rigAppearancePromise = null;
+            if (window.RigAppearance) {
+                let untextured = true;
+                object.traverse?.((node) => {
+                    if (!node?.isMesh) return;
+                    const mats = Array.isArray(node.material) ? node.material : [node.material];
+                    if (mats.some((m) => m && m.name !== 'vision_detector_neutral_gray')) untextured = false;
+                });
+                const sides = views.filter((v) => ['front', 'back', 'left', 'right'].includes(v.id)).map(capture);
+                // No textures: also a front Z-depth, near = white, for the farm to
+                // repaint the character from. The camera's near and far planes are
+                // pulled in around the model so its depth spans the whole grey range.
+                let depth = '';
+                if (untextured) {
+                    const front = views.find((v) => v.id === 'front');
+                    const saved = { near: camera.near, far: camera.far, bg: scene.background, ground: ground.visible };
+                    try {
+                        camera.near = Math.max(0.001, dist - maxDim * 0.8);
+                        camera.far = dist + maxDim * 0.8;
+                        camera.updateProjectionMatrix();
+                        scene.overrideMaterial = new THREE.MeshDepthMaterial();
+                        scene.background = new THREE.Color(0x000000);
+                        ground.visible = false;
+                        depth = capture(front);
+                    } finally {
+                        scene.overrideMaterial = null;
+                        scene.background = saved.bg;
+                        ground.visible = saved.ground;
+                        camera.near = saved.near;
+                        camera.far = saved.far;
+                        camera.updateProjectionMatrix();
+                    }
+                }
+                this._rigAppearancePromise = window.RigAppearance.start(sides, { untextured, depth });
+            }
             const first = await analyze(views[0], preflightRender);
             // Array.map passes (value, index, array). Keep the index from being
             // mistaken for analyze()'s optional capturedImage argument.
@@ -831,6 +868,9 @@ const App = {
     buildRigDetectionSubmitPayload(detection, selectedRigKey) {
         const d = JSON.parse(JSON.stringify(detection));
         delete d.preflight_render_jpg_base64_string;
+        if (this._rigAppearancePanel) {
+            d.appearance = this._rigAppearancePanel.choice();
+        }
         const autoKey = this.rigDetectAutoKey(detection);
         const sel = String(selectedRigKey || 'humanoid').toLowerCase();
         if (sel === 'humanoid') {
@@ -1016,6 +1056,25 @@ const App = {
                 this.updateRigDetectSelection(selected);
                 renderReviewCopy();
             });
+
+            this._rigAppearancePanel = null;
+            const ctaRow = review?.querySelector('.rig-detect-cta-row');
+            if (window.RigAppearance && this._rigAppearancePromise && ctaRow) {
+                const host = document.createElement('div');
+                ctaRow.parentNode.insertBefore(host, ctaRow);
+                const holdTimer = () => {
+                    // Someone ticking boxes is not done choosing: the countdown
+                    // must not start the job under them.
+                    if (interval) clearInterval(interval);
+                    interval = 0;
+                    if (hint) hint.textContent = '';
+                    if (startBtn && typeof t === 'function') {
+                        // The label without its countdown, in any language's brackets.
+                        startBtn.textContent = t('upload_rig_start_now_with_timer', { timer: '' }).split(/[(（]/)[0].trim();
+                    }
+                };
+                this._rigAppearancePanel = window.RigAppearance.mount(host, this._rigAppearancePromise, holdTimer, holdTimer);
+            }
 
             renderReviewCopy();
             refreshFooter();

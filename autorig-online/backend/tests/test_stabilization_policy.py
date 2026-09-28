@@ -153,6 +153,23 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         self.assertIn("independent tunnel supervisors started", source)
         self.assertNotIn("restarting all", source)
 
+    def test_storage_backend_loads_feature_flags_after_other_overlays(self):
+        service = (
+            Path(__file__).resolve().parents[2]
+            / "deploy"
+            / "storage-host"
+            / "autorig-storage.service"
+        ).read_text(encoding="utf-8")
+        environment_files = [
+            line.strip()
+            for line in service.splitlines()
+            if line.startswith("EnvironmentFile=")
+        ]
+        self.assertEqual(
+            environment_files[-1],
+            "EnvironmentFile=-/srv/autorig/secrets/feature-flags.env",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -65,6 +65,11 @@ def apply_runtime_settings(workflow, prompt, width, height):
     for node in list(workflow.values()):
         inputs = node.get('inputs', {})
         kind = node.get('class_type', '')
+        # Camera orbit (2026-09-27): the CrossView IC-LoRA strength travels as
+        # lora_strength (1.5 by default; the LoRA is weak on distilled LTX).
+        if kind == 'LTXICLoRALoaderModelOnly' and node.get('_meta', {}).get('title') == 'AUTORIG_CROSSVIEW_IC_LORA' \
+                and float(getattr(prompt, 'lora_strength', 0) or 0) > 0:
+            inputs['strength_model'] = float(prompt.lora_strength)
         if kind in {'LTXAddVideoICLoRAGuide', 'LTXAddVideoICLoRAGuideAdvanced'}:
             inputs['strength'] = float(getattr(prompt, 'control_strength', 0.8))
         if kind == 'ControlNetApplyAdvanced':

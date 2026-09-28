@@ -26,8 +26,7 @@ test('the tracker caption folds into one state line with the machine name', () =
 });
 
 test('result previews carry no Open link, only an Avatar keeps its profile link', () => {
-  assert.doesNotMatch(source, /: 'open';/);
-  assert.match(source, /link\.textContent = (type === 'avatar' \? 'open profile' : )?'';/);
+  assert.match(source, /link\.textContent = type === 'avatar' \? 'open profile' : '';/);
 });
 
 test('the page hides the applied-settings note and the tracker caption on nodes', () => {

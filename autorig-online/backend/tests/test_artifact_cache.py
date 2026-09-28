@@ -6,6 +6,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import httpx
 from sqlalchemy import select
@@ -93,6 +94,50 @@ class RangeResumeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen_ranges[0][0], 1024)
         self.assertTrue(all(end - start + 1 <= 8 * 1024 * 1024 for start, end in seen_ranges))
 
+    async def test_download_stops_before_crossing_disk_reserve(self):
+        payload = b"glTF" + (2).to_bytes(4, "little") + b"x" * 4096
+        requests = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal requests
+            requests += 1
+            start, end = [
+                int(value)
+                for value in request.headers["range"][6:].split("-", 1)
+            ]
+            return httpx.Response(
+                206,
+                content=payload[start : end + 1],
+                headers={"Content-Range": f"bytes {start}-{end}/{len(payload)}"},
+            )
+
+        source = ArtifactSource(
+            url="https://converter-f1.freestock.online/task/model.glb",
+            relative_path="files/model.glb",
+            role="primary_glb",
+            assigned_worker=WORKER,
+        )
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-reserve-") as tmp:
+            partial = Path(tmp) / "partial"
+            reserve = int(artifact_cache.ARTIFACT_CACHE_RESERVE_GB * 1024**3)
+            with patch.object(
+                artifact_cache.shutil,
+                "disk_usage",
+                return_value=SimpleNamespace(free=reserve + 512),
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(artifact_cache.ArtifactCacheReserveError):
+                        await artifact_cache._download_to_partial(
+                            client,
+                            source,
+                            partial,
+                            {"size": len(payload), "ranges": True},
+                        )
+            self.assertEqual(partial.stat().st_size, 0)
+        self.assertEqual(requests, 1)
+
 
 class ArtifactValidationTests(unittest.TestCase):
     def test_html_cannot_be_published_as_a_model(self):
@@ -146,6 +191,185 @@ class ArtifactValidationTests(unittest.TestCase):
                 entry["internal_uri"],
                 f"/_autorig_artifacts/{TASK_ID}/files/model%20files/hero.glb",
             )
+
+    def test_manifest_lookup_can_select_a_specific_lod_path(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-lod-") as tmp:
+            root = Path(tmp)
+            task_dir = root / TASK_ID
+            rows = []
+            for lod in ("1k", "100k"):
+                relative = f"files/model-files/hero_{lod}/hero_all_animations.glb"
+                artifact = task_dir / relative
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_bytes(b"glTF" + (2).to_bytes(4, "little") + b"x" * 16)
+                rows.append(
+                    {
+                        "source_url": f"https://f1.freestock.online/{lod}/hero.glb",
+                        "relative_path": relative,
+                        "size": artifact.stat().st_size,
+                        "role": "primary_glb",
+                    }
+                )
+            artifact_cache.write_manifest(root, TASK_ID, {"files": rows})
+
+            entry = artifact_cache.lookup_cached_artifact(
+                TASK_ID,
+                role="primary_glb",
+                basename="hero_all_animations.glb",
+                relative_path_fragment="_100k/",
+                root=root,
+            )
+
+            self.assertIsNotNone(entry)
+            self.assertIn("hero_100k/", entry["relative_path"])
+
+
+class CachedArchiveMemberTests(unittest.TestCase):
+    def _archive_entry(self, root: Path, *, role="deliverable_zip", members=None):
+        task_dir = root / TASK_ID
+        archive_path = task_dir / "files" / "model-files" / "hero.zip"
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, payload in (members or {}).items():
+                archive.writestr(name, payload)
+        payload = archive_path.read_bytes()
+        artifact_cache.write_manifest(
+            root,
+            TASK_ID,
+            {
+                "files": [
+                    {
+                        "source_url": "https://converter-f1.freestock.online/task/hero.zip",
+                        "relative_path": "files/model-files/hero.zip",
+                        "size": len(payload),
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                        "role": role,
+                        "long_lived": True,
+                    }
+                ]
+            },
+        )
+        return archive_path
+
+    def test_exact_member_is_read_and_ranged_without_extraction(self):
+        rig_payload = b'{"collection_guid":"collection-1","collection_index":14}'
+        glb_payload = (
+            b"glTF"
+            + (2).to_bytes(4, "little")
+            + (20).to_bytes(4, "little")
+            + b"payload!"
+        )
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-") as tmp:
+            root = Path(tmp)
+            self._archive_entry(
+                root,
+                members={"hero_rig.json": rig_payload, "hero.glb": glb_payload},
+            )
+
+            rig = artifact_cache.lookup_cached_archive_member(
+                TASK_ID,
+                basename="hero_rig.json",
+                max_uncompressed_bytes=1024,
+                root=root,
+            )
+            model = artifact_cache.lookup_cached_archive_member(
+                TASK_ID,
+                basename="hero.glb",
+                max_uncompressed_bytes=1024,
+                root=root,
+            )
+
+            self.assertIsNotNone(rig)
+            self.assertEqual(
+                artifact_cache.read_cached_archive_member(rig, max_bytes=1024),
+                rig_payload,
+            )
+            self.assertEqual(model["prefix"], glb_payload)
+            self.assertEqual(
+                b"".join(
+                    artifact_cache.iter_cached_archive_member(
+                        model,
+                        start=4,
+                        end=11,
+                        chunk_bytes=3,
+                    )
+                ),
+                glb_payload[4:12],
+            )
+            self.assertFalse((root / TASK_ID / "hero.glb").exists())
+
+    def test_lookup_rejects_unsafe_ambiguous_and_oversized_members(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-safe-") as tmp:
+            root = Path(tmp)
+            self._archive_entry(
+                root,
+                members={
+                    "../hero_rig.json": b"{}",
+                    "one/duplicate.json": b"one",
+                    "two/duplicate.json": b"two",
+                    "large.json": b"x" * 32,
+                },
+            )
+
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="../hero_rig.json",
+                    max_uncompressed_bytes=1024,
+                    root=root,
+                )
+            )
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="duplicate.json",
+                    max_uncompressed_bytes=1024,
+                    root=root,
+                )
+            )
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="large.json",
+                    max_uncompressed_bytes=16,
+                    root=root,
+                )
+            )
+
+    def test_non_deliverable_zip_is_not_a_recovery_source(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-role-") as tmp:
+            root = Path(tmp)
+            self._archive_entry(
+                root,
+                role="diagnostic",
+                members={"hero_rig.json": b"{}"},
+            )
+            self.assertIsNone(
+                artifact_cache.lookup_cached_archive_member(
+                    TASK_ID,
+                    basename="hero_rig.json",
+                    max_uncompressed_bytes=1024,
+                    root=root,
+                )
+            )
+
+    def test_stream_fails_closed_if_archive_changes_after_lookup(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-archive-change-") as tmp:
+            root = Path(tmp)
+            archive_path = self._archive_entry(
+                root,
+                members={"hero_rig.json": b"{}"},
+            )
+            entry = artifact_cache.lookup_cached_archive_member(
+                TASK_ID,
+                basename="hero_rig.json",
+                max_uncompressed_bytes=1024,
+                root=root,
+            )
+            archive_path.write_bytes(archive_path.read_bytes() + b"changed")
+
+            with self.assertRaisesRegex(RuntimeError, "changed"):
+                artifact_cache.read_cached_archive_member(entry, max_bytes=1024)
 
 
 class RetentionTests(unittest.TestCase):
@@ -332,6 +556,36 @@ class DurableQueueTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row.status, "pending")
             self.assertEqual(row.worker_key, "f1")
 
+    async def test_concurrent_completion_observers_create_one_queue_row(self):
+        task_id = "00000000-0000-0000-0000-000000000904"
+        async with self.sessions() as db:
+            db.add(Task(
+                id=task_id,
+                owner_type="anon",
+                owner_id="cache-race-test",
+                input_url="https://example.test/model.glb",
+                input_type="t_pose",
+                worker_api=WORKER,
+                status="done",
+            ))
+            await db.commit()
+
+        async def observe_completion():
+            async with self.sessions() as db:
+                task = await db.get(Task, task_id)
+                await artifact_cache.enqueue_artifact_cache(db, task)
+                await db.commit()
+
+        await asyncio.gather(observe_completion(), observe_completion())
+
+        async with self.sessions() as verifier:
+            rows = (
+                await verifier.execute(
+                    select(ArtifactCacheJob).where(ArtifactCacheJob.task_id == task_id)
+                )
+            ).scalars().all()
+            self.assertEqual(len(rows), 1)
+
     async def test_expired_failure_is_not_silently_cleared(self):
         now = datetime.utcnow()
         async with self.sessions() as db:
@@ -363,6 +617,52 @@ class DurableQueueTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             self.assertEqual(task.artifact_cache_status, "failed")
             self.assertEqual(task.artifact_cache_error, "worker copy expired")
+
+    async def test_disk_reserve_deferral_does_not_spend_attempt(self):
+        now = datetime.utcnow()
+        task_id = "00000000-0000-0000-0000-000000000903"
+        async with self.sessions() as db:
+            task = Task(
+                id=task_id,
+                owner_type="anon",
+                owner_id="cache-test",
+                input_url="https://example.test/model.glb",
+                input_type="t_pose",
+                worker_api=WORKER,
+                status="done",
+                artifact_cache_status="caching",
+            )
+            db.add(task)
+            job = ArtifactCacheJob(
+                task_id=task.id,
+                worker_key="f1",
+                status="caching",
+                attempt_count=7,
+                next_attempt_at=now,
+                deadline_at=now + timedelta(hours=1),
+            )
+            db.add(job)
+            await db.commit()
+            job_id = job.id
+
+        original_sessions = artifact_cache.AsyncSessionLocal
+        artifact_cache.AsyncSessionLocal = self.sessions
+        try:
+            await artifact_cache._defer_job_for_reserve(
+                job_id,
+                manifest={"files": []},
+                error="disk reserve",
+            )
+        finally:
+            artifact_cache.AsyncSessionLocal = original_sessions
+
+        async with self.sessions() as db:
+            job = await db.get(ArtifactCacheJob, job_id)
+            task = await db.get(Task, task_id)
+            self.assertEqual(job.status, "pending")
+            self.assertEqual(job.attempt_count, 7)
+            self.assertGreaterEqual(job.next_attempt_at, now + timedelta(minutes=4))
+            self.assertEqual(task.artifact_cache_status, "pending")
 
 
 if __name__ == "__main__":

@@ -52,6 +52,125 @@ def is_worker_disabled(worker_url: Optional[str]) -> bool:
 
 
 # =============================================================================
+# Worker capability routing
+# =============================================================================
+# ``worker_endpoints.pool`` value for boxes that run Auto Rig only: they have no
+# retopo/3ds Max/Maya/C4D toolchain, so ``pipeline_kind == "convert"`` would fail
+# on them.  Their ``/server-status`` publishes ``capabilities.mode == "only_rig"``
+# with ``legacy_conversion: false``.
+WORKER_POOL_FULL_CONVERTER = "full_converter"
+WORKER_POOL_RIG_ONLY = "rig_only"
+CAPABILITY_MODE_RIG_ONLY = "only_rig"
+CAPABILITY_MODE_HUNYUAN_ONLY = "hunyuan_only"
+
+PIPELINE_KIND_RIG = "rig"
+PIPELINE_KIND_CONVERT = "convert"
+
+
+def normalize_pipeline_kind(value: Any) -> str:
+    """Match ``start_task_on_worker``: anything unknown is a rig task."""
+    kind = str(value or "").strip().lower()
+    return kind if kind in (PIPELINE_KIND_RIG, PIPELINE_KIND_CONVERT) else PIPELINE_KIND_RIG
+
+
+def normalize_worker_pool(value: Any) -> str:
+    """Normalize ``worker_endpoints.pool``; anything unknown stays a full converter."""
+    pool = str(value or "").strip().lower().replace("-", "_")
+    if pool in (WORKER_POOL_RIG_ONLY, CAPABILITY_MODE_RIG_ONLY):
+        return WORKER_POOL_RIG_ONLY
+    return WORKER_POOL_FULL_CONVERTER
+
+
+def pool_is_rig_only(value: Any) -> bool:
+    return normalize_worker_pool(value) == WORKER_POOL_RIG_ONLY
+
+
+@dataclass(frozen=True)
+class WorkerPipelineCapabilities:
+    """Which ``pipeline_kind`` values a worker is allowed to receive.
+
+    Both default to ``True`` so a legacy node that publishes no capability block
+    keeps its current behaviour; only an explicit denial narrows routing.
+    """
+    rig: bool = True
+    convert: bool = True
+
+    def accepts(self, pipeline_kind: Any) -> bool:
+        return (
+            self.convert
+            if normalize_pipeline_kind(pipeline_kind) == PIPELINE_KIND_CONVERT
+            else self.rig
+        )
+
+
+FULL_PIPELINE_CAPABILITIES = WorkerPipelineCapabilities()
+RIG_ONLY_PIPELINE_CAPABILITIES = WorkerPipelineCapabilities(rig=True, convert=False)
+
+
+def parse_worker_pipeline_capabilities(payload: Any) -> WorkerPipelineCapabilities:
+    """Read routing capabilities from the worker's ``/server-status`` payload."""
+    if not isinstance(payload, dict):
+        return FULL_PIPELINE_CAPABILITIES
+    capabilities = payload.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return FULL_PIPELINE_CAPABILITIES
+    mode = str(capabilities.get("mode") or "").strip().lower()
+    rig = not (
+        capabilities.get("autorig") is False or mode == CAPABILITY_MODE_HUNYUAN_ONLY
+    )
+    convert = not (
+        capabilities.get("legacy_conversion") is False
+        or mode in (CAPABILITY_MODE_RIG_ONLY, CAPABILITY_MODE_HUNYUAN_ONLY)
+    )
+    return WorkerPipelineCapabilities(rig=rig, convert=convert)
+
+
+def worker_pipeline_capabilities(worker: Any) -> WorkerPipelineCapabilities:
+    value = getattr(worker, "pipeline_capabilities", None)
+    return value if isinstance(value, WorkerPipelineCapabilities) else FULL_PIPELINE_CAPABILITIES
+
+
+def worker_accepts_pipeline_kind(worker: Any, pipeline_kind: Any) -> bool:
+    """True unless the worker has proven it cannot run this pipeline kind."""
+    return worker_pipeline_capabilities(worker).accepts(pipeline_kind)
+
+
+def mark_rig_only_workers(workers_list: List[Any], rig_only_urls: set[str]) -> None:
+    """A ``rig_only`` registry row bans full conversion before telemetry arrives."""
+    if not rig_only_urls:
+        return
+    for worker in workers_list:
+        if normalize_worker_url_key(getattr(worker, "url", "")) not in rig_only_urls:
+            continue
+        current = worker_pipeline_capabilities(worker)
+        setattr(
+            worker,
+            "pipeline_capabilities",
+            WorkerPipelineCapabilities(rig=current.rig, convert=False),
+        )
+
+
+async def get_rig_only_worker_urls(db: Optional[AsyncSession] = None) -> set[str]:
+    """Normalized URLs of enabled endpoints registered in the rig-only pool."""
+    if not db:
+        return set()
+    try:
+        res = await db.execute(
+            select(WorkerEndpoint.url, WorkerEndpoint.pool)
+            .where(WorkerEndpoint.enabled.is_(True))
+        )
+        rows = res.all()
+    except Exception as e:
+        print(f"[Workers] Could not read worker pools: {e}")
+        return set()
+    return {
+        normalize_worker_url_key(url)
+        for (url, pool) in rows
+        if str(url or "").strip() and pool_is_rig_only(pool)
+    }
+
+
+# =============================================================================
 # Data Classes
 # =============================================================================
 @dataclass
@@ -61,6 +180,16 @@ class WorkerInfo:
     available: bool
     load: float = 1.0
     error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class WorkerDispatchAdmission:
+    """Dispatch-only health gate derived from the worker's extended status."""
+    allowed: bool
+    maintenance: Optional[bool] = None
+    free_disk_gb: Optional[float] = None
+    reason: Optional[str] = None
+    pipeline_capabilities: WorkerPipelineCapabilities = FULL_PIPELINE_CAPABILITIES
 
 
 @dataclass
@@ -74,6 +203,11 @@ class WorkerTaskResult:
     viewer_prepared_glb_url: Optional[str] = None
     viewer_animations_glb_url: Optional[str] = None
     error: Optional[str] = None
+    # The POST may have been accepted even though no response reached the
+    # dispatcher.  Callers must retain the exact worker/request/lease binding
+    # and replay it; treating this as an ordinary transient failure can create
+    # a second worker task.
+    unknown_outcome: bool = False
     
     def __post_init__(self):
         if self.output_urls is None:
@@ -298,8 +432,16 @@ def get_worker_effective_active(worker: Any, backend_counts: Optional[Dict[str, 
 
 WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
 WORKER_HEALTH_TIMEOUT_SECONDS = float(os.getenv("WORKER_HEALTH_TIMEOUT_SECONDS", "10"))
+WORKER_MIN_FREE_DISK_GB = max(
+    0.0, float(os.getenv("AUTORIG_WORKER_MIN_FREE_DISK_GB", "25"))
+)
+WORKER_DISPATCH_HEALTH_TTL_SECONDS = max(
+    5.0, float(os.getenv("AUTORIG_WORKER_DISPATCH_HEALTH_TTL_SECONDS", "30"))
+)
 _worker_quarantine_until: Dict[str, datetime] = {}
 _worker_quarantine_reason: Dict[str, str] = {}
+_worker_dispatch_health_cache: Dict[str, Tuple[float, WorkerDispatchAdmission]] = {}
+_worker_dispatch_last_reason: Dict[str, Optional[str]] = {}
 
 
 def _utcnow() -> datetime:
@@ -357,6 +499,145 @@ def get_quarantined_workers() -> Dict[str, dict]:
     return snapshot
 
 
+def parse_worker_dispatch_admission(
+    payload: Any,
+    *,
+    min_free_disk_gb: float = WORKER_MIN_FREE_DISK_GB,
+) -> WorkerDispatchAdmission:
+    """
+    Interpret optional extended worker telemetry without breaking legacy nodes.
+
+    Explicit maintenance and an explicitly reported low system-disk value block
+    only *new* dispatch. Missing telemetry remains compatible with older workers;
+    their normal root health and queue counters are still authoritative.
+
+    The same payload carries ``capabilities``, which decides which
+    ``pipeline_kind`` values this node may receive at all.
+    """
+    if not isinstance(payload, dict):
+        return WorkerDispatchAdmission(allowed=True)
+
+    capabilities = parse_worker_pipeline_capabilities(payload)
+    maintenance_raw = payload.get("maintenance")
+    maintenance = maintenance_raw if isinstance(maintenance_raw, bool) else None
+
+    free_disk_raw: Any = payload.get("disk_free_gb")
+    if free_disk_raw is None:
+        disk = payload.get("disk")
+        if isinstance(disk, dict):
+            free_disk_raw = disk.get("free_gb")
+    if free_disk_raw is None:
+        hunyuan = payload.get("hunyuan")
+        if isinstance(hunyuan, dict):
+            disk = hunyuan.get("disk")
+            if isinstance(disk, dict):
+                free_disk_raw = disk.get("free_gb")
+
+    free_disk_gb: Optional[float] = None
+    try:
+        if free_disk_raw is not None:
+            free_disk_gb = float(free_disk_raw)
+    except (TypeError, ValueError):
+        free_disk_gb = None
+
+    if maintenance is True:
+        return WorkerDispatchAdmission(
+            allowed=False,
+            maintenance=True,
+            free_disk_gb=free_disk_gb,
+            reason="maintenance",
+            pipeline_capabilities=capabilities,
+        )
+    if free_disk_gb is not None and free_disk_gb < max(0.0, min_free_disk_gb):
+        return WorkerDispatchAdmission(
+            allowed=False,
+            maintenance=maintenance,
+            free_disk_gb=free_disk_gb,
+            reason=f"low_disk:{free_disk_gb:.2f}<{max(0.0, min_free_disk_gb):.2f}GB",
+            pipeline_capabilities=capabilities,
+        )
+    return WorkerDispatchAdmission(
+        allowed=True,
+        maintenance=maintenance,
+        free_disk_gb=free_disk_gb,
+        pipeline_capabilities=capabilities,
+    )
+
+
+def clear_worker_dispatch_health_cache() -> None:
+    """Test/admin helper; normal operation relies on the short TTL."""
+    _worker_dispatch_health_cache.clear()
+    _worker_dispatch_last_reason.clear()
+
+
+async def get_worker_dispatch_admission(
+    worker_url: str,
+    client: httpx.AsyncClient,
+) -> WorkerDispatchAdmission:
+    """Fetch and briefly cache the dispatch-only `/server-status` gate."""
+    key = normalize_worker_url_key(worker_url)
+    now = time.monotonic()
+    cached = _worker_dispatch_health_cache.get(key)
+    if cached and now - cached[0] < WORKER_DISPATCH_HEALTH_TTL_SECONDS:
+        return cached[1]
+
+    admission = WorkerDispatchAdmission(allowed=True)
+    try:
+        response = await client.get(
+            f"{key}/server-status",
+            timeout=WORKER_HEALTH_TIMEOUT_SECONDS,
+        )
+        if response.status_code == 200:
+            admission = parse_worker_dispatch_admission(response.json())
+    except Exception:
+        # Legacy or temporarily degraded extended telemetry must not override a
+        # successful root health check. The normal dispatch POST remains the
+        # final admission authority and can reject transiently without retry use.
+        admission = WorkerDispatchAdmission(allowed=True)
+
+    _worker_dispatch_health_cache[key] = (now, admission)
+    return admission
+
+
+async def filter_workers_for_dispatch(
+    workers: List[Any],
+    *,
+    client: Optional[httpx.AsyncClient] = None,
+) -> List[Any]:
+    """Exclude only workers with a confirmed maintenance/low-disk gate."""
+    if not workers:
+        return []
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(follow_redirects=True)
+    try:
+        admissions = await asyncio.gather(
+            *(get_worker_dispatch_admission(worker.url, client) for worker in workers)
+        )
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    allowed: List[Any] = []
+    for worker, admission in zip(workers, admissions):
+        setattr(worker, "dispatch_allowed", admission.allowed)
+        setattr(worker, "maintenance", admission.maintenance)
+        setattr(worker, "free_disk_gb", admission.free_disk_gb)
+        setattr(worker, "dispatch_block_reason", admission.reason)
+        setattr(worker, "pipeline_capabilities", admission.pipeline_capabilities)
+        key = normalize_worker_url_key(worker.url)
+        previous = _worker_dispatch_last_reason.get(key)
+        if admission.reason != previous:
+            if admission.reason:
+                print(f"[Workers] Dispatch blocked for {worker.url}: {admission.reason}")
+            elif key in _worker_dispatch_last_reason:
+                print(f"[Workers] Dispatch gate recovered for {worker.url}")
+            _worker_dispatch_last_reason[key] = admission.reason
+        if admission.allowed:
+            allowed.append(worker)
+    return allowed
+
+
 async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerInfo:
     """Get load/status from a single worker"""
     try:
@@ -379,6 +660,37 @@ async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerI
         return WorkerInfo(url=worker_url, available=False, error=str(e))
 
 
+async def get_worker_workload_status(worker_url: str) -> Dict[str, Any]:
+    """Return the raw non-secret node snapshot used for central admission."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
+        if response.status_code != 200:
+            raise RuntimeError(f"worker status HTTP {response.status_code}")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("worker status is not an object")
+        return payload
+
+
+def worker_supports_submission_idempotency(status: Any) -> bool:
+    """Fail-closed capability gate for central identity/replay dispatch.
+
+    Rolling worker builds expose capabilities in slightly different additive
+    containers, so read the explicit boolean from all supported server-status
+    shapes.  A missing value, a string such as ``"true"``, or an arbitrary
+    truthy object is deliberately not accepted.
+    """
+    if not isinstance(status, dict):
+        return False
+    if status.get("submission_idempotency_v1") is True:
+        return True
+    for key in ("capabilities", "capability_by_key", "feature_flags"):
+        value = status.get(key)
+        if isinstance(value, dict) and value.get("submission_idempotency_v1") is True:
+            return True
+    return False
+
+
 async def get_all_workers_status(worker_urls: List[str]) -> List[WorkerInfo]:
     """Get status of provided workers"""
     async with httpx.AsyncClient() as client:
@@ -398,10 +710,16 @@ async def get_all_workers_status(worker_urls: List[str]) -> List[WorkerInfo]:
         return workers
 
 
-async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]:
+async def select_best_worker(
+    db: Optional[AsyncSession] = None,
+    *,
+    pipeline_kind: str = PIPELINE_KIND_RIG,
+) -> Optional[str]:
     """
     Select best worker for a new task.
     Strategy:
+    - Skip workers that cannot run this ``pipeline_kind`` (rig-only boxes have
+      no retopo/DCC toolchain and must never receive a ``convert`` task).
     - Prefer higher weight (priority).
     - Within the highest-weight available group, pick least busy (min load).
     - If none respond, fallback to first configured URL (still weight-ordered).
@@ -411,9 +729,25 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
     if not worker_urls:
         return None
 
+    rig_only_urls = await get_rig_only_worker_urls(db)
     statuses = await get_all_workers_status(worker_urls)
     backend_processing = await get_backend_worker_processing_counts(db)
-    available = [w for w in statuses if w.available]
+    responsive_available = [w for w in statuses if w.available]
+    available = responsive_available
+    if responsive_available:
+        available = await filter_workers_for_dispatch(responsive_available)
+        if not available:
+            # Every responsive node supplied an explicit maintenance/low-disk
+            # block. Never reinterpret that as a network outage and fall back
+            # to optimistic dispatch.
+            return None
+        mark_rig_only_workers(available, rig_only_urls)
+        available = [
+            w for w in available if worker_accepts_pipeline_kind(w, pipeline_kind)
+        ]
+        if not available:
+            # Reachable capacity exists but none of it can run this pipeline.
+            return None
     quarantine_safe_available = [w for w in available if not is_worker_quarantined(w.url)]
 
     if quarantine_safe_available:
@@ -424,9 +758,17 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
         candidates_pool = available
         print("[Workers] All available workers are quarantined, using degraded fallback")
     else:
-        # No worker responded as available. Prefer non-quarantined URL for optimistic dispatch.
-        non_quarantined_urls = [u for u in worker_urls if not is_worker_quarantined(u)]
-        return (non_quarantined_urls or worker_urls)[0]
+        # No worker responded as available. Prefer non-quarantined URL for optimistic dispatch,
+        # but never guess a rig-only endpoint for a full-conversion task.
+        eligible_urls = [
+            u
+            for u in worker_urls
+            if normalize_pipeline_kind(pipeline_kind) != PIPELINE_KIND_CONVERT
+            or normalize_worker_url_key(u) not in rig_only_urls
+        ]
+        non_quarantined_urls = [u for u in eligible_urls if not is_worker_quarantined(u)]
+        fallback = non_quarantined_urls or eligible_urls
+        return fallback[0] if fallback else None
 
     # For direct restart/admin dispatch, avoid piling new work onto a high-weight
     # worker that is already busy when lower-weight idle workers are available.
@@ -459,6 +801,7 @@ async def send_task_to_worker(
     metadata: Optional[Dict[str, Any]] = None,
     backend_task_id: Optional[str] = None,
     queue_class: str = "interactive",
+    workload_lease: Optional[Dict[str, Any]] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -543,6 +886,17 @@ async def send_task_to_worker(
                 if str(queue_class or "").strip().lower() == "collection_background"
                 else "interactive"
             )
+            payload["workload_class"] = (
+                "collection_background"
+                if payload["queue_class"] == "collection_background"
+                else "autorig_interactive"
+            )
+            if isinstance(workload_lease, dict) and workload_lease.get("lease_id_string"):
+                payload["workload_lease_id"] = str(workload_lease.get("lease_id_string"))
+                payload["workload_request_id"] = str(workload_lease.get("request_id_string") or "")
+                payload["physical_resource_id"] = str(
+                    workload_lease.get("physical_resource_id_string") or ""
+                )
 
             request_started_at = time.time()
             response = await client.post(
@@ -585,7 +939,15 @@ async def send_task_to_worker(
                     error=f"Worker returned HTTP {response.status_code}: {response.text[:200]}"
                 )
                 
+        except httpx.ConnectTimeout:
+            return WorkerTaskResult(success=False, error="Worker connect timeout")
         except httpx.TimeoutException:
+            if isinstance(workload_lease, dict) and workload_lease.get("request_id_string"):
+                return WorkerTaskResult(
+                    success=False,
+                    error="Worker submission outcome unknown after timeout",
+                    unknown_outcome=True,
+                )
             recovered = await _recover_worker_task_after_post_timeout(
                 client,
                 worker_url,
@@ -595,6 +957,17 @@ async def send_task_to_worker(
             if recovered is not None:
                 return recovered
             return WorkerTaskResult(success=False, error="Worker timeout")
+        except httpx.ConnectError as e:
+            return WorkerTaskResult(success=False, error=str(e))
+        except httpx.RequestError as e:
+            return WorkerTaskResult(
+                success=False,
+                error=f"Worker submission outcome unknown: {e}",
+                unknown_outcome=bool(
+                    isinstance(workload_lease, dict)
+                    and workload_lease.get("request_id_string")
+                ),
+            )
         except Exception as e:
             return WorkerTaskResult(success=False, error=str(e))
 

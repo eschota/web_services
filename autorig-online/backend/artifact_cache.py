@@ -18,11 +18,12 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Awaitable, Callable, Iterable, Optional, Sequence
+from typing import Any, Awaitable, Callable, Iterable, Iterator, Optional, Sequence
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from config import (
     ARTIFACT_CACHE_CONCURRENCY,
@@ -43,6 +44,10 @@ _TASK_ID_RE = re.compile(r"^[0-9a-fA-F-]{16,64}$")
 _WORKER_RE = re.compile(r"(?:^|[.-])(?:converter-)?(f\d+)(?:[.-]|$)", re.IGNORECASE)
 _claim_lock = asyncio.Lock()
 _worker_locks: dict[str, asyncio.Lock] = {}
+
+
+class ArtifactCacheReserveError(RuntimeError):
+    """The next write would consume the filesystem reserve."""
 
 
 @dataclass(frozen=True)
@@ -207,6 +212,7 @@ def lookup_cached_artifact(
     source_url: Optional[str] = None,
     role: Optional[str] = None,
     basename: Optional[str] = None,
+    relative_path_fragment: Optional[str] = None,
     root: Optional[Path] = None,
 ) -> Optional[dict[str, Any]]:
     cache_root = Path(root or ARTIFACT_CACHE_ROOT)
@@ -219,6 +225,7 @@ def lookup_cached_artifact(
         return None
     source_key = _normalized_url(source_url or "")
     basename_key = str(basename or "").lower()
+    relative_fragment_key = str(relative_path_fragment or "").replace("\\", "/").lower()
     for item in manifest.get("files", []):
         if not isinstance(item, dict):
             continue
@@ -235,6 +242,8 @@ def lookup_cached_artifact(
             continue
         if basename_key and path.name.lower() != basename_key:
             continue
+        if relative_fragment_key and relative_fragment_key not in str(relative).replace("\\", "/").lower():
+            continue
         result = dict(item)
         result["path"] = path
         result["internal_uri"] = "/_autorig_artifacts/" + "/".join(
@@ -242,6 +251,188 @@ def lookup_cached_artifact(
         )
         return result
     return None
+
+
+_CACHED_ARCHIVE_MEMBER_ROLES = frozenset({"deliverable_zip", "full_bundle"})
+
+
+def _safe_cached_archive_member_name(value: str) -> Optional[str]:
+    """Return a normalized ZIP member name, or ``None`` for unsafe entries."""
+    raw = str(value or "").replace("\\", "/")
+    candidate = PurePosixPath(raw)
+    if (
+        not raw
+        or "\x00" in raw
+        or candidate.is_absolute()
+        or any(part in ("", ".", "..") for part in candidate.parts)
+    ):
+        return None
+    return candidate.as_posix()
+
+
+def lookup_cached_archive_member(
+    task_id: str,
+    *,
+    basename: str,
+    max_uncompressed_bytes: int,
+    root: Optional[Path] = None,
+) -> Optional[dict[str, Any]]:
+    """Locate an exact file inside a verified, last-copy cached ZIP.
+
+    Converter task ZIPs contain the original GLB and ``*_rig.json`` even when
+    the worker has already evicted its public task directory.  This lookup is
+    intentionally read-only: callers stream the member from central storage
+    instead of copying a large bundle back to a disk-pressured worker.
+    """
+    requested = str(basename or "").strip()
+    if (
+        not requested
+        or requested != PurePosixPath(requested).name
+        or "/" in requested
+        or "\\" in requested
+        or "\x00" in requested
+    ):
+        return None
+    limit = max(1, int(max_uncompressed_bytes or 0))
+    cache_root = Path(root or ARTIFACT_CACHE_ROOT)
+    try:
+        manifest = read_manifest(cache_root, task_id)
+    except ValueError:
+        return None
+
+    # Prefer the small converter deliverable ZIP over a potentially hundreds
+    # of megabytes full bundle.  Both were already checksum/CRC validated when
+    # admitted to the durable cache.
+    rows = [item for item in manifest.get("files", []) if isinstance(item, dict)]
+    rows.sort(
+        key=lambda item: (
+            0 if str(item.get("role") or "").lower() == "deliverable_zip" else 1,
+            int(item.get("size") or 0),
+            str(item.get("relative_path") or ""),
+        )
+    )
+    for item in rows:
+        role = str(item.get("role") or "").lower()
+        if role not in _CACHED_ARCHIVE_MEMBER_ROLES:
+            continue
+        relative = str(item.get("relative_path") or "")
+        try:
+            archive_path = _safe_destination(cache_root, task_id, relative)
+            archive_size = archive_path.stat().st_size
+        except (OSError, ValueError):
+            continue
+        if (
+            not archive_path.is_file()
+            or archive_path.suffix.lower() != ".zip"
+            or archive_size != int(item.get("size") or -1)
+        ):
+            continue
+        try:
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                matches = []
+                for info in archive.infolist():
+                    safe_name = _safe_cached_archive_member_name(info.filename)
+                    if (
+                        safe_name
+                        and not info.is_dir()
+                        and PurePosixPath(safe_name).name.casefold() == requested.casefold()
+                    ):
+                        matches.append((safe_name, info))
+                exact_root = [row for row in matches if row[0].casefold() == requested.casefold()]
+                if len(exact_root) == 1:
+                    safe_name, info = exact_root[0]
+                elif len(matches) == 1:
+                    safe_name, info = matches[0]
+                else:
+                    # Ambiguous duplicate basenames are never guessed.
+                    continue
+                if info.flag_bits & 0x1 or info.file_size <= 0 or info.file_size > limit:
+                    continue
+                with archive.open(info, "r") as member:
+                    prefix = member.read(min(512, info.file_size))
+        except (OSError, RuntimeError, ValueError, zipfile.BadZipFile, NotImplementedError):
+            continue
+        archive_sha256 = str(item.get("sha256") or "")
+        etag_seed = archive_sha256[:24] or f"{archive_size:x}"
+        return {
+            "archive_path": archive_path,
+            "archive_size": archive_size,
+            "archive_sha256": archive_sha256,
+            "archive_relative_path": relative,
+            "archive_role": role,
+            "member_name": safe_name,
+            "member_size": int(info.file_size),
+            "member_crc32": int(info.CRC),
+            "member_compress_size": int(info.compress_size),
+            "prefix": prefix,
+            "etag": f'"zip-{etag_seed}-{int(info.CRC):08x}-{int(info.file_size):x}"',
+        }
+    return None
+
+
+def _validated_cached_archive_info(entry: dict[str, Any]) -> tuple[zipfile.ZipFile, zipfile.ZipInfo]:
+    """Re-open a previously resolved member and fail if the archive changed."""
+    archive_path = Path(entry["archive_path"])
+    if archive_path.stat().st_size != int(entry["archive_size"]):
+        raise RuntimeError("cached archive changed after member lookup")
+    archive = zipfile.ZipFile(archive_path, "r")
+    try:
+        info = archive.getinfo(str(entry["member_name"]))
+        if (
+            info.is_dir()
+            or info.flag_bits & 0x1
+            or info.file_size != int(entry["member_size"])
+            or info.CRC != int(entry["member_crc32"])
+        ):
+            raise RuntimeError("cached archive member changed after lookup")
+        return archive, info
+    except Exception:
+        archive.close()
+        raise
+
+
+def read_cached_archive_member(entry: dict[str, Any], *, max_bytes: int) -> bytes:
+    """Read one bounded member and verify its declared size and CRC."""
+    expected = int(entry["member_size"])
+    if expected <= 0 or expected > max(1, int(max_bytes or 0)):
+        raise RuntimeError("cached archive member exceeds read limit")
+    archive, info = _validated_cached_archive_info(entry)
+    try:
+        payload = archive.read(info)
+    finally:
+        archive.close()
+    if len(payload) != expected:
+        raise RuntimeError("cached archive member was truncated")
+    return payload
+
+
+def iter_cached_archive_member(
+    entry: dict[str, Any],
+    *,
+    start: int = 0,
+    end: Optional[int] = None,
+    chunk_bytes: int = 1024 * 1024,
+) -> Iterator[bytes]:
+    """Stream an exact byte range from a cached ZIP member without extracting it."""
+    total = int(entry["member_size"])
+    first = int(start)
+    last = total - 1 if end is None else int(end)
+    if first < 0 or first >= total or last < first or last >= total:
+        raise ValueError("invalid cached archive member range")
+    archive, info = _validated_cached_archive_info(entry)
+    try:
+        with archive.open(info, "r") as member:
+            if first:
+                member.seek(first)
+            remaining = last - first + 1
+            while remaining:
+                block = member.read(min(max(1, int(chunk_bytes)), remaining))
+                if not block:
+                    raise RuntimeError("cached archive member range was truncated")
+                remaining -= len(block)
+                yield block
+    finally:
+        archive.close()
 
 
 async def _safe_stream_request(
@@ -275,6 +466,24 @@ def _parse_content_range(value: str) -> tuple[int, int, int]:
     if start < 0 or end < start or total <= end:
         raise RuntimeError("invalid Content-Range bounds")
     return start, end, total
+
+
+def _ensure_cache_write_capacity(path: Path, incoming_bytes: int) -> None:
+    """Fail before a cache write would cross the production disk reserve."""
+    required = max(0, int(incoming_bytes or 0))
+    if required <= 0:
+        return
+    probe_path = path.parent
+    while not probe_path.exists() and probe_path != probe_path.parent:
+        probe_path = probe_path.parent
+    free = int(shutil.disk_usage(probe_path).free)
+    reserve = int(ARTIFACT_CACHE_RESERVE_GB * 1024**3)
+    if free - required < reserve:
+        raise ArtifactCacheReserveError(
+            f"artifact cache write paused: free={free / 1024**3:.2f}GB "
+            f"reserve={ARTIFACT_CACHE_RESERVE_GB:.0f}GB "
+            f"next_write={required / 1024**2:.2f}MiB"
+        )
 
 
 async def _probe_source(
@@ -351,6 +560,7 @@ async def _download_to_partial(
             written = 0
             with partial.open("wb") as output:
                 async for chunk in response.aiter_bytes(1024 * 1024):
+                    _ensure_cache_write_capacity(partial, len(chunk))
                     output.write(chunk)
                     written += len(chunk)
                     if written > total:
@@ -381,6 +591,7 @@ async def _download_to_partial(
                     raise RuntimeError("range response does not match requested block")
                 written = 0
                 async for chunk in response.aiter_bytes(1024 * 1024):
+                    _ensure_cache_write_capacity(partial, len(chunk))
                     output.write(chunk)
                     written += len(chunk)
                 if written != end - start + 1:
@@ -529,6 +740,10 @@ async def cache_sources(
                 existing[item["relative_path"]] = item
                 manifest["files"] = sorted(existing.values(), key=lambda row: row["relative_path"])
                 write_manifest(cache_root, task_id, manifest)
+            except ArtifactCacheReserveError:
+                manifest["files"] = sorted(existing.values(), key=lambda row: row["relative_path"])
+                write_manifest(cache_root, task_id, manifest)
+                raise
             except Exception as exc:
                 errors.append(f"{source.role}:{source.url}: {exc}")
     manifest["files"] = sorted(existing.values(), key=lambda row: row["relative_path"])
@@ -558,17 +773,29 @@ async def enqueue_artifact_cache(
     )
     job = result.scalar_one_or_none()
     if job is None:
-        job = ArtifactCacheJob(
-            task_id=task.id,
-            worker_key=_worker_key(task),
-            status="pending",
-            attempt_count=0,
-            next_attempt_at=moment,
-            deadline_at=full_until,
-            created_at=moment,
-            updated_at=moment,
+        # Completion can be observed concurrently by the public task endpoint
+        # and the background synchronizer.  A select-then-add sequence races on
+        # the unique task_id constraint and turns a successful task page into a
+        # 500.  SQLite's conflict-safe insert serializes that race without
+        # rolling back the caller's task-completion transaction.
+        await db.execute(
+            sqlite_insert(ArtifactCacheJob)
+            .values(
+                task_id=task.id,
+                worker_key=_worker_key(task),
+                status="pending",
+                attempt_count=0,
+                next_attempt_at=moment,
+                deadline_at=full_until,
+                created_at=moment,
+                updated_at=moment,
+            )
+            .on_conflict_do_nothing(index_elements=[ArtifactCacheJob.task_id])
         )
-        db.add(job)
+        result = await db.execute(
+            select(ArtifactCacheJob).where(ArtifactCacheJob.task_id == task.id)
+        )
+        job = result.scalar_one()
         task.artifact_cache_status = "pending"
         task.artifact_cache_error = None
     elif job.status == "failed" and moment < job.deadline_at:
@@ -703,6 +930,39 @@ async def _finish_job(
         await db.commit()
 
 
+async def _defer_job_for_reserve(
+    job_id: int,
+    *,
+    manifest: Optional[dict[str, Any]],
+    error: str,
+) -> None:
+    """Pause infrastructure-limited cache work without spending an attempt."""
+    async with AsyncSessionLocal() as db:
+        job = await db.get(ArtifactCacheJob, job_id)
+        if job is None:
+            return
+        task = await db.get(Task, job.task_id)
+        moment = utcnow()
+        count, size = manifest_stats(manifest or {"files": []})
+        message = str(error)[:8000]
+        if moment >= job.deadline_at:
+            job.status = "failed"
+            job.finished_at = moment
+        else:
+            job.status = "pending"
+            job.next_attempt_at = moment + timedelta(minutes=5)
+        job.last_error = message
+        job.updated_at = moment
+        if task is not None:
+            task.artifact_cache_file_count = count
+            task.artifact_cache_bytes = size
+            task.artifact_cache_error = message
+            task.artifact_cache_status = "partial" if count else (
+                "failed" if job.status == "failed" else "pending"
+            )
+        await db.commit()
+
+
 async def _process_claimed_job(
     job_id: int,
     task_id: str,
@@ -710,6 +970,7 @@ async def _process_claimed_job(
 ) -> None:
     manifest: Optional[dict[str, Any]] = None
     errors: list[str] = []
+    reserve_error: Optional[str] = None
     try:
         full_until: Optional[datetime] = None
         async with AsyncSessionLocal() as db:
@@ -742,8 +1003,17 @@ async def _process_claimed_job(
         }
         missing = sorted(required_paths - cached_paths)
         errors.extend(f"required artifact missing: {path}" for path in missing)
+    except ArtifactCacheReserveError as exc:
+        reserve_error = str(exc)
+        try:
+            manifest = read_manifest(Path(ARTIFACT_CACHE_ROOT), task_id)
+        except (OSError, ValueError):
+            manifest = None
     except Exception as exc:
         errors.append(str(exc))
+    if reserve_error is not None:
+        await _defer_job_for_reserve(job_id, manifest=manifest, error=reserve_error)
+        return
     await _finish_job(job_id, manifest=manifest, errors=errors)
 
 

@@ -94,7 +94,7 @@ AI_SERVICE_MODES = {"vision": "vision", "text": "text",
                     "avatar_from_image": "vision"}
 # Frame extraction is ffmpeg on this host: no GPU box is involved, so counting
 # farm computers for it would be a wrong answer rather than a missing one.
-LOCAL_SERVICES = {"video_frame", "video_storyboard"}
+LOCAL_SERVICES = {"video_frame", "video_storyboard", "scene_split", "video_concat", "audio_from_source"}
 
 # A typed image request is scheduled as plain `gen_image.json` and only then
 # resolved to its real template — a quirk carried over from the C# scheduler.
@@ -119,6 +119,7 @@ SERVICE_TOKENS = {
     "control_pose": "gen_control_pose.json",
     "control_depth": "gen_control_depth.json",
     "control_canny": "gen_control_canny.json",
+    "control_normal": "gen_control_normal.json",
     "upscale": ENHANCE_SCHEDULING_TOKEN,
     "detail_enhance": ENHANCE_SCHEDULING_TOKEN,
     "face_fix": ENHANCE_SCHEDULING_TOKEN,

@@ -27,6 +27,9 @@ PREEMPTION_NONE = "none"
 PREEMPTION_REQUESTED = "requested"
 PREEMPTION_STOPPING = "stopping"
 PREEMPT_COOLDOWN_SECONDS = int(os.getenv("AUTORIG_COLLECTION_PREEMPT_COOLDOWN", "300"))
+TRANSIENT_DISPATCH_COOLDOWN_SECONDS = max(
+    5, int(os.getenv("AUTORIG_TRANSIENT_DISPATCH_COOLDOWN", "600"))
+)
 PREEMPT_DEADLINE_SECONDS = max(
     1, min(60, int(os.getenv("AUTORIG_COLLECTION_PREEMPT_DEADLINE", "60")))
 )
@@ -126,39 +129,119 @@ def select_preemption_victims(tasks: Iterable[Any], count: int) -> List[Any]:
     return sorted(candidates, key=victim_sort_key)[: max(0, int(count or 0))]
 
 
+BACKGROUND_DISPATCH_RESERVE = int(
+    os.getenv("AUTORIG_BACKGROUND_DISPATCH_RESERVE", "2")
+)
+
+
 def background_dispatch_budget(free_workers: Sequence[Any], interactive_waiting: int) -> int:
-    """Keep one healthy full-converter slot unused by background work."""
+    """Keep ``BACKGROUND_DISPATCH_RESERVE`` free slots unused by background work.
+
+    This stacks with the cross-pipeline N-1 reserve in
+    ``hunyuan_client.shared_full_background_capacity``; with a 4-5 box fleet
+    and both reserves at 2, one interactive task in flight already zeroes the
+    background budget, so the collection lane crawls while the farm idles.
+    """
     if int(interactive_waiting or 0) > 0:
         return 0
-    return max(0, len(free_workers) - 1)
+    return max(0, len(free_workers) - max(0, BACKGROUND_DISPATCH_RESERVE))
 
 
-async def dispatch_fifo_candidate(candidates: List[Any], attempt) -> bool:
-    """Dispatch one task, preserving the head on worker-transient rejection."""
-    while candidates:
-        task = candidates.pop(0)
-        source_attempts_before = int(getattr(task, "source_attempt_count", 0) or 0)
-        try:
-            started_task, dispatch_error = await attempt(task)
-        except Exception as exc:
-            print(f"[Priority] Error dispatching task {task.id}: {exc}")
-            candidates.insert(0, task)
-            return False
-        if started_task.status == "processing":
-            return True
-        source_attempts_after = int(
-            getattr(started_task, "source_attempt_count", 0) or 0
-        )
-        if started_task.status == "error" or source_attempts_after > source_attempts_before:
-            print(
-                f"[Priority] Skipping task {task.id} after task-specific "
-                "dispatch rejection"
+async def dispatch_fifo_candidate(candidates: List[Any], attempt, *, eligible=None) -> bool:
+    """Dispatch one task, preserving the head on worker-transient rejection.
+
+    ``eligible`` filters by worker capability (a rig-only box cannot run a
+    ``convert`` task).  A task the chosen worker cannot serve is put back in its
+    original queue position instead of being consumed, so the FIFO head keeps
+    waiting for a compatible worker while the next eligible task is dispatched.
+    """
+    skipped: List[Any] = []
+    try:
+        while candidates:
+            task = candidates.pop(0)
+            if eligible is not None and not eligible(task):
+                skipped.append(task)
+                continue
+            source_attempts_before = int(getattr(task, "source_attempt_count", 0) or 0)
+            try:
+                started_task, dispatch_error = await attempt(task)
+            except Exception as exc:
+                print(f"[Priority] Error dispatching task {task.id}: {exc}")
+                candidates.insert(0, task)
+                return False
+            if started_task.status == "processing":
+                return True
+            source_attempts_after = int(
+                getattr(started_task, "source_attempt_count", 0) or 0
             )
-            continue
-        if dispatch_error:
+            if started_task.status == "error" or source_attempts_after > source_attempts_before:
+                print(
+                    f"[Priority] Skipping task {task.id} after task-specific "
+                    "dispatch rejection"
+                )
+                continue
+            if dispatch_error:
+                not_before = getattr(started_task, "dispatch_not_before", None)
+                if not_before is None or not_before <= datetime.utcnow():
+                    candidates.insert(0, task)
+                else:
+                    print(
+                        f"[Priority] Deferred FIFO head {task.id} until "
+                        f"{not_before.isoformat()} after transient worker rejection"
+                    )
+                return False
+        return False
+    finally:
+        for task in reversed(skipped):
             candidates.insert(0, task)
-            return False
-    return False
+
+
+async def dispatch_released_interactive(
+    candidates: List[Any],
+    free_workers: Sequence[Any],
+    released_worker_urls: Iterable[str],
+    attempt,
+    *,
+    eligible=None,
+) -> int:
+    """Immediately reuse proven-empty preempted slots for interactive FIFO.
+
+    Waiting for the next scheduler cycle after a worker has confirmed
+    ``Preempted`` can push end-to-end admission beyond the 60-second recall
+    deadline.  The caller holds the common scheduler/fleet-admission lock and
+    supplies a fresh dispatchable-worker snapshot, so only explicitly released
+    compatible workers are eligible here.  ``eligible(task, worker)`` additionally
+    keeps a task away from a worker that cannot run its pipeline kind.
+    """
+    released = {
+        str(url or "").strip().rstrip("/").lower()
+        for url in released_worker_urls
+        if str(url or "").strip()
+    }
+    if not candidates or not released:
+        return 0
+
+    dispatched = 0
+    for worker in free_workers:
+        if not candidates:
+            break
+        worker_url = str(getattr(worker, "url", "") or "").strip()
+        if worker_url.rstrip("/").lower() not in released:
+            continue
+
+        async def _attempt(task: Any, selected_worker=worker):
+            return await attempt(task, selected_worker)
+
+        worker_eligible = (
+            (lambda task, selected_worker=worker: eligible(task, selected_worker))
+            if eligible is not None
+            else None
+        )
+        if await dispatch_fifo_candidate(
+            candidates, _attempt, eligible=worker_eligible
+        ):
+            dispatched += 1
+    return dispatched
 
 
 def worker_supports_preemption(worker: Any) -> bool:
@@ -200,7 +283,7 @@ def _control_worker(worker_url: str) -> Optional[Dict[str, Any]]:
     try:
         from renderfin import config as renderfin_config
 
-        for worker in renderfin_config.hunyuan_workers():
+        for worker in renderfin_config.converter_control_workers():
             if str(worker.get("name") or "").strip().lower() == name:
                 return worker
     except Exception as exc:
@@ -264,6 +347,7 @@ async def _cas_requeue_preempted_task(
     worker_api: str,
     worker_task_id: str,
     request_id: str,
+    workload_lease_id: str = "",
     now: datetime,
 ) -> bool:
     """Atomically clear only the exact worker attempt that was recalled."""
@@ -307,6 +391,13 @@ async def _cas_requeue_preempted_task(
             dispatch_not_before=now + timedelta(seconds=PREEMPT_COOLDOWN_SECONDS),
             preemption_request_id=None,
             preemption_worker_boot_id=None,
+            workload_request_id=None,
+            workload_lease_id=None,
+            workload_physical_resource_id=None,
+            workload_node_id=None,
+            workload_class=None,
+            workload_lease_state=None,
+            workload_lease_heartbeat_at=None,
             updated_at=now,
         )
     )
@@ -314,6 +405,20 @@ async def _cas_requeue_preempted_task(
     if int(result.rowcount or 0) != 1:
         await db.rollback()
         return False
+    if workload_lease_id:
+        from database import WorkloadLease, WorkloadWaiter
+
+        lease = await db.get(WorkloadLease, workload_lease_id)
+        if lease is not None and lease.state in ("active", "preemption_requested"):
+            lease.state = "preempted"
+            lease.released_at = now
+            lease.expires_at = now
+            lease.updated_at = now
+            waiter = await db.get(WorkloadWaiter, lease.request_id)
+            if waiter is not None:
+                waiter.state = "preempted"
+                waiter.terminal_at = now
+                waiter.updated_at = now
     await db.commit()
     return True
 
@@ -351,19 +456,30 @@ async def _worker_task_status(
     return "", last
 
 
-async def preempt_background_task(task_id: str) -> bool:
+async def preempt_background_task(task_id: str, *, broker_requested: bool = False) -> bool:
     """Recall one full-conversion task and requeue the same DB row after proof."""
     if not PREEMPTION_ENABLED:
         return False
 
-    from database import AsyncSessionLocal, Task
+    from database import AsyncSessionLocal, Task, WorkloadLease
     from workers import clear_worker_quarantine, quarantine_worker
 
     started = time.monotonic()
     deadline = started + PREEMPT_DEADLINE_SECONDS
     async with AsyncSessionLocal() as db:
         task = await db.get(Task, task_id)
-        if task is None or task.status != "processing" or not is_background(task.queue_class):
+        if task is None or task.status != "processing":
+            return False
+        broker_lease = None
+        if task.workload_lease_id:
+            broker_lease = await db.get(WorkloadLease, task.workload_lease_id)
+        durable_broker_recall = bool(
+            broker_requested
+            and broker_lease is not None
+            and broker_lease.state == "preemption_requested"
+            and broker_lease.owner_task_id == task.id
+        )
+        if not is_background(task.queue_class) and not durable_broker_recall:
             return False
         worker = _control_worker(task.worker_api or "")
         if not worker or not task.worker_task_id:
@@ -377,12 +493,20 @@ async def preempt_background_task(task_id: str) -> bool:
         worker_task_id = str(task.worker_task_id)
         backend_task_id = str(task.id)
         worker_api = str(task.worker_api or "")
+        workload_lease_id = str(task.workload_lease_id or "")
+        requester_workload_class = "autorig_interactive"
+        if durable_broker_recall:
+            reason = str(broker_lease.preemption_reason or "")
+            requester_workload_class = (
+                "ai_vision" if "ai_vision" in reason else "autorig_interactive"
+            )
 
     _METRICS["preemption_requested"] += 1
     headers = {"Authorization": f"Bearer {worker['token']}"}
     body = {
         "backend_task_id": backend_task_id,
         "preemption_request_id": request_id,
+        "requester_workload_class": requester_workload_class,
     }
     control_url = (
         f"{worker['url']}/api-converter-glb/control/tasks/{worker_task_id}/preempt"
@@ -456,8 +580,46 @@ async def preempt_background_task(task_id: str) -> bool:
                         raise RuntimeError(
                             "persisted preemption has neither its bound task nor release proof"
                         )
-            elif not current_boot_id or not bound_task_visible:
-                raise RuntimeError("worker did not prove the bound task and boot identity")
+            elif not current_boot_id:
+                raise RuntimeError("worker did not prove its boot identity")
+            elif not bound_task_visible:
+                # The worker can naturally finish between the scheduler's
+                # queue snapshot and the first recall probe.  Completed tasks
+                # disappear from the active slot buckets, so absence alone is
+                # not a quarantine-worthy identity failure.  Confirm the exact
+                # immutable worker task before clearing the recall request;
+                # the regular synchronizer will then persist its artifacts.
+                previous_status, _ = await _worker_task_status(
+                    client, worker, worker_task_id, deadline=deadline
+                )
+                if previous_status == "Completed":
+                    async with AsyncSessionLocal() as db:
+                        await db.execute(
+                            update(Task)
+                            .where(
+                                Task.id == task_id,
+                                Task.worker_api == worker_api,
+                                Task.worker_task_id == worker_task_id,
+                                Task.preemption_request_id == request_id,
+                            )
+                            .values(
+                                preemption_state=PREEMPTION_NONE,
+                                preemption_request_id=None,
+                                preemption_worker_boot_id=None,
+                            )
+                        )
+                        await db.commit()
+                    return False
+                if (
+                    previous_status == "Preempted"
+                    and _status_is_slot_empty(initial_payload, worker_task_id)
+                ):
+                    terminal_status = "Preempted"
+                    already_released = True
+                else:
+                    raise RuntimeError(
+                        "worker did not prove the bound task or terminal release"
+                    )
             else:
                 # Persist the immutable process identity before sending the
                 # cancellation request.  A backend crash after the POST can
@@ -627,6 +789,7 @@ async def preempt_background_task(task_id: str) -> bool:
                 worker_api=worker_api,
                 worker_task_id=worker_task_id,
                 request_id=request_id,
+                workload_lease_id=workload_lease_id,
                 now=now,
             )
             if not requeued:
@@ -654,7 +817,7 @@ async def preempt_background_task(task_id: str) -> bool:
         _METRICS["preemption_resumed"] += 1
         _METRICS["preemption_latency_seconds_total"] += elapsed
         clear_worker_quarantine(worker_api)
-        print(f"[Priority] Preempted background task {task_id} in {elapsed:.1f}s; same row requeued")
+        print(f"[Priority] Preempted task {task_id} in {elapsed:.1f}s; same row requeued")
         return True
     except Exception as exc:
         _METRICS["preemption_failed"] += 1
@@ -676,15 +839,18 @@ async def recover_incomplete_preemptions() -> int:
         result = await db.execute(
             select(Task.id).where(
                 Task.status == "processing",
-                Task.queue_class == QUEUE_CLASS_BACKGROUND,
                 Task.preemption_state.in_((PREEMPTION_REQUESTED, PREEMPTION_STOPPING)),
+                or_(
+                    Task.queue_class == QUEUE_CLASS_BACKGROUND,
+                    Task.workload_lease_id.is_not(None),
+                ),
             )
         )
         task_ids = list(result.scalars().all())
     if not task_ids:
         return 0
     results = await asyncio.gather(
-        *(preempt_background_task(task_id) for task_id in task_ids),
+        *(preempt_background_task(task_id, broker_requested=True) for task_id in task_ids),
         return_exceptions=True,
     )
     return sum(result is True for result in results)

@@ -9,11 +9,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
+from pathlib import Path
 from typing import Dict, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ai_vision_api import (
@@ -31,13 +34,16 @@ CHANNEL_TYPES = {
     "pose": "control_pose",
     "depth": "control_depth",
     "canny": "control_canny",
+    # Surface orientation (BAE normal preprocessor). No model on the fleet has a
+    # native normal ControlNet; the map is used as a reference picture.
+    "normal": "control_normal",
 }
 
 
 class ControlNetRequest(BaseModel):
     image_url: Optional[str] = Field(None, description="Source image, public http(s) URL")
     image_base64: Optional[str] = Field(None, description="Source image as base64 or data URL")
-    channel: str = Field(..., description="pose, depth or canny")
+    channel: str = Field(..., description="pose, depth, canny or normal")
     width: Optional[int] = Field(None, ge=64, le=2048,
         description="Map width; omitted = the source image's own width")
     height: Optional[int] = Field(None, ge=64, le=2048,
@@ -80,7 +86,7 @@ def renderfin_payload(channel: str, image_url: str,
     if channel not in CHANNEL_TYPES:
         raise HTTPException(status_code=400, detail={
             "error_string": "unknown_control_channel",
-            "message_string": "channel must be pose, depth or canny",
+            "message_string": "channel must be pose, depth, canny or normal",
             "available_channels_array": sorted(CHANNEL_TYPES),
         })
     if not str(image_url or "").strip().startswith(("http://", "https://")):
@@ -95,6 +101,50 @@ def renderfin_payload(channel: str, image_url: str,
         "main_size_width": int((size or DEFAULT_MAP_SIZE)[0]),
         "main_size_height": int((size or DEFAULT_MAP_SIZE)[1]),
     }
+
+
+# ------------------------------------------------ normal map -> grey shading
+#
+# A model handed an RGB normal map as a reference picture copies its purple and
+# pink into the render (measured 2026-09-27, Qwen-Image 2.1). Lit once from the
+# upper left, the same map is a neutral grey clay render that carries only the
+# shapes. Only maps the farm itself made are shaded (no open proxy); the result
+# is cached next to the other derived files.
+RENDER_FILES = Path(os.getenv("RENDERFIN_DATA_DIR", "/srv/autorig/data/var/renderfin")) / "render"
+SHADE_DIR = Path(os.getenv("AUTORIG_NORMAL_SHADE_DIR", "/srv/autorig/data/var/normal-shade"))
+_RENDER_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def shade_normal_png(data: bytes) -> bytes:
+    from io import BytesIO
+    import numpy as np
+    from PIL import Image
+    with Image.open(BytesIO(data)) as picture:
+        normals = np.asarray(picture.convert("RGB"), dtype=np.float32) / 127.5 - 1.0
+    light = np.array([-0.4, 0.5, 0.75], dtype=np.float32)
+    light /= np.linalg.norm(light)
+    shade = np.clip((normals * light).sum(-1), 0.0, 1.0) * 0.85 + 0.15
+    out = BytesIO()
+    Image.fromarray((shade * 255).astype(np.uint8)).save(out, format="PNG")
+    return out.getvalue()
+
+
+@router.get("/api/ai/normal-shade/{render_id}.png")
+async def api_normal_shade(render_id: str):
+    if not _RENDER_ID_RE.match(render_id or ""):
+        raise HTTPException(status_code=404, detail="not a farm render id")
+    target = SHADE_DIR / f"{render_id}.png"
+    if not target.exists():
+        source = RENDER_FILES / "default_user" / f"{render_id}.png"
+        if not source.is_file() or source.stat().st_size > MAX_PROBE_BYTES:
+            raise HTTPException(status_code=404, detail="normal map not found")
+        png = await asyncio.to_thread(shade_normal_png, source.read_bytes())
+        SHADE_DIR.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(".tmp")
+        temporary.write_bytes(png)
+        os.replace(temporary, target)
+    return FileResponse(target, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/api/controlnet")
@@ -192,3 +242,13 @@ router.include_router(_enhance_router)
 from ai_qwen_image_api import router as _qwen_image_router  # noqa: E402
 
 router.include_router(_qwen_image_router)
+
+# /api/music (Stable Audio 3, 2026-09-26): the same renderfin shape again.
+from ai_music_api import router as _music_router  # noqa: E402
+
+router.include_router(_music_router)
+
+# /api/camera-orbit (2026-09-27): Qwen-Image 2.1 camera prompts + LTX-2.5 CrossView IC-LoRA.
+from ai_camera_orbit_api import router as _camera_orbit_router  # noqa: E402
+
+router.include_router(_camera_orbit_router)

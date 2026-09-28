@@ -49,6 +49,9 @@ class RenderPrompt(BaseModel):
     # the scene/composition reference last. The order is meaningful to the
     # prompt ("image 1", "image 2", ...), so it must survive persistence.
     reference_image_urls: List[str] = Field(default_factory=list)
+    # Qwen-Image 2.1 edit: influence 0..1 of each reference, in the same order
+    # (missing = 1). See multiref.inject_qwen21_references.
+    reference_strengths: List[float] = Field(default_factory=list)
     type: str = ""
     work_flow: str = ""
     main_size_width: int = 0
@@ -80,6 +83,8 @@ class RenderPrompt(BaseModel):
     loras: List["LoraStackItem"] = Field(default_factory=list)
     user_name: str = "default_user"
     render_mode: str = ""
+    # Music (renderfin.music): clip length in seconds; 0 = the default 30 s.
+    audio_seconds: float = 0
 
     @field_validator("frame_count")
     @classmethod
