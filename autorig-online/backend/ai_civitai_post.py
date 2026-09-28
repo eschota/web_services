@@ -225,8 +225,18 @@ def _manual(body: CivitaiPostRequest, reason: str, download_url: str) -> Dict[st
             "details_string": details.strip()}
 
 
+CALL_LOG: List[str] = []
+
+
+def _call_log(job: Optional[Dict[str, Any]], entry: str) -> None:
+    if job is not None:
+        job.setdefault("calls_array", []).append(entry)
+
+
 async def _trpc(client: httpx.AsyncClient, procedure: str, payload: Dict[str, Any],
                 superjson_meta: Optional[Dict[str, Any]] = None) -> Any:
+    CALL_LOG.append(procedure + (" publishedAt" if "publishedAt" in payload else ""))
+    del CALL_LOG[:-400]
     envelope: Dict[str, Any] = {"json": payload}
     if superjson_meta:
         envelope["meta"] = {"values": superjson_meta, "v": 1}
@@ -884,15 +894,25 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
     notes: List[str] = []
     for item in items:
         notes += [note for note in item["notes"] if note not in notes]
-    update: Dict[str, Any] = {"id": post_id, "title": body.title.strip()[:TITLE_MAX] or None,
-                              "detail": description_html(body.description, notes, upscaled)}
-    # A draft is a post.update WITHOUT publishedAt: null is refused and the
-    # post stays behind as an orphan draft (2026-09-27).
+    # Everything on the post and its images is settled while it is still a
+    # draft: title and description, then the rating (after the scan), and only
+    # then the publish, as the very last call. Two R-rated clips published
+    # first and rated after (2026-09-28) never reached the Images/Videos feeds.
+    await _trpc(client, "post.update", {"id": post_id, "title": body.title.strip()[:TITLE_MAX] or None,
+                                        "detail": description_html(body.description, notes, upscaled)})
+    ratings = []
+    for image_id, item in zip(image_ids, items):
+        if image_id:
+            _job_update(job, stage="posting", stage_label="Waiting for Civitai's scan and rating")
+            ratings.append(await apply_rating(client, image_id, body.nsfw_level, item["is_video"]))
+    # A draft is simply never given publishedAt (null is refused and left an
+    # orphan draft, 2026-09-27).
     if body.publish:
-        update["publishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-        await _trpc(client, "post.update", update, superjson_meta={"publishedAt": ["Date"]})
-    else:
-        await _trpc(client, "post.update", update)
+        _job_update(job, stage="posting", stage_label="Publishing")
+        await _trpc(client, "post.update", {"id": post_id,
+                                            "publishedAt": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())},
+                    superjson_meta={"publishedAt": ["Date"]})
+        _call_log(job, "post.update publishedAt (last call)")
     resume.pop(resume_key, None)
     _write_json(RESUME_FILE, resume)
 
@@ -914,7 +934,6 @@ async def _post_image(client: httpx.AsyncClient, body: CivitaiPostRequest,
         result["post_url_string"] = f"{CIVITAI_HOST}/posts/{post_id}"
     if extras_errors:
         result["extras_errors_array"] = extras_errors
-    ratings = [await apply_rating(client, image_id, body.nsfw_level) for image_id in image_ids if image_id]
     if ratings:
         result.update(ratings[0])
         infos = sorted({r["rating_info_string"] for r in ratings if r.get("rating_info_string")})
@@ -930,7 +949,8 @@ async def _image_level(client: httpx.AsyncClient, image_id: int) -> Tuple[int, b
     return int(data.get("nsfwLevel") or 0), bool(data.get("nsfwLevelLocked"))
 
 
-async def apply_rating(client: httpx.AsyncClient, image_id: int, name: str) -> Dict[str, Any]:
+async def apply_rating(client: httpx.AsyncClient, image_id: int, name: str,
+                       is_video: bool = False) -> Dict[str, Any]:
     """Settle the rating with Civitai's scanner, never against it.
 
     The scanner's level comes first. Higher than the owner's choice: it is
@@ -958,6 +978,13 @@ async def apply_rating(client: httpx.AsyncClient, image_id: int, name: str) -> D
         answer["rating_on_civitai_string"] = LEVEL_NAMES.get(level, str(level))
         if level > wanted:
             answer["rating_info_string"] = f"Rated {LEVEL_NAMES.get(level, level)} by Civitai's scanner"
+        if is_video:
+            # The clips that did reach the feeds all carried an owner or
+            # moderator rating; confirm the scanner's own level (never lower).
+            try:
+                await _trpc(client, "image.updateImageNsfwLevel", {"id": image_id, "nsfwLevel": level})
+            except Exception as error:
+                logger.info("civitai rating confirm %s on %s: %s", level, image_id, error)
         return answer
     try:
         await _trpc(client, "image.updateImageNsfwLevel", {"id": image_id, "nsfwLevel": wanted})
