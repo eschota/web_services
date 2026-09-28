@@ -17,8 +17,8 @@
   const ITEM_TASKS = new Map();
   let api = null;
   const PER_ITEM_PARALLEL = 3;
-  const LIST_SINKS = new Set(['video_concat']);
-  const TRANSIENT = /unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
+  const LIST_SINKS = new Set(['video_concat', 'video_summary']);
+  const TRANSIENT = /server restarted|unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
 
   function install(host) { api = host; }
 
@@ -47,8 +47,9 @@
       status: 'done', type: 'video', value: shot.clip_url, error: '',
       outputs: {shot_clip_url_string: shot.clip_url, first_frame_url_string: shot.first_frame_url,
                 middle_frame_url_string: shot.middle_frame_url || shot.first_frame_url,
-                shot_info_string: shot.label},
-      meta: {frames: shot.frames, label: shot.label, index: shot.index, shot: shot.shot, part: shot.part}
+                shot_info_string: shot.label, last_frame_url_string: shot.last_frame_url || ''},
+      meta: {frames: shot.frames, label: shot.label, index: shot.index, shot: shot.shot, part: shot.part,
+             chain_frames: shot.chain_frames || shot.frames, next_same_scene: !!shot.next_same_scene}
     }));
   }
 
@@ -69,6 +70,21 @@
                 summary: data.scenes_int + ' scene' + (data.scenes_int === 1 ? '' : 's') + ' · ' + data.count_int +
                          ' shot' + (data.count_int === 1 ? '' : 's') + ' · ' + data.frames_int + ' frames · ' +
                          data.duration_float + ' s' + (data.cuts_array && data.cuts_array.length ? ' · cuts at ' + data.cuts_array.join(', ') + ' s' : '')};
+      }},
+    // Extract Frames (replaces "Video first frame" under the id video_frame).
+    video_frame: {api: '/api/ai/video-tools/extract-frames', field: 'first_url_string', type: 'image',
+      finish: async (accepted, runner, report) => {
+        const data = await pollVideoTool(accepted, runner, report);
+        const frames = data.frames_array || [];
+        const outputs = {image_url_string: data.first_url_string, frames_text_string: data.frames_text_string};
+        frames.slice(0, FRAME_SOCKETS).forEach((f, i) => { outputs['frame_' + (i + 1) + '_url_string'] = f.url; });
+        return {value: data.first_url_string, outputs,
+                frameLabels: frames.map(f => ({label: f.label, url: f.url})),
+                items: frames.map((f, i) => ({status: 'done', type: 'image', value: f.url, error: '',
+                  outputs: {frame_url_string: f.url, frame_info_string: f.text},
+                  meta: {label: f.label, index: i, scene: f.scene, frame: f.frame}})),
+                summary: data.scenes_int + ' scene' + (data.scenes_int === 1 ? '' : 's') + ' · ' + data.count_int +
+                         ' picture' + (data.count_int === 1 ? '' : 's') + ' · ' + data.frames_int + ' frames'};
       }},
     video_storyboard: {api: '/api/ai/video-tools/scene-split', field: 'storyboard_url_string', type: 'image',
       finish: async (accepted, runner, report) => {
@@ -100,6 +116,21 @@
         }
         throw new Error('the Avatar build did not finish in time');
       }},
+    // Normal map had no runner in the page (pose/depth/canny only).
+    control_normal: {api: '/api/controlnet', field: 'image_url_string', type: 'control_normal',
+      finish: async (accepted) => {
+        const url = accepted.image_url_string;
+        for (let attempt = 0; attempt < 400; attempt += 1) {
+          const status = accepted.task_id_string ? await fetch('/api/ai/render-status/' + encodeURIComponent(accepted.task_id_string))
+            .then(r => r.ok ? r.json() : null).catch(() => null) : null;
+          if (status && (status.status_string === 'failed' || status.status_string === 'cancelled')) throw new Error(status.error_string || status.status_string);
+          if (status && status.status_string === 'completed') return status.output_url_string || url;
+          const probe = await fetch(url, {method: 'HEAD'}).catch(() => null);
+          if (probe && probe.ok) return url;
+          await sleep(2500);
+        }
+        throw new Error('the normal map did not land in time');
+      }},
     wan_image: {api: '/api/ai/wan-animate', field: 'video_url_string', type: 'video',
       finish: async (accepted) => {
         const url = accepted.video_url_string;
@@ -114,6 +145,9 @@
         }
         throw new Error('Wan-Animate did not finish in time');
       }},
+    // Summary (keyframe chain): the same join job in chain mode (adjustBody).
+    video_summary: {api: '/api/ai/video-tools/concat', field: 'video_url_string', type: 'video',
+      finish: async (accepted, runner, report) => (await pollVideoTool(accepted, runner, report)).video_url_string},
     video_concat: {api: '/api/ai/video-tools/concat', field: 'video_url_string', type: 'video',
       finish: async (accepted, runner, report) => (await pollVideoTool(accepted, runner, report)).video_url_string},
     audio_from_source: {api: '/api/ai/video-tools/audio-mux', field: 'video_url_string', type: 'video',
@@ -121,8 +155,91 @@
   };
 
   /** Last-step changes to a request body (called at the end of bodyFor). */
-  function adjustBody(serviceId, body) {
+  /* ---------------------------------------- Qwen per-picture strength */
+
+  // A Strength slider (0..1) beside each connected picture socket of a
+  // Qwen-Image node. The value rides as param rs_1..rs_3 (socket order); the
+  // server schedules a weaker picture over fewer sampling steps, a weak control
+  // map is also softened, and the prompt is told to follow it loosely.
+  const RS_FIELDS = {image: 1, reference_2: 2, reference_3: 3};
+
+  function applyRefStrength(serviceId, body, resolved, params) {
+    if (serviceId !== 'qwen_image' || !resolved || !params) return;
+    const channels = api.mapChannels ? api.mapChannels() : new Map();
+    const byUrl = new Map();
+    Object.keys(RS_FIELDS).forEach(field => {
+      const url = resolved[field];
+      if (!url) return;
+      const v = Number(params['rs_' + RS_FIELDS[field]]);
+      byUrl.set(String(url), Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1);
+    });
+    Object.keys(body).filter(k => /^rs_\d$/.test(k)).forEach(k => delete body[k]);
+    if (![...byUrl.values()].some(v => v < 0.999)) return;
+    const order = [body.image_url || body.image_base64 || ''].concat(body.reference_image_urls || []).filter(Boolean);
+    const strengths = order.map(url => byUrl.has(String(url)) ? byUrl.get(String(url)) : 1);
+    body.reference_strengths = strengths;
+    body.reference_attenuate = order.map((url, i) => !!channels.get(String(url)) && strengths[i] < 0.999);
+    const hints = [];
+    order.forEach((url, i) => {
+      const ch = channels.get(String(url));
+      if (strengths[i] < 0.8) hints.push('Follow image ' + (i + 1) + (ch ? ' (the ' + ch + ' map)' : '') + ' only loosely.');
+    });
+    if (hints.length) body.prompt = [String(body.prompt || '').trim(), hints.join(' ')].filter(Boolean).join(' ');
+  }
+
+  function paintRefStrength(id) {
+    const node = api.meta(id) || {};
+    if (node.service !== 'qwen_image') return;
+    const element = api.nodeElement(id);
+    if (!element || !api.graphFromCanvas) return;
+    const wired = new Set(api.graphFromCanvas().links.filter(l => String(l.to) === String(id)).map(l => l.input));
+    const rows = [...element.querySelectorAll('.nports .pin')];
+    (node.inFields || []).forEach((field, index) => {
+      const k = RS_FIELDS[field];
+      const row = rows[index];
+      if (!k || !row) return;
+      let box = element.querySelector('.nrs-' + k);
+      if (!box) {
+        box = document.createElement('span');
+        box.className = 'nrs nrs-' + k;
+        box.style.cssText = 'display:inline-flex;align-items:center;gap:2px;margin-left:6px;font:600 9px system-ui;opacity:.9';
+        const input = document.createElement('input');
+        input.type = 'range'; input.min = '0'; input.max = '1'; input.step = '0.05'; input.value = '1';
+        input.dataset.param = 'rs_' + k;
+        input.title = 'Strength of image ' + k + ' (1 = full; lower = it shapes only the early steps; a map is also softened)';
+        input.style.cssText = 'width:56px;height:10px';
+        const out = document.createElement('b');
+        out.textContent = '1.00';
+        input.addEventListener('input', () => { out.textContent = Number(input.value).toFixed(2); });
+        input.addEventListener('change', () => { out.textContent = Number(input.value).toFixed(2); api.invalidate(id); });
+        ['mousedown', 'pointerdown', 'touchstart'].forEach(t => input.addEventListener(t, e => e.stopPropagation()));
+        box.appendChild(input); box.appendChild(out);
+        box._out = out; box._input = input;
+        row.appendChild(box);
+      }
+      box.style.display = wired.has(field) ? 'inline-flex' : 'none';
+      box._out.textContent = Number(box._input.value).toFixed(2);
+    });
+  }
+
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    setInterval(() => {
+      try {
+        if (!api || !api.graphFromCanvas) return;
+        api.graphFromCanvas().nodes.filter(n => n.service === 'qwen_image').forEach(n => paintRefStrength(n.id));
+      } catch (e) { /* display only */ }
+    }, 1500);
+  }
+
+  function adjustBody(serviceId, body, resolved, params) {
+    applyRefStrength(serviceId, body, resolved, params);
     if (serviceId === 'video_storyboard' || serviceId === 'scene_split') delete body.view;
+    if (serviceId === 'video_summary') body.chain = true;
+    if (serviceId === 'video_frame') {
+      delete body.view;
+      body.template = body.template || 'start_only';  // a migrated First frame node
+      body.detect_scenes = body.detect_scenes !== 'off';
+    }
     if (serviceId === 'vision' && typeof body.context === 'string') {
       const context = body.context.trim();
       if (context) body.prompt = String(body.prompt || '').trim() + '\n\nContext (facts about what you see):\n' + context;
@@ -147,6 +264,8 @@
   function gateLinks(graph) {
     const extra = [];
     (graph.nodes || []).forEach(node => {
+      const chainFrom = node.params && node.params._chain_next ? canvasIdFor(node.params._chain_next) : null;
+      if (chainFrom && chainFrom !== String(node.id)) extra.push({from: chainFrom, to: String(node.id), output: '_chain', input: '_chain'});
       const when = whenOf(node.params);
       if (!when) return;
       const from = canvasIdFor(when.node);
@@ -213,11 +332,189 @@
    * ({ok, result} / {ok:false, error}) when this node is a list sink, runs per
    * item or is gated; returns null to let the ordinary path run it.
    */
+  // Outputs of Scene split that only exist per shot: a wire from one of them
+  // must never fall back to the node's single value (the storyboard PNG went
+  // to Wan/LTX as a "control video" when a cached Scsplit lost its list).
+  const PER_ITEM_FIELDS = new Set(['shot_clip_url_string', 'first_frame_url_string', 'middle_frame_url_string',
+    'shot_info_string']);
+  const GENERATORS = new Set(['video', 'video_control']);
+
+  /** Model / LoRA set on a Concat shots node, for the generators wired into it. */
+  function concatOverride(id) {
+    if (!api.graphFromCanvas) return null;
+    const graph = api.graphFromCanvas();
+    const byId = new Map(graph.nodes.map(node => [String(node.id), node]));
+    const out = {};
+    graph.links.filter(link => String(link.from) === String(id)).forEach(link => {
+      const target = byId.get(String(link.to));
+      if (!target || target.service !== 'video_concat') return;
+      const p = target.params || {};
+      if (String(p.checkpoint || '').trim() && !out.checkpoint) out.checkpoint = String(p.checkpoint).trim();
+      if ((String(p.loras || '').trim() || String(p.lora || '').trim()) && !out.lora_set) {
+        out.lora_set = true; out.lora = String(p.lora || '').trim(); out.loras = String(p.loras || '').trim();
+        out.lora_strength = Number(p.lora_strength) || 0;
+      }
+    });
+    return Object.keys(out).length ? out : null;
+  }
+
+  /** Badges: which generators a Concat drives, and on them where the model comes from. */
+  function paintOverrides() {
+    if (!api || !api.graphFromCanvas) return;
+    const graph = api.graphFromCanvas();
+    const byId = new Map(graph.nodes.map(node => [String(node.id), node]));
+    const label = node => ((node.params || {})._label || node.service || node.id).slice(0, 40);
+    graph.nodes.filter(node => node.service === 'video_concat').forEach(concat => {
+      const feeders = graph.links.filter(link => String(link.to) === String(concat.id))
+        .map(link => byId.get(String(link.from))).filter(Boolean);
+      const driven = feeders.filter(node => GENERATORS.has(node.service));
+      const fixed = feeders.filter(node => node.service !== 'video_concat' && !GENERATORS.has(node.service) &&
+        /video|wan|avatar/.test(node.service));
+      const p = concat.params || {};
+      const set = String(p.checkpoint || '').trim() || String(p.loras || '').trim() || String(p.lora || '').trim();
+      const el = api.nodeElement(concat.id);
+      const head = el && el.querySelector('.nhead');
+      if (head) {
+        let badge = head.querySelector('.noverride');
+        if (!badge) { badge = document.createElement('span'); badge.className = 'noverride'; head.appendChild(badge); }
+        badge.textContent = set ? ' ⇧ model/LoRA → ' + driven.length : ' ⇧ inherit';
+        badge.title = (set ? 'Model / LoRAs set here override: ' : 'Model / LoRAs: inherit (empty) — set them here to override: ') +
+          (driven.map(label).join(', ') || 'no LTX/MiniMax generator wired') +
+          (fixed.length ? '. Not affected (own fixed model): ' + fixed.map(label).join(', ') : '');
+        badge.style.cssText = 'margin-left:4px;font:600 10px system-ui;color:' + (set ? '#22d3ee' : 'rgba(255,255,255,.55)');
+      }
+      driven.forEach(node => {
+        const gel = api.nodeElement(node.id);
+        const ghead = gel && gel.querySelector('.nhead');
+        if (!ghead) return;
+        let b = ghead.querySelector('.nfromconcat');
+        if (!set) { if (b) b.remove(); return; }
+        if (!b) { b = document.createElement('span'); b.className = 'nfromconcat'; ghead.appendChild(b); }
+        b.textContent = ' ⇩ model from Concat';
+        b.title = 'Model / LoRAs of this node are overridden by "' + label(concat) + '" for every shot';
+        b.style.cssText = 'margin-left:4px;font:600 10px system-ui;color:#22d3ee';
+      });
+    });
+  }
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    setInterval(() => { try { paintOverrides(); } catch (e) { /* display only */ } }, 3000);
+  }
+
+  /* ------------------------------------------- Extract Frames sockets */
+
+  // Extract Frames exposes each frame on its own plain socket (frame_1 .. 12):
+  // a node wired there receives that one picture and runs once. The socket
+  // rows show "k · S1 start" + a thumbnail; unused rows are hidden, and a wired
+  // socket past the current count stays visible as "missing" (the link is kept).
+  const FRAME_SOCKETS = 12;
+  const PROBES = new Map();   // node id -> {key, frames}
+
+  function frameLabelsOf(id) {
+    const record = api.runState.get(String(id));
+    if (record && Array.isArray(record.items) && record.items.length) {
+      return record.items.map(it => ({label: (it.meta && it.meta.label) || '', url: it.value}));
+    }
+    const probe = PROBES.get(String(id));
+    return probe && probe.frames ? probe.frames : null;
+  }
+
+  function wiredFrameSockets(id) {
+    const wired = new Set();
+    if (!api.graphFromCanvas) return wired;
+    api.graphFromCanvas().links.forEach(link => {
+      const m = /^frame_(\d+)_url_string$/.exec(String(link.from) === String(id) ? link.output : '');
+      if (m) wired.add(Number(m[1]));
+    });
+    return wired;
+  }
+
+  function paintFrameSockets(id) {
+    const element = api.nodeElement(id);
+    if (!element) return;
+    const rows = [...element.querySelectorAll('.nports .pout')];
+    const ports = [...element.querySelectorAll('.outputs .output')];
+    const frames = frameLabelsOf(id);
+    const wired = wiredFrameSockets(id);
+    const count = frames ? frames.length : 0;
+    let changed = false;
+    for (let k = 1; k <= FRAME_SOCKETS; k += 1) {
+      const row = rows[k - 1], port = ports[k - 1];
+      if (!row || !port) continue;
+      const have = k <= count;
+      const show = have || wired.has(k) || (!frames && k === 1);
+      const key = (show ? '1' : '0') + (have ? frames[k - 1].label + frames[k - 1].url : (wired.has(k) ? 'missing' : ''));
+      if (row.dataset.fkey === key) continue;
+      row.dataset.fkey = key;
+      changed = true;
+      row.style.display = show ? '' : 'none';
+      port.style.display = show ? '' : 'none';
+      row.textContent = '';
+      if (have) {
+        const img = document.createElement('img');
+        img.src = frames[k - 1].url;
+        img.style.cssText = 'width:16px;height:16px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px';
+        row.appendChild(img);
+        row.appendChild(document.createTextNode(k + ' · ' + frames[k - 1].label));
+        row.title = 'Frame ' + k + ': ' + frames[k - 1].label + ' — a node wired here gets this one picture';
+      } else if (wired.has(k)) {
+        row.appendChild(document.createTextNode(k + ' · missing'));
+        row.style.color = '#fb7185';
+        row.title = 'Frame ' + k + ' is not produced by the current template/clip; the wire is kept';
+      } else {
+        row.appendChild(document.createTextNode('Frame ' + k));
+      }
+      if (have) row.style.color = '';
+    }
+    if (changed && api.updatePorts) api.updatePorts(id);
+  }
+
+  /** Quick probe: when the wired clip or template changes, fetch the frame list
+   *  (cached server-side) so sockets can be wired before rendering. */
+  function probeExtract(id) {
+    if (!api.graphFromCanvas) return;
+    const graph = api.graphFromCanvas();
+    const node = graph.nodes.find(n => String(n.id) === String(id));
+    const link = graph.links.find(l => String(l.to) === String(id) && l.input === 'video_url');
+    const src = link && graph.nodes.find(n => String(n.id) === String(link.from));
+    if (!node || !src || src.kind !== 'input' || !/^https?:/.test(String(src.value || ''))) return;
+    const p = node.params || {};
+    const body = adjustBody('video_frame', {video_url: src.value, template: p.template, detect_scenes: p.detect_scenes,
+                                            n: Number(p.n) || 4, offset: Number(p.offset) || 0});
+    const key = JSON.stringify(body);
+    const prior = PROBES.get(String(id));
+    if (prior && prior.key === key) return;
+    PROBES.set(String(id), {key, frames: prior ? prior.frames : null});
+    fetch('/api/ai/video-tools/extract-frames', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: key})
+      .then(r => r.json()).then(accepted => pollVideoTool(accepted, RUNNERS.video_frame, null))
+      .then(data => {
+        const cur = PROBES.get(String(id));
+        if (!cur || cur.key !== key) return;
+        cur.frames = (data.frames_array || []).map(f => ({label: f.label, url: f.url}));
+        paintFrameSockets(id);
+      }).catch(() => {});
+  }
+
+  if (typeof setInterval !== 'undefined' && typeof document !== 'undefined' && document.addEventListener) {
+    setInterval(() => {
+      try {
+        if (!api || !api.graphFromCanvas) return;
+        api.graphFromCanvas().nodes.filter(n => n.service === 'video_frame').forEach(n => {
+          probeExtract(n.id);
+          paintFrameSockets(n.id);
+        });
+      } catch (e) { /* display only */ }
+    }, 2500);
+  }
+
   async function maybeRun(ctx) {
     const {id, node, feeds, upstreamRecords, pending, epoch, keepDone} = ctx;
     const params = Object.assign({}, node.params || {});
     const when = whenOf(params);
     const lists = feeds.map((link, index) => perItem(upstreamRecords[index] && upstreamRecords[index].result, link.output));
+    const lost = feeds.find((link, index) => PER_ITEM_FIELDS.has(link.output) && !lists[index]);
+    if (lost) {
+      return {ok: false, error: 'Scene split came back without its shot list (' + lost.output + ') — press Render again'};
+    }
     const sink = LIST_SINKS.has(node.service);
     if (!sink && !when && !lists.some(Boolean)) return null;
     const shared = {};
@@ -247,6 +544,14 @@
         return {ok: false, error: String(error.message || error)};
       }
     }
+    // Keyframe chain: the end frame of segment i is the start frame of segment
+    // i+1 of the same scene, so it is taken from that node, never drawn twice.
+    let chainResult = null;
+    if (params._chain_next) {
+      const chainId = canvasIdFor(params._chain_next);
+      const chainRecord = chainId ? await pending.get(chainId) : null;
+      chainResult = chainRecord && chainRecord.ok ? chainRecord.result : null;
+    }
     let gateResult = null;
     if (when) {
       const gateId = canvasIdFor(when.node);
@@ -258,7 +563,7 @@
     try {
       // Streamed: the node answers at once and each item resolves on its own,
       // so shot 1 goes on to the next node while shot 2 is still rendering.
-      const {result, done} = runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch);
+      const {result, done} = runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch, chainResult);
       return {ok: true, result, whenDone: done};
     } catch (error) {
       return {ok: false, error: String(error.message || error)};
@@ -269,12 +574,13 @@
     return Promise.all((result && result.itemPromises) || []);
   }
 
-  function runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch) {
+  function runEach(id, node, feeds, upstreamRecords, lists, shared, params, when, gateResult, count, epoch, chainResult) {
     const runner = api.runnerFor(node.service);
     const previous = api.runState.get(String(id));
     const oldItems = previous && Array.isArray(previous.items) ? previous.items : [];
     const items = [];
-    for (let i = 0; i < count; i += 1) items.push({status: 'queued', type: runner.type, value: '', error: '', outputs: null, meta: null});
+    for (let i = 0; i < count; i += 1) items.push(Object.assign({status: 'queued', type: runner.type, value: '', error: '', outputs: null, meta: null},
+      oldItems[i] && oldItems[i].seed_override ? {seed_override: oldItems[i].seed_override} : {}));
     const record = {status: 'running', type: api.runnerType(runner, ''), value: '', items, started_at: Date.now() / 1000};
     api.runState.set(String(id), record);
     const state = () => { const el = api.nodeElement(id); return el && el.querySelector('.nstate'); };
@@ -332,9 +638,38 @@
         if (missing) { item.status = 'skipped'; item.error = 'no input: ' + missing; report(); return; }
         const gate = gatePasses(when, gateResult, i);
         if (!gate.ok) { item.status = 'skipped'; item.error = gate.why; report(); return; }
+        if (chainResult && item.meta && item.meta.next_same_scene && chainResult.itemPromises) {
+          const shared = await chainResult.itemPromises[i + 1];
+          if (shared && shared.status === 'done') {
+            Object.assign(item, {status: 'done', value: shared.value, outputs: shared.outputs || null,
+                                 type: shared.type || item.type, sig: 'chain:' + shared.value, chained: true});
+            report();
+            return;
+          }
+        }
         const itemParams = Object.assign({}, params);
+        // One seed per item (base + i): shots never share a seed, so similar
+        // inputs cannot collapse to the same result; a locked/rerolled item
+        // keeps its own seed.
+        if (Number(itemParams.seed) > 0) itemParams.seed = Number(itemParams.seed) + i;
+        const previousItem = oldItems[i];
+        if (previousItem && previousItem.seed_override) {
+          itemParams.seed = previousItem.seed_override;
+          item.seed_override = previousItem.seed_override;
+        }
+        if (GENERATORS.has(node.service)) {
+          const override = concatOverride(id);
+          if (override && override.checkpoint) itemParams.checkpoint = override.checkpoint;
+          // The Concat's LoRA stack (same component as a video node: slot 1 =
+          // lora + lora_strength, slots 2.. = loras) replaces the node's own.
+          if (override && override.lora_set) {
+            itemParams.lora = override.lora; itemParams.loras = override.loras;
+            if (override.lora_strength) itemParams.lora_strength = override.lora_strength; else delete itemParams.lora_strength;
+          }
+        }
         if (item.meta && item.meta.frames && Number(itemParams.frame_count) > 0 && itemParams._frames_from_shot !== false) {
-          itemParams.frame_count = frameCountFor(item.meta.frames, itemParams.frame_count);
+          // Keyframe chain: a segment includes its shared end frame.
+          itemParams.frame_count = frameCountFor(item.meta.chain_frames || item.meta.frames, itemParams.frame_count);
         }
         try {
           await api.followInputSizeAtRun(node, resolved, itemParams);
@@ -342,7 +677,8 @@
           const sig = api.stableJson(body);
           const old = oldItems[i];
           if (old && old.status === 'done' && old.sig === sig && old.value) {
-            Object.assign(item, {status: 'done', value: old.value, outputs: old.outputs || null, type: old.type || item.type, sig, cached: true});
+            Object.assign(item, {status: 'done', value: old.value, outputs: old.outputs || null, type: old.type || item.type, sig, cached: true,
+                                 seed: old.seed || Number(itemParams.seed) || 0});
             report();
             return;
           }
@@ -372,7 +708,8 @@
           let value = finished.value;
           if (post && value) value = await api.upscaleClip2x(value, null);
           if (!value) throw new Error('no result');
-          Object.assign(item, {status: 'done', value, outputs: finished.outputs || null, type: api.runnerType(runner, value), sig});
+          Object.assign(item, {status: 'done', value, outputs: finished.outputs || null, type: api.runnerType(runner, value), sig,
+                               seed: Number(itemParams.seed) || 0});
         } catch (error) {
           item.status = 'failed';
           item.error = String(error.message || error).slice(0, 400);
@@ -413,7 +750,7 @@
     const video = api.looksLikeVideo(value);
     const media = document.createElement(video ? 'video' : 'img');
     media.src = value;
-    media.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+    media.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;background:#0b0c18';
     if (video) { media.muted = true; media.loop = true; media.preload = 'metadata'; media.playsInline = true;
       media.addEventListener('mouseenter', () => media.play().catch(() => {}));
       media.addEventListener('mouseleave', () => media.pause()); }
@@ -435,18 +772,24 @@
     }
     const node = api.meta(id) || {};
     const scene = node.service === 'scene_split';
-    strip.style.cssText = 'display:flex;gap:3px;overflow-x:auto;margin-top:4px;padding-bottom:2px;max-width:100%';
+    // A grid like X9: cells follow the frame's aspect, rows wrap, no scrollbar.
+    const probe = record.items.find(it => it.status === 'done');
+    const portrait = !probe || !probe.outputs || true;
+    const aspect = listAspect(id, record);
+    // Landscape -> fewer, wider cells; portrait -> more, narrower (like X9).
+    const minCell = aspect >= 1.2 ? 120 : aspect <= 0.8 ? 58 : 84;
+    strip.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(' + minCell + 'px,1fr));gap:3px;margin-top:4px;max-width:100%';
     strip.innerHTML = '';
     if (record.summary) {
       const head = document.createElement('div');
       head.textContent = record.summary;
       head.style.cssText = 'flex:0 0 100%;font:700 12px system-ui;color:#f59e0b;margin-bottom:2px';
-      strip.style.flexWrap = 'wrap';
+      head.style.gridColumn = '1 / -1';
       strip.appendChild(head);
     }
     record.items.forEach((item, index) => {
       const box = document.createElement('div');
-      box.style.cssText = 'position:relative;flex:0 0 74px;height:74px;border-radius:4px;overflow:hidden;cursor:pointer;' +
+      box.style.cssText = 'position:relative;aspect-ratio:' + aspect.toFixed(4) + ';border-radius:4px;overflow:hidden;cursor:zoom-in;' +
         'background:rgba(255,255,255,.06);outline:1px solid ' + (item.status === 'failed' ? '#fb7185' : item.status === 'done' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.08)');
       box.title = 'Shot ' + (index + 1) + ' · ' + item.status + (item.error ? ': ' + item.error : '') + (item.meta && item.meta.label ? '\n' + item.meta.label : '');
       if (item.status === 'done') {
@@ -460,12 +803,18 @@
         box.appendChild(label);
       }
       const tag = document.createElement('i');
-      tag.textContent = String(index + 1);
-      tag.style.cssText = 'position:absolute;left:3px;top:1px;font:700 9px system-ui;font-style:normal;color:#fff;text-shadow:0 0 3px #000';
+      // One corner chip: the index, plus the picture's label for Extract Frames.
+      tag.textContent = String(index + 1) + (node.service === 'video_frame' && item.meta && item.meta.label ? ' · ' + item.meta.label : '');
+      tag.style.cssText = 'position:absolute;z-index:1;left:2px;top:2px;padding:0 3px;border-radius:3px;background:rgba(0,0,0,.55);font:700 8px system-ui;font-style:normal;color:#fff;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       box.appendChild(tag);
+      if (rerollable(node.service) && !scene) box.appendChild(cellTools(id, index, item));
       ['mousedown', 'pointerdown'].forEach(type => box.addEventListener(type, event => event.stopPropagation()));
+      box.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation(); segmentMenu(id, index, box); });
       box.addEventListener('click', event => {
         event.stopPropagation();
+        if ((item.status === 'done' && (item.type !== 'text' || scene)) || (rerollable(node.service) && !scene)) {
+          openListLightbox(id, index); return;
+        }
         if (item.status !== 'done') { api.toast('Shot ' + (index + 1) + ': ' + item.status + (item.error ? ' — ' + item.error : '')); return; }
         if (item.type === 'text' && !scene) { api.toast('Shot ' + (index + 1) + ': ' + String(item.value).slice(0, 400)); return; }
         const url = scene ? item.value : item.value;
@@ -473,6 +822,182 @@
       });
       strip.appendChild(box);
     });
+  }
+
+  const REROLLABLE = new Set(['video', 'video_control', 'wan_image', 'qwen_image', 'image', 'avatar_video',
+    'control_pose', 'control_depth', 'control_canny', 'control_normal']);
+  function rerollable(service) { return REROLLABLE.has(service); }
+
+  // Real width/height of a list's outputs: measured from the loaded media and
+  // kept on the record; until then the node's size fields.
+  const ASPECTS = new Map();
+  function listAspect(id, record) {
+    const known = ASPECTS.get(String(id));
+    if (known) return known;
+    const done = (record.items || []).find(it => it.status === 'done' && /^https?:/.test(String(it.value || '')));
+    if (done && typeof document !== 'undefined') {
+      const url = String(done.value);
+      const probe = document.createElement(api.looksLikeVideo(url) ? 'video' : 'img');
+      const settle = (w, h) => {
+        if (!(w > 0 && h > 0)) return;
+        const a = w / h;
+        if (Math.abs((ASPECTS.get(String(id)) || 0) - a) > 0.01) { ASPECTS.set(String(id), a); paint(id); }
+      };
+      if (probe.tagName === 'VIDEO') { probe.preload = 'metadata'; probe.muted = true;
+        probe.addEventListener('loadedmetadata', () => settle(probe.videoWidth, probe.videoHeight)); }
+      else probe.addEventListener('load', () => settle(probe.naturalWidth, probe.naturalHeight));
+      probe.src = url;
+    }
+    const [w, h] = cellAspect(id).split('/').map(Number);
+    return w > 0 && h > 0 ? w / h : 9 / 16;
+  }
+
+  function cellAspect(id) {
+    const el = api.nodeElement(id);
+    const w = Number((el && el.querySelector('[data-param="width"]') || {}).value) || 9;
+    const h = Number((el && el.querySelector('[data-param="height"]') || {}).value) || 16;
+    return w + '/' + h;
+  }
+
+  function newSeed() { return Math.floor(Math.random() * 2147483000) + 1; }
+
+  function toggleLock(id, index) {
+    const record = api.runState.get(String(id));
+    const item = record && record.items && record.items[index];
+    if (!item) return;
+    if (item.seed_override) { delete item.seed_override; api.toast('Segment ' + (index + 1) + ': seed follows the node again.'); }
+    else { item.seed_override = item.seed || newSeed(); api.toast('Segment ' + (index + 1) + ': seed ' + item.seed_override + ' locked.'); }
+    api.recordResult(id, record);
+    paint(id);
+  }
+
+  /**
+   * "Use this" (X9 parity): keep the take on screen by locking the seed it was
+   * rendered with, so R (new node seed) and re-renders skip this segment.
+   */
+  function useTake(id, index) {
+    const record = api.runState.get(String(id));
+    const item = record && record.items && record.items[index];
+    if (!item || item.status !== 'done') return;
+    item.seed_override = item.seed_override || item.seed || newSeed();
+    api.recordResult(id, record);
+    paint(id);
+    api.toast('Segment ' + (index + 1) + ': this take is kept (seed ' + item.seed_override + ' locked; R skips it).');
+  }
+
+  /** 🎲 / 🔒 overlay on a strip cell, with the seed. */
+  function cellTools(id, index, item) {
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:absolute;right:2px;bottom:2px;display:flex;align-items:center;gap:1px;padding:1px;' +
+      'border-radius:4px;background:rgba(0,0,0,.55);font:600 8px system-ui;color:#fff';
+    const seed = document.createElement('span');
+    seed.textContent = (item.seed_override || item.seed) ? String(item.seed_override || item.seed) : '';
+    // The seed shows on hover only, so the chip stays a small corner.
+    seed.style.cssText = 'display:none;padding:0 2px;white-space:nowrap;opacity:.9';
+    bar.addEventListener('mouseenter', () => { if (seed.textContent) seed.style.display = ''; });
+    bar.addEventListener('mouseleave', () => { seed.style.display = 'none'; });
+    bar.title = (item.seed_override || item.seed) ? 'Seed ' + (item.seed_override || item.seed) : '';
+    const btn = (glyph, title, fn, on) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = glyph; b.title = title;
+      b.style.cssText = 'border:0;border-radius:3px;padding:0 2px;font:11px system-ui;cursor:pointer;line-height:14px;' +
+        (on ? 'background:#f59e0b;color:#111' : 'background:rgba(255,255,255,.18);color:#fff');
+      ['mousedown', 'pointerdown'].forEach(type => b.addEventListener(type, e => e.stopPropagation()));
+      b.addEventListener('click', e => { e.stopPropagation(); fn(); });
+      return b;
+    };
+    bar.appendChild(seed);
+    bar.appendChild(btn('🎲', 'New seed & re-render this segment', () => rerollSegment(id, index, newSeed())));
+    bar.appendChild(btn('🔒', item.seed_override ? 'Seed locked (' + item.seed_override + ') — click to unlock' : 'Lock this seed',
+                        () => toggleLock(id, index), !!item.seed_override));
+    return bar;
+  }
+
+  function openListLightbox(id, start) {
+    const node = String(id);
+    const items = () => { const r = api.runState.get(node); return r && Array.isArray(r.items) ? r.items : []; };
+    const info = () => api.meta(node) || {};
+    const tools = () => rerollable(info().service) && info().service !== 'scene_split';
+    window.AILightbox.open({
+      kind: 'list', start, aspect: ASPECTS.get(node) || 0,
+      count: () => items().length,
+      item: index => {
+        const item = items()[index];
+        if (!item) return {};
+        const scene = info().service === 'scene_split';
+        const status = item.status === 'done' ? 'done' : item.status === 'failed' ? 'error' : item.status === 'skipped' ? 'error' : item.status;
+        const url = String(item.value || '');
+        const text = item.type === 'text' || (url && !/^https?:/.test(url));
+        return {url: text ? '' : url, text: text ? url : '', kind: text ? 'text' : '', status,
+                thumb: scene && item.outputs ? item.outputs.first_frame_url_string : '',
+                seed: item.seed_override || item.seed, locked: !!item.seed_override, used: !!item.seed_override && item.status === 'done',
+                error: item.status === 'skipped' ? 'skipped' + (item.error ? ': ' + item.error : '') : item.error};
+      },
+      title: index => {
+        const item = items()[index] || {};
+        const word = info().service === 'video_frame' ? 'Frame' : info().service === 'scene_split' ? 'Shot' : 'Segment';
+        return word + ' ' + (index + 1) + '/' + items().length + (item.meta && item.meta.label ? ' · ' + item.meta.label : '');
+      },
+      actions: {
+        reseed: index => rerollSegment(node, index, newSeed()), reseedHidden: () => !tools(),
+        use: tools() ? index => useTake(node, index) : null,
+        useTip: 'Keep this take: lock its seed (R and re-renders leave it alone)',
+        lock: tools() ? index => toggleLock(node, index) : null
+      }
+    });
+  }
+
+  /**
+   * Per-segment menu (owner, 2026-09-27): open it, re-render it alone with a
+   * new seed, or lock its seed. The seed lives on the item (seed_override), so
+   * the rest of the list keeps its results and only nodes after this one
+   * (Summary / Concat) join again.
+   */
+  function segmentMenu(id, index, anchor) {
+    const record = api.runState.get(String(id));
+    const item = record && record.items && record.items[index];
+    if (!item) return;
+    document.querySelectorAll('.nsegmenu').forEach(el => el.remove());
+    const menu = document.createElement('div');
+    menu.className = 'nsegmenu';
+    const rect = anchor.getBoundingClientRect();
+    menu.style.cssText = 'position:fixed;z-index:9999;left:' + Math.round(rect.left) + 'px;top:' + Math.round(rect.bottom + 4) +
+      'px;background:#161827;border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:2px;font:12px system-ui';
+    const add = (text, fn, enabled) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = text; b.disabled = enabled === false;
+      b.style.cssText = 'text-align:left;background:transparent;color:#fff;border:0;padding:5px 9px;border-radius:5px;cursor:pointer';
+      b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,255,255,.08)'; });
+      b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; });
+      b.addEventListener('click', event => { event.stopPropagation(); menu.remove(); fn(); });
+      menu.appendChild(b);
+    };
+    const seedNow = item.seed_override || Number(((api.meta(id) || {}).params || {}).seed) || 0;
+    add('Open segment ' + (index + 1), () => {
+      if (item.value) api.openPreview(api.looksLikeVideo(item.value) ? 'video' : 'image', item.value);
+    }, item.status === 'done' && !!item.value);
+    add('New seed & re-render this segment', () => rerollSegment(id, index, Math.floor(Math.random() * 2147483000) + 1));
+    add(item.seed_override ? 'Seed locked: ' + item.seed_override + ' (unlock)' : 'Lock this segment\'s seed', () => {
+      if (item.seed_override) { delete item.seed_override; api.toast('Segment ' + (index + 1) + ': seed follows the node again.'); }
+      else { item.seed_override = seedNow || Math.floor(Math.random() * 2147483000) + 1; api.toast('Segment ' + (index + 1) + ': seed ' + item.seed_override + ' locked.'); }
+      api.recordResult(id, record);
+    });
+    document.body.appendChild(menu);
+    setTimeout(() => document.addEventListener('click', () => menu.remove(), {once: true}), 0);
+  }
+
+  function rerollSegment(id, index, seed) {
+    const record = api.runState.get(String(id));
+    const item = record && record.items && record.items[index];
+    if (!item || !api.runGraph) return;
+    item.seed_override = seed;
+    item.status = 'stale';
+    item.sig = '';
+    api.recordResult(id, record);
+    // Everything after this node joins again; everything before is reused.
+    api.invalidate(id);
+    api.toast('Segment ' + (index + 1) + ': new seed ' + seed + ' — re-rendering only this segment, then re-joining.');
+    api.runGraph(true);
   }
 
   /** A saved list result reopened from a link. Returns true when handled. */
@@ -492,6 +1017,16 @@
 
   /** The ⎇ badge of a gated node; click to change or clear the condition. */
   function decorate(id, params) {
+    try { paintRefStrength(id); } catch (e) { /* not drawn yet */ }
+    // A migrated "First frame" node (saved without a template) stays one picture.
+    const meta0 = api.meta(id) || {};
+    if (meta0.service === 'video_frame' && params && !params.template) {
+      const field = api.nodeElement(id) && api.nodeElement(id).querySelector('[data-param="template"]');
+      if (field) field.value = 'start_only';
+      // ...and the whole clip as one scene: exactly the old single first frame.
+      const scenes = api.nodeElement(id) && api.nodeElement(id).querySelector('[data-param="detect_scenes"]');
+      if (scenes && !params.detect_scenes) scenes.value = 'off';
+    }
     const element = api.nodeElement(id);
     const head = element && element.querySelector('.nhead');
     const item = api.meta(id);
