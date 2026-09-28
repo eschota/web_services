@@ -18,7 +18,9 @@
   let api = null;
   const PER_ITEM_PARALLEL = 3;
   const LIST_SINKS = new Set(['video_concat', 'video_summary']);
-  const TRANSIENT = /server restarted|unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
+  // Network trouble before a job was accepted is retried; a job the restart
+  // wipe cancelled ("server restarted") is not (owner rule 2026-09-28).
+  const TRANSIENT = /unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
 
   function install(host) { api = host; watchCatalogue(); }
 
@@ -186,6 +188,24 @@
                 summary: data.scenes_int + ' scene' + (data.scenes_int === 1 ? '' : 's') + ' · ' + data.count_int +
                          ' shot' + (data.count_int === 1 ? '' : 's') + ' · ' + data.frames_int + ' frames · ' +
                          data.duration_float + ' s' + (data.cuts_array && data.cuts_array.length ? ' · cuts at ' + data.cuts_array.join(', ') + ' s' : '')};
+      }},
+    // Search · Civitai (2026-09-28): answers at once (server cache 10 min).
+    civitai_search: {api: '/api/ai/civitai-search', field: 'image_url_string', type: 'image',
+      finish: async (accepted) => {
+        const data = accepted || {};
+        if (!data.success_bool) throw new Error((data.detail && data.detail.message_string) || 'Civitai search failed');
+        const found = data.items_array || [];
+        const kind = data.kind_string === 'video' ? 'video' : 'image';
+        const outputs = {image_url_string: found[0] ? found[0].url_string : '', items_text_string: data.items_text_string || ''};
+        found.slice(0, FRAME_SOCKETS).forEach((f, i) => { outputs['frame_' + (i + 1) + '_url_string'] = f.url_string; });
+        return {value: outputs.image_url_string, type: kind, outputs,
+                frameLabels: found.map(f => ({label: '@' + f.author_string, url: f.url_string})),
+                items: found.map((f, i) => ({status: 'done', type: kind, value: f.url_string, error: '',
+                  outputs: {media_url_string: f.url_string, media_info_string: f.info_string},
+                  meta: {label: '@' + f.author_string + ' · ♥ ' + f.reactions_int, index: i, link: f.link_string,
+                         author: f.author_string, reactions: f.reactions_int, prompt: f.prompt_string, info: f.info_string,
+                         width: f.width_int, height: f.height_int}})),
+                summary: data.summary_string || ''};
       }},
     // Extract Frames (replaces "Video first frame" under the id video_frame).
     video_frame: {api: '/api/ai/video-tools/extract-frames', field: 'first_url_string', type: 'image',
@@ -445,7 +465,10 @@
 
   /* ------------------------------------------------------------- lists */
 
-  function isList(result) { return !!(result && Array.isArray(result.items) && result.items.length); }
+  function isList(result) {
+    return !!(result && Array.isArray(result.items) && result.items.length &&
+              result.items.every(item => item && typeof item === 'object' && ITEM_STATES.has(item.status)));
+  }
 
   /** Does this wire carry item i of a list (true) or one shared value (false)? */
   function perItem(upstream, field) {
@@ -549,7 +572,7 @@
   // a node wired there receives that one picture and runs once. The socket
   // rows show "k · S1 start" + a thumbnail; unused rows are hidden, and a wired
   // socket past the current count stays visible as "missing" (the link is kept).
-  const FRAME_SOCKETS = 12;
+  const FRAME_SOCKETS = 20;  // Extract Frames uses 12, Search up to 20
   const PROBES = new Map();   // node id -> {key, frames}
 
   function frameLabelsOf(id) {
@@ -578,6 +601,7 @@
     const ports = [...element.querySelectorAll('.outputs .output')];
     const frames = frameLabelsOf(id);
     const wired = wiredFrameSockets(id);
+    const search = (api.meta(id) || {}).service === 'civitai_search';
     const count = frames ? frames.length : 0;
     let changed = false;
     for (let k = 1; k <= FRAME_SOCKETS; k += 1) {
@@ -593,18 +617,21 @@
       port.style.display = show ? '' : 'none';
       row.textContent = '';
       if (have) {
-        const img = document.createElement('img');
-        img.src = frames[k - 1].url;
+        const clip = api.looksLikeVideo(frames[k - 1].url);
+        const img = document.createElement(clip ? 'video' : 'img');
+        if (clip) { img.muted = true; img.preload = 'metadata'; img.src = frames[k - 1].url + '#t=0.1'; }
+        else img.src = /^https:[/][/]image[.]civitai[.]com[/]/.test(frames[k - 1].url)
+          ? '/api/ai/thumb?w=64&url=' + encodeURIComponent(frames[k - 1].url) : frames[k - 1].url;
         img.style.cssText = 'width:16px;height:16px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px';
         row.appendChild(img);
         row.appendChild(document.createTextNode(k + ' · ' + frames[k - 1].label));
-        row.title = 'Frame ' + k + ': ' + frames[k - 1].label + ' — a node wired here gets this one picture';
+        row.title = (search ? 'Item ' : 'Frame ') + k + ': ' + frames[k - 1].label + ' — a node wired here gets this one ' + (search ? 'item' : 'picture');
       } else if (wired.has(k)) {
         row.appendChild(document.createTextNode(k + ' · missing'));
         row.style.color = '#fb7185';
         row.title = 'Frame ' + k + ' is not produced by the current template/clip; the wire is kept';
       } else {
-        row.appendChild(document.createTextNode('Frame ' + k));
+        row.appendChild(document.createTextNode((search ? 'Item ' : 'Frame ') + k));
       }
       if (have) row.style.color = '';
     }
@@ -645,6 +672,7 @@
           probeExtract(n.id);
           paintFrameSockets(n.id);
         });
+        api.graphFromCanvas().nodes.filter(n => n.service === 'civitai_search').forEach(n => paintFrameSockets(n.id));
       } catch (e) { /* display only */ }
     }, 2500);
   }
@@ -703,6 +731,9 @@
     }
     const count = Math.max(1, ...feeds.map((link, index) => lists[index] ? upstreamRecords[index].result.items.length : 0),
       isList(gateResult) ? gateResult.items.length : 0);
+    if (count > LIST_CAP && (api.meta(id) || {}).service !== 'civitai_search') {
+      return {ok: false, error: 'the list has ' + count + ' items; at most ' + LIST_CAP + ' per node — split it (e.g. Max shots / fewer frames)'};
+    }
     try {
       // Streamed: the node answers at once and each item resolves on its own,
       // so shot 1 goes on to the next node while shot 2 is still rendering.
@@ -838,18 +869,19 @@
           const mineTask = {sig, taskId: ''};
           ITEM_TASKS.set(itemKey, mineTask);
           try {
-            const accepted = await api.submitJson(runner.api, body);
+            const accepted = await api.submitJson(runner.api, body, undefined, {nodeId: id});
             mineTask.taskId = accepted.task_id_string || '';
+            try { if (window.AINodeParams) item.params_used = window.AINodeParams.fromRecord(body, accepted); } catch (_) { /* display only */ }
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
             if (ITEM_TASKS.get(itemKey) !== mineTask) throw new Error('replaced by a newer render');
           } catch (error) {
             if (String(error.message || '').indexOf(api.BUDGET_EXHAUSTED) === -1) throw error;
             body = Object.assign({}, body, {max_output_tokens: Math.min(8192, (Number(body.max_output_tokens) || 1024) * 2)});
-            const accepted = await api.submitJson(runner.api, body);
+            const accepted = await api.submitJson(runner.api, body, undefined, {nodeId: id});
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
           }
           let value = finished.value;
-          if (post && value) value = await api.upscaleClip2x(value, null);
+          if (post && value) value = await api.upscaleClip2x(value, null, id);
           if (!value) throw new Error('no result');
           Object.assign(item, {status: 'done', value, outputs: finished.outputs || null, type: api.runnerType(runner, value), sig,
                                seed: Number(itemParams.seed) || 0});
@@ -892,7 +924,9 @@
     }
     const video = api.looksLikeVideo(value);
     const media = document.createElement(video ? 'video' : 'img');
-    media.src = value;
+    // Civitai originals are several MB each: the grid shows a cached thumbnail.
+    media.src = !video && /^https:[/][/]image[.]civitai[.]com[/]/.test(String(value))
+      ? '/api/ai/thumb?w=240&url=' + encodeURIComponent(value) : value;
     media.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;background:#0b0c18';
     if (video) { media.muted = true; media.loop = true; media.preload = 'metadata'; media.playsInline = true;
       media.addEventListener('mouseenter', () => media.play().catch(() => {}));
@@ -934,7 +968,8 @@
       const box = document.createElement('div');
       box.style.cssText = 'position:relative;aspect-ratio:' + aspect.toFixed(4) + ';border-radius:4px;overflow:hidden;cursor:zoom-in;' +
         'background:rgba(255,255,255,.06);outline:1px solid ' + (item.status === 'failed' ? '#fb7185' : item.status === 'done' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.08)');
-      box.title = 'Shot ' + (index + 1) + ' · ' + item.status + (item.error ? ': ' + item.error : '') + (item.meta && item.meta.label ? '\n' + item.meta.label : '');
+      box.title = (item.meta && item.meta.info) ? (index + 1) + '. ' + item.meta.info :
+        'Shot ' + (index + 1) + ' · ' + item.status + (item.error ? ': ' + item.error : '') + (item.meta && item.meta.label ? '\n' + item.meta.label : '');
       if (item.status === 'done') {
         const shown = scene && item.outputs ? item.outputs.first_frame_url_string : item.value;
         box.appendChild(cellMedia(shown, scene ? 'image' : item.type));
@@ -947,7 +982,7 @@
       }
       const tag = document.createElement('i');
       // One corner chip: the index, plus the picture's label for Extract Frames.
-      tag.textContent = String(index + 1) + (node.service === 'video_frame' && item.meta && item.meta.label ? ' · ' + item.meta.label : '');
+      tag.textContent = String(index + 1) + ((node.service === 'video_frame' || node.service === 'civitai_search') && item.meta && item.meta.label ? ' · ' + item.meta.label : '');
       tag.style.cssText = 'position:absolute;z-index:1;left:2px;top:2px;padding:0 3px;border-radius:3px;background:rgba(0,0,0,.55);font:700 8px system-ui;font-style:normal;color:#fff;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       box.appendChild(tag);
       if (rerollable(node.service) && !scene) box.appendChild(cellTools(id, index, item));
@@ -1078,16 +1113,52 @@
       },
       title: index => {
         const item = items()[index] || {};
-        const word = info().service === 'video_frame' ? 'Frame' : info().service === 'scene_split' ? 'Shot' : 'Segment';
+        const word = info().service === 'video_frame' ? 'Frame' : info().service === 'scene_split' ? 'Shot' :
+          info().service === 'civitai_search' ? 'Civitai' : 'Segment';
         return word + ' ' + (index + 1) + '/' + items().length + (item.meta && item.meta.label ? ' · ' + item.meta.label : '');
       },
       actions: {
         reseed: index => rerollSegment(node, index, newSeed()), reseedHidden: () => !tools(),
         use: tools() ? index => useTake(node, index) : null,
         useTip: 'Keep this take: lock its seed (R and re-renders leave it alone)',
-        lock: tools() ? index => toggleLock(node, index) : null
+        lock: tools() ? index => toggleLock(node, index) : null,
+        extra: [{glyph: 'ⓘ', label: 'Parameters used', key: 'P',
+                 hidden: index => !(items()[index] || {}).params_used,
+                 run: index => window.AINodeParams && window.AINodeParams.dialog(items()[index].params_used,
+                   'Item ' + (index + 1) + ' · parameters used', null)},
+                {glyph: '↗', label: 'Open on Civitai', key: 'O',
+                 hidden: index => !((items()[index] || {}).meta || {}).link,
+                 run: index => { const link = ((items()[index] || {}).meta || {}).link; if (link) window.open(link, '_blank', 'noopener'); }}]
       }
     });
+  }
+
+  /** Search · Civitai: "↻ Refresh" skips the 10-minute server cache once. */
+  function searchRefreshButton(id) {
+    if ((api.meta(id) || {}).service !== 'civitai_search') return;
+    const element = api.nodeElement(id);
+    const head = element && element.querySelector('.nhead');
+    if (!head || head.querySelector('.nsearch-refresh')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nsearch-refresh';
+    button.textContent = '↻';
+    button.title = 'Refresh: fetch Civitai again now (results are otherwise cached for 10 minutes)';
+    button.style.cssText = 'border:1px solid rgba(255,255,255,.18);background:transparent;color:inherit;border-radius:6px;cursor:pointer;padding:0 6px;margin-left:4px';
+    ['mousedown', 'pointerdown', 'touchstart', 'dblclick'].forEach(type => button.addEventListener(type, event => event.stopPropagation()));
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const graph = api.graphFromCanvas();
+      const node = graph.nodes.find(n => String(n.id) === String(id));
+      const body = Object.assign({}, (node && node.params) || {}, {refresh: true});
+      Object.keys(body).forEach(key => { if (key.startsWith('_')) delete body[key]; });
+      button.disabled = true;
+      fetch('/api/ai/civitai-search', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+        .then(r => r.json()).then(() => { api.invalidate(id); api.toast('Civitai refreshed — Render to use the new results.'); })
+        .catch(() => api.toast('Civitai did not answer.'))
+        .finally(() => { button.disabled = false; });
+    });
+    head.appendChild(button);
   }
 
   /**
@@ -1144,8 +1215,27 @@
   }
 
   /** A saved list result reopened from a link. Returns true when handled. */
+  // A real list item always carries a status; anything else (a bare {value}
+  // written by a test, a string) is not a list and is dropped on load, so a
+  // node fed by one picture never shows a phantom gallery (2026-09-28).
+  const LIST_CAP = 64;
+  const ITEM_STATES = new Set(['queued', 'running', 'done', 'failed', 'skipped', 'stale']);
+  function validItems(id, items) {
+    if (!Array.isArray(items) || !items.length) return false;
+    const service = (api.meta(id) || {}).service || '';
+    const cap = service === 'civitai_search' ? 512 : LIST_CAP;
+    return items.length <= cap && items.every(item => item && typeof item === 'object' && ITEM_STATES.has(item.status));
+  }
+
   function restore(id, record, state) {
     if (!record || !Array.isArray(record.items) || !record.items.length) return false;
+    if (!validItems(id, record.items)) {
+      // Bogus list state on a node: forget it and let the node show its single result.
+      delete record.items;
+      delete record.summary;
+      api.recordResult(id, record);
+      return false;
+    }
     if (record.status === 'running') {
       record.status = record.items.some(item => item.status === 'done') ? 'stale' : 'failed';
       record.error = 'interrupted — Render again (finished shots are reused)';
@@ -1161,6 +1251,7 @@
   /** The ⎇ badge of a gated node; click to change or clear the condition. */
   function decorate(id, params) {
     try { paintRefStrength(id); } catch (e) { /* not drawn yet */ }
+    try { searchRefreshButton(id); } catch (e) { /* not drawn yet */ }
     // A migrated "First frame" node (saved without a template) stays one picture.
     const meta0 = api.meta(id) || {};
     if (meta0.service === 'video_frame' && params && !params.template) {
