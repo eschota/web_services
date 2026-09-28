@@ -1960,7 +1960,7 @@ async def _uncached_api_image(body: ImageRequest):
             "effective_params_object": {k: payload[k] for k in (
                 "main_size_width", "main_size_height", "steps", "cfg", "sampler",
                 "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "loras",
-                "work_flow", "prompt", "noise_seed", "reference_image_urls")
+                "work_flow", "prompt", "negative_prompt", "noise_seed", "reference_image_urls")
                 if k in payload},
             "server_time_unix_int": int(time.time()),
         }
@@ -2184,7 +2184,7 @@ async def _uncached_api_video(body: VideoRequest):
             "effective_params_object": {k: payload[k] for k in (
                 "main_size_width", "main_size_height", "steps", "cfg", "sampler",
                 "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "loras",
-                "work_flow", "prompt", "noise_seed")
+                "work_flow", "prompt", "negative_prompt", "noise_seed", "frame_count", "fps")
                 if k in payload},
             "server_time_unix_int": int(time.time()),
         }

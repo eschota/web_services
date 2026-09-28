@@ -144,6 +144,10 @@ class NodeResult(BaseModel):
     # split and everything wired after it) keeps every item here:
     # {status, type, value, outputs, error, sig, meta}.
     items: List[Dict[str, object]] = Field(default_factory=list, max_length=64)
+    # What the server rendered this result with (2026-09-28): final prompt,
+    # seed, steps, CFG, sampler, model, LoRAs, size, frames. X9 cells and list
+    # items carry their own inside x9 / items.
+    params_used: Dict[str, object] = Field(default_factory=dict)
 
     @field_validator("input_reference_url")
     @classmethod

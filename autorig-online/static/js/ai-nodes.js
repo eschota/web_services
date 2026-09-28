@@ -244,6 +244,10 @@
   }
 
   function recordResult(id, record) {
+    if (record && !record.params_used && pendingParams.has(String(id)) && !Array.isArray(record.items)) {
+      record.params_used = pendingParams.get(String(id));
+    }
+    if (record && record.status === 'done' && record.params_used) pendingParams.delete(String(id));
     if (record && record.status === 'done' && looksLikeVideo(record.value)) scheduleAutoFrames();
     if (nodeCompare) record = nodeCompare.enhanceRecord(record, runState.get(String(id)));
     runState.set(String(id), record);
@@ -721,6 +725,107 @@
   const QWEN_DEFAULT_CHECKPOINT = 'qwen_image_2.1_int8_convrot.safetensors';
 
   const PROMPT_EDIT_SERVICES = new Set(['image', 'video', 'qwen_image']);
+
+  /* ------------------------------------ parameters used by a result (owner, 2026-09-28)
+     Every result keeps what the server actually rendered it with: the final
+     prompt (LoRA triggers, prompt edit, translation), negative prompt, seed,
+     steps, CFG, sampler, model, LoRAs, size, frames. Stored on the record
+     (params_used), so it is saved with the graph and survives a reload; an X9
+     cell and a list item keep their own. */
+  const pendingParams = new Map();
+  const USED_KEYS = ['prompt', 'negative_prompt', 'noise_seed', 'seed', 'steps', 'cfg', 'sampler', 'scheduler',
+    'checkpoint', 'lora', 'lora_strength', 'loras', 'main_size_width', 'main_size_height', 'width', 'height',
+    'frame_count', 'fps', 'work_flow', 'model', 'mode', 'duration', 'upscale_model', 'prompt_edit'];
+  function paramsUsed(body, accepted) {
+    const out = {};
+    USED_KEYS.forEach(key => { if (body && body[key] !== undefined && body[key] !== '') out[key] = body[key]; });
+    const server = (accepted && accepted.effective_params_object) || {};
+    Object.keys(server).forEach(key => { if (server[key] !== undefined && server[key] !== '') out[key] = server[key]; });
+    if (accepted) {
+      if (accepted.prompt_string) out.prompt = accepted.prompt_string;
+      if (accepted.checkpoint_string) out.checkpoint = accepted.checkpoint_string;
+      if (accepted.width_int && accepted.height_int) { out.main_size_width = accepted.width_int; out.main_size_height = accepted.height_int; }
+      if (accepted.model_string) out.model = accepted.model_string;
+      if (accepted.task_id_string) out.task_id = accepted.task_id_string;
+    }
+    if (out.noise_seed !== undefined && out.seed === undefined) out.seed = out.noise_seed;
+    delete out.noise_seed;
+    out.recorded_at = new Date().toISOString();
+    return out;
+  }
+
+  function paramsDialog(used, title, nodeId) {
+    let dialog = document.getElementById('params-used');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'params-used';
+      dialog.className = 'civ-dialog';
+      dialog.style.width = 'min(760px, 94vw)';
+      document.body.appendChild(dialog);
+      dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+    }
+    const esc = value => String(value).replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[ch]);
+    const row = (label, value) => value === undefined || value === null || value === '' ? '' :
+      '<tr><th style="text-align:left;padding:3px 10px 3px 0;color:#9aa0b5;font-weight:500;white-space:nowrap;vertical-align:top">' +
+      esc(label) + '</th><td style="padding:3px 0;word-break:break-word">' + esc(typeof value === 'object' ? JSON.stringify(value) : value) + '</td></tr>';
+    const size = used.main_size_width ? used.main_size_width + '×' + used.main_size_height : (used.width ? used.width + '×' + used.height : '');
+    const loras = [used.lora ? used.lora + (used.lora_strength ? ' · ' + used.lora_strength : '') : '']
+      .concat((Array.isArray(used.loras) ? used.loras : []).map(item => (item.name || item.file) + ' · ' + (item.strength_model ?? item.weight ?? ''))
+      .concat(typeof used.loras === 'string' && used.loras ? [used.loras] : [])).filter(Boolean).join(', ');
+    dialog.innerHTML = '<form method="dialog"><b>' + esc(title || 'Parameters used') + '</b>' +
+      '<div style="margin:8px 0 4px;color:#9aa0b5;font-size:12px">Final prompt</div>' +
+      '<div class="pu-prompt" style="white-space:pre-wrap;padding:10px 12px;border-radius:9px;background:rgba(10,11,22,.85);' +
+      'border:1px solid rgba(255,255,255,.12);font-size:14px;line-height:1.45;max-height:40vh;overflow:auto">' + esc(used.prompt || '(none)') + '</div>' +
+      '<table style="margin-top:10px;font-size:13px;border-collapse:collapse">' +
+      row('Negative prompt', used.negative_prompt) + row('Seed', used.seed) + row('Steps', used.steps) + row('CFG', used.cfg) +
+      row('Sampler', [used.sampler, used.scheduler].filter(Boolean).join(' · ')) + row('Model', used.checkpoint || used.model) +
+      row('LoRAs', loras) + row('Size', size) + row('Frames', used.frame_count) + row('Workflow', used.work_flow) +
+      row('Instruction applied', used.prompt_edit) + row('Task', used.task_id) + row('Recorded', used.recorded_at) + '</table>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:12px">' +
+      '<button type="button" data-pu="copy">Copy prompt</button><button type="button" data-pu="json">Copy all params (JSON)</button>' +
+      (nodeId != null ? '<button type="button" data-pu="use" class="civ-go">Use this prompt</button>' : '') +
+      '<button type="button" data-pu="close">Close</button></div></form>';
+    dialog.onclick = event => {
+      const action = event.target && event.target.dataset && event.target.dataset.pu;
+      if (!action) { if (event.target === dialog) dialog.close(); return; }
+      if (action === 'copy') copyText(used.prompt || '').then(() => toast('Prompt copied.'));
+      if (action === 'json') copyText(JSON.stringify(used, null, 2)).then(() => toast('Parameters copied as JSON.'));
+      if (action === 'close') dialog.close();
+      if (action === 'use') {
+        // Into the node's own field; the wire into "prompt", if any, is removed
+        // so this prompt is the one that renders.
+        const element = nodeElement(nodeId);
+        const field = element && element.querySelector('textarea[data-param="prompt"]');
+        if (!field) { toast('This node has no prompt field.'); return; }
+        const graph = graphFromCanvas();
+        graph.links.filter(link => String(link.to) === String(nodeId) && link.input === 'prompt').forEach(link => {
+          const from = meta(link.from), to = meta(link.to);
+          const out = from ? from.outFields.indexOf(link.output) : -1, inp = to ? to.inFields.indexOf(link.input) : -1;
+          if (out >= 0 && inp >= 0) editor.removeSingleConnection(String(link.from), String(link.to), 'output_' + (out + 1), 'input_' + (inp + 1));
+        });
+        field.value = used.prompt || '';
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        field.dispatchEvent(new Event('change', {bubbles: true}));
+        dialog.close();
+        toast('Prompt placed in the node (its prompt wire was removed).');
+      }
+    };
+    if (!dialog.open) dialog.showModal();
+  }
+
+  /** The node's parameters: its own result, or the X9 output cell. */
+  function showNodeParams(id) {
+    const record = runState.get(String(id));
+    let used = record && record.params_used;
+    if (record && Array.isArray(record.x9) && record.x9.length) {
+      const pick = x9Pick(record);
+      const cell = record.x9[pick >= 0 ? pick : 0];
+      if (cell && cell.params_used) used = cell.params_used;
+    }
+    if (!used) { toast('No parameters recorded for this node yet — render it once.'); return; }
+    paramsDialog(used, ((meta(id) || {}).label || (serviceById((meta(id) || {}).service) || {}).title || 'Node') + ' · parameters used', id);
+  }
+  window.AINodeParams = {show: showNodeParams, dialog: paramsDialog, fromRecord: paramsUsed};
 
   /** "sent: <final prompt>" under a generator's prompt field, from the server's answer. */
   function paintSentPrompt(id, accepted) {
@@ -2085,7 +2190,10 @@
                 used: x9Pick(record) === index};
       },
       title: index => 'X9 · ' + ((meta(node) || {}).title || 'node') + ' · cell ' + (index + 1) + ' / 9',
-      actions: {use: useCell, useTip: 'Use this cell as the node output', post: () => openCivitaiDialog(node)},
+      actions: {use: useCell, useTip: 'Use this cell as the node output', post: () => openCivitaiDialog(node),
+        extra: [{glyph: 'ⓘ', label: 'Parameters used (this cell)', key: 'P',
+                 hidden: index => { const r = x9Record(node); return !(r && r.x9[index] && r.x9[index].params_used); },
+                 run: index => { const r = x9Record(node); paramsDialog(r.x9[index].params_used, 'X9 cell ' + (index + 1) + ' · parameters used', node); }}]},
       // The last cell looked at is the node's output (owner rule).
       onShow: index => { const r = x9Record(node); if (r && r.x9[index] && r.x9[index].status === 'done') setX9Pick(node, index); }
     });
@@ -2140,6 +2248,7 @@
         for (let round = 0; ; round += 1) {
           const accepted = await submitJson(runner.api, body);
           if (accepted.task_id_string) mine.tasks.push(accepted.task_id_string);
+          try { cell.params_used = paramsUsed(body, accepted); } catch (_) { /* display only */ }
           if (!current()) { cell.status = 'error'; cell.error = 'replaced by a newer render'; supersedeTasks([accepted.task_id_string]); return; }
           cell.status = 'running';
           report();
@@ -2147,11 +2256,8 @@
             ({value} = splitMulti(await runner.finish(accepted, runner, null)));
             break;
           } catch (error) {
-            // A site restart wiped the queued cell: submit it again (3 times).
-            if (!/server restarted/i.test(String(error.message || '')) || round >= 2 || !current()) throw error;
-            cell.status = 'queued';
-            report();
-            await sleep(3000);
+            // A restart wipe is final (owner rule 2026-09-28): no resubmit.
+            throw error;
           }
         }
         if (post && value) value = await upscaleClip2x(value, null);
@@ -4271,6 +4377,7 @@
       });
       execution.taskId = accepted.task_id_string || '';
       try { paintSentPrompt(id, accepted); } catch (_) { /* display only */ }
+      try { pendingParams.set(String(id), paramsUsed(submitBody, accepted)); } catch (_) { /* display only */ }
       if (executionIsCurrent(execution)) state.textContent = 'queued — waiting for a worker';
       // Recorded before the wait, not after: the whole point is that a link
       // opened mid-render knows which task to carry on watching.
@@ -4305,16 +4412,9 @@
           if (task) task.clear();
           return runServiceNode(id, resolved, params, execution, Math.min(bigger, 8192));
         }
-        // A site restart wipes queued jobs (owner rule): submit it again,
-        // up to three times, instead of failing the node (2026-09-27).
-        if (/server restarted/i.test(String(error.message || '')) && (execution.restartTries || 0) < 3 &&
-            executionIsCurrent(execution)) {
-          execution.restartTries = (execution.restartTries || 0) + 1;
-          state.textContent = 'server restarted — submitting again';
-          if (task) task.clear();
-          await sleep(3000);
-          return runServiceNode(id, resolved, params, execution, budget);
-        }
+        // Owner rule (2026-09-28): a restart wipes the queue and it STAYS
+        // empty — a job cancelled by it is not submitted again. The node says
+        // "server restarted — press Render again" and waits for a person.
         throw error;
       }
       finishTaskTracker(task, true, execution, progress);

@@ -18,7 +18,9 @@
   let api = null;
   const PER_ITEM_PARALLEL = 3;
   const LIST_SINKS = new Set(['video_concat', 'video_summary']);
-  const TRANSIENT = /server restarted|unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
+  // Network trouble before a job was accepted is retried; a job the restart
+  // wipe cancelled ("server restarted") is not (owner rule 2026-09-28).
+  const TRANSIENT = /unreachable|10054|10053|reset|ECONN|timed? ?out|HTTP 50[234]|Bad Gateway|did not accept/i;
 
   function install(host) { api = host; watchCatalogue(); }
 
@@ -863,6 +865,7 @@
           try {
             const accepted = await api.submitJson(runner.api, body);
             mineTask.taskId = accepted.task_id_string || '';
+            try { if (window.AINodeParams) item.params_used = window.AINodeParams.fromRecord(body, accepted); } catch (_) { /* display only */ }
             finished = api.splitMulti(await runner.finish(accepted, runner, null));
             if (ITEM_TASKS.get(itemKey) !== mineTask) throw new Error('replaced by a newer render');
           } catch (error) {
@@ -1113,7 +1116,11 @@
         use: tools() ? index => useTake(node, index) : null,
         useTip: 'Keep this take: lock its seed (R and re-renders leave it alone)',
         lock: tools() ? index => toggleLock(node, index) : null,
-        extra: [{glyph: '↗', label: 'Open on Civitai', key: 'O',
+        extra: [{glyph: 'ⓘ', label: 'Parameters used', key: 'P',
+                 hidden: index => !(items()[index] || {}).params_used,
+                 run: index => window.AINodeParams && window.AINodeParams.dialog(items()[index].params_used,
+                   'Item ' + (index + 1) + ' · parameters used', null)},
+                {glyph: '↗', label: 'Open on Civitai', key: 'O',
                  hidden: index => !((items()[index] || {}).meta || {}).link,
                  run: index => { const link = ((items()[index] || {}).meta || {}).link; if (link) window.open(link, '_blank', 'noopener'); }}]
       }

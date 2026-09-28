@@ -1159,6 +1159,11 @@
           'Edit the standing instruction these nodes give the model',
           () => onEditSystemPrompt(promptTargets)));
       }
+      if (window.AINodeParams && contextNodeId != null) {
+        commands.append(commandButton('Parameters used…',
+          'The final prompt, seed, model, LoRAs and size this node\'s result was rendered with',
+          () => window.AINodeParams.show(String(contextNodeId))));
+      }
       if (onArrange) {
         commands.append(commandButton('Arrange',
           'Lay the selected nodes out in columns by depth; with nothing selected, the whole graph',
