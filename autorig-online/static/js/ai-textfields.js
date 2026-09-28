@@ -34,10 +34,10 @@
     font-size: var(--tf-size) !important; line-height: 1.5 !important; padding: 10px 12px 22px !important;
     border-radius: 10px !important; box-sizing: border-box; width: 100%; resize: none !important;
     overflow-y: auto !important; max-height: none !important; -webkit-line-clamp: unset !important; display: block !important;
-    height: 150px; min-height: 48px; scrollbar-width: none; overscroll-behavior: contain;
+    height: var(--tf-h, 150px); min-height: 48px; scrollbar-width: none; overscroll-behavior: contain;
     font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
     user-select: text; cursor: text; }
-  .drawflow .drawflow-node .ntext.tf { height: 190px !important; }
+  .drawflow .drawflow-node .ntext.tf { height: var(--tf-ah, 190px) !important; }
   .drawflow .drawflow-node .tf::-webkit-scrollbar { display: none; }
   .drawflow .drawflow-node .tf.tf-more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent);
     mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent); }

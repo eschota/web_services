@@ -863,15 +863,47 @@ def _render_model_profile(service_id: str, checkpoint: Optional[str],
     ]
 
 
+def _qwen_model_settings(checkpoint: Optional[str], lora: Optional[str]) -> Dict[str, object]:
+    """Qwen-Image nodes asked this and got a 400 (2026-09-28): the model's own
+    settings, the default model when none is named, its LoRA's trigger. The
+    mode does not matter here: Qwen-Image 2.1 samples on a fixed schedule."""
+    import ai_model_catalogue
+    import ai_model_defaults
+    import ai_qwen_image_api
+    name = str(checkpoint or "").strip()
+    entry = ai_model_catalogue.known_file(name, "checkpoint") if name else None
+    if not entry or str(entry.get("family") or "") != "qwen_image":
+        installed = ai_qwen_image_api.installed_checkpoints()
+        name = installed[0] if installed else name
+        entry = ai_model_catalogue.known_file(name, "checkpoint") or {}
+    effective: Dict[str, object] = {"checkpoint": name, "main_size_width": 960, "main_size_height": 540}
+    for key, value in (entry.get("recommended") or {}).items():
+        if key in ("steps", "cfg", "sampler", "scheduler"):
+            effective[key] = value
+    lora_entry = ai_model_catalogue.known_file(str(lora or "").strip(), "lora") if lora else None
+    return {
+        "success_bool": True,
+        "service_string": "qwen_image",
+        "checkpoint_string": name,
+        "lora_string": str((lora_entry or {}).get("file") or ""),
+        "trigger_prefix_string": ai_model_defaults.add_triggers("", [lora_entry]) if lora_entry else "",
+        "effective_params_object": effective,
+        "sampling_policy_object": entry.get("sampling_policy") or {},
+        "server_time_unix_int": int(time.time()),
+    }
+
+
 @router.get("/api/ai/model-settings")
 async def api_ai_model_settings(service: str, checkpoint: Optional[str] = None,
                                 lora: Optional[str] = None, control_channel: str = "", mode: str = ""):
     """Resolved catalogue defaults used when a model selection changes."""
     service_id = str(service or "").strip().lower()
+    if service_id == "qwen_image":
+        return _qwen_model_settings(checkpoint, lora)
     if service_id not in ("image", "video"):
         raise HTTPException(status_code=400, detail={
             "error_string": "unknown_service",
-            "message_string": "service must be image or video"})
+            "message_string": "service must be image, video or qwen_image"})
     effective, trigger_prefix = _effective_model_settings(
         service_id, checkpoint, lora, {},
         use_default=not (service_id == "image" and bool(control_channel or mode)),

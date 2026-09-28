@@ -660,6 +660,7 @@
       kind: KIND_SERVICE,
       service: serviceId,
       displayMode: params && params._display_mode,
+      nodeSize: nodeSizeFrom(params),
       label: (params && params._label) || '',
       followInputSize: hasDimensions ? sizeFollowsInput(entry, params) : undefined,
       framesAuto: parameterNames.has('frame_count') ? framesFollowInput(entry, params) : undefined,
@@ -680,6 +681,7 @@
     if (window.AINodeLists) window.AINodeLists.decorate(id, params);
     if (X9_SERVICES.has(serviceId)) addX9Button(id, !!(params && params._x9));
     alignPorts(id, inputs.length, outputs.length);
+    installResizeHandle(id);
     refreshReferenceSockets(id);
     mountModelPickers(id, serviceId);
     if (params) applyParams(id, params);
@@ -718,6 +720,73 @@
 
   const QWEN_DEFAULT_CHECKPOINT = 'qwen_image_2.1_int8_convrot.safetensors';
 
+  /* --------------------------------------------- node resize (owner, 2026-09-28)
+     A handle in the node's bottom-right corner: dragging it sets the node's
+     width, and the extra height goes to the node's text fields (shared
+     equally). Saved with the graph as params._node_size {w, extra}. */
+  function nodeSizeFrom(params) {
+    const size = params && params._node_size;
+    if (!size || typeof size !== 'object') return null;
+    const w = Number(size.w), extra = Number(size.extra);
+    return {w: Number.isFinite(w) && w >= 180 ? Math.min(1400, Math.round(w)) : 0,
+            extra: Number.isFinite(extra) ? Math.max(0, Math.min(2400, Math.round(extra))) : 0};
+  }
+
+  function applyNodeSize(id) {
+    const element = nodeElement(id);
+    const size = meta(id) && meta(id).nodeSize;
+    if (!element) return;
+    if (size && size.w) element.style.setProperty('width', size.w + 'px', 'important');
+    else element.style.removeProperty('width');
+    const fields = element.querySelectorAll('textarea, .ntext').length || 1;
+    const each = size && size.extra ? Math.round(size.extra / fields) : 0;
+    element.style.setProperty('--tf-h', (150 + each) + 'px');
+    element.style.setProperty('--tf-ah', (190 + each) + 'px');
+  }
+
+  function installResizeHandle(id) {
+    const element = nodeElement(id);
+    if (!element || element.querySelector(':scope > .nresize')) { applyNodeSize(id); return; }
+    const grip = document.createElement('div');
+    grip.className = 'nresize';
+    grip.title = 'Drag to resize the node (the extra height goes to its text fields); double-click resets';
+    element.appendChild(grip);
+    applyNodeSize(id);
+    grip.addEventListener('dblclick', event => {
+      event.stopPropagation();
+      const item = meta(id); if (!item) return;
+      item.nodeSize = null; applyNodeSize(id); refreshNodeLinks(id);
+    });
+    grip.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const item = meta(id); if (!item) return;
+      const zoomNow = Number(editor.zoom) || 1;
+      const start = {x: event.clientX, y: event.clientY, w: element.offsetWidth,
+                     extra: (item.nodeSize && item.nodeSize.extra) || 0};
+      grip.setPointerCapture(event.pointerId);
+      const move = e => {
+        const w = Math.max(180, Math.min(1400, Math.round(start.w + (e.clientX - start.x) / zoomNow)));
+        const extra = Math.max(0, Math.min(2400, Math.round(start.extra + (e.clientY - start.y) / zoomNow)));
+        item.nodeSize = {w, extra};
+        applyNodeSize(id);
+        refreshNodeLinks(id);
+      };
+      const up = () => {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+  }
+
+  function refreshNodeLinks(id) {
+    try { editor.updateConnectionNodes('node-' + id); } catch (_) { /* not drawn */ }
+  }
+
   function addInputNode(entityType, x, y, value, params) {
     // Image in / Video in were folded into one Media node; old graphs,
     // pasted groups and agent edits open as Media with value and wires kept.
@@ -729,7 +798,9 @@
       'ainode input-node', { entity_type: entityType }, inputNodeHtml(entityType)
     );
     setMeta(id, { kind: KIND_INPUT, entityType: entityType, displayMode: params && params._display_mode,
+                  nodeSize: nodeSizeFrom(params),
                   disabled: !!(params && params._disabled), inFields: [], outFields: ['value'] });
+    installResizeHandle(id);
     alignPorts(id, 0, 1);
     if (params && params._disabled) applyBypass(id, true);
     if (value) {
@@ -1488,6 +1559,7 @@
     const values = {};
     if (meta(id)?.label) values._label = meta(id).label;
     if (meta(id)?.displayMode) values._display_mode = meta(id).displayMode;
+    if (meta(id)?.nodeSize) values._node_size = Object.assign({}, meta(id).nodeSize);
     if (typeof meta(id)?.followInputSize === 'boolean') {
       values._follow_input_size = meta(id).followInputSize;
       values._size_auto = meta(id).followInputSize;
@@ -4677,8 +4749,8 @@
           value: field && !String(field.value).startsWith('data:') ? field.value : '',
           x: raw.pos_x, y: raw.pos_y,
           params: node.disabled
-            ? {_display_mode: node.displayMode || 'medium', _disabled: true}
-            : {_display_mode: node.displayMode || 'medium'}
+            ? Object.assign({_display_mode: node.displayMode || 'medium', _disabled: true}, node.nodeSize ? {_node_size: node.nodeSize} : {})
+            : Object.assign({_display_mode: node.displayMode || 'medium'}, node.nodeSize ? {_node_size: node.nodeSize} : {})
         });
       } else {
         nodes.push({
