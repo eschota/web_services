@@ -143,7 +143,7 @@ class NodeResult(BaseModel):
     # For each shot (2026-09-27): a node run once per item of a list (Scene
     # split and everything wired after it) keeps every item here:
     # {status, type, value, outputs, error, sig, meta}.
-    items: List[Dict[str, object]] = Field(default_factory=list, max_length=64)
+    items: List[Dict[str, object]] = Field(default_factory=list, max_length=512)
     # What the server rendered this result with (2026-09-28): final prompt,
     # seed, steps, CFG, sampler, model, LoRAs, size, frames. X9 cells and list
     # items carry their own inside x9 / items.
@@ -207,7 +207,10 @@ class Graph(BaseModel):
     links: List[GraphLink] = Field(default_factory=list)
     # Keyed by node id. Never part of what makes a graph's identity: a rerun
     # must update the same link, not mint a new one.
-    results: Dict[str, NodeResult] = Field(default_factory=dict)
+    # Validated leniently in the handlers (_sanitize_results): one result a
+    # tab cannot serialise must never turn the whole save into a 422 (owner
+    # bug 2026-09-28: "Not rendered: the graph could not be saved (HTTP 422)").
+    results: Dict[str, object] = Field(default_factory=dict)
     # Branch isolation (Ctrl+O): {"target": node id, "prior": {node id: was
     # bypassed}}. Absent when nothing is isolated; never part of identity.
     isolation: Optional[Dict[str, object]] = None
@@ -235,6 +238,46 @@ class Graph(BaseModel):
         if value and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
             raise ValueError("comparison_anchor_id may contain letters, digits, - and _")
         return value
+
+
+def _sanitize_results(results: object, *, where: str = "") -> Dict[str, object]:
+    """Every result that validates, trimmed where a list is too long; the rest dropped.
+
+    A save is a save of the wiring; a result the store cannot hold (too many
+    list items, an inline media address in the history, a stray field) is
+    logged and left out instead of refusing the whole graph with a 422.
+    """
+    clean: Dict[str, object] = {}
+    if not isinstance(results, dict):
+        return clean
+    for key, raw in results.items():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            clean[str(key)] = NodeResult.model_validate(raw).model_dump()
+            continue
+        except Exception:
+            pass
+        trimmed = dict(raw)
+        for field, limit in (("items", 512), ("history", 5), ("x9", 9)):
+            if isinstance(trimmed.get(field), list):
+                trimmed[field] = trimmed[field][:limit]
+        if isinstance(trimmed.get("history"), list):
+            kept = []
+            for entry in trimmed["history"]:
+                try:
+                    HistoryEntry.model_validate(entry)
+                    kept.append(entry)
+                except Exception:
+                    pass
+            trimmed["history"] = kept
+        try:
+            clean[str(key)] = NodeResult.model_validate(trimmed).model_dump()
+            logger.warning("graph %s: result of node %s stored trimmed", where, key)
+        except Exception as exc:
+            logger.warning("graph %s: result of node %s dropped from the save: %s", where, key,
+                           str(exc).splitlines()[0][:200])
+    return clean
 
 
 class DuplicateGraphRequest(BaseModel):
@@ -779,6 +822,7 @@ async def api_graph_save(graph: Graph):
     migrate_media_inputs(graph)
     validate(graph)
     body = graph.model_dump(by_alias=True)
+    body["results"] = _sanitize_results(body.get("results"), where="new")
     # The link names the composition, not the run: saving after a render must
     # land on the same link so the one already shared stays the right one.
     identity = _identity_payload(body)
@@ -1042,6 +1086,7 @@ async def api_graph_update(graph_id: str, graph: Graph, request: Request):
         # the draft default is for new graphs only.
         body["render_quality"] = str(
             (previous.get("graph") or {}).get("render_quality") or "normal")
+    body["results"] = _sanitize_results(body.get("results"), where=graph_id)
     body["results"] = _carry_results(previous, body)
     payload = json.dumps(body, ensure_ascii=False, sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_GRAPH_BYTES:
@@ -1100,7 +1145,7 @@ async def api_graph_duplicate(body: DuplicateGraphRequest):
 
 
 @router.put("/api/ai/graphs/{graph_id}/results")
-async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
+async def api_graph_results(graph_id: str, results: Dict[str, object]):
     """Record what a run has produced so far, without touching the wiring.
 
     Written as the run goes rather than once at the end: a clip takes minutes,
@@ -1127,6 +1172,9 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
             "message_string": f"The graph has no node called '{sorted(unknown)[0]}'"})
     previous_results = graph.get("results") or {}
     merged_results: Dict[str, object] = {}
+    dropped = sorted(set(results) - set(_sanitize_results(results, where=graph_id)))
+    results = {key: NodeResult.model_validate(value)
+               for key, value in _sanitize_results(results, where=graph_id).items()}
     for key, incoming in results.items():
         previous_raw = previous_results.get(key) or {}
         try:
@@ -1210,7 +1258,7 @@ async def api_graph_results(graph_id: str, results: Dict[str, NodeResult]):
         raise HTTPException(status_code=500, detail={
             "error_string": "results_not_saved",
             "message_string": "The graph store did not accept the update"}) from None
-    return {"success_bool": True, "graph_id_string": graph_id,
+    return {"success_bool": True, "graph_id_string": graph_id, "dropped_array": dropped,
             "server_time_unix_int": int(time.time())}
 
 
@@ -1691,6 +1739,14 @@ def _size_path(url: str):
     import hashlib as _hashlib
     key = _hashlib.sha256(("size|" + url).encode("utf-8")).hexdigest()
     return _THUMB_DIR / "size" / key[:2] / (key + ".json")
+
+
+@router.get("/api/ai/build")
+async def api_build():
+    """Live editor build and this backend's start time (ai-autoreload.js polls it)."""
+    import task_owner
+    return {"success_bool": True, "build_string": task_owner.current_build(),
+            "started_at_float": task_owner.PROCESS_START, "server_time_unix_int": int(time.time())}
 
 
 @router.get("/api/ai/media-size")

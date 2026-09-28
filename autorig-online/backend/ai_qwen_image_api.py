@@ -66,8 +66,10 @@ TYPE21_EDIT_MULTI = "qwen_image21_edit_multi"
 # Qwen-Image 2.1 turbo. The old edit files stay installed on the boxes for
 # rollback but are out of the catalogue; a request that still names one is
 # redirected to the default and told so, instead of failing.
+# Qwen-Image-Edit 2511 is back (owner, 2026-09-28) as an ADDITIONAL edit model
+# for 2511 LoRAs (Sura edit): chosen explicitly it renders on its own GGUF
+# workflow; 2.1 turbo stays the default. Only the bare alias still redirects.
 RETIRED_EDIT_CHECKPOINTS = frozenset({
-    "qwen-image-edit-2511-Q3_K_S.gguf",
     "qwen-image-edit-2511",
     "qwen-image-edit-2512-Q3_K_S.gguf",
 })
@@ -89,7 +91,8 @@ def redirect_retired_checkpoint(name: Optional[str], mode: str) -> Tuple[Optiona
     if not retired and mode == "edit":
         entry = ai_model_catalogue.known_file(wanted, "checkpoint") or {}
         # A generate-only Qwen file named for an edit: same answer.
-        retired = bool(entry) and str(entry.get("qwen_image_generation") or "") != "2.1"
+        # A catalogue model that says it edits is not retired (2511 edit is back).
+        retired = bool(entry) and "edit" not in _entry_modes(entry)
     if not retired:
         return name, ""
     target = default_edit_checkpoint()

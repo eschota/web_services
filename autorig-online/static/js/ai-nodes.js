@@ -832,6 +832,32 @@
     paramsDialog(used, ((meta(id) || {}).label || (serviceById((meta(id) || {}).service) || {}).title || 'Node') + ' · parameters used', id);
   }
   window.AINodeParams = {show: showNodeParams, dialog: paramsDialog, fromRecord: paramsUsed};
+  // For ai-autoreload.js (owner, 2026-09-28): autosave and save-then-reload
+  // when the site restarts or is updated.
+  window.AINodesHost = {
+    graphId: () => graphId,
+    stale: () => graphStale,
+    signature: () => {
+      const graph = toStoredIds(graphFromCanvas());
+      delete graph.results;
+      return stableJson(graph);
+    },
+    save: async () => {
+      const result = await persistGraph();
+      if (result.response.ok) adoptSavedId(result.data);
+      return result;
+    },
+    viewport: () => ({x: Number(editor.canvas_x) || 0, y: Number(editor.canvas_y) || 0, zoom: Number(editor.zoom) || 1}),
+    setViewport: v => {
+      if (!v) return;
+      editor.canvas_x = v.x; editor.canvas_y = v.y; editor.zoom = v.zoom;
+      editor.precanvas.style.transform = 'translate(' + v.x + 'px, ' + v.y + 'px) scale(' + v.zoom + ')';
+    },
+    selection: () => selectedIds(),
+    select: ids => { if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds(ids); },
+    toast: message => toast(message),
+    load: graph => loadGraph(JSON.parse(JSON.stringify(graph)))
+  };
 
   /** "sent: <final prompt>" under a generator's prompt field, from the server's answer. */
   function paintSentPrompt(id, accepted) {
@@ -5222,8 +5248,11 @@
       const { response, data } = await persistGraph();
       if (response.ok) { adoptSavedId(data); return {ok: true}; }
       const detail = (data && data.detail) || {};
-      return {ok: false, stale: detail.error_string === 'graph_stale' || response.status === 428,
-              reason: detail.message_string || ('HTTP ' + response.status)};
+      // FastAPI answers a validation failure (422) with a list of errors.
+      const first = Array.isArray(detail) && detail[0] ? detail[0] : null;
+      const reason = first ? ('HTTP 422 ' + [].concat(first.loc || []).join('.') + ': ' + (first.msg || '')).slice(0, 200)
+        : (detail.message_string || ('HTTP ' + response.status));
+      return {ok: false, stale: detail.error_string === 'graph_stale' || response.status === 428, reason};
     } catch (error) {
       return {ok: false, stale: false, reason: String(error && error.message || error)};
     }
@@ -5384,10 +5413,11 @@
     if (!saved.ok) {
       if (saved.stale) {
         if (window.confirm('This graph was changed in another tab or by an agent. This tab holds an older copy, so it was not saved and will not render.\n\nReload now to get the latest version?')) location.reload();
-      } else {
-        toast('Not rendered: the graph could not be saved (' + (saved.reason || 'save failed') + ').');
+        return;
       }
-      return;
+      // Any other refusal (validation, store error, network) is a warning:
+      // the canvas still renders; only a true stale-revision conflict stops it.
+      toast('Rendering without saving — the graph could not be saved: ' + (saved.reason || 'save failed'));
     }
     runSession = TAB_SESSION + ':' + token.id;
     graph.nodes.filter(node => node.kind === KIND_SERVICE).forEach(node => {

@@ -547,14 +547,21 @@ class EndpointTests(unittest.TestCase):
             json={"b": {"status": "done", "type": "image",
                         "value": "https://x/current.png", "history": six}},
         )
-        self.assertEqual(response.status_code, 422)
+        # Lenient since 2026-09-28: a result the store cannot hold is trimmed
+        # (six entries -> the five newest) or its bad entries dropped (inline
+        # media), never a 422 that stops the whole save and, with it, Render.
+        self.assertEqual(response.status_code, 200, response.text)
+        stored = self.client.get("/api/ai/graphs/" + graph_id).json()["graph_object"]["results"]["b"]
+        self.assertEqual(len(stored["history"]), 5)
         inline = self.client.put(
             f"/api/ai/graphs/{graph_id}/results",
             json={"b": {"status": "done", "type": "image",
                         "value": "https://x/current.png",
                         "history": [{"type": "image", "value": "data:image/png;base64,AAAA"}]}},
         )
-        self.assertEqual(inline.status_code, 422)
+        self.assertEqual(inline.status_code, 200, inline.text)
+        stored = self.client.get("/api/ai/graphs/" + graph_id).json()["graph_object"]["results"]["b"]
+        self.assertFalse(any(entry["value"].startswith("data:") for entry in stored["history"]))
 
     def test_automatic_history_keeps_only_the_five_most_recent_values(self):
         payload = self._payload()
