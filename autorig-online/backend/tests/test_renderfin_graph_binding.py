@@ -74,17 +74,23 @@ class GraphBindingTests(unittest.TestCase):
         self.assertIn("no longer needs", self.status(changed)["error"])
         self.assertEqual(self.status(gone)["status"], "Error")
 
-    def test_a_new_render_press_replaces_the_same_nodes_queued_job(self):
+    def test_a_new_render_press_replaces_only_a_changed_nodes_queued_job(self):
         first = self.submit("b", "sig-b", session="tab:1")
         same_press = self.submit("b", "sig-b", session="tab:1")  # X9 sibling: kept
         self.assertEqual(self.status(first)["status"], "Pending")
-        second = self.submit("b", "sig-b", session="tab:2")
+        # Render pressed again with nothing changed: the waiting job stays.
+        again = self.submit("b", "sig-b", session="tab:2")
+        self.assertEqual(self.status(first)["status"], "Pending")
+        self.assertEqual(self.status(again)["status"], "Pending")
+        # The node changed: its older queued jobs are replaced.
+        second = self.submit("b", "sig-b-2", session="tab:3")
         self.assertEqual(self.status(first)["status"], "Error")
         self.assertEqual(self.status(same_press)["status"], "Error")
+        self.assertEqual(self.status(again)["status"], "Error")
         self.assertIn("rendered again", self.status(first)["error"])
         self.assertEqual(self.status(second)["status"], "Pending")
         # A task with no session (not a graph node) never supersedes anything.
-        self.submit("b", "sig-b", session="")
+        self.submit("b", "sig-b-3", session="")
         self.assertEqual(self.status(second)["status"], "Pending")
 
     def test_graph_summary_and_cancel_graph(self):

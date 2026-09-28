@@ -94,6 +94,9 @@ class RenderPrompt(BaseModel):
     node_id: str = ""
     node_signature: str = ""
     submit_session: str = ""
+    # The text behind node_signature (what the site hashed), kept so a later
+    # "node changed" cancel can say what changed (journal), never compared.
+    node_identity: str = ""
 
     @field_validator("frame_count")
     @classmethod

@@ -947,7 +947,7 @@ def _signature_params(params: Dict[str, object]) -> Dict[str, object]:
     return _plain(out)
 
 
-def node_signatures(graph: Dict[str, object]) -> Dict[str, str]:
+def node_signatures(graph: Dict[str, object], identities: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """Signature of every node the graph runs: {node id: sha1}.
 
     A signature covers the node's service and params (minus drawing-only
@@ -991,8 +991,11 @@ def node_signatures(graph: Dict[str, object]) -> Dict[str, str]:
             "quality": quality,
             "inputs": feeds,
         }
-        digest = hashlib.sha1(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        text = json.dumps(identity, ensure_ascii=False, sort_keys=True)
+        digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
         memo[node_id] = digest
+        if identities is not None:
+            identities[node_id] = text
         return digest
 
     out: Dict[str, str] = {}
@@ -1015,6 +1018,19 @@ def stored_node_signature(graph_id: str, node_id: str) -> str:
     return node_signatures(stored.get("graph") or {}).get(str(node_id), "")
 
 
+def stored_node_identity(graph_id: str, node_id: str) -> str:
+    """The text behind stored_node_signature, kept on the farm task so a later
+    "node changed" cancel can journal what changed (2026-09-29)."""
+    if not SAFE_ID_RE.match(str(graph_id or "")):
+        return ""
+    stored = _read_stored(_stored_path(graph_id))
+    if not stored:
+        return ""
+    identities: Dict[str, str] = {}
+    node_signatures(stored.get("graph") or {}, identities)
+    return identities.get(str(node_id), "")[:4000]
+
+
 async def reconcile_graph_queue(graph_id: str, graph: Dict[str, object], *, why: str = "saved") -> Dict[str, object]:
     """Tell the farm what this graph still wants; it cancels the rest.
 
@@ -1025,12 +1041,13 @@ async def reconcile_graph_queue(graph_id: str, graph: Dict[str, object], *, why:
 
     import ai_vision_api
 
-    wanted = node_signatures(graph)
+    identities: Dict[str, str] = {}
+    wanted = node_signatures(graph, identities)
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 ai_vision_api.RENDERFIN_BASE + "/api-render/cancel-stale-graph",
-                json={"graph_id": graph_id, "wanted": wanted,
+                json={"graph_id": graph_id, "wanted": wanted, "identities": identities,
                       "reason": "cancelled: the graph was " + why + " and no longer needs this render"},
                 timeout=20.0)
             payload = response.json() if response.status_code == 200 else {}
@@ -1697,6 +1714,10 @@ async def api_graph_load(graph_id: str):
 
 class CancelRequest(BaseModel):
     task_ids: List[str] = Field(default_factory=list)
+    # Why (the task's error text): the editor says "replaced by newer settings"
+    # for a supersession so nobody reads "cancelled by the composition" for a
+    # render they never touched (2026-09-29).
+    reason: str = Field("", max_length=200)
 
 
 async def _caller_is_admin(request: Request) -> bool:
@@ -1964,7 +1985,8 @@ async def api_cancel(body: CancelRequest, request: Request):
             try:
                 response = await client.post(
                     ai_vision_api.RENDERFIN_BASE + "/api-render/cancel-if-pending",
-                    json={"task_id": task_id}, timeout=15.0)
+                    json={"task_id": task_id, "reason": " ".join(str(body.reason or "").split())[:200]},
+                    timeout=15.0)
                 payload = response.json() if response.status_code == 200 else {}
             except Exception:
                 logger.warning("Could not reach the render queue to cancel %s", task_id)

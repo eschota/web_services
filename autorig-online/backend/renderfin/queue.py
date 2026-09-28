@@ -45,6 +45,7 @@ from .registry import ServerRegistry
 _UNKNOWN_DEPTH = 10_000
 _AVATAR_WORKFLOW = "gen_image_flux2_avatar.json"
 # Why a queued graph job was stood down (its error text; the editor shows it).
+MISSING_NODE_EXCLUDE_SECONDS = 6 * 3600
 GRAPH_STALE_REASON = "cancelled: the graph no longer needs this render"
 GRAPH_SUPERSEDED_REASON = "cancelled: this node was rendered again"
 
@@ -530,6 +531,12 @@ class RenderQueue:
         # Without a cooldown, one broken disk/proxy can spend all three task
         # attempts while healthy renderers sit unused.
         self._server_submit_cooldowns: Dict[str, float] = {}
+        # (box, workflow token) -> until: a box whose ComfyUI lacks a node class
+        # a workflow needs (missing_node_type) is kept off THAT workflow and
+        # the task goes to another box (2026-09-29: worker-4090 advertised
+        # gen_image.json without the QwenImage21Cache node; 3 identical
+        # refusals failed the task instead of moving it).
+        self._server_missing_nodes: Dict[Tuple[str, str], float] = {}
         # signature of a starved dispatch pass -> when it was last printed.
         self._starvation_logged: Dict[str, float] = {}
 
@@ -670,6 +677,10 @@ class RenderQueue:
                 and other.prompt.graph_id == prompt.graph_id
                 and other.prompt.node_id == prompt.node_id
                 and other.prompt.submit_session != prompt.submit_session
+                # Render pressed again without a change keeps the job that is
+                # already waiting (2026-09-29): only a changed node replaces it.
+                and (not prompt.node_signature or not other.prompt.node_signature
+                     or other.prompt.node_signature != prompt.node_signature)
             ]
             for other_id in stale:
                 await self.cancel(other_id, reason=GRAPH_SUPERSEDED_REASON)
@@ -711,7 +722,8 @@ class RenderQueue:
         }
 
     async def cancel_stale_for_graph(
-        self, graph_id: str, wanted: Dict[str, str], *, reason: str = ""
+        self, graph_id: str, wanted: Dict[str, str], *, reason: str = "",
+        identities: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Stand down this graph's queued jobs its current nodes do not want.
 
@@ -740,6 +752,9 @@ class RenderQueue:
                 continue
             if await self.cancel(task.id, reason=reason + " (" + why + ")"):
                 cancelled.append({"id": task.id, "node_id_string": node_id, "why_string": why})
+                if why == "node changed":
+                    print(f"[Renderfin][Queue] graph {graph_id} node {node_id} changed: "
+                          f"was {task.prompt.node_identity[:1200]} || now {(identities or {}).get(node_id, '')[:1200]}")
         if cancelled:
             print(f"[Renderfin][Queue] graph {graph_id}: {len(cancelled)} stale queued job(s) "
                   f"cancelled, {kept} kept")
@@ -1123,6 +1138,8 @@ class RenderQueue:
             return ("missing-model", "")
         if server.render_server_name in busy:
             return ("busy", busy[server.render_server_name])
+        if self._server_missing_nodes.get((server.render_server_name, token), 0) > now:
+            return ("missing-node", token)
         until = self._server_submit_cooldowns.get(server.render_server_name, 0)
         if until > now:
             return ("cooling", _utc_stamp(until))
@@ -1338,6 +1355,19 @@ class RenderQueue:
                 # a cooldown.
                 request_fault = errors.is_request_fault(exc)
                 await self._release_workload(task, outcome="released", retry=True)
+                if "missing_node_type" in str(exc):
+                    # The box, not the request: its ComfyUI lacks a node this
+                    # workflow needs. Keep it off this workflow for a while and
+                    # let another box take the task without spending a retry.
+                    until = time.time() + MISSING_NODE_EXCLUDE_SECONDS
+                    self._server_missing_nodes[(server.render_server_name, task.workflow)] = until
+                    print(
+                        f"[Renderfin][Queue] {server.render_server_name} lacks a node for "
+                        f"{task.workflow} ({str(exc)[:160]}); kept off it until {_utc_stamp(until)}, "
+                        f"task {task.id} goes to another box"
+                    )
+                    await self._persist(task)
+                    continue
                 task.submit_failures += 1
                 if request_fault:
                     print(

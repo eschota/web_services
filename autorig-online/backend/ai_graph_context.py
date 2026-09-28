@@ -59,6 +59,7 @@ def fields() -> Dict[str, str]:
     try:
         import ai_graph
         out["node_signature"] = ai_graph.stored_node_signature(graph_id, node_id)
+        out["node_identity"] = ai_graph.stored_node_identity(graph_id, node_id)
     except Exception:
         logger.exception("node signature for %s/%s not computed", graph_id, node_id)
         out["node_signature"] = ""

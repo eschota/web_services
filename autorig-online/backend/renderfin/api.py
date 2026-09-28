@@ -160,8 +160,10 @@ async def api_render_cancel_stale_graph(request: Request) -> Dict[str, Any]:
     if not graph_id or not isinstance(wanted, dict):
         raise HTTPException(status_code=400, detail="graph_id and wanted{} are required")
     reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    identities = body.get("identities") if isinstance(body.get("identities"), dict) else {}
     return await _queue(request).cancel_stale_for_graph(
-        graph_id, {str(k): str(v) for k, v in wanted.items()}, reason=reason)
+        graph_id, {str(k): str(v) for k, v in wanted.items()}, reason=reason,
+        identities={str(k): str(v) for k, v in identities.items()})
 
 
 @router.post("/api-render/cancel-graph")

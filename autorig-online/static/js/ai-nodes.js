@@ -111,12 +111,28 @@
    * node, so the result is cached and a later Render (for example after
    * wiring its output somewhere) does not roll a new picture (2026-09-27).
    */
+  /**
+   * The random seed a node's ALIVE job (queued or rendering) was given, so a
+   * Render pressed again — or auto-render — does not roll a new one and
+   * replace a job that is still wanted (owner, 2026-09-29: every re-render
+   * cancelled the previous job "by the composition" for no change at all).
+   */
+  function aliveSeed(nodeId) {
+    const id = String(nodeId);
+    for (const execution of activeExecutions.values()) {
+      if (execution.id === id && execution.seed > 0) return execution.seed;
+    }
+    const x9 = x9Active.get(id);
+    if (x9 && x9.baseSeed > 0) return x9.baseSeed;
+    return 0;
+  }
+
   function fixRandomSeed(node, params) {
     if (!params || !('seed' in params) || ![undefined, null, '', 0, '0'].includes(params.seed)) return;
     const field = nodeElement(node.id) && nodeElement(node.id).querySelector('[data-param="seed"]');
     if (!field) return;
     const top = Math.min(Number(field.max) || 2147483647, 2147483647);
-    const seed = 1 + Math.floor(Math.random() * (top - 1));
+    const seed = aliveSeed(node.id) || (1 + Math.floor(Math.random() * (top - 1)));
     params.seed = seed;
     if (node.params) node.params.seed = seed;
     field.dataset.silentUpdate = 'yes';
@@ -831,7 +847,32 @@
     if (!used) { toast('No parameters recorded for this node yet — render it once.'); return; }
     paramsDialog(used, ((meta(id) || {}).label || (serviceById((meta(id) || {}).service) || {}).title || 'Node') + ' · parameters used', id);
   }
-  window.AINodeParams = {show: showNodeParams, dialog: paramsDialog, fromRecord: paramsUsed};
+  // The lightbox's info panel: what a node / result is, and its actions.
+  function nodeInfo(nodeId, used) {
+    const item = meta(nodeId) || {};
+    const record = runState.get(String(nodeId)) || {};
+    return {node: item.label || (serviceById(item.service) || {}).title || 'Node', params: used || null,
+            graphUrl: graphId ? location.origin + '/nodes?g=' + graphId : '', civitaiUrl: record.civitai_url || ''};
+  }
+  function usePromptIn(nodeId, prompt) {
+    const element = nodeElement(nodeId);
+    const field = element && element.querySelector('textarea[data-param="prompt"]');
+    if (!field) { toast('This node has no prompt field.'); return; }
+    graphFromCanvas().links.filter(link => String(link.to) === String(nodeId) && link.input === 'prompt').forEach(link => {
+      const from = meta(link.from), to = meta(link.to);
+      const out = from ? from.outFields.indexOf(link.output) : -1, inp = to ? to.inFields.indexOf(link.input) : -1;
+      if (out >= 0 && inp >= 0) editor.removeSingleConnection(String(link.from), String(link.to), 'output_' + (out + 1), 'input_' + (inp + 1));
+    });
+    field.value = prompt || '';
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+  }
+  function openNode(nodeId) {
+    if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds([String(nodeId)]);
+    const element = nodeElement(nodeId);
+    if (element) { element.classList.add('rl-flash'); setTimeout(() => element.classList.remove('rl-flash'), 1600); }
+  }
+  window.AINodeParams = {show: showNodeParams, dialog: paramsDialog, fromRecord: paramsUsed, info: nodeInfo, usePrompt: usePromptIn, openNode};
   // For ai-autoreload.js (owner, 2026-09-28): autosave and save-then-reload
   // when the site restarts or is updated.
   window.AINodesHost = {
@@ -856,8 +897,52 @@
     selection: () => selectedIds(),
     select: ids => { if (nodeGroups && nodeGroups.selectIds) nodeGroups.selectIds(ids); },
     toast: message => toast(message),
-    load: graph => loadGraph(JSON.parse(JSON.stringify(graph)))
+    load: graph => loadGraph(JSON.parse(JSON.stringify(graph))),
+    // The whole graph document with results, in stored ids (ai-undo.js).
+    full: () => toStoredIds(graphFromCanvas()),
+    // Auto-render (ai-autoreload.js): the Continue run, leaving failed and
+    // unchanged nodes alone; ids are stored ids.
+    autoRender: skipStoredIds => {
+      autoSkip = new Set();
+      (skipStoredIds || []).forEach(stored => {
+        nodeMeta.forEach((item, key) => { if (item && (item.storedId === stored || String(key) === String(stored))) autoSkip.add(String(key)); });
+      });
+      return runGraph('auto');
+    },
+    running: () => runRequests.size > 0,
+    cancelTasks: (ids, reason) => supersedeTasks(ids, reason || 'replaced by newer settings'),
+    // What makes a node's render identity, per stored id — the same
+    // normalisation as the server's ai_graph.node_signatures (2026-09-29):
+    // drawing-only params, the seed the run fixed, auto sizes/frames and
+    // unset values are not changes, so neither autosave nor auto-render nor
+    // the server treats a run's own writes as a person editing the node.
+    nodeKeys: () => {
+      const graph = toStoredIds(graphFromCanvas());
+      const map = {};
+      (graph.nodes || []).forEach(n => {
+        map[n.id] = stableJson({s: n.service || null, k: n.kind, v: n.kind === KIND_INPUT ? (n.value || '') : null,
+                                p: signatureParams(n.params || {})});
+      });
+      return {map, links: graph.links || [], nodes: graph.nodes || []};
+    },
   };
+
+  const SIGNATURE_UI_ONLY = new Set(['_display_mode', '_node_size', '_label', '_tint']);
+  const SIGNATURE_RUNTIME = new Set(['seed']);
+  function signatureParams(params) {
+    const out = {};
+    const autoSize = !!(params._size_auto || params._follow_input_size);
+    const autoFrames = !!params._frames_auto;
+    Object.keys(params).forEach(key => {
+      const value = params[key];
+      if (SIGNATURE_UI_ONLY.has(key) || SIGNATURE_RUNTIME.has(key)) return;
+      if (value === '' || value === null || value === undefined) return;
+      if (autoSize && (key === 'width' || key === 'height')) return;
+      if (autoFrames && key === 'frame_count') return;
+      out[key] = (typeof value === 'number' && Number.isInteger(value)) ? value : value;
+    });
+    return out;
+  }
 
   /** "sent: <final prompt>" under a generator's prompt field, from the server's answer. */
   function paintSentPrompt(id, accepted) {
@@ -869,7 +954,12 @@
     const field = element.querySelector('textarea[data-param="prompt"]');
     const row = field && (field.closest('.nparam') || field.parentNode);
     if (!row) return;
-    let box = element.querySelector('.nsent');
+    // One "sent:" line per node: a re-rendered prompt row (edit fields shown
+    // or hidden) left an older box behind, so two lines showed (2026-09-29).
+    const boxes = element.querySelectorAll('.nsent');
+    boxes.forEach((old, index) => { if (index < boxes.length - 1) old.remove(); });
+    let box = boxes.length ? boxes[boxes.length - 1] : null;
+    if (box && !(row.nextElementSibling === box)) { box.remove(); box = null; }
     if (!box) {
       box = document.createElement('div');
       box.className = 'nsent';
@@ -892,6 +982,10 @@
     box.dataset.full = sent;
     box.textContent = 'sent: ' + sent;
     box.title = sent;
+    // The LoRA-trigger preview ("sent: sura, ‹incoming prompt›") is a guess
+    // made before the run; once the real sent prompt is known it only reads
+    // as a second, competing state (owner, 2026-09-29).
+    element.querySelectorAll('.ltrig-sent').forEach(guess => { guess.hidden = true; });
   }
 
   /** "What should happen / edit the incoming prompt" while a prompt is wired in. */
@@ -2219,13 +2313,11 @@
         const cell = record && record.x9[index];
         if (!cell) return {};
         return {url: cell.value, status: cell.status === 'done' ? 'done' : cell.status, seed: cell.seed, error: cell.error,
-                used: x9Pick(record) === index};
+                used: x9Pick(record) === index, info: nodeInfo(node, cell.params_used)};
       },
       title: index => 'X9 · ' + ((meta(node) || {}).title || 'node') + ' · cell ' + (index + 1) + ' / 9',
       actions: {use: useCell, useTip: 'Use this cell as the node output', post: () => openCivitaiDialog(node),
-        extra: [{glyph: 'ⓘ', label: 'Parameters used (this cell)', key: 'P',
-                 hidden: index => { const r = x9Record(node); return !(r && r.x9[index] && r.x9[index].params_used); },
-                 run: index => { const r = x9Record(node); paramsDialog(r.x9[index].params_used, 'X9 cell ' + (index + 1) + ' · parameters used', node); }}]},
+        usePrompt: (index, prompt) => usePromptIn(node, prompt), openNode: () => openNode(node)},
       // The last cell looked at is the node's output (owner rule).
       onShow: index => { const r = x9Record(node); if (r && r.x9[index] && r.x9[index].status === 'done') setX9Pick(node, index); }
     });
@@ -2236,7 +2328,7 @@
     const runner = runnerFor(node.service);
     const element = nodeElement(id);
     const state = element && element.querySelector('.nstate');
-    const base = Number(params.seed) > 0 ? Number(params.seed) : Math.floor(Math.random() * 2147483000);
+    const base = Number(params.seed) > 0 ? Number(params.seed) : (aliveSeed(id) || Math.floor(Math.random() * 2147483000));
     const bodies = [];
     for (let index = 0; index < 9; index += 1) {
       const inputs = {...resolved};
@@ -2251,7 +2343,7 @@
       return {type: previous.type, value: previous.value, x9: previous.x9.map(cell => cell.value)};
     }
     const cells = bodies.map(body => ({seed: body.seed, status: 'queued', value: '', error: ''}));
-    const mine = {signature, tasks: []};
+    const mine = {signature, tasks: [], baseSeed: base};
     const older = x9Active.get(String(id));
     if (older && older.signature !== signature) supersedeTasks(older.tasks);
     x9Active.set(String(id), mine);
@@ -2876,15 +2968,8 @@
     };
     ['pointerdown', 'mousedown'].forEach(type => canvas.addEventListener(type, intercept, true));
     canvas.addEventListener('auxclick', event => { if (event.button === 1) event.preventDefault(); }, true);
-    document.addEventListener('keydown', event => {
-      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.code !== 'KeyZ') return;
-      if (typingIn(event.target) || typingIn(document.activeElement) || document.querySelector('dialog[open]')) return;
-      const undo = (window.AIUndo || []).pop();
-      if (!undo) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      undo();
-    }, true);
+    // Ctrl+Z is the graph-wide undo now (ai-undo.js): a removed wire is one
+    // of its steps like any other edit.
   }
 
   // ?safe=1 (owner, 2026-09-28): open a graph without saved results, the
@@ -4929,8 +5014,14 @@
   }
 
   function openPreview(type, url) {
+    let owner = null;
+    runState.forEach((record, id) => { if (!owner && record && record.value === url) owner = id; });
+    const record = owner ? runState.get(owner) : null;
     window.AILightbox.open({kind: 'preview', url, status: 'done', kind_: type,
-      title: () => String(url).split('/').pop().split('?')[0].slice(0, 80)});
+      info: owner ? nodeInfo(owner, record.params_used) : null,
+      actions: owner ? {usePrompt: (i, prompt) => usePromptIn(owner, prompt), openNode: () => openNode(owner),
+                        post: () => openCivitaiDialog(owner)} : {},
+      title: () => owner ? nodeInfo(owner).node + ' · result' : String(url).split('/').pop().split('?')[0].slice(0, 80)});
   }
 
   /**
@@ -5267,11 +5358,12 @@
    */
   let supersededCount = 0;
   let supersedeToastTimer = null;
-  function supersedeTasks(taskIds) {
+  const SUPERSEDE_REASON = 'replaced by newer settings';
+  function supersedeTasks(taskIds, reason) {
     const ids = [...new Set((taskIds || []).filter(Boolean).map(String))];
     if (!ids.length) return;
     fetch('/api/ai/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({task_ids: ids})})
+      body: JSON.stringify({task_ids: ids, reason: reason || SUPERSEDE_REASON})})
       .then(response => response.ok ? response.json() : null)
       .then(data => {
         if (!data) return;
@@ -5358,7 +5450,7 @@
     const version = (nodeRunVersions.get(idString) || 0) + 1;
     nodeRunVersions.set(idString, version);
     continuableResults.delete(idString);
-    const execution = {id:idString, signature, epoch, version, taskId:'',
+    const execution = {id:idString, signature, epoch, version, taskId:'', seed: Number(params && params.seed) || 0,
       inputReference:nodeCompare?.resolveReference(idString, graphSnapshot) || resolved.image || ''};
     const promise = runServiceNode(idString, resolved, params, execution)
       .then(result => {
@@ -5383,6 +5475,7 @@
   }
 
   /** Add the current graph snapshot to the live queue. */
+  let autoSkip = new Set();
   async function runGraph(keepDone) {
     // Say up front when most of the graph will not run: an isolated branch or
     // bypassed nodes look like "Render did nothing" otherwise (2026-09-27).
@@ -5441,6 +5534,8 @@
             if (epoch === canvasEpoch && meta(id)) markState(id, 'bypassed — not run', 'nstate');
             return {ok:false, bypassed:true};
           }
+          // Auto-render leaves a failed node alone until it is changed.
+          if (keepDone === 'auto' && autoSkip.has(String(id))) return {ok:false, skipped:true};
           // Until its inputs arrive a node says what it is waiting for; the old
           // "changed — render to update" read as "left out of this run".
           if (node.kind === KIND_SERVICE && epoch === canvasEpoch && meta(id)) {
@@ -5483,7 +5578,15 @@
           }
           if (node.kind === KIND_INPUT) {
             const value = inputValues.get(id) || '';
-            if (!value) return {ok:false, error:'empty input'};
+            if (!value) {
+              // A file pasted or chosen by hand is not saved with the graph
+              // (only an address is), so after a reload the box is empty.
+              const why = node.entity_type === 'media'
+                ? 'no picture or clip — paste a link or choose the file again (a pasted file is not saved with the graph)'
+                : 'empty input';
+              if (epoch === canvasEpoch && meta(id)) markState(id, why, 'nstate failed');
+              return {ok:false, error:why};
+            }
             if (node.entity_type === 'media' && !/^(https?:\/\/|data:(image|video)\/|blob:)/.test(value)) {
               if (epoch === canvasEpoch && meta(id)) markState(id, 'not a link or file — paste an image/video link', 'nstate failed');
               return {ok:false, error:'Media in holds no picture or clip link (' + value.slice(0, 30) + '…)'};

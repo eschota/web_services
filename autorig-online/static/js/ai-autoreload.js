@@ -43,7 +43,11 @@
     saving = true;
     try {
       const {response, data} = await host.save();
-      if (response.ok) { baseline = host.signature(); return true; }
+      if (response.ok) {
+        baseline = host.signature();
+        if (reason === 'autosave') autoRender();
+        return true;
+      }
       const code = ((data || {}).detail || {}).error_string;
       if (code === 'graph_stale' || response.status === 409 || response.status === 428) {
         keepBackup(signature);
@@ -69,14 +73,146 @@
     if (!host || !host.graphId() || stopped) return;
     let signature;
     try { signature = host.signature(); } catch (_) { return; }
-    if (baseline === null) { baseline = signature; return; }
+    if (baseline === null) {
+      baseline = signature;
+      // The auto-render reference is taken at the same moment: an autosave
+      // that beats the toggle's own 3 s timer used to find no reference,
+      // baseline itself and render nothing (2026-09-29).
+      if (!lastRendered) { try { lastRendered = nodesDoc(); } catch (_) { /* next tick */ } }
+      return;
+    }
     if (signature !== baseline) {
       if (!lastChange) lastChange = Date.now();
-      if (Date.now() - lastChange >= 10000 && idle(3000)) { lastChange = 0; save('autosave'); }
+      // 2.5 s after the last real edit (2026-09-29; was 10 s), once typing
+      // and dragging have stopped for 1.5 s.
+      if (Date.now() - lastChange >= 2500 && idle(1500)) { lastChange = 0; save('autosave'); }
     } else {
       lastChange = 0;
     }
-  }, 4000);
+  }, 1000);
+
+  // ------------------------------------------------------------- auto-render
+  // Owner, 2026-09-28: ON by default, per graph. After the autosave tick the
+  // changed nodes (and what depends on them) are rendered: the save already
+  // makes the server cancel their stale queued jobs; with "interrupt running"
+  // their running jobs are cancelled too. Results never count as changes.
+  const AUTO_KEY = id => 'autorender.' + id;
+  const INT_KEY = id => 'autorender.interrupt.' + id;
+  let lastRendered = null;   // per-node document at the last auto-render
+  let askedBig = false;
+  function autoOn() { const host = H(); const v = host && host.graphId() ? store.get(AUTO_KEY(host.graphId())) : null; return v !== '0'; }
+  function interruptOn() { const host = H(); const v = host && host.graphId() ? store.get(INT_KEY(host.graphId())) : null; return v !== '0'; }
+  function nodesDoc() {
+    const host = H();
+    // Normalised render identity per node (host.nodeKeys, same rule as the
+    // server): what a run writes back (seed, auto size) is not a change, so
+    // auto-render never re-renders — or interrupts — a node nobody edited.
+    if (host.nodeKeys) return host.nodeKeys();
+    const graph = JSON.parse(host.signature());
+    const map = {};
+    (graph.nodes || []).forEach(n => { map[n.id] = JSON.stringify({p: n.params, v: n.value, s: n.service}); });
+    return {map, links: graph.links || [], nodes: graph.nodes || []};
+  }
+  let autoWaiting = false;
+  async function autoRender() {
+    const host = H();
+    if (!host || !host.autoRender || !autoOn()) return;
+    if (host.running()) {
+      // A run is still going: with "interrupt running", stop the jobs of the
+      // nodes just changed so it ends sooner; then render once it is over.
+      if (interruptOn() && lastRendered) {
+        try {
+          const now = nodesDoc(), results = host.full().results || {};
+          const tasks = Object.keys(now.map).filter(id => now.map[id] !== lastRendered.map[id])
+            .map(id => results[id]).filter(r => r && r.status === 'running' && r.task_id).map(r => r.task_id);
+          if (tasks.length) host.cancelTasks(tasks);
+        } catch (_) { /* best effort */ }
+      }
+      if (!autoWaiting) {
+        autoWaiting = true;
+        const again = () => { if (H().running()) { setTimeout(again, 1500); return; } autoWaiting = false; autoRender(); };
+        setTimeout(again, 1500);
+      }
+      return;
+    }
+    const now = nodesDoc();
+    if (!lastRendered) { lastRendered = now; return; }
+    const changed = Object.keys(now.map).filter(id => now.map[id] !== lastRendered.map[id]);
+    if (!changed.length) return;
+    // A failed node upstream of a change runs again too: a failure is never
+    // sticky, or the changed node would only ever report "input did not
+    // arrive: failed" (owner, 2026-09-29).
+    const priorResults = (host.full() || {}).results || {};
+    const upstream = new Set(changed);
+    let more = true;
+    while (more) {
+      more = false;
+      now.links.forEach(l => { if (upstream.has(String(l.to)) && !upstream.has(String(l.from))) { upstream.add(String(l.from)); more = true; } });
+    }
+    upstream.forEach(id => {
+      if (priorResults[id] && priorResults[id].status === 'failed' && !changed.includes(id)) changed.push(id);
+    });
+    // What runs: the changed nodes and everything downstream of them.
+    const affected = new Set(changed);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      now.links.forEach(l => { if (affected.has(String(l.from)) && !affected.has(String(l.to))) { affected.add(String(l.to)); grew = true; } });
+    }
+    const byId = new Map(now.nodes.map(n => [String(n.id), n]));
+    const jobs = [...affected].reduce((sum, id) => {
+      const n = byId.get(id);
+      if (!n || n.kind !== 'service' || (n.params || {})._disabled) return sum;
+      return sum + ((n.params || {})._x9 ? 9 : 1);
+    }, 0);
+    if (!jobs) { lastRendered = now; return; }
+    if (jobs > 30 && !askedBig) {
+      askedBig = true;
+      if (!window.confirm('Auto-render would queue ' + jobs + ' jobs for these changes. Render them now?')) { lastRendered = now; return; }
+    }
+    const live = host.full();
+    const results = live.results || {};
+    if (interruptOn()) {
+      const tasks = changed.map(id => results[id]).filter(r => r && r.status === 'running' && r.task_id).map(r => r.task_id);
+      if (tasks.length) host.cancelTasks(tasks);
+    }
+    // Only the changed nodes and what depends on them run; everything else
+    // (including failed or stale nodes nobody touched) stays as it is.
+    const skip = now.nodes.map(n => String(n.id)).filter(id => !affected.has(id));
+    lastRendered = now;
+    toast('Auto-render: ' + jobs + ' job' + (jobs === 1 ? '' : 's') + ' queued');
+    try { await host.autoRender(skip); } catch (_) { /* the run reports itself */ }
+    // What the run itself wrote (a fixed random seed) is not a new change.
+    setTimeout(() => { try { lastRendered = nodesDoc(); } catch (_) { /* ignore */ } }, 1500);
+  }
+  function mountToggle() {
+    const host = H();
+    const run = document.getElementById('continue');
+    if (!host || !host.graphId() || !run || document.getElementById('autorender-toggle')) { if (!document.getElementById('autorender-toggle')) setTimeout(mountToggle, 1000); return; }
+    const box = document.createElement('span');
+    box.id = 'autorender-toggle';
+    box.style.cssText = 'display:inline-flex;gap:6px;align-items:center;margin-left:8px;font:600 12px system-ui';
+    box.innerHTML = '<button type="button" data-a="auto"></button><label style="display:inline-flex;gap:4px;align-items:center;opacity:.8;cursor:pointer">' +
+      '<input type="checkbox" data-a="int">interrupt running</label>';
+    const button = box.querySelector('[data-a="auto"]');
+    const check = box.querySelector('[data-a="int"]');
+    const paint = () => {
+      button.textContent = autoOn() ? 'Auto ● on' : 'Auto ○ off';
+      button.style.cssText = 'padding:6px 10px;border-radius:9px;border:1px solid ' + (autoOn() ? '#22c55e' : 'rgba(255,255,255,.2)') +
+        ';background:' + (autoOn() ? 'rgba(34,197,94,.15)' : 'transparent') + ';color:inherit;cursor:pointer';
+      button.title = 'Auto-render: changed nodes render about 10 s after your last edit (click to turn ' + (autoOn() ? 'off' : 'on') + ')';
+      check.checked = interruptOn();
+      check.parentElement.style.display = autoOn() ? '' : 'none';
+    };
+    button.addEventListener('click', () => { store.set(AUTO_KEY(host.graphId()), autoOn() ? '0' : '1'); lastRendered = null; paint(); });
+    check.addEventListener('change', () => { store.set(INT_KEY(host.graphId()), check.checked ? '1' : '0'); paint(); });
+    run.insertAdjacentElement('afterend', box);
+    paint();
+    // The graph as opened is the starting point: opening a graph renders nothing.
+    setTimeout(() => { try { lastRendered = nodesDoc(); } catch (_) { /* ignore */ } }, 3000);
+  }
+  setTimeout(mountToggle, 1500);
+  window.AIAutoRender = {on: autoOn, run: autoRender};
 
   // ---------------------------------------------------------------- idleness
   ['keydown', 'pointerdown', 'wheel'].forEach(type => document.addEventListener(type, () => { lastInput = Date.now(); }, true));
