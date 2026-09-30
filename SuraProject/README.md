@@ -5,12 +5,13 @@ chat history: who she is, where she is produced, and the rules of her channel.
 
 | File | What it holds |
 |---|---|
-| [RULES.md](RULES.md) | Hard rules: what may go on YouTube and what never may. **Read first.** |
-| [CHANNEL.md](CHANNEL.md) | Channel identity and branding: name, handle, description, keywords, art specs |
+| [Marketing/Youtube/RULES.md](Marketing/Youtube/RULES.md) | Hard rules: what may go on YouTube and what never may. **Read first.** |
+| [Marketing/Youtube/CHANNEL.md](Marketing/Youtube/CHANNEL.md) | Channel identity and branding: name, handle, description, keywords, art specs |
 | [CHARACTER.md](CHARACTER.md) | Sura's canon look, one detail per line (same as the graph's text nodes) |
 | [PIPELINE.md](PIPELINE.md) | Where she is rendered: autorig.online graphs, endpoints, farm, LoRA, upload |
-| [CONTENT_PLAN.md](CONTENT_PLAN.md) | Formats, cadence, first 30 days, metrics |
+| [Marketing/Youtube/CONTENT_PLAN.md](Marketing/Youtube/CONTENT_PLAN.md) | Formats, cadence, first 30 days, metrics |
 | [LOG.md](LOG.md) | Dated decisions and status, newest first |
+| [Marketing/](Marketing/) | Youtube, Steam, Civitai.red |
 | [game/](game/README.md) | The game: premise, levels, characters (level 1 = the jet) |
 
 ## The two sides of the project
