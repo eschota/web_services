@@ -11,6 +11,7 @@ chat history: who she is, where she is produced, and the rules of her channel.
 | [PIPELINE.md](PIPELINE.md) | Where she is rendered: autorig.online graphs, endpoints, farm, LoRA, upload |
 | [CONTENT_PLAN.md](CONTENT_PLAN.md) | Formats, cadence, first 30 days, metrics |
 | [LOG.md](LOG.md) | Dated decisions and status, newest first |
+| [game/](game/README.md) | The game: premise, levels, characters (level 1 = the jet) |
 
 ## The two sides of the project
 

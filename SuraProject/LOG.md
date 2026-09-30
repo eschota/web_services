@@ -9,3 +9,7 @@
   CHARACTER.md). Join texts node deployed (`textjoin-20260930`).
 - Open: owner approval of the branding; SFW reference sheet; OAuth for the
   channel.
+
+## 2026-09-30 (later)
+
+- Game hierarchy added under game/; level 1 "До острова" imported from jet-first-level-source.zip. Sura = the flight attendant, a secret agent.

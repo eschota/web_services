@@ -1,0 +1,71 @@
+{
+  "nodes": 40,
+  "endings": 6,
+  "reachableNodes": 40,
+  "states": 120906,
+  "endingPaths": {
+    "Нейтральная посадка": [
+      "wake:2",
+      "ignore:2",
+      "descent:4",
+      "resolve:2"
+    ],
+    "Неловкое знакомство": [
+      "wake:3",
+      "door:3",
+      "brag:3",
+      "descent:4",
+      "resolve:1"
+    ],
+    "Гибель": [
+      "wake:3",
+      "door:3",
+      "brag:4",
+      "refusal:3",
+      "warning:2"
+    ],
+    "Поддержка": [
+      "wake:3",
+      "door:1",
+      "water:1",
+      "honest:1",
+      "support:4",
+      "descent:3"
+    ],
+    "Тайна отца": [
+      "wake:1",
+      "room:1",
+      "phone:2",
+      "envelope:2",
+      "door:1",
+      "water:2",
+      "flight:1",
+      "reveal:1",
+      "descent:2"
+    ],
+    "Контакт": [
+      "wake:3",
+      "door:1",
+      "water:1",
+      "honest:1",
+      "support:1",
+      "connection:2",
+      "invite:1",
+      "contact:1",
+      "descent:1"
+    ]
+  },
+  "tests": [
+    "all targets exist",
+    "all images exist",
+    "all 40 nodes state-reachable",
+    "all six endings state-reachable",
+    "undo restores node and flags on every explored transition",
+    "save/load round trip on every explored transition",
+    "invalid JSON / unknown node / malformed flags / invalid history rejected",
+    "fresh start verified",
+    "HTML local references exist",
+    "final refusal clears prior contact, friendship and trust in every reachable state"
+  ],
+  "browserVisualQA": "not performed"
+}
