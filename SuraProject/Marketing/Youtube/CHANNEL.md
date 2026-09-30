@@ -9,7 +9,7 @@ until accepted.
 |---|---|
 | Channel name | **Sura Games** (current) |
 | Handle | `@SuraGames` if free, else `@SuraPlays` / `@SuraVirtual` |
-| Channel ID | `UCaVWpEglmxNzJr-4YV4e1dQ` |
+| Channel ID | `UCaVWpEgImxNzJr-4YV4e1dQ` |
 | Language | English titles, RU/EN subtitles later |
 | Category | Gaming |
 | Made for kids | No |

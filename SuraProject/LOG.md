@@ -13,3 +13,9 @@
 ## 2026-09-30 (later)
 
 - Game hierarchy added under game/; level 1 "До острова" imported from jet-first-level-source.zip. Sura = the flight attendant, a secret agent.
+
+## 2026-09-30 (YouTube)
+
+- About updated in Studio: devlog of an 18+ visual novel, SFW-only channel; link autorig.online. No civitai.red link (YouTube external-links policy).
+- Owner rule: YouTube gets only SFW video, no nudity, no Mature content; NSFW posting to YouTube is fully forbidden.
+- Handle is @SuraFriend; channel ID UCaVWpEgImxNzJr-4YV4e1dQ (capital I).

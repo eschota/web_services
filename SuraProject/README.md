@@ -19,8 +19,8 @@ chat history: who she is, where she is produced, and the rules of her channel.
 1. **Adult side (Civitai and similar).** Nude and explicit renders, pose
    libraries, swap pipelines. Never on YouTube.
 2. **YouTube side, the channel "Sura Games".** Channel ID
-   `UCaVWpEglmxNzJr-4YV4e1dQ`, Studio:
-   <https://studio.youtube.com/channel/UCaVWpEglmxNzJr-4YV4e1dQ>. SFW only: the
+   `UCaVWpEgImxNzJr-4YV4e1dQ`, Studio:
+   <https://studio.youtube.com/channel/UCaVWpEgImxNzJr-4YV4e1dQ>. SFW only: the
    character, gaming, humour, AI behind the scenes. The first Short,
    *Say Sura Hello!*, is live (0 views, 0 subscribers as of 2026-09-30).
 
