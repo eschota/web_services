@@ -67,3 +67,39 @@ The old VPS database/secrets were not recovered. Existing OneClick email/Telegra
 notifications and payment-provider callbacks require their own verified credentials
 and configuration; the common Google login does not grant access to AutoRig's
 payment credentials or its separate YouTube integrations.
+
+## Restoration verification, 2026-10-05
+
+Production application release `3595e893`; 12 production unit/regression tests
+passed. Streaming a 64 MiB asset used approximately 232 KiB additional Python
+memory. A 192-request live read/invalid-input run stayed around 85–88 MiB RSS;
+there was no growing spool/cache usage in that run. A real 10 GiB upload session
+was admitted using only 258 bytes of metadata, then the explicitly owned probe
+was removed. A real HTTPS archive fetch returned 4,761,602 bytes with the expected
+SHA-256 and left no partial file. These are bounded tests, not a claim that every
+possible long-running workload has been proved leak-free.
+
+The real owned scene was submitted through the production browser. The first
+accepted F2 worker job `40cb0323-0663-4d4d-abc9-b0fabe6367b9`, output GUID
+`cc4367bf-a48c-492a-acd7-0441b8e3bdfb`, produced Max exports (23 meshes,
+3 materials), 15 Max renders, 7 textures, 9 URP renders, a 32.8 MB Unity package,
+a 36.2 MB Windows build ZIP and an MP4. Android/Quest/WebGL phases failed because
+the required playback engines were absent on the checked nodes. HDRP was still
+processing at the last inspection; full cross-platform completion is not verified.
+A delayed browser restart linked site task `00d5b630-a5fb-4e5f-9140-2c032ab77dde`
+to another queued attempt. Active restarts now return HTTP 409 to prevent an
+earlier worker job from becoming untracked.
+
+F7 now has AndroidPlayer, WebGLSupport, JDK 17.0.9+9, NDK r27c, SDK/CMake/build
+tools/platforms/cmdline-tools installed from the official version manifest. Temporary
+installers were removed. Only the owner-approved `android-sdk-license` was accepted,
+verified by the installed sdkmanager. The SDK file anchors pass; Unity batch target
+validation stops with `No valid Unity Editor license found`. Do not claim working
+Android/Quest/WebGL until the owner activates a valid F7 Unity license and the
+actual target builds pass. Current OneClick environment restricts new dispatch to
+the known working F2; the rest of AutoRig's pool is independent.
+
+Runtime receipts and screenshots remain under `R:/autorig/.work/oneclick-discovery`.
+The installed SDK consent receipt supersedes the earlier raw-XML license hash.
+The correct sdkmanager-derived accepted hash is
+`24333f8a63b6825ea9c5514f83c2829b004d1fee`.
