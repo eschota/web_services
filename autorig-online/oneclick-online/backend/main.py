@@ -1205,7 +1205,9 @@ async def _stream_chunk_to_disk(
             pass
 
 @app.post("/api/upload/init")
+@limiter.limit("20/minute")
 async def api_upload_init(
+    request: Request,
     filename: str = Form(...),
     total_size: int = Form(...),
     chunk_size: int = Form(10 * 1024 * 1024),
@@ -1244,6 +1246,9 @@ async def api_upload_init(
     if total_chunks is None or total_chunks <= 0 or total_chunks != computed_total_chunks:
         total_chunks = computed_total_chunks
 
+    session_root = Path(UPLOAD_DIR) / "temp"
+    if session_root.exists() and sum(1 for p in session_root.iterdir() if p.is_dir()) >= 128:
+        raise HTTPException(status_code=429, detail="Too many unfinished uploads; resume an existing upload")
     upload_id = str(uuid.uuid4())
     from storage import upload_admission
     try:
@@ -5544,7 +5549,12 @@ async def cleanup_disk_space(min_free_gb: int = 20) -> dict:
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(select(Task).where(Task.status.notin_(["done", "error"])))) .scalars().all()
         active_ids = [row.id for row in rows]
-    return await asyncio.to_thread(clean, active_ids)
+    result = await asyncio.to_thread(clean, active_ids)
+    for upload_id in set(_UPLOAD_LAST_META_SAVE_TS) | set(_UPLOAD_UPLOADED_INDEX_CACHE):
+        if not (Path(UPLOAD_DIR) / "temp" / upload_id).exists():
+            _UPLOAD_LAST_META_SAVE_TS.pop(upload_id, None)
+            _UPLOAD_UPLOADED_INDEX_CACHE.pop(upload_id, None)
+    return result
 
 
 # Mount static files

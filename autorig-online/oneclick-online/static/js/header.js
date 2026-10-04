@@ -198,7 +198,7 @@ async function initSiteHeader() {
                 if (creditsCount) creditsCount.textContent = data.user.balance_credits || 0;
                 if (creditsLabel) {
                     creditsLabel.textContent = 'Credits';
-                    creditsLabel.setAttribute('data-i18n', 'credits_balance');
+                    creditsLabel.setAttribute('data-i18n', 'credits_remaining');
                 }
             } else if (data.anon && data.anon.free_remaining !== undefined) {
                 // Anonymous user

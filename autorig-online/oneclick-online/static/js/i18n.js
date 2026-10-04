@@ -41,7 +41,7 @@ const I18n = {
         try {
             // NOTE: /static/ is served with long-lived immutable caching in nginx.
             // For translations we want updates to propagate immediately, so bypass cache.
-            const response = await fetch(`/static/i18n/${lang}.json`, { cache: 'no-store' });
+            const response = await fetch(`/static/i18n/${lang}.json?v=oneclick-20261005-v5`, { cache: 'no-store' });
             if (response.ok) {
                 this.translations = await response.json();
             } else {
