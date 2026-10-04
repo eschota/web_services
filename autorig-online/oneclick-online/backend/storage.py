@@ -167,6 +167,13 @@ def clean(active_ids=(), *, force=False):
                     freed += size_of(d)
                     shutil.rmtree(d)
                     removed += 1
+    # Empty task directories consume inodes even after every cached file is evicted.
+    if CACHE.exists():
+        for d in sorted((p for p in CACHE.rglob('*') if p.is_dir() and not p.is_symlink()), key=lambda p: len(p.parts), reverse=True):
+            if any(task in str(d) for task in active_ids):
+                continue
+            with contextlib.suppress(OSError):
+                d.rmdir()
     result = {'deleted_count': removed, 'freed_bytes': freed, 'freed_gb': freed / 1024**3, 'cache_bytes': size_of(CACHE), 'free_bytes': shutil.disk_usage(ROOT).free}
     (ROOT / 'storage-status.json').write_text(json.dumps(result))
     return result

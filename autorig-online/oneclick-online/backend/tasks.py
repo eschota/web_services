@@ -5,9 +5,10 @@ import asyncio
 import uuid
 import re
 import httpx
+from storage import BoundedClient
 from datetime import datetime
 from typing import Optional, Tuple, List
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,7 +71,7 @@ async def _head_is_ready(url: str) -> bool:
     """Lightweight availability check for a single URL (HEAD 200)."""
     import httpx
     try:
-        async with httpx.AsyncClient() as client:
+        async with BoundedClient() as client:
             resp = await client.head(url, timeout=5.0, follow_redirects=True)
             return resp.status_code == 200
     except Exception:
@@ -359,8 +360,146 @@ def _collect_worker_files(payload: dict) -> list[dict]:
     return collected
 
 
+def _merge_product_entries(existing: list, discovered: list) -> list[dict]:
+    """Merge artifact metadata without dropping entries found by earlier polls."""
+    merged: list[dict] = []
+    positions: dict[tuple[str, str], int] = {}
+    for raw in list(existing or []) + list(discovered or []):
+        if not isinstance(raw, dict):
+            continue
+        entry = dict(raw)
+        key = (
+            str(entry.get("category") or "file").lower(),
+            str(entry.get("name") or entry.get("url") or "").lower(),
+        )
+        if key in positions:
+            current = merged[positions[key]]
+            current.update({k: v for k, v in entry.items() if v not in (None, "")})
+        else:
+            positions[key] = len(merged)
+            merged.append(entry)
+    return merged
+
+
+def _merge_urls(existing: list, discovered: list) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for raw in list(existing or []) + list(discovered or []):
+        url = str(raw or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            merged.append(url)
+    return merged
+
+
+async def _read_log_tail(client: BoundedClient, url: str) -> str:
+    """Read at most the final MiB while capping a server that ignores Range."""
+    tail_limit = 1024 * 1024
+    transfer_limit = 16 * 1024 * 1024
+    tail = bytearray()
+    transferred = 0
+    dropped_prefix = False
+    async with client.stream(
+        "GET",
+        url,
+        headers={"Range": "bytes=-1048576"},
+        timeout=10.0,
+    ) as response:
+        if response.status_code not in (200, 206):
+            return ""
+        content_range = str(response.headers.get("content-range") or "")
+        partial_start = response.status_code == 206 and not content_range.startswith("bytes 0-")
+        async for block in response.aiter_bytes(64 * 1024):
+            transferred += len(block)
+            if transferred > transfer_limit:
+                raise ValueError("Worker log transfer exceeded 16 MiB")
+            tail.extend(block)
+            if len(tail) > tail_limit:
+                del tail[:-tail_limit]
+                dropped_prefix = True
+    if (partial_start or dropped_prefix) and b"\n" in tail:
+        tail = tail.split(b"\n", 1)[1]
+    return bytes(tail).decode("utf-8", errors="replace")
+
+
+async def _native_occonvert_status(client: BoundedClient, task: Task) -> Optional[dict]:
+    """Return identity-checked native status, or None for transient/unknown state."""
+    if not task.worker_api or not task.worker_task_id:
+        return None
+    worker_base = get_worker_base_url(task.worker_api).rstrip("/")
+    status_url = (
+        f"{worker_base}/api-converter-glb/occonvert/status/"
+        f"{quote(str(task.worker_task_id), safe='')}"
+    )
+    try:
+        response = await client.get(status_url, timeout=8.0)
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return None
+        worker_backend_id = str(payload.get("backend_task_id") or "").strip()
+        if worker_backend_id and worker_backend_id != str(task.id):
+            print(
+                f"[Tasks] Ignoring worker status identity mismatch for {task.id}: "
+                f"worker_backend_task_id={worker_backend_id}"
+            )
+            return None
+        return payload
+    except (httpx.TimeoutException, httpx.HTTPError, ValueError):
+        return None
+
+
+async def _merge_terminal_worker_inventory(
+    client: BoundedClient,
+    task: Task,
+) -> None:
+    """Merge the final worker inventory so tail-only log reads cannot lose artifacts."""
+    if not task.guid or not task.worker_api:
+        return
+    worker_base = get_worker_base_url(task.worker_api).rstrip("/")
+    files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
+    try:
+        response = await client.get(files_url, timeout=8.0)
+        if response.status_code != 200:
+            return
+        payload = response.json()
+    except (httpx.TimeoutException, httpx.HTTPError, ValueError):
+        return
+
+    files = _collect_worker_files(payload)
+    public_source = task.output_log_url or task.progress_page or ""
+    public_parts = urlparse(public_source)
+    public_base = f"{public_parts.scheme}://{public_parts.netloc}" if public_parts.scheme and public_parts.netloc else worker_base
+    entries: list[dict] = []
+    urls: list[str] = []
+    for file_meta in files:
+        url = str(file_meta.get("url") or "").strip()
+        rel_path = str(file_meta.get("rel_path") or "").replace("\\", "/").lstrip("/")
+        if not url and rel_path:
+            url = f"{public_base}/converter/glb/{quote(str(task.guid), safe='')}/{quote(rel_path, safe='/')}"
+        if not url:
+            continue
+        name = str(file_meta.get("name") or rel_path or url.rsplit("/", 1)[-1])
+        folder = str(file_meta.get("folder") or file_meta.get("category") or "file")
+        category = folder.rsplit("/", 1)[-1] or "file"
+        entries.append({"category": category, "name": name, "url": url})
+        if "log" not in folder.lower() and not name.lower().endswith((".log", ".txt")):
+            urls.append(url)
+    if isinstance(payload, dict):
+        payload_urls = payload.get("output_urls") or []
+        if isinstance(payload_urls, dict):
+            payload_urls = list(payload_urls.values())
+        elif isinstance(payload_urls, str):
+            payload_urls = [payload_urls]
+        if isinstance(payload_urls, list):
+            urls.extend(value for value in payload_urls if isinstance(value, str))
+    task.product_entries = _merge_product_entries(task.product_entries, entries)
+    task.ready_urls = _merge_urls(task.ready_urls, urls)
+
+
 async def _resolve_detailed_failure_reason(
-    client: httpx.AsyncClient,
+    client: BoundedClient,
     task: Task,
     fail_reason: Optional[str],
 ) -> tuple[str, Optional[str]]:
@@ -382,14 +521,14 @@ async def _resolve_detailed_failure_reason(
         if files_resp.status_code != 200:
             return fallback, None
 
-        data = files_resp.json() if files_resp.content else {}
+        data = files_resp.json()
         files = _collect_worker_files(data)
         occonvert_logs = [
             f for f in files
             if str(f.get("name", "")).lower().startswith("occonvert_")
             and str(f.get("name", "")).lower().endswith(".log")
             and "logs" in str(f.get("folder", "")).lower()
-            and f.get("url")
+            and (f.get("url") or f.get("rel_path"))
         ]
         if not occonvert_logs:
             return fallback, None
@@ -397,13 +536,16 @@ async def _resolve_detailed_failure_reason(
         # Name includes timestamp, lexicographic sort gives latest.
         occonvert_logs.sort(key=lambda x: str(x.get("name", "")))
         latest = occonvert_logs[-1]
-        exporter_log_url = str(latest.get("url"))
+        exporter_log_url = str(latest.get("url") or "").strip()
+        if not exporter_log_url:
+            rel_path = str(latest.get("rel_path") or "").replace("\\", "/").lstrip("/")
+            exporter_log_url = (
+                f"{worker_base}/converter/glb/{quote(str(task.guid), safe='')}/"
+                f"{quote(rel_path, safe='/')}"
+            )
 
-        log_resp = await client.get(exporter_log_url, timeout=10.0)
-        if log_resp.status_code != 200:
-            return fallback, exporter_log_url
-
-        detailed = _extract_reason_from_occonvert_log(log_resp.text)
+        log_tail = await _read_log_tail(client, exporter_log_url)
+        detailed = _extract_reason_from_occonvert_log(log_tail)
         if detailed:
             return detailed, exporter_log_url
         return fallback, exporter_log_url
@@ -412,203 +554,159 @@ async def _resolve_detailed_failure_reason(
 
 
 async def update_task_progress(db: AsyncSession, task: Task) -> Task:
-    """
-    Check and update task progress by parsing worker logs.
-    Supports both legacy ``*_url = "..."`` lines and the new
-    ``PRODUCT\\t<category>\\t<name>\\t<url>`` format, as well as
-    ``TASK_COMPLETE`` / ``FAILURE: <reason>`` completion markers.
-    """
-    if task.status in ("done", "error") or not task.output_log_url:
+    """Update progress from bounded log tails and terminal state from OCConvert."""
+    if task.status in ("done", "error"):
         return task
 
     was_processing = task.status == "processing"
     failure_reason = None
 
     try:
-        async with httpx.AsyncClient() as client:
-            # 1. Fetch and parse log
-            log_resp = await client.get(task.output_log_url, timeout=10.0)
-            if log_resp.status_code == 200:
-                log_text = log_resp.text
+        async with BoundedClient() as client:
+            native = await _native_occonvert_status(client, task)
+            native_state = str((native or {}).get("status") or "").strip().lower()
+            old_progress = int(task.ready_count or 0)
+            old_ready_count = len(task.ready_urls or [])
+            old_product_count = len(task.product_entries or [])
+            progress_pct = max(2, min(old_progress, 99))
+            log_text = ""
 
-                # ----- Legacy URL extraction -----
-                legacy_pattern = re.compile(
-                    r'^(renders|textures|meshes)_url\s*=\s*"(https?://[^"]+)"',
-                    re.MULTILINE,
+            if task.output_log_url:
+                try:
+                    log_text = await _read_log_tail(client, task.output_log_url)
+                except (httpx.TimeoutException, httpx.HTTPError, ValueError):
+                    log_text = ""
+
+            legacy_matches = re.findall(
+                r'^(renders|textures|meshes)_url\s*=\s*"(https?://[^"]+)"',
+                log_text,
+                re.MULTILINE,
+            )
+            new_urls = [url for _, url in legacy_matches]
+            discovered_products = _parse_product_lines(log_text)
+            task.product_entries = _merge_product_entries(
+                task.product_entries,
+                discovered_products,
+            )
+
+            product_url_categories = {
+                "renders", "textures", "meshes", "unity_renders", "unity_video",
+                "unity_package", "unity_build_zip", "unity_android_apk",
+                "unity_renders_oc_android_apk", "unity_quest_apk",
+                "unity_renders_oc_vr", "unity_web_build_folder",
+                "unity_renders_oc_webbuild", "unity_renders_oc_hdrp",
+                "unity_hdrp_video", "unity_hdrp_build_zip", "unity_hdrp_package",
+            }
+            new_urls.extend(
+                str(entry.get("url"))
+                for entry in discovered_products
+                if entry.get("category") in product_url_categories and entry.get("url")
+            )
+            task.ready_urls = _merge_urls(task.ready_urls, new_urls)
+
+            render_count = sum(1 for kind, _ in legacy_matches if kind == "renders")
+            render_count += sum(
+                1 for entry in task.product_entries or []
+                if entry.get("category") == "renders"
+            )
+            if render_count:
+                progress_pct = max(progress_pct, min(2 + render_count * 10, 50))
+
+            phase_categories = {
+                str(entry.get("category") or "") for entry in task.product_entries or []
+            }
+            urp_renders = sum(
+                1 for entry in task.product_entries or []
+                if entry.get("category") == "unity_renders"
+            )
+            hdrp_renders = sum(
+                1 for entry in task.product_entries or []
+                if entry.get("category") == "unity_renders_oc_hdrp"
+            )
+            if urp_renders:
+                progress_pct = max(progress_pct, min(20 + urp_renders * 3, 35))
+            if "unity_video" in phase_categories:
+                progress_pct = max(progress_pct, 40)
+            if "unity_android_apk" in phase_categories:
+                progress_pct = max(progress_pct, 55)
+            if "unity_quest_apk" in phase_categories:
+                progress_pct = max(progress_pct, 70)
+            if "unity_web_build_folder" in phase_categories:
+                progress_pct = max(progress_pct, 80)
+            if hdrp_renders:
+                progress_pct = max(progress_pct, min(80 + hdrp_renders * 3, 95))
+            if "unity_hdrp_video" in phase_categories:
+                progress_pct = max(progress_pct, 98)
+
+            # Max export completion is progress only; OCConvert owns terminal state.
+            if "Export completed" in log_text:
+                progress_pct = max(progress_pct, 50)
+                summary_match = re.search(
+                    r'--- EXPORT SUMMARY.*?---(.*?)------------------------------',
+                    log_text,
+                    re.DOTALL,
                 )
-                legacy_matches = legacy_pattern.findall(log_text)
+                if summary_match:
+                    task.export_summary = summary_match.group(1).strip()
 
-                new_urls = []
-                render_count = 0
-                for type_group, url in legacy_matches:
-                    if url not in task.ready_urls:
-                        new_urls.append(url)
-                    if type_group == "renders":
-                        render_count += 1
+            native_output_url = str((native or {}).get("output_url") or "").strip()
+            if native_output_url and not native_output_url.endswith("/"):
+                task.ready_urls = _merge_urls(task.ready_urls, [native_output_url])
 
-                # ----- PRODUCT line extraction -----
-                product_entries = _parse_product_lines(log_text)
-                task.product_entries = product_entries
+            if native_state in {"completed", "failed"}:
+                await _merge_terminal_worker_inventory(client, task)
 
-                # Collect URLs from PRODUCT entries into ready_urls
-                product_url_categories = {
-                    "renders", "textures", "meshes",
-                    # Phase 1: URP
-                    "unity_renders", "unity_video",
-                    "unity_package", "unity_build_zip",
-                    # Phase 2: Android
-                    "unity_android_apk", "unity_renders_oc_android_apk",
-                    # Phase 3: Quest VR
-                    "unity_quest_apk", "unity_renders_oc_vr",
-                    # Phase 4: WebGL
-                    "unity_web_build_folder", "unity_renders_oc_webbuild",
-                    # Phase 5: HDRP
-                    "unity_renders_oc_hdrp", "unity_hdrp_video",
-                    "unity_hdrp_build_zip", "unity_hdrp_package",
-                }
-                phase_counts = {
-                    "unity_renders": 0,
-                    "unity_video": False,
-                    "unity_android_apk": False,
-                    "unity_quest_apk": False,
-                    "unity_web_build_folder": False,
-                    "unity_renders_oc_hdrp": 0,
-                    "unity_hdrp_video": False,
-                }
-                for pe in product_entries:
-                    cat = pe.get("category", "")
-                    url = pe.get("url", "")
-                    if cat in product_url_categories and url and url not in task.ready_urls and url not in new_urls:
-                        new_urls.append(url)
-                    if cat == "renders":
-                        render_count += 1
-                    if cat == "unity_renders":
-                        phase_counts["unity_renders"] += 1
-                    if cat == "unity_renders_oc_hdrp":
-                        phase_counts["unity_renders_oc_hdrp"] += 1
-                    if cat in ("unity_video", "unity_android_apk", "unity_quest_apk",
-                               "unity_web_build_folder", "unity_hdrp_video"):
-                        phase_counts[cat] = True
-
-                if new_urls:
-                    current_ready = list(task.ready_urls)
-                    current_ready.extend(new_urls)
-                    task.ready_urls = current_ready
-                    task.last_progress_at = datetime.utcnow()
-
-                # ----- Progress calculation -----
-                # 3ds Max stage: 0-50%   (10% per render, capped at 50)
-                # Unity stage:   51-99%  (60 base + 5 per unity render, capped at 95)
-                progress_pct = 2
-                if render_count > 0:
-                    progress_pct = min(2 + render_count * 10, 50)
-
-                # JSON availability pushes 3ds Max stage to 50%
-                if task.output_json_url:
-                    try:
-                        json_check = await client.head(task.output_json_url, timeout=5.0)
-                        if json_check.status_code == 200:
-                            progress_pct = max(progress_pct, 50)
-                    except Exception:
-                        pass
-
-                # "Export completed" = 3ds Max done → 50%
-                if "Export completed" in log_text:
-                    progress_pct = max(progress_pct, 50)
-                    # Parse Summary
-                    summary_match = re.search(
-                        r'--- EXPORT SUMMARY.*?---(.*?)------------------------------',
-                        log_text,
-                        re.DOTALL,
+            if native_state == "completed":
+                task.status = "done"
+                progress_pct = 100
+                task.error_message = None
+            elif native_state == "failed":
+                log_failure = re.search(r'^FAILURE:\s*(.+)', log_text, re.MULTILINE)
+                raw_reason = str((native or {}).get("error") or "").strip()
+                if not raw_reason and log_failure:
+                    raw_reason = log_failure.group(1).strip()
+                failure_reason, exporter_error_log_url = await _resolve_detailed_failure_reason(
+                    client,
+                    task,
+                    raw_reason,
+                )
+                if exporter_error_log_url:
+                    task.product_entries = _merge_product_entries(
+                        task.product_entries,
+                        [{
+                            "category": "error_log",
+                            "name": "occonvert.log",
+                            "url": exporter_error_log_url,
+                        }],
                     )
-                    if summary_match:
-                        task.export_summary = summary_match.group(1).strip()
-                    else:
-                        lines = log_text.splitlines()
-                        summary_lines = []
-                        for line in reversed(lines):
-                            if "Export completed" in line:
-                                continue
-                            if "Time:" in line or "Processed" in line or "Total" in line or "Unwrapped" in line:
-                                summary_lines.append(line)
-                            if len(summary_lines) >= 5:
-                                break
-                        task.export_summary = "\n".join(reversed(summary_lines))
+                task.status = "error"
+                task.error_message = failure_reason
+            else:
+                task.status = "processing"
+                progress_pct = min(progress_pct, 99)
 
-                # Multi-phase Unity progress (5 phases)
-                # Phase 1 URP: 20-40%
-                urp_renders = phase_counts["unity_renders"]
-                if urp_renders > 0:
-                    progress_pct = max(progress_pct, min(20 + urp_renders * 3, 35))
-                if phase_counts["unity_video"]:
-                    progress_pct = max(progress_pct, 40)
-                # Phase 2 Android: 40-55%
-                if phase_counts["unity_android_apk"]:
-                    progress_pct = max(progress_pct, 55)
-                # Phase 3 Quest VR: 55-70%
-                if phase_counts["unity_quest_apk"]:
-                    progress_pct = max(progress_pct, 70)
-                # Phase 4 WebGL: 70-80%
-                if phase_counts["unity_web_build_folder"]:
-                    progress_pct = max(progress_pct, 80)
-                # Phase 5 HDRP: 80-98%
-                hdrp_renders = phase_counts["unity_renders_oc_hdrp"]
-                if hdrp_renders > 0:
-                    progress_pct = max(progress_pct, min(80 + hdrp_renders * 3, 95))
-                if phase_counts["unity_hdrp_video"]:
-                    progress_pct = max(progress_pct, 98)
+            for category in ("unity_hdrp_video", "unity_video"):
+                video_entry = next(
+                    (
+                        entry for entry in task.product_entries or []
+                        if entry.get("category") == category and entry.get("url")
+                    ),
+                    None,
+                )
+                if video_entry:
+                    task.video_url = video_entry["url"]
+                    task.video_ready = True
+                    break
 
-                # ----- Completion markers -----
-                # FAILURE takes priority: if any stage failed the task is an error,
-                # even if TASK_COMPLETE also appears in the log.
-                fail_match = re.search(r'^FAILURE:\s*(.+)', log_text, re.MULTILINE)
-                if fail_match:
-                    raw_fail_reason = fail_match.group(1).strip()
-                    failure_reason, exporter_error_log_url = await _resolve_detailed_failure_reason(
-                        client,
-                        task,
-                        raw_fail_reason,
-                    )
-                    if exporter_error_log_url:
-                        has_error_log_entry = any(
-                            e.get("category") == "error_log" for e in product_entries
-                        )
-                        if not has_error_log_entry:
-                            product_entries.append({
-                                "category": "error_log",
-                                "name": "occonvert.log",
-                                "url": exporter_error_log_url,
-                            })
-                            task.product_entries = product_entries
-                    task.status = "error"
-                    task.error_message = failure_reason
-                    # Still extract videos for partial results
-                    for cat in ("unity_hdrp_video", "unity_video"):
-                        for pe in product_entries:
-                            if pe.get("category") == cat and pe.get("url"):
-                                task.video_url = pe["url"]
-                                task.video_ready = True
-                                break
-                        if task.video_ready:
-                            break
-                elif "TASK_COMPLETE" in log_text:
-                    task.status = "done"
-                    progress_pct = 100
-                    for cat in ("unity_hdrp_video", "unity_video"):
-                        for pe in product_entries:
-                            if pe.get("category") == cat and pe.get("url"):
-                                task.video_url = pe["url"]
-                                task.video_ready = True
-                                break
-                        if task.video_ready:
-                            break
-                elif "Export completed" in log_text and not product_entries:
-                    task.status = "done"
-                    progress_pct = max(progress_pct, 50)
-
-                task.total_count = 100
-                task.ready_count = progress_pct
-                task.updated_at = datetime.utcnow()
+            if (
+                progress_pct > old_progress
+                or len(task.ready_urls or []) > old_ready_count
+                or len(task.product_entries or []) > old_product_count
+            ):
+                task.last_progress_at = datetime.utcnow()
+            task.total_count = 100
+            task.ready_count = progress_pct
+            task.updated_at = datetime.utcnow()
 
     except Exception as e:
         print(f"[Tasks] Error updating progress for task {task.id}: {e}")

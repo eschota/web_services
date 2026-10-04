@@ -2184,6 +2184,9 @@ async def api_restart_task(
     if not (is_owner or is_admin):
         raise HTTPException(status_code=403, detail="Not authorized to restart this task")
 
+    if task.status not in {"done", "error"}:
+        raise HTTPException(status_code=409, detail="This conversion is still running. Wait for completion before restarting to avoid leaving a worker job behind.")
+
     # Age gate: 1 minute
     task_age = datetime.utcnow() - task.created_at
     min_age = timedelta(minutes=1)

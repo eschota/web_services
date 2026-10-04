@@ -80,6 +80,26 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await client.get('https://worker.test/log')
 
+    async def test_quota_rejection_does_not_corrupt_reservation_counter(self):
+        class Client(storage.BoundedClient):
+            def __init__(self, **kwargs):
+                super().__init__(transport=httpx.MockTransport(lambda _:httpx.Response(200,headers={'content-length':'1024'},content=b'x'*1024)), **kwargs)
+        with patch.object(storage,'MAX_CACHE',10), patch.object(storage,'BoundedClient',Client):
+            with self.assertRaises(OSError):
+                await storage.download('https://worker.test/a',storage.CACHE/'a.zip')
+        self.assertEqual(storage.RESERVED,0)
+        self.assertEqual(len(storage.INFLIGHT),0)
+
+    async def test_disk_backed_upload_reservations_block_overcommit(self):
+        import json
+        temp=self.root/'uploads'/'temp'/'session'
+        temp.mkdir(parents=True)
+        (temp/'metadata.json').write_text(json.dumps({'total_size':1000}))
+        with patch.object(storage,'MAX_UPLOADS',2500):
+            with self.assertRaises(OSError):
+                storage.upload_admission(1000)
+        self.assertTrue((temp/'metadata.json').exists())
+
 
 if __name__=='__main__':
     unittest.main()

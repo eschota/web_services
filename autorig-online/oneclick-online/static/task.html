@@ -1323,7 +1323,7 @@
                     <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
                 </div>
                 <div class="progress-text">
-                    <span><span id="ready-count">0</span> / <span id="total-count">0</span> <span data-i18n="task_files_ready">files ready</span></span>
+                    <span><span id="ready-count">0</span><span id="total-count" hidden></span> <span data-i18n="task_files_ready">files ready</span></span>
                     <span id="eta"></span>
                 </div>
             </div>
@@ -2832,8 +2832,8 @@
                     const stageEl = document.getElementById('progress-stage-label');
                     if (stageEl) stageEl.textContent = initialStage;
                 }
-                document.getElementById('ready-count').textContent = task.ready_count;
-                document.getElementById('total-count').textContent = task.total_count;
+                document.getElementById('ready-count').textContent = new Set([...(task.ready_urls || []), ...(task.output_urls || [])].filter(url => url && !url.endsWith('/'))).size;
+                document.getElementById('total-count').textContent = '';
 
                 // Tooltip: worker_api + guid on hover for debugging (admin only; hidden for public)
                 const pc = document.getElementById('progress-container');
