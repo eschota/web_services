@@ -833,6 +833,16 @@ async def api_create_task(
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
+
+    if source == "link":
+        from archive_fetch import fetch
+        try:
+            upload_token = await fetch(final_url, MAX_UPLOAD_SIZE_MB * 1024**2)
+            final_url = f"{APP_URL}/u/{upload_token}/scene.zip"
+        except OSError:
+            raise HTTPException(status_code=507, detail="Insufficient upload storage; retry later")
+        except (ValueError, httpx.HTTPError):
+            raise HTTPException(status_code=400, detail="Use a publicly accessible HTTPS link that downloads a ZIP archive")
     
     # Create task
     task, error = await create_conversion_task(
@@ -6696,6 +6706,10 @@ if __name__ == "__main__":
 async def health():
     from storage import ROOT, CACHE, size_of, INFLIGHT, _LOCKS
     return {"status": "ok", "cache_bytes": await asyncio.to_thread(size_of, CACHE), "uploads_bytes": await asyncio.to_thread(size_of, ROOT / "uploads"), "free_bytes": shutil.disk_usage(ROOT).free, "inflight_downloads": len(INFLIGHT), "cache_lock_slots": len(_LOCKS), "upload_session_locks": len(_UPLOAD_SESSION_LOCKS)}
+
+@app.get("/developers")
+async def developers():
+    return FileResponse(STATIC_DIR / "developers.html")
 
 from shared_login import install as install_shared_login
 install_shared_login(app)
