@@ -7,6 +7,7 @@ import asyncio
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 import random
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -140,6 +141,9 @@ async def send_task_to_worker(
         task_type: Type of task (t_pose, etc.)
         transform_params: Optional dict with local_position, local_rotation, local_scale arrays
     """
+    parsed = urlsplit(input_url)
+    if parsed.hostname in {"oneclick3d.xyz", "www.oneclick3d.xyz"} and parsed.path.startswith("/u/"):
+        input_url = urlunsplit(("https", "autorig.online", "/oneclick-input/" + parsed.path[3:], "", ""))
     async with httpx.AsyncClient() as client:
         try:
             # Standard payload for all file types - workers handle GLB/FBX/OBJ
@@ -147,7 +151,7 @@ async def send_task_to_worker(
                 "input_url": input_url,
                 "type": task_type,
                 "mode": "full",
-                "backend_task_id": "oneclick:" + backend_task_id if backend_task_id else None,
+                "backend_task_id": backend_task_id,
                 "queue_class": "interactive",
                 "workload_class": "autorig_interactive"
             }

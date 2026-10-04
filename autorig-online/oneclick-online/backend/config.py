@@ -61,7 +61,7 @@ USER_BONUS_AFTER_LOGIN = 27  # Additional credits after login (30 - max anon use
 # =============================================================================
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/srv/oneclick/data/uploads")
 UPLOAD_TTL_HOURS = 24
-MAX_UPLOAD_SIZE_MB = max(1, int(os.getenv("MAX_UPLOAD_SIZE_MB", "100")))
+MAX_UPLOAD_SIZE_MB = max(1, int(os.getenv("MAX_UPLOAD_SIZE_MB", "10240")))
 
 # =============================================================================
 # Viewer Defaults (3D viewer settings)

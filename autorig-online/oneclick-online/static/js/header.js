@@ -50,8 +50,7 @@ function renderSiteHeader(options = {}) {
         <div class="container">
             <div class="header-inner">
                 <a href="/" class="logo">
-                    <img src="/static/images/logo/oneclick-logo.png" 
-                         srcset="/static/images/logo/oneclick-logo.png 1x, /static/images/logo/oneclick-logo@2x.png 2x"
+                    <img src="/static/images/logo/oneclick-logo.png"
                          alt="Autorig.Online" 
                          class="logo-img" 
                          height="120">
