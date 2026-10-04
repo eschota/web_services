@@ -51,9 +51,10 @@ function renderSiteHeader(options = {}) {
             <div class="header-inner">
                 <a href="/" class="logo">
                     <img src="/static/images/logo/oneclick-logo.png"
-                         alt="Autorig.Online" 
+                         alt="OneClick3D converter" 
                          class="logo-img" 
-                         height="120">
+                         width="90"
+                         height="60">
                 </a>
 
                 ${navHtml}
@@ -79,7 +80,7 @@ function renderSiteHeader(options = {}) {
                     <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
                     
                     <!-- Login Button -->
-                    <a href="/auth/login" class="btn btn-google" id="login-btn">
+                    <a href="/auth/login" class="btn btn-google" id="login-btn" aria-label="Sign in with Google" title="Sign in with Google">
                         ${GOOGLE_ICON_SVG}
                         <span data-i18n="btn_login">Sign in with Google</span>
                     </a>

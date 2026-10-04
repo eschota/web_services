@@ -3433,15 +3433,15 @@ async def api_admin_restart_incomplete_tasks(
 # =============================================================================
 # Upload Serving
 # =============================================================================
-@app.get("/u/{token}/{filename}")
-async def serve_upload(token: str, filename: str):
+@app.api_route("/u/{token}/{filename}", methods=["GET", "HEAD"])
+async def serve_upload(token: str, filename: str, request: Request):
     """Serve uploaded files"""
     token = _validated_uuid(token, "token")
     filename = _validated_zip_filename(filename)
     filepath = os.path.join(UPLOAD_DIR, token, filename)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(filepath)
+    return FileResponse(filepath, method=request.method)
 
 
 # =============================================================================
