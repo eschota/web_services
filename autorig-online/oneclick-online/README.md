@@ -103,3 +103,24 @@ Runtime receipts and screenshots remain under `R:/autorig/.work/oneclick-discove
 The installed SDK consent receipt supersedes the earlier raw-XML license hash.
 The correct sdkmanager-derived accepted hash is
 `24333f8a63b6825ea9c5514f83c2829b004d1fee`.
+
+Final application release: `3d183437`. The initial worker canary is now natively
+`Completed`; its actual 53-file inventory is preserved on the site at
+`/task?id=40cb0323-0663-4d4d-abc9-b0fabe6367b9`. Max, URP and HDRP/Windows outputs
+exist. This does not verify Android/Quest/WebGL, which failed on F2 due to missing
+modules. The separate restarted attempt remains in the normal worker queue.
+
+All 53 discovered files were downloaded through the existing worker SSH tunnel
+with zero cache errors: 154,482,339 cached bytes. Repeated catalog access took
+6.6 ms and did not grow the cache. URP/HDRP `cam1.png` have distinct URL-derived
+cache keys and distinct SHA-256 values; both preview HTTP responses match their
+own cached bytes. The Windows URP ZIP (36,244,852 bytes, 164 entries) and HDRP ZIP
+(68,949,149 bytes, 163 entries) pass CRC validation. Thirteen regression tests pass.
+Filesystem page cache contributes to cgroup memory; warmed-process RSS was about
+137 MiB, below the configured limits. This is a measured finite run, not an
+absolute guarantee against every future memory/disk leak.
+
+Production cleanup removed approximately 719 MB of owned release/staging files
+without deleting task originals, the current release or a rollback release.
+Automatic tool policy rejected deletion of four local staging archives; they
+remain inside the repository-owned `.work/oneclick-discovery` directory.
