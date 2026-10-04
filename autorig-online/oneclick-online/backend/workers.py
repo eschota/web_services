@@ -80,15 +80,8 @@ def extract_guid(text: str) -> Optional[str]:
 async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerInfo:
     """Get load/status from a single worker"""
     try:
-        response = await client.get(worker_url, timeout=5.0)
-        if response.status_code == 200:
-            data = response.json()
-            # Worker may return load info in different formats
-            load = data.get("load", data.get("queue_size", 0))
-            if isinstance(load, (int, float)):
-                return WorkerInfo(url=worker_url, available=True, load=float(load))
-            return WorkerInfo(url=worker_url, available=True, load=0.0)
-        return WorkerInfo(url=worker_url, available=False, error=f"HTTP {response.status_code}")
+        status = await get_worker_queue_status(worker_url, client)
+        return WorkerInfo(url=worker_url, available=status.available, load=float(status.total_active + status.total_pending + status.queue_size), error=status.error)
     except Exception as e:
         return WorkerInfo(url=worker_url, available=False, error=str(e))
 
@@ -382,9 +375,12 @@ async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) ->
         response = await client.get(worker_url, timeout=5.0)
         if response.status_code == 200:
             data = response.json()
+            readiness = await client.get(worker_url.rstrip('/') + '/server-status', timeout=5.0)
+            flags = readiness.json() if readiness.status_code == 200 else {}
+            admitted = readiness.status_code == 200 and not flags.get('maintenance', False) and flags.get('accepting_autorig', True)
             return WorkerQueueStatus(
                 url=worker_url,
-                available=True,
+                available=bool(admitted),
                 total_active=data.get("total_active", 0),
                 total_pending=data.get("total_pending", 0),
                 queue_size=data.get("queue_size", 0),
