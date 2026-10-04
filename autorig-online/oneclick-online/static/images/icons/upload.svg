@@ -1,0 +1,12 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="uploadGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Cloud -->
+  <path d="M45 25 C45 20 41 16 36 16 C33 16 30 18 29 21 C27 20 24 20 22 22 C20 24 20 27 21 29 C18 30 16 33 16 36 C16 41 20 45 25 45 L39 45 C43 45 47 41 47 37 C47 33 43 29 39 29 C38 25 35 22 31 22 C28 22 25 25 25 28 C23 28 21 30 21 32 C21 34 23 36 25 36 L25 25 Z" fill="url(#uploadGradient)" opacity="0.3"/>
+  <path d="M32 20 L32 40 M24 28 L32 20 L40 28" stroke="url(#uploadGradient)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
+

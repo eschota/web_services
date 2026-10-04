@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Конвертация 3ds Max + V-Ray/Corona в Unity | WebGL, VR, APK, EXE</title>
+    <meta name="description" content="Автоматическая конвертация сцен 3ds Max с V-Ray или Corona в realtime-проекты Unity: WebGL, VR-прогулки, Android APK и Windows EXE.">
+    <meta name="keywords" content="3ds max в unity, v-ray в unity, corona в unity, archviz webgl, unity vr walkthrough">
+    <link rel="canonical" href="https://3dsmaxtounity.com/ru/">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/">
+    <meta property="og:title" content="Автоматическая конвертация 3ds Max + V-Ray/Corona в Unity">
+    <meta property="og:description" content="Загрузите ZIP-сцену и получите WebGL, VR, Android APK и EXE автоматически.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://3dsmaxtounity.com/ru/">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/ru/" aria-current="page">Главная</a>
+                <a href="/ru/unity-hdrp-workflow">HDRP workflow</a>
+                <a href="/ru/corona-to-unity">Corona в Unity</a>
+                <a href="/ru/webgl-from-3ds-max">WebGL</a>
+                <a href="/ru/unity-vr-build">VR build</a>
+                <a href="/ru/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero reveal">
+                <p class="eyebrow">Realtime-пайплайн для Archviz</p>
+                <h1>Превратите сцены <span>3ds Max + V-Ray/Corona</span> в интерактивный Unity-опыт</h1>
+                <p class="lead">Страница для студий и независимых художников, которым нужно не только показывать рендеры, но и давать клиенту возможность ходить по сцене, сравнивать варианты и принимать решения в контексте.</p>
+                <p class="lead">Одна ZIP-загрузка может дать несколько форматов выдачи: браузерный WebGL, desktop EXE, Android APK и VR-сборку для иммерсивных презентаций.</p>
+                <div class="hero-cta">
+                    <button class="btn btn-primary" id="hero-upload-trigger" type="button">Загрузить ZIP-сцену</button>
+                    <a class="btn btn-secondary" href="/special-build/">Запустить проект в браузере</a>
+                    <a class="text-link" href="https://oneclick3d.xyz/" target="_blank" rel="noopener noreferrer">Открыть основной сервис</a>
+                </div>
+                <p class="hint">Управление демо: <strong>WASD + мышь</strong></p>
+            </section>
+            <section class="card reveal">
+                <h2>Почему команды уходят от только offline-выдачи</h2>
+                <div class="icon-grid">
+                    <article class="icon-item"><h3>Быстрее согласования</h3><p>Когда клиент может свободно перемещаться по проекту, правок становится меньше, а решения принимаются быстрее.</p></article>
+                    <article class="icon-item"><h3>Совместимо с вашим стеком</h3><p>Пайплайн рассчитан на продакшен-сцены из <strong>3ds Max</strong> с <strong>V-Ray</strong> или <strong>Corona</strong>.</p></article>
+                    <article class="icon-item"><h3>Один источник - много форматов</h3><p>Из одной сцены вы получаете WebGL, VR, Android APK и Windows EXE без повторной ручной сборки логики презентации.</p></article>
+                </div>
+            </section>
+            <section class="card reveal outputs">
+                <h2>Что вы получаете после одной загрузки</h2>
+                <ul>
+                    <li>WebGL для презентаций в браузере</li>
+                    <li>VR-версию для иммерсивного согласования</li>
+                    <li>Android APK для мобильного показа</li>
+                    <li>Windows EXE для офлайн-демо</li>
+                </ul>
+                <div class="output-cta">
+                    <a class="btn btn-primary" href="/special-build/">Открыть проект в браузере</a>
+                    <span>Прогулка по сцене: WASD + мышь</span>
+                </div>
+            </section>
+            <section class="card reveal upload-card" id="upload-block">
+                <h2>Загрузите сцену и создайте задачу конвертации</h2>
+                <p class="upload-intro">Поддерживаемый вход: <strong>.zip</strong> со сценой 3ds Max и подключенными текстурами.</p>
+                <input id="scene-file-input" type="file" accept=".zip" hidden>
+                <div class="upload-panel" id="upload-panel"><button class="btn btn-primary" type="button" id="upload-pick-btn">Выбрать ZIP-файл</button></div>
+                <p id="upload-file-meta" class="upload-meta">Файл не выбран</p>
+                <div class="progress-wrap" id="upload-progress-wrap">
+                    <div class="progress-bar"><div class="progress-fill" id="upload-progress-fill"></div></div>
+                    <div class="progress-stats">
+                        <span id="upload-progress-percent">0%</span>
+                        <span id="upload-progress-speed">0 MB/s</span>
+                        <span id="upload-progress-eta">Ожидание</span>
+                    </div>
+                    <p id="upload-progress-chunks" class="upload-meta">0 / 0 частей</p>
+                </div>
+                <p id="upload-status" class="upload-status">Готово</p>
+            </section>
+        </main>
+        <footer>
+            <p>Автоматическая конвертация 3ds Max + V-Ray/Corona в Unity для Archviz-команд.</p>
+            <p>© 3dsmaxtounity.com</p>
+        </footer>
+    </div>
+    <script src="/static/sites/unity/landing.js"></script>
+</body>
+</html>

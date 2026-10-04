@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>V-Ray 到 Unreal Engine 5 | 3ds Max 场景转换流程</title>
+  <meta name="description" content="3ds Max V-Ray 场景转换到 Unreal 的实用指南：材质优先级、质量检查点与稳定的 UE5 交付流程。">
+  <meta name="keywords" content="vray 转 unreal, 3ds max vray ue5, ue5 建筑可视化材质, 实时转换">
+  <link rel="canonical" href="https://3dsmaxtounreal.com/zh-cn/convert-vray-to-unreal">
+  <link rel="alternate" hreflang="en" href="https://3dsmaxtounreal.com/convert-vray-to-unreal">
+  <link rel="alternate" hreflang="ru" href="https://3dsmaxtounreal.com/ru/convert-vray-to-unreal">
+  <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounreal.com/zh-cn/convert-vray-to-unreal">
+  <link rel="alternate" hreflang="es" href="https://3dsmaxtounreal.com/es/convert-vray-to-unreal">
+  <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounreal.com/convert-vray-to-unreal">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://3dsmaxtounreal.com/zh-cn/convert-vray-to-unreal">
+  <meta property="og:image" content="https://3dsmaxtounreal.com/og-image.svg">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+<div class="container">
+  <header class="minimal-nav">
+    <div class="brandmark">3dsmaxtounreal.com</div>
+    <nav class="inline-nav">
+      <a href="/zh-cn/">首页</a>
+      <a href="/zh-cn/vr-archviz-unreal">VR 建筑可视化</a>
+      <a href="/zh-cn/convert-vray-to-unreal" aria-current="page">V-Ray</a>
+      <a href="/zh-cn/corona-to-unreal">Corona</a>
+      <a href="/zh-cn/unreal-lighting-setup">灯光</a>
+      <a href="/zh-cn/faq">FAQ</a>
+    </nav>
+  </header>
+  <main>
+    <section class="hero reveal">
+      <div>
+        <p class="eyebrow">V-Ray 转换策略</p>
+        <h1>将 V-Ray 场景转换到 <span>Unreal Engine 5</span> 并保持稳定质量</h1>
+        <p class="lead">V-Ray 场景常包含精细反射、分层材质与复杂光照关系。可靠转换的关键是在实时约束下尽量保留原始视觉意图。</p>
+      </div>
+    </section>
+    <section class="card reveal">
+      <h2>转换前建议锁定</h2>
+      <div class="steps-grid">
+        <article class="step"><h3>材质分组</h3><p>上传前先区分核心材质和次要表面，减少后续混乱重映射。</p></article>
+        <article class="step"><h3>贴图一致性</h3><p>统一路径与命名，避免丢图和跨场景冲突。</p></article>
+        <article class="step"><h3>关键镜头优先级</h3><p>提前标记 QA 重点视角，优先保障业务关键展示区。</p></article>
+      </div>
+      <p>继续阅读：<a href="/zh-cn/unreal-lighting-setup">Unreal 灯光设置</a>、<a href="/zh-cn/vr-archviz-unreal">VR 指南</a>、<a href="/zh-cn/faq">FAQ</a>。</p>
+    </section>
+  </main>
+  <footer>面向 archviz 团队的 UE5 V-Ray 转换实践。</footer>
+</div>
+</body>
+</html>

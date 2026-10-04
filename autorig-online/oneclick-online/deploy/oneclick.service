@@ -1,0 +1,29 @@
+[Unit]
+Description=OneClick 3ds Max Converter
+After=network-online.target autorig-storage-tunnels.service
+Wants=network-online.target
+
+[Service]
+User=oneclick
+Group=oneclick
+WorkingDirectory=/srv/oneclick/current/backend
+EnvironmentFile=/srv/oneclick/secrets/backend.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=TMPDIR=/srv/oneclick/data/spool
+ExecStart=/srv/oneclick/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8244 --workers 1 --no-access-log --limit-concurrency 24 --timeout-graceful-shutdown 5
+Restart=on-failure
+RestartSec=5
+MemoryHigh=600M
+MemoryMax=900M
+TasksMax=96
+CPUQuota=150%
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/oneclick/data
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

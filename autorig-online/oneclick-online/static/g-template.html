@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 3ds Max to Unity & Unreal Engine Converter | OneClick3D</title>
+    <meta name="description" content="Instantly convert 3ds Max scenes (V-Ray/Corona) into Unity HDRP, Unreal Engine projects, VR walkthroughs, and WebGL. Perfect for archviz.">
+    <meta name="keywords" content="fantasy warrior rigging example, auto rig character result, before after rigging, professional character rigging demo">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="🚀 3ds Max to Unity & Unreal Engine Converter">
+    <meta property="og:description" content="Instantly convert 3ds Max scenes (V-Ray/Corona) into Unity HDRP, Unreal Engine projects, VR walkthroughs, and WebGL. Perfect for archviz.">
+    <meta property="og:type" content="video.other">
+    <meta property="og:url" content="https://oneclick3d.xyz/g/fantasy-warrior">
+    <meta property="og:image" content="https://oneclick3d.xyz/static/gallery/fantasy-warrior-result.jpg">
+    <meta property="og:video" content="https://oneclick3d.xyz/api/video/fantasy-warrior-id">
+    <meta property="og:video:type" content="video/mp4">
+
+    <!-- Schema.org VideoObject markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        "name": "Fantasy Warrior Auto Rigging Result",
+        "description": "Complete auto rigging demonstration showing before and after results with professional animations",
+        "thumbnailUrl": "https://oneclick3d.xyz/static/gallery/fantasy-warrior-thumb.jpg",
+        "uploadDate": "2024-12-20",
+        "duration": "PT45S",
+        "contentUrl": "https://oneclick3d.xyz/api/video/fantasy-warrior-id",
+        "embedUrl": "https://oneclick3d.xyz/g/fantasy-warrior",
+        "interactionStatistic": {
+            "@type": "InteractionCounter",
+            "interactionType": "https://schema.org/WatchAction",
+            "userInteractionCount": 150
+        },
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": "https://oneclick3d.xyz"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Gallery",
+                    "item": "https://oneclick3d.xyz/gallery"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": "Fantasy Warrior",
+                    "item": "https://oneclick3d.xyz/g/fantasy-warrior"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z0WYEBKD2G"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-Z0WYEBKD2G');
+    </script>
+</head>
+<body>
+        <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/oneclick-logo.png" 
+                         srcset="/static/images/logo/oneclick-logo.png 1x, /static/images/logo/oneclick-logo@2x.png 2x"
+                         alt="OneClick3D - 3ds Max to Unity and Unreal Converter" 
+                         class="logo-img" 
+                         height="120">
+                </a>
+
+                <nav class="nav">
+                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                    <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
+                    </nav>
+                
+                <div class="header-actions">
+                    <!-- Credits Badge -->
+                    <div class="credits-badge">
+                        <span id="credits-label" data-i18n="credits_free">Free conversions left</span>
+                        <span class="count" id="credits-count">3</span>
+                    </div>
+                    
+                    <!-- Language Selector -->
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                <path d="M3 4.5L6 7.5L9 4.5"/>
+                            </svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Theme Toggle -->
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    
+                    <!-- Login Button -->
+                    <a href="/auth/login" class="btn btn-google" id="login-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        <span data-i18n="btn_login">Sign in with Google</span>
+                    </a>
+                    
+                    <!-- User Info (hidden when not logged in) -->
+                    <div id="user-info" class="hidden flex items-center gap-2">
+                        <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
+                        <span class="user-name"></span>
+                        <a href="/auth/logout" class="btn btn-ghost" data-i18n="btn_logout">Sign out</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Result Hero -->
+    <section class="result-hero">
+        <div class="container">
+            <div class="result-header">
+                <h1>Fantasy Warrior Character</h1>
+                <div class="result-meta">
+                    <span class="format">FBX Format</span>
+                    <span class="processing-time">Processed in 8 minutes</span>
+                    <span class="quality">Professional Quality</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Before/After Comparison -->
+    <section class="comparison-section">
+        <div class="container">
+            <h2>Before & After Comparison</h2>
+            <div class="before-after">
+                <div class="comparison-item">
+                    <h3>Before Auto Rigging</h3>
+                    <div class="model-preview">
+                        <img src="/static/gallery/fantasy-warrior-before.jpg" alt="Fantasy Warrior Before Rigging">
+                        <div class="preview-label">Static Mesh</div>
+                    </div>
+                    <ul class="before-features">
+                        <li>❌ No bones or joints</li>
+                        <li>❌ Cannot animate</li>
+                        <li>❌ Not usable in games</li>
+                        <li>❌ No deformation</li>
+                    </ul>
+                </div>
+
+                <div class="comparison-arrow">
+                    <div class="arrow">→</div>
+                    <div class="process-label">OneClick AI</div>
+                </div>
+
+                <div class="comparison-item">
+                    <h3>After Auto Rigging</h3>
+                    <div class="model-preview">
+                        <video poster="/static/gallery/fantasy-warrior-after.jpg" controls muted>
+                            <source src="/api/video/fantasy-warrior-id" type="video/mp4">
+                        </video>
+                        <div class="preview-label">Rigged & Animated</div>
+                    </div>
+                    <ul class="after-features">
+                        <li>✅ Professional bone structure</li>
+                        <li>✅ 50+ animations included</li>
+                        <li>✅ Unity/Unreal compatible</li>
+                        <li>✅ Smooth deformations</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technical Details -->
+    <section class="technical-details">
+        <div class="container">
+            <h2>Technical Specifications</h2>
+            <div class="specs-grid">
+                <div class="spec-group">
+                    <h3>🎯 Rig Quality</h3>
+                    <ul>
+                        <li><strong>Bone Count:</strong> 28 bones</li>
+                        <li><strong>IK Setup:</strong> Foot and hand IK</li>
+                        <li><strong>Pose:</strong> Industry standard T-pose</li>
+                        <li><strong>Skinning:</strong> Smooth weight painting</li>
+                    </ul>
+                </div>
+
+                <div class="spec-group">
+                    <h3><img src="/static/images/icons/animations.svg" alt="Animations" width="32" height="32" style="vertical-align: middle;"> Animations</h3>
+                    <ul>
+                        <li><strong>Walk Cycles:</strong> 3 variations</li>
+                        <li><strong>Combat:</strong> 12 animations</li>
+                        <li><strong>Idle:</strong> 5 poses</li>
+                        <li><strong>Transitions:</strong> Smooth blending</li>
+                    </ul>
+                </div>
+
+                <div class="spec-group">
+                    <h3><img src="/static/images/icons/tools.svg" alt="Unity and Unreal Engine compatibility" width="32" height="32" style="vertical-align: middle;"> Engine Compatibility</h3>
+                    <ul>
+                        <li><strong>Unity:</strong> Mecanim ready</li>
+                        <li><strong>Unreal:</strong> Animation Blueprint</li>
+                        <li><strong>Other:</strong> Compatible with major engines</li>
+                        <li><strong>Export:</strong> FBX with animations</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Animation Gallery -->
+    <section class="animation-gallery">
+        <div class="container">
+            <h2>Animation Showcase</h2>
+            <p>See the character in action with different animations from our library.</p>
+
+            <div class="animation-grid">
+                <div class="animation-item">
+                    <video poster="/static/gallery/walk-cycle-thumb.jpg" muted loop>
+                        <source src="/static/gallery/walk-cycle.mp4" type="video/mp4">
+                    </video>
+                    <h4>Walk Cycle</h4>
+                </div>
+
+                <div class="animation-item">
+                    <video poster="/static/gallery/combat-idle-thumb.jpg" muted loop>
+                        <source src="/static/gallery/combat-idle.mp4" type="video/mp4">
+                    </video>
+                    <h4>Combat Idle</h4>
+                </div>
+
+                <div class="animation-item">
+                    <video poster="/static/gallery/attack-thumb.jpg" muted loop>
+                        <source src="/static/gallery/attack.mp4" type="video/mp4">
+                    </video>
+                    <h4>Attack Animation</h4>
+                </div>
+
+                <div class="animation-item">
+                    <video poster="/static/gallery/jump-thumb.jpg" muted loop>
+                        <source src="/static/gallery/jump.mp4" type="video/mp4">
+                    </video>
+                    <h4>Jump Animation</h4>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Related Examples -->
+    <section class="related-section">
+        <div class="container">
+            <h2>More Examples</h2>
+            <div class="related-grid">
+                <div class="related-item">
+                    <img src="/static/gallery/cyberpunk-character-thumb.jpg" alt="Cyberpunk Character">
+                    <h4>Cyberpunk Character</h4>
+                    <a href="/g/cyberpunk-character" class="related-link">View Example</a>
+                </div>
+
+                <div class="related-item">
+                    <img src="/static/gallery/animal-companion-thumb.jpg" alt="Animal Companion">
+                    <h4>Animal Companion</h4>
+                    <a href="/g/animal-companion" class="related-link">View Example</a>
+                </div>
+
+                <div class="related-item">
+                    <img src="/static/gallery/mecha-robot-thumb.jpg" alt="Mecha Robot">
+                    <h4>Mecha Robot</h4>
+                    <a href="/g/mecha-robot" class="related-link">View Example</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Create Your Own Character</h2>
+            <p>Get professional auto rigging results like this for your 3D models. Free to try!</p>
+            <a href="/" class="cta-button">Start Auto Rigging</a>
+        </div>
+    </section>
+
+        <!-- SEO Footer -->
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer-grid">
+                <!-- Brand Column -->
+                <div class="footer-brand">
+                    <a href="/" class="footer-logo">
+                        <img src="/static/images/logo/oneclick-logo.png" alt="OneClick3D - 3ds Max to Unity and Unreal Converter" height="60">
+                    </a>
+                    <p class="footer-tagline" data-i18n="footer_tagline">Automatic conversion of 3ds max scenes with V-ray or Corona render to realtime 3d presentation, VR or web presentation.</p>
+                </div>
+                
+                <!-- Services Column -->
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_services"></h4><ul></ul>
+                </div>
+                
+                <!-- Guides Column -->
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_guides"></h4><ul></ul>
+                </div>
+                
+                <!-- Company Column -->
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_company"></h4><ul></ul>
+                </div>
+            </div>
+            
+            <!-- Bottom Bar -->
+            <div class="footer-bottom">
+                <p class="footer-copyright" data-i18n="footer_copyright">© 2026 OneClick. All rights reserved.</p>
+                <div class="footer-social">
+                    <a href="https://t.me/OneClickExporter" target="_blank" rel="noopener noreferrer" class="footer-social-link" title="Telegram">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                        </svg>
+                        <span>Telegram</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Video controls
+        document.addEventListener('DOMContentLoaded', function() {
+            const videos = document.querySelectorAll('.animation-item video');
+            videos.forEach(video => {
+                video.addEventListener('mouseenter', function() {
+                    this.play();
+                });
+                video.addEventListener('mouseleave', function() {
+                    this.pause();
+                    this.currentTime = 0;
+                });
+            });
+        });
+    </script>
+</body>
+</html>

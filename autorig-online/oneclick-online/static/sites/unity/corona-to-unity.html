@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Corona to Unity Conversion | Material Translation for Realtime Archviz</title>
+    <meta name="description" content="Practical Corona to Unity conversion guide for archviz teams: material mapping priorities, lighting continuity, scene optimization, and delivery-ready realtime presentation flow.">
+    <meta name="keywords" content="corona to unity, corona renderer conversion, archviz material translation, realtime interior conversion, unity urp corona scene">
+    <link rel="canonical" href="https://3dsmaxtounity.com/corona-to-unity">
+    <meta property="og:title" content="Corona to Unity Conversion Guide">
+    <meta property="og:description" content="Understand how Corona-authored scenes are translated into reliable Unity realtime presentations with consistent look and performance.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://3dsmaxtounity.com/corona-to-unity">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "TechArticle",
+      "headline": "Corona to Unity Conversion",
+      "description": "Material-aware workflow for converting Corona scenes to Unity realtime projects.",
+      "author": {
+        "@type": "Organization",
+        "name": "OneClick3D"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "OneClick3D"
+      },
+      "mainEntityOfPage": "https://3dsmaxtounity.com/corona-to-unity"
+    }
+    </script>
+</head>
+<body>
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                3dsmaxtounity.com
+            </div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/unity-hdrp-workflow">HDRP Workflow</a>
+                <a href="/corona-to-unity" aria-current="page">Corona to Unity</a>
+                <a href="/webgl-from-3ds-max">WebGL</a>
+                <a href="/unity-vr-build">VR Build</a>
+                <a href="/faq">FAQ</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">Corona Conversion Path</p>
+                <h1>Move <span>Corona-rendered</span> 3ds Max scenes into Unity with confidence</h1>
+                <p class="lead">
+                    Corona scenes are usually crafted with strong mood, subtle gloss behavior, and carefully balanced interior lighting.
+                    During realtime conversion, the main challenge is preserving that artistic intent while meeting performance constraints required for interactive delivery.
+                </p>
+                <p class="lead">
+                    The goal is not a literal one-to-one shader clone.
+                    The goal is perceptual continuity: clients should recognize the same space, same design decisions, and same emotional tone when they move from static render previews to a realtime walkthrough.
+                </p>
+            </section>
+
+            <section class="card article-section">
+                <h2>Material translation priorities that matter most</h2>
+                <div class="bullet-grid">
+                    <article class="bullet-item">
+                        <h3>Primary surface identity</h3>
+                        <p>Wood, stone, fabric, and painted surfaces should preserve roughness rhythm and color response under dynamic camera motion.</p>
+                    </article>
+                    <article class="bullet-item">
+                        <h3>Specular discipline</h3>
+                        <p>Over-bright highlights break perceived realism quickly, especially on glossy furniture and polished architectural elements.</p>
+                    </article>
+                    <article class="bullet-item">
+                        <h3>Lighting continuity</h3>
+                        <p>Clients evaluate atmosphere first. Keep consistent mood when transitioning from rendered stills to realtime views.</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="card media-feature">
+                <div class="media-copy">
+                    <p class="stage-kicker">Stage 01 · Corona source logic</p>
+                    <h2>Preserve design intent before optimization</h2>
+                    <p>
+                        Start with a clear inventory of hero materials and focal compositions.
+                        If you optimize blindly too early, you risk losing the very qualities that convinced the client in the original render stage.
+                    </p>
+                </div>
+                <figure class="media-figure">
+                    <img src="/static/sites/unity/assets/images/01-max-vray.png" alt="Source 3ds Max scene in renderer setup before Corona to Unity conversion">
+                    <figcaption>Identify critical materials and lighting zones before conversion decisions.</figcaption>
+                </figure>
+            </section>
+
+            <section class="card media-feature">
+                <div class="media-copy">
+                    <p class="stage-kicker">Stage 02 · Realtime perception check</p>
+                    <h2>Evaluate material feel while moving through the space</h2>
+                    <p>
+                        Real users do not inspect one frozen angle.
+                        They move, compare corners, and read reflections in motion.
+                        Validate converted results in walkthrough mode and adjust priorities around what viewers perceive first.
+                    </p>
+                </div>
+                <figure class="media-figure">
+                    <img src="/static/sites/unity/assets/images/02-unity-runtime.png" alt="Converted realtime interior scene in Unity for Corona project">
+                    <figcaption>Motion-based checks expose what still previews cannot show.</figcaption>
+                </figure>
+            </section>
+
+            <section class="card article-section">
+                <h2>Next pages in this Unity cluster</h2>
+                <p>
+                    Continue to <a href="/unity-hdrp-workflow">Unity HDRP workflow</a> for pipeline depth,
+                    open <a href="/webgl-from-3ds-max">WebGL from 3ds Max</a> for browser delivery,
+                    or jump to <a href="/unity-vr-build">Unity VR build</a> for immersive walkthrough strategy.
+                </p>
+            </section>
+        </main>
+
+        <footer>
+            <p>Corona to Unity conversion for consistent realtime archviz presentation quality.</p>
+            <p>© 3dsmaxtounity.com</p>
+        </footer>
+    </div>
+</body>
+</html>

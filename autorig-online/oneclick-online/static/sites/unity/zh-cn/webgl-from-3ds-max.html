@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>3ds Max 到 Unity WebGL 指南 | 浏览器交互式 Archviz 演示</title>
+    <meta name="description" content="将 3ds Max + V-Ray/Corona 场景转换为 Unity WebGL 浏览器体验的完整流程，并提供页面内实时演示。">
+    <meta name="keywords" content="3ds max to webgl, unity webgl archviz">
+    <link rel="canonical" href="https://3dsmaxtounity.com/zh-cn/webgl-from-3ds-max">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/webgl-from-3ds-max">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/webgl-from-3ds-max">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/webgl-from-3ds-max">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/webgl-from-3ds-max">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/webgl-from-3ds-max">
+    <meta property="og:title" content="3ds Max 到 Unity WebGL（含实时演示）">
+    <meta property="og:description" content="从源场景准备到浏览器交付的实用 WebGL 流程。">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://3dsmaxtounity.com/zh-cn/webgl-from-3ds-max">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/zh-cn/">首页</a>
+                <a href="/zh-cn/unity-hdrp-workflow">HDRP 流程</a>
+                <a href="/zh-cn/corona-to-unity">Corona 到 Unity</a>
+                <a href="/zh-cn/webgl-from-3ds-max" aria-current="page">WebGL</a>
+                <a href="/zh-cn/unity-vr-build">VR 构建</a>
+                <a href="/zh-cn/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">Web Delivery Pipeline</p>
+                <h1>Archviz 团队如何从 3ds Max 场景交付 <span>Unity WebGL</span></h1>
+                <p class="lead">浏览器交付是向非技术干系人展示设计意图的高效方式。优秀的 WebGL 版本不仅是压缩构建，更是加载可预期、移动流畅、重点明确的产品体验。</p>
+                <p class="lead">本页包含从源场景到浏览器运行时的实用流程，并提供可立即体验的嵌入式演示。</p>
+            </section>
+            <section class="card article-section">
+                <h2>让 WebGL 客户评审更有效的关键点</h2>
+                <div class="bullet-grid">
+                    <article class="bullet-item"><h3>首屏速度</h3><p>初次加载速度决定信任感，要平衡视觉质量与资源体量。</p></article>
+                    <article class="bullet-item"><h3>操作简单</h3><p>客户应能用键鼠自然移动，无需学习复杂控制方案。</p></article>
+                    <article class="bullet-item"><h3>视觉层级清晰</h3><p>突出灯光氛围、材质对比与关键动线，支撑审批决策。</p></article>
+                </div>
+            </section>
+            <section class="card webgl-embed">
+                <h2>页面内嵌实时 WebGL 演示</h2>
+                <p>可直接评估移动手感、视觉反馈与交互节奏。控制方式：<strong>WASD + 鼠标</strong>。</p>
+                <div class="embed-shell">
+                    <iframe src="/special-build/" title="Unity WebGL live demo" loading="lazy" allowfullscreen></iframe>
+                </div>
+                <div class="output-cta">
+                    <a class="btn btn-primary" href="/special-build/" target="_blank" rel="noopener noreferrer">在新标签页打开演示</a>
+                    <a class="text-link" href="https://oneclick3d.xyz/" target="_blank" rel="noopener noreferrer">打开主服务</a>
+                </div>
+            </section>
+            <section class="card article-section">
+                <h2>相关转换路径</h2>
+                <p>继续阅读 <a href="/zh-cn/unity-hdrp-workflow">HDRP 流程</a>、<a href="/zh-cn/corona-to-unity">Corona 到 Unity</a>、<a href="/zh-cn/unity-vr-build">Unity VR 构建</a>，或返回<a href="/zh-cn/">首页</a>上传 ZIP 场景包。</p>
+            </section>
+        </main>
+        <footer><p>用于快速浏览器 Archviz 演示的 Unity WebGL 转换方案。</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+</body>
+</html>

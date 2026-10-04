@@ -1,0 +1,8 @@
+backend/__pycache__/
+backend/*.log
+backend/db/
+backend/.env
+static/tasks/
+static/glb_cache/
+*.part.*
+*.pyc

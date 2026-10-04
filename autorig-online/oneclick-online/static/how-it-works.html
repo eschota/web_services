@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="hiw_meta_title">How to Prepare 3ds Max Scene for Unity & Unreal | OneClick3D</title>
+    <meta name="description" content="Detailed guide on preparing 3ds Max scenes with V-Ray or Corona for automated conversion to Unity and Unreal Engine using OneClick3D." data-i18n="hiw_meta_description">
+    <meta name="keywords" content="3ds max to unity, 3ds max to unreal, v-ray to unity, corona to unity, scene preparation, archviz" data-i18n="hiw_meta_keywords">
+    <link rel="canonical" href="https://oneclick3d.xyz/how-it-works">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="How to Prepare 3ds Max Scene for Unity & Unreal" data-i18n-content="hiw_meta_title">
+    <meta property="og:description" content="Step-by-step guide for V-Ray and Corona users." data-i18n-content="hiw_meta_description">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://oneclick3d.xyz/how-it-works">
+    <meta property="og:image" content="https://oneclick3d.xyz/static/images/how-it-works/max-vray-corona.webp">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+    
+    <style>
+        .article-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 4rem 1.5rem;
+        }
+        
+        .article-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+        
+        .article-header h1 {
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.7) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .article-content {
+            font-size: 1.15rem;
+            line-height: 1.8;
+            color: var(--text-primary);
+        }
+        
+        .article-content h2 {
+            font-size: clamp(2rem, 4vw, 2.45rem);
+            margin: 4rem 0 1.25rem;
+            color: var(--accent);
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+        }
+        
+        .article-content p {
+            margin-bottom: 1.5rem;
+            opacity: 0.9;
+        }
+        
+        .article-content ul, .article-content ol {
+            margin: 1.5rem 0;
+            padding-left: 1.5rem;
+        }
+        
+        .article-content li {
+            margin-bottom: 1rem;
+        }
+        
+        .article-image-wrap {
+            margin: 2.5rem 0;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+            background: #000;
+        }
+        
+        .article-image-wrap img {
+            display: block;
+            width: 100%;
+            height: auto;
+            transition: transform 0.3s ease;
+        }
+
+        .article-image-wrap:hover img {
+            transform: scale(1.02);
+        }
+        
+        .feature-list {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .feature-item {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .feature-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .feature-icon {
+            width: 74px;
+            height: 74px;
+            flex-shrink: 0;
+            border-radius: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.24) 0%, rgba(139, 92, 246, 0.14) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+        }
+
+        .feature-icon svg {
+            width: 40px;
+            height: 40px;
+            stroke: var(--accent);
+            stroke-width: 1.9;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        
+        .feature-text strong {
+            display: block;
+            color: var(--accent);
+            margin-bottom: 0.45rem;
+            font-size: 1.28rem;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+            line-height: 1.25;
+        }
+
+        .feature-text span {
+            display: block;
+            font-size: 1.04rem;
+            line-height: 1.7;
+            opacity: 0.86;
+        }
+        
+        .pipeline-box {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 3rem 0;
+        }
+        
+        .pipeline-step {
+            background: var(--bg-input);
+            border: 1px solid var(--glass-border);
+            padding: 1.65rem;
+            border-radius: 14px;
+            position: relative;
+        }
+
+        .pipeline-step h3 {
+            font-size: 1.35rem;
+            font-weight: 800;
+            line-height: 1.3;
+            margin-bottom: 0.6rem;
+            color: var(--text-primary);
+        }
+
+        .pipeline-step p {
+            font-size: 1.02rem;
+            line-height: 1.7;
+            opacity: 0.86;
+            margin: 0;
+        }
+        
+        .step-num {
+            position: absolute;
+            top: -1rem;
+            left: 1rem;
+            width: 2.5rem;
+            height: 2.5rem;
+            background: var(--accent);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+        
+        .highlight-note {
+            background: rgba(99, 102, 241, 0.1);
+            border-left: 4px solid var(--accent);
+            padding: 1.5rem;
+            border-radius: 0 12px 12px 0;
+            margin: 2rem 0;
+            font-style: italic;
+        }
+    </style>
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z0WYEBKD2G"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-Z0WYEBKD2G');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/oneclick-logo.png" 
+                         srcset="/static/images/logo/oneclick-logo.png 1x, /static/images/logo/oneclick-logo@2x.png 2x"
+                         alt="OneClick3D" 
+                         class="logo-img" 
+                         height="120">
+                </a>
+
+                <nav class="nav">
+                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                    <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
+                </nav>
+                
+                <div class="header-actions">
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                <path d="M3 4.5L6 7.5L9 4.5"/>
+                            </svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+                    
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    
+                    <a href="/auth/login" class="btn btn-google" id="login-btn">
+                        <span data-i18n="btn_login">Sign in</span>
+                    </a>
+                    
+                    <div id="user-info" class="hidden flex items-center gap-2">
+                        <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
+                        <a href="/auth/logout" class="btn btn-ghost" data-i18n="btn_logout">Sign out</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="article-container">
+        <article>
+            <header class="article-header">
+                <h1 data-i18n="hiw_title">How to Prepare 3ds Max Scene for Unity & Unreal</h1>
+                <p class="lead" data-i18n="hiw_lead">A comprehensive guide on optimizing your V-Ray and Corona scenes for OneClick3D automated conversion.</p>
+            </header>
+
+            <div class="article-content">
+                <div class="article-image-wrap">
+                    <img src="/static/images/how-it-works/max-vray-corona.webp" alt="3ds Max V-Ray Corona Scene" data-i18n-alt="hiw_img_1_alt">
+                </div>
+
+                <p data-i18n="hiw_intro">The converter works with 3ds Max 2025 and V-Ray 7 (lower versions are also supported). OneClick3D aims to support the following features to ensure the best real-time results:</p>
+
+                <div class="feature-list">
+                    <div class="feature-item">
+                        <span class="feature-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M12 3c-5.2 0-9.5 3.8-9.5 8.4 0 2.1 1 4 2.6 5.4 1 .8 2.2 1.2 3.5 1.2h1.1c.8 0 1.5.6 1.5 1.4 0 1-.8 1.8-1.8 1.8h1.6c6 0 10.5-4 10.5-9.4C21.5 7 17.3 3 12 3Z"/>
+                                <circle cx="7.3" cy="11.2" r="1.1"/>
+                                <circle cx="10.4" cy="8.5" r="1.1"/>
+                                <circle cx="14" cy="8.5" r="1.1"/>
+                                <path d="M16.8 12.7h1.7c1.2 0 2.2 1 2.2 2.2v.1"/>
+                            </svg>
+                        </span>
+                        <div class="feature-text">
+                            <strong data-i18n="hiw_f1_title">Materials</strong>
+                            <span data-i18n="hiw_f1_desc">Standard, VrayMtl, and CoronaMtl are supported. Complex materials are either baked into textures or replaced with a gray placeholder. Simplify where possible.</span>
+                        </div>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <rect x="3.5" y="5" width="17" height="14" rx="2.2"/>
+                                <circle cx="9" cy="10" r="1.5"/>
+                                <path d="m4.5 17 5.2-4.7a1.8 1.8 0 0 1 2.4 0l2.6 2.4"/>
+                                <path d="m12.8 14.7 2-1.8a1.8 1.8 0 0 1 2.4 0L20 15.4"/>
+                            </svg>
+                        </span>
+                        <div class="feature-text">
+                            <strong data-i18n="hiw_f2_title">Maps & Textures</strong>
+                            <span data-i18n="hiw_f2_desc">Standard bitmaps are preferred. Procedural maps will be baked, which increases processing time and file size. Replace procedurals with bitmaps for best performance.</span>
+                        </div>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M4 18.5h16"/>
+                                <path d="m6 18.5 6.8-12.5c.3-.6 1.1-.6 1.4 0L21 18.5"/>
+                                <path d="M10.3 10.6h3.4"/>
+                                <path d="M8.8 13.5h6.5"/>
+                            </svg>
+                        </span>
+                        <div class="feature-text">
+                            <strong data-i18n="hiw_f3_title">UV Channels</strong>
+                            <span data-i18n="hiw_f3_desc">Use only the 1st UV channel. The 2nd channel is reserved for lightmapping in Unity and Unreal Engine.</span>
+                        </div>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M12 3.5a6.2 6.2 0 0 0-3.9 11c.9.8 1.5 1.9 1.7 3h4.4c.2-1.1.8-2.2 1.7-3A6.2 6.2 0 0 0 12 3.5Z"/>
+                                <path d="M9.8 17.5h4.4"/>
+                                <path d="M10.3 20h3.4"/>
+                                <path d="M12 1.8v1.2"/>
+                                <path d="m5.1 5.1.9.9"/>
+                                <path d="m18.9 5.1-.9.9"/>
+                            </svg>
+                        </span>
+                        <div class="feature-text">
+                            <strong data-i18n="hiw_f4_title">Lighting</strong>
+                            <span data-i18n="hiw_f4_desc">Basic lights from all render engines, self-illuminated materials, and Emissive GI are supported. Intensity and color may vary in real-time engines.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <h2 data-i18n="hiw_pipeline_title">The Conversion Pipeline</h2>
+                
+                <div class="pipeline-box">
+                    <div class="pipeline-step">
+                        <div class="step-num">1</div>
+                        <h3 data-i18n="hiw_step1_title">3ds Max Export</h3>
+                        <p data-i18n="hiw_step1_desc">The scene is unpacked. All cameras are rendered to create reference images for lighting and material matching.</p>
+                    </div>
+                    <div class="pipeline-step">
+                        <div class="step-num">2</div>
+                        <h3 data-i18n="hiw_step2_title">Engine Import</h3>
+                        <p data-i18n="hiw_step2_desc">The "Black Box" magic happens here. Renders are used as ground truth to adapt 3ds Max lighting for Unity and Unreal.</p>
+                    </div>
+                </div>
+
+                <div class="article-image-wrap">
+                    <img src="/static/images/how-it-works/interior-gallery-reference.png" alt="Unity and Unreal Engine Export" data-i18n-alt="hiw_img_2_alt">
+                </div>
+
+                <h2 data-i18n="hiw_optimization_title">Optimization Rules</h2>
+                <ul>
+                    <li data-i18n="hiw_opt_1"><strong>Instances:</strong> Use instances as much as possible, but avoid complex baked materials on small instanced objects like leaves.</li>
+                    <li data-i18n="hiw_opt_2"><strong>Polycount:</strong> Objects over 50k triangles will be automatically optimized.</li>
+                    <li data-i18n="hiw_opt_3"><strong>Transparency:</strong> Glass and transparent materials are replaced with specialized real-time shaders. Simplify these materials for better results.</li>
+                    <li data-i18n="hiw_opt_4"><strong>Environment:</strong> SKY and HDRi lighting in standard slots are fully supported.</li>
+                </ul>
+
+                <div class="highlight-note" data-i18n="hiw_final_note">
+                    The output includes builds for all platforms and the original project files, allowing you to make manual adjustments if needed.
+                </div>
+            </div>
+        </article>
+    </main>
+
+    <!-- CTA -->
+    <section class="hiw-cta">
+        <div class="container">
+            <h2 data-i18n="hiw_cta_title">Ready to Convert Your Scene?</h2>
+            <p data-i18n="hiw_cta_subtitle">Upload your 3ds Max archive and get real-time results in minutes.</p>
+            <a href="/" class="cta-button" data-i18n="hiw_cta_button">Start Conversion Now</a>
+        </div>
+    </section>
+
+    <!-- Footer (Injected) -->
+    <div id="site-footer"></div>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/footer.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize site footer
+            const footerContainer = document.getElementById('site-footer');
+            if (footerContainer && window.SiteFooter) {
+                footerContainer.innerHTML = SiteFooter.render();
+            }
+        });
+    </script>
+</body>
+</html>

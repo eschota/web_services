@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>FAQ: 3ds Max to Unity Conversion | WebGL, VR, HDRP, Corona Workflow</title>
+    <meta name="description" content="Frequently asked questions about 3ds Max to Unity conversion workflow: source ZIP preparation, WebGL and VR delivery, quality expectations, and practical production concerns.">
+    <meta name="keywords" content="3ds max to unity faq, archviz conversion questions, unity webgl workflow, unity vr build, corona to unity support">
+    <link rel="canonical" href="https://3dsmaxtounity.com/faq">
+    <meta property="og:title" content="FAQ: 3ds Max to Unity Conversion">
+    <meta property="og:description" content="Answers about conversion scope, source preparation, runtime outputs, and practical delivery expectations for archviz teams.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://3dsmaxtounity.com/faq">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What should be included in the ZIP source package?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Include your 3ds Max scene file, linked textures, and all assets required to rebuild visual context without missing dependencies."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can one source scene be delivered as WebGL, VR, APK, and EXE?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The pipeline is designed for multi-format delivery from one source package, depending on target presentation goals."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is this workflow suitable for Corona and V-Ray authored scenes?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The conversion flow is built around common production scenes created with V-Ray or Corona in 3ds Max."
+          }
+        }
+      ]
+    }
+    </script>
+</head>
+<body>
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                3dsmaxtounity.com
+            </div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/unity-hdrp-workflow">HDRP Workflow</a>
+                <a href="/corona-to-unity">Corona to Unity</a>
+                <a href="/webgl-from-3ds-max">WebGL</a>
+                <a href="/unity-vr-build">VR Build</a>
+                <a href="/faq" aria-current="page">FAQ</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">Knowledge Base</p>
+                <h1>Frequently asked questions about <span>3ds Max to Unity</span> conversion</h1>
+                <p class="lead">
+                    This FAQ is written for teams who manage real projects with deadlines, client reviews, and changing requirements.
+                    The answers below focus on production realities: what to prepare, what to expect from conversion, and how to avoid predictable bottlenecks.
+                </p>
+            </section>
+
+            <section class="card faq-list">
+                <article class="faq-item">
+                    <h2>What should be inside the source ZIP before upload?</h2>
+                    <p>
+                        Include the main 3ds Max scene and all linked dependencies required to reconstruct visual logic.
+                        Missing textures or scattered asset paths are the most common reason projects lose time during conversion and review.
+                    </p>
+                </article>
+                <article class="faq-item">
+                    <h2>How do we keep visual intent from offline renders?</h2>
+                    <p>
+                        Prioritize perception, not literal renderer parity.
+                        Preserve hero materials, major lighting contrast, and key viewpoints that support design decisions.
+                        The objective is continuity of design communication in realtime.
+                    </p>
+                </article>
+                <article class="faq-item">
+                    <h2>Can we deliver multiple targets from one converted scene?</h2>
+                    <p>
+                        Yes. The same conversion flow can support WebGL browser demos, VR walkthroughs, Android APK packages, and Windows EXE outputs.
+                        This makes stakeholder communication much faster across remote calls, office meetings, and on-site presentations.
+                    </p>
+                </article>
+                <article class="faq-item">
+                    <h2>When should we choose WebGL versus VR?</h2>
+                    <p>
+                        Choose WebGL when speed of access is critical and you need instant link-based sharing.
+                        Choose VR when spatial understanding and immersion are central to approval, such as premium interiors or complex circulation spaces.
+                    </p>
+                </article>
+                <article class="faq-item">
+                    <h2>Where can we see practical examples of each workflow?</h2>
+                    <p>
+                        Use <a href="/webgl-from-3ds-max">WebGL from 3ds Max</a> for browser delivery,
+                        <a href="/unity-vr-build">Unity VR build</a> for immersive presentation,
+                        <a href="/unity-hdrp-workflow">HDRP workflow</a> for production quality structure,
+                        and <a href="/corona-to-unity">Corona to Unity</a> for material conversion specifics.
+                    </p>
+                </article>
+            </section>
+        </main>
+
+        <footer>
+            <p>Answers for practical Unity conversion and delivery questions.</p>
+            <p>© 3dsmaxtounity.com</p>
+        </footer>
+    </div>
+</body>
+</html>

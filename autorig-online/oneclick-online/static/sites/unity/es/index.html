@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Conversor 3ds Max + V-Ray/Corona a Unity en tiempo real | WebGL, VR, APK, EXE</title>
+    <meta name="description" content="Convierte automáticamente escenas de 3ds Max con V-Ray o Corona en proyectos realtime de Unity: WebGL, recorridos VR, Android APK y Windows EXE.">
+    <meta name="keywords" content="3ds max a unity, v-ray a unity, corona a unity, archviz webgl, unity vr">
+    <link rel="canonical" href="https://3dsmaxtounity.com/es/">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/">
+    <meta property="og:title" content="Conversión automática de 3ds Max + V-Ray/Corona a Unity">
+    <meta property="og:description" content="Sube un ZIP y obtén WebGL, VR, Android APK y EXE automáticamente.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://3dsmaxtounity.com/es/">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/es/" aria-current="page">Inicio</a>
+                <a href="/es/unity-hdrp-workflow">Flujo HDRP</a>
+                <a href="/es/corona-to-unity">Corona a Unity</a>
+                <a href="/es/webgl-from-3ds-max">WebGL</a>
+                <a href="/es/unity-vr-build">Build VR</a>
+                <a href="/es/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero reveal">
+                <p class="eyebrow">Pipeline Archviz en tiempo real</p>
+                <h1>Convierte escenas de <span>3ds Max + V-Ray/Corona</span> en experiencias interactivas de Unity</h1>
+                <p class="lead">Esta página está pensada para estudios y artistas que necesitan algo más que renders estáticos: clientes que caminan, comparan y deciden dentro del espacio.</p>
+                <p class="lead">Con una sola carga ZIP puedes obtener varios formatos de entrega: WebGL en navegador, EXE de escritorio, APK para Android y versión VR.</p>
+                <div class="hero-cta">
+                    <button class="btn btn-primary" id="hero-upload-trigger" type="button">Subir ZIP de escena</button>
+                    <a class="btn btn-secondary" href="/special-build/">Abrir proyecto en el navegador</a>
+                    <a class="text-link" href="https://oneclick3d.xyz/" target="_blank" rel="noopener noreferrer">Abrir servicio principal</a>
+                </div>
+                <p class="hint">Controles demo: <strong>WASD + ratón</strong></p>
+            </section>
+            <section class="card reveal">
+                <h2>Por qué los equipos migran de entrega offline a realtime</h2>
+                <div class="icon-grid">
+                    <article class="icon-item"><h3>Decisiones más rápidas</h3><p>Cuando el cliente se mueve dentro del proyecto, los ciclos de revisión se acortan.</p></article>
+                    <article class="icon-item"><h3>Compatible con tu stack</h3><p>Flujo diseñado para escenas reales en <strong>3ds Max</strong> con <strong>V-Ray</strong> o <strong>Corona</strong>.</p></article>
+                    <article class="icon-item"><h3>Una fuente, múltiples salidas</h3><p>Desde una escena puedes entregar WebGL, VR, Android APK y Windows EXE.</p></article>
+                </div>
+            </section>
+            <section class="card reveal outputs">
+                <h2>Qué obtienes tras una sola carga</h2>
+                <ul>
+                    <li>Build WebGL para presentaciones en navegador</li>
+                    <li>Build VR para validación inmersiva</li>
+                    <li>APK Android para demos móviles</li>
+                    <li>Aplicación EXE de Windows para reuniones offline</li>
+                </ul>
+                <div class="output-cta">
+                    <a class="btn btn-primary" href="/special-build/">Lanzar proyecto en navegador</a>
+                    <span>Recorre la escena con WASD + ratón</span>
+                </div>
+            </section>
+            <section class="card reveal upload-card" id="upload-block">
+                <h2>Sube tu escena y crea la tarea de conversión</h2>
+                <p class="upload-intro">Entrada compatible: paquete <strong>.zip</strong> con escena de 3ds Max y texturas vinculadas.</p>
+                <input id="scene-file-input" type="file" accept=".zip" hidden>
+                <div class="upload-panel" id="upload-panel"><button class="btn btn-primary" type="button" id="upload-pick-btn">Elegir archivo ZIP</button></div>
+                <p id="upload-file-meta" class="upload-meta">Ningún archivo seleccionado</p>
+                <div class="progress-wrap" id="upload-progress-wrap">
+                    <div class="progress-bar"><div class="progress-fill" id="upload-progress-fill"></div></div>
+                    <div class="progress-stats">
+                        <span id="upload-progress-percent">0%</span>
+                        <span id="upload-progress-speed">0 MB/s</span>
+                        <span id="upload-progress-eta">Esperando</span>
+                    </div>
+                    <p id="upload-progress-chunks" class="upload-meta">0 / 0 partes</p>
+                </div>
+                <p id="upload-status" class="upload-status">Listo</p>
+            </section>
+        </main>
+        <footer><p>Conversión automática de 3ds Max + V-Ray/Corona a Unity para equipos de archviz.</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+    <script src="/static/sites/unity/landing.js"></script>
+</body>
+</html>

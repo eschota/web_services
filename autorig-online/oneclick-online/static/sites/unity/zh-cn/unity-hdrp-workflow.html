@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>3ds Max 到 Unity HDRP | 工作流程与质量清单</title>
+    <meta name="description" content="面向 3ds Max + V-Ray/Corona 场景的 Unity HDRP 实操流程：源场景整理、导入规范、光照基线、质量检查与交付。">
+    <meta name="keywords" content="unity hdrp workflow, 3ds max to hdrp, archviz hdrp">
+    <link rel="canonical" href="https://3dsmaxtounity.com/zh-cn/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/unity-hdrp-workflow">
+    <meta property="og:title" content="3ds Max 场景的 Unity HDRP 工作流程">
+    <meta property="og:description" content="适用于 Archviz 团队的端到端 HDRP 转换方法。">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://3dsmaxtounity.com/zh-cn/unity-hdrp-workflow">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/zh-cn/">首页</a>
+                <a href="/zh-cn/unity-hdrp-workflow" aria-current="page">HDRP 流程</a>
+                <a href="/zh-cn/corona-to-unity">Corona 到 Unity</a>
+                <a href="/zh-cn/webgl-from-3ds-max">WebGL</a>
+                <a href="/zh-cn/unity-vr-build">VR 构建</a>
+                <a href="/zh-cn/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">HDRP Production Track</p>
+                <h1>从 3ds Max 场景构建可靠的 <span>Unity HDRP</span> 流程</h1>
+                <p class="lead">当项目需要更稳定的材质响应与光照一致性时，HDRP 是常见选择。要发挥它的价值，前期源场景与导入结构必须从第一天就规范。</p>
+                <p class="lead">本页聚焦生产逻辑：如何从离线渲染创作过渡到可维护、可评审、可交付的实时 HDRP 项目。</p>
+            </section>
+            <section class="card article-section">
+                <h2>Archviz 转换中的 HDRP 核心原则</h2>
+                <div class="bullet-grid">
+                    <article class="bullet-item"><h3>可重复导入</h3><p>统一命名与目录结构可显著降低多轮迭代时的返工。</p></article>
+                    <article class="bullet-item"><h3>先锁定光照基线</h3><p>先建立中性光照，再做后期细化，质量评估更客观。</p></article>
+                    <article class="bullet-item"><h3>尽早设定性能预算</h3><p>提前定义 draw call 与贴图预算，避免后期妥协核心区域质量。</p></article>
+                </div>
+            </section>
+            <section class="card article-section">
+                <h2>下一步阅读</h2>
+                <p>浏览器交付请看 <a href="/zh-cn/webgl-from-3ds-max">3ds Max 到 WebGL</a>；材质转换语境请看 <a href="/zh-cn/corona-to-unity">Corona 到 Unity</a>；沉浸式展示请看 <a href="/zh-cn/unity-vr-build">Unity VR 构建</a>。</p>
+            </section>
+        </main>
+        <footer><p>面向生产级 Archviz 交付的 Unity HDRP 转换流程。</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+</body>
+</html>

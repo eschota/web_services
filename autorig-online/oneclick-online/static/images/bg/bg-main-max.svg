@@ -1,0 +1,24 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1218"/>
+      <stop offset="1" stop-color="#16222D"/>
+    </linearGradient>
+    <radialGradient id="r1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(420 320) rotate(18) scale(640 360)">
+      <stop stop-color="#2FD5C6" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#2FD5C6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#g)"/>
+  <rect width="1920" height="1080" fill="url(#r1)"/>
+  <g stroke="#69A9C5" stroke-opacity="0.2" stroke-width="1">
+    <path d="M0 870L420 620L860 760L1280 490L1920 690"/>
+    <path d="M0 770L480 540L920 670L1350 410L1920 600"/>
+    <path d="M130 1080L500 680L900 810L1250 560L1560 740"/>
+    <path d="M420 1080L740 760L1080 900L1470 640L1780 820"/>
+  </g>
+  <g stroke="#2FD5C6" stroke-opacity="0.28" stroke-width="2">
+    <path d="M220 340L620 220L790 340L560 500L220 340Z"/>
+    <path d="M1010 300L1430 210L1630 370L1320 560L1010 300Z"/>
+  </g>
+</svg>

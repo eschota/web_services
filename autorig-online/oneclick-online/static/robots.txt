@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /auth/
+Disallow: /api/
+
+Sitemap: https://oneclick3d.xyz/sitemap.xml
+Host: oneclick3d.xyz

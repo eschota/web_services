@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Corona 到 Unity 转换 | 面向实时 Archviz 的材质迁移</title>
+    <meta name="description" content="适用于 Archviz 团队的 Corona 到 Unity 转换指南：材质映射优先级、光照连续性、优化策略与实时交付。">
+    <meta name="keywords" content="corona to unity, archviz material translation">
+    <link rel="canonical" href="https://3dsmaxtounity.com/zh-cn/corona-to-unity">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/corona-to-unity">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/corona-to-unity">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/corona-to-unity">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/corona-to-unity">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/corona-to-unity">
+    <meta property="og:title" content="Corona 到 Unity 转换指南">
+    <meta property="og:description" content="在保证观感连续性的同时，将 Corona 场景可靠迁移到 Unity 实时项目。">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://3dsmaxtounity.com/zh-cn/corona-to-unity">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/zh-cn/">首页</a>
+                <a href="/zh-cn/unity-hdrp-workflow">HDRP 流程</a>
+                <a href="/zh-cn/corona-to-unity" aria-current="page">Corona 到 Unity</a>
+                <a href="/zh-cn/webgl-from-3ds-max">WebGL</a>
+                <a href="/zh-cn/unity-vr-build">VR 构建</a>
+                <a href="/zh-cn/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">Corona Conversion Path</p>
+                <h1>将 <span>Corona 渲染</span> 的 3ds Max 场景稳定迁移到 Unity</h1>
+                <p class="lead">Corona 场景通常依赖细腻光照与材质层次。实时转换的重点是保留设计意图，同时满足交互式展示所需的性能边界。</p>
+                <p class="lead">目标并非逐像素复制离线渲染，而是保持观感一致，让客户在实时漫游中仍能识别同一设计表达。</p>
+            </section>
+            <section class="card article-section">
+                <h2>最关键的材质迁移优先级</h2>
+                <div class="bullet-grid">
+                    <article class="bullet-item"><h3>主体表面识别度</h3><p>木材、石材、织物、漆面在动态视角下仍应保持质感节奏。</p></article>
+                    <article class="bullet-item"><h3>高光控制</h3><p>过亮高光会迅速破坏真实感，尤其在光泽家具与抛光构件上。</p></article>
+                    <article class="bullet-item"><h3>光照连续性</h3><p>从静帧到实时视图，空间氛围应保持稳定和可识别。</p></article>
+                </div>
+            </section>
+            <section class="card article-section">
+                <h2>相关页面</h2>
+                <p>继续阅读 <a href="/zh-cn/unity-hdrp-workflow">Unity HDRP 流程</a>、<a href="/zh-cn/webgl-from-3ds-max">3ds Max 到 WebGL</a> 与 <a href="/zh-cn/unity-vr-build">Unity VR 构建</a>。</p>
+            </section>
+        </main>
+        <footer><p>用于保持 Archviz 实时展示质量的 Corona 到 Unity 转换指南。</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+</body>
+</html>

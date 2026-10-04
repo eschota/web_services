@@ -1,0 +1,20 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="glbGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- 3D Cube representing GLB/glTF -->
+  <g transform="translate(32,32)">
+    <!-- Back face -->
+    <path d="M-20,-20 L0,-30 L20,-20 L0,-10 Z" fill="url(#glbGradient)" opacity="0.4"/>
+    <!-- Top face -->
+    <path d="M-20,-20 L0,-30 L0,-10 L-20,0 Z" fill="url(#glbGradient)" opacity="0.6"/>
+    <!-- Right face -->
+    <path d="M0,-30 L20,-20 L20,0 L0,-10 Z" fill="url(#glbGradient)"/>
+    <!-- Text -->
+    <text x="0" y="25" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="url(#glbGradient)" text-anchor="middle">GLB</text>
+  </g>
+</svg>
+

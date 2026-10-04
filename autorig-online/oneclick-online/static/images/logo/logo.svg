@@ -1,0 +1,18 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Stylized bone/skeleton icon -->
+  <path d="M128 40 L140 60 L160 55 L155 75 L175 85 L165 105 L145 100 L135 120 L128 140 L121 120 L111 100 L91 105 L81 85 L101 75 L96 55 L116 60 Z" fill="url(#logoGradient)" stroke="url(#logoGradient)" stroke-width="2"/>
+  <!-- Additional skeleton structure -->
+  <circle cx="128" cy="160" r="8" fill="url(#logoGradient)"/>
+  <circle cx="128" cy="180" r="8" fill="url(#logoGradient)"/>
+  <circle cx="128" cy="200" r="8" fill="url(#logoGradient)"/>
+  <!-- Joint connections -->
+  <line x1="128" y1="160" x2="128" y2="180" stroke="url(#logoGradient)" stroke-width="3" stroke-linecap="round"/>
+  <line x1="128" y1="180" x2="128" y2="200" stroke="url(#logoGradient)" stroke-width="3" stroke-linecap="round"/>
+</svg>
+

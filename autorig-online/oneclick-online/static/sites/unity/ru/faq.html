@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>FAQ: 3ds Max в Unity | WebGL, VR, HDRP, Corona</title>
+    <meta name="description" content="Частые вопросы по конвертации 3ds Max в Unity: подготовка ZIP, WebGL/VR выдача, ожидания по качеству и продакшен-практика.">
+    <meta name="keywords" content="3ds max unity faq, archviz conversion questions">
+    <link rel="canonical" href="https://3dsmaxtounity.com/ru/faq">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/faq">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/faq">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/faq">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/faq">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/faq">
+    <meta property="og:title" content="FAQ: Конвертация 3ds Max в Unity">
+    <meta property="og:description" content="Ответы о составе исходников, форматах выдачи и практических ожиданиях для archviz-команд.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://3dsmaxtounity.com/ru/faq">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/ru/">Главная</a>
+                <a href="/ru/unity-hdrp-workflow">HDRP workflow</a>
+                <a href="/ru/corona-to-unity">Corona в Unity</a>
+                <a href="/ru/webgl-from-3ds-max">WebGL</a>
+                <a href="/ru/unity-vr-build">VR build</a>
+                <a href="/ru/faq" aria-current="page">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">База знаний</p>
+                <h1>Частые вопросы о <span>конвертации 3ds Max в Unity</span></h1>
+                <p class="lead">FAQ для команд, работающих с реальными сроками, ревью клиентом и изменениями в процессе. Ниже - ответы про подготовку исходников и практическую выдачу проекта.</p>
+            </section>
+            <section class="card faq-list">
+                <article class="faq-item"><h2>Что должно быть в ZIP-пакете?</h2><p>Добавьте основную сцену 3ds Max и все зависимости (текстуры/ассеты), без которых нельзя восстановить визуальную логику проекта.</p></article>
+                <article class="faq-item"><h2>Как сохранить визуальный замысел offline-рендера?</h2><p>Ставьте в приоритет восприятие: ключевые материалы, контраст света и важные ракурсы. Цель - непрерывность дизайн-коммуникации в realtime.</p></article>
+                <article class="faq-item"><h2>Можно ли получить несколько форматов из одной сцены?</h2><p>Да. Один пайплайн поддерживает WebGL-демо, VR-прогулки, Android APK и Windows EXE.</p></article>
+                <article class="faq-item"><h2>Когда выбирать WebGL, а когда VR?</h2><p>WebGL - для быстрого доступа по ссылке. VR - когда критичны масштаб и глубина погружения при согласовании.</p></article>
+                <article class="faq-item"><h2>Где посмотреть смежные сценарии?</h2><p><a href="/ru/webgl-from-3ds-max">WebGL из 3ds Max</a>, <a href="/ru/unity-vr-build">Unity VR build</a>, <a href="/ru/unity-hdrp-workflow">HDRP workflow</a>, <a href="/ru/corona-to-unity">Corona в Unity</a>.</p></article>
+            </section>
+        </main>
+        <footer><p>Ответы по практической конвертации и delivery в Unity.</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+</body>
+</html>

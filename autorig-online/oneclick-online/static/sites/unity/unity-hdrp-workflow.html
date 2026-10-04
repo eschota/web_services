@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>3ds Max to Unity HDRP Workflow | Archviz Conversion and Quality Checklist</title>
+    <meta name="description" content="Detailed Unity HDRP workflow for 3ds Max + V-Ray/Corona scenes: source cleanup, import discipline, lighting baseline, quality checks, and production-ready delivery logic.">
+    <meta name="keywords" content="unity hdrp workflow, 3ds max to hdrp, archviz hdrp pipeline, unity lighting quality, realtime conversion checklist">
+    <link rel="canonical" href="https://3dsmaxtounity.com/unity-hdrp-workflow">
+    <meta property="og:title" content="Unity HDRP Workflow from 3ds Max Scenes">
+    <meta property="og:description" content="End-to-end practical HDRP conversion guide for archviz teams moving from offline rendering to interactive Unity delivery.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://3dsmaxtounity.com/unity-hdrp-workflow">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "TechArticle",
+      "headline": "3ds Max to Unity HDRP Workflow",
+      "description": "Practical HDRP conversion process for production-ready archviz scenes.",
+      "author": {
+        "@type": "Organization",
+        "name": "OneClick3D"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "OneClick3D"
+      },
+      "mainEntityOfPage": "https://3dsmaxtounity.com/unity-hdrp-workflow"
+    }
+    </script>
+</head>
+<body>
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                3dsmaxtounity.com
+            </div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/unity-hdrp-workflow" aria-current="page">HDRP Workflow</a>
+                <a href="/corona-to-unity">Corona to Unity</a>
+                <a href="/webgl-from-3ds-max">WebGL</a>
+                <a href="/unity-vr-build">VR Build</a>
+                <a href="/faq">FAQ</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">HDRP Production Track</p>
+                <h1>Reliable <span>Unity HDRP</span> workflow from 3ds Max scenes</h1>
+                <p class="lead">
+                    HDRP is often chosen when your project needs stronger material response, controlled reflections, and consistent lighting behavior across cinematic viewpoints.
+                    But high visual potential only pays off when the source scene, import structure, and validation workflow are aligned from day one.
+                </p>
+                <p class="lead">
+                    This page focuses on production logic: how to move from beautiful offline authoring to a stable realtime HDRP package that your team can maintain, review, and deliver without chaotic manual fixes.
+                </p>
+            </section>
+
+            <section class="card article-section">
+                <h2>Core HDRP principles for archviz conversion</h2>
+                <div class="bullet-grid">
+                    <article class="bullet-item">
+                        <h3>Deterministic imports</h3>
+                        <p>Predictable naming and structure reduce rework when scenes are updated and re-imported during iterative design cycles.</p>
+                    </article>
+                    <article class="bullet-item">
+                        <h3>Lighting baseline first</h3>
+                        <p>Before polishing post-processing, lock a neutral lighting baseline so quality checks remain objective across revisions.</p>
+                    </article>
+                    <article class="bullet-item">
+                        <h3>Performance budgets</h3>
+                        <p>Set practical draw-call and texture targets early to avoid late-stage compromises on hero spaces.</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="card media-feature">
+                <div class="media-copy">
+                    <p class="stage-kicker">Stage 01 · Source discipline</p>
+                    <h2>Treat source authoring as runtime preparation</h2>
+                    <p>
+                        HDRP outcomes are strongly tied to scene cleanliness before conversion.
+                        Structured assets, coherent scale, and rationalized material groups make the import process faster and reduce inconsistent look-development behavior in later stages.
+                    </p>
+                </div>
+                <figure class="media-figure">
+                    <img src="/static/sites/unity/assets/images/01-max-vray.png" alt="3ds Max source preparation for Unity HDRP conversion">
+                    <figcaption>Well-structured source scenes are the foundation of predictable HDRP quality.</figcaption>
+                </figure>
+            </section>
+
+            <section class="card media-feature">
+                <div class="media-copy">
+                    <p class="stage-kicker">Stage 02 · Realtime validation</p>
+                    <h2>Use walkthrough testing, not screenshots, for QA</h2>
+                    <p>
+                        A realtime pass reveals issues static shots hide: awkward transitions, uneven contrast, and navigation hotspots.
+                        Validate quality while moving through the scene to ensure your client experience stays coherent from entry point to detail zones.
+                    </p>
+                </div>
+                <figure class="media-figure">
+                    <img src="/static/sites/unity/assets/images/02-unity-runtime.png" alt="Unity realtime scene validation for HDRP workflow">
+                    <figcaption>Walkthrough QA aligns technical checks with actual client behavior.</figcaption>
+                </figure>
+            </section>
+
+            <section class="card article-section">
+                <h2>Where to continue</h2>
+                <p>
+                    For browser-first delivery, go to <a href="/webgl-from-3ds-max">WebGL from 3ds Max</a>.
+                    For Corona-specific material context, open <a href="/corona-to-unity">Corona to Unity</a>.
+                    For immersive walkthrough logic, see <a href="/unity-vr-build">Unity VR build</a>.
+                </p>
+            </section>
+        </main>
+
+        <footer>
+            <p>Unity HDRP conversion workflow for production-grade archviz delivery.</p>
+            <p>© 3dsmaxtounity.com</p>
+        </footer>
+    </div>
+</body>
+</html>

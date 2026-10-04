@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>3ds Max в Unity HDRP | Рабочий процесс и чеклист качества</title>
+    <meta name="description" content="Практический workflow Unity HDRP для сцен 3ds Max + V-Ray/Corona: подготовка, импорт, свет, проверка качества и delivery.">
+    <meta name="keywords" content="unity hdrp workflow, 3ds max to hdrp, archviz hdrp">
+    <link rel="canonical" href="https://3dsmaxtounity.com/ru/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/unity-hdrp-workflow">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/unity-hdrp-workflow">
+    <meta property="og:title" content="Workflow Unity HDRP из сцен 3ds Max">
+    <meta property="og:description" content="Пошаговый практический процесс HDRP для Archviz-команд.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://3dsmaxtounity.com/ru/unity-hdrp-workflow">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/ru/">Главная</a>
+                <a href="/ru/unity-hdrp-workflow" aria-current="page">HDRP workflow</a>
+                <a href="/ru/corona-to-unity">Corona в Unity</a>
+                <a href="/ru/webgl-from-3ds-max">WebGL</a>
+                <a href="/ru/unity-vr-build">VR build</a>
+                <a href="/ru/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">HDRP Production Track</p>
+                <h1>Надежный <span>Unity HDRP</span> workflow из сцен 3ds Max</h1>
+                <p class="lead">HDRP выбирают, когда нужны контролируемые отражения, стабильное освещение и высокий уровень визуальной подачи. Результат зависит от дисциплины подготовки исходной сцены и предсказуемости импорта.</p>
+                <p class="lead">Этот материал про продакшен-логику: как перейти от offline-рендера к стабильному realtime-проекту без хаотичных ручных исправлений.</p>
+            </section>
+            <section class="card article-section">
+                <h2>Ключевые принципы HDRP-конвертации</h2>
+                <div class="bullet-grid">
+                    <article class="bullet-item"><h3>Детерминированный импорт</h3><p>Понятная структура и нейминг ускоряют повторные импорты при итерациях.</p></article>
+                    <article class="bullet-item"><h3>Сначала базовый свет</h3><p>Сначала фиксируйте нейтральную световую базу, потом переходите к тонкой пост-обработке.</p></article>
+                    <article class="bullet-item"><h3>Бюджеты производительности</h3><p>Ограничения по draw calls и текстурам нужно задавать на старте.</p></article>
+                </div>
+            </section>
+            <section class="card article-section">
+                <h2>Куда перейти дальше</h2>
+                <p>Для браузерной выдачи откройте <a href="/ru/webgl-from-3ds-max">WebGL из 3ds Max</a>. Для контекста материалов - <a href="/ru/corona-to-unity">Corona в Unity</a>. Для иммерсивной презентации - <a href="/ru/unity-vr-build">Unity VR build</a>.</p>
+            </section>
+        </main>
+        <footer><p>HDRP-конвертация Unity для production-grade Archviz delivery.</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>3ds Max + V-Ray/Corona 到 Unity 实时转换 | WebGL、VR、APK、EXE</title>
+    <meta name="description" content="将 3ds Max（V-Ray/Corona）场景自动转换为 Unity 实时项目：WebGL、VR 漫游、Android APK 和 Windows EXE。">
+    <meta name="keywords" content="3ds max to unity, v-ray to unity, corona to unity, archviz webgl, unity vr">
+    <link rel="canonical" href="https://3dsmaxtounity.com/zh-cn/">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/">
+    <meta property="og:title" content="3ds Max + V-Ray/Corona 自动转换到 Unity">
+    <meta property="og:description" content="上传 ZIP 场景后可自动获得 WebGL、VR、Android APK 与 EXE。">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://3dsmaxtounity.com/zh-cn/">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/zh-cn/" aria-current="page">首页</a>
+                <a href="/zh-cn/unity-hdrp-workflow">HDRP 流程</a>
+                <a href="/zh-cn/corona-to-unity">Corona 到 Unity</a>
+                <a href="/zh-cn/webgl-from-3ds-max">WebGL</a>
+                <a href="/zh-cn/unity-vr-build">VR 构建</a>
+                <a href="/zh-cn/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero reveal">
+                <p class="eyebrow">Archviz 实时工作流</p>
+                <h1>将 <span>3ds Max + V-Ray/Corona</span> 场景转换为高质量 Unity 交互体验</h1>
+                <p class="lead">此页面面向需要让客户“进入场景”进行查看和决策的团队。相比只发静态图，实时场景能更快推进沟通与确认。</p>
+                <p class="lead">一次 ZIP 上传即可生成多种交付格式：浏览器 WebGL、桌面 EXE、Android APK 与 VR 漫游版本。</p>
+                <div class="hero-cta">
+                    <button class="btn btn-primary" id="hero-upload-trigger" type="button">上传场景 ZIP</button>
+                    <a class="btn btn-secondary" href="/special-build/">在浏览器中启动项目</a>
+                    <a class="text-link" href="https://oneclick3d.xyz/" target="_blank" rel="noopener noreferrer">打开主服务</a>
+                </div>
+                <p class="hint">演示控制：<strong>WASD + 鼠标</strong></p>
+            </section>
+            <section class="card reveal">
+                <h2>为什么团队从纯离线交付转向实时交付</h2>
+                <div class="icon-grid">
+                    <article class="icon-item"><h3>更快达成决策</h3><p>客户可在场景中自由移动，减少反复修改与沟通成本。</p></article>
+                    <article class="icon-item"><h3>兼容现有生产栈</h3><p>工作流基于 <strong>3ds Max</strong> + <strong>V-Ray/Corona</strong> 的真实项目环境。</p></article>
+                    <article class="icon-item"><h3>一套源文件，多端输出</h3><p>同一场景可交付 WebGL、VR、Android APK 与 Windows EXE。</p></article>
+                </div>
+            </section>
+            <section class="card reveal outputs">
+                <h2>一次上传可获得的输出</h2>
+                <ul>
+                    <li>WebGL 浏览器演示</li>
+                    <li>VR 沉浸式漫游</li>
+                    <li>Android APK 移动演示包</li>
+                    <li>Windows EXE 离线演示应用</li>
+                </ul>
+                <div class="output-cta">
+                    <a class="btn btn-primary" href="/special-build/">在浏览器中打开项目</a>
+                    <span>使用 WASD + 鼠标进行漫游</span>
+                </div>
+            </section>
+            <section class="card reveal upload-card" id="upload-block">
+                <h2>上传场景并创建转换任务</h2>
+                <p class="upload-intro">支持输入：包含 3ds Max 场景与贴图的 <strong>.zip</strong> 包。</p>
+                <input id="scene-file-input" type="file" accept=".zip" hidden>
+                <div class="upload-panel" id="upload-panel"><button class="btn btn-primary" type="button" id="upload-pick-btn">选择 ZIP 文件</button></div>
+                <p id="upload-file-meta" class="upload-meta">未选择文件</p>
+                <div class="progress-wrap" id="upload-progress-wrap">
+                    <div class="progress-bar"><div class="progress-fill" id="upload-progress-fill"></div></div>
+                    <div class="progress-stats">
+                        <span id="upload-progress-percent">0%</span>
+                        <span id="upload-progress-speed">0 MB/s</span>
+                        <span id="upload-progress-eta">等待中</span>
+                    </div>
+                    <p id="upload-progress-chunks" class="upload-meta">0 / 0 分片</p>
+                </div>
+                <p id="upload-status" class="upload-status">就绪</p>
+            </section>
+        </main>
+        <footer><p>面向 Archviz 团队的 3ds Max + V-Ray/Corona 到 Unity 自动转换。</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+    <script src="/static/sites/unity/landing.js"></script>
+</body>
+</html>

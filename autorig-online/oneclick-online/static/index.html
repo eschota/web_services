@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="meta_title">3ds Max to Unity & Unreal Engine Converter | OneClick3D</title>
+    <meta name="description" content="Instantly convert 3ds Max scenes (V-Ray/Corona) into Unity HDRP, Unreal Engine projects, VR walkthroughs, and WebGL. Perfect for archviz." data-i18n="meta_description">
+    <link rel="canonical" href="https://oneclick3d.xyz">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="3ds Max to Unity & Unreal Engine Converter" data-i18n-content="meta_title">
+    <meta property="og:description" content="Instantly convert 3ds Max scenes into Unity and Unreal Engine real-time projects." data-i18n-content="meta_description">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://oneclick3d.xyz">
+    <meta property="og:image" content="https://oneclick3d.xyz/static/images/og-image.png">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="alternate icon" href="/static/images/logo/favicon.svg">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css?v=free3d-glass">
+    
+    <!-- Schema.org SoftwareApplication markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "OneClick3D",
+        "description": "Instantly convert 3ds Max scenes (V-Ray/Corona) into Unity HDRP, Unreal Engine projects, VR walkthroughs, and WebGL. Perfect for archviz.",
+        "url": "https://oneclick3d.xyz",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Windows, Web Browser",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD",
+            "description": "Pay per conversion"
+        },
+        "featureList": [
+            "3ds Max to Unity Converter",
+            "V-Ray and Corona Renderer Support",
+            "VR Walkthroughs",
+            "WebGL Presentations",
+            "Mobile-ready builds",
+            "Automatic Scene Optimization",
+            "Realtime 3D walkthroughs",
+            "Fast processing"
+        ],
+        "screenshot": "https://oneclick3d.xyz/static/images/screenshot.png",
+        "author": {
+            "@type": "Organization",
+            "name": "OneClick3D"
+        }
+    }
+    </script>
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z0WYEBKD2G"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-Z0WYEBKD2G');
+    </script>
+</head>
+<body class="page-home">
+    <!-- Upload Progress Overlay -->
+    <div id="upload-overlay" class="upload-overlay hidden">
+        <div class="upload-overlay-content">
+            <div class="upload-overlay-header">
+                <h2 data-i18n="uploading_title">Uploading Scene</h2>
+                <p id="upload-filename" class="upload-filename"></p>
+            </div>
+            
+            <div class="upload-progress-wrapper">
+                <div class="upload-progress-info">
+                    <span id="upload-percent">0%</span>
+                    <span id="upload-speed">0 MB/s</span>
+                </div>
+                <div class="upload-progress-bar-container">
+                    <div id="upload-progress-bar-inner" class="upload-progress-bar-inner"></div>
+                </div>
+                <div class="upload-progress-footer">
+                    <span id="upload-eta">Estimating time...</span>
+                    <span id="upload-chunks">0 / 0 chunks</span>
+                </div>
+            </div>
+
+            <div class="upload-overlay-rules">
+                <h3 class="upload-rules-title" data-i18n="upload_rules_title">Before upload, please check:</h3>
+                <ol class="upload-rules-list">
+                    <li data-i18n="upload_rule_1">Ensure the archive contains only 1 .MAX file.</li>
+                    <li data-i18n="upload_rule_2">The scene must contain at least one CAMERA.</li>
+                    <li data-i18n="upload_rule_3">The scene should render correctly without errors.</li>
+                    <li data-i18n="upload_rule_4">All textures must be linked correctly.</li>
+                    <li data-i18n="upload_rule_5">Conversion time depends on scene complexity and can take from 5 minutes to several hours.</li>
+                </ol>
+                <p class="upload-rules-contact">
+                    <span data-i18n="upload_contact_intro">For any questions, contact me personally at</span>
+                    <a href="mailto:eschota@gmail.com">eschota@gmail.com</a>,
+                    <a href="https://t.me/YesDeadline" target="_blank" rel="noopener noreferrer">t.me/YesDeadline</a>
+                    <span data-i18n="upload_contact_telegram_priority">(Telegram is priority)</span>,
+                    <span data-i18n="upload_contact_support_group">or in the support group</span>
+                    <a href="https://t.me/OneClickExporter" target="_blank" rel="noopener noreferrer">t.me/OneClickExporter</a>.
+                </p>
+                <p class="upload-rules-note" data-i18n="upload_any_scene_note">Any scene can be converted automatically if needed.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <div id="visitor-counter" class="visitor-counter"></div>
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/oneclick-logo.png" 
+                         srcset="/static/images/logo/oneclick-logo.png 1x, /static/images/logo/oneclick-logo@2x.png 2x"
+                         alt="OneClick3D - 3ds Max to Unity and Unreal Converter" 
+                         class="logo-img" 
+                         height="60">
+                </a>
+
+                <nav class="nav">
+                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                    <a href="/how-it-works" class="nav-link nav-link-guide" data-i18n="nav_how_it_works">How It Works</a>
+                    <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
+                </nav>
+                
+                <div class="header-actions">
+                    <!-- Credits Badge -->
+                    <div class="credits-badge">
+                        <span id="credits-label" data-i18n="credits_free">Free conversions left</span>
+                        <span class="count" id="credits-count">3</span>
+                    </div>
+                    
+                    <!-- Language Selector -->
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                <path d="M3 4.5L6 7.5L9 4.5"/>
+                            </svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Theme Toggle -->
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    
+                    <!-- Login Button -->
+                    <a href="/auth/login" class="btn btn-google" id="login-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        <span data-i18n="btn_login">Sign in with Google</span>
+                    </a>
+                    
+                    <!-- User Info (hidden when not logged in) -->
+                    <div id="user-info" class="hidden flex items-center gap-2">
+                        <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
+                        <span class="user-name"></span>
+                        <a href="/auth/logout" class="btn btn-ghost" data-i18n="btn_logout">Sign out</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+    
+    <!-- Free3D Model Search -->
+    <section class="free3d-search hidden">
+        <div class="container">
+            <div class="free3d-search-row">
+                <label for="free3d-search-input" class="free3d-search-label" data-i18n="free3d_search_label">Search Free 3D Models</label>
+                <select id="free3d-category-select" class="free3d-category-select">
+                    <option value="characters" selected data-i18n="free3d_cat_characters">Characters</option>
+                    <option value="animals" data-i18n="free3d_cat_animals">Animals</option>
+                    <option value="vehicles" data-i18n="free3d_cat_vehicles">Vehicles</option>
+                    <option value="weapons" data-i18n="free3d_cat_weapons">Weapons</option>
+                    <option value="props" data-i18n="free3d_cat_props">Props</option>
+                    <option value="all" data-i18n="free3d_cat_all">All</option>
+                </select>
+                <div class="free3d-input-group">
+                    <input type="text" 
+                           id="free3d-search-input" 
+                           class="free3d-search-input" 
+                           data-i18n-placeholder="free3d_search_placeholder"
+                           placeholder="girl, robot, warrior..."
+                           autocomplete="off">
+                    <button type="button" class="free3d-randomize-btn" id="free3d-randomize-btn" title="Random search">🎲</button>
+                </div>
+                <span class="free3d-search-status hidden" id="free3d-search-status" data-i18n="free3d_searching">Searching...</span>
+            </div>
+            <div class="free3d-results hidden" id="free3d-results">
+                <!-- Horizontal scrollable preview strip populated by JS -->
+            </div>
+        </div>
+    </section>
+    
+    <main>
+        <!-- Conversion Form -->
+        <section class="container">
+            <div class="card">
+                <h1 style="text-align: center; margin: 0 0 1.5rem 0; font-size: 1.75rem;">
+                    <span class="text-gradient" data-i18n="hero_title">3ds Max to Unity & Unreal Converter</span>
+                </h1>
+                <form id="convert-form">
+                    <!-- Tabs -->
+                    <div class="tabs">
+                        <button type="button" class="tab active" data-tab="upload" data-i18n="tab_upload">Upload File</button>
+                        <button type="button" class="tab" data-tab="link" data-i18n="tab_link">Paste Link</button>
+                    </div>
+                    
+                    <!-- Upload Panel -->
+                    <div id="upload-panel">
+                        <div class="upload-row">
+                            <div class="upload-zone" id="upload-zone">
+                                <img src="/static/images/icons/upload.svg" alt="Upload 3ds Max scene for Unity conversion" class="upload-zone-icon" width="64" height="64">
+                                <div class="upload-zone-title" data-i18n="upload_title">Drop your 3ds Max scene here</div>
+                                <div class="upload-zone-subtitle" data-i18n="upload_subtitle">or click to browse (.zip package up to 100MB)</div>
+                                <div class="upload-scene-guide">
+                                    <a href="/how-it-works" class="upload-scene-guide-link" data-i18n="upload_scene_guide_cta">Read scene preparation guide before upload</a>
+                                </div>
+
+                                <div class="upload-zone-file hidden" id="file-info">
+                                    <span>📄</span>
+                                    <span id="file-name"></span>
+                                    <img src="/static/images/icons/close.svg" alt="Remove" class="remove" id="remove-file" width="20" height="20">
+                                </div>
+                            </div>
+
+                            <aside class="support-card" aria-label="Support">
+                                <div class="support-card-title" data-i18n="support_questions_title">Have questions?</div>
+                                <div class="support-card-desc" data-i18n="support_questions_desc">Join our Telegram support group</div>
+                                <a class="support-card-qr" href="https://t.me/OneClickExporter" target="_blank" rel="noopener noreferrer" aria-label="Telegram QR">
+                                    <img src="/static/images/telegram_qr.jpg" alt="Join OneClick3D Telegram support group" width="256" height="256" loading="lazy">
+                                </a>
+                                <a class="btn btn-ghost support-card-cta" href="https://t.me/OneClickExporter" target="_blank" rel="noopener noreferrer" data-i18n="support_questions_cta">Open Telegram</a>
+                            </aside>
+                        </div>
+
+                        <input type="file" id="file-input" accept=".zip" hidden>
+                    </div>
+                    
+                    <!-- Link Panel -->
+                    <div id="link-panel" class="hidden">
+                        <div class="form-group">
+                            <label class="form-label" data-i18n="link_label">Model URL</label>
+                            <input type="url" class="form-input" id="link-input" data-i18n-placeholder="link_placeholder" placeholder="https://example.com/model.glb">
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                </form>
+            </div>
+        </section>
+
+        <!-- YouTube Video -->
+        <section class="container mt-4">
+            <div class="card" style="padding: 1rem; overflow: hidden;">
+                <div style="position: relative; width: 100%; padding-bottom: 56.25%; height: 0;">
+                    <iframe src="https://www.youtube-nocookie.com/embed/wz8cR6VitF8" 
+                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 8px;" 
+                            frameborder="0" 
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                            allowfullscreen></iframe>
+                </div>
+            </div>
+        </section>
+
+        <!-- Queue Status -->
+        <section class="container mt-4">
+            <div class="card" style="padding: 1.5rem;">
+                <div class="queue-status" id="queue-status" style="margin-top: 0;">
+                    <div class="queue-status-header">
+                        <img src="/static/images/icons/queue.svg" alt="OneClick3D conversion server queue status" class="queue-status-icon" width="20" height="20">
+                        <span data-i18n="queue_status">Server Queue</span>
+                    </div>
+                    <div class="queue-status-body">
+                        <div class="queue-stat">
+                            <span class="queue-stat-value" id="queue-active">-</span>
+                            <span class="queue-stat-label" data-i18n="queue_active">Active</span>
+                        </div>
+                        <div class="queue-stat">
+                            <span class="queue-stat-value" id="queue-pending">-</span>
+                            <span class="queue-stat-label" data-i18n="queue_pending">In Queue</span>
+                        </div>
+                        <div class="queue-stat">
+                            <span class="queue-stat-value" id="queue-wait">-</span>
+                            <span class="queue-stat-label" data-i18n="queue_wait">Est. Wait</span>
+                        </div>
+                        <div class="queue-stat">
+                            <span class="queue-stat-value" id="queue-servers">-</span>
+                            <span class="queue-stat-label" data-i18n="queue_servers">Servers</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Gallery Preview -->
+        <section class="container mt-4">
+            <div class="card" style="padding: 2rem;">
+                <div class="card-header" style="padding: 0; margin-bottom: 1rem; display:flex; align-items:flex-start; justify-content: space-between; gap: 1rem;">
+                    <div>
+                        <h3 class="card-title" style="margin: 0;" data-i18n="gallery_title">Latest converted 3D scenes</h3>
+                    </div>
+                    <a href="/gallery" class="btn btn-ghost" id="gallery-view-all-link" data-i18n="gallery_view_all_plain">View all</a>
+                </div>
+                <div class="features" id="gallery-preview-grid" style="margin: 0;">
+                    <div class="card" style="padding: 1rem; color: var(--text-muted);">Loading…</div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- History -->
+        <section class="container-sm mt-4">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title" data-i18n="history_title">Your Recent Tasks</h3>
+                </div>
+                <div class="history-list" id="history-list">
+                    <!-- Loaded dynamically -->
+                    <div class="skeleton skeleton-text"></div>
+                    <div class="skeleton skeleton-text short"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+    
+    <!-- SEO Footer -->
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer-grid">
+                <!-- Brand Column -->
+                <div class="footer-brand">
+                    <a href="/" class="footer-logo">
+                        <img src="/static/images/logo/oneclick-logo.png" alt="OneClick3D - 3ds Max to Unity and Unreal Converter" height="60">
+                    </a>
+                    <p class="footer-tagline" data-i18n="footer_tagline">Automatic conversion of 3ds max scenes with V-ray or Corona render to realtime 3d presentation, VR or web presentation.</p>
+                    <a href="/how-it-works" class="footer-guide-link" data-i18n="footer_scene_guide_cta">Scene preparation guide</a>
+                </div>
+                
+                <!-- Services Column -->
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_services"></h4><ul></ul>
+                </div>
+                
+                <!-- Guides Column -->
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_guides"></h4><ul></ul>
+                </div>
+                
+                <!-- Company Column -->
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_company"></h4><ul></ul>
+                </div>
+            </div>
+            
+            <!-- Bottom Bar -->
+            <div class="footer-bottom">
+                <p class="footer-copyright" data-i18n="footer_copyright">© 2026 OneClick. All rights reserved.</p>
+                <div class="footer-social">
+                    <a href="https://t.me/OneClickExporter" target="_blank" rel="noopener noreferrer" class="footer-social-link" title="Telegram">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                        </svg>
+                        <span>Telegram</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+    
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/task-card.js"></script>
+    <script src="/static/js/app.js?v=likes-5"></script>
+</body>
+</html>

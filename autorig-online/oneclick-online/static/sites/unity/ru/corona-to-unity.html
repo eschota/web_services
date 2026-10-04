@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Конвертация Corona в Unity | Перенос материалов для realtime Archviz</title>
+    <meta name="description" content="Практический гайд по конвертации Corona-сцен в Unity: приоритеты материалов, свет, оптимизация и delivery в realtime.">
+    <meta name="keywords" content="corona to unity, corona renderer conversion, archviz">
+    <link rel="canonical" href="https://3dsmaxtounity.com/ru/corona-to-unity">
+    <link rel="alternate" hreflang="en" href="https://3dsmaxtounity.com/corona-to-unity">
+    <link rel="alternate" hreflang="ru" href="https://3dsmaxtounity.com/ru/corona-to-unity">
+    <link rel="alternate" hreflang="zh-CN" href="https://3dsmaxtounity.com/zh-cn/corona-to-unity">
+    <link rel="alternate" hreflang="es" href="https://3dsmaxtounity.com/es/corona-to-unity">
+    <link rel="alternate" hreflang="x-default" href="https://3dsmaxtounity.com/corona-to-unity">
+    <meta property="og:title" content="Гайд по конвертации Corona в Unity">
+    <meta property="og:description" content="Как перенести Corona-сцены в Unity с сохранением визуального характера и производительности.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://3dsmaxtounity.com/ru/corona-to-unity">
+    <meta property="og:image" content="https://3dsmaxtounity.com/og-image.svg">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/site-styles.css">
+</head>
+<body>
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="grid-overlay"></div>
+    <div class="wrap">
+        <header class="topbar">
+            <div class="brand"><span class="brand-dot"></span>3dsmaxtounity.com</div>
+            <nav>
+                <a href="/ru/">Главная</a>
+                <a href="/ru/unity-hdrp-workflow">HDRP workflow</a>
+                <a href="/ru/corona-to-unity" aria-current="page">Corona в Unity</a>
+                <a href="/ru/webgl-from-3ds-max">WebGL</a>
+                <a href="/ru/unity-vr-build">VR build</a>
+                <a href="/ru/faq">FAQ</a>
+            </nav>
+        </header>
+        <main>
+            <section class="hero article-hero">
+                <p class="eyebrow">Corona Conversion Path</p>
+                <h1>Переводите <span>Corona-сцены</span> из 3ds Max в Unity уверенно</h1>
+                <p class="lead">Corona-сцены обычно строятся на нюансной светотени и аккуратной работе с глянцем. При realtime-конвертации важно сохранить художественный замысел и уложиться в бюджет производительности.</p>
+                <p class="lead">Цель - не буквальная копия шейдеров, а визуальная непрерывность: клиент должен узнавать тот же проект в интерактивной среде.</p>
+            </section>
+            <section class="card article-section">
+                <h2>Критичные приоритеты при переносе материалов</h2>
+                <div class="bullet-grid">
+                    <article class="bullet-item"><h3>Идентичность основных поверхностей</h3><p>Дерево, камень, ткань и краска должны сохранять характер при движении камеры.</p></article>
+                    <article class="bullet-item"><h3>Контроль бликов</h3><p>Пересвеченные спекуляры быстро разрушают ощущение реализма.</p></article>
+                    <article class="bullet-item"><h3>Непрерывность освещения</h3><p>При переходе от рендера к realtime атмосфера проекта должна оставаться узнаваемой.</p></article>
+                </div>
+            </section>
+            <section class="card article-section">
+                <h2>Связанные страницы</h2>
+                <p>Продолжайте с <a href="/ru/unity-hdrp-workflow">Unity HDRP workflow</a>, <a href="/ru/webgl-from-3ds-max">WebGL из 3ds Max</a> и <a href="/ru/unity-vr-build">Unity VR build</a>.</p>
+            </section>
+        </main>
+        <footer><p>Конвертация Corona в Unity для стабильной realtime-подачи Archviz-проектов.</p><p>© 3dsmaxtounity.com</p></footer>
+    </div>
+</body>
+</html>

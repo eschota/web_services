@@ -1467,6 +1467,9 @@ async def get_current_user(
 
 
 app.include_router(build_model_sale_router(get_current_user))
+from oneclick_auth_bridge import install as install_oneclick_bridge
+install_oneclick_bridge(app, get_current_user)
+
 
 
 if ANIMATION_FITTING_ENABLED:
