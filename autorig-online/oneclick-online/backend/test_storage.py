@@ -18,6 +18,10 @@ class Blocks(httpx.AsyncByteStream):
 
 
 class StorageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_trusted_worker_asset_paths_use_existing_tunnels(self):
+        self.assertEqual(storage.internal_worker_file_url('https://converter-f2.freestock.online/converter/glb/guid/export/cam1.png'),'http://127.0.0.1:15279/converter/glb/guid/export/cam1.png')
+        self.assertEqual(storage.internal_worker_file_url('https://other.example/converter/glb/guid/a.zip'),'https://other.example/converter/glb/guid/a.zip')
+        self.assertEqual(storage.internal_worker_file_url('https://converter-f2.freestock.online/private'),'https://converter-f2.freestock.online/private')
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir='/srv/oneclick/data')
         self.root = Path(self.tmp.name)

@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import time
 import uuid
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -21,6 +22,22 @@ RESERVATION_LOCK = asyncio.Lock()
 RESERVED = 0
 _LOCKS = [asyncio.Lock() for _ in range(64)]
 INFLIGHT = set()
+
+WORKER_FILE_TUNNELS = {
+    'converter-f1.freestock.online': '127.0.0.1:15132',
+    'converter-f2.freestock.online': '127.0.0.1:15279',
+    'converter-f7.freestock.online': '127.0.0.1:15131',
+    'converter-f11.freestock.online': '127.0.0.1:15533',
+    'converter-f13.freestock.online': '127.0.0.1:15267',
+}
+
+
+def internal_worker_file_url(url):
+    parsed = urlsplit(str(url))
+    target = WORKER_FILE_TUNNELS.get((parsed.hostname or '').lower())
+    if target and parsed.path.startswith('/converter/glb/'):
+        return urlunsplit(('http', target, parsed.path, parsed.query, ''))
+    return str(url)
 
 
 def size_of(path):
@@ -63,6 +80,10 @@ def valid_glb(path):
 class BoundedClient(httpx.AsyncClient):
     """Cap buffered metadata/image responses; large assets must use streaming."""
     async def send(self, request, *, stream=False, **kwargs):
+        mapped = internal_worker_file_url(request.url)
+        if mapped != str(request.url):
+            request.url = httpx.URL(mapped)
+            request.headers['host'] = request.url.netloc.decode('ascii')
         response = await super().send(request, stream=True, **kwargs)
         if stream:
             return response

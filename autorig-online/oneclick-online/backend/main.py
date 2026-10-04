@@ -3673,12 +3673,7 @@ async def proxy_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     file_url = ready_urls[file_index]
-    filename = file_url.split("/")[-1]
-    
-    # Clean filename for download (remove GUID)
-    clean_filename = filename
-    import re
-    clean_filename = re.sub(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', '', filename, flags=re.IGNORECASE)
+    clean_filename = _friendly_filename_for_cache(file_url, task.guid)
     
     # Determine content type
     ext = clean_filename.split(".")[-1].lower()
@@ -3708,7 +3703,7 @@ async def proxy_file(
             raise HTTPException(status_code=402, detail="Payment required to download files")
     
     # Serve from local cache if present
-    cached_path = TASK_CACHE_DIR / task_id / clean_filename
+    cached_path = TASK_CACHE_DIR / task_id / _clean_filename_for_cache(file_url, task.guid)
     if cached_path.exists():
         return FileResponse(
             cached_path,
@@ -3739,6 +3734,7 @@ async def proxy_file(
 async def proxy_file_by_name(
     task_id: str,
     filename: str,
+    source: Optional[str] = Query(None),
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -3747,32 +3743,31 @@ async def proxy_file_by_name(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Search in output_urls first, then ready_urls
-    file_url = None
-    all_urls = (task.output_urls or []) + (task.ready_urls or [])
-    
-    for url in all_urls:
-        url_clean = url.strip()
-        if url_clean.endswith(filename) or filename in url_clean.split('/')[-1]:
-            file_url = url_clean
-            break
-    
-    if not file_url:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Clean filename for download (remove GUID)
-    clean_filename = filename
-    import re
-    clean_filename = re.sub(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', '', filename, flags=re.IGNORECASE)
-    
-    # Determine index in download list (for purchase checks)
-    download_urls = (task.output_urls or []) if (task.output_urls and len(task.output_urls) > 0) else (task.ready_urls or [])
-    file_index = None
-    for idx, url in enumerate(download_urls):
-        url_clean = (url or "").strip()
-        if url_clean.endswith(filename) or filename in url_clean.split('/')[-1]:
-            file_index = idx
-            break
+    if not filename or Path(filename).name != filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    catalog = _task_file_url_catalog(task)
+    if source is not None:
+        source = source.strip()
+        if not source or source not in catalog:
+            raise HTTPException(status_code=400, detail="Invalid source for task")
+        friendly = _friendly_filename_for_cache(source, task.guid)
+        if filename != friendly:
+            raise HTTPException(status_code=400, detail="Filename does not match source")
+        file_url = source
+    else:
+        matches = [
+            url for url in catalog
+            if _friendly_filename_for_cache(url, task.guid) == filename
+        ]
+        if not matches:
+            raise HTTPException(status_code=404, detail="File not found")
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail="Ambiguous filename; use source from cached-files")
+        file_url = matches[0]
+
+    clean_filename = _friendly_filename_for_cache(file_url, task.guid)
+    file_index = _task_file_index_for_source(task, file_url)
     
     # Determine content type
     ext = clean_filename.split(".")[-1].lower()
@@ -3802,7 +3797,7 @@ async def proxy_file_by_name(
             raise HTTPException(status_code=402, detail="Payment required to download files")
     
     # Serve from local cache if present
-    cached_path = TASK_CACHE_DIR / task_id / clean_filename
+    cached_path = TASK_CACHE_DIR / task_id / _clean_filename_for_cache(file_url, task.guid)
     if cached_path.exists():
         return FileResponse(
             cached_path,
@@ -3847,18 +3842,12 @@ async def api_task_cached_files(
     
     # If files are already cached, return them
     if cache_dir.exists():
-        files = []
-        total_size = 0
-        from urllib.parse import quote
-        for f in sorted(cache_dir.iterdir()):
-            if f.is_file() and not f.name.endswith('.tmp'):
-                size = f.stat().st_size
-                total_size += size
-                files.append({
-                    "name": f.name,
-                    "size": size,
-                    "url": f"/api/file/{task_id}/download/{quote(f.name)}"
-                })
+        files = [
+            item
+            for source in _task_file_url_catalog(task)
+            if (item := _cached_file_item(task_id, source, task.guid)) is not None
+        ]
+        total_size = sum(item["size"] for item in files)
         
         if files:
             return {
@@ -5512,7 +5501,7 @@ def _render_sitemap_xml(entries: list[dict]) -> bytes:
 # =============================================================================
 import re as _re_module
 
-def _clean_filename_for_cache(url: str, guid: str = None) -> str:
+def _friendly_filename_for_cache(url: str, guid: str = None) -> str:
     """
     Extract and clean filename from URL for caching.
     Removes GUID prefix from filename for cleaner downloads.
@@ -5532,20 +5521,77 @@ def _clean_filename_for_cache(url: str, guid: str = None) -> str:
     uuid_pattern = _re_module.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', _re_module.IGNORECASE)
     filename = uuid_pattern.sub('', filename)
     
+    filename = filename.strip() or "download.bin"
+    if len(filename) > 220:
+        suffix = "".join(Path(filename).suffixes)[-32:]
+        filename = filename[:220 - len(suffix)] + suffix
+    if Path(filename).name != filename or "\\" in filename or filename in {".", ".."}:
+        raise ValueError("Unsafe cache filename")
     return filename
+
+
+def _clean_filename_for_cache(url: str, guid: str = None) -> str:
+    """Return a bounded cache key that preserves the exact source URL identity."""
+    friendly = _friendly_filename_for_cache(url, guid)
+    url_hash = hashlib.sha256(str(url).encode("utf-8")).hexdigest()[:20]
+    return f"{url_hash}--{friendly}"
+
+
+def _task_file_url_catalog(task) -> list[str]:
+    """Return the task-owned source URLs in stable order without duplicates."""
+    catalog: list[str] = []
+    seen: set[str] = set()
+    for raw in list(task.output_urls or []) + list(task.ready_urls or []):
+        url = str(raw or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            catalog.append(url)
+    return catalog
+
+
+def _task_file_index_for_source(task, source: str) -> Optional[int]:
+    """Resolve purchase index by exact URL, never by a colliding basename."""
+    download_urls = (
+        list(task.output_urls or [])
+        if task.output_urls
+        else list(task.ready_urls or [])
+    )
+    for index, raw in enumerate(download_urls):
+        if str(raw or "").strip() == source:
+            return index
+    return None
+
+
+def _cached_file_item(task_id: str, source: str, guid: str = None) -> Optional[dict]:
+    """Build one customer-facing cache item from a task-owned source URL."""
+    from urllib.parse import quote, urlencode
+
+    cache_key = _clean_filename_for_cache(source, guid)
+    path = TASK_CACHE_DIR / task_id / cache_key
+    if not path.is_file():
+        return None
+    friendly = _friendly_filename_for_cache(source, guid)
+    query = urlencode({"source": source})
+    return {
+        "name": friendly,
+        "size": path.stat().st_size,
+        "url": f"/api/file/{task_id}/download/{quote(friendly)}?{query}",
+    }
 
 
 async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> dict:
     from storage import download
-    from urllib.parse import quote
     cached, errors = [], []
-    for url in list(dict.fromkeys(ready_urls))[:256]:
+    normalized_urls = list(dict.fromkeys(
+        str(raw or "").strip() for raw in ready_urls if str(raw or "").strip()
+    ))
+    for url in normalized_urls[:256]:
         try:
-            filename = _clean_filename_for_cache(url, guid)
-            if not filename or Path(filename).name != filename or "\\" in filename:
-                raise ValueError("Unsafe cache filename")
-            filepath = await download(url, TASK_CACHE_DIR / task_id / filename)
-            cached.append({"name": filename, "size": filepath.stat().st_size, "url": f"/api/file/{task_id}/download/{quote(filename)}"})
+            cache_key = _clean_filename_for_cache(url, guid)
+            await download(url, TASK_CACHE_DIR / task_id / cache_key)
+            item = _cached_file_item(task_id, url, guid)
+            if item:
+                cached.append(item)
         except Exception as exc:
             errors.append(str(exc))
     return {"cached": bool(cached), "files": cached, "errors": errors}
