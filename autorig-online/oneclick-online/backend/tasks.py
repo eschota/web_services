@@ -8,7 +8,7 @@ import httpx
 from storage import BoundedClient
 from datetime import datetime
 from typing import Optional, Tuple, List
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlsplit
 
 from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -483,6 +483,18 @@ async def _merge_terminal_worker_inventory(
         name = str(file_meta.get("name") or rel_path or url.rsplit("/", 1)[-1])
         folder = str(file_meta.get("folder") or file_meta.get("category") or "file")
         category = folder.rsplit("/", 1)[-1] or "file"
+        path_hint = (rel_path or urlsplit(url).path).lower()
+        lower_name = name.lower()
+        if lower_name.endswith('.unitypackage'):
+            category = 'unity_hdrp_package' if 'hdrp' in path_hint else 'unity_package'
+        elif lower_name.endswith('_build.zip'):
+            category = 'unity_hdrp_build_zip' if 'hdrp' in path_hint else 'unity_build_zip'
+        elif lower_name.endswith('.apk'):
+            category = 'unity_quest_apk' if 'oc_vr' in path_hint or 'quest' in path_hint else 'unity_android_apk'
+        elif lower_name.endswith('.mp4'):
+            category = 'unity_hdrp_video' if 'hdrp' in path_hint else 'unity_video'
+        elif 'unity_renders' in path_hint:
+            category = 'unity_renders_oc_hdrp' if 'hdrp' in path_hint else 'unity_renders'
         entries.append({"category": category, "name": name, "url": url})
         if "log" not in folder.lower() and not name.lower().endswith((".log", ".txt")):
             urls.append(url)

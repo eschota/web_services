@@ -20,7 +20,7 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
                 if native is None: return httpx.Response(404)
                 return httpx.Response(200,json={'status':native,'backend_task_id':task.id})
             if '/model-files/' in request.url.path:
-                return httpx.Response(200,json={'folders':{'export/meshes':{'files':[{'name':'model.fbx','rel_path':'export/meshes/model.fbx'}]}}})
+                return httpx.Response(200,json={'folders':{'export/meshes':{'files':[{'name':'model.fbx','rel_path':'export/meshes/model.fbx'}]},'OC_HDRP':{'files':[{'name':'scene_HDRP.unitypackage','rel_path':'OC_HDRP/scene_HDRP.unitypackage'}]}}})
             return httpx.Response(206,headers={'content-range':'bytes 0-36/37'},text='Export completed\nTASK_COMPLETE\n')
         class Client(BoundedClient):
             def __init__(self, **kwargs):
@@ -31,6 +31,7 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         if expected=='done':
             self.assertEqual(task.ready_count,100)
             self.assertIn('https://public.worker.test/converter/glb/guid/export/meshes/model.fbx',task.ready_urls)
+            self.assertTrue(any(p['category']=='unity_hdrp_package' for p in task.product_entries))
         else:
             self.assertLess(task.ready_count,100)
 
