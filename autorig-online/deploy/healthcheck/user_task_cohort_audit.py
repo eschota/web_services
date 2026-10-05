@@ -319,7 +319,7 @@ def make_summary(state, now):
             "queue_seconds_median": statistics.median(queues) if queues else None,
             "processing_seconds_median": statistics.median(processing) if processing else None,
             "download_response_task_count": sum(any(e["kind"] in {"bundle_response", "file_download_response"} and e["status"] in {200, 206} for e in m["http_events"]) for m in members),
-            "support_task_count": sum(bool(m.get("support_sessions")) for m in members),
+            "support_task_count": sum(any(message.get("direction") == "user" for message in m.get("support_messages", [])) for m in members),
             "checkout_task_count": sum(bool(m.get("checkout_intents")) for m in members),
             "final_report_ready": final_ready, "limitations": state["limitations"]}
 

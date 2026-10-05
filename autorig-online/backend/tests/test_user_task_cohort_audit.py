@@ -40,6 +40,17 @@ class RealUserObserverTests(unittest.TestCase):
         state["members"]["0"]["current"]["status"] = "processing"
         self.assertFalse(observer.make_summary(state, "2026-10-06T14:00:00+00:00")["final_report_ready"])
 
+    def test_support_widget_session_does_not_count_as_contact(self):
+        member = {"current": {"status": "created", "created_at": "2026-10-05T12:00:00+00:00"},
+                  "http_events": [], "support_sessions": [{"id": 1}], "support_messages": []}
+        state = {"target": 20, "started_at": "2026-10-05T11:00:00+00:00", "followup_hours": 2,
+                 "limitations": {}, "members": {"one": member}}
+        self.assertEqual(observer.make_summary(state, "2026-10-05T13:00:00+00:00")["support_task_count"], 0)
+        member["support_messages"] = [{"direction": "system"}]
+        self.assertEqual(observer.make_summary(state, "2026-10-05T13:00:00+00:00")["support_task_count"], 0)
+        member["support_messages"].append({"direction": "user"})
+        self.assertEqual(observer.make_summary(state, "2026-10-05T13:00:00+00:00")["support_task_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
