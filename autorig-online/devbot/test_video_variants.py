@@ -28,6 +28,10 @@ class VideoVariantsTests(unittest.IsolatedAsyncioTestCase):
 
         async def tg_call(method, **kwargs):
             self.calls.append((method, kwargs))
+            if method=='sendMediaGroup':
+                return [{'message_id':120+i,'chat':{'id':-1},'media_group_id':'TEST_ALBUM',
+                         'video':{'file_id':'TEST_ONLY_FILE_'+str(i),'width':540,'height':960,'duration':8}}
+                        for i in range(3)]
             return {'message_id': 123, 'reply_markup': json.loads(kwargs.get('data',{}).get('reply_markup','{}'))}
 
         async def old_callback(cq):
@@ -38,7 +42,7 @@ class VideoVariantsTests(unittest.IsolatedAsyncioTestCase):
                   'CHAT_ID':-1,'db':self.db,'insert_message':self.insert,'tg_call':tg_call}
         self.app=FastAPI()
         video_variants.install(self.app,self.ctx)
-        self.endpoint=next(r.endpoint for r in self.app.routes if r.path=='/dev/api/send_variants')
+        self.endpoint=next(r.endpoint for r in self.app.routes if r.path=='/dev/api/youtube_video_album_choices')
 
     async def asyncTearDown(self):
         self.temporary.cleanup()
@@ -66,18 +70,19 @@ class VideoVariantsTests(unittest.IsolatedAsyncioTestCase):
         return json.loads((await self.endpoint(agent='Own agent',project='Own project',
                                                 caption='Three videos',files=self.files())).body)
 
-    async def test_three_native_videos_and_choices_are_in_one_message(self):
+    async def test_three_real_album_videos_and_separate_choice_controls(self):
         result=await self.send()
-        self.assertEqual(len(self.calls),1)
+        self.assertEqual(len(self.calls),2)
         method,kwargs=self.calls[0]
-        self.assertEqual(method,'sendRichMessage')
-        blocks=json.loads(kwargs['data']['rich_message'])['blocks']
-        videos=[b['video'] for b in blocks if b['type']=='video']
+        self.assertEqual(method,'sendMediaGroup')
+        videos=json.loads(kwargs['data']['media'])
         self.assertEqual([v['media'] for v in videos],['attach://v0','attach://v1','attach://v2'])
         self.assertTrue(all(v['supports_streaming'] for v in videos))
-        rows=json.loads(kwargs['data']['reply_markup'])['inline_keyboard']
+        self.assertEqual(self.calls[1][0],'sendMessage')
+        rows=json.loads(self.calls[1][1]['data']['reply_markup'])['inline_keyboard']
         self.assertEqual([b['text'] for b in rows[0]],['Выбрать A','Выбрать B','Выбрать C'])
         self.assertEqual(result['state'],'sent')
+        self.assertEqual(len(result['telegram_videos']),3)
         self.assertEqual([v['label'] for v in result['variants']],list('ABC'))
 
     async def test_select_b_uses_parent_agent_and_original_media_digest(self):
@@ -117,6 +122,15 @@ class VideoVariantsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException):
                 await self.endpoint(agent='Own agent',project='Own project',caption='',files=files)
         self.assertEqual(self.calls,[])
+
+    async def test_message_ids_without_video_attachments_are_not_delivery_proof(self):
+        async def incomplete(method,**kwargs):
+            return [{'message_id':120+i,'chat':{'id':-1}} for i in range(3)]
+        self.ctx['tg_call']=incomplete
+        with self.assertRaises(HTTPException):
+            await self.send()
+        metadata=json.loads(next(self.root.glob('*.variants.json')).read_text())
+        self.assertNotEqual(metadata['state'],'sent')
 
 
 if __name__=='__main__':

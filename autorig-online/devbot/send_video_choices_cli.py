@@ -4,13 +4,16 @@ import asyncio
 import json
 import re
 import sys
+import importlib.util
 from pathlib import Path
 
 from fastapi import UploadFile
 
 sys.path.insert(0, '/srv/autorig/devbot')
 import app as current
-import video_variants
+spec=importlib.util.spec_from_file_location('youtube_video_variants_staged',Path(__file__).with_name('video_variants.py'))
+video_variants=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(video_variants)
 
 
 async def main():
@@ -40,7 +43,7 @@ async def main():
 
     current.new_uid=request_uid
     video_variants.install(current.app,vars(current))
-    endpoint=next(r.endpoint for r in current.app.routes if r.path=='/dev/api/send_variants')
+    endpoint=next(r.endpoint for r in current.app.routes if r.path=='/dev/api/youtube_video_album_choices')
     streams=[Path(p).open('rb') for p in args.files]
     try:
         response=await endpoint(agent=args.agent,project=args.project,caption=args.caption,
