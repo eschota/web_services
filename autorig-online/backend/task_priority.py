@@ -20,6 +20,8 @@ from urllib.parse import urlparse
 import httpx
 from sqlalchemy import case, func, or_, select, update
 
+from worker_transport import worker_transport_url
+
 
 QUEUE_CLASS_INTERACTIVE = "interactive"
 QUEUE_CLASS_BACKGROUND = "collection_background"
@@ -338,7 +340,7 @@ async def _worker_task_status(
             if timeout <= 0:
                 raise TimeoutError("preemption deadline expired during status probe")
         response = await asyncio.wait_for(
-            client.get(url, headers=headers, timeout=timeout), timeout=timeout
+            client.get(worker_transport_url(url), headers=headers, timeout=timeout), timeout=timeout
         )
         if response.status_code == 404:
             continue
@@ -395,7 +397,7 @@ async def preempt_background_task(task_id: str) -> bool:
                 raise TimeoutError("preemption deadline expired before worker probe")
             initial_server = await asyncio.wait_for(
                 client.get(
-                    f"{worker['url']}/api-converter-glb/server-status",
+                    worker_transport_url(f"{worker['url']}/api-converter-glb/server-status"),
                     timeout=initial_timeout,
                 ),
                 timeout=initial_timeout,
@@ -488,7 +490,7 @@ async def preempt_background_task(task_id: str) -> bool:
                     raise TimeoutError("preemption deadline expired before control request")
                 response = await asyncio.wait_for(
                     client.post(
-                        control_url,
+                        worker_transport_url(control_url),
                         json=body,
                         headers=headers,
                         timeout=post_timeout,
@@ -577,7 +579,7 @@ async def preempt_background_task(task_id: str) -> bool:
                         break
                     server = await asyncio.wait_for(
                         client.get(
-                            f"{worker['url']}/api-converter-glb/server-status",
+                            worker_transport_url(f"{worker['url']}/api-converter-glb/server-status"),
                             timeout=status_timeout,
                         ),
                         timeout=status_timeout,
@@ -594,7 +596,7 @@ async def preempt_background_task(task_id: str) -> bool:
                         break
                     server = await asyncio.wait_for(
                         client.get(
-                            f"{worker['url']}/api-converter-glb/server-status",
+                            worker_transport_url(f"{worker['url']}/api-converter-glb/server-status"),
                             timeout=status_timeout,
                         ),
                         timeout=status_timeout,

@@ -20,6 +20,7 @@ from database import Task, User, AnonSession, AsyncSessionLocal
 from config import APP_URL
 from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
+from worker_transport import worker_transport_url
 from task_timeout_contract import task_hard_timeout_reference
 from collection_retry_policy import collection_error_retry_due
 from task_priority import normalize_queue_class, preemption_in_progress
@@ -113,7 +114,7 @@ async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bo
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             async with client.stream(
                 "GET",
-                url,
+                worker_transport_url(url),
                 headers={"Range": "bytes=0-63", "Accept-Encoding": "identity"},
             ) as response:
                 if response.status_code not in (200, 206):
@@ -426,7 +427,7 @@ async def _head_is_ready(url: str) -> bool:
     import httpx
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.head(url, timeout=5.0, follow_redirects=True)
+            resp = await client.head(worker_transport_url(url), timeout=5.0, follow_redirects=True)
             return resp.status_code == 200
     except Exception:
         return False
@@ -912,7 +913,7 @@ async def _fetch_concrete_worker_artifacts(
     worker_root = f"{worker_base.rstrip('/')}/converter/glb"
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(files_url, timeout=8.0)
+            resp = await client.get(worker_transport_url(files_url), timeout=8.0)
         if resp.status_code != 200:
             return [], None, None
         data = resp.json() if resp.content else {}
@@ -972,7 +973,7 @@ async def _fetch_worker_status_viewer_artifacts(
             timeout=VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS,
             follow_redirects=True,
         ) as client:
-            response = await client.get(status_url)
+            response = await client.get(worker_transport_url(status_url))
         if response.status_code != 200:
             return None, None
         payload = response.json() if response.content else {}
@@ -1004,7 +1005,7 @@ async def _fetch_worker_completion_contract(task: Task) -> Optional[dict]:
     status_url = f"{worker_api.rstrip('/')}/status/{quote(worker_task_id, safe='')}"
     try:
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            response = await client.get(status_url)
+            response = await client.get(worker_transport_url(status_url))
         if response.status_code != 200:
             return None
         payload = response.json() if response.content else {}
@@ -1055,7 +1056,7 @@ async def _probe_remote_glb_artifact(url: Optional[str]) -> bool:
         async with httpx.AsyncClient(follow_redirects=True) as client:
             async with client.stream(
                 "GET",
-                candidate,
+                worker_transport_url(candidate),
                 headers={"Range": "bytes=0-11", "Accept-Encoding": "identity"},
                 timeout=VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS,
             ) as response:
@@ -1204,7 +1205,7 @@ async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
     log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
     try:
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            resp = await client.get(log_url)
+            resp = await client.get(worker_transport_url(log_url))
         if resp.status_code != 200:
             return None
         text = resp.text
@@ -1223,7 +1224,7 @@ async def _worker_conversion_completed(task: Task) -> bool:
     log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
     try:
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            resp = await client.get(log_url)
+            resp = await client.get(worker_transport_url(log_url))
         if resp.status_code != 200:
             return False
         text = resp.text.replace("\r\n", "\n").replace("\r", "\n")

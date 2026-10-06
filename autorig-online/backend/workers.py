@@ -19,6 +19,7 @@ from sqlalchemy import select, desc, func
 
 from database import WorkerEndpoint, Task
 from worker_artifact_urls import parse_worker_artifact_payload
+from worker_transport import worker_transport_url
 from config import (
     WORKERS, 
     PROGRESS_BATCH_SIZE, 
@@ -122,7 +123,7 @@ async def _recover_worker_task_after_post_timeout(
     of incorrectly marking the task as Worker timeout.
     """
     try:
-        resp = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
+        resp = await client.get(worker_transport_url(worker_url), timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -360,7 +361,7 @@ def get_quarantined_workers() -> Dict[str, dict]:
 async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerInfo:
     """Get load/status from a single worker"""
     try:
-        response = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
+        response = await client.get(worker_transport_url(worker_url), timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             # Worker may return load info in different formats
@@ -546,7 +547,7 @@ async def send_task_to_worker(
 
             request_started_at = time.time()
             response = await client.post(
-                worker_url,
+                worker_transport_url(worker_url),
                 json=payload,
                 timeout=30.0
             )
@@ -607,7 +608,7 @@ async def send_fbx_to_glb(worker_api_url: str, input_url: str) -> FbxToGlbResult
     Response: { "model_name": "...", "output_url": "..." }
     """
     worker_base = get_worker_base_url(worker_api_url)
-    endpoint = f"{worker_base}/api-converter-glb-to-fbx"
+    endpoint = worker_transport_url(f"{worker_base}/api-converter-glb-to-fbx")
 
     async with httpx.AsyncClient() as client:
         try:
@@ -648,14 +649,15 @@ async def probe_resource_available(url: str, client: httpx.AsyncClient) -> bool:
     in those cases we fall back to a 1-byte Range GET (cheap existence check).
     """
     try:
-        r = await client.head(url, timeout=PROGRESS_CHECK_TIMEOUT, follow_redirects=True)
+        request_url = worker_transport_url(url)
+        r = await client.head(request_url, timeout=PROGRESS_CHECK_TIMEOUT, follow_redirects=True)
         if r.status_code == 200:
             return True
         if r.status_code == 404:
             return False
         if r.status_code in (403, 405, 501) or r.status_code >= 500:
             g = await client.get(
-                url,
+                request_url,
                 timeout=PROGRESS_CHECK_TIMEOUT,
                 follow_redirects=True,
                 headers={"Range": "bytes=0-0"},
@@ -665,7 +667,7 @@ async def probe_resource_available(url: str, client: httpx.AsyncClient) -> bool:
     except Exception:
         try:
             g = await client.get(
-                url,
+                request_url,
                 timeout=PROGRESS_CHECK_TIMEOUT,
                 follow_redirects=True,
                 headers={"Range": "bytes=0-0"},
@@ -1023,7 +1025,7 @@ def _safe_worker_float(value: Any, default: float = 900.0) -> float:
 async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) -> WorkerQueueStatus:
     """Get detailed queue status from a single worker"""
     try:
-        response = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
+        response = await client.get(worker_transport_url(worker_url), timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             if not isinstance(data, dict):

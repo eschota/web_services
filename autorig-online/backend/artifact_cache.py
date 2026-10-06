@@ -32,6 +32,7 @@ from config import (
     ARTIFACT_CACHE_SOFT_CAP_GB,
 )
 from database import ArtifactCacheJob, AsyncSessionLocal, Task
+from worker_transport import worker_transport_url
 
 
 RANGE_CHUNK_BYTES = 8 * 1024 * 1024
@@ -254,7 +255,9 @@ async def _safe_stream_request(
 ) -> httpx.Response:
     current = validate_source_url(url, assigned_worker)
     for _ in range(MAX_REDIRECTS + 1):
-        request = client.build_request(method, current, headers=headers)
+        request = client.build_request(
+            method, worker_transport_url(current), headers=headers
+        )
         response = await client.send(request, stream=True)
         if response.status_code not in (301, 302, 303, 307, 308):
             return response
