@@ -1037,6 +1037,28 @@ def _completion_contract_v2_state(payload: Optional[dict]) -> Tuple[bool, bool, 
     return True, finalized, None
 
 
+def _legacy_primary_completion_gate(
+    task: Task,
+    payload: Optional[dict],
+    *,
+    all_urls_ready: bool,
+) -> Tuple[bool, Optional[str]]:
+    """Require the exact primary worker task to report Completed."""
+    if not str(getattr(task, "worker_task_id", None) or "").strip():
+        return False, None
+    if not isinstance(payload, dict):
+        return False, None
+    worker_status = str(payload.get("status") or "").strip().lower()
+    if worker_status in {"failed", "error"}:
+        failure = str(
+            payload.get("error")
+            or payload.get("error_message")
+            or "worker task failed"
+        ).strip()
+        return False, failure or "worker task failed"
+    return bool(all_urls_ready and worker_status == "completed"), None
+
+
 def _task_declares_completion_v2(task: Task) -> bool:
     """Read the persisted, migration-free v2 declaration from progress_page."""
     try:
@@ -1321,6 +1343,24 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         _schedule_task_error_notification(task.id)
         return task
 
+    legacy_worker_completed = False
+    if not expects_v2 and not _is_animal_task(task):
+        legacy_worker_completed, legacy_worker_failure = _legacy_primary_completion_gate(
+            task,
+            completion_payload,
+            all_urls_ready=False,
+        )
+        if legacy_worker_failure and task.status not in ("done", "error"):
+            task.status = "error"
+            task.error_message = f"Worker failed: {legacy_worker_failure}"
+            _clear_terminal_preemption_state(task)
+            task.updated_at = datetime.utcnow()
+            await release_task_workload_lease(db, task, outcome="released")
+            await db.commit()
+            await db.refresh(task)
+            _schedule_task_error_notification(task.id)
+            return task
+
     # Get already ready URLs
     already_ready = set(task.ready_urls)
     
@@ -1346,11 +1386,19 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
+            if not expects_v2 and not _is_animal_task(task):
+                legacy_worker_completed, _ = _legacy_primary_completion_gate(
+                    task,
+                    completion_payload,
+                    all_urls_ready=True,
+                )
             if completion_probe_unavailable:
                 task.status = "processing"
             elif contract_v2 and not worker_finalized:
                 task.status = "processing"
             elif _is_animal_task(task) and not await _worker_conversion_completed(task):
+                task.status = "processing"
+            elif not contract_v2 and not _is_animal_task(task) and not legacy_worker_completed:
                 task.status = "processing"
             else:
                 task.status = "done"
@@ -1375,19 +1423,34 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         if validated_animations_url:
             task.viewer_animations_glb_url = validated_animations_url
             task.updated_at = datetime.utcnow()
+        concrete_outputs_complete = bool(
+            concrete_urls and _worker_outputs_look_complete(concrete_urls)
+        )
+        if not expects_v2 and not _is_animal_task(task):
+            legacy_worker_completed, _ = _legacy_primary_completion_gate(
+                task,
+                completion_payload,
+                all_urls_ready=concrete_outputs_complete,
+            )
         if (
             task.status not in ("done", "error")
-            and concrete_urls
-            and _worker_outputs_look_complete(concrete_urls)
+            and concrete_outputs_complete
             and not completion_probe_unavailable
             and (not contract_v2 or worker_finalized)
+            and (contract_v2 or _is_animal_task(task) or legacy_worker_completed)
         ):
             task.output_urls = concrete_urls
             task.ready_urls = concrete_urls
             task.total_count = len(concrete_urls)
             task.ready_count = len(concrete_urls)
-            conversion_completed = worker_finalized if contract_v2 else (
-                (not _is_animal_task(task)) or await _worker_conversion_completed(task)
+            conversion_completed = (
+                worker_finalized
+                if contract_v2
+                else (
+                    await _worker_conversion_completed(task)
+                    if _is_animal_task(task)
+                    else legacy_worker_completed
+                )
             )
             task.status = "done" if conversion_completed else "processing"
             task.last_progress_at = datetime.utcnow()
