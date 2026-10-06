@@ -222,6 +222,7 @@ from animation_correction_exports import (
 
 import re
 import httpx
+from worker_transport import worker_http_client
 
 from ai_fleet import router as ai_fleet_router
 from ai_graph import router as ai_graph_router
@@ -466,7 +467,7 @@ async def send_ga4_event(client_id: str, event_name: str, params: dict = None):
     }
     
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with worker_http_client(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
             if DEBUG:
                 print(f"[GA4] Event '{event_name}' sent. Status: {resp.status_code}")
@@ -627,7 +628,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             try:
                 from renderfin import hunyuan_client
 
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with worker_http_client(follow_redirects=True) as client:
                     cross_background_capacity = (
                         await hunyuan_client.shared_full_background_capacity(client)
                     )
@@ -677,7 +678,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             if remaining_excess:
                 from renderfin import hunyuan_client
 
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with worker_http_client(follow_redirects=True) as client:
                     released = await hunyuan_client.preempt_background_hunyuan_many(
                         client,
                         limit=remaining_excess,
@@ -766,7 +767,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             if hunyuan_needed:
                 from renderfin import hunyuan_client
 
-                async with httpx.AsyncClient(follow_redirects=True) as client:
+                async with worker_http_client(follow_redirects=True) as client:
                     released = await hunyuan_client.preempt_background_hunyuan_many(
                         client,
                         limit=hunyuan_needed,
@@ -2008,7 +2009,7 @@ async def _worker_file_available(url: str) -> bool:
     if not url:
         return False
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             resp = await client.head(url, timeout=15.0)
             if resp.status_code == 200:
                 return True
@@ -2040,7 +2041,7 @@ async def _cache_worker_file_by_ranges(
         temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
         try:
             timeout = httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
-            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            async with worker_http_client(follow_redirects=True, timeout=timeout) as client:
                 probe = None
                 for attempt in range(4):
                     probe = await client.get(url, headers={"Range": "bytes=0-0"})
@@ -2104,7 +2105,7 @@ async def _cache_worker_file_by_ranges(
 async def _download_worker_file_bytes(url: str, label: str, *, max_bytes: int = 80 * 1024 * 1024) -> bytes:
     """Download a worker file into memory for small on-demand bundles."""
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             resp = await client.get(url, timeout=120.0)
             if resp.status_code != 200:
                 raise HTTPException(status_code=404, detail=f"{label} is unavailable")
@@ -2181,7 +2182,7 @@ async def _fetch_worker_animation_file_urls(worker_root: str, guid: str) -> List
     files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
     out: List[str] = []
     try:
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             resp = await client.get(files_url, timeout=5.0)
         if resp.status_code != 200:
             return []
@@ -2419,7 +2420,7 @@ async def _fetch_worker_model_files(task: Task) -> Tuple[bool, List[Dict[str, An
     files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
 
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             resp = await client.get(files_url)
         if resp.status_code != 200:
             return False, [], {}, f"HTTP {resp.status_code}"
@@ -2885,7 +2886,7 @@ async def admin_u3d_youtube_oauth_callback(
     if not code:
         return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
     from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
-    async with httpx.AsyncClient() as client:
+    async with worker_http_client() as client:
         token_response = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
@@ -4933,7 +4934,7 @@ async def _rig_v2_list_openai_models(cfg: Dict[str, Any]) -> List[str]:
         return []
     models_url = str(cfg.get("open_ai_models_url_string") or "https://api.openai.com/v1/models").strip()
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=15.0, follow_redirects=True) as client:
             resp = await client.get(models_url, headers={"Authorization": f"Bearer {api_key}"})
         if resp.status_code != 200:
             return []
@@ -4977,7 +4978,7 @@ async def _rig_v2_discover_free_vision_models(cfg: Dict[str, Any], api_key: str)
     if not models_url:
         return []
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=10.0, follow_redirects=True) as client:
             resp = await client.get(
                 models_url,
                 headers={
@@ -5063,7 +5064,7 @@ async def _rig_v2_call_openrouter_vision(
             ],
         }
         try:
-            async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            async with worker_http_client(timeout=45.0, follow_redirects=True) as client:
                 resp = await client.post(api_url, headers=headers, json=payload)
             if resp.status_code != 200:
                 last_error = f"{model}: HTTP {resp.status_code} {resp.text[:240]}"
@@ -5163,7 +5164,7 @@ async def _rig_v2_call_openai_vision(
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=45.0, follow_redirects=True) as client:
             resp = await client.post(api_url, headers=headers, json=payload)
         if resp.status_code != 200:
             return {
@@ -5631,7 +5632,7 @@ async def api_gumroad_ping(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=10.0, follow_redirects=True) as client:
             upstream = await client.post(
                 GUMROAD_PROXY_TARGET,
                 content=raw_body,
@@ -5965,7 +5966,7 @@ async def api_task_progress_log(
     
     try:
         import httpx
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             resp = await client.get(log_url, timeout=5.0)
             
             if resp.status_code == 404:
@@ -6105,7 +6106,7 @@ async def _fetch_animal_variant_matrix(task: Task, file_map: Dict[str, Dict[str,
 
     for url in dict.fromkeys(candidate_urls):
         try:
-            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            async with worker_http_client(timeout=5.0, follow_redirects=True) as client:
                 resp = await client.get(url)
             if resp.status_code != 200:
                 continue
@@ -6377,7 +6378,7 @@ async def _fetch_exact_animal_animation_manifest_actions(
     manifest_url, expected_artifact_name = selected
     owns_client = client is None
     if client is None:
-        client = httpx.AsyncClient(timeout=5.0, follow_redirects=False)
+        client = worker_http_client(timeout=5.0, follow_redirects=False)
     response = None
     try:
         request = client.build_request("GET", manifest_url)
@@ -6664,7 +6665,7 @@ async def _fetch_animal_variant_progress_line(task: Task) -> Optional[str]:
         return None
     log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=5.0, follow_redirects=True) as client:
             resp = await client.get(log_url)
         if resp.status_code != 200:
             return None
@@ -7206,7 +7207,7 @@ async def _probe_stable_remote_file(
     """Reject an obvious write race; two samples do not prove publication completeness."""
     owns_client = client is None
     if client is None:
-        client = httpx.AsyncClient(
+        client = worker_http_client(
             timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
             follow_redirects=False,
         )
@@ -8120,7 +8121,7 @@ async def api_preview_animation(
         raise HTTPException(status_code=404, detail="Animation file not ready")
 
     file_url = resolved["url"]
-    client = httpx.AsyncClient(timeout=120.0)
+    client = worker_http_client(timeout=120.0)
     try:
         req = client.build_request("GET", file_url)
         worker_resp = await client.send(req, stream=True)
@@ -8209,7 +8210,7 @@ async def api_download_animation(
         )
 
     async def stream_file():
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             async with client.stream("GET", file_url, timeout=120.0) as response:
                 if response.status_code != 200:
                     raise HTTPException(status_code=404, detail="Animation file is unavailable")
@@ -9884,7 +9885,7 @@ async def proxy_video(
     if if_range:
         upstream_headers["If-Range"] = if_range
 
-    client = httpx.AsyncClient(timeout=120.0)
+    client = worker_http_client(timeout=120.0)
     try:
         req = client.build_request("GET", source_video_url, headers=upstream_headers)
         worker_resp = await client.send(req, stream=True)
@@ -10140,7 +10141,7 @@ async def proxy_file(
         )
     
     async def stream_file():
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             async with client.stream("GET", file_url, timeout=120.0) as response:
                 if response.status_code != 200:
                     return
@@ -10262,7 +10263,7 @@ async def proxy_file_by_name(
         )
     
     async def stream_file():
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             async with client.stream("GET", file_url, timeout=120.0) as response:
                 if response.status_code != 200:
                     return
@@ -10444,7 +10445,7 @@ def _write_cached_task_bundle_meta(task_id: str, meta: Dict[str, Any]) -> None:
 
 async def _worker_bundle_zip_available(zip_url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             # A one-byte Range can succeed through the public gateway even when
             # a normal full response is rejected as too large.
             async with client.stream("GET", zip_url) as response:
@@ -10481,7 +10482,7 @@ async def _load_task_bundle_meta(
         worker_zip_available = await _worker_bundle_zip_available(zip_url)
         meta_url = f"{zip_url}.meta.json"
         try:
-            async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
                 response = await client.get(meta_url, headers={"Accept": "application/json"})
             if response.status_code == 200:
                 worker_meta = _normalize_bundle_meta(
@@ -10546,7 +10547,7 @@ async def task_download_recovery_state(task: Task) -> Dict[str, Any]:
     if _has_complete_primary_task_cache(task):
         return state
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=8.0, follow_redirects=True) as client:
             if await _probe_http_asset_reachable(client, urls[0]):
                 return state
     except Exception:
@@ -10727,7 +10728,7 @@ async def _ensure_purchased_worker_bundle_zip_url(
 
     if verify_worker_byte and zip_url:
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with worker_http_client(timeout=30.0) as client:
                 async with client.stream(
                     "GET",
                     zip_url,
@@ -10780,7 +10781,7 @@ async def _probe_worker_file_range(url: str) -> Dict[str, Any]:
     """Get worker artifact size without asking the relay to buffer the full body."""
     timeout = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with worker_http_client(timeout=timeout, follow_redirects=True) as client:
             async with client.stream("GET", url, headers={"Range": "bytes=0-0"}) as response:
                 if response.status_code != 206:
                     raise HTTPException(
@@ -10814,7 +10815,7 @@ async def _iter_worker_file_ranges(
     """Yield verified relay-friendly ranges, buffering one chunk before publishing it."""
     timeout = httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0)
     position = start
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with worker_http_client(timeout=timeout, follow_redirects=True) as client:
         while position <= end:
             range_end = min(end, position + max(1, int(chunk_bytes)) - 1)
             expected_length = range_end - position + 1
@@ -11075,7 +11076,7 @@ async def api_proxy_viewer(
     worker_base = f"{parsed.scheme}://{parsed.netloc}"
     
     # Proxy the HTML file
-    async with httpx.AsyncClient() as client:
+    async with worker_http_client() as client:
         try:
             response = await client.get(viewer_url, timeout=30.0, follow_redirects=True)
             response.raise_for_status()
@@ -11211,7 +11212,7 @@ async def api_proxy_viewer_resource(
     resource_url = f"{worker_base}{path}"
     
     # Proxy the resource
-    async with httpx.AsyncClient() as client:
+    async with worker_http_client() as client:
         try:
             response = await client.get(resource_url, timeout=30.0, follow_redirects=True)
             response.raise_for_status()
@@ -11320,7 +11321,7 @@ def _find_cached_blueprint_file(task_id: str, guid: Optional[str], suffix: str) 
 
 async def _remote_file_exists(url: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=4.0, follow_redirects=True) as client:
             resp = await client.head(url)
             if 200 <= resp.status_code < 400:
                 return True
@@ -11361,7 +11362,7 @@ async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str
 
     files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             resp = await client.get(files_url)
         if resp.status_code != 200:
             return None
@@ -11445,7 +11446,7 @@ async def _resolve_task_blueprint_model_url(task: Task) -> Optional[str]:
 
     files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=6.0, follow_redirects=True) as client:
             resp = await client.get(files_url)
         if resp.status_code != 200:
             return None
@@ -12230,7 +12231,7 @@ async def _proxy_model_file(
     
     # Large ZIP bundles: allow long reads from worker (nginx should use long proxy_read_timeout too).
     allow_redirects = required_snapshot is None
-    client = httpx.AsyncClient(
+    client = worker_http_client(
         timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0),
         follow_redirects=allow_redirects,
     )
@@ -13064,7 +13065,7 @@ async def _task_cache_dir_is_last_copy(db: AsyncSession, task_id: str) -> bool:
     if not urls:
         return False
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=8.0, follow_redirects=True) as client:
             return not await _probe_http_asset_reachable(client, urls[0])
     except Exception:
         # Undecidable. A file kept by mistake costs disk space; a file deleted
@@ -13318,7 +13319,7 @@ async def purge_gallery_upstream_dead_tasks(
         return {"deleted": 0, "scanned": 0, "upstream": True, "offset": offset}
 
     deleted = 0
-    async with httpx.AsyncClient() as client:
+    async with worker_http_client() as client:
         for task in rows:
             poster_url = resolve_poster_url_for_task(task)
             if not poster_url:
@@ -13419,7 +13420,7 @@ async def _get_cached_glb(
         # Bound the complete optional-artifact transfer so a slow trickle cannot
         # block the valid original GLB fallback indefinitely.
         async with asyncio.timeout(timeout_seconds):
-            async with httpx.AsyncClient() as client:
+            async with worker_http_client() as client:
                 async with client.stream(
                     "GET",
                     url,
@@ -13562,7 +13563,7 @@ MAX_STRICT_ANIMATION_GLB_BYTES = 512 * 1024 * 1024
 
 async def _fetch_strict_animation_manifest(artifact, version) -> Tuple[dict, str]:
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=8.0, follow_redirects=True) as client:
             upstream = await client.get(artifact.animation_manifest_url)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Animation manifest source unavailable: {exc}") from exc
@@ -13625,7 +13626,7 @@ async def _strict_animation_glb_response(task_id: str, artifact, manifest: dict,
 
     temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             async with client.stream(
                 "GET",
                 artifact.animation_glb_url,
@@ -13897,7 +13898,7 @@ async def api_proxy_animations_fbx(
                 },
             )
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with worker_http_client(follow_redirects=True) as client:
             upstream = await client.get(
                 animations_url,
                 headers={"Range": range_header, "Accept-Encoding": "identity"},
@@ -14159,7 +14160,7 @@ async def api_proxy_thumb(
     
     # Download and return the image (not streaming - more compatible with HTTP/2)
     try:
-        async with httpx.AsyncClient() as client:
+        async with worker_http_client() as client:
             response = await client.get(poster_url, timeout=30.0, follow_redirects=True)
             if response.status_code != 200:
                 raise HTTPException(status_code=404, detail="Thumbnail not available")
@@ -14274,7 +14275,7 @@ async def api_free3d_search(
     for attempt in range(2):
         timeout = 8.0 if attempt == 0 else 12.0
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with worker_http_client(timeout=timeout) as client:
                 resp = await client.get(f"{FREE3D_BASE_URL}{endpoint}", params=params)
                 resp.raise_for_status()
                 payload = resp.json()
@@ -14339,7 +14340,7 @@ async def api_free3d_image(guid: str, filename: str):
     url = f"{FREE3D_BASE_URL}/data/{guid}/{filename}"
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with worker_http_client(timeout=30.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             
@@ -14363,7 +14364,7 @@ async def api_free3d_glb(guid: str, filename: str):
     url = f"{FREE3D_BASE_URL}/data/{guid}/{filename}"
     
     async def stream_file():
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with worker_http_client(timeout=120.0) as client:
             async with client.stream("GET", url) as resp:
                 if resp.status_code != 200:
                     return
@@ -15046,7 +15047,7 @@ async def _viewer_theme_select_with_openai(image_data_url: str, themes: List[Dic
 
     try:
 
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        async with worker_http_client(timeout=45.0, follow_redirects=True) as client:
 
             resp = await client.post(api_url, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=payload)
 
@@ -15727,7 +15728,7 @@ async def api_proxy_face_rig_analyze_head(
                 ))
 
             timeout = httpx.Timeout(connect=20.0, read=240.0, write=240.0, pool=20.0)
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with worker_http_client(timeout=timeout, follow_redirects=True) as client:
                 upstream = await client.post(
                     FACE_RIG_ANALYZE_HEAD_PROXY_URL,
                     data={"metadata": metadata},
@@ -16209,7 +16210,7 @@ async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> 
     errors = []
     
     from urllib.parse import quote
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with worker_http_client(timeout=120.0) as client:
         for url in ready_urls:
             try:
                 filename = _clean_filename_for_cache(url, guid)
