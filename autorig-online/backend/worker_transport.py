@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Dict
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
@@ -18,6 +19,12 @@ ENV_NAME = "AUTORIG_WORKER_TRANSPORTS"
 
 class WorkerTransportConfigError(ValueError):
     """The explicit worker transport mapping is unsafe or malformed."""
+
+
+@dataclass(frozen=True)
+class WorkerTransportTarget:
+    origin: str
+    path_prefix: str = ""
 
 
 def _origin(value: str, *, field: str) -> str:
@@ -42,7 +49,31 @@ def _origin(value: str, *, field: str) -> str:
     return f"{parsed.scheme.lower()}://{netloc}"
 
 
-def worker_transport_map(raw: str | None = None) -> Dict[str, str]:
+def _path_prefix(value: Any) -> str:
+    if not isinstance(value, str):
+        raise WorkerTransportConfigError("transport path_prefix must be a string")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise WorkerTransportConfigError("transport path_prefix contains control characters")
+    prefix = value.strip()
+    if not prefix or prefix == "/":
+        return ""
+    if (
+        not prefix.startswith("/")
+        or "\\" in prefix
+        or "%" in prefix
+        or "?" in prefix
+        or "#" in prefix
+    ):
+        raise WorkerTransportConfigError("transport path_prefix must be a plain absolute path")
+    if "//" in prefix:
+        raise WorkerTransportConfigError("transport path_prefix must be normalized")
+    segments = prefix.split("/")[1:]
+    if any(segment in {"", ".", ".."} for segment in segments):
+        raise WorkerTransportConfigError("transport path_prefix contains traversal or empty segments")
+    return prefix.rstrip("/")
+
+
+def worker_transport_map(raw: str | None = None) -> Dict[str, WorkerTransportTarget]:
     """Parse and validate the explicit logical-origin to transport-origin map."""
     value = os.getenv(ENV_NAME, "") if raw is None else raw
     if not str(value or "").strip():
@@ -53,15 +84,32 @@ def worker_transport_map(raw: str | None = None) -> Dict[str, str]:
         raise WorkerTransportConfigError(f"{ENV_NAME} must be a JSON object") from exc
     if not isinstance(payload, dict):
         raise WorkerTransportConfigError(f"{ENV_NAME} must be a JSON object")
-    result: Dict[str, str] = {}
+    result: Dict[str, WorkerTransportTarget] = {}
     for logical, transport in payload.items():
-        if not isinstance(logical, str) or not isinstance(transport, str):
-            raise WorkerTransportConfigError(f"{ENV_NAME} keys and values must be strings")
+        if not isinstance(logical, str):
+            raise WorkerTransportConfigError(f"{ENV_NAME} keys must be strings")
         source = _origin(logical, field="logical worker origin")
-        destination = _origin(transport, field="transport worker origin")
-        if source in result and result[source] != destination:
+        if isinstance(transport, str):
+            target = WorkerTransportTarget(
+                origin=_origin(transport, field="transport worker origin")
+            )
+        elif isinstance(transport, dict):
+            unknown = set(transport) - {"origin", "path_prefix"}
+            if unknown or "origin" not in transport:
+                raise WorkerTransportConfigError(
+                    "transport object must contain only origin and optional path_prefix"
+                )
+            target = WorkerTransportTarget(
+                origin=_origin(transport.get("origin"), field="transport worker origin"),
+                path_prefix=_path_prefix(transport.get("path_prefix", "")),
+            )
+        else:
+            raise WorkerTransportConfigError(
+                f"{ENV_NAME} values must be origin strings or transport objects"
+            )
+        if source in result and result[source] != target:
             raise WorkerTransportConfigError(f"duplicate logical worker origin: {source}")
-        result[source] = destination
+        result[source] = target
     return result
 
 
@@ -79,11 +127,14 @@ def worker_transport_url(url: str) -> str:
         urlunsplit(SplitResult(parsed.scheme, parsed.netloc, "", "", "")),
         field="worker request origin",
     )
-    destination = worker_transport_map().get(source)
-    if not destination:
+    target = worker_transport_map().get(source)
+    if not target:
         return raw
-    target = urlsplit(destination)
-    return urlunsplit((target.scheme, target.netloc, parsed.path, parsed.query, parsed.fragment))
+    destination = urlsplit(target.origin)
+    path = parsed.path or ""
+    if target.path_prefix:
+        path = target.path_prefix + (path if path.startswith("/") else f"/{path}")
+    return urlunsplit((destination.scheme, destination.netloc, path, parsed.query, parsed.fragment))
 
 
 def worker_http_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:

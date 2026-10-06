@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import unittest
 from unittest.mock import patch
@@ -54,6 +55,23 @@ class WorkerTransportTests(unittest.TestCase):
                         f"http://127.0.0.1:15279{suffix}",
                     )
 
+    def test_files_alias_rebases_under_explicit_path_prefix(self):
+        mapping = (
+            '{"https://f2.freestock.online":'
+            '{"origin":"http://127.0.0.1:15279","path_prefix":"/converter/glb"}}'
+        )
+        logical = "https://f2.freestock.online/guid/file.glb?download=%2Fraw#viewer"
+        with patch.dict(os.environ, {ENV_NAME: mapping}, clear=True):
+            routed = worker_transport_url(logical)
+        self.assertEqual(
+            routed,
+            "http://127.0.0.1:15279/converter/glb/guid/file.glb?download=%2Fraw#viewer",
+        )
+        self.assertEqual(
+            logical,
+            "https://f2.freestock.online/guid/file.glb?download=%2Fraw#viewer",
+        )
+
     def test_different_origin_is_not_rewritten(self):
         mapping = '{"https://converter-f2.freestock.online":"http://127.0.0.1:15279"}'
         unrelated = "https://converter-f2.freestock.online.evil/api-converter-glb"
@@ -106,6 +124,32 @@ class WorkerTransportTests(unittest.TestCase):
         )
         for raw in invalid:
             with self.subTest(raw=raw):
+                with self.assertRaises(WorkerTransportConfigError):
+                    worker_transport_map(raw)
+
+    def test_mapping_rejects_unsafe_or_ambiguous_path_prefixes(self):
+        for prefix in (
+            "converter/glb",
+            "/converter//glb",
+            "/converter/../glb",
+            "/converter/./glb",
+            "/converter/%2e%2e/glb",
+            "/converter\\glb",
+            "/converter/glb?x=1",
+            "/converter/glb#x",
+            "/converter/glb\n",
+            "/converter/\x00glb",
+            "/converter/\x7fglb",
+        ):
+            raw = json.dumps(
+                {
+                    "https://f2.freestock.online": {
+                        "origin": "http://127.0.0.1:15279",
+                        "path_prefix": prefix,
+                    }
+                }
+            )
+            with self.subTest(prefix=prefix):
                 with self.assertRaises(WorkerTransportConfigError):
                     worker_transport_map(raw)
 
