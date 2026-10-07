@@ -1,0 +1,29 @@
+{
+  "_comment": "worker-4090 example: Bonsai on the CUDA 13 llama.cpp build already in C:\\llm\\bonsai. Copy to config.json next to ai_node.py and adjust. Keys are explained in README.md.",
+  "node_name": "worker-4090",
+  "listen_host": "127.0.0.1",
+  "listen_port": 5480,
+  "token_file": "token.txt",
+
+  "model_id": "bonsai2-27b",
+  "weights": "C:\\llm\\bonsai\\models\\bonsai2-27b-PQ2_0.gguf",
+  "mmproj": "C:\\llm\\bonsai\\models\\mmproj-Q8_0.gguf",
+  "context_tokens": 4096,
+  "max_output_tokens": 2048,
+  "vram_need_mb": 9400,
+  "vram_margin_mb": 1536,
+
+  "llama_server": "C:\\llm\\bonsai\\bin\\llama-server.exe",
+  "llama_port": 8092,
+  "ngl": 99,
+  "extra_llama_args": [],
+  "llama_log_file": "llama-server.log",
+
+  "comfy_url": "http://127.0.0.1:8988",
+  "comfy_poll_seconds": 3,
+  "comfy_wait_seconds": 300,
+  "keepalive_seconds": 120,
+  "max_tasks": 2,
+
+  "log_file": "ai-node.log"
+}
