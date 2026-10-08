@@ -2,8 +2,10 @@
 
 Updated: 2026-10-09, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-The active work is GPU erosion → anatomical bones → skinning, using isolated
-F5 and real model copies. It is not yet a production-ready full rig.
+The active work is GPU erosion → anatomical bones → skinning, plus the V3
+Motion Transfer output viewer and interactive graph planning. The owner added
+a separate stabilized-pose → 2D diorama → final-video presentation branch.
+F5 stays isolated; this is not yet a production-ready full rig.
 
 Read the authoritative [converter handoff](autorig-online/backups/repair-rig-dispatch-20261006/converter-source/handoff.md)
 before continuing. It contains exact commits, tested timings, private artifact
