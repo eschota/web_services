@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex,nofollow">
   <title>AutoRig V3 pipeline viewer</title>
   <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/static/css/viewer-v3.css?v=1">
+  <link rel="stylesheet" href="/static/css/viewer-v3.css?v=2">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
 </head>
 <body>
@@ -40,13 +40,13 @@
         <ol id="stage-list" class="stage-list"></ol>
         <div class="layer-controls">
           <h3>Слои</h3>
-          <label><input type="checkbox" data-layer="model" checked> Модель</label>
-          <label><input type="checkbox" data-layer="surface" checked> C1 surface</label>
-          <label><input type="checkbox" data-layer="solid"> C2 solid</label>
-          <label><input type="checkbox" data-layer="thin" checked> C3 thin</label>
-          <label><input type="checkbox" data-layer="skeleton" checked> C4 граф скелета</label>
-          <label><input type="checkbox" data-layer="bones" checked> Анатомические кости</label>
-          <label><input type="checkbox" data-layer="weights" disabled> Embedded V3 skin weights</label>
+          <label><input type="checkbox" data-layer="model" checked> Модель <span class="layer-state">source</span></label>
+          <label><input type="checkbox" data-layer="surface" disabled> C1 surface <span class="layer-state">проверка…</span></label>
+          <label><input type="checkbox" data-layer="solid" disabled> C2 solid <span class="layer-state">проверка…</span></label>
+          <label><input type="checkbox" data-layer="thin" disabled> C3 thin <span class="layer-state">проверка…</span></label>
+          <label><input type="checkbox" data-layer="skeleton" disabled> C4 граф скелета <span class="layer-state">проверка…</span></label>
+          <label><input type="checkbox" data-layer="bones" disabled> Анатомические кости <span class="layer-state">проверка…</span></label>
+          <label><input type="checkbox" data-layer="weights" disabled> Embedded V3 skin weights <span class="layer-state">проверка…</span></label>
         </div>
         <div class="actions">
           <button id="auto-rotate" type="button" aria-pressed="false">Автовращение</button>
@@ -69,6 +69,6 @@
       </aside>
     </section>
   </main>
-  <script type="module" src="/static/js/viewer-v3.js?v=1"></script>
+  <script type="module" src="/static/js/viewer-v3.js?v=2"></script>
 </body>
 </html>
