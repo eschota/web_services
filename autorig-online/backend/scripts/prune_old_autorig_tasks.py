@@ -323,6 +323,9 @@ def immutable_snapshot(conn):
 
 
 def workload_block_reason(row):
+    preemption = str(row.get("preemption_state") or "none").lower()
+    if preemption in {"requested", "stopping"}:
+        return f"preemption:{preemption}"
     state = str(row.get("workload_lease_state") or "").lower()
     lease_id = str(row.get("workload_lease_id") or "")
     if state in {"active", "waiting", "acquiring", "preempting", "submission_unknown", "unknown"}:

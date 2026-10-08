@@ -104,6 +104,14 @@ class PruneOldTasksTests(unittest.TestCase):
         c.execute("INSERT INTO tasks(id,status,created_at,updated_at,guid,input_url,output_urls,viewer_settings,workload_lease_id,workload_lease_state) VALUES('leased','done','2026-08-01','u','g-leased','','[]','{}','live','submission_unknown')")
         c.commit();c.close();manifest=self.manifest();selected={task["id"] for task in manifest["tasks"]}
         self.assertIn("old",selected);self.assertNotIn("leased",selected);self.assertEqual(manifest["protected"]["leased"],["workload_lease:submission_unknown"])
+    def test_pending_preemption_is_protected_during_manifest_selection(self):
+        c=sqlite3.connect(self.db)
+        c.execute("ALTER TABLE tasks ADD COLUMN preemption_state TEXT")
+        c.execute("UPDATE tasks SET preemption_state='requested' WHERE id='old'")
+        c.commit();c.close()
+        manifest=self.manifest()
+        self.assertNotIn("old",{task["id"] for task in manifest["tasks"]})
+        self.assertIn("preemption:requested",manifest["protected"]["old"])
     def test_retained_reference_protection_reaches_fixed_point(self):
         c=sqlite3.connect(self.db);c.execute("INSERT INTO tasks VALUES('chain-b','done','2026-08-01','u',NULL,NULL,'g-chain-b','','[\"chain-c\"]','{}')")
         c.execute("INSERT INTO tasks VALUES('chain-c','done','2026-08-01','u',NULL,NULL,'g-chain-c','','[]','{}')")
