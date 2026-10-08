@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>AutoRig V3 pipeline viewer</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/static/css/viewer-v3.css?v=1">
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+</head>
+<body>
+  <header class="v3-head">
+    <a href="/" class="brand">AutoRig<span>.online</span></a>
+    <div class="build-tag">V3 LAB · verified artifacts only</div>
+    <a href="/gallery" class="gallery-link">Gallery</a>
+  </header>
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">GPU erosion → graph → bones → skin</p>
+        <h1>V3 pipeline viewer</h1>
+        <p class="lede">Каждый слой показывается только при наличии проверенного hash-bound артефакта. Отсутствующий этап останется отсутствующим.</p>
+      </div>
+      <form id="task-form" class="task-form">
+        <label for="task-id">Task ID</label>
+        <div><input id="task-id" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"><button>Открыть</button></div>
+      </form>
+    </section>
+
+    <section id="examples-panel" class="examples-panel">
+      <h2>Проверенные V3 примеры</h2>
+      <div id="examples" class="examples"><p class="muted">Загрузка…</p></div>
+    </section>
+
+    <section id="viewer-panel" class="viewer-panel" hidden>
+      <aside class="pipeline-panel">
+        <div class="task-title"><span>Task</span><a id="task-link" href="#"></a></div>
+        <div id="integrity" class="integrity"></div>
+        <ol id="stage-list" class="stage-list"></ol>
+        <div class="layer-controls">
+          <h3>Слои</h3>
+          <label><input type="checkbox" data-layer="model" checked> Модель</label>
+          <label><input type="checkbox" data-layer="surface" checked> C1 surface</label>
+          <label><input type="checkbox" data-layer="solid"> C2 solid</label>
+          <label><input type="checkbox" data-layer="thin" checked> C3 thin</label>
+          <label><input type="checkbox" data-layer="skeleton" checked> C4 граф скелета</label>
+          <label><input type="checkbox" data-layer="bones" checked> Анатомические кости</label>
+          <label><input type="checkbox" data-layer="weights" disabled> Embedded V3 skin weights</label>
+        </div>
+        <div class="actions">
+          <button id="auto-rotate" type="button" aria-pressed="false">Автовращение</button>
+          <button id="deform" type="button" aria-pressed="false" disabled>Деформация</button>
+          <button id="reset-camera" type="button">Камера</button>
+        </div>
+      </aside>
+      <div class="viewport-wrap">
+        <div id="viewport" class="viewport"></div>
+        <div id="loading" class="loading">Загрузка модели…</div>
+        <div id="legend" class="legend"></div>
+        <div id="error" class="error" hidden></div>
+      </div>
+      <aside class="metrics-panel">
+        <h2>Факты запуска</h2>
+        <dl id="metrics"></dl>
+        <h3>Артефакты</h3>
+        <div id="artifacts" class="artifact-list"></div>
+        <p class="limits">Воксели отображаются с ограничением 250k точек и детерминированным прореживанием. Это визуализация данных, не доказательство качества рига.</p>
+      </aside>
+    </section>
+  </main>
+  <script type="module" src="/static/js/viewer-v3.js?v=1"></script>
+</body>
+</html>

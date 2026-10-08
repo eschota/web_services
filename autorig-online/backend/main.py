@@ -16623,6 +16623,20 @@ async def serve_llms_txt():
     raise HTTPException(status_code=404, detail="llms.txt not found")
 
 
+# Experimental V3 pipeline viewer.  The implementation lives in a separate
+# module so this hook stays reviewable in the heavily shared main.py.
+from v3_viewer_routes import build_v3_viewer_router
+
+app.include_router(
+    build_v3_viewer_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+        static_dir=STATIC_DIR,
+    )
+)
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
