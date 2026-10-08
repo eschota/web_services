@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 import sys
 
 
@@ -18,6 +19,7 @@ class FakeDb:
     def __init__(self):
         self.commit = AsyncMock()
         self.refresh = AsyncMock()
+        self.execute = AsyncMock(return_value=SimpleNamespace(rowcount=0))
 
 
 def make_task() -> Task:
@@ -34,6 +36,21 @@ def make_task() -> Task:
 
 
 class SourcePreflightDispatchTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Isolate source/dispatch behavior from production-only normalization
+        # and broker admission; tests must never mirror URLs or acquire leases.
+        for name, replacement in (
+            ("normalize_task_input", lambda *_: SimpleNamespace(changed=False)),
+            ("autorig_workload_broker_enabled", lambda: False),
+            ("release_task_workload_lease", AsyncMock()),
+        ):
+            guard = patch.object(tasks, name, replacement, create=True)
+            guard.start()
+            self.addCleanup(guard.stop)
+        metadata = patch("content_moderation.build_pre_convert_metadata_sync", return_value=None)
+        metadata.start()
+        self.addCleanup(metadata.stop)
+
     async def test_unavailable_source_schedules_retry_without_worker_quarantine(self):
         db = FakeDb()
         task = make_task()

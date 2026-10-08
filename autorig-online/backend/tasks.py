@@ -17,10 +17,19 @@ from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession, AsyncSessionLocal
-from config import APP_URL
+from config import APP_URL, UPLOAD_DIR
 from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
-from worker_transport import worker_transport_url
+from worker_transport import worker_http_client, worker_transport_url, worker_transport_map, WorkerTransportConfigError
+from source_preflight_policy import (
+    SourceDisposition,
+    SourcePreflightResult,
+    normalize_source_preflight,
+    redirect_allowlist,
+    resolve_source_redirect,
+    retry_delay_seconds,
+)
+from source_preflight_local import probe_owned_source
 from task_timeout_contract import task_hard_timeout_reference
 from collection_retry_policy import collection_error_retry_due
 from task_priority import normalize_queue_class, preemption_in_progress
@@ -69,7 +78,7 @@ RIG_V2_WORKER_ANIMAL_TYPES = {
 RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
 SOURCE_PREFLIGHT_TIMEOUT_SECONDS = 8.0
 SOURCE_PREFLIGHT_MAX_ATTEMPTS = 3
-SOURCE_PREFLIGHT_BACKOFF_SECONDS = (60, 300)
+SOURCE_PREFLIGHT_BACKOFF_SECONDS = (60, 300, 900, 1800)
 VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS = 4.0
 VIEWER_RECONCILE_BACKOFF_SECONDS = 300.0
 _viewer_reconcile_last_attempt: Dict[str, float] = {}
@@ -95,30 +104,54 @@ def _source_format_error(input_url: str, prefix: bytes, content_type: str) -> Op
         return "source format could not be recognized as GLB, FBX, or OBJ"
     return None
 
-
-async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bool]:
-    """
-    Read only the first bytes of the source before reserving a worker.
-
-    Returns (available, detail, permanent_error). Network/HTTP availability
-    failures are retryable; an invalid payload/format is terminal immediately.
-    """
-    url = (input_url or "").strip()
-    if not url:
-        return False, "source URL is missing", True
-    try:
-        timeout = httpx.Timeout(
-            SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
-            connect=SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
-        )
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+async def _preflight_http_source(url:str)->SourcePreflightResult:
+    timeout = httpx.Timeout(
+        SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
+        connect=SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
+    )
+    allowed = redirect_allowlist(
+        url,
+        APP_URL,
+        worker_transport_map().keys(),
+        os.getenv("AUTORIG_SOURCE_REDIRECT_ORIGINS", ""),
+    )
+    current = url
+    seen = {current}
+    redirects = 0
+    async with worker_http_client(timeout=timeout, follow_redirects=False) as client:
+        while True:
             async with client.stream(
                 "GET",
-                worker_transport_url(url),
+                current,
                 headers={"Range": "bytes=0-63", "Accept-Encoding": "identity"},
             ) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    if redirects >= 5:
+                        return SourcePreflightResult(
+                            False, "source redirect limit exceeded", SourceDisposition.INTERNAL
+                        )
+                    try:
+                        current = resolve_source_redirect(
+                            current, response.headers.get("location") or "", allowed, seen
+                        )
+                    except ValueError as exc:
+                        return SourcePreflightResult(
+                            False,
+                            f"source redirect rejected: {exc}",
+                            SourceDisposition.INTERNAL,
+                        )
+                    seen.add(current)
+                    redirects += 1
+                    continue
                 if response.status_code not in (200, 206):
-                    return False, f"source returned HTTP {response.status_code}", False
+                    disposition = (
+                        SourceDisposition.TRANSIENT
+                        if response.status_code == 429 or response.status_code >= 500
+                        else SourceDisposition.BOUNDED
+                    )
+                    return SourcePreflightResult(
+                        False, f"source returned HTTP {response.status_code}", disposition
+                    )
                 prefix = b""
                 async for chunk in response.aiter_bytes():
                     prefix += chunk
@@ -126,7 +159,9 @@ async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bo
                         break
                 prefix = prefix[:64]
                 if not prefix:
-                    return False, "source returned an empty response", False
+                    return SourcePreflightResult(
+                        False, "source returned an empty response", SourceDisposition.TRANSIENT
+                    )
                 size = None
                 content_range = response.headers.get("content-range") or ""
                 match = re.search(r"/(\d+)\s*$", content_range)
@@ -137,21 +172,49 @@ async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bo
                     if raw_length and raw_length.isdigit():
                         size = int(raw_length)
                 if size == 0:
-                    return False, "source file is empty", True
+                    return SourcePreflightResult(
+                        False, "source file is empty", SourceDisposition.PERMANENT
+                    )
                 format_error = _source_format_error(
-                    url,
-                    prefix,
-                    response.headers.get("content-type") or "",
+                    current, prefix, response.headers.get("content-type") or ""
                 )
                 if format_error:
-                    return False, format_error, True
-                return True, "", False
+                    return SourcePreflightResult(
+                        False, format_error, SourceDisposition.PERMANENT
+                    )
+                return SourcePreflightResult(True)
+
+
+async def preflight_task_source(input_url: Optional[str]) -> SourcePreflightResult:
+    """
+    Read only the first bytes of the source before reserving a worker.
+
+    Returns (available, detail, permanent_error). Network/HTTP availability
+    failures are retryable; an invalid payload/format is terminal immediately.
+    """
+    url = (input_url or "").strip()
+    if not url:
+        return SourcePreflightResult(False,"source URL is missing",SourceDisposition.PERMANENT)
+    try:
+        owned=await probe_owned_source(url,app_url=APP_URL,upload_dir=UPLOAD_DIR,renderfin_data_dir=os.getenv("RENDERFIN_DATA_DIR","/var/autorig/renderfin"))
+        if owned is not None:
+            if owned.state=="missing":return SourcePreflightResult(False,owned.detail,SourceDisposition.BOUNDED)
+            if owned.state=="transient":return SourcePreflightResult(False,owned.detail,SourceDisposition.TRANSIENT)
+            if owned.state=="internal":return SourcePreflightResult(False,owned.detail,SourceDisposition.INTERNAL)
+            if owned.state=="unsafe":return SourcePreflightResult(False,owned.detail,SourceDisposition.PERMANENT)
+            if owned.size==0:return SourcePreflightResult(False,"source file is empty",SourceDisposition.PERMANENT)
+            format_error=_source_format_error(url,owned.prefix,"")
+            if format_error:return SourcePreflightResult(False,format_error,SourceDisposition.PERMANENT)
+            return SourcePreflightResult(True)
+        return await _preflight_http_source(url)
     except httpx.TimeoutException:
-        return False, f"source did not respond within {SOURCE_PREFLIGHT_TIMEOUT_SECONDS:g}s", False
+        return SourcePreflightResult(False,f"source did not respond within {SOURCE_PREFLIGHT_TIMEOUT_SECONDS:g}s",SourceDisposition.TRANSIENT)
     except httpx.HTTPError as exc:
-        return False, f"source request failed: {exc.__class__.__name__}", False
+        return SourcePreflightResult(False,f"source request failed: {exc.__class__.__name__}",SourceDisposition.TRANSIENT)
+    except WorkerTransportConfigError as exc:
+        return SourcePreflightResult(False,f"source transport configuration failed: {exc.__class__.__name__}",SourceDisposition.INTERNAL)
     except Exception as exc:
-        return False, f"source check failed: {exc.__class__.__name__}", False
+        return SourcePreflightResult(False,f"source check failed: {exc.__class__.__name__}",SourceDisposition.INTERNAL)
 
 
 async def _apply_source_preflight_failure(
@@ -159,13 +222,14 @@ async def _apply_source_preflight_failure(
     task: Task,
     detail: str,
     *,
-    permanent: bool,
+    disposition: SourceDisposition,
 ) -> str:
     now = datetime.utcnow()
     attempts = int(getattr(task, "source_attempt_count", 0) or 0) + 1
     task.source_attempt_count = attempts
     task.updated_at = now
-    if permanent or attempts >= SOURCE_PREFLIGHT_MAX_ATTEMPTS:
+    terminal=disposition is SourceDisposition.PERMANENT or (disposition is SourceDisposition.BOUNDED and attempts>=SOURCE_PREFLIGHT_MAX_ATTEMPTS)
+    if terminal:
         task.status = "error"
         task.source_next_retry_at = None
         task.error_message = f"Source asset unavailable: {detail}."
@@ -177,16 +241,17 @@ async def _apply_source_preflight_failure(
         )
         return task.error_message
 
-    backoff_index = min(attempts - 1, len(SOURCE_PREFLIGHT_BACKOFF_SECONDS) - 1)
-    delay_seconds = SOURCE_PREFLIGHT_BACKOFF_SECONDS[backoff_index]
+    delay_seconds=retry_delay_seconds(attempts)
     task.status = "created"
+    task.worker_api = None
+    task.processing_started_at = None
     task.source_next_retry_at = now + timedelta(seconds=delay_seconds)
     task.error_message = None
     await db.commit()
     await db.refresh(task)
     print(
-        f"[Source Preflight] Task {task.id} retry {attempts}/"
-        f"{SOURCE_PREFLIGHT_MAX_ATTEMPTS} in {delay_seconds}s: {detail}"
+        f"[Source Preflight] Task {task.id} retry {attempts} "
+        f"({disposition.value}) in {delay_seconds}s: {detail}"
     )
     return f"Source preflight retry scheduled: {detail}"
 
@@ -641,19 +706,20 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             _schedule_task_error_notification(task.id)
             return task, task.error_message
 
-    source_ok, source_detail, source_permanent = await preflight_task_source(task.input_url)
-    if not source_ok:
+    source_result=normalize_source_preflight(await preflight_task_source(task.input_url))
+    if not source_result.available:
         error = await _apply_source_preflight_failure(
             db,
             task,
-            source_detail,
-            permanent=source_permanent,
+            source_result.detail,
+            disposition=source_result.disposition,
         )
         return task, error
 
     # Reserve the worker only after all deterministic task metadata is valid.
     # Otherwise malformed metadata or an unreachable source looks like a
     # worker-side failure and can quarantine healthy capacity.
+    task.source_attempt_count = 0
     task.worker_api = worker_url
     task.status = "processing"
     task.source_next_retry_at = None
