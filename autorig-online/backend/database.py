@@ -260,7 +260,7 @@ class Task(Base):
     owner_id = Column(String(255), nullable=False)  # anon_id or user email
     # Existing task pages and gallery records are public by default.  V3
     # diagnostic artifacts additionally enforce this flag on every request.
-    is_public = Column(Boolean, nullable=False, default=True, server_default=text("TRUE"))
+    is_public = Column(Boolean, nullable=False, default=True, server_default=text("TRUE"), index=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
