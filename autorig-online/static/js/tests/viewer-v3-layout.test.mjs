@@ -28,8 +28,8 @@ test('opaque preview is explicit, optional and not a data layer',()=>{
   assert.doesNotMatch(html,/data-layer="opaque/);
   assert.match(html,/Игнорировать прозрачность/);
 });
-test('v3 cache busters are present',()=>{
+test('current cache busters are present',()=>{
   assert.match(html,/viewer-v3\.css\?v=3/);
-  assert.match(html,/viewer-v3\.js\?v=4/);
+  assert.match(html,/viewer-v3\.js\?v=5/);
   assert.match(js,/viewer-v3-contract\.js\?v=3/);
 });

@@ -62,3 +62,26 @@ This is expected sampling loss and is why originals remain canonical.
 
 Receipt SHA-256:
 `371333ee458aaac584cbb5cc5f5218717ebaa58b91ea63301f4f9e35b99332d1`.
+
+### Actual joint-tracker gate
+
+The same completed clip was also processed end-to-end by the existing joint
+tracker at native 384-pixel tiles and at 256-pixel tiles. This separate audit
+did not import or modify the private Motion Transfer source:
+
+- native repeat: 9.592 s;
+- 256: 5.352 s (44.2% faster for tracking and encoding);
+- current-artifact downscale to lossless FFV1: 0.589 s, making the experimental
+  total 5.941 s (38.1% faster); direct small-video generation would avoid it;
+- all 4,935 joint/frame samples remained valid;
+- against the native repeat, 3D position drift as a fraction of the reference
+  trajectory bounding-box diagonal was p50 0.00438, p95 0.11057, max 0.37782;
+- native repeat noise versus the saved baseline was p95 0.00669, so the 256
+  divergence is materially larger than repeat variability;
+- frames 70 and 140 visibly contain severe limb-track failures at both sizes.
+
+The 256 path is therefore a measured speed optimization candidate, but it must
+not become the default until the semantic tracker is improved and validated on
+multiple clips. Aggregate reprojection and valid-joint rates were almost equal
+at both sizes and did not expose the visible limb failures; they are insufficient
+as the only quality gate.

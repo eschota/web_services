@@ -100,3 +100,21 @@ export function normalizePhases(raw,runId){
   return{status:shortText(raw.status,24),title:shortText(raw.title,160),taskId:UUID_RE.test(raw.task_id||'')?raw.task_id:null,phases:raw.phases.map(value=>{if(!plain(value))fail('Motion Transfer phase is invalid');return{id:shortText(value.id,64),title:shortText(value.title,160),status:shortText(value.status,24),seconds:finite(value.seconds,0,86400)?value.seconds:null,error:shortText(value.error,400),question:shortText(value.question,2000),answer:shortText(value.answer,2000),result:boundedValue(value.result),media:boundedValue(value.media),dialogue:boundedValue(value.dialogue),options:boundedValue(value.options)}})};
 }
 
+export function buildPresentationDraft(schema,poseBestUrl){
+  if(!plain(schema)||schema.success_bool!==true||!Array.isArray(schema.services_array))fail('Live graph schema is unavailable');
+  if(typeof poseBestUrl!=='string'||!/^\/api\/mt\/files\/[0-9a-f]{20}\/maps\/pose_best\.png$/.test(poseBestUrl))fail('A trusted pose_best input is required');
+  const service=id=>schema.services_array.find(item=>plain(item)&&item.id===id&&item.status==='live');
+  const hasPort=(item,side,field,type)=>Array.isArray(item?.[side])&&item[side].some(port=>plain(port)&&port.field===field&&port.type===type);
+  const qwen=service('qwen_image'),video=service('video');
+  if(!hasPort(qwen,'inputs','image','image')||!hasPort(qwen,'outputs','image_url_string','image'))fail('qwen_image live image ports are unavailable');
+  if(!hasPort(video,'inputs','image','image')||!hasPort(video,'outputs','video_url_string','video'))fail('video live image/video ports are unavailable');
+  return{name:'MT presentation draft · local only',nodes:[
+    {id:'mt_in_pose',kind:'input',entity_type:'image',value:poseBestUrl,x:0,y:80,params:{}},
+    {id:'mt_diorama',kind:'service',service:'qwen_image',x:360,y:80,params:{mode:'edit',prompt:'The supplied pose_best image is a 2x2 reference sheet. Use only the front subject view in the top-left tile as the subject reference. Output ONE coherent presentation scene, never a grid, collage, contact sheet, or repeated subjects. Preserve the exact source subject identity, outfit, silhouette, and pose. Extend a coherent thematic environment to approximately a 3 metre radius around the subject, with believable ground contact and scale cues. This is a 2D visual scale hint, not reconstructed 3D geometry.',width:960,height:540}},
+    {id:'mt_final_video',kind:'service',service:'video',x:760,y:80,params:{prompt:'Create a high-quality independent presentation video from the approved 2D diorama image. Preserve the subject, outfit, silhouette, pose continuity, environment scale cues, and ground contact. Do not claim reconstructed 3D geometry.',width:960,height:540,frame_count:97,steps:0,checkpoint:''}},
+  ],links:[
+    {from:'mt_in_pose',output:'value',to:'mt_diorama',input:'image'},
+    {from:'mt_diorama',output:'image_url_string',to:'mt_final_video',input:'image'},
+  ],results:{},metadata:{presentation_only:true,source:'motion_transfer_pose_best',radius_hint_m:3,fast_geometry_branch_independent:true}};
+}
+
