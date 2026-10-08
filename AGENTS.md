@@ -50,6 +50,16 @@ Cursor `.cursor/rules` instructions for this project.
 
 ## General Workflow
 
+### Persistent development handoff
+
+For ongoing AutoRig development, read the root `handoff.md` after context
+compression, a new session, or an agent handoff, then follow its canonical
+project checkpoint. Verify Git and live runtime facts before acting. Keep the
+canonical handoff and its documented server mirrors current after material
+verified progress, blockers, or changed next steps; verify mirror SHA-256.
+This is an owner requirement from 2026-10-09. Never store secrets/private assets
+in the handoff, and never treat an old snapshot as fresh operational evidence.
+
 Use a production-first deployment workflow for AutoRig.online. Do not run local
 dev servers, local preview servers, or local browser QA for this project unless
 the user explicitly asks for a local-only experiment. The local checkout exists
