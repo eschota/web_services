@@ -1,7 +1,17 @@
 const SHA256=/^[0-9a-f]{64}$/;
+const OPAQUE_PREVIEW_FLAGS=Object.freeze({transparent:false,opacity:1,alphaTest:0,depthWrite:true,premultipliedAlpha:false,alphaHash:false,alphaToCoverage:false});
 
 function fail(message){throw new Error(message)}
 function finiteNumber(value){return typeof value==='number'&&Number.isFinite(value)}
+
+export function opaquePreviewOverrides(){return {...OPAQUE_PREVIEW_FLAGS}}
+export function nextPreviewMaterialMode(current,requested){
+  const safe=current&&typeof current==='object'?current:{};
+  if(requested==='opaque')return {opaque:true,weights:false};
+  if(requested==='weights')return {opaque:false,weights:true};
+  if(requested==='off')return {opaque:false,weights:false};
+  return {opaque:!!safe.opaque,weights:!!safe.weights};
+}
 
 export function validateOverlayBase(payload,artifact,manifest,schema){
   if(!payload||typeof payload!=='object'||payload.schema!==schema)fail(`Overlay schema mismatch: ${artifact.name}`);

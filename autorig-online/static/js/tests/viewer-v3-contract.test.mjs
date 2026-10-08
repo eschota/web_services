@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {assertSelfContainedGlb,sha256Hex,validateBoneClip,validateSkeletonPayload,validateSkinAttributes,validateVoxelPayload} from '../viewer-v3-contract.js';
+import {assertSelfContainedGlb,nextPreviewMaterialMode,opaquePreviewOverrides,sha256Hex,validateBoneClip,validateSkeletonPayload,validateSkinAttributes,validateVoxelPayload} from '../viewer-v3-contract.js';
 
 const sha='a'.repeat(64);
 const manifest={task_id:'11111111-2222-3333-4444-555555555555',build:{source_sha256:'b'.repeat(64)}};
@@ -39,4 +39,13 @@ test('accepts nonconstant track bound to a bone',()=>assert.ok(validateBoneClip(
 test('rejects static camera/material tracks',()=>{
   assert.throws(()=>validateBoneClip(clip,[{...boneTrack,nodeName:'Camera',propertyName:'position'}],new Set(['leg'])));
   assert.throws(()=>validateBoneClip(clip,[{...boneTrack,values:new Float32Array([0,0,0,1,0,0,0,1])}],new Set(['leg'])));
+});
+test('opaque preview contract ignores alpha without changing texture properties',()=>{
+  const source={map:{id:'same-map'},color:{id:'same-color'},roughness:.4,transparent:true,opacity:.12,alphaTest:.5,depthWrite:false,premultipliedAlpha:true};
+  const clone={...source,...opaquePreviewOverrides()};
+  assert.equal(clone.map,source.map);assert.equal(clone.color,source.color);assert.equal(clone.roughness,source.roughness);
+  assert.deepEqual({transparent:clone.transparent,opacity:clone.opacity,alphaTest:clone.alphaTest,depthWrite:clone.depthWrite,premultipliedAlpha:clone.premultipliedAlpha},{transparent:false,opacity:1,alphaTest:0,depthWrite:true,premultipliedAlpha:false});
+});
+test('opaque and weight preview modes are mutually exclusive and reversible',()=>{
+  let state={opaque:false,weights:false};state=nextPreviewMaterialMode(state,'opaque');assert.deepEqual(state,{opaque:true,weights:false});state=nextPreviewMaterialMode(state,'weights');assert.deepEqual(state,{opaque:false,weights:true});state=nextPreviewMaterialMode(state,'off');assert.deepEqual(state,{opaque:false,weights:false});
 });

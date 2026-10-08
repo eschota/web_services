@@ -23,8 +23,13 @@ test('missing layers are synchronized from exact manifest artifacts',()=>{
   assert.match(js,/has\('fitted_bones','r1_bones'\)/);
   assert.match(js,/document\.body\.classList\.add\('has-task'\)/);
 });
-test('v2 cache busters are present',()=>{
-  assert.match(html,/viewer-v3\.css\?v=2/);
-  assert.match(html,/viewer-v3\.js\?v=2/);
-  assert.match(js,/viewer-v3-contract\.js\?v=2/);
+test('opaque preview is explicit, optional and not a data layer',()=>{
+  assert.match(html,/id="opaque-preview" disabled/);
+  assert.doesNotMatch(html,/data-layer="opaque/);
+  assert.match(html,/Игнорировать прозрачность/);
+});
+test('v3 cache busters are present',()=>{
+  assert.match(html,/viewer-v3\.css\?v=3/);
+  assert.match(html,/viewer-v3\.js\?v=3/);
+  assert.match(js,/viewer-v3-contract\.js\?v=3/);
 });
