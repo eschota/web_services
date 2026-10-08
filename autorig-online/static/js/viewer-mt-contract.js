@@ -76,8 +76,9 @@ export function validateJoints3d(raw){
   if(!Array.isArray(raw.joints)||raw.joints.length<1||raw.joints.length>1000||raw.joints.some(x=>!vec3(x)))fail('3D track rest joints are invalid');
   if(raw.frames*raw.joints.length>1000000)fail('3D track aggregate point count is too large');
   if(!Array.isArray(raw.positions)||raw.positions.length!==raw.frames||raw.positions.some(frame=>!Array.isArray(frame)||frame.length!==raw.joints.length||frame.some(x=>!vec3(x))))fail('3D track positions are invalid');
-  if(!Array.isArray(raw.valid)||raw.valid.length!==raw.frames||raw.valid.some(frame=>!Array.isArray(frame)||frame.length!==raw.joints.length||frame.some(x=>typeof x!=='boolean'))||!Array.isArray(raw.bones)||raw.bones.length>3000||raw.bones.some(edge=>!Array.isArray(edge)||edge.length!==2||edge.some(i=>!Number.isInteger(i)||i<0||i>=raw.joints.length)||edge[0]===edge[1]))fail('3D track validity or bones are invalid');
-  return{fps:raw.fps,frames:raw.frames,frame:shortText(raw.frame,160),joints:raw.joints,positions:raw.positions,valid:raw.valid,bones:raw.bones,reprojectionMean:finite(raw.reprojection_px_mean,0,1e6)?raw.reprojection_px_mean:null,reprojectionP95:finite(raw.reprojection_px_p95,0,1e6)?raw.reprojection_px_p95:null};
+  if(!Array.isArray(raw.valid)||raw.valid.length!==raw.frames||raw.valid.some(frame=>!Array.isArray(frame)||frame.length!==raw.joints.length||frame.some(x=>typeof x!=='boolean'))||!Array.isArray(raw.bones)||raw.bones.length>3000||raw.bones.some(edge=>!Array.isArray(edge)||edge.length!==2||edge.some(i=>!Number.isInteger(i)||i<0||i>=raw.joints.length)))fail('3D track validity or bones are invalid');
+  const degenerateEdgeCount=raw.bones.filter(edge=>edge[0]===edge[1]).length;
+  return{fps:raw.fps,frames:raw.frames,frame:shortText(raw.frame,160),joints:raw.joints,positions:raw.positions,valid:raw.valid,bones:raw.bones,degenerateEdgeCount,reprojectionMean:finite(raw.reprojection_px_mean,0,1e6)?raw.reprojection_px_mean:null,reprojectionP95:finite(raw.reprojection_px_p95,0,1e6)?raw.reprojection_px_p95:null};
 }
 
 export function normalizeLabelLegend(raw){
