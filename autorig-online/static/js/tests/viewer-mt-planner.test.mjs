@@ -3,7 +3,7 @@ import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {buildPlannerInput,parsePlannerProposal,readJsonBounded,summarizeValidatedDiff,validatePlannerContext,VIEWER_MT_PLANNER_API} from '../viewer-mt-planner.js';
+import {buildPlannerInput,parsePlannerProposal,readJsonBounded,requireRequestedModel,summarizeValidatedDiff,validatePlannerContext,VIEWER_MT_PLANNER_API} from '../viewer-mt-planner.js';
 import {buildPresentationDraft} from '../viewer-mt-contract.js';
 
 const RUN='0123456789abcdefabcd',SHA='a'.repeat(64),POSE=`/api/mt/files/${RUN}/maps/pose_best.png`;
@@ -26,7 +26,7 @@ test('pure input builder compacts the actual backend schema response below the A
  const schema=JSON.parse(output);assert.equal(schema.operations_array.length,9);assert.ok(schema.services_array.length>=20);assert.ok(schema.models_array.length>=7);
  const graph=buildPresentationDraft(schema,POSE);
  const encoded=buildPlannerInput('Create a 3 m diorama hint, then final HQ video.',graph,schema,{runId:RUN,sourceSha256:SHA,poseBestUrl:POSE},{id:'bonsai2-27b',title:'Bonsai 2',context_tokens:4096});
- const payload=JSON.parse(encoded);assert.ok(encoded.length<6400,encoded.length);assert.deepEqual(payload.graph_edit_schema.operations_array.map(item=>item.op),schema.operations_array.map(item=>item.op));
+ const payload=JSON.parse(encoded);assert.ok(encoded.length<6400,encoded.length);assert.deepEqual(payload.graph_edit_schema.operation_examples.map(item=>item.op),schema.operations_array.map(item=>item.op));assert.ok(payload.graph_edit_schema.operation_examples.every(item=>!Object.hasOwn(item,'fields')));
  assert.deepEqual(payload.graph_edit_schema.services_array.map(item=>item.id).sort(),['qwen_image','text','video']);assert.equal(payload.planner_model.id,'bonsai2-27b');assert.equal(payload.graph_edit_schema.models_array,undefined);
  assert.equal(payload.graph.nodes[1].params.prompt,graph.nodes[1].params.prompt);assert.equal(payload.graph.nodes[2].params.frame_count,97);
 });
@@ -40,6 +40,8 @@ test('bounded reader rejects content-length before consuming a response',async()
  let read=false;const response={status:200,ok:true,headers:{get:()=>String(600000)},text:async()=>{read=true;return '{}';}};
  await assert.rejects(()=>readJsonBounded(response),/exceeded/);assert.equal(read,false);
 });
+
+test('served model must exactly match the explicit selection',()=>{assert.equal(requireRequestedModel('bonsai2-27b','bonsai2-27b'),'bonsai2-27b');assert.throws(()=>requireRequestedModel('bonsai2-27b','qwen35-9b-uncensored'),/proposal rejected/);assert.throws(()=>requireRequestedModel('bonsai2-27b',''),/did not report/);});
 
 test('validated diff is human-readable and does not execute actions',()=>{
  const before={name:'A',nodes:[{id:'a',params:{x:1}}],links:[]};const after={name:'B',nodes:[{id:'a',params:{x:2}},{id:'b'}],links:[{from:'a',to:'b'}]};
@@ -58,7 +60,7 @@ test('planner requires explicit user click and never auto-submits on bootstrap',
  const source=readFileSync(new URL('../viewer-mt-planner.js',import.meta.url),'utf8');
  assert.match(source,/propose\.addEventListener\('click',ask\)/);
  assert.doesNotMatch(source,/await ask\(\)/);
- assert.match(source,/validated!==true/);assert.match(source,/pose_best/);assert.match(source,/abortableDelay/);
+ assert.match(source,/validated!==true/);assert.match(source,/pose_best/);assert.match(source,/abortableDelay/);assert.match(source,/structured:false/);assert.doesNotMatch(source,/operations_array:OPERATION_FORMS|op:'update_params',fields/);assert.match(source,/Bounded raw model answer/);
 });
 
 test('planner bridges and removes the parent abort signal',()=>{
