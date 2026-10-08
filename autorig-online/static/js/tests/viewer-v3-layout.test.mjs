@@ -30,6 +30,6 @@ test('opaque preview is explicit, optional and not a data layer',()=>{
 });
 test('current cache busters are present',()=>{
   assert.match(html,/viewer-v3\.css\?v=3/);
-  assert.match(html,/viewer-v3\.js\?v=6/);
+  assert.match(html,/viewer-v3\.js\?v=7/);
   assert.match(js,/viewer-v3-contract\.js\?v=3/);
 });

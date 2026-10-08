@@ -81,6 +81,14 @@ export function validateJoints3d(raw){
   return{fps:raw.fps,frames:raw.frames,frame:shortText(raw.frame,160),joints:raw.joints,positions:raw.positions,valid:raw.valid,bones:raw.bones,degenerateEdgeCount,reprojectionMean:finite(raw.reprojection_px_mean,0,1e6)?raw.reprojection_px_mean:null,reprojectionP95:finite(raw.reprojection_px_p95,0,1e6)?raw.reprojection_px_p95:null};
 }
 
+export function buildTrackFrameGeometry(track,index){
+  if(!track||!Number.isInteger(index)||index<0||index>=track.frames)fail('3D track frame index is invalid');
+  const positions=track.positions[index],mask=track.valid[index],points=[],lines=[],minimum=[Infinity,Infinity,Infinity],maximum=[-Infinity,-Infinity,-Infinity];let finiteJointCount=0,skippedDegenerateEdges=0,skippedInvalidEdges=0;
+  for(let joint=0;joint<positions.length;joint++)if(mask[joint]){const value=positions[joint];points.push(value[0],value[1],value[2]);finiteJointCount++;for(let axis=0;axis<3;axis++){minimum[axis]=Math.min(minimum[axis],value[axis]);maximum[axis]=Math.max(maximum[axis],value[axis])}}
+  for(const edge of track.bones){if(edge[0]===edge[1]){skippedDegenerateEdges++;continue}if(!mask[edge[0]]||!mask[edge[1]]){skippedInvalidEdges++;continue}lines.push(...positions[edge[0]],...positions[edge[1]])}
+  return{points:new Float32Array(points),lines:new Float32Array(lines),finiteJointCount,skippedInvalidJoints:positions.length-finiteJointCount,skippedDegenerateEdges,skippedInvalidEdges,bounds:finiteJointCount?{minimum,maximum}:null};
+}
+
 export function normalizeLabelLegend(raw){
   if(!plain(raw)||raw.schema!=='autorig.motion-transfer.labels/1'||!Array.isArray(raw.legend)||raw.legend.length>256)fail('Label legend is invalid');
   const legend=raw.legend.map(item=>{if(!plain(item)||!Number.isInteger(item.index)||item.index<0||typeof item.name!=='string'||!Array.isArray(item.rgb)||item.rgb.length!==3||item.rgb.some(x=>!Number.isInteger(x)||x<0||x>255))fail('Label entry is invalid');return{index:item.index,name:item.name.slice(0,100),rgb:item.rgb}});
