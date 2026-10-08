@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {assertSelfContainedGlb,sha256Hex,validateSkeletonPayload,validateVoxelPayload} from '../viewer-v3-contract.js';
+import {assertSelfContainedGlb,sha256Hex,validateBoneClip,validateSkeletonPayload,validateSkinAttributes,validateVoxelPayload} from '../viewer-v3-contract.js';
 
 const sha='a'.repeat(64);
 const manifest={task_id:'11111111-2222-3333-4444-555555555555',build:{source_sha256:'b'.repeat(64)}};
@@ -23,3 +23,20 @@ function glb(json){
 }
 test('accepts a self-contained GLB and hashes exact bytes',async()=>{const bytes=glb({asset:{version:'2.0'},buffers:[],images:[]});assert.equal(assertSelfContainedGlb(bytes).asset.version,'2.0');assert.match(await sha256Hex(bytes),/^[0-9a-f]{64}$/)});
 test('rejects external GLB image URI',()=>assert.throws(()=>assertSelfContainedGlb(glb({asset:{version:'2.0'},images:[{uri:'https://evil.invalid/x.png'}]}))));
+
+function attribute(rows){return {count:rows.length,itemSize:4,getX:i=>rows[i][0],getY:i=>rows[i][1],getZ:i=>rows[i][2],getW:i=>rows[i][3]}}
+const position={count:1};
+test('accepts finite normalized skin weights',async()=>assert.deepEqual(await validateSkinAttributes([{position,skinIndex:attribute([[0,1,0,0]]),skinWeight:attribute([[.75,.25,0,0]]),boneCount:2}]),{vertices:1}));
+test('rejects zero and NaN skin weights',async()=>{
+  await assert.rejects(validateSkinAttributes([{position,skinIndex:attribute([[0,0,0,0]]),skinWeight:attribute([[0,0,0,0]]),boneCount:1}]));
+  await assert.rejects(validateSkinAttributes([{position,skinIndex:attribute([[0,0,0,0]]),skinWeight:attribute([[NaN,0,0,0]]),boneCount:1}]));
+});
+test('rejects out of range joint index',async()=>assert.rejects(validateSkinAttributes([{position,skinIndex:attribute([[2,0,0,0]]),skinWeight:attribute([[1,0,0,0]]),boneCount:2}])));
+
+const clip={duration:1};
+const boneTrack={nodeName:'leg',propertyName:'quaternion',times:new Float32Array([0,1]),values:new Float32Array([0,0,0,1,0,.2,0,.98]),valueSize:4};
+test('accepts nonconstant track bound to a bone',()=>assert.ok(validateBoneClip(clip,[boneTrack],new Set(['leg'])).animatedBones.has('leg')));
+test('rejects static camera/material tracks',()=>{
+  assert.throws(()=>validateBoneClip(clip,[{...boneTrack,nodeName:'Camera',propertyName:'position'}],new Set(['leg'])));
+  assert.throws(()=>validateBoneClip(clip,[{...boneTrack,values:new Float32Array([0,0,0,1,0,0,0,1])}],new Set(['leg'])));
+});

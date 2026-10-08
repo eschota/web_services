@@ -258,6 +258,9 @@ class Task(Base):
     id = Column(String(36), primary_key=True)  # UUID
     owner_type = Column(String(10), nullable=False)  # 'anon' or 'user'
     owner_id = Column(String(255), nullable=False)  # anon_id or user email
+    # Existing task pages and gallery records are public by default.  V3
+    # diagnostic artifacts additionally enforce this flag on every request.
+    is_public = Column(Boolean, nullable=False, default=True, server_default=text("TRUE"))
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1266,6 +1269,9 @@ async def init_db():
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_description TEXT")
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN registered_as_agent BOOLEAN DEFAULT 0")
 
+            await _try_add_column(
+                "ALTER TABLE tasks ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT 1"
+            )
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
@@ -1709,6 +1715,9 @@ async def init_db():
                 )
             except Exception:
                 pass
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE"
+            )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS viewer_prepared_glb_url VARCHAR(1024)"
             )

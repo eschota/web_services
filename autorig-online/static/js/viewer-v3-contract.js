@@ -65,3 +65,52 @@ export function assertSelfContainedGlb(buffer){
   return document;
 }
 
+function attributeComponent(attribute,index,component){
+  if(component===0)return attribute.getX(index);
+  if(component===1)return attribute.getY(index);
+  if(component===2)return attribute.getZ(index);
+  return attribute.getW(index);
+}
+
+export async function validateSkinAttributes(meshes,yieldControl=async()=>{}){
+  if(!Array.isArray(meshes)||!meshes.length)fail('No skinned meshes were loaded');
+  let vertices=0;
+  for(const entry of meshes){
+    const {position,skinIndex,skinWeight,boneCount}=entry;
+    if(!position||!skinIndex||!skinWeight||position.count!==skinIndex.count||position.count!==skinWeight.count)fail('Skin attribute counts do not match positions');
+    if(skinIndex.itemSize!==4||skinWeight.itemSize!==4||!Number.isInteger(boneCount)||boneCount<=0)fail('Skin attributes or skeleton size are invalid');
+    for(let index=0;index<position.count;index++){
+      let sum=0,positive=0;
+      for(let component=0;component<4;component++){
+        const joint=attributeComponent(skinIndex,index,component),weight=attributeComponent(skinWeight,index,component);
+        if(!Number.isInteger(joint)||joint<0||joint>=boneCount)fail(`Skin joint index is invalid at vertex ${index}`);
+        if(!finiteNumber(weight)||weight<0||weight>1.000001)fail(`Skin weight is invalid at vertex ${index}`);
+        sum+=weight;if(weight>1e-8)positive++;
+      }
+      if(!positive||Math.abs(sum-1)>1e-3)fail(`Skin weights are not normalized at vertex ${index}`);
+      vertices++;
+      if(vertices%100000===0)await yieldControl();
+    }
+  }
+  return {vertices};
+}
+
+export function validateBoneClip(clip,trackDescriptors,boneNames){
+  if(!clip||!finiteNumber(clip.duration)||clip.duration<=0)fail('Animation clip duration is invalid');
+  if(!Array.isArray(trackDescriptors)||!trackDescriptors.length||!(boneNames instanceof Set)||!boneNames.size)fail('Animation clip or skeleton is empty');
+  const animatedBones=new Set();
+  for(const descriptor of trackDescriptors){
+    const {nodeName,propertyName,times,values,valueSize}=descriptor;
+    if(!boneNames.has(nodeName)||!['position','quaternion','scale'].includes(propertyName))fail('Animation track is not bound to a loaded skeleton bone');
+    if(!times||!values||!Number.isInteger(valueSize)||valueSize<=0||values.length!==times.length*valueSize||times.length<2)fail('Animation track arrays are invalid');
+    let last=-Infinity;
+    for(const time of times){if(!finiteNumber(time)||time<0||time>clip.duration+1e-6||time<last)fail('Animation track time is invalid');last=time}
+    for(const value of values)if(!finiteNumber(value))fail('Animation track value is invalid');
+    let changed=false;
+    for(let frame=1;frame<times.length&&!changed;frame++)for(let component=0;component<valueSize;component++)if(Math.abs(values[frame*valueSize+component]-values[component])>1e-7){changed=true;break}
+    if(changed)animatedBones.add(nodeName);
+  }
+  if(!animatedBones.size)fail('Animation clip has no nonconstant bone transform track');
+  return {animatedBones};
+}
+

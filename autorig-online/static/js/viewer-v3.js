@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import {OrbitControls} from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
-import {assertSelfContainedGlb,sha256Hex,validateSkeletonPayload,validateVoxelPayload} from './viewer-v3-contract.js';
+import {assertSelfContainedGlb,sha256Hex,validateBoneClip,validateSkeletonPayload,validateSkinAttributes,validateVoxelPayload} from './viewer-v3-contract.js';
 
 const STAGE_LABELS={source:'Source model',c1_surface:'C1 Surface',c2_solid:'C2 Solid volume',c3_thin:'C3 Erosion',c4_graph:'C4 Skeleton graph',r1_bones:'R1 Anatomical fitted bones',s1_owner:'S1 Ownership',s2_weights:'S2 Heat weights',s3_skin:'S3 Skin bind',final_deformation:'Final verified deformation'};
 const app={manifest:null,scene:null,camera:null,renderer:null,controls:null,groups:{},model:null,mixer:null,clock:new THREE.Clock(),autoRotate:false,deform:false,voxelModes:[]};
@@ -22,7 +22,40 @@ function fitCamera(){const box=new THREE.Box3();Object.values(app.groups).forEac
 function stageComplete(name){return app.manifest.stages.some(x=>x.name===name&&x.status==='complete')}
 function modelArtifact(){if(stageComplete('final_deformation'))return app.manifest.artifacts.find(x=>x.type==='deformation_clip')||null;if(stageComplete('s3_skin'))return app.manifest.artifacts.find(x=>x.type==='skinned_model')||null;return null}
 function modelUrl(){const artifact=modelArtifact();return artifact?.url||app.manifest.model?.source_url}
-async function loadModel(){const url=modelUrl();if(!url)return;const response=await fetch(url,{credentials:'same-origin'});if(!response.ok)throw new Error(`Model fetch failed: ${response.status}`);const bytes=await response.arrayBuffer();assertSelfContainedGlb(bytes);const artifact=modelArtifact(),expected=artifact?.sha256||app.manifest.build?.source_sha256||null;if(expected){const actual=await sha256Hex(bytes);if(actual!==expected)throw new Error('Rendered model SHA-256 does not match the V3 manifest')}const gltf=await new GLTFLoader().parseAsync(bytes,'');app.model=gltf.scene;let hasVerifiedSkin=false;app.model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;o.userData.v3OriginalMaterial=o.material}if(o.isSkinnedMesh&&o.skeleton?.bones?.length&&o.geometry?.attributes?.position&&o.geometry?.attributes?.skinIndex&&o.geometry?.attributes?.skinWeight&&o.geometry.attributes.skinIndex.count===o.geometry.attributes.position.count&&o.geometry.attributes.skinWeight.count===o.geometry.attributes.position.count)hasVerifiedSkin=true});app.groups.model.add(app.model);const finalReady=stageComplete('final_deformation')&&!!app.manifest.model?.deformation_url&&hasVerifiedSkin&&gltf.animations?.length>0;if(finalReady){app.mixer=new THREE.AnimationMixer(app.model);app.mixer.clipAction(gltf.animations[0]).play();app.mixer.timeScale=0}$('#deform').disabled=!finalReady;const weightToggle=document.querySelector('[data-layer="weights"]');weightToggle.disabled=!(stageComplete('s2_weights')&&stageComplete('s3_skin')&&!!app.manifest.model?.skinned_url&&hasVerifiedSkin);fitCamera()}
+function runtimeGate(name,ok,detail){$('#metrics').insertAdjacentHTML('beforeend',`<dt>${esc(name)}</dt><dd>${ok?'PASS':'BLOCKED'} · ${esc(detail)}</dd>`);if(!ok){$('#integrity').className='integrity warn';$('#integrity').textContent=`Runtime verification blocked · ${detail}`}}
+function clipDescriptors(clip){return clip.tracks.map(track=>{const parsed=THREE.PropertyBinding.parseTrackName(track.name),nodeName=parsed.objectName==='bones'?parsed.objectIndex:parsed.nodeName;return {nodeName,propertyName:parsed.propertyName,times:track.times,values:track.values,valueSize:track.getValueSize()}})}
+async function proveLbsMovement(model,mixer,clip,animatedBones,entries){
+  const candidates=[];
+  for(const entry of entries){
+    const indices=entry.skinIndex,weights=entry.skinWeight,bones=entry.mesh.skeleton.bones;
+    for(let vertex=0;vertex<indices.count&&candidates.length<128;vertex++){
+      const jointIds=[indices.getX(vertex),indices.getY(vertex),indices.getZ(vertex),indices.getW(vertex)],jointWeights=[weights.getX(vertex),weights.getY(vertex),weights.getZ(vertex),weights.getW(vertex)];
+      if(jointIds.some((joint,slot)=>jointWeights[slot]>1e-6&&animatedBones.has(bones[joint]?.name)))candidates.push({entry,vertex});
+    }
+  }
+  if(!candidates.length)throw new Error('No rendered vertex is weighted to an animated bone');
+  const snapshot=time=>{mixer.setTime(time);model.updateMatrixWorld(true);const out=[];for(const candidate of candidates){const {mesh}=candidate.entry;mesh.skeleton.update();const value=new THREE.Vector3().fromBufferAttribute(candidate.entry.position,candidate.vertex);if(typeof mesh.applyBoneTransform!=='function')throw new Error('Browser skinning probe is unavailable');mesh.applyBoneTransform(candidate.vertex,value);value.applyMatrix4(mesh.matrixWorld);out.push(value)}return out};
+  const rest=snapshot(0),bounds=new THREE.Box3().setFromObject(model),scale=Math.max(bounds.getSize(new THREE.Vector3()).length(),1e-6),threshold=Math.max(scale*1e-7,1e-8);let movement=0;
+  for(const fraction of [.23,.51,.79]){const moved=snapshot(Math.min(clip.duration*fraction,clip.duration-1e-7));for(let index=0;index<rest.length;index++)movement=Math.max(movement,rest[index].distanceTo(moved[index]))}
+  mixer.setTime(0);model.updateMatrixWorld(true);
+  if(!Number.isFinite(movement)||movement<=threshold)throw new Error('Verified bone clip produced no bounded LBS vertex movement');
+  return {vertices:candidates.length,maxMovement:movement};
+}
+async function loadModel(){
+  const url=modelUrl();if(!url)return;
+  const response=await fetch(url,{credentials:'same-origin'});if(!response.ok)throw new Error(`Model fetch failed: ${response.status}`);
+  const bytes=await response.arrayBuffer();assertSelfContainedGlb(bytes);
+  const artifact=modelArtifact(),expected=artifact?.sha256||app.manifest.build?.source_sha256||null;
+  if(expected){const actual=await sha256Hex(bytes);if(actual!==expected)throw new Error('Rendered model SHA-256 does not match the V3 manifest')}
+  const gltf=await new GLTFLoader().parseAsync(bytes,'');app.model=gltf.scene;const skinEntries=[];
+  app.model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;o.userData.v3OriginalMaterial=o.material}if(o.isSkinnedMesh)skinEntries.push({mesh:o,position:o.geometry?.attributes?.position,skinIndex:o.geometry?.attributes?.skinIndex,skinWeight:o.geometry?.attributes?.skinWeight,boneCount:o.skeleton?.bones?.length||0})});
+  app.groups.model.add(app.model);let skinVerified=false;
+  if(stageComplete('s3_skin')){try{const result=await validateSkinAttributes(skinEntries,()=>new Promise(resolve=>requestAnimationFrame(resolve)));skinVerified=true;runtimeGate('V3 skin weights',true,`${result.vertices} vertices`)}catch(error){runtimeGate('V3 skin weights',false,error.message)}}
+  const weightToggle=document.querySelector('[data-layer="weights"]');weightToggle.disabled=!(stageComplete('s2_weights')&&stageComplete('s3_skin')&&!!app.manifest.model?.skinned_url&&skinVerified);
+  let finalReady=false;
+  if(stageComplete('final_deformation')&&skinVerified){try{const clipName=app.manifest.model?.deformation_clip_name,clip=gltf.animations.find(item=>item.name===clipName);if(!clip)throw new Error('Declared deformation clip is missing');const boneNames=new Set(skinEntries.flatMap(entry=>entry.mesh.skeleton.bones.map(bone=>bone.name)));const clipProof=validateBoneClip(clip,clipDescriptors(clip),boneNames);app.mixer=new THREE.AnimationMixer(app.model);const action=app.mixer.clipAction(clip);action.play();const movement=await proveLbsMovement(app.model,app.mixer,clip,clipProof.animatedBones,skinEntries);app.mixer.timeScale=0;finalReady=true;runtimeGate('V3 deformation',true,`${movement.vertices} samples, movement ${movement.maxMovement.toPrecision(4)}`)}catch(error){app.mixer=null;runtimeGate('V3 deformation',false,error.message)}}
+  $('#deform').disabled=!finalReady;fitCamera();
+}
 function artifactMatrix(d){const values=d.matrix_to_model;if(values==null)return new THREE.Matrix4();if(!Array.isArray(values)||values.length!==16||values.some(x=>typeof x!=='number'||!Number.isFinite(x)))throw new Error('Invalid artifact matrix_to_model');const m=new THREE.Matrix4();m.fromArray(values);return m}
 function verifyOverlayPayload(d,a,schema){if(d.schema!==schema||d.task_id!==app.manifest.task_id||d.source_sha256!==app.manifest.build.source_sha256)throw new Error(`Overlay provenance mismatch: ${a.name}`);if(d.stage_receipt_sha256!==a.stage_receipt_sha256)throw new Error(`Overlay stage receipt mismatch: ${a.name}`);if(d.coordinate_space!=='model_local_gltf'&&!Array.isArray(d.matrix_to_model))throw new Error(`Overlay coordinate transform missing: ${a.name}`)}
 function finiteVec3(v){return Array.isArray(v)&&v.length===3&&v.every(x=>typeof x==='number'&&Number.isFinite(x))}

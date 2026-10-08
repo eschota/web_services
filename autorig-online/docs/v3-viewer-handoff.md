@@ -32,12 +32,14 @@ lists only public tasks with a fully valid manifest.
 ## Verified
 
 - `python -m py_compile backend/v3_viewer_routes.py`: pass.
-- `node --check static/js/viewer-v3.js`: pass; frontend contract 8/8 pass,
+- `node --check static/js/viewer-v3.js`: pass; frontend contract 13/13 pass,
   including strict overlay receipts/counts, exact model-byte SHA-256 and
-  rejection of external GLB resources.
+  rejection of external GLB resources, invalid skin weights/joint indices and
+  static or non-bone animation tracks.
 - Production Python environment, isolated audit copy under
   `/srv/autorig/audits/animal-gpu-development/v3-viewer-test`: 4/4 manifest
-  validator/access tests 17/17 pass (valid hash-bound publication, changed
+  viewer validator/access tests 17/17 plus visibility schema tests 3/3 pass
+  (valid hash-bound publication, changed
   bytes rejection, strict stage/type/receipt/counts, aggregate caps, traversal,
   symlink rejection, registered/anon/API-key ownership, admin, unrelated
   private denial, public anonymous access and visibility revocation).

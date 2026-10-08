@@ -244,6 +244,7 @@ def validate_v3_manifest(raw: Any, *, task_id: str, task_dir: Path, verify_files
         "coordinate_space": str(raw_model.get("coordinate_space") or "model_local_gltf")[:50],
         "vertices": _as_nonnegative_int(raw_model.get("vertices", 0), "model.vertices", 5_000_000),
         "triangles": _as_nonnegative_int(raw_model.get("triangles", 0), "model.triangles", 10_000_000),
+        "deformation_clip_name": str(raw_model.get("deformation_clip_name") or "")[:128],
     }
     skinned_artifact = next((item for item in clean_artifacts if item["type"] == "skinned_model"), None)
     deformation_artifact = next((item for item in clean_artifacts if item["type"] == "deformation_clip"), None)
@@ -258,6 +259,7 @@ def validate_v3_manifest(raw: Any, *, task_id: str, task_dir: Path, verify_files
         "c2_solid": "voxel_points",
         "c3_thin": "voxel_points",
         "c4_graph": "skeleton_graph",
+        "r1_bones": "fitted_bones",
         "s2_weights": "skin_weights",
         "s3_skin": "skinned_model",
         "final_deformation": "deformation_clip",
@@ -268,6 +270,9 @@ def validate_v3_manifest(raw: Any, *, task_id: str, task_dir: Path, verify_files
             item["stage"] == stage_name and item["type"] == artifact_type for item in clean_artifacts
         ):
             raise V3ManifestError(f"{stage_name} requires a {artifact_type} artifact")
+    final_stage = stage_map.get("final_deformation")
+    if final_stage and final_stage["status"] == "complete" and not model["deformation_clip_name"]:
+        raise V3ManifestError("final_deformation requires an explicit deformation_clip_name")
 
     return {
         "schema": raw["schema"],
@@ -360,8 +365,7 @@ def build_v3_viewer_router(
         task = (await db.execute(select(task_model).where(task_model.id == task_id))).scalar_one_or_none()
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-        row = (await db.execute(text("SELECT is_public FROM tasks WHERE id = :task_id"), {"task_id": task_id})).first()
-        is_public = bool(row and row[0])
+        is_public = bool(getattr(task, "is_public", False))
         if not _can_access_task(task, is_public=is_public, user=user, request=request, is_admin_email=is_admin_email):
             raise HTTPException(status_code=404, detail="Task not found")
         return task
