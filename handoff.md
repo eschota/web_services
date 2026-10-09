@@ -6,7 +6,7 @@ Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`9bb18bd00cdb81ff70e957d989db40fd3c0d34184ae64f37f19318cfe806b6e5`.
+`eff2aaa1f07dc13682afe138f5071a56dde618df9191b944a9aa26af6da0de0e`.
 Default index SHA `0add54a02ba721d2fc49a9cebf1a9dbb527670e9b6f62a599a70f1f5f60eefc3`.
 Bones inspection hides terrain obscuring feet and restores the environment on
 exit. REST transition restores/disables FootGrounding before resetting bones,
@@ -15,7 +15,12 @@ checks passed; these are viewer fixes, NOT producer anatomical/skin acceptance.
 Fresh isolated-session foot-chip check returns targeted metrics:9clips/2341
 samples in13.466s, no repair. Screenshot fallback is not reproduced on the current
 path; exact owner-session provenance remains unknown. Preserve customer artifacts
-and production queue. Canonical source checkpoint a9546cb, viewer/driver83756a3.
+and production queue. Canonical checkpoint98855bb; viewer/driver83756a3.
+New source-only diagnostic bind-frame rebase7dbff17 preserves animation skin
+matrices during anatomical joint relocation;14tests pass, not baseline skin repair.
+Knee-volume repair and sided garment-contact constraints remain in development.
+Same16sample cloth fit now passes edge/area0failures but collision1/16 remains,
+so it is explicitly rejected. Five-model full acceptance still0/5.
 This is NOT full producer/converter migration: body/clothing/hair acceptance0/5.
 F5 streaming GPU validation is terminal2341/2341, with explicitly limited CPU
 parity coverage. Real moving-bones video was delivered to /dev (uid71093d934dd1),
