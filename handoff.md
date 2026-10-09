@@ -9,6 +9,13 @@ the new numbered migration plan. MT/viewer/diorama presentation is complementary
 not a substitute for a working skin. F5 stays isolated; this is not yet a
 production-ready full humanoid rig or a production-default switch.
 
+Latest implemented slice: H0 immutable human bind contracts and H3 reversible
+calibration math (research source732566e;143 CPU tests passed). One F5 legacy
+human-control inspection completed with a source-domain mismatch, not V3
+readiness. Resume from the canonical checkpoint's active H0/H3 section; next is
+the explicit offline BODY25 + volume-lift human semantic experiment. Do not
+mistake the handoff's retained historical next-step lists for current work.
+
 Read the authoritative [converter handoff](autorig-online/backups/repair-rig-dispatch-20261006/converter-source/handoff.md)
 before continuing. It contains exact commits, tested timings, private artifact
 locations, blockers, next steps and restoration rules. Then read current
