@@ -6,7 +6,7 @@ Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`eff2aaa1f07dc13682afe138f5071a56dde618df9191b944a9aa26af6da0de0e`.
+`4fb3d23abbe1aeb9dc7a923c1b3af1b0ee29e2003759f9e29c27c6d33fc35b74`.
 Default index SHA `0add54a02ba721d2fc49a9cebf1a9dbb527670e9b6f62a599a70f1f5f60eefc3`.
 Bones inspection hides terrain obscuring feet and restores the environment on
 exit. REST transition restores/disables FootGrounding before resetting bones,
@@ -15,12 +15,16 @@ checks passed; these are viewer fixes, NOT producer anatomical/skin acceptance.
 Fresh isolated-session foot-chip check returns targeted metrics:9clips/2341
 samples in13.466s, no repair. Screenshot fallback is not reproduced on the current
 path; exact owner-session provenance remains unknown. Preserve customer artifacts
-and production queue. Canonical checkpoint98855bb; viewer/driver83756a3.
+and production queue. Canonical checkpointe650929; viewer/driver83756a3.
 New source-only diagnostic bind-frame rebase7dbff17 preserves animation skin
 matrices during anatomical joint relocation;14tests pass, not baseline skin repair.
 Knee-volume repair and sided garment-contact constraints remain in development.
 Same16sample cloth fit now passes edge/area0failures but collision1/16 remains,
 so it is explicitly rejected. Five-model full acceptance still0/5.
+Baseline bilateral knee research candidate reduces collapsededges by68 on
+9clips/2341samples without layerregressions, but badframes unchanged; independent
+artifact review pending. Contact primitive has a reproduced falsecoplanar P1;
+fix/tests required before further signedcontact fitting. No fullskin deployment.
 This is NOT full producer/converter migration: body/clothing/hair acceptance0/5.
 F5 streaming GPU validation is terminal2341/2341, with explicitly limited CPU
 parity coverage. Real moving-bones video was delivered to /dev (uid71093d934dd1),
