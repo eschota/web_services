@@ -6,7 +6,7 @@ Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`b453d477feb6eea158988b3467b5aab3a77eaf675726fdf28ce8d74b1741e364`.
+`3f62d33dd5c86eba966d48efbe4cd7f62964442f35bc19ebf24b11f3e4b68aab`.
 Default index SHA `0add54a02ba721d2fc49a9cebf1a9dbb527670e9b6f62a599a70f1f5f60eefc3`.
 Bones inspection hides terrain obscuring feet and restores the environment on
 exit. REST transition restores/disables FootGrounding before resetting bones,
