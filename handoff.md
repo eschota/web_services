@@ -6,14 +6,16 @@ Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`3f62d33dd5c86eba966d48efbe4cd7f62964442f35bc19ebf24b11f3e4b68aab`.
+`9bb18bd00cdb81ff70e957d989db40fd3c0d34184ae64f37f19318cfe806b6e5`.
 Default index SHA `0add54a02ba721d2fc49a9cebf1a9dbb527670e9b6f62a599a70f1f5f60eefc3`.
 Bones inspection hides terrain obscuring feet and restores the environment on
 exit. REST transition restores/disables FootGrounding before resetting bones,
 preventing a stale animated snapshot from overwriting REST. Production browser
 checks passed; these are viewer fixes, NOT producer anatomical/skin acceptance.
-Current owner screenshot's static quick-foot QA fallback is under fresh backend
-path investigation. Preserve existing customer artifacts and production queue.
+Fresh isolated-session foot-chip check returns targeted metrics:9clips/2341
+samples in13.466s, no repair. Screenshot fallback is not reproduced on the current
+path; exact owner-session provenance remains unknown. Preserve customer artifacts
+and production queue. Canonical source checkpoint a9546cb, viewer/driver83756a3.
 This is NOT full producer/converter migration: body/clothing/hair acceptance0/5.
 F5 streaming GPU validation is terminal2341/2341, with explicitly limited CPU
 parity coverage. Real moving-bones video was delivered to /dev (uid71093d934dd1),
