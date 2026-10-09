@@ -2,6 +2,14 @@
 
 Updated: 2026-10-09, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
+The current primary checkpoint is `R:\3d_video_motion_transfer\HANDOFF.md`
+(private repo), mirrored at `/srv/autorig/audits/3d-video-motion-transfer/handoff.md`.
+The owner now assigns the whole V3 rig/viewer/converter migration to this session:
+live mesh-aligned bones, persistent T/A-pose IK corrections consumed by retargeting,
+dedicated clothing/hair bones with Qwen attachment masks, at least five real models,
+and proactive agent inspection/correction tools. Read that checkpoint first.
+The converter handoff below remains the supporting GPU research checkpoint.
+
 The primary work is GPU erosion → anatomical bones → skinning. The owner has
 confirmed migrating humanoids to V3, including a non-destructive calibration
 T-pose and adaptation of animation retargeting. The canonical checkpoint links
