@@ -9,12 +9,19 @@ the new numbered migration plan. MT/viewer/diorama presentation is complementary
 not a substitute for a working skin. F5 stays isolated; this is not yet a
 production-ready full humanoid rig or a production-default switch.
 
-Latest implemented slice: H0 immutable human bind contracts and H3 reversible
-calibration math (research source732566e;143 CPU tests passed). One F5 legacy
-human-control inspection completed with a source-domain mismatch, not V3
-readiness. Resume from the canonical checkpoint's active H0/H3 section; next is
-the explicit offline BODY25 + volume-lift human semantic experiment. Do not
-mistake the handoff's retained historical next-step lists for current work.
+Latest source e20cb33 joins existing Vision taxonomy and a fresh limb-count
+observation with V3 evidence; runtime parallel orchestration is still pending.
+The owner explicitly requires name/description/category/body/limb analysis
+alongside geometry before scenario selection. Existing elf classification is
+same-source; one completed f7-only Vision call returned2 arms/2 legs/1 head in
+11.068s. Do not repeat it or mistake the observation for a validated rig.
+
+H0 bind/H3 calibration math and real H1 tests are retained. Cardinal elf views
+pass13/25 numeric joint candidates (core6/15), oblique only4/25 (core1/15).
+Existing MT parts labels are now privately resealed to exact source vertex
+order, but only20.62% of faces were directly observed. Next: parallel semantic
+branch integration plus soft label/C2 body-proxy/correspondence, then actual
+bones, GPU skin and retargeting. Full V3 humanoid success remains0/6.
 
 Read the authoritative [converter handoff](autorig-online/backups/repair-rig-dispatch-20261006/converter-source/handoff.md)
 before continuing. It contains exact commits, tested timings, private artifact
