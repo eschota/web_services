@@ -6,7 +6,7 @@ Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`29abab63ded2cf8cf381abf4725ded3f5d8f5cb425019ba693ac84b43e288eea`.
+`de184fc891051eb0f294d9e3c464d925888eb9423c0e58f6c9508c05db50d450`.
 Default index SHA `0add54a02ba721d2fc49a9cebf1a9dbb527670e9b6f62a599a70f1f5f60eefc3`.
 Bones inspection hides terrain obscuring feet and restores the environment on
 exit. REST transition restores/disables FootGrounding before resetting bones,
@@ -15,7 +15,7 @@ checks passed; these are viewer fixes, NOT producer anatomical/skin acceptance.
 Fresh isolated-session foot-chip check returns targeted metrics:9clips/2341
 samples in13.466s, no repair. Screenshot fallback is not reproduced on the current
 path; exact owner-session provenance remains unknown. Preserve customer artifacts
-and production queue. Canonical checkpoint21a5747; viewer/driver83756a3.
+and production queue. Canonical checkpointe70af73; viewer/driver83756a3.
 New source-only diagnostic bind-frame rebase7dbff17 preserves animation skin
 matrices during anatomical joint relocation;14tests pass, not baseline skin repair.
 Knee-volume repair and sided garment-contact constraints remain in development.
@@ -32,6 +32,13 @@ neck/shoulder/elbow tracks exact,22kneevertices changed,68fewer collapsededgeeve
 Unsigned contact primitive now independently accepted acrossscales, but rootfound
 postskinanchoroverwrite APIproof defect; physical lockedhelpertransforms required
 before newfit. Sixhelper arbitraryexport and research movingvideo are active next.
+Physical anchor helper source repair is preservedb5592b9,9tests; serialized16
+cloth excerpt3ca667a6 independentlynarrowaccepted,edgearea/selfcollision0/16,
+4424nonadjacentpairs allseparated. Bodycollision/all9/continuousnotproven.
+Sixhelper lineage+NovelRetarget source96967ae,15tests;FBX30fps sampledtime proof
+fourfractionaltimes maxvertexerror.275mm (notcontinuousbound). Firstcomparison
+video rejectedfor mismatchedcamera/light; matchedrecapture active,noMEDIA sent.
+FullWalkingcloth boundedresearchrun next; do not duplicate confirmedlive handles.
 This is NOT full producer/converter migration: body/clothing/hair acceptance0/5.
 F5 streaming GPU validation is terminal2341/2341, with explicitly limited CPU
 parity coverage. Real moving-bones video was delivered to /dev (uid71093d934dd1),
