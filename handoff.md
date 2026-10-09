@@ -6,7 +6,7 @@ Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`6f81d4e9fc31d3334b859355e071fd4aafa0303b912af6931b2d512edaafdaa1`.
+`87a7a3cd6295e280f986a3d8172df273193535988027640977195f32a7123063`.
 Default index SHA `0add54a02ba721d2fc49a9cebf1a9dbb527670e9b6f62a599a70f1f5f60eefc3`.
 Bones inspection hides terrain obscuring feet and restores the environment on
 exit. REST transition restores/disables FootGrounding before resetting bones,
@@ -15,7 +15,7 @@ checks passed; these are viewer fixes, NOT producer anatomical/skin acceptance.
 Fresh isolated-session foot-chip check returns targeted metrics:9clips/2341
 samples in13.466s, no repair. Screenshot fallback is not reproduced on the current
 path; exact owner-session provenance remains unknown. Preserve customer artifacts
-and production queue. Canonical checkpointecaf2f0; viewer/driver83756a3.
+and production queue. Canonical checkpoint4d3466e; viewer/driver83756a3.
 New source-only diagnostic bind-frame rebase7dbff17 preserves animation skin
 matrices during anatomical joint relocation;14tests pass, not baseline skin repair.
 Knee-volume repair and sided garment-contact constraints remain in development.
@@ -44,6 +44,13 @@ LATEST supersedespartialcloth optimism: actualWalkingPID30192completed63/63 in
 Bodycollision auditrejects16excerpt:1508freecloth/Body propercrossings acrossALL16,
 roots0/Face0. Selfcollision0doesNOTmeanclothing-safe. Agents comparinginputREST/
 baselineversuscandidate andimplementingmovingBodyconstraints. Noall9/defaultswitch.
+Comparison completed: originalselectedclothREST17Bodycontacts, wholegarment21;
+baseline1717/16 vsnew1508/16 butlateWalkingregresses. OfficialWalking7/63fail,
+prior19wasstrictedge/area (strictedgealone16). Bodyisopen/nonmanifold; stable
+64/96/128localproxy13patches acceptedonlyassurrogateprior. DerivedRESTrepair21→6
+stillrejected; furtherpropercrossing/boundarytouchsemanticreview active.
+Real neutralfixedcamera bones+skin video sentTelegramMEDIA once uid8742d46ab0e6,
+rev r22/4e5f09,deliveryNOTapproval; notpixelcomparison, cameradistancenormalized.
 This is NOT full producer/converter migration: body/clothing/hair acceptance0/5.
 F5 streaming GPU validation is terminal2341/2341, with explicitly limited CPU
 parity coverage. Real moving-bones video was delivered to /dev (uid71093d934dd1),
