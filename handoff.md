@@ -9,7 +9,19 @@ the new numbered migration plan. MT/viewer/diorama presentation is complementary
 not a substitute for a working skin. F5 stays isolated; this is not yet a
 production-ready full humanoid rig or a production-default switch.
 
-Latest source e20cb33 joins existing Vision taxonomy and a fresh limb-count
+Current owner-visible priority: malformed feet and hair spikes in the actual
+Unity MT viewer `/api/mt/unity/test/index.html?run=bb6d2681d1bdcf4d694f`.
+Main has personally reproduced Walking and the failed bones overlay there.
+Independent numeric postvalidation and parallel Vision leg QA are implemented
+and tested on the real girl: all nine clips failed numerical checks; Vision's
+answer was not admitted. New owner priority is clothing detection from exact
+hierarchy plus isolated layer images. Source body/head, skirt and shirt are
+separate; shared material does not merge the garments.42 focused tests pass.
+These components are not yet mandatory production gates. Another actor edits the
+private MT fast-rig; preserve its WIP. See the newest canonical section first.
+Ten public sources are inventoried, but ten validated rig scenes do not yet exist.
+
+Source e20cb33 joins existing Vision taxonomy and a fresh limb-count
 observation with V3 evidence; runtime parallel orchestration is still pending.
 The owner explicitly requires name/description/category/body/limb analysis
 alongside geometry before scenario selection. Existing elf classification is
