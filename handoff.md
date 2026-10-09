@@ -2,10 +2,12 @@
 
 Updated: 2026-10-09, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-The active work is GPU erosion → anatomical bones → skinning, plus the V3
-Motion Transfer output viewer and interactive graph planning. The owner added
-a separate stabilized-pose → 2D diorama → final-video presentation branch.
-F5 stays isolated; this is not yet a production-ready full rig.
+The primary work is GPU erosion → anatomical bones → skinning. The owner has
+confirmed migrating humanoids to V3, including a non-destructive calibration
+T-pose and adaptation of animation retargeting. The canonical checkpoint links
+the new numbered migration plan. MT/viewer/diorama presentation is complementary,
+not a substitute for a working skin. F5 stays isolated; this is not yet a
+production-ready full humanoid rig or a production-default switch.
 
 Read the authoritative [converter handoff](autorig-online/backups/repair-rig-dispatch-20261006/converter-source/handoff.md)
 before continuing. It contains exact commits, tested timings, private artifact
