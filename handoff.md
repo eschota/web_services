@@ -2,14 +2,15 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest verified checkpoint: default Unity MT viewer now r12 with visible T/A
+Latest verified checkpoint: default Unity MT viewer now r15 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`a4d5d2cd5d4488a440e612466892eb04e1c8c9257622ef13524f99d090627746`.
+`b1d8d777d96ea2b6b6e13175422a5ff0407aa1d25098d472fd141624b7787100`.
 This is NOT full producer/converter migration: body/clothing/hair acceptance0/5.
-F5 streaming GPU validation has a real running handle; resume/poll it through
-the canonical checkpoint before launching another experiment. Legacykit52cc
+F5 streaming GPU validation is terminal2341/2341, with explicitly limited CPU
+parity coverage. Real moving-bones video was delivered to /dev (uid71093d934dd1),
+not approved. Verify the canonical checkpoint before another experiment. Legacykit52cc
 is a proven orchestration orphan, not successful; no status/requeue mutation.
 
 The current primary checkpoint is `R:\3d_video_motion_transfer\HANDOFF.md`
