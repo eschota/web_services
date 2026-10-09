@@ -2839,14 +2839,36 @@ async def _reattach_chargen_watchers(bot) -> None:
         await asyncio.sleep(5)
 
 
+async def _admin_forward(update, context) -> None:
+    """The owner's private messages and the administrator's buttons go to the server administrator (mt/admin_bot.py,
+    127.0.0.1:8262, owner 2026-10-09: the main bot is also his admin). Everyone else, /start, and anything it does not
+    claim go the usual way; when it is down, nothing changes."""
+    owner = os.environ.get("ADMIN_OWNER_ID", "").strip()
+    user = update.effective_user
+    if not owner or user is None or str(user.id) != owner:
+        return
+    from telegram.ext import ApplicationHandlerStop
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(os.environ.get("ADMIN_FORWARD_URL", "http://127.0.0.1:8262/update"),
+                                  json=update.to_dict())
+        handled = r.status_code == 200 and bool(r.json().get("handled"))
+    except Exception:
+        return
+    if handled:
+        raise ApplicationHandlerStop
+
+
 async def run_polling() -> None:
     token = _get_token()
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+    from telegram import Update
+    from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, TypeHandler, filters
 
     app = ApplicationBuilder().token(token).build()
+    app.add_handler(TypeHandler(Update, _admin_forward), group=-1)       # before every other handler
     app.add_handler(CommandHandler("start", _start_cmd))
     app.add_handler(CallbackQueryHandler(_handle_generate_callback, pattern=r"^rfg:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_full_convert_callback, pattern=r"^rfc:[0-9a-fA-F-]{8,64}$"))
