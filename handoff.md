@@ -6,7 +6,7 @@ Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
 PIDs/Renderfin queue untouched. Canonical HANDOFF and server mirror hash match
-`de184fc891051eb0f294d9e3c464d925888eb9423c0e58f6c9508c05db50d450`.
+`6f81d4e9fc31d3334b859355e071fd4aafa0303b912af6931b2d512edaafdaa1`.
 Default index SHA `0add54a02ba721d2fc49a9cebf1a9dbb527670e9b6f62a599a70f1f5f60eefc3`.
 Bones inspection hides terrain obscuring feet and restores the environment on
 exit. REST transition restores/disables FootGrounding before resetting bones,
@@ -15,7 +15,7 @@ checks passed; these are viewer fixes, NOT producer anatomical/skin acceptance.
 Fresh isolated-session foot-chip check returns targeted metrics:9clips/2341
 samples in13.466s, no repair. Screenshot fallback is not reproduced on the current
 path; exact owner-session provenance remains unknown. Preserve customer artifacts
-and production queue. Canonical checkpointe70af73; viewer/driver83756a3.
+and production queue. Canonical checkpointecaf2f0; viewer/driver83756a3.
 New source-only diagnostic bind-frame rebase7dbff17 preserves animation skin
 matrices during anatomical joint relocation;14tests pass, not baseline skin repair.
 Knee-volume repair and sided garment-contact constraints remain in development.
@@ -39,6 +39,11 @@ Sixhelper lineage+NovelRetarget source96967ae,15tests;FBX30fps sampledtime proof
 fourfractionaltimes maxvertexerror.275mm (notcontinuousbound). Firstcomparison
 video rejectedfor mismatchedcamera/light; matchedrecapture active,noMEDIA sent.
 FullWalkingcloth boundedresearchrun next; do not duplicate confirmedlive handles.
+LATEST supersedespartialcloth optimism: actualWalkingPID30192completed63/63 in
+352.289s,19strictfitfailures; no fullserializedartifact/collisionpass. Independent
+Bodycollision auditrejects16excerpt:1508freecloth/Body propercrossings acrossALL16,
+roots0/Face0. Selfcollision0doesNOTmeanclothing-safe. Agents comparinginputREST/
+baselineversuscandidate andimplementingmovingBodyconstraints. Noall9/defaultswitch.
 This is NOT full producer/converter migration: body/clothing/hair acceptance0/5.
 F5 streaming GPU validation is terminal2341/2341, with explicitly limited CPU
 parity coverage. Real moving-bones video was delivered to /dev (uid71093d934dd1),
