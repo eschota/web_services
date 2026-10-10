@@ -11,6 +11,12 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ### Текущее требование владельца
 
+- Актуальный `AGENTS.md` дополнен commit `baf45d76` во время подготовки handoff:
+  **Astra** развивается из существующего `@autorigbot`, не создаётся новый бот.
+  **1 task = 1 viewer**, один локальный агент сессии на задачу. Любые inputs:
+  meshes/images/video/text; путь выбирает агент через инструменты, а не только
+  фиксированный rig-конвейер. Единый каталог — `/dev/tools`; ещё не реализован.
+  Эта концепция обязательна; текущие rig-stage helpers не заменяют её.
 - Все новые website/Telegram/API/generation/retry/convert задачи должны идти
   только через V3, без скрытого fallback на старый rig.
 - Заменить только страницу `/task` текущим Unity-вьювером с агентом, ригом,
@@ -119,6 +125,8 @@ Checkout sparse: до runtime/deploy проверить материализац
 6. FBX/OBJ queue сейчас self-contained only; sealed texture bundles ещё не подключены.
 7. Legacy scheduler/admin/stuck queries не везде отделены от V3.
 8. Subscription/export gates, FBX и настоящий Unity NPC package ещё не интегрированы.
+9. Astra/session-agent orchestration и единый `/dev/tools` catalogue не подключены;
+   новые инструменты не считать завершёнными до публикации в этом каталоге.
 
 ### Следующие действия
 
