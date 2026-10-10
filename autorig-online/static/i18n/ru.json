@@ -1058,5 +1058,18 @@
   "live_src_judge": "судья",
   "live_src_hair": "волосы",
   "live_src_prop": "предмет",
-  "live_eta": "~{t}"
+  "live_eta": "~{t}",
+  "pchat_orig_show": "Показать оригинал",
+  "pchat_tr_show": "Показать перевод",
+  "pchat_translated_from": "Переведено: {lang}",
+  "pchat_author_open": "Модели автора {name}",
+  "pchat_author_title": "{name} · 3D-модели на AutoRig",
+  "pchat_author_desc": "Публичные 3D-модели автора {name} на AutoRig: автоматически зариганные персонажи и анимации.",
+  "pchat_author_models_label": "публичных моделей",
+  "pchat_author_h2": "Публичные модели",
+  "pchat_author_empty": "Публичных моделей пока нет.",
+  "pchat_author_guest": "Гость",
+  "pchat_author_member": "Участник",
+  "pchat_author_prev": "Назад",
+  "pchat_author_next": "Вперёд"
 }

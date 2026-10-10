@@ -1,0 +1,34 @@
+# AutoRig public chat (Public chat · V3, 2026-10-10): GET/POST https://autorig.online/api/public-chat/*
+# The site-wide room and one room per task, shown at the bottom centre of the task viewer
+# (static/js/public-chat.js). Standalone on purpose: deploying or restarting it never touches
+# autorig-storage, whose restart wipes the render queue. Lives in /srv/autorig/public-chat
+# (outside the release tree, like fleet and devbot), data in /srv/autorig/data/public-chat,
+# live switches in /srv/autorig/live/config/public-chat.json (read on change, no restart).
+# Reads autorig.db read-only (session -> user, task -> public/title); WAL readers need the -shm.
+# Deploy: deploy/public-chat/install.sh. nginx: deploy/public-chat/nginx-public-chat.conf.
+[Unit]
+Description=AutoRig public chat (/api/public-chat, 127.0.0.1:8278)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/public-chat
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+ExecStart=/srv/autorig/venv/bin/python3 -P /srv/autorig/public-chat/public_chat.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/data/public-chat /srv/autorig/live/config /srv/autorig/data/db
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

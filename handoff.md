@@ -854,3 +854,16 @@ Do not use the owner's worker-4090. Warm Blender is explicitly permitted.
 
 This scoped development checkpoint does not overwrite the unrelated historical
 `autorig-online/docs/handoff.md`, nor the repository's existing unrelated WIP.
+
+## Public chat · V3 (2026-10-10, evening): auto-translate, avatars, author pages
+
+- Service `autorig-public-chat` (127.0.0.1:8278, `deploy/public-chat/`, install via `install.sh`; build pchat-20261010.3).
+- Auto-translate: readers send their browser language (`lang=` on /messages and /stream); each message is translated in
+  batches of 5 by `/api/text2text`, cached per (message, language), pushed as `tr` events; live config key
+  `auto_translate`. Widget: translated text + "Show original" toggle (RTL aware).
+- Avatars: `GET /api/avatar/<handle|me|t-<task>>?s=64|128|256` (round WebP from the newest safe public model: MT
+  proj/front_lit+mask, else the GLB via mt.render, else poster; NudeNet gate), `GET /api/people/<handle|me>`,
+  host-local `GET /api/people/resolve?user_id=|email=|anon_id=` (for Multiplayer · V3: returns handle/url/avatar, never ids).
+- Author gallery: `/author/<handle>` and `/<ru|zh|hi|fa>/author/<handle>`, server-rendered, i18n keys `pchat_author_*`.
+  Handle = 10 hex HMAC; guests are Guest-XXXX; a user without nickname shows User-XXXX unless they already chatted.
+- nginx: locations appended to `/etc/nginx/snippets/autorig-public-chat.conf`.

@@ -1046,5 +1046,18 @@
   "live_src_judge": "judge",
   "live_src_hair": "hair",
   "live_src_prop": "prop",
-  "live_eta": "~{t}"
+  "live_eta": "~{t}",
+  "pchat_orig_show": "Show original",
+  "pchat_tr_show": "Show translation",
+  "pchat_translated_from": "Translated from {lang}",
+  "pchat_author_open": "Open {name}'s models",
+  "pchat_author_title": "{name} · 3D models on AutoRig",
+  "pchat_author_desc": "Public 3D models by {name} on AutoRig: auto-rigged characters and animations ready to open and download.",
+  "pchat_author_models_label": "public models",
+  "pchat_author_h2": "Public models",
+  "pchat_author_empty": "No public models yet.",
+  "pchat_author_guest": "Guest",
+  "pchat_author_member": "Member",
+  "pchat_author_prev": "Previous",
+  "pchat_author_next": "Next"
 }
