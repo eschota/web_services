@@ -333,7 +333,7 @@
   "developers_examples_note": "将 TASK_ID 与 YOUR_API_KEY 替换为实际值。使用链接输入时，模型 URL 需公开可访问。",
   "developers_agent_hint": "面向自动化代理的机器可读 API 摘要位于页面 JSON 中。",
   "support_chat_title": "客服",
-  "support_chat_disclaimer": "您正在与真人运营者（Escho）对话 — 回复来自人工，不是 AI 或自动脚本。",
+  "support_chat_disclaimer": "AutoRig 的 AI 助手 Astra 会立即回复；需要时团队成员会加入。",
   "support_chat_placeholder": "输入消息…",
   "support_chat_send": "发送",
   "support_chat_send_aria": "发送消息",
@@ -605,5 +605,6 @@
   "guides_card_read": "阅读指南 →",
   "guides_workflow_title": "工作流教程",
   "guides_workflow_intro": "面向生产导出的格式、引擎、姿势与重定向指南。",
-  "taskv3_unavailable": "3D 模型不可用"
+  "taskv3_unavailable": "3D 模型不可用",
+  "support_chat_ai_label": "Astra · AI 助手"
 }

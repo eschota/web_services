@@ -333,7 +333,7 @@
   "developers_examples_note": "TASK_ID और YOUR_API_KEY बदलें। लिंक इनपुट के लिए सार्वजनिक URL उपयोग करें।",
   "developers_agent_hint": "एजेंट्स के लिए JSON ब्रीफ पेज के अंत में है।",
   "support_chat_title": "सहायता",
-  "support_chat_disclaimer": "आप एक जीवित ऑपरेटर (Escho) से चैट कर रहे हैं — जवाब मानव देते हैं, AI या स्वचालित बॉट नहीं।",
+  "support_chat_disclaimer": "AutoRig की AI सहायक Astra तुरंत जवाब देती है; ज़रूरत होने पर टीम का कोई व्यक्ति जुड़ता है।",
   "support_chat_placeholder": "संदेश लिखें…",
   "support_chat_send": "भेजें",
   "support_chat_send_aria": "संदेश भेजें",
@@ -605,5 +605,6 @@
   "guides_card_read": "गाइड पढ़ें →",
   "guides_workflow_title": "वर्कफ़्लो ट्यूटोरियल",
   "guides_workflow_intro": "प्रोडक्शन एक्सपोर्ट के लिए फ़ॉर्मेट, इंजन, पोज़ और रीटार्गेटिंग गाइड।",
-  "taskv3_unavailable": "3D मॉडल उपलब्ध नहीं है"
+  "taskv3_unavailable": "3D मॉडल उपलब्ध नहीं है",
+  "support_chat_ai_label": "Astra · AI सहायक"
 }

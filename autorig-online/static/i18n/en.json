@@ -519,7 +519,7 @@
   "hiw_cta_subtitle": "Upload GLB/FBX/OBJ and get production-ready results in minutes.",
   "hiw_cta_button": "Start Auto Rigging Now",
   "support_chat_title": "Support",
-  "support_chat_disclaimer": "You are chatting with a live human operator (Escho) — replies are never from AI or scripted bots.",
+  "support_chat_disclaimer": "Astra, the AutoRig AI assistant, answers right away; a person from the team joins when needed.",
   "support_chat_placeholder": "Type a message…",
   "support_chat_send": "Send",
   "support_chat_send_aria": "Send message",
@@ -789,5 +789,6 @@
   "guides_card_pig_desc": "Farm animal rigs with stout legs, rounded bodies, and clean ground contact.",
   "guides_card_read": "Read guide ->",
   "guides_workflow_title": "Workflow tutorials",
-  "guides_workflow_intro": "Format, engine, pose, and retargeting guides for production exports."
+  "guides_workflow_intro": "Format, engine, pose, and retargeting guides for production exports.",
+  "support_chat_ai_label": "Astra · AI assistant"
 }

@@ -37,7 +37,7 @@
         en: {
             support_chat_title: 'Support',
             support_chat_disclaimer:
-                'You are chatting with a live human operator (Escho) — replies are never from AI or scripted bots.',
+                'Astra, the AutoRig AI assistant, answers right away; a person from the team joins when needed.',
             support_chat_placeholder: 'Type a message…',
             support_chat_send: 'Send',
             support_chat_send_aria: 'Send message',
@@ -62,7 +62,7 @@
         ru: {
             support_chat_title: 'Поддержка',
             support_chat_disclaimer:
-                'Вы общаетесь с живым оператором (Escho) — ответ приходит человеком, не ИИ и не ботами.',
+                'Сразу отвечает Astra — ИИ-ассистент AutoRig; при необходимости подключается человек из команды.',
             support_chat_placeholder: 'Введите сообщение…',
             support_chat_send: 'Отправить',
             support_chat_send_aria: 'Отправить сообщение',
@@ -86,7 +86,7 @@
         zh: {
             support_chat_title: '客服',
             support_chat_disclaimer:
-                '您正在与真人运营者（Escho）对话 — 回复来自人工，不是 AI 或自动脚本。',
+                'AutoRig 的 AI 助手 Astra 会立即回复；需要时团队成员会加入。',
             support_chat_placeholder: '输入消息…',
             support_chat_send: '发送',
             support_chat_send_aria: '发送消息',
@@ -109,7 +109,7 @@
         hi: {
             support_chat_title: 'सहायता',
             support_chat_disclaimer:
-                'आप जीवित ऑपरेटर (Escho) से चैट कर रहे हैं — जवाब मानव देते हैं, AI या बॉट नहीं।',
+                'AutoRig की AI सहायक Astra तुरंत जवाब देती है; ज़रूरत होने पर टीम का कोई व्यक्ति जुड़ता है।',
             support_chat_placeholder: 'संदेश लिखें…',
             support_chat_send: 'भेजें',
             support_chat_send_aria: 'संदेश भेजें',
@@ -131,6 +131,7 @@
             support_chat_arialabel_open: 'सहायता चैट खोलें',
             support_chat_arialabel_panel: 'सहायता चैट विंडो',
             support_chat_system_label: 'सिस्टम',
+            support_chat_ai_label: 'Astra · AI सहायक',
             support_chat_error_rate_limited: 'बहुत सारे संदेश। कृपया एक मिनट रुककर फिर भेजें।',
             support_chat_error_too_long: 'संदेश बहुत लंबा है। कृपया इसे छोटा करें।',
             support_chat_error_generic: 'संदेश नहीं भेजा जा सका। कृपया फिर कोशिश करें।',
@@ -138,7 +139,8 @@
         fa: {
             support_chat_title: 'پشتیبانی',
             support_chat_disclaimer:
-                'شما با یک اپراتور واقعی (Escho) گفتگو می‌کنید — پاسخ‌ها از هوش مصنوعی یا ربات‌های خودکار نیستند.',
+                'Astra، دستیار هوش مصنوعی AutoRig، فوراً پاسخ می‌دهد؛ در صورت نیاز یکی از اعضای تیم هم به گفتگو می‌پیوندد.',
+            support_chat_ai_label: 'Astra · دستیار هوش مصنوعی',
             support_chat_placeholder: 'پیامی بنویسید…',
             support_chat_send: 'ارسال',
             support_chat_send_aria: 'ارسال پیام',
@@ -169,18 +171,21 @@
     (function () {
         var extra = {
             en: {
+                support_chat_ai_label: 'Astra · AI assistant',
                 support_chat_system_label: 'System',
                 support_chat_error_rate_limited: 'Too many messages. Please wait a minute and send again.',
                 support_chat_error_too_long: 'This message is too long. Please shorten it.',
                 support_chat_error_generic: 'The message could not be sent. Please try again.',
             },
             ru: {
+                support_chat_ai_label: 'Astra · ИИ-ассистент',
                 support_chat_system_label: 'Система',
                 support_chat_error_rate_limited: 'Слишком много сообщений. Подождите минуту и отправьте снова.',
                 support_chat_error_too_long: 'Сообщение слишком длинное. Сократите его, пожалуйста.',
                 support_chat_error_generic: 'Не удалось отправить сообщение. Попробуйте ещё раз.',
             },
             zh: {
+                support_chat_ai_label: 'Astra · AI 助手',
                 support_chat_system_label: '系统',
                 support_chat_error_rate_limited: '消息过多，请稍等一分钟后再发送。',
                 support_chat_error_too_long: '消息过长，请缩短后再发送。',
@@ -596,14 +601,18 @@
 
             var inner = el('div', 'ar-support-chat-msg-inner');
 
+            // support_ai answers carry this prefix: label them as the AI, not as the operator
+            var aiReply = dir === 'admin' && String(item.body_text_string || '').indexOf('🤖 Astra') === 0;
             var whoLabel =
-                dir === 'admin'
+                aiReply
+                    ? tr('support_chat_ai_label')
+                    : dir === 'admin'
                     ? tr('support_chat_operator_label')
                     : dir === 'user'
                       ? tr('support_chat_you_label')
                       : tr('support_chat_system_label');
 
-            if (dir === 'admin') {
+            if (dir === 'admin' && !aiReply) {
                 var av = document.createElement('img');
                 av.className = 'ar-support-chat-avatar';
                 av.src = OPERATOR_GRAVATAR;

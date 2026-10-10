@@ -519,7 +519,7 @@
   "hiw_cta_subtitle": "GLB/FBX/OBJ را آپلود کنید و در چند دقیقه نتیجه آماده تولید بگیرید.",
   "hiw_cta_button": "همین حالا ریگینگ خودکار را شروع کنید",
   "support_chat_title": "پشتیبانی",
-  "support_chat_disclaimer": "شما با یک اپراتور واقعی (Escho) گفتگو می‌کنید — پاسخ‌ها از هوش مصنوعی یا ربات‌های خودکار نیستند.",
+  "support_chat_disclaimer": "Astra، دستیار هوش مصنوعی AutoRig، فوراً پاسخ می‌دهد؛ در صورت نیاز یکی از اعضای تیم هم به گفتگو می‌پیوندد.",
   "support_chat_placeholder": "پیامی بنویسید…",
   "support_chat_send": "ارسال",
   "support_chat_send_aria": "ارسال پیام",
@@ -801,5 +801,6 @@
   "guides_card_read": "خواندن راهنما ←",
   "guides_workflow_title": "آموزش‌های روند کار",
   "guides_workflow_intro": "راهنماهای فرمت، موتور بازی، ژست و ریتارگتینگ برای خروجی‌های تولید.",
-  "taskv3_unavailable": "مدل سه‌بعدی در دسترس نیست"
+  "taskv3_unavailable": "مدل سه‌بعدی در دسترس نیست",
+  "support_chat_ai_label": "Astra · دستیار هوش مصنوعی"
 }

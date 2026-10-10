@@ -519,7 +519,7 @@
   "hiw_cta_subtitle": "Загрузите GLB/FBX/OBJ и получите production-ready результат за минуты.",
   "hiw_cta_button": "Начать авто-риггинг",
   "support_chat_title": "Поддержка",
-  "support_chat_disclaimer": "Вы общаетесь с живым оператором (Escho) — ответы приходит человеком, не ИИ и не скриптами-ботами.",
+  "support_chat_disclaimer": "Сразу отвечает Astra — ИИ-ассистент AutoRig; при необходимости подключается человек из команды.",
   "support_chat_placeholder": "Введите сообщение…",
   "support_chat_send": "Отправить",
   "support_chat_send_aria": "Отправить сообщение",
@@ -801,5 +801,6 @@
   "guides_card_pig_desc": "Риги сельскохозяйственных животных: крепкие ноги, округлое тело и чистый контакт с землёй.",
   "guides_card_read": "Читать гайд →",
   "guides_workflow_title": "Гайды по рабочему процессу",
-  "guides_workflow_intro": "Форматы, движки, позы и ретаргетинг для продакшен-экспорта."
+  "guides_workflow_intro": "Форматы, движки, позы и ретаргетинг для продакшен-экспорта.",
+  "support_chat_ai_label": "Astra · ИИ-ассистент"
 }
