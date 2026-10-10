@@ -1609,3 +1609,17 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Важное для всех**: `qa.numeric_deformation` падает почти у всех ранов — порог numeric QA 1.25 по ребру и любой
   плохой кадр валит клип (рыцарь 0/9, 505665ad 0/9 при чистом риге). Это открытый класс владельца «Rig tools · V3»:
   либо гейт меряет то, что видно глазу (как rig_check / clip_4x), либо он навсегда «open».
+
+## Gallery · V3 (2026-10-11): V3-style posters for every gallery card
+
+- `autorig-gallery-poster.service` (`deploy/gallery-poster/`, install.sh): one 9:16 capture per public task in
+  `/srv/autorig/data/static/posters-v3/<task>.jpg` (viewer GLB, mt.render 3/4 camera, one of the viewer environments,
+  contact shadow; blank/low-contrast captures retried on another environment). State per task in `posters.sqlite3`
+  (ok | failed | no_source). Newest and V3 tasks first, loops forever; no_source tasks keep the old poster.
+- Backend `main.py`: `/thumb/<task>` serves the capture first (`v3_poster_path`), gallery JSON carries
+  `thumbnail_url=/thumb/<id>?v=<mtime>` (`thumb_url_for`), homepage `/` has the 12 newest cards in the first HTML
+  (`_home_gallery_cards`, 60 s cache), `task-card.js` and the SSR cards fall back to `static/images/poster-missing.svg`.
+- Triage (`mt/triage.py`): `poster_failed` / `poster_no_source` defects (sev 1) and `triage/manual_flags.json`
+  operator flags; task 2ad5c0c8 (stretched arm, 708k tris, unmeasured by the rig checks) is flagged `rig_stretch.owner_report`.
+- Open: the poster is the rest pose, not an animation frame; `/api/gallery` still returns `author_email` (public) and
+  TaskCard shows its local part: replace it with the public handle (`/api/people`).
