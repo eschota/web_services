@@ -59,3 +59,17 @@ V3 intent/version policy, with focused tests. It is not wired or activated yet.
 No fleet switch, service restart or customer record mutation was performed in
 this tranche. Next implementation is the durable source/dispatch integration,
 not a cosmetic task iframe without a real task-to-run binding.
+
+Prepared and root-tested source slices: `v3_dispatch_outbox.py` persists v2
+attempts/leases and requires independently fetched artifact bytes/hashes before
+local done; `task_v3_shell.py`, `task-v3.html`, `task-v3-shell.js` resolve only
+authorized persisted task/source/publication bindings. Raw MT done without
+source-bound QA is needs_review. Combined Python tests: 28 + 18 subtests passed;
+JS shell tests: 2 passed. These source slices are NOT mounted/activated.
+
+Read-only fleet observation 08:44 UTC: F1/F7/F13/F2 serving processes respond but
+have no V3 dispatch endpoint (404); serving commits are mixed. F11 has no port
+7000 listener and cannot be counted as a V3 converter. No deployment was invoked.
+Production storage has AUTORIG_WIPE_QUEUE_ON_START=1; render_tasks had only
+Done/Error in the snapshot, but pending chargen and creation races must be checked
+immediately before a restart. A historical empty snapshot is not restart safety.

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <!-- TASK_SEO_PLACEHOLDER -->
+  <title>AutoRig V3</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    :root{color-scheme:dark;--bg:#080b11;--panel:rgba(14,18,27,.92);--line:#263246;--text:#f5f7fb;--muted:#aab4c5;--accent:#66e3bf;--danger:#ff7385}
+    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden}
+    .task-v3{position:fixed;inset:0;background:radial-gradient(circle at 50% 35%,#172034 0,#080b11 62%)}
+    #viewer{position:absolute;inset:0;width:100%;height:100%;border:0;background:#080b11}
+    .status{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 32px));padding:24px;border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:0 24px 80px #000b;backdrop-filter:blur(18px)}
+    .status[hidden]{display:none}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;letter-spacing:.14em;text-transform:uppercase}.status h1{margin:0 0 8px;font-size:clamp(22px,4vw,34px)}
+    #message{margin:0 0 18px;color:var(--muted);line-height:1.5}.bar{height:10px;overflow:hidden;border-radius:99px;background:#222a38}.bar>i{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#51b5ff,var(--accent));transition:width .45s ease}
+    .meta{display:flex;justify-content:space-between;gap:16px;margin-top:10px;color:var(--muted);font-size:12px}.error{color:var(--danger)}
+    .noscript{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center}
+  </style>
+</head>
+<body>
+  <main class="task-v3" aria-live="polite">
+    <iframe id="viewer" title="AutoRig V3 viewer" allow="fullscreen; autoplay" hidden></iframe>
+    <section id="status-card" class="status">
+      <p class="eyebrow">AutoRig V3</p>
+      <h1 id="title">Подготавливаем модель</h1>
+      <p id="message">Проверяем состояние задачи…</p>
+      <div class="bar" role="progressbar" aria-label="Прогресс V3" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="bar-fill"></i></div>
+      <div class="meta"><span id="stage">ожидание</span><span id="percent">0%</span></div>
+    </section>
+    <noscript><div class="noscript">Для интерактивного V3-вьювера требуется JavaScript.</div></noscript>
+  </main>
+  <script type="module" src="/static/js/task-v3-shell.js?v=1"></script>
+</body>
+</html>
