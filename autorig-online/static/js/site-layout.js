@@ -121,7 +121,7 @@
             if (document.querySelector('script[data-support-chat-js="1"]')) return;
 
             const s = document.createElement('script');
-            s.src = '/static/js/support-chat.js?v=8a8db0b092';
+            s.src = '/static/js/support-chat.js?v=e18aab0d3b';
             s.async = true;
             s.setAttribute('data-support-chat-js', '1');
             s.onload = function () {

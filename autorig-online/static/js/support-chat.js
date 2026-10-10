@@ -628,7 +628,11 @@
 
             var body = el('div', 'ar-support-chat-msg-body', '');
             body.dir = 'auto';
-            body.textContent = item.body_text_string || '';
+            // The label already says Astra · AI: without the Latin prefix the reply's own
+            // language sets its direction (a Persian answer reads right to left).
+            body.textContent = aiReply
+                ? String(item.body_text_string || '').replace(/^🤖\s*Astra\s*\(AI\):\s*/, '')
+                : (item.body_text_string || '');
             col.appendChild(hdr);
             col.appendChild(body);
             inner.appendChild(col);

@@ -35,7 +35,7 @@
         '/payment/success', '/developers', '/guides'];
     var STORAGE_KEY = 'autorig_lang';
     var COOKIE_KEY = 'autorig_lang';
-    var RTL_CSS_HREF = '/static/css/rtl.css?v=6876854065';
+    var RTL_CSS_HREF = '/static/css/rtl.css?v=72f3adeba2';
     var SAFE_TAG_RE = /<(\/?)(strong|b|em|i|br|code|small)\s*\/?>/gi;
     var LATIN_RE = /[A-Za-z]{2,}/;
     // The page's own language as served, read before this script changes <html lang>.

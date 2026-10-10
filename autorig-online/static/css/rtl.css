@@ -223,10 +223,12 @@ html[dir="rtl"] h3 {
     transform: scaleX(-1);
 }
 
+/* Phones: the panel is almost as wide as the screen and opens to the right of
+   the bubble, which sits at the left edge in right-to-left pages. */
 @media (max-width: 480px) {
     [dir="rtl"] .ar-support-chat-panel,
     .ar-support-chat[dir="rtl"] .ar-support-chat-panel {
-        left: auto;
+        left: calc(10px - max(14px, env(safe-area-inset-left)));
         right: auto;
     }
 }
