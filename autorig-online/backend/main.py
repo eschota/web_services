@@ -17114,10 +17114,52 @@ async def favicon_ico():
     return FileResponse(str(FAVICON_SVG), media_type="image/svg+xml")
 
 
+# Gallery · V3 (2026-10-11): the homepage's «Recent Rigged Models» cards are in the first HTML the server sends
+# (SEO-critical: crawlers see the links, the thumbnails and their alt text without running app.js). The same cards
+# as TaskCard.render() draws, newest first, cached for a minute; app.js replaces them with the live ones.
+_HOME_GALLERY_CACHE: Dict[str, Any] = {"at": 0.0, "cards": ""}
+
+
+async def _home_gallery_cards(request: Request, db: AsyncSession) -> str:
+    if _HOME_GALLERY_CACHE["cards"] and time.time() - float(_HOME_GALLERY_CACHE["at"]) < 60:
+        return str(_HOME_GALLERY_CACHE["cards"])
+    from database import Task
+    data = await api_get_gallery(request=request, page=1, per_page=12, sort="date", rig_type="all", author=None,
+                                 user=None, db=db)
+    ids = [item.task_id for item in data.items]
+    titles = {}
+    if ids:
+        rows = await db.execute(select(Task.id, Task.poster_llm_title).where(Task.id.in_(ids)))
+        titles = {row[0]: str(row[1] or "").strip()[:120] for row in rows.all()}
+    cards = []
+    for item in data.items:
+        title = titles.get(item.task_id) or "Rigged 3D character"
+        src = html.escape(item.thumbnail_url or f"/thumb/{item.task_id}", quote=True)
+        cards.append(
+            f'<a href="/task?id={item.task_id}" class="tc-card" data-task-id="{item.task_id}"><div class="tc-media">'
+            f'<img class="tc-thumb loaded" src="{src}" alt="{html.escape(title, quote=True)}" width="360" height="640" '
+            f'loading="lazy" decoding="async"></div></a>')
+    out = "".join(cards)
+    if out:
+        _HOME_GALLERY_CACHE.update(at=time.time(), cards=out)
+    return out
+
+
 @app.get("/")
-async def index():
+async def index(request: Request, db: AsyncSession = Depends(get_db)):
     """Serve main page"""
-    return _static_html_response("index.html")
+    page = _static_html_response("index.html")
+    try:
+        cards = await _home_gallery_cards(request, db)
+        if cards:
+            body = page.body.decode("utf-8")
+            body, n = re.subn(r'(id="gallery-preview-grid"[^>]*>\s*)<div class="card"[^>]*>[^<]*</div>',
+                              lambda m: m.group(1) + cards, body, count=1)
+            if n:
+                return HTMLResponse(content=body)
+    except Exception as exc:  # noqa: BLE001 - the page never depends on the gallery query
+        print(f"[home] gallery cards skipped: {type(exc).__name__}: {exc}")
+    return page
 
 
 def _task_html_response(html_content: str, request: Optional[Request] = None) -> HTMLResponse:
