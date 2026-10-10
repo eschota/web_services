@@ -49,21 +49,48 @@ def _route_set(value: str) -> set[str]:
     return {item.strip().lower() for item in str(value or "").split(",") if item.strip()}
 
 
+ROUTES_FILE = Path(os.getenv("AUTORIG_V3_ROUTES_FILE", "/srv/autorig/live/config/v3-routes.json"))
+_ROUTES_CACHE: Dict[str, Any] = {"key": None, "value": None}
+
+
+def _live_routes() -> Optional[Dict[str, str]]:
+    """The live switch file (no restart): {"routes": "website,api" | "all", "admin_routes": "all"}.
+    Absent or unreadable -> None, and the environment decides."""
+    try:
+        st = ROUTES_FILE.stat()
+    except OSError:
+        return None
+    key = (st.st_ino, st.st_size, st.st_mtime_ns)
+    if _ROUTES_CACHE["key"] == key:
+        return _ROUTES_CACHE["value"]
+    try:
+        data = json.loads(ROUTES_FILE.read_text(encoding="utf-8"))
+        value = {"routes": ",".join(data["routes"]) if isinstance(data.get("routes"), list) else str(data.get("routes") or ""),
+                 "admin_routes": ",".join(data["admin_routes"]) if isinstance(data.get("admin_routes"), list)
+                 else str(data.get("admin_routes") if data.get("admin_routes") is not None else "all")}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        value = None
+    _ROUTES_CACHE.update(key=key, value=value)
+    return value
+
+
 def route_enabled(route: str, *, is_admin: bool = False, explicit: bool = False) -> bool:
     """Whether a new task on this creation route goes to V3.
 
-    ``AUTORIG_V3_ROUTES`` (comma list or ``all``) switches routes for everyone;
-    ``AUTORIG_V3_ADMIN_ROUTES`` (default ``all``) for administrator accounts.
-    An explicit ``pipeline=v3`` request always gets V3.  A V3 task never falls
-    back to the legacy rig, whatever these switches say later.
+    The live file ``/srv/autorig/live/config/v3-routes.json`` (read on change, no
+    restart) or else ``AUTORIG_V3_ROUTES`` (comma list or ``all``) switches routes
+    for everyone; ``admin_routes`` / ``AUTORIG_V3_ADMIN_ROUTES`` (default ``all``)
+    for administrator accounts.  An explicit ``pipeline=v3`` request always gets
+    V3.  A V3 task never falls back to the legacy rig, whatever these switches say later.
     """
     if explicit:
         return True
     route = str(route or "").strip().lower()
-    public = _route_set(os.getenv("AUTORIG_V3_ROUTES", ""))
+    live = _live_routes()
+    public = _route_set(live["routes"] if live else os.getenv("AUTORIG_V3_ROUTES", ""))
     if "all" in public or route in public:
         return True
-    admin = _route_set(os.getenv("AUTORIG_V3_ADMIN_ROUTES", "all"))
+    admin = _route_set(live["admin_routes"] if live else os.getenv("AUTORIG_V3_ADMIN_ROUTES", "all"))
     return bool(is_admin and ("all" in admin or route in admin))
 
 
@@ -95,6 +122,11 @@ def sniff_format(path: Path) -> Optional[str]:
         head = stream.read(65536)
     if head[:4] == b"glTF":
         return "glb"
+    if head[:8] == bytes.fromhex("89504e470d0a1a0a") or head[:3] == bytes.fromhex("ffd8ff") or \
+            (head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
+        return "image"
+    if head[4:8] == b"ftyp" or head[:4] == bytes.fromhex("1a45dfa3"):
+        return "video"
     if head.startswith(b"Kaydara FBX Binary") or head.lstrip().startswith(b"; FBX"):
         return "fbx"
     if b"\0" not in head[:4096] and re.search(rb"(?m)^\s*v\s+[-+0-9.eE]+\s+[-+0-9.eE]+", head):
@@ -237,7 +269,49 @@ async def admit_upload(db, *, path: Path, original_url: str, filename: str, owne
                                               origin=origin, created_via_api=created_via_api,
                                               requested_intent=requested_intent, input_type=input_type,
                                               input_bytes=input_bytes)
-    raise V3IntakeError("unsupported_format", "V3 accepts GLB, FBX and OBJ meshes; images go to generation")
+    if fmt in ("image", "video"):
+        return await _create_generation_task(db, path=Path(path), fmt=fmt, original_url=original_url,
+                                             owner_type=owner_type, owner_id=owner_id,
+                                             created_via_api=created_via_api, input_bytes=input_bytes)
+    raise V3IntakeError("unsupported_format", "V3 accepts GLB, FBX and OBJ meshes, images and video")
+
+
+async def _create_generation_task(db, *, path: Path, fmt: str, original_url: str, owner_type: str,
+                                  owner_id: str, created_via_api: bool, input_bytes: Optional[int]):
+    """A picture (or a video's frame) is generated into a mesh first, then bound to V3.
+
+    Generation spends farm GPU, so through this route it is open to
+    administrator accounts only; everyone else uses /api/generate/from-image,
+    which charges credits.  The row stays ``pipeline_kind="generate"`` until the
+    mesh exists (generation_tasks), then becomes the V3 task of that mesh."""
+    from config import is_admin_email
+    from generation_tasks import set_generation_meta
+    from tasks import create_conversion_task
+
+    if not (owner_type == "user" and is_admin_email(owner_id)):
+        raise V3IntakeError("generation_requires_account",
+                            "image and video generation: use /api/generate/from-image (credits)")
+    image_url = original_url
+    if fmt == "video":
+        frame = path.with_name(path.stem + "_frame.png")
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-v", "error", "-ss", "1", "-i", str(path), "-frames:v", "1", str(frame),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, err = await proc.communicate()
+        if proc.returncode or not frame.is_file():
+            raise V3IntakeError("video_frame", (err or b"").decode(errors="replace")[-300:] or "no frame")
+        base = original_url.rsplit("/", 1)[0]
+        image_url = f"{base}/{frame.name}"
+    task, error = await create_conversion_task(db, input_url=image_url, task_type="t_pose", owner_type=owner_type,
+                                               owner_id=owner_id, created_via_api=created_via_api,
+                                               pipeline_kind="generate", input_bytes=input_bytes)
+    if task is None:
+        raise V3IntakeError("task_create_failed", error or "the task could not be created")
+    set_generation_meta(task, stage="detect", charged=0, v3=True, source_kind=fmt,
+                        source_url=original_url if fmt == "video" else None)
+    await db.commit()
+    print(f"[V3 intake] {task.id} {fmt} -> generation first, then the V3 conveyor")
+    return task
 
 
 async def _create_normalizing_task(db, *, original, owner_type, owner_id, origin, created_via_api,

@@ -84,6 +84,28 @@ class IntakeTests(Work):
                 if value is not None:
                     os.environ[key] = value
 
+    def test_live_route_file_overrides_environment_without_restart(self):
+        with self.temp() as tmp:
+            path = pathlib.Path(tmp) / "v3-routes.json"
+            old_file, old_env = intake.ROUTES_FILE, os.environ.pop("AUTORIG_V3_ROUTES", None)
+            intake.ROUTES_FILE = path
+            intake._ROUTES_CACHE.update(key=None, value=None)
+            try:
+                self.assertFalse(intake.route_enabled("website"))           # no file: environment default
+                path.write_text(json.dumps({"routes": ["website", "telegram"], "admin_routes": "all"}))
+                self.assertTrue(intake.route_enabled("telegram"))
+                self.assertFalse(intake.route_enabled("convert"))
+                self.assertTrue(intake.route_enabled("convert", is_admin=True))
+                path.write_text(json.dumps({"routes": "", "admin_routes": ""}) + " ")
+                self.assertFalse(intake.route_enabled("website", is_admin=True))
+                path.write_text("{broken")
+                self.assertTrue(intake.route_enabled("website", is_admin=True))  # unreadable: environment decides
+            finally:
+                intake.ROUTES_FILE = old_file
+                intake._ROUTES_CACHE.update(key=None, value=None)
+                if old_env is not None:
+                    os.environ["AUTORIG_V3_ROUTES"] = old_env
+
     def test_formats_glb_facts_and_immutable_source_store(self):
         with self.temp() as tmp:
             root = pathlib.Path(tmp)
@@ -91,8 +113,11 @@ class IntakeTests(Work):
             (root / "m.fbx").write_bytes(b"Kaydara FBX Binary  \x00\x1a\x00")
             (root / "m.obj").write_text("# obj\no mesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
             (root / "m.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-            self.assertEqual([intake.sniff_format(root / n) for n in ("m.glb", "m.fbx", "m.obj", "m.png")],
-                             ["glb", "fbx", "obj", None])
+            (root / "m.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 16)
+            (root / "m.bin").write_bytes(b"\x01\x02\x03 not a model")
+            self.assertEqual([intake.sniff_format(root / n) for n in ("m.glb", "m.fbx", "m.obj", "m.png", "m.mp4",
+                                                                      "m.bin")],
+                             ["glb", "fbx", "obj", "image", "video", None])
             self.assertEqual(intake.glb_facts(glb())["primitives"], 1)
             broken = bytearray(glb()); broken[8:12] = struct.pack("<I", 9)
             with self.assertRaises(intake.V3IntakeError):
