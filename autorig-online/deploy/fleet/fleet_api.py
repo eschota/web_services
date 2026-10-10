@@ -72,6 +72,16 @@ VPS_SECONDS = 15.0
 AGENT_STALE_SECONDS = 15 * 60
 LOW_DISK_GB = 15.0
 LOW_DISK_SYSTEM_GB = 10.0
+# DEV-channel disk alerts (owner rule via the main session, 2026-10-10): any
+# AutoRig work drive of an in-fleet box under 10 GB. Re-armed above 15 GB,
+# repeated every 12 h while it stays low, escalated at once under 2 GB.
+ALERT_BELOW_GB = float(os.getenv("FLEET_ALERT_BELOW_GB", "10"))
+ALERT_REARM_GB = float(os.getenv("FLEET_ALERT_REARM_GB", "15"))
+ALERT_CRITICAL_GB = 2.0
+ALERT_REPEAT_SECONDS = 12 * 3600
+DEV_SEND = os.getenv("FLEET_DEV_SEND", "https://autorig.online/dev/api/send")
+DEV_AGENT = "Fleet · V3"
+DEV_PROJECT = "AutoRig V3"
 
 VPS_UNITS = [
     "autorig-storage", "autorig-storage-renderfin", "autorig-mt", "autorig-storage-telegram",
@@ -525,6 +535,11 @@ class Collector:
             self.snapshot_bytes = body
             self.snapshot_at = time.monotonic()
             self.text = text
+        try:
+            if not snapshot.get("restored_from_disk_bool"):
+                self.check_alerts(snapshot)
+        except Exception:
+            traceback.print_exc()
         # Keep the last answer on disk, so a restart serves it at once instead
         # of making callers wait for the first full probe round.
         if time.monotonic() - self.persisted_at > 30:
@@ -533,6 +548,48 @@ class Collector:
                 _write_json_atomic(os.path.join(STATE_DIR, "snapshot.json"), snapshot)
             except Exception:
                 traceback.print_exc()
+
+    # -- DEV alerts -------------------------------------------------------------
+    def check_alerts(self, snapshot: Dict[str, Any]) -> None:
+        path = os.path.join(STATE_DIR, "alerts.json")
+        state = _read_json(path, {})
+        if not isinstance(state, dict):
+            state = {}
+        changed = False
+        messages: List[str] = []
+        now = _now()
+        for box in snapshot.get("boxes_array") or []:
+            if not box.get("in_fleet_bool"):
+                continue
+            for disk in box.get("disks_array") or []:
+                free = disk.get("free_gb")
+                if free is None or disk.get("work_drive") is False or disk.get("source") not in ("agent", "converter",
+                                                                                                 "hunyuan-adapter"):
+                    continue
+                key = f"{box['id']}:{disk.get('drive')}"
+                record = state.get(key) or {}
+                free = float(free)
+                if free < ALERT_BELOW_GB:
+                    last = float(record.get("alerted_at") or 0)
+                    critical = free < ALERT_CRITICAL_GB and not record.get("critical_sent")
+                    if not record.get("active") or critical or now - last > ALERT_REPEAT_SECONDS:
+                        messages.append(
+                            f"Диск: {box['id']} {disk.get('drive')} {free:.1f} ГБ свободно "
+                            f"(порог {ALERT_BELOW_GB:.0f} ГБ) https://autorig.online/api/fleet/box/{box['id']}")
+                        state[key] = {"active": True, "alerted_at": now, "free_gb": free,
+                                      "critical_sent": bool(record.get("critical_sent") or free < ALERT_CRITICAL_GB)}
+                        changed = True
+                elif record.get("active") and free > ALERT_REARM_GB:
+                    messages.append(f"Диск: {box['id']} {disk.get('drive')} снова {free:.0f} ГБ свободно")
+                    state[key] = {"active": False, "recovered_at": now, "free_gb": free}
+                    changed = True
+        if changed:
+            try:
+                _write_json_atomic(path, state)
+            except Exception:
+                traceback.print_exc()
+        for text in messages:
+            threading.Thread(target=_dev_text, args=(text,), daemon=True).start()
 
     def load_persisted(self) -> None:
         data = _read_json(os.path.join(STATE_DIR, "snapshot.json"), None)
@@ -598,7 +655,7 @@ def _slim_status(j: Dict[str, Any]) -> Dict[str, Any]:
         "pending": tasks("pending_tasks"),
         "stuck_count": len(j.get("stuck_tasks") or []) if isinstance(j.get("stuck_tasks"), list) else 0,
         "capability_mode": flags.get("converter_capability_mode"),
-        "normalized_source": caps.get("normalized_source"),
+        "normalized_source": flags.get("normalized_source", caps.get("normalized_source")),
         "comfy_online": j.get("comfy_online"),
         "comfy_running": j.get("comfy_running"),
         "comfy_pending": j.get("comfy_pending"),
@@ -722,7 +779,8 @@ def compose(col: Collector) -> Dict[str, Any]:
     mt = col._get("mt")
     vps = col._get("vps")
     target = _v3_target()
-    target_sha = str(target.get("artifact_sha256") or "").strip().lower() or None
+    target_commit = str(target.get("commit") or "").strip().lower() or None
+    target_nodes = target.get("nodes") if isinstance(target.get("nodes"), dict) else {}
     servers = {str(s.get("name")): s for s in renderfin.get("servers") or []}
     active_by_server: Dict[str, List[Dict[str, Any]]] = {}
     pending_render = 0
@@ -887,35 +945,54 @@ def compose(col: Collector) -> Dict[str, Any]:
                              "deploy_artifact_sha256": stale.get("deploy_artifact_sha256"),
                              "stale": True}
             services["converter"] = conv
-            # V3 readiness
+            # V3 readiness: the serving build is the accepted commit (deploy_commit and
+            # boot_build_id), it announces normalized_source and the V3 route answers.
             v3_probe = col._get("v3:" + conv_name)
             artifact = (build or {}).get("deploy_artifact_sha256")
+            node_record = target_nodes.get(bid) if isinstance(target_nodes.get(bid), dict) else {}
+            expected_artifact = str(node_record.get("artifact_sha256") or "").lower() or None
+            deploy_commit = str((build or {}).get("deploy_commit") or "").lower()
+            boot_build = str((status or {}).get("boot_build_id") or "").lower()
+            commit_ok = bool(target_commit and deploy_commit == target_commit and boot_build == target_commit)
             v3 = {
                 "target_bool": True,
-                "endpoint_present": v3_probe.get("endpoint_present"),
-                "endpoint_checked_age_seconds": _age(v3_probe.get("checked_at")),
+                "target_commit": target_commit,
+                "deploy_commit": deploy_commit or None,
+                "boot_build_id": boot_build or None,
+                "commit_matches": commit_ok,
                 "normalized_source_capability": (status or {}).get("normalized_source"),
+                "endpoint_present": v3_probe.get("endpoint_present"),
+                "endpoint_http_status": v3_probe.get("http_status"),
+                "endpoint_checked_age_seconds": _age(v3_probe.get("checked_at")),
                 "deployed_artifact_sha256": artifact,
-                "target_artifact_sha256": target_sha,
-                "matches_target": bool(target_sha and artifact and str(artifact).lower() == target_sha),
+                "rollout_artifact_sha256": expected_artifact,
+                "artifact_matches_rollout": (bool(expected_artifact and artifact
+                                                  and str(artifact).lower() == expected_artifact)
+                                             if expected_artifact else None),
+                "canary": node_record.get("canary"),
+                "deployed_at": node_record.get("deployed_at"),
                 "deploy_protocol": (build or {}).get("deploy_protocol"),
             }
             prep = _v3_prep(bid)
             if prep:
                 v3["prep"] = prep
-            v3["ready"] = bool(reachable and v3["endpoint_present"] and v3["matches_target"]
-                               and (status.get("asset_preflight") or {}).get("healthy") is not False)
+            v3["ready"] = bool(reachable and commit_ok and v3["normalized_source_capability"] is True
+                               and v3["endpoint_present"]
+                               and v3["artifact_matches_rollout"] is not False)
             reasons = []
             if not reachable:
                 reasons.append("converter not serving")
-            if not v3["endpoint_present"]:
+            if not target_commit:
+                reasons.append("no accepted V3 converter commit yet")
+            elif not commit_ok:
+                reasons.append("serving build is not the accepted V3 commit "
+                               f"({(deploy_commit or '?')[:8]} / boot {(boot_build or '?')[:8]})")
+            if reachable and v3["normalized_source_capability"] is not True:
+                reasons.append("feature_flags.normalized_source is not true")
+            if reachable and not v3["endpoint_present"]:
                 reasons.append("no V3 endpoint (/api-converter-glb/v3/normalize)")
-            if not target_sha:
-                reasons.append("no accepted V3 artifact yet")
-            elif not v3["matches_target"]:
-                reasons.append("serving build is not the accepted V3 artifact")
-            if bid == "f7":
-                reasons.append("dispatch off on purpose: Unity export broken")
+            if v3["artifact_matches_rollout"] is False:
+                reasons.append("deployed artifact differs from this node's rollout report")
             v3["blocked_by"] = reasons
         else:
             v3 = {"target_bool": False, "ready": None,
@@ -1192,7 +1269,7 @@ def compose(col: Collector) -> Dict[str, Any]:
         "hunyuan_ready_array": hunyuan_ready,
         "ai_ready_array": ai_ready,
         "v3_ready_array": [b["id"] for b in in_fleet if (b.get("v3_object") or {}).get("ready")],
-        "v3_target_artifact_sha256": target_sha,
+        "v3_target_commit": target_commit,
         "v3_target_note": str(target.get("note") or "")[:300],
         "low_disk_array": sorted({b["id"] for b in in_fleet
                                   for w in b["blockers_array"] + b["warnings_array"] if w.startswith("disk ")}),
@@ -1303,6 +1380,25 @@ def render_text(snapshot: Dict[str, Any]) -> str:
         if box.get("note_string"):
             lines.append(f"{'':<12} note: {box['note_string']}")
     return "\n".join(lines) + "\n"
+
+
+def _dev_text(text: str) -> None:
+    """One-line DEV message, UTF-8 multipart from the VPS (Windows curl garbles captions)."""
+    boundary = "fleet" + os.urandom(8).hex()
+    parts = []
+    for name, value in (("agent", DEV_AGENT), ("project", DEV_PROJECT), ("kind", "text"), ("caption", text)):
+        parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n"
+                      f"Content-Type: text/plain; charset=utf-8\r\n\r\n").encode("utf-8")
+                     + value.encode("utf-8") + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    request = urllib.request.Request(DEV_SEND, data=b"".join(parts), method="POST",
+                                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                                              "User-Agent": "autorig-fleet/1"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            print(f"[fleet] DEV alert sent ({response.status}): {text}", flush=True)
+    except Exception as exc:
+        print(f"[fleet] DEV alert failed: {exc}: {text}", flush=True)
 
 
 # ------------------------------------------------------------- box reports
