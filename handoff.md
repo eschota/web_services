@@ -2,6 +2,19 @@
 
 Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persistent checkpoint.
 
+## Координация агентов V3 (2026-10-10)
+
+- **Localization · V3** владеет языком пользователя и локализацией (fa/RTL и др.).
+  Сырой алерт artifact-cache (`cache=… cap=… reserve=…; last-copy deliverables
+  preserved`) чинит Localization: пользователю уходит локализованное сообщение
+  `storage_paused`, фронт не показывает сырой 5xx `detail`. **Astra это не делает.**
+- Язык — поле API (деплой в процессе): `support_chat_sessions.language`,
+  `tasks.owner_language`, `GET /auth/me` → `language`, `GET/POST /api/me/language`.
+  Бэкенд-хелпер: `user_language.py` (`language_instruction(code)`,
+  `support_session_language(db, session_id)`). **Astra / support_ai.py**: брать язык
+  из сессии/API, отвечать на нём; если посетитель пишет на другом языке — на языке
+  его сообщения. Строки нового `/task` (Task page · V3) — только через `I18n.t()`.
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
