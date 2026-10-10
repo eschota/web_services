@@ -623,6 +623,29 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - Проверка end-to-end на реальном ране (MT-dispatch, источник warrior 300k): analysis 7 с, rig 2.6 с + fast_analysis
   13.5 с, retarget 0.8 с — **всё до QA ≈ 25 с**; чистый прогон до конца с новым размером кусков прерывали рестарты MT.
 
+## Session agent · V3 — Blender-скилл и тест-мост Claude (2026-10-11 04:10 MSK, MT `4a04545`, `d9a1de2`)
+
+- **Скилл на проде**: `mt/skills/blender_modeling.md` (в enum инструмента `skill`), канон — ASStore26 `skills/blender-reference-modeling`
+  (читал с `origin/main` без правок; на сайте `/dev/skills/blender-reference-modeling`). Текстуры только из `https://pbr.autorig.online/`
+  (read only, `mt/pbr_library.py`: поиск по индексу, агент называет ключ, URL строит сервис).
+- **Инструмент `blender_model`** (в `/dev/tools`, группа session): `options | pbr_search | look | build | undo | versions`. Агент шлёт
+  JSON-задание (части box/sphere/cylinder/cone/torus/lathe/extrude со скином на кость, материал/PBR-замена по box/bones/material),
+  а не скрипт: исполняется только `mt/blender_model.py` (значения зажаты, лимиты 40 частей / 400k треугольников / 300 с).
+  Результат версионируется в `agent/blender/<имя>/vN/` (GLB со всеми клипами + before/after + close-up кости), `undo` возвращает версию.
+  Опции и лимиты — `op=options`. Публичные посетители: квота `blender_visitor` 12 / `blender_ip` 30 в сутки.
+- **Очередь/воркер**: существующая MT-очередь Blender (`/api/mt/blender`), новый kind `model`; воркер `AutoRig MT Blender Worker F7`
+  (запланированная задача на f7, Blender 5.1, CPU, `C:\ProgramData\AutoRig\mt-blender-worker\blender_worker.py`, ключ
+  `%USERPROFILE%\.secrets\autorig-blender-worker.key`, хэш в `/srv/autorig/secrets/mt-blender-workers.json` имя `f7`, права 640 root:autorig).
+  Воркер качает только с `autorig.online` и `pbr.autorig.online`. Замер: look 13 с, build 14-45 с на воркере, 80-95 с весь ход агента.
+- **Результат тестов** (OpenAI-ключ снят посреди прогона): «добавь шлем» на аниме-девушке — работает (шлем на кости Head, едет по клипам, агент
+  сам заметил, что обод закрывает глаза); «меч в руку» — у воительницы меч уже есть, агент это увидел; остальные (металл из PBR, кисть,
+  task-страница) на farm-провайдере не дошли до результата (ответ «Done.» / обрыв), на Sonnet не прогнаны (см. ниже).
+- **Мост Claude** (только внутренние тесты, `tools/claude_bridge/`): `claude_bridge.py` (127.0.0.1:18765, секрет, 2 параллельно, таймаут,
+  лог `~/claude-bridge.log`, CLI с `--tools ""`), `provider.patch` (llm.py провайдер `claude-bridge` по флагу сессии
+  `X-Autorig-Internal-Test: <секрет>`, по умолчанию выключен: нет файла `/srv/autorig/secrets/claude-bridge.secret` = выкл), `start.ps1` /
+  `stop.ps1`. **Не выкачен**: (1) CLI на этом ПК разлогинен (`claude auth status` → loggedIn false; нужен `claude auth login` владельцем),
+  (2) гейт `mt-deploy` падает на `lowpoly_chibi/mt_tess` (чужой, риг-путь), мой код не причём. Протокол моста проверен заглушкой CLI.
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
