@@ -2,7 +2,14 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpoint06b4cb1/sourcebe6f432: r25defaultviewer LIVE (indexddf0),
+CURRENT private checkpoint321ae0b/source7bc0381: canonical/server SHA3908f1a465ee65402127c7d9540f384020e64f2d209e14bc24beb8e706769cb6.
+R5fa47 actualserializedREST/alias native+Web15 gates pass; smooth48 v1 FINALREJECT
+onlypose0 strictintermediatepass, Bodystillcolliding/notproduction-safe. Centered
+sourcevalidated, no optimizer yet; self-safe paircert957/1006 with49unknown,
+objectiveintegration pending. Correctproducer Foot8f3 exact474weights/all8 noNR,
+FootROI left8/right1->0; sideviewcaptureapproved noMEDIAyet. Modelacceptance0/5.
+
+Prior checkpoint06b4cb1/sourcebe6f432: r25defaultviewer LIVE (indexddf0),
 T/A-IK/Cancel/keyboard/retargetrace browser gates pass, oldr22 rollback andoldBuild
 assets retained, NO backendrestart; actualRenderfinunit autorig-storage-renderfin.
 FootMEDIA sentonce uid64f5bb91f5be/deliverynotapproval. RealglTFast16-weightnative+
