@@ -3,8 +3,8 @@
 
 A visitor writes in the chat bubble -> main.py posts it into a forum topic «Support #N · …» and stores it in
 support_chat_messages. This loop picks up new visitor messages and, by mode:
-    live   answers in the visitor's language (stored as an admin message the widget shows) and mirrors the answer
-           into the topic so the owner sees every reply
+    live   (default, owner 2026-10-10: «это должен быть полностью автономный агент поддержки») answers in the
+           visitor's language (stored as an admin message the widget shows) and mirrors the answer into the topic
     draft  posts a draft into the topic with 📤 Отправить / ✖ buttons; only the owner's press sends it
     off    nothing (the kill switch)
 The owner switches with /support live|draft|off in the forum (or the buttons under /support).
@@ -128,7 +128,7 @@ def _jwrite(p, doc):
 def settings():
     doc = _jread(SETTINGS, {})
     if doc.get("mode") not in MODES:
-        doc["mode"] = "draft"
+        doc["mode"] = "live"
     return doc
 
 
