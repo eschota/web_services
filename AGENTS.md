@@ -48,6 +48,36 @@ release. `/root` is the old VPS layout and does not apply to this host.
 Use this `AGENTS.md` as the project rule source. Do not create or rely on
 Cursor `.cursor/rules` instructions for this project.
 
+## V3 Concept: Astra and Session Agents
+
+Owner rule, 2026-10-10:
+
+> полноценный ИИ Агент Астра и локальные агенты сессий — основная концепция V3
+> протокола сайта и сервисов autorig.online — с новым вьювером в основе каждого
+> таска, 1 таск 1 вьювер — любые инпут форматы, АИ агент сессии сам должен
+> выбирать по какому пути развивать сессию и что делать с моделью засчет
+> инструментов. Список инструментов должен быть по адресу
+> www.autorig.online/dev/tools
+
+Every V3 decision for the site and its services follows from it:
+
+* **Astra** is the one full AI agent of autorig.online and its services. The
+  owner: «@autorigbot агент уже есть», so Astra grows out of the existing
+  @autorigbot agent rather than a new bot.
+* **Session agents** are local: one per task session, working inside that
+  task's viewer.
+* **1 task = 1 viewer.** Every task is built around the new viewer. No task
+  page exists without it.
+* **Any input format** enters the same task conveyor: meshes, images, video,
+  text.
+* **The session agent chooses the path.** It decides how the session develops
+  and what to do with the model by calling tools, not by following a fixed
+  pipeline.
+* **Tools are listed at `https://autorig.online/dev/tools`.** That catalogue
+  is the one list of the tools Astra and the session agents can call. A new
+  tool is not finished until it appears there. As of 2026-10-10 the URL
+  returns 404 and still has to be built.
+
 ## General Workflow
 
 ### Persistent development handoff
