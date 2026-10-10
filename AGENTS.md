@@ -456,7 +456,33 @@ Owner rule, 2026-10-10:
   * gen3d: `cloud.enabled=false` in `/srv/autorig/live/config/gen3d-routing.json`.
   * Other consumers get an explicit switch from the «No paid APIs» agent.
 * **The Claude Code CLI on worker-4090** (the owner's subscription) may
-  serve only our own internal tests, never public visitors.
+  serve only our own internal tests, never public visitors. The bridge
+  (`3d_video_motion_transfer/tools/claude_bridge/`) is on hold; its code stays.
+* **Free LLM providers are allowed** (owner decisions 2026-10-11:
+  «бесплатные модели», «подключай их все»):
+  * the session agents' brain is the router in `mt/llm.py` over the endpoints
+    of the live config `/srv/autorig/live/config/free-llm.json` (providers by
+    priority, models in order, per-provider request and token counters,
+    rotation on 429 / 5xx / tool-format failures); keys only in
+    `/srv/autorig/secrets/free-llm.env`; then the farm provider answers;
+  * **OpenRouter first, `:free` model ids only.** The router and the backend
+    reject any other id in code (`only_ids_ending: ":free"`). The key is
+    free-tier with a hard $1 cap, so money cannot leave. No paid model id is
+    ever added to the config;
+  * **the key's daily allowance (about 50 requests) is shared:** the backend
+    keeps its own counter in `/var/autorig/openrouter_free_budget.json`, the
+    agents' share is `limits.per_day` (28) and `key_per_day` (48) counts the
+    backend's file too. Keep the backend's `AUTORIG_OPENROUTER_FREE_DAILY` at 20;
+  * a new free provider enters the config with `enabled: false` until its key
+    exists in `free-llm.env`; its terms must allow serving a public site's
+    visitors;
+  * **OpenCode Zen free models** (official CLI only, never the HTTP API; the
+    model's own label says the data trains the vendor's models). The owner
+    accepted the training clause («у нас нет ничего секретного»), but the
+    OpenCode Terms of Service say «You will only use the Services for your own
+    internal use, and not on behalf of or for the benefit of any third party»
+    (https://opencode.ai/legal/terms-of-service), so serving public visitors
+    is NOT enabled until the owner decides on that conflict.
 
 ## Astra Is Stopped (owner order, 2026-10-11)
 
