@@ -2,7 +2,15 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpointeb9caa7/source67abb9f+f7e19bf: canonical/server SHA87f69d7e20b38b774db3f59e2646bb6eac09f05443489017193ed1aab6bd7f24.
+CURRENT private checkpoint9871313/source740181a: canonical/server SHAa0c4e9de697579583ce73e13aafa4cab581fe238c424c19eedd0aa72e9aa81d8.
+OwnerPRIORITY pulseAltfix+Webbuild nowLIVEr27 default staticindex25a4c085;
+native+actualproductionkeyboard/raster/typing/bonesPASS. Webwall70.27s/warmBuild59s,
+initial17.681MiB/full23.443MiB (bakedscenesextraon-demand). No backendrestart.
+Nextgradientfill/optionalredarc requestworker+exclusiveUnitybuilderr28pending.
+AdaptiveclothphaseI/nonlinearstrainwitnesspassedbutcontactsunchecked;361Upper
+positiveBodyproposalsJ0 due259locks, sofullgarmentnotfixed/quality0of5.
+
+Prior private checkpointeb9caa7/source67abb9f+f7e19bf: canonical/server SHA87f69d7e20b38b774db3f59e2646bb6eac09f05443489017193ed1aab6bd7f24.
 Root19constraint/trust/id tests and22clipset/direct tests pass, sourcepreserved.
 Actualanalytictrustsupport9/10edgeviolations exceed8controlbounds (worst26.39x);
 NOTglobalnonlinearinfeasibility. Nextadaptive localtopology-awarebasis top4beta
