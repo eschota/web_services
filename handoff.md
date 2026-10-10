@@ -1417,3 +1417,26 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `mt/skills/hunyuan3d_generation.md`. autorig-mt рестарт ждёт простоя через `autorig-mt-restart --wait`.
 - Выводы: FaceCount (+10) не нужен (бесплатный gltf-transform simplify + resize даёт то же); Rapid на intl
   ненадёжен (текст 0/5, фото 1/2) → draft идёт как Pro 3.1 (25); Smart Topology (50) отдаёт геометрию без текстуры.
+
+## Intake · killed runs (2026-10-11, агент «Intake · killed runs»)
+
+- **Правило**: V3-ран, у которого дочерний процесс стадии убит снаружи (рестарт сервиса, OOM, kill; триаж-класс
+  `run_error.killed`), повторяется сам и не показывается клиенту/Telegram как «Task failed».
+- **MT** (`R:\3d_video_motion_transfer` ff498c3, на проде через `mt-deploy`): `kit.sub` кидает `ChildKilled`
+  (сигнал/пустой вывод с кодом 137/143) и убивает ребёнка при отмене; `V3Conveyor.execute` повторяет ран до
+  `AUTO_RETRIES`=2 с паузой 8/20 с (статус `running`, стадия `resuming:killed_retry n/2`, счётчик в `run.json`
+  `killed_retries`/`last_killed`); после исчерпания ошибка начинается с `[killed; auto-retries exhausted 2/2]`.
+  Рестарт сервиса во время паузы отменяет её, ран подхватывает `store.resumable()` как раньше.
+- **Numeric QA**: пул-воркеры умирают с родителем (`prctl PDEATHSIG` + сторож ppid, `_stop_pool` в `finally`,
+  SIGTERM→`sys.exit`), сам валидатор запускается в своей группе процессов (`start_new_session`, `killpg` при таймауте/отмене).
+  Проверено на проде: `kill -9` родителя -> все 4 воркера мертвы за <1 с.
+- **Backend** (`v3_runtime_mount.py`, ef561ff6, релиз `killedretry-20261010T184935`, `current` уже на нём):
+  `project_task` для failed-попытки с «убитой» ошибкой (без `exhausted`, `auto_retries` < 2) ставит задачу в
+  `processing`/`v3.state=retrying`, без `error_message`; `after_commit` -> `retry_killed_task` -> `v3_retry`
+  (новая попытка), Telegram ERROR не уходит; `sweep_retrying` на старте подбирает зависшие `retrying`.
+  **Код загрузится при следующем рестарте autorig-storage** (на момент деплоя renderfin был занят графами, queued/running ≠ 0 —
+  рестарт не делал). Проверено вручную скриптом на тестовой задаче b8d271f7 (попытка 2 прошла до needs_review).
+- **Триаж**: класс `run_killed_retried` (severity 1) из `run.json.killed_retries` и из прошлых failed-попыток
+  с убитой ошибкой; в `triage.py` заодно починен regex (в нём был символ backspace вместо `\b`).
+- Тест на проде: задача 9d2a5ae8 (маленький корпус-манекен): `mt.project` убит SIGTERM дважды подряд, ран дошёл до
+  needs_review без ошибок; тесты `tests/test_v3_killed_runs.py` (MT), `tests/test_v3_killed_retry.py` (backend).
