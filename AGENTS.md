@@ -130,18 +130,76 @@ Owner rule, 2026-10-10:
 
 * Every agent gets the state of the whole fleet with one request:
   Astra, session agents, Claude and Codex sessions.
-  * The target is `GET https://autorig.online/api/fleet`, being built on
-    2026-10-10.
-  * Until it is live, `GET https://autorig.online/api/ai/fleet` covers only
-    the render and LLM nodes.
-* The answer lists every box and fleet agent with:
-  * its roles and whether it is online;
-  * what it is busy with and its queue;
-  * its build and V3 readiness;
-  * GPU/VRAM and free disk;
-  * its last error or blocker.
+  * `GET https://autorig.online/api/fleet`: JSON, rebuilt in memory every few
+    seconds, public, no secrets.
+  * `GET https://autorig.online/api/fleet?format=text`: the same as a plain
+    table, one line per box. It is the cheapest form for an LLM.
+  * `GET https://autorig.online/api/fleet/box/<id>`: one box (`f1`, `f2`,
+    `f7`, `f11`, `f13`, `f12`, `f15`, `raptor`, `worker-4090`, `f5`).
+* What the answer carries:
+  * `summary_object`:
+    * `autorig_capable_array`: converters AutoRig can dispatch to right now;
+    * `autorig_dispatch_enabled_array`, `healthy_full_converters_array`;
+    * `hunyuan_ready_array`, `ai_ready_array`, `v3_ready_array`;
+    * `v3_target_artifact_sha256`, `low_disk_array`.
+  * `queues_object`: AutoRig created/processing tasks and processing per
+    box, done/error per box over 24 h, Renderfin pending/rendering, and the
+    converters' own queues.
+  * `vps_object`: free disk, `new_tasks_paused_bool`, the release and the
+    state of the AutoRig units.
+  * Each box in `boxes_array` has:
+    * `state_string`: `idle`, `busy`, `degraded`, `blocked`, `offline` or
+      `out_of_fleet`, with a one-line `summary_string`;
+    * `roles_array`: `converter`, `render`, `hunyuan`, `ai-node`,
+      `blender-worker`, `trainer`;
+    * `busy_with_array` and `queue_depth_int`;
+    * `dispatch_object`: the `worker_endpoints` flag, membership in
+      `AUTORIG_DISABLED_WORKERS`, the backend route (internal tunnel or public
+      gateway) and whether the public gateway is up;
+    * `build_object`: build, commit, deployed artifact SHA-256, deploy
+      protocol and drift;
+    * `v3_object`: V3 endpoint present, deployed versus accepted artifact,
+      `ready` and `blocked_by`;
+    * `gpu_object`, `disks_array` (every drive; `work_drive` marks the drives
+      AutoRig works on) and `quarantine_array` (`_retired_*` sizes);
+    * `blockers_array`, `warnings_array`, `notes_array`, `last_seen_utc`;
+    * `services_object`: converter, render, hunyuan, ai_node, lora_sync,
+      blender_worker and fleet_agent detail.
+* Where it comes from:
+  * the converter registry `/srv/autorig/secrets/renderfin-hunyuan.json`
+    (server-status through the VPS tunnels, tokens stay server side);
+  * `worker_endpoints` and the live `AUTORIG_DISABLED_WORKERS` /
+    `AUTORIG_WORKER_TRANSPORTS` of autorig-storage;
+  * Renderfin, each ComfyUI, the MT Blender workers;
+  * the box agents.
+* The service is `autorig-fleet.service`, running
+  `/srv/autorig/fleet/fleet_api.py` on `127.0.0.1:8255`.
+  * It lives outside the release tree, so a parallel web release cannot drop
+    it. nginx sends `location = /api/fleet` and `^~ /api/fleet/` to it.
+  * Source: `autorig-online/deploy/fleet/`. Deploy by writing the file there
+    atomically and restarting `autorig-fleet` only. That never touches
+    autorig-storage, and the restarted service answers at once from its last
+    snapshot on disk.
+* The box agent is the scheduled task "AutoRig Fleet Agent".
+  * It runs `C:\ProgramData\AutoRig\fleet-agent\fleet-agent.ps1` every
+    2 minutes and is read-only.
+  * It runs on f1, f2, f7, f11, f13, f12, f15 and Raptor, and on worker-4090
+    as a user task under `%LOCALAPPDATA%`.
+  * It posts drives, GPU (nvidia-smi), AutoRig scheduled tasks, listening
+    ports and `_retired_*` sizes to `POST /api/fleet/report`.
+  * It updates itself from `/api/fleet/agent.ps1`. Keys:
+    `/srv/autorig/secrets/fleet-agent-keys.json`; render boxes reuse their
+    LoRA sync key.
 * Do not probe boxes one by one over SSH to learn their state. If something
-  is missing from the API, add it to the API.
+  is missing from the API, add it to the API or to the box agent.
+* AutoRig reaches the converters through the VPS tunnels.
+  * The map is `AUTORIG_WORKER_TRANSPORTS` in
+    `/srv/autorig/secrets/autorig-rig-worker-transport.env`.
+  * Since about 2026-10-06 the public `converter-fX.freestock.online` gateway
+    answers "Node tunnel is offline" for f1, f2, f11 and f13.
+  * A converter listed in `AUTORIG_DISABLED_WORKERS` gets no AutoRig work,
+    whatever `worker_endpoints` says.
+  * Changing either variable needs an autorig-storage restart.
 * Fleet members:
   * converters with LLM: f1, f2, f7, f11, f13;
   * render with LLM: f12, f15, Raptor;
