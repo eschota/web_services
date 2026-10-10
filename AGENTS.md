@@ -456,6 +456,14 @@ Owner rule, 2026-10-10:
   from its own projections, the Vision description and the concept. This runs
   in the background after the rig and never delays the 60 s rig. The result
   is a new model version; the original stays.
+* **Method (owner, 2026-10-11):** a planar screen-space bake in the T-pose,
+  front and back.
+  * Guide passes per view: depth, a materialID mask, an objectID mask,
+    normals and a soft AO.
+  * A Qwen-edit graph on the farm takes those guides and paints a projection
+    of every PBR channel: albedo, roughness, metallic, normal and emissive.
+  * The projections are baked onto the UVs. The seam is blended by
+    normal·view; occluded texels are filled by dilation or inpaint.
 * **Example, task 583622f3** (the «potato»): only `dpgoe.obj` was uploaded.
   It has UVs and `usemtl Apotat0o1Mtl`, but no .mtl and no images.
 
