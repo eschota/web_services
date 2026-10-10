@@ -1467,6 +1467,9 @@ def _effective_anon_id(request: Request) -> Optional[str]:
     return getattr(request.state, "api_key_anon_id", None) or request.cookies.get(ANON_COOKIE)
 
 
+import astra_owner_access as _astra_owner_access
+
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db)
@@ -1474,6 +1477,11 @@ async def get_current_user(
     """Session cookie user, or user resolved from API key; anon API keys set request.state.api_key_anon_id."""
     request.state.api_key_anon_id = None
     request.state.auth_via_api_key = False
+    # Astra acts as the owner's admin account (user id 2) with a one-call HMAC token from the local root broker;
+    # local connections only, never through nginx (astra_owner_access.py). A bad token is 401, never a fallback.
+    owner_via_astra = await _astra_owner_access.resolve_owner(request, db, User, is_admin_email)
+    if owner_via_astra is not None:
+        return owner_via_astra
     session_token = request.cookies.get(SESSION_COOKIE)
     if session_token:
         user = await get_user_by_session(db, session_token)
