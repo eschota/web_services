@@ -688,6 +688,11 @@ def _v3_prep(box_id: str) -> Dict[str, Any]:
     return entry if isinstance(entry, dict) else {}
 
 
+def _operator_notes() -> Dict[str, Any]:
+    data = _read_json(os.path.join(STATE_DIR, "operator_notes.json"), {})
+    return data if isinstance(data, dict) else {}
+
+
 def _endpoint_for(db: Dict[str, Any], marker: str) -> Optional[Dict[str, Any]]:
     if not marker:
         return None
@@ -730,6 +735,7 @@ def compose(col: Collector) -> Dict[str, Any]:
     blender_workers = (mt.get("workers") or {}) if mt.get("ok") else {}
 
     boxes_out: List[Dict[str, Any]] = []
+    operator_notes = _operator_notes()
     for box in BOXES:
         bid = box["id"]
         roles: List[str] = []
@@ -1095,6 +1101,15 @@ def compose(col: Collector) -> Dict[str, Any]:
                 blockers.append(f"disk {drive} FULL (0 GB free)")
             elif float(free_gb) < limit:
                 warnings.append(f"disk {drive} low: {free_gb} GB free")
+
+        # ---- operator notes (established by an agent, not probed)
+        op = operator_notes.get(bid)
+        if isinstance(op, dict) and op.get("text"):
+            text = f"{op.get('text')} (noted {op.get('since') or '?'} by {op.get('by') or 'agent'})"
+            if op.get("blocking"):
+                blockers.insert(0, text)
+            else:
+                notes.insert(0, text)
 
         # ---- roll-up
         if box.get("out_of_fleet"):
