@@ -1813,3 +1813,33 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `deploy/autotests/patch_hair_scale_case.py`. fit_check больше не считает Head/Neck в «масса на 2 костях» (чиби).
 - **Замечено для Viewer · V3**: на скриншоте владельца (23.jpg) скелет нарисован у пола, а меш — выше и крупнее:
   оверлей костей и меш масштабируются по-разному.
+
+## Scenes · V3: «Италия» — ПАУЗА по слову владельца (2026-10-11), точка возобновления
+
+Владелец: «отменяем пока моделлеров на блендере». Всё сделанное сохранено, ничего не удалено; Blender и концепт-рендеры остановлены.
+
+- **Референсы (Фаза 1) на DEV**: 4 картинки A–D (Krea 2 Turbo 1280x720, `.work/italia-refs/A..D.png`, URL в `urls.json`), видео D (LTX-2.5, 121 кадр) на DEV.
+  Видео A (LTX) и A (H3) дорендериваются в фоне `.work/italia-refs/vid.py` -> `A_ltx.mp4`, `A_h3.mp4` (не постились). Вердикты: `GET /dev/api/inbox?agent=Scenes · V3`.
+- **Сцена «Италия» — НЕ на проде, Спонза не заменена.** Собрана локально, ни одного файла на VPS нет:
+  - `tools/scene_kit/italia/build_italia.py` + `italia_tex.py` (оригинальные текстуры), запуск:
+    `ITALIA_TEX=<work>/tex ITALIA_PROPS=<work>/props [ITALIA_CAM=1..4] py -3.11 tools/scene_kit/run_blender.py tools/scene_kit/italia/build_italia.py <out>`;
+    последний результат `.work/scenes/italia/out3` (49k треугольников, 7 МБ): перистиль, 3 крыла, фонтан, утопленный бассейн (`effects.water`),
+    амфитеатр на востоке (CX=28.5), акведук, 54 болванки пропсов `Prop_<id>`, 8 жаровен, 6 курильниц `SMOKE_*`, флаги `FLAG_H_/FLAG_V_*`, вода `WATER_*/JET_*`.
+  - Вьюер-часть (НЕ скомпилирована, поэтому вынесена из проекта Unity): `tools/scene_kit/italia/unity_fx/` — `PackageFx.cs` + шейдеры
+    `AutoRigFlagWave/FountainWater/Smoke`. Чтобы включить: положить в `Assets/Italia/` (шейдеры в `Assets/Italia/Resources/`), добавить в
+    `ScenePackage.cs` после `Dress(model);` строку `PackageFx.Attach(m_Root, doc);`, собрать плеер (замок), проверить.
+  - Дальше: scene.json `look.shadow_distance`, `modules.fx` уже пишутся скриптом; установка пакета `scenes/italia/`, скрыть Спонзу в каталоге
+    (`hidden` в index.json + фильтр в `baked_scene_routes.py`), иконка/превью с вьюера, проверка сети (ни одного запроса italia до клика).
+- **Концепты 60 пропсов: не начаты** (180 рендеров не запускались). Спеки: `.work/scenes/italia/props/*.json` (60 шт., группы в `props_list.json`).
+  Бенчмарк (один проп `abacus_counting_board`, 1024², seed 777, `concepts/_bench/`, лог `tools/scene_kit/italia/bench_concepts.log`):
+  | настройка | узел | render, с | wall, с |
+  |---|---|---|---|
+  | Qwen 2.1 turbo 768² generate | f15 | 28.5 (холодный) | 49.9 |
+  | Qwen 2.1 turbo 1024² generate | f15 | 4.2 | 74.0 |
+  | Krea 2 Turbo 768², 8 шагов | worker-4090 | 16.6 | 98.8 |
+  | Krea 2 Turbo 1024², 8 шагов | worker-4090 | 21.8 | 45.3 |
+  | Z-Image Turbo 1024², 8 шагов | worker-4090 | 15.0 | 40.0 |
+  | Qwen 2512 GGUF 1024² | worker-4090 | n/a | 227.3 |
+  Предварительный выбор для 180 концептов: Qwen 2.1 turbo 1024² generate на f15 (единственный узел Qwen в сети сейчас, ~5-30 с на кадр, 1 задача за раз)
+  либо Z-Image Turbo 1024² (~15 с); картинки смотреть глазами перед запуском (`_bench/*.png`). Суффикс промпта: изолированный предмет, нейтральный
+  серый фон, полный силуэт, 3/4 сверху (см. `bench.py`). Раскладка сохранения: `concepts/<id>/v1..v3.png`, зеркало `/srv/autorig/data/scenes/italia/concepts/`.
