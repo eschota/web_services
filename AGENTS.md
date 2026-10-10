@@ -467,6 +467,32 @@ Owner rule, 2026-10-10:
 * **Example, task 583622f3** (the «potato»): only `dpgoe.obj` was uploaded.
   It has UVs and `usemtl Apotat0o1Mtl`, but no .mtl and no images.
 
+## Viewer Load Order, Scenes and Saved Settings (owner order, 2026-10-11)
+
+> до полной загрузки 3д меша, все этапы … проигрывались на фоне черной сцены
+> которая очень быстро грузится билдом, а сцена грузилась только после того
+> как отработает презентация вокселей, костей … каждая сессия должна сама
+> выбирать сцену … и погоду … глобально всё сохранялось у каждого по своему,
+> а дефолтные сцены только я мог сохранять
+
+* **Black first.** The viewer build opens on a black scene that ships inside
+  the build and loads at once. All the stages (upload, voxels, erosion,
+  bones, rig) play on that black background until the mesh is fully loaded.
+* **Scene after the presentation.** The environment scene starts loading only
+  when the presentation of voxels, bones and the rig has finished.
+* **Only what the scene needs.** Then the viewer loads just the assets of the
+  chosen scene, never the others.
+* **The session picks the scene.** Each session chooses a scene from the
+  existing ones automatically, and the weather where it can.
+* **Each person's settings are saved globally.** A person's own choices
+  (scene, weather, viewer settings) are saved for that person, signed in or
+  anonymous, on the server, across tasks and devices. They win over the
+  automatic pick for that person.
+* **Only the owner saves defaults.** The default scenes and settings are
+  saved only by the owner/admin (eschota@gmail.com). He uses a global
+  «Save» button in the settings menu that only admins see. Defaults are
+  versioned.
+
 ## No Paid APIs (owner order, 2026-10-11)
 
 > платные нам нельзя использовать будем думать как обходиться возможностями
