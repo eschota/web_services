@@ -282,6 +282,23 @@ Owner rule, 2026-10-10:
   * The V3 conveyor rigs in 4–10 s (`fastrig`), but its analysis and QA phases
     have taken up to 400 s.
 
+## Reuse the Agent That Holds the Context
+
+Owner rule, 2026-10-11:
+
+> вопросы скиннинга отдал тому же фаблу который уже занимался проблема рига,
+> у него контекст закеширован подходящий, а новый всё заново искать будет,
+> это не рационально, добавь рационализаторство
+
+* **Continue before you spawn.** Follow-up work goes to the agent that
+  already worked on the same files or topic: continue it, and its cached
+  context comes with it.
+* **A regression goes first to the author of the suspect change.**
+* **A new agent only for a genuinely new area,** or when the old context is
+  unrelated.
+* **One agent per entity.** Never run two agents in parallel on the same
+  problem.
+
 ## Astra's Tasks Are Work Orders
 
 Owner rule, 2026-10-11:
