@@ -74,9 +74,21 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   Передаю: **Task page · V3 / вьювер** — Vision-проверка стартового кадра (сейчас
   кинематографическая камера на /task режет голову) и `SetCamera`; **сцена** —
   `scene_recipe` клампит площадку до 3 м и фиксирует SIZE_M, нужен размер по `dims_m`.
-- **Рестарт MT** (ключ OpenAI координатора + мой conveyor): безопасен, когда нет running
-  веток. Агенты сессий сами запускают GPU-ветки (танец/диорама) на каждую V3-задачу
-  (`MT_AGENT_AUTOSTART`) — учесть ёмкость фермы при открытии V3 всем.
+- **Рестарт MT 11:56:55 UTC** (PID 4110250, окно без running веток): активны ключ OpenAI
+  координатора и карточка масштаба. Доказано на `2eb85454` (elf upload): analysis
+  «рост 1.72 м», card «Леди Роза». Агенты сессий сами запускают GPU-ветки (танец/диорама)
+  на каждую V3-задачу (`MT_AGENT_AUTOSTART`) — учесть ёмкость фермы при открытии V3 всем.
+- **Batch 3** (коммит `3e272584`, релиз `v3intake-20261010e`, current переключён БЕЗ
+  рестарта — активируется ближайшим рестартом storage): картинка/видео от админа →
+  генерация → V3; живой переключатель маршрутов `/srv/autorig/live/config/v3-routes.json`
+  (`{"routes": "all"|[...], "admin_routes": "all"}`, читается при изменении, без рестарта).
+- **Retry доказан**: `5f6f91fc` POST `/retry` → attempt 2 (`v3run-1a2e0e40…`), attempt 1
+  `superseded`, новая сессия `1c92958d1ab3f392f596` → `needs_review`.
+- **Каталог инструментов**: реестр V3-инструментов `/srv/autorig/data/v3-intake/tools.json`
+  (`autorig.tools-registry/1`: v3_upload, v3_task_shell, v3_task, v3_retry, mt_v3). **Astra**:
+  добавить группу `v3` в `mt/astra/catalog.py` из этого файла.
+- **Диск**: ~70–80 МБ на V3-задачу (сессия 30–50 МБ, копия попытки ~25 МБ, источник);
+  `numeric-qa.json` ~5 МБ — сжимать/чистить по давлению вместе с регенерируемыми копиями.
 - **Не смонтировано**: `v3_site_integration.py`/`task_v3_shell.py` (заменены read API выше),
   `v3_cutover.py` (контроллер фермы), MT→backend push-callbacks (`task_callbacks.py`):
   идемпотентность даёт durable outbox (poll, lease CAS, повтор проекции).
