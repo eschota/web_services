@@ -17138,7 +17138,8 @@ async def _home_gallery_cards(request: Request, db: AsyncSession) -> str:
         cards.append(
             f'<a href="/task?id={item.task_id}" class="tc-card" data-task-id="{item.task_id}"><div class="tc-media">'
             f'<img class="tc-thumb loaded" src="{src}" alt="{html.escape(title, quote=True)}" width="360" height="640" '
-            f'loading="lazy" decoding="async"></div></a>')
+            f'loading="lazy" decoding="async" '
+            "onerror=\"this.onerror=null;this.src='/static/images/poster-missing.svg'\"></div></a>")
     out = "".join(cards)
     if out:
         _HOME_GALLERY_CACHE.update(at=time.time(), cards=out)

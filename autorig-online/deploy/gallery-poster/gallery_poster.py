@@ -260,7 +260,8 @@ def glb_from_url(url: str):
 def source_glb(task_id: str, viewer_url: str):
     """The model the V3 viewer opens: the run's rigged GLB for V3 tasks, else the viewer-prepared GLB."""
     for path in (glb_from_url(viewer_url), GLB_CACHE / f"{task_id}_prepared_viewer.glb",
-                 GLB_CACHE / f"{task_id}_prepared.glb", TASK_CACHE / task_id / "model_prepared.glb"):
+                 GLB_CACHE / f"{task_id}_prepared.glb", TASK_CACHE / task_id / "model_prepared.glb",
+                 GLB_CACHE / f"{task_id}_animations.glb", TASK_CACHE / task_id / "all_animations.glb"):
         if path is not None and path.is_file() and path.stat().st_size > 2000:
             return path
     return None
