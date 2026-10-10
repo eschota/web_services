@@ -704,6 +704,42 @@ def mt_numeric_qa(ctx, clips=None, cap=2000):
             "workers": (rep.get("parallel") or {}).get("workers")}
 
 
+def numeric_qa_file(ctx, target, cap=2000):
+    """QA calibration V3: the V3 numeric QA (visible defects, per-clip aggregates) and the pops check of anim_qa on a
+    corpus GLB, in a work copy (the live log of the QA child lands there, never in a customer run)."""
+    run = pathlib.Path(ctx["work"]) / "numeric" / pathlib.Path(target).stem / "rig"
+    shutil.rmtree(run.parent, ignore_errors=True)
+    run.mkdir(parents=True)
+    glb = run / "rigged.glb"
+    shutil.copyfile(target, glb)
+    doc = s_doc(glb)
+    names = [a.get("name") for a in doc.get("animations") or []]
+    acc = [int(x.get("count") or 0) for x in doc.get("accessors") or []]
+    need = 1
+    for an in doc.get("animations") or []:
+        need = max(need, max([acc[x["input"]] for x in an.get("samplers") or []] or [1]) * 2 + 1)
+    cj, out = run / "clips.json", run / "numeric.json"
+    cj.write_text(json.dumps(names))
+    p, wall = _child([PY, "-P", "-m", "mt.v3_numeric_qa", str(glb), _sha(glb), str(cj), str(min(need, int(cap))),
+                      str(out)], timeout=900)
+    if p.returncode != 0 or not out.is_file():
+        raise RuntimeError(f"v3_numeric_qa exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    rep = json.loads(out.read_text())
+    clips = rep.get("clips") or {}
+    vis = [c.get("visible") or {} for c in clips.values()]
+    from mt import anim_qa
+    aq = anim_qa.check(glb.read_bytes())
+    return {"seconds": wall, "status": rep.get("status"), "rule": rep.get("verdict_rule"),
+            "passed": bool(rep.get("numeric_deformation_passed")), "clips": len(clips),
+            "clips_passed": sum(1 for c in clips.values() if c.get("numeric_deformation_passed")),
+            "tear_clips": sum(1 for v in vis if "tear" in (v.get("why") or [])),
+            "extent_clips": sum(1 for v in vis if "extent" in (v.get("why") or [])),
+            "worst": max([float(v.get("worst_stretch") or 0) for v in vis] or [0.0]),
+            "peak_share": max([float(v.get("peak_share") or 0) for v in vis] or [0.0]),
+            "anim_flips": sum(len(r["flips"]) for r in aq.values()),
+            "anim_spikes": sum(len(r["spikes"]) for r in aq.values())}
+
+
 # ------------------------------------------------------------------------------------------------ backend / intake
 def ascii_fbx_intake(input_name, work):
     """b5b2a520 / 63bf5d35: an ASCII FBX (AssetStudio export without the `a:` key) must become a GLB on the VPS
@@ -875,6 +911,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return hand_detect(ctx, inp, a.get("words", ""))
     if k == "mt_arm_clearance":
         return mt_arm_clearance(ctx)
+    if k == "numeric_qa_file":                                     # QA calibration V3
+        return numeric_qa_file(ctx, target, a.get("cap", 2000))
     if k == "mt_numeric_qa":
         return mt_numeric_qa(ctx, a.get("clips"), a.get("cap", 2000))
     if k == "skeleton_fit":

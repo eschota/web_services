@@ -348,6 +348,20 @@
    "what": "«Кайо-Бей»: a chibi with dreadlocks, sunglasses and a T-shirt, 22.5 units (cm) tall, one welded shell of 24 357 vertices, no skeleton (owner 2026-10-11: dreads to the arms, a poor palm, too small in the cathedral)",
    "sha256": "323b1d38b71637f68c6647d924ec1f4c65da9e1136c788f4ce34670de5009661",
    "bytes": 4033364
+  },
+  "bfbd3248.mt-v0.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3dbc776ff6bffe8c8f3b/rig/skin/v0/rigged.glb",
+   "task": "bfbd3248-3feb-4bf2-95d3-65c44cfc2b03",
+   "what": "the kitbash warrior's first fastrig (run 3dbc776f v0): belly and skirt on the forearm",
+   "sha256": "18e7519e9897a22ed28ade21664187b53ae543bc0a92e206721614e4057627a4",
+   "bytes": 5429060
+  },
+  "dd498832.mt-untess.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/2fd6423ac6aa115b0e97/rig/skin/v0/rigged.glb",
+   "task": "dd498832",
+   "what": "the low-poly chibi's fastrig before tessellation (run 2fd6423a v0)",
+   "sha256": "762e8b46943d39c065861916c7d4d14ebf121b50126aba1e7404dd0b1194b46e",
+   "bytes": 631880
   }
  },
  "profiles": {
@@ -979,6 +993,25 @@
        0
       ]
      }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "complete": [
+       "==",
+       true
+      ],
+      "clips_passed": [
+       "==",
+       9
+      ]
+     },
+     "note": "QA calibration V3: a clean fast rig passes numeric QA (was 0 of 9 clips with the strict rule)"
     }
    ]
   },
@@ -1436,19 +1469,13 @@
       "max_stretched_edges": [
        "<=",
        710
+      ],
+      "clips_passed": [
+       "==",
+       2
       ]
      },
-     "target": {
-      "thresholds": {
-       "clips_passed": [
-        "==",
-        2
-       ]
-      },
-      "reason": "numeric deformation QA fails Idle and Walking of the fast rig (stretched edges)",
-      "owner": "Rig tools · V3"
-     },
-     "note": "2026-10-10 V3 triage: 0.80 -> 0.85 with the retarget end-bone alignment (straight wrists/toes, owner DEV 6552): one small layer collapses more in Idle (101 -> 504 bad frames) and less in Walking (63 -> 0); stretch hotspots unchanged"
+     "note": "2026-10-10 V3 triage: 0.80 -> 0.85 with the retarget end-bone alignment (straight wrists/toes, owner DEV 6552): one small layer collapses more in Idle (101 -> 504 bad frames) and less in Walking (63 -> 0); stretch hotspots unchanged | 2026-10-11 QA calibration V3: the visible-defect rule passes Idle and Walking (XPASS flipped to a threshold)"
     },
     {
      "id": "mt_probe",
@@ -3079,6 +3106,25 @@
        1
       ]
      }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "complete": [
+       "==",
+       true
+      ],
+      "clips_passed": [
+       "==",
+       9
+      ]
+     },
+     "note": "QA calibration V3: the kitbash after the skin fix passes (<= 21x, <= 0.41 % over 4x)"
     }
    ]
   },
@@ -3732,6 +3778,79 @@
        0
       ]
      }
+    }
+   ]
+  },
+  {
+   "id": "numeric_visible",
+   "task": "bfbd3248-3feb-4bf2-95d3-65c44cfc2b03",
+   "cost": 2,
+   "defect": "V3 backfill 2026-10-11: numeric QA failed practically every rig, clean ones included (0 of 9 clips: an edge 25 % longer failed the frame, one frame the clip), so every task stayed «needs_review». Recalibrated to visible defects per clip (tear: worst edge > 30x; extent: >= 10 edges and > 0.6 % of edges over 4x in the worst frame) and spikes to real pops. The known-bad rigs must keep failing, the clean ones must pass.",
+   "owner": "QA calibration · V3",
+   "checks": [
+    {
+     "id": "bad_horse_v0",
+     "kind": "numeric_qa_file",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "a742491a.mt-before.glb",
+     "thresholds": {
+      "passed": [
+       "==",
+       false
+      ],
+      "tear_clips": [
+       ">=",
+       1
+      ],
+      "worst": [
+       ">",
+       100
+      ]
+     },
+     "note": "the gltfpack horse rigged sideways, front and hind legs sharing weights: 165x, 4.0 % over 4x"
+    },
+    {
+     "id": "bad_kitbash_v0",
+     "kind": "numeric_qa_file",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "bfbd3248.mt-v0.glb",
+     "thresholds": {
+      "passed": [
+       "==",
+       false
+      ],
+      "tear_clips": [
+       ">=",
+       8
+      ],
+      "extent_clips": [
+       ">=",
+       8
+      ]
+     },
+     "note": "fastrig gave the belly plates and the skirt to the forearm: 84-213x, 1.7-3.9 % over 4x in every clip"
+    },
+    {
+     "id": "bad_chibi_untessellated",
+     "kind": "numeric_qa_file",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "dd498832.mt-untess.glb",
+     "thresholds": {
+      "passed": [
+       "==",
+       false
+      ]
+     },
+     "note": "the low-poly chibi before tessellation: fails on extent in Waving1 only (12 edges, 0.73 %) - a borderline case; its real gate is the tessellation stage, numeric stretch barely sees faceting"
     }
    ]
   }
