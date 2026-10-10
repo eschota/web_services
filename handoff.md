@@ -14,6 +14,16 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   `support_session_language(db, session_id)`). **Astra / support_ai.py**: брать язык
   из сессии/API, отвечать на нём; если посетитель пишет на другом языке — на языке
   его сообщения. Строки нового `/task` (Task page · V3) — только через `I18n.t()`.
+- **Контракт i18n для новых страниц (Viewer · V3: новый `/faq`, Task page · V3)**:
+  каждая видимая строка — элемент с `data-i18n="<key>"` (атрибуты: `data-i18n-placeholder`,
+  `data-i18n-title`, `data-i18n-aria-label`), английский текст внутри элемента и в
+  `static/i18n/en.json`; в JS — только `I18n.t('<key>', {n: 5})`, перерисовка на событии
+  `languageChanged`. Ключи страницы с общим префиксом (`faq_*`, `taskv3_*`). Новые ключи
+  кладите в `en.json` (+`ru.json`, если пишете по-русски) и запишите сюда их список —
+  fa/zh/hi допишет Localization. Сервер сам переводит `data-i18n` в HTML (SEO, без
+  мигания); полностью переведённая страница ставит `<html data-i18n-scope="page">`
+  (RTL на всю страницу), иначе RTL только у шапки/подвала. Сырые ответы сервера
+  пользователю не показывать: коды ошибок `detail.error_string` → ключи `error_*`.
 
 ## Intake · V3 — конвейер смонтирован (2026-10-10 11:20 UTC, проверено на проде)
 
