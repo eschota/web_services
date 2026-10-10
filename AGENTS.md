@@ -270,6 +270,27 @@ Owner rule, 2026-10-10:
   * The V3 conveyor rigs in 4–10 s (`fastrig`), but its analysis and QA phases
     have taken up to 400 s.
 
+## Tools Have Options
+
+Owner rule, 2026-10-10:
+
+> нужно делать инструменты с опциями, особенно такими критичными, которые
+> сейчас плавают от модели к модели
+
+* A parameter that changes the result from model to model is never only a
+  constant in code. That covers bone influence and blend width per joint,
+  capture radius, smoothing, max influences, thresholds and resolutions. Each
+  one is a named, documented, range-checked option of a session-agent tool.
+* Defaults equal today's behaviour, and the tool reports its current values
+  (`*_get`).
+* Every tool that changes a model returns before/after metrics on the same
+  poses and cameras. It keeps the previous version for undo.
+* Better values are saved per run. Only the owner or an admin can make them
+  a category default, and those defaults are versioned.
+* The agent never says it fixed something without the metric delta. When a
+  tool is missing, it says so. The missing tool is then built and listed in
+  `/dev/tools`.
+
 ## V3 Concept: Astra and Session Agents
 
 Owner rule, 2026-10-10:
