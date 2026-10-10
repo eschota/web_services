@@ -283,6 +283,21 @@ class ShellTests(unittest.TestCase):
         self.assertEqual(failed["status"], "failed")
         self.assertEqual(mount._shell(task("done", session=session))["status"], "done")
 
+    def test_live_sub_stage_titles_and_no_frozen_zero(self):
+        import v3_runtime_mount as mount
+
+        self.assertEqual(mount._stage_title("analysis:vision 42s"), "анализ · Vision-анализ · 42 с")
+        self.assertEqual(mount._stage_title("generation:hunyuan f13"), "генерация модели · Hunyuan 3D · f13")
+        self.assertEqual(mount._stage_title("rig"), "риг")
+        row = types.SimpleNamespace(id="t", status="processing", error_message=None, created_at=None,
+                                    viewer_settings=json.dumps({"v3": {"state": "queued", "progress": 0}}))
+        self.assertEqual(mount._shell(row)["progress"], mount.ACTIVE_FLOOR)
+        row.viewer_settings = json.dumps({"v3": {"state": "generating", "stage": "generation:waiting_3d_worker",
+                                                 "progress": .03}})
+        shell = mount._shell(row)
+        self.assertEqual((shell["status"], shell["progress"]), ("processing", .03))
+        self.assertIn("ждёт 3D-воркер", shell["stage"])
+
 
 if __name__ == "__main__":
     unittest.main()

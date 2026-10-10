@@ -44,8 +44,29 @@ STAGE_TITLES = {
     "pending_register": "регистрация источника", "pending_submit": "постановка в V3",
     "queued": "в очереди V3", "starting": "запуск", "source": "источник", "analysis": "анализ",
     "rig": "риг", "retarget": "ретаргет", "qa": "проверка качества", "publish": "публикация",
-    "complete": "готово", "qa_review": "нужна проверка",
+    "complete": "готово", "qa_review": "нужна проверка", "generation": "генерация модели",
+    "running": "обработка", "resuming": "возобновление",
 }
+SUB_TITLES = {
+    "projections": "проекции", "vision": "Vision-анализ", "bones_and_weights": "кости и веса",
+    "library_clips": "анимации", "numeric": "численная проверка", "scale": "масштаб",
+    "detect": "распознавание картинки", "waiting_3d_worker": "ждёт 3D-воркер", "hunyuan": "Hunyuan 3D",
+    "turntable": "оборот модели", "ready": "модель готова",
+}
+ACTIVE_FLOOR = .01            # a task that is being worked on never shows 0 %
+
+
+def _stage_title(stage: str) -> str:
+    """"analysis:vision 42s" -> "анализ · Vision-анализ · 42 с" (a live sub-stage from the conveyor)."""
+    base, _, sub = str(stage or "").partition(":")
+    title = STAGE_TITLES.get(base, base)
+    if not sub:
+        return title
+    word, _, rest = sub.strip().partition(" ")
+    sub_title = SUB_TITLES.get(word, word)
+    if rest.endswith("s") and rest[:-1].isdigit():
+        rest = rest[:-1] + " с"
+    return " · ".join(part for part in (title, sub_title, rest.strip()) if part)
 
 
 def _token() -> str:
@@ -91,6 +112,8 @@ async def project_task(session, binding, patch, record) -> None:
     session_doc = remote.get("session") or v3.get("session") or {}
     stage = record.remote_stage or record.state
     progress = 1.0 if record.state in {"done", "needs_review"} else max(0.0, min(.99, float(record.progress or 0)))
+    if binding.requested_intent == "generate" and progress < 1.0:
+        progress = .3 + .7 * progress          # the generation already filled the first 30 %
     v3.update(
         state=record.state, stage=stage, progress=round(progress, 3), attempt=binding.attempt,
         requested_intent=binding.requested_intent, dispatch_intent=binding.dispatch_intent,
@@ -218,17 +241,19 @@ def _shell(task) -> dict:
     else:
         status = "created" if state in {"pending", "normalizing", "pending_register", "pending_submit"} else "processing"
         viewer_state = "loading" if viewer else "awaiting_binding"
-        message = "V3: " + STAGE_TITLES.get(stage, stage)
+        message = "V3: " + _stage_title(stage) + (f" — {v3.get('detail')}" if v3.get("detail") else "")
+        progress = max(progress, ACTIVE_FLOOR)
     return {"schema": "autorig.task-v3-shell/1", "task_id": task.id, "status": status,
-            "stage": STAGE_TITLES.get(stage, stage), "stage_id": stage,
+            "stage": _stage_title(stage), "stage_id": stage,
             "progress": 1.0 if status in {"done", "needs_review"} else round(min(.99, max(0.0, progress)), 3),
-            "viewer_url": viewer, "viewer_state": viewer_state, "message": message}
+            "viewer_url": viewer, "viewer_state": viewer_state, "message": message,
+            "events_url": (session.get("files_base") or "") + "v3/events.jsonl" if session.get("mt_run_id") else None}
 
 
 def _detail(task) -> dict:
     v3 = dict(_settings(task).get("v3") or {})
     intake = v3.get("intake") if isinstance(v3.get("intake"), dict) else {}
-    return {**_shell(task), "schema": "autorig.task-v3/1", "task_id": task.id, "pipeline_kind": "v3",
+    return {**_shell(task), "schema": "autorig.task-v3/1", "task_id": task.id, "pipeline_kind": task.pipeline_kind,
             "task_status": task.status,
             "state": v3.get("state"), "attempt": v3.get("attempt"),
             "requested_intent": v3.get("requested_intent") or intake.get("requested_intent"),
@@ -251,7 +276,10 @@ def build_v3_read_router(*, get_db: Callable[..., Any], get_current_user: Callab
 
     async def load(task_id: str, request: Request, user: Any, db: Any):
         task = (await db.execute(select(task_model).where(task_model.id == task_id))).scalar_one_or_none()
-        if task is None or str(task.pipeline_kind or "") != "v3" or not _can_access_task(
+        # a V3-routed generation row carries its live state before its mesh exists
+        v3_row = task is not None and (str(task.pipeline_kind or "") == "v3" or (
+            str(task.pipeline_kind or "") == "generate" and bool(_settings(task).get("v3"))))
+        if not v3_row or not _can_access_task(
                 task, is_public=bool(getattr(task, "is_public", False)), user=user, request=request,
                 is_admin_email=is_admin_email):
             raise HTTPException(status_code=404, detail="V3 task not found")

@@ -232,9 +232,51 @@ async def _start_generation(db, task: Task) -> None:
     )
 
 
+def _v3_generation_stage(job: Dict[str, Any]) -> tuple:
+    """Renderfin's job state as a live V3 stage and progress (the generation fills 0-30 %)."""
+    import math
+
+    stage = str(job.get("stage") or "")
+    if stage == "hunyuan":
+        worker = str(job.get("hunyuan_worker") or "")
+        if worker and job.get("hunyuan_task_id"):
+            started = float(job.get("stage_started_at") or 0) or time.time()
+            return f"generation:hunyuan {worker}", .05 + .2 * (1 - math.exp(-(time.time() - started) / 600))
+        return "generation:waiting_3d_worker", .03
+    if stage == "turntable":
+        return "generation:turntable", .27
+    if stage in ("ready", "submitted"):
+        return "generation:ready", .29
+    return "generation:detect", .02
+
+
+def _note_v3_generation(task: Task, job: Dict[str, Any]) -> bool:
+    """Keep a V3-routed generation row's live stage in viewer_settings.v3; True when it changed."""
+    label, progress = _v3_generation_stage(job)
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+        if not isinstance(settings, dict):
+            settings = {}
+    except (TypeError, ValueError):
+        settings = {}
+    v3 = dict(settings.get("v3") or {})
+    if v3.get("stage") == label and abs(float(v3.get("progress") or 0) - progress) < .005:
+        return False
+    v3.update(state="generating", stage=label, progress=round(max(progress, float(v3.get("progress") or 0)), 3),
+              updated_at=datetime.utcnow().isoformat() + "Z")
+    settings["v3"] = v3
+    task.viewer_settings = json.dumps(settings)
+    return True
+
+
 async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
     """Poll renderfin; publish the mesh, then either rig it or finish."""
     import render_prompting
+    from config import is_admin_email
+    from v3_intake import route_enabled
+
+    v3_route = route_enabled("generation", is_admin=task.owner_type == "user" and is_admin_email(task.owner_id),
+                             explicit=bool(meta.get("v3")))
 
     job_id = str(meta.get("job_id") or "")
     if not job_id:
@@ -247,6 +289,9 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
 
     stage = str(job.get("stage") or "")
     glb_url = str(job.get("glb_url") or "").strip()
+    if v3_route and stage != "failed" and _note_v3_generation(task, job) and not glb_url:
+        task.updated_at = datetime.utcnow()
+        await db.commit()               # the task card shows the generation's own stage, never a frozen 0 %
 
     if stage == "failed":
         task.status = "error"
@@ -284,11 +329,9 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
     # V3 conveyor (2026-10-10): the generated mesh re-enters the same V3
     # conveyor as an uploaded one, bound to this row with a generation receipt.
     # A failed binding is retried on the next tick; it never becomes a legacy rig.
-    from config import is_admin_email
-    from v3_intake import bind_generated_task, route_enabled
+    from v3_intake import bind_generated_task
 
-    if route_enabled("generation", is_admin=task.owner_type == "user" and is_admin_email(task.owner_id),
-                     explicit=bool(meta.get("v3"))):
+    if v3_route:
         set_generation_meta(task, stage=GEN_STAGE_RIGGING, conveyor="v3")
         try:
             await bind_generated_task(db, task, glb_url=glb_url, receipt_facts={
