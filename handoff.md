@@ -1396,3 +1396,17 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Не сделано / кому**: (1) arm_clearance на 1M вершин: таймаут 420 с сработал на 5ee6219f (теперь одна детекция
   вместо четырёх, но детекция limb_collision на 1M ~80 с) — для плотных брать прокси-меш; (2) v3-triage добавлен
   Астре (`tools/bin/v3-triage`, registry, /dev/tools — виден).
+
+## Hunyuan 3D API · V3 (2026-10-10, агент «Hunyuan 3D API»)
+
+- Платный Tencent HY 3D Global подключён: `mt/hunyuan3d_cloud.py` (MT `dc9f35b`; hunyuan.intl.tencentcloudapi.com,
+  2023-09-01, ap-singapore, TC3-подпись без SDK; ключи только из `/srv/autorig/secrets/tencent-hunyuan3d.env` внутри
+  процесса). Леджер `/srv/autorig/data/var/hunyuan3d/ledger.jsonl`, конфиг `config.json` там же (`daily_credit_cap`
+  100, `session_allowance` owner=null / account=0 / anonymous=0 / run_chat=0, `rapid_text`/`rapid_image` false).
+- Серия 10.10: 15 моделей + 1 тест инструмента = 465 кредитов по прайсу (5 FAIL Rapid не списываются);
+  результаты `/srv/autorig/data/hunyuan3d/<job>/model.glb`, индекс `series_20261010.json`, лист DEV 6561/6562.
+  В пакеты сцен castle-yard / scifi-hangar / sakura-shrine НЕ ставились (ждут вердиктов владельца).
+- Инструменты сессии `generate_3d` / `generate_3d_options_get` (agent.py, видны в /dev/tools), скилл
+  `mt/skills/hunyuan3d_generation.md`. autorig-mt рестарт ждёт простоя через `autorig-mt-restart --wait`.
+- Выводы: FaceCount (+10) не нужен (бесплатный gltf-transform simplify + resize даёт то же); Rapid на intl
+  ненадёжен (текст 0/5, фото 1/2) → draft идёт как Pro 3.1 (25); Smart Topology (50) отдаёт геометрию без текстуры.
