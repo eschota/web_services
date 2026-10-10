@@ -346,7 +346,11 @@ async def _classic_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path
     rigged = cached_glb(cache_dir, task_id, RIGGED_KINDS)
     static = cached_glb(cache_dir, task_id, STATIC_KINDS)
     warming = None
-    if status == "done" and rigged is None:
+    # Rig within one minute (owner, 2026-10-10): the converter collects the viewer GLBs right after the
+    # retarget, minutes before Unity/video/ZIP; update_task_progress stores the URL once its header is
+    # valid, so the rig is warmed while the task is still processing (Converter speed · V3).
+    rig_declared = bool(str(getattr(task, "viewer_animations_glb_url", None) or "").strip())
+    if rigged is None and (status == "done" or (status == "processing" and rig_declared)):
         warming = start_warmup(task_id, "animations")
     if status in ("processing", "done") and rigged is None and static is None:
         prepared = start_warmup(task_id, "prepared")

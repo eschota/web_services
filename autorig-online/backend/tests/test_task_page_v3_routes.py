@@ -269,6 +269,22 @@ class ClassicEstimateTests(unittest.TestCase):
         self.assertEqual(state["progress"], 0.9)
         self.assertEqual(state["eta_s"], 30)
 
+    def test_processing_task_warms_its_rig_once_the_worker_declared_it(self):
+        """Converter speed · V3: the rig reaches the viewer before Unity/video/ZIP finish."""
+        kinds = []
+        routes.start_warmup = lambda task_id, kind: kinds.append(kind) or "started"
+        from datetime import timezone
+        started = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=90)
+        task = SimpleNamespace(id=STATIC, status="processing", progress=10, processing_started_at=started,
+                               created_at=started, queue_class="interactive", viewer_animations_glb_url="")
+        cache = pathlib.Path(self.tmp.name)
+        asyncio.run(routes._classic_state(task, None, task_model=None, cache_dir=cache))
+        self.assertNotIn("animations", kinds)
+        task.viewer_animations_glb_url = "https://f1.freestock.online/g/g_all_animations_viewer.glb"
+        state = asyncio.run(routes._classic_state(task, None, task_model=None, cache_dir=cache))
+        self.assertIn("animations", kinds)
+        self.assertEqual(state["model"]["state"], "warming")
+
     def test_reported_outputs_keep_their_own_progress(self):
         state = self.state(50, 300)
         self.assertEqual((state["progress"], state["progress_basis"]), (0.5, "outputs"))
