@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261010.9';
+const BUILD = 'tv3-20261010.10';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -168,7 +168,8 @@ function render(state) {
   const hasViewer = !!viewer && showViewer(viewer);
   if (hasViewer) unavailable = false;
   else if (state.model && state.model.state === 'unavailable') unavailable = true;
-  els.classic.classList.toggle('ok', unavailable);
+  // the classic page carries downloads and the restart button: point at it when this page cannot help
+  els.classic.classList.toggle('ok', unavailable || status === 'error');
   const rigged = hasViewer && viewer.rigged;
   setSteps({
     queue: status === 'created' ? 'run' : 'done',
@@ -210,7 +211,7 @@ function render(state) {
   else if (hasViewer && status === 'needs_review') chip = tr('taskv3_review');
   else if (hasViewer && status === 'error') chip = tr('taskv3_failed');
   else if (hasViewer && !finished) chip = `${stageTitle || (status === 'created' ? tr('taskv3_queued') : tr('taskv3_rigging'))} · ${Math.round(progress * 100)}%`;
-  else if (hasViewer && !rigged && state.model && state.model.state === 'warming') chip = tr('taskv3_rigging');
+  else if (hasViewer && !rigged && !finished && state.model && state.model.state === 'warming') chip = tr('taskv3_rigging');
   els.chip.hidden = !chip;
   els.chip.textContent = chip;
   els.chip.title = (v3 && v3.message) || '';
