@@ -94,6 +94,31 @@ What it means for every agent:
   * Customer sources and outputs are never deleted.
   * A restart that wipes queues (`autorig-storage`, renderfin) is batched,
     and in-flight work is checked first.
+    `render_tasks` alone is not enough: the startup reset also cancels graph
+    renders that are only running in renderfin (3 were lost on 2026-10-10).
+
+### How a live static edit is made (2026-10-10)
+
+* One command per file, from the VPS:
+  `sudo python3 /srv/autorig/tools/live_static.py put <rel> <file>`, where
+  `<rel>` is a path under `autorig-online/static` (e.g. `js/task-v3-shell.js`).
+  * It writes the overlay `/srv/autorig/live/static` atomically.
+  * Under one lock it stages a hardlinked release beside `current`, gives
+    every overlay file a fresh inode in it, repoints `current` and clears the
+    overlay copies that `current` now carries.
+  * The output names the `previous` release, which is the rollback.
+  * `--no-promote` keeps a change in the overlay only; `ls`, `rm`, `promote`
+    and `gc` manage the overlay.
+  * Backend code is not live-editable: it needs a release and a restart.
+* nginx serves `/static/` from the overlay first, then the release.
+  * JS/CSS whose `?v=` is an exact 10-hex content stamp are immutable.
+  * Every other JS/CSS is `no-cache` with ETag, so browsers revalidate it on
+    each load.
+* `/task` is rendered per request: its template and partials come from the
+  live roots, and every `/static` JS/CSS reference gets its current content
+  stamp. A task page HTML/JS/CSS change needs no backend restart.
+* `GET https://autorig.online/api/task-page/live` shows the rollout mode and
+  the current stamps of the task page assets.
 
 ## AutoRig Fleet Status Is One API Call
 

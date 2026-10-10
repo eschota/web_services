@@ -22,7 +22,8 @@
 .tv3-line b{color:var(--tv3-ink);font-variant-numeric:tabular-nums;font-weight:600}
 .tv3-card.failed .tv3-line span{color:var(--tv3-bad)}
 
-.tv3-chip{position:absolute;left:14px;bottom:14px;z-index:3;padding:6px 11px;border-radius:99px;background:var(--tv3-glass);border:1px solid var(--tv3-line);color:var(--tv3-ink);font-size:12px;font-variant-numeric:tabular-nums;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);pointer-events:none}
+/* status pill in the tools row: clear of the viewer's own toolbars and the site support chat */
+.tv3-chip{padding:6px 11px;border-radius:99px;background:var(--tv3-glass);border:1px solid var(--tv3-line);color:var(--tv3-ink);font-size:12px;line-height:1.2;font-variant-numeric:tabular-nums;white-space:nowrap;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .tv3-chip[hidden]{display:none}
 
 .tv3-tools{position:absolute;left:14px;top:14px;z-index:4;display:flex;align-items:center;gap:6px}

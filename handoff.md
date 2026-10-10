@@ -57,6 +57,51 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   вернуть после очистки диска (Fleet). Renderfin не считает "disk gate failed" ожиданием —
   стоит добавить в `_FLEET_ERROR_MARKERS`. Повторная генерация владельца: `8635aa06`.
 
+## Task page · V3 — живая страница задачи (2026-10-10 11:50 UTC, проверено на проде)
+
+- **Свежий JS на каждом заходе.** nginx `/static/`: оверлей `/srv/autorig/live/static`,
+  затем релиз. JS/CSS без точного 10-hex `?v=` отдаются `no-cache` + ETag (304),
+  со штампом — immutable. `/task` собирается на каждый запрос (`task_page_live.py`):
+  шаблон и partials из live-корней, каждый `/static` JS/CSS получает `?v=<sha1[:10]>`
+  текущего содержимого. Живая правка статики:
+  `sudo python3 /srv/autorig/tools/live_static.py put <rel> <file>` (атомарная запись,
+  затем promotion в релиз под локом, откат — `previous`). Состояние:
+  `GET /api/task-page/live`. Доказано: тот же URL без hard refresh взял новый билд
+  (`tv3-20261010.2` → `.4` → `.5`), DEV `672ce48ed028`.
+- **/task = V3-оболочка** (`task-v3.html`, `js/task-v3-shell.js`, `css/task-v3.css`):
+  тот же SEO head/canonical/OG/JSON-LD, шапка, подвал и h1, что у классики; один
+  Unity-вьювер; реальная позиция в очереди (порядок диспетчера) и прогресс до модели;
+  инструменты: скачать/классика (`?classic=1`), ссылка, полный экран.
+- **API** `GET /api/task/{id}/v3-view` (`autorig.task-page-v3/1`), только сервер решает:
+  - V3-задачи (`pipeline_kind=v3`) открывают MT-run из проекции Intake
+    (`viewer_settings.v3.session.mt_run_id`, контракт `v3_runtime_mount._shell`),
+    с агентом сессии;
+  - классические открывают свои GLB из glb_cache через `/api/task-viewer/{id}/…`
+    (`files/task/rig/rig.json`, `rig/rigged.glb`, `proj/model.glb` через X-Accel;
+    texlib/scenes/settings — 307 на `/api/mt/…`; POST настроек от не-админа
+    игнорируется), `agent=0`. Кэш прогревается фоном через классические эндпоинты;
+  - ACL owner / anon_id / admin, чужая приватная задача → 404.
+  Доказано: `492210fd` (классика, 70 костей, клип играет, DEV `b123c856bfc6`),
+  `cfa2e6a1` (V3 run `31682814bd06170f1063`, агент на связи).
+- **Раскатка без рестарта:** `/srv/autorig/live/config/task-page.json`
+  (`mode` off|admin|new|all, `new_since`, `webapp`, `preview_keys`; запись — temp+rename).
+  Сейчас `admin`: V3 у админа с `?v3=1` (кука `ar_task_v3`) или с превью-кукой
+  `ar_task_v3_preview`; **V3-задачи всегда в V3-оболочке**; `?v3=0` — отказ,
+  `?classic=1` — разово классика; Telegram `mode=webapp` — классика, пока `webapp: false`.
+- **i18n:** 15 ключей `taskv3_*` в prod `en.json`/`ru.json` (+Git); fa/zh/hi — Localization.
+- **Для Viewer · V3** (шаблон Unity не трогаю): оболочка грузит
+  `/api/mt/unity/test/index.html?api=<origin>/api/task-viewer/<id>&run=task&agent=0`
+  (классика) или `?run=<mt_run>` (V3) и шлёт `autorigUnity.send('LoadRun', run)` при
+  смене ревизии. Нужно: событие «модель готова» для оболочки; классический
+  `animations.glb` приходит одной glTF-анимацией `Animation` — разбить на клипы по
+  каталогу задачи; общий профиль настроек вьювера vs. клиенты.
+- **Рестарт** 11:25:32 UTC (`tv3-backend-20261010b`): стартовый сброс отменил 3 running
+  graph-рендера (Raptor, f15, worker-4090), в `render_tasks` их не было — проверять
+  живую очередь renderfin. Коммит `da882c56`.
+- **Дальше:** шаг 3 (`mode: new`) — после вердикта владельца; шаг 4 (`all`) — когда во
+  вьювере будут клипы классических задач и загрузки/покупки внутри V3; мобильный Unity;
+  загрузка движка 17.7 MiB.
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**

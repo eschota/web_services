@@ -715,5 +715,20 @@
   "img2rig_related_p": "More on poses, formats, and what happens after the rig:",
   "img2rig_final_h2": "Try it with one picture",
   "img2rig_final_p": "Open the home page, drop an image of a character, and watch it come back rigged.",
-  "footer_image_to_rig": "Image to Rigged Character"
+  "footer_image_to_rig": "Image to Rigged Character",
+  "taskv3_queued": "In queue",
+  "taskv3_ahead": "{count} ahead",
+  "taskv3_next": "next up",
+  "taskv3_processing": "Processing",
+  "taskv3_rigging": "Rig and animations",
+  "taskv3_ready": "Ready",
+  "taskv3_failed": "Processing failed",
+  "taskv3_missing": "Task not found or private",
+  "taskv3_offline": "Offline, retrying…",
+  "taskv3_copied": "Link copied",
+  "taskv3_review": "Needs review",
+  "taskv3_preparing": "Preparing the model for the viewer",
+  "taskv3_tool_classic": "Downloads · classic viewer",
+  "taskv3_tool_share": "Copy link",
+  "taskv3_tool_fullscreen": "Fullscreen"
 }
