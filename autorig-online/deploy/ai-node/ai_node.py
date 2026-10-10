@@ -54,7 +54,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
 
-VERSION = "ai-node-20261011"
+VERSION = "ai-node-20261011b"
 API_PREFIX = "/api-converter-glb"
 WORKLOAD_AI_VISION = "ai_vision"
 
@@ -160,6 +160,13 @@ DEFAULT_CONFIG: Dict[str, object] = {
     # (the 3D adapter's games.txt). Empty = not watched.
     "owner_games": [],
     "owner_games_file": "",
+    # A model that does not fit whole (owner 2026-10-11: «он должен брать мозг пока идёт игра» - cs2 and the desktop
+    # leave the 27B at 128k some GB short): llama.cpp's --fit puts as many layers on the GPU as fit, leaving
+    # fit_target_mb free, and the rest in RAM - slower, the same context. Only when at least fit_min_vram_mb (+ the
+    # margin) are free once ComfyUI is put away. False = wait for the whole need.
+    "fit_when_short": False,
+    "fit_min_vram_mb": 0,
+    "fit_target_mb": 1536,
     # The converter/3D adapter answers 503 when it refuses NEW 3D jobs - also because an LLM took the VRAM it needs to
     # start Hunyuan. False = a 503 is not «the GPU is in use» (the VRAM check still guards the load).
     "converter_503_is_busy": True,
@@ -259,6 +266,9 @@ class Config:
         self.gpu_gate_grace_seconds = max(0.0, float(merged.get("gpu_gate_grace_seconds") or 0))
         self.owner_games = [str(g).strip().lower() for g in (merged.get("owner_games") or []) if str(g).strip()]
         self.owner_games_file = (self._path(merged["owner_games_file"]) if merged.get("owner_games_file") else "")
+        self.fit_when_short = bool(merged.get("fit_when_short"))
+        self.fit_min_vram_mb = max(0, int(merged.get("fit_min_vram_mb") or 0))
+        self.fit_target_mb = max(256, int(merged.get("fit_target_mb") or 1536))
         self.converter_503_is_busy = bool(merged.get("converter_503_is_busy", True))
         self.max_prompt_chars = max(1000, int(merged.get("max_prompt_chars") or MAX_PROMPT_CHARS))
         self.keepalive_seconds = int(merged["keepalive_seconds"])
@@ -304,6 +314,12 @@ class Config:
 
     def vision_installed(self) -> bool:
         return bool(self.mmproj) and os.path.isfile(self.mmproj)
+
+    def min_need_mb(self) -> int:
+        """The least VRAM a load starts with: fit_min_vram_mb with fit_when_short, else the whole need."""
+        if self.fit_when_short and self.fit_min_vram_mb > 0:
+            return min(self.fit_min_vram_mb, self.need_mb())
+        return self.need_mb()
 
     def need_mb(self) -> int:
         """VRAM the model takes once loaded: configured, or files + overhead."""
@@ -817,6 +833,7 @@ class LlamaServer:
         self.loads = 0
         self.last_error = ""
         self.last_stop_reason = ""
+        self.fit = False                       # this load lets llama.cpp --fit the layers (part of them in RAM)
 
     # ------------------------------------------------------------- state
     def running(self) -> bool:
@@ -877,13 +894,15 @@ class LlamaServer:
             argv += ["--reasoning", cfg.reasoning]
         argv += [
             "--alias", cfg.model_id,
-            "-ngl", str(cfg.ngl),
+            "-ngl", "auto" if self.fit else str(cfg.ngl),
             "-c", str(cfg.context_tokens),
             "--host", "127.0.0.1",
             "--port", str(cfg.llama_port),
             "--jinja",
         ]
         argv += list(cfg.extra_llama_args)
+        if self.fit:
+            argv += ["--fit", "on", "--fit-target", str(cfg.fit_target_mb)]
         return argv
 
     def _is_ours(self, cmdline: str) -> bool:
@@ -1361,10 +1380,10 @@ class Node:
         if not self.llama.loaded_model_id() and active == 0:
             if not vram.get("ok"):
                 return ("vram_unknown", f"cannot read free VRAM: {vram.get('error')}")
-            need = cfg.need_mb() + cfg.vram_margin_mb
+            need = cfg.min_need_mb() + cfg.vram_margin_mb
             if int(vram.get("free_mb") or 0) < need and not self.can_free_comfy(comfy):
                 return ("insufficient_vram",
-                        f"{vram.get('free_mb')} MiB free, model needs {cfg.need_mb()} MiB "
+                        f"{vram.get('free_mb')} MiB free, model needs {cfg.min_need_mb()} MiB "
                         f"+ {cfg.vram_margin_mb} MiB margin")
         return None
 
@@ -1386,8 +1405,15 @@ class Node:
             if not vram.get("ok"):
                 return f"vram_unknown ({vram.get('error')})"
         if int(vram.get("free_mb") or 0) < need:
-            return (f"insufficient_vram ({vram.get('free_mb')} MiB free < "
-                    f"{self.cfg.need_mb()} + {self.cfg.vram_margin_mb} MiB)")
+            short = (f"insufficient_vram ({vram.get('free_mb')} MiB free < "
+                     f"{self.cfg.need_mb()} + {self.cfg.vram_margin_mb} MiB)")
+            if self.cfg.fit_when_short and int(vram.get("free_mb") or 0) >= \
+                    self.cfg.min_need_mb() + self.cfg.vram_margin_mb:
+                self.llama.fit = True              # the game / the desktop keep some GB: part of the layers in RAM
+                logger.info("%s: loading with --fit, part of the layers in RAM", short)
+                return None
+            return short
+        self.llama.fit = False
         return None
 
     # ------------------------------------------------------------- submit
@@ -1716,6 +1742,8 @@ class Node:
                 "max_tasks": cfg.max_tasks,
                 "max_prompt_chars": cfg.max_prompt_chars,
                 "context_tokens": cfg.context_tokens,
+                "fit_when_short": cfg.fit_when_short,
+                "llama_fit": bool(self.llama.fit and loaded),
                 "gpu_lease_hold_file": cfg.gpu_lease_hold_file,
                 "gpu_lease_yield_to": comfy.get("gpu_lease") or "",
                 "owner_game": running_game(cfg),

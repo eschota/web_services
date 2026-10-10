@@ -770,6 +770,23 @@ def game_checks(ai_node):
     ai_node._GAME_CACHE.update(at=0.0, name="")
 
 
+def fit_checks(ai_node):
+    """2026-10-11 (owner: the brain loads while he plays): a model that does not fit whole loads with --fit."""
+    base = {"model_id": MODEL_ID, "weights": "w.gguf", "llama_server": "x", "vram_need_mb": 18900}
+    cfg = ai_node.Config(dict(base, fit_when_short=True, fit_min_vram_mb=10000), HERE)
+    check("fit: the least need is fit_min_vram_mb", cfg.min_need_mb() == 10000, cfg.min_need_mb())
+    llama = ai_node.LlamaServer(cfg)
+    argv = llama.launch_argv()
+    check("fit: a whole load keeps its -ngl", argv[argv.index("-ngl") + 1] != "auto" and "--fit" not in argv, argv)
+    llama.fit = True
+    argv = llama.launch_argv()
+    check("fit: a short load lets llama.cpp fit the layers",
+          argv[argv.index("-ngl") + 1] == "auto" and argv[argv.index("--fit") + 1] == "on"
+          and argv[argv.index("--fit-target") + 1] == "1536", argv)
+    off = ai_node.Config(dict(base), HERE)
+    check("fit: off by default", not off.fit_when_short and off.min_need_mb() == 18900, off.min_need_mb())
+
+
 def lease_checks(tmp):
     """2026-10-11: two nodes on one card (a holder that needs the whole GPU and a yielder), max_prompt_chars and the
     temperature passthrough."""
@@ -900,6 +917,7 @@ def main():
         integration(tmp)
         lease_checks(tmp)
         game_checks(ai_node)
+        fit_checks(ai_node)
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         check("selftest ran to the end", False)

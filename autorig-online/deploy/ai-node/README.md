@@ -310,9 +310,13 @@ and uncensored.
 | `max_prompt_chars` | 8000 | Characters of system_prompt + prompt one request may carry (2026-10-11). The backend's own cap stays 8000; a node that a long-context caller talks to directly (the film director) raises it with its `context_tokens`. |
 | `gpu_lease_hold_file` | empty | Two nodes on one card (2026-10-11). The node that needs most of the card writes this file while it waits for, loads or holds its model, and removes it once the card is free again. |
 | `gpu_lease_yield_files` / `gpu_lease_fresh_seconds` | `[]` / 60 | A node listing another node's lease file treats a fresh lease (mtime within the window) like a busy ComfyUI. It refuses new work with `503 gpu_leased`, unloads when idle, and lets a running answer finish. |
+| `gpu_gate_url` / `gpu_gate_owner` / `gpu_gate_grace_seconds` | empty / node name / 30 | worker-4090's GPU gate (`C:\AI\HY3D2\fleet-adapter\gate.py`, control 127.0.0.1:18778). While the node waits for ComfyUI to drain, loads or answers (plus the grace), it holds a gate lease, so renderfin sends the card no new render. |
+| `owner_games` / `owner_games_file` | `[]` / empty | Executables (plus a file with one per line). While one runs the node loads nothing and takes no work. Empty = not watched. The owner, 2026-10-11: «он должен брать мозг пока идёт игра», so both worker-4090 nodes run with it empty. |
+| `fit_when_short` / `fit_min_vram_mb` / `fit_target_mb` | false / 0 / 1536 | A model that does not fit whole (2026-10-11: cs2 and the desktop leave the 27B some GB short). With ComfyUI put away and at least `fit_min_vram_mb` + margin free, llama-server starts with `-ngl auto --fit on --fit-target <MiB>`: as many layers on the GPU as fit, the rest in RAM, the same context. `server-status` shows `llama_fit`. |
+| `converter_503_is_busy` | true | false = the 3D adapter's 503 (it refuses new 3D jobs, e.g. because an LLM took the VRAM) is not «the GPU is in use». |
+| `log_file` / `log_level` | `ai-node.log` / `INFO` | Service log. |
 
 A request may also carry `temperature` (0-1.5, default 0.3; 2026-10-11).
-| `log_file` / `log_level` | `ai-node.log` / `INFO` | Service log. |
 
 ## Deployed nodes (2026-10-07)
 
@@ -332,14 +336,17 @@ route next to it is untouched). `max_tasks` is 8 on f11/f7 and 4 at home: with 2
 
 ## The film director's brain (worker-4090, 2026-10-11)
 
-`C:\ProgramData\AutoRigi-director` is a second node on the owner's card: `ai_node.py` ai-node-20261011 with
+`C:\ProgramData\AutoRig\ai-director` is a second node on the owner's card: `ai_node.py` ai-node-20261011b with
 `config.json`, `ensure.ps1` and the task `AutoRig 4090 AI Director`.
 
 * It serves `qwen38-27b-uncensored` (Qwen3.8 27B IQ4_XS, our own file).
 * llama-server flags: `-c 131072 -fa on -ctk q4_0 -ctv q4_0 -np 1`, text only.
-* `max_prompt_chars` is 450000. It listens on 127.0.0.1:5482, with llama on 8094.
+* `max_prompt_chars` is 700000. It listens on 127.0.0.1:5482, with llama on 8094.
 * The VPS reaches it through `ssh -R 15420`, with the token in `/srv/autorig/secrets/film-director-brain.token`.
 * It needs about 18.9 GB. The owner's desktop keeps ~4 GB of the 24, so q8_0 KV at 128k (~21 GB) does not fit.
-* It writes `gpu.lease`. The 9B pool node `C:\ProgramData\AutoRigi-node` lists that file in `gpu_lease_yield_files`
+* It runs while the owner plays (owner 2026-10-11, `owner_games` empty). cs2 and the desktop leave ~16.5 GB, so it
+  loads with `fit_when_short` (`fit_min_vram_mb` 9000, `fit_target_mb` 1536): part of the layers in RAM, still
+  128k. The first such load took 61 s.
+* It writes `gpu.lease`. The 9B pool node `C:\ProgramData\AutoRig\ai-node` lists that file in `gpu_lease_yield_files`
   and steps aside.
 * It is not in the backend's AI registry: only the film director (`/srv/autorig/data/red_film`) calls it.
