@@ -1179,7 +1179,8 @@ def compose(col: Collector) -> Dict[str, Any]:
                     bl_env = str(bl_in.get("env_exe") or "")
                     bl_list = [b for b in (bl_in.get("installs") or []) if isinstance(b, dict)]
                     bl_main = next((b for b in bl_list if bl_env and str(b.get("path") or "").lower() == bl_env.lower()),
-                                   bl_list[0] if bl_list else None)
+                                   max(bl_list, key=lambda b: tuple(int(x) for x in re.findall(r"\d+", str(b.get("version") or "0")))
+                                       ) if bl_list else None)
                     services["blender"] = {
                         "version": (bl_main or {}).get("version") or "",
                         "path": (bl_main or {}).get("path") or "",
