@@ -516,6 +516,48 @@ def task_page_js(files):
     return {"checked": checked, "failed": len(bad), "failures": bad}
 
 
+def v3_export_fbx(input_name, timeout=300):
+    """Downloads · V3: a corpus V3 rig through the real export queue and a Blender export worker -> a binary FBX
+    whose re-import (inside the worker) finds one armature, the skinned mesh and every take."""
+    import importlib
+    import pwd
+    import time
+
+    backend = str(RELEASE / "autorig-online" / "backend")
+    if backend not in sys.path:
+        sys.path.insert(0, backend)
+    D = importlib.import_module("task_downloads_v3")
+    data = _input(input_name).read_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    folder = D.QUEUE_DIR.parent / "autotests" / sha[:16]
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    (folder / "rigged.glb").write_bytes(data)
+    try:                                                   # the backend (user autorig) writes the job's progress
+        pw = pwd.getpwnam("autorig")
+        for path in (folder.parent, folder, folder / "rigged.glb"):
+            os.chown(path, pw.pw_uid, pw.pw_gid)
+    except (KeyError, PermissionError):
+        pass
+    online = D.worker_online()
+    t0 = time.time()
+    D.enqueue(folder, "autotests", {"sha16": sha[:16], "sha256": sha}, D.parse_fmt("fbx", []))
+    job = {}
+    while time.time() - t0 < timeout and not (folder / "rigged.fbx").is_file():
+        job = D._read_json(D._job_path(folder, "fbx")) or {}
+        if job.get("state") == "failed":
+            break
+        time.sleep(2)
+    job = D._read_json(D._job_path(folder, "fbx")) or job
+    fbx = folder / "rigged.fbx"
+    head = fbx.read_bytes()[:18] if fbx.is_file() else b""
+    report = job.get("report") or {}
+    return {"seconds": round(time.time() - t0, 1), "worker_online": int(online),
+            "fbx_valid": int(head == b"Kaydara FBX Binary"), "bytes": fbx.stat().st_size if fbx.is_file() else 0,
+            "verify_ok": int(bool((report.get("verify") or {}).get("ok"))),
+            "takes": len(report.get("clips") or []), "error": str(job.get("error") or "")[:200]}
+
+
 # ------------------------------------------------------------------------------------------------ live process
 def classic_mirror_live(wait=12):
     """The classic mirror must follow its task: a mirror still «running» after the task is done/error, twice
@@ -619,6 +661,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return backend_unittests(a["modules"])
     if k == "task_page_js":
         return task_page_js(a["files"])
+    if k == "v3_export_fbx":
+        return v3_export_fbx(inp, a.get("timeout", 300))
     if k == "classic_mirror_live":
         return classic_mirror_live(a.get("wait", 12))
     if k == "rig_budget_live":

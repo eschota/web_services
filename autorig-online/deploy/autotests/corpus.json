@@ -263,6 +263,12 @@
    "checks": [
     {"id": "upload_to_rig_24h", "kind": "rig_budget_live", "paths": ["live"], "params": {"hours": 24, "since": "2026-10-10 15:30:00"}, "thresholds": {"upload_p95_s": ["<=", 60], "fast_failed": ["==", 0]},
      "target": {"thresholds": {"prepared_p95_s": ["<=", 60]}, "reason": "an FBX/OBJ upload waits in the converter queue for its prepared GLB before the fast rig (minutes); convert it on the VPS at upload like the ASCII FBX intake", "owner": "Intake · V3"}}
+   ]},
+  {"id": "v3_downloads", "task": null, "cost": 1,
+   "defect": "Downloads · V3: every download/export endpoint refuses a non-subscriber before any export starts; a V3 rig exports to a valid FBX with every animation (Blender export worker)",
+   "checks": [
+    {"id": "unittests", "kind": "backend_unittests", "paths": ["backend"], "params": {"modules": ["tests.test_task_downloads_v3"]}, "thresholds": {"exit": ["==", 0], "ran": [">=", 10]}},
+    {"id": "export_fbx", "kind": "v3_export_fbx", "paths": ["backend"], "tier": "extended", "input": "8369addb.mt-rig.glb", "params": {"timeout": 300}, "thresholds": {"fbx_valid": ["==", 1], "verify_ok": ["==", 1], "takes": [">=", 8], "seconds": ["<=", 240]}}
    ]}
  ]
 }

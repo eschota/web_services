@@ -67,11 +67,24 @@ def _live_routes() -> Optional[Dict[str, str]]:
         data = json.loads(ROUTES_FILE.read_text(encoding="utf-8"))
         value = {"routes": ",".join(data["routes"]) if isinstance(data.get("routes"), list) else str(data.get("routes") or ""),
                  "admin_routes": ",".join(data["admin_routes"]) if isinstance(data.get("admin_routes"), list)
-                 else str(data.get("admin_routes") if data.get("admin_routes") is not None else "all")}
+                 else str(data.get("admin_routes") if data.get("admin_routes") is not None else "all"),
+                 "classic_new_tasks": str(data.get("classic_new_tasks") or "on").strip().lower()}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         value = None
     _ROUTES_CACHE.update(key=key, value=value)
     return value
+
+
+def classic_new_tasks_enabled() -> bool:
+    """Downloads · V3 (owner 2026-10-10: «отмени нахрен старый пайплайн конвертации, оставь только новый»).
+
+    ``"classic_new_tasks": "off"`` in the live routes file sends every new task of every route to V3 and makes
+    ``tasks.create_conversion_task`` refuse new classic (rig / convert) rows. Tasks that already exist, queued or
+    running, finish on the classic converter as before. Rollback: ``"classic_new_tasks": "on"`` (no restart).
+    ``AUTORIG_CLASSIC_NEW_TASKS=off`` does the same when the file is absent."""
+    live = _live_routes()
+    value = live.get("classic_new_tasks") if live else os.getenv("AUTORIG_CLASSIC_NEW_TASKS", "on")
+    return str(value or "on").strip().lower() not in ("off", "0", "false", "no")
 
 
 def route_enabled(route: str, *, is_admin: bool = False, explicit: bool = False) -> bool:
@@ -83,7 +96,7 @@ def route_enabled(route: str, *, is_admin: bool = False, explicit: bool = False)
     for administrator accounts.  An explicit ``pipeline=v3`` request always gets
     V3.  A V3 task never falls back to the legacy rig, whatever these switches say later.
     """
-    if explicit:
+    if explicit or not classic_new_tasks_enabled():
         return True
     route = str(route or "").strip().lower()
     live = _live_routes()

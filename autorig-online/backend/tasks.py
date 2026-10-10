@@ -638,6 +638,14 @@ async def create_conversion_task(
     pk = (pipeline_kind or "rig").strip().lower()
     if pk not in ("rig", "convert", "generate", "v3"):
         pk = "rig"
+    if pk in ("rig", "convert"):
+        # Downloads · V3: the classic converter takes no new tasks while the live switch says so
+        # (v3_intake.classic_new_tasks_enabled); existing tasks are not touched.
+        from v3_intake import classic_new_tasks_enabled
+
+        if not classic_new_tasks_enabled():
+            print(f"[Tasks] classic {pk} task refused for {owner_type}:{str(owner_id)[:40]}: classic_new_tasks=off")
+            return None, "classic_pipeline_off"
     canonical = None
     if pk == "v3":
         if v3_binding is None:

@@ -9,6 +9,8 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - converter: Limb collision · V3 — `5650feb` (arms_spread guard, only `Vlado_Blender/tpose_remap_animation.py` on top of `6674da2`) pushed to converter main, **НЕ выкачен** (f1/f13 под замками выше, f2/f7 на `b386115`): кто катит следующим — везёт его; канарейка = в `tpose_remap_animation_log.txt` строка `guard: X·abduction=…`.
 - backend restart: **Astra admin access · V3** — done 17:02Z: релиз `astra-owner-20261010T1702Z` (= `live-20261010T170005Z-1119323` c Downloads · V3 + `backend/astra_owner_access.py` + якорь в `get_current_user`), autorig-storage перезапущен (Downloads уже рестартовал в 16:58 сам). Инструмент Астры `site_as_owner` (= `sudo astra-priv site-as-owner`) — аккаунт владельца, user id 2, только owner-ходы; заголовок `X-Astra-Owner` принимается только локально. **Стейджите следующий релиз от `current`**, иначе выкинете `astra_owner_access.py`.
 
+- **Downloads · V3 (17:00Z, live)**: классический конвейер закрыт для НОВЫХ задач живым флагом `/srv/autorig/live/config/v3-routes.json` (`"classic_new_tasks": "off"`, `"routes": "all"`; откат — `"on"` и `""`, без рестарта). `tasks.create_conversion_task` отвечает `classic_pipeline_off` на новые rig/convert, retry классики идёт в V3. Существующие и идущие классические задачи не тронуты. Telegram-бот НЕ перезапускался: его авто-сабмит уже идёт в V3 по `routes: all`, ручная кнопка «полная конвертация» в боте до его рестарта ещё может создать классику.
+
 - **Localization · V3** владеет языком пользователя и локализацией (fa/RTL и др.).
   Сырой алерт artifact-cache (`cache=… cap=… reserve=…; last-copy deliverables
   preserved`) чинит Localization: пользователю уходит локализованное сообщение
@@ -1242,3 +1244,43 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Для Multiplayer · V3**: у классических задач один клип `Animation` → `rigged:false` в `MpInfo`, комнаты «norig»; в play-режиме
   в Спонзе камера/спавн у колонны — модель почти не видна (кадр DEV).
 - **Регрессионный гейт**: `gate all --tier base` после выкладки — GATE PASS (65 PASS, 16 XFAIL, 1 PENDING), отчёт `autotests/reports/20261010T164445Z-all-base.json`. Самого вьювера (WebGL) в корпусе нет.
+
+## Downloads · V3 — скачивание только новых файлов, экспорт по запросу, только с Unlimited (2026-10-10 17:15 UTC, на проде)
+
+- **Старый конвейер выключен для новых задач** (см. строку в «Координации»): флаг `classic_new_tasks` в живом
+  `v3-routes.json` (`v3_intake.classic_new_tasks_enabled`), при `off` все маршруты (website/api/telegram/generation/retry)
+  идут в V3, `create_conversion_task` не создаёт новых rig/convert. Проверено: анонимная загрузка `e8960693` (тест,
+  синтетика 8.8 КБ) → `pipeline_kind=v3`; с 17:00:32Z новых классических задач 0, классических в работе 0.
+- **API** (`backend/task_downloads_v3.py`, роутер в main.py после task_page_v3): `GET /api/task/{id}/downloads-v3`
+  (манифест: access, plan, rig sha/version/clips, formats со state ready|instant|missing|queued|running|failed),
+  `POST|GET /api/task/{id}/downloads-v3/{fmt}` (запуск/статус: реальный процент + стадия), `GET …/{fmt}/file?v=<sha16>`
+  (X-Accel из `glb_cache/<task>_v3exports/<sha16>/`). Форматы: `glb` (rigged.glb рана, все клипы), `fbx` (все клипы
+  takes), `zip` (GLB+FBX+клипы GLB+README), `clip-<i>.glb` (режется на VPS за ~0.1 с), `clip-<i>.fbx`. Внутренний клип
+  `rig_check` не отдаётся. Ключ кэша = sha256 текущего `rig/rigged.glb` (новая версия Rig tools/limb fix = новый sha16,
+  `version` = id из `rig/skin/index.json`). Только задачи `pipeline_kind=v3`; классические получают ссылку на свои файлы.
+- **Гейт** (fail closed, до любого экспорта): админ — всегда; владелец задачи с активной подпиской
+  (`users.autorig_subscription_status in active|canceling` и `period_end > now`) — да; аноним → 401 `download_signin`,
+  не владелец → 403, без подписки → 402 `download_subscription`; detail = `user_error_detail` + `plan` (цена из config,
+  checkout `/buy-credits/checkout/autorig-unlimited-monthly?source=task_download&task_id=…`, login
+  `/auth/login?next=/task?id=…&dl=1`). «Смотреть как бесплатный» для админа: кука `ar_view_as=free`
+  (`POST /api/admin/view-as {mode}`, глаз в панели) или `?as=free` (для `site_as_owner` Астры) — только для админ-сессий.
+- **Экспорт FBX**: Blender на VPS нет, MT-очередь Blender без воркеров (все её задачи «no Blender worker took it»).
+  Свой pull-воркер `deploy/v3-export-worker/export_worker.py` на **f7** (Blender 5.1, CPU, задача планировщика
+  `AutoRig V3 Export Worker F7`, AtLogOn, pythonw, лог `C:\Users\user\v3-export-worker.log`, ключ
+  `%USERPROFILE%\.secrets\autorig-v3-export-worker.key`, хэш в `/srv/autorig/secrets/v3-export-workers.json`).
+  Скрипт Blender — `backend/v3_export_blender.py` (воркер берёт его с сервера на каждую задачу), реимпорт FBX —
+  проверка, провал = failed. Очередь `/srv/autorig/data/var/v3-exports/queue`, lease 120 с, 3 попытки, без воркера
+  10 мин → failed. Замер 4f85d45e (300k верш., 18 МБ): FBX 50 с (из них ~25 с выгрузка с f7), клип FBX 36 с, ZIP 108 МБ +15 с.
+- **UI**: `js/task-v3-downloads.js` + `css/task-v3-downloads.css`, подключены в `task-v3.html`; кнопка загрузки
+  (`#tv3-classic`) открывает панель: GLB/FBX/ZIP, клипы, прогресс-бар со стадией, пейволл (замок, 3 строки-иконки,
+  $20/мес, «Войти через Google» / «Подписаться» в новой вкладке; вкладка ждёт активации подписки и продолжает скачивание
+  сама). 42 ключа `dlv3_*` / `error_download_*` / `error_classic_pipeline_off` во всех 5 языках.
+- **Автотесты**: кейс `v3_downloads` (base: `tests.test_task_downloads_v3`, 14 тестов; extended: `export_fbx` —
+  корпусный `8369addb.mt-rig.glb` через настоящую очередь и воркер f7 → валидный FBX, 8 takes, ≤240 с; PASS за 32 с).
+- **Проверено / не проверено**: аноним в Chrome (ru) и на телефоне (fa) → панель → FBX → пейволл со входом, DEV 6550/6551;
+  админ и `?as=free` — на уровне роутера (harness с реальной БД, очередью и f7): 402 без экспорта; админ получает GLB,
+  FBX, ZIP, клип FBX. **Не проверено в браузере**: путь вошедшего пользователя (Chrome не залогинен на autorig.online,
+  логиниться нельзя), сама страница Gumroad, отдача файла через nginx X-Accel под сессией.
+- **Не сделано**: Unity package (нужен конвертер с Unity, по запросу не подключён); старые эндпоинты скачивания
+  классики остаются на прежних правилах (владелец + кредиты) — решение владельца, переводить ли их на подписку;
+  второй экспорт-воркер (f2) для отказоустойчивости.

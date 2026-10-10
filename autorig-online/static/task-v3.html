@@ -9,6 +9,8 @@
     <script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('autorig_theme')||'dark')}catch(e){}</script>
     <link rel="stylesheet" href="/static/css/styles.css">
     <link rel="stylesheet" href="/static/css/task-v3.css">
+    <link rel="stylesheet" href="/static/css/task-v3-downloads.css">
+    <link rel="stylesheet" href="/static/css/public-chat.css">
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
@@ -23,7 +25,7 @@
     <main class="tv3" id="tv3">
         <section class="tv3-stage" id="tv3-stage" aria-label="3D viewer">
             <nav class="tv3-tools" id="tv3-tools" aria-label="Task">
-                <a class="tv3-tool" id="tv3-classic" href="#" title="Downloads · classic viewer" aria-label="Downloads · classic viewer" data-i18n-title="taskv3_tool_classic" data-i18n-aria-label="taskv3_tool_classic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/></svg></a>
+                <a class="tv3-tool" id="tv3-classic" href="#" title="Download" aria-label="Download" data-i18n-title="dlv3_title" data-i18n-aria-label="dlv3_title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/></svg></a>
                 <button class="tv3-tool" id="tv3-share" type="button" title="Copy link" aria-label="Copy link" data-i18n-title="taskv3_tool_share" data-i18n-aria-label="taskv3_tool_share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg></button>
                 <button class="tv3-tool" id="tv3-full" type="button" title="Fullscreen" aria-label="Fullscreen" data-i18n-title="taskv3_tool_fullscreen" data-i18n-aria-label="taskv3_tool_fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
                 <span class="tv3-build" id="tv3-build" hidden></span>
@@ -58,5 +60,7 @@
     <script src="/static/js/site-layout.js"></script>
     <script src="/static/js/i18n.js"></script>
     <script type="module" src="/static/js/task-v3-shell.js"></script>
+    <script type="module" src="/static/js/task-v3-downloads.js"></script>
+    <script defer src="/static/js/public-chat.js"></script>
 </body>
 </html>

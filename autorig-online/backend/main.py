@@ -4757,6 +4757,9 @@ async def api_create_task(
         input_bytes=uploaded_bytes,
     )
     
+    if error == "classic_pipeline_off" and not task:
+        from user_language import user_error_detail
+        raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
 
@@ -5494,6 +5497,9 @@ async def api_create_convert_from_rig_task(
         input_bytes=getattr(parent, "input_bytes", None),
     )
 
+    if error == "classic_pipeline_off" and not task:
+        from user_language import user_error_detail
+        raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
 
@@ -7523,6 +7529,32 @@ async def api_retry_task(
     if not task.input_url:
         raise HTTPException(status_code=400, detail="No input URL to retry")
     
+    # Downloads · V3: with the classic converter closed to new tasks, a retry of a classic task
+    # enters the V3 conveyor with the same uploaded file.
+    from v3_intake import classic_new_tasks_enabled as _classic_on
+
+    if not _classic_on():
+        from v3_intake import V3IntakeError, admit_upload as _v3_admit_upload, local_upload_path
+        from user_language import user_error_detail
+
+        v3_source = local_upload_path(task.input_url)
+        if v3_source is None:
+            raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
+        try:
+            new_task = await _v3_admit_upload(
+                db, path=v3_source, original_url=task.input_url, filename=v3_source.name,
+                owner_type=task.owner_type, owner_id=task.owner_id, origin="retry",
+                created_via_api=bool(getattr(task, "created_via_api", False)),
+                requested_intent="convert" if (task.pipeline_kind or "rig") == "convert" else "rig",
+                input_type=task.input_type or "t_pose", input_bytes=getattr(task, "input_bytes", None),
+            )
+        except V3IntakeError as exc:
+            raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.detail})
+        task.status = "error"
+        task.error_message = f"Retried as V3 task {new_task.id}"
+        await db.commit()
+        return TaskCreateResponse(task_id=new_task.id, status=new_task.status, message="Task resubmitted successfully")
+
     # Create new task (don't deduct credits - it's a retry)
     new_task, error = await create_conversion_task(
         db,
@@ -7534,6 +7566,9 @@ async def api_retry_task(
         input_bytes=getattr(task, "input_bytes", None),
     )
     
+    if error == "classic_pipeline_off" and not new_task:
+        from user_language import user_error_detail
+        raise HTTPException(status_code=409, detail=user_error_detail("classic_pipeline_off"))
     if error and not new_task:
         raise HTTPException(status_code=500, detail=error)
     
@@ -16801,6 +16836,21 @@ app.include_router(
         task_model=Task,
         is_admin_email=is_admin_email,
         glb_cache_dir=GLB_CACHE_DIR,
+    )
+)
+
+# Downloads · V3 (2026-10-10): the task page's download mode. V3 files only, exported on request
+# (FBX by the Blender export workers), every download and export behind the unlimited subscription.
+from task_downloads_v3 import build_task_downloads_v3_router
+
+app.include_router(
+    build_task_downloads_v3_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+        glb_cache_dir=GLB_CACHE_DIR,
+        effective_anon_id=_effective_anon_id,
     )
 )
 
