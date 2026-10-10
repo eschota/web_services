@@ -1,6 +1,153 @@
 # AutoRig development — start here after context compression
 
-Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
+Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persistent checkpoint.
+
+## Актуальный handoff сессии — читать прежде исторических записей
+
+**Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
+Готовность полного рига тела/одежды/волос на пяти разных моделях: **0/5**.
+Ни исходники, ни unit-тесты, ни работающий вьювер сами по себе не доказывают
+завершение конвейера. Ниже указаны реальные границы готовности.
+
+### Текущее требование владельца
+
+- Все новые website/Telegram/API/generation/retry/convert задачи должны идти
+  только через V3, без скрытого fallback на старый rig.
+- Заменить только страницу `/task` текущим Unity-вьювером с агентом, ригом,
+  ретаргетом, эффектами, реальным прогрессом и медиа. Остальные страницы не менять.
+- Сохранить старые пользовательские записи, исходники и результаты.
+- Бесплатный интерактивный 3D; GLB/FBX/Unity package exports по безлимитной
+  подписке $20/месяц. Это требование, не подтверждённая реализация биллинга.
+- Отдельные кости одежды/волос, source-bound Qwen masks, T/A-pose IK corrections,
+  перенос правок в любой ретаргет, поствалидация и реальные видео в `/dev`.
+- Для пульса: Alt, градиент усиливается к краю, отдельное кольцо выключено;
+  Falloff и независимые HDR множители заливки/кольца 0–10, default ×2.
+
+### Production — перепроверено в этой сессии
+
+| Компонент | Фактическое состояние |
+| --- | --- |
+| Release | `/srv/autorig/releases/adminfwd-20261009` |
+| Storage | `autorig-storage.service`, PID 511626 |
+| Motion Transfer | `autorig-mt.service`, PID 2364036 |
+| Renderfin | `autorig-storage-renderfin.service`, PID 693215 |
+| V3 dispatch | `GET http://127.0.0.1:8251/api/mt/v3` → **404** |
+| Default Unity viewer | `/srv/autorig/data/motion_transfer/unity/test` → **pulse-alt-r27-20261010** |
+| Fleet | Срез 08:44 UTC: F1/F7/F13/F2 обслуживали разные legacy commits; V3 endpoint 404. F11 без listener :7000. Этот срез НЕ свежая готовность к deploy. |
+
+Не перезапускать backend вслепую: live `AUTORIG_WIPE_QUEUE_ON_START=1`.
+Production main.py при старте вызывает Renderfin `/api-render/reset` с
+`spare_non_graph=1`; это owner policy, её не отключать самостоятельно.
+Повторить проверку render/chargen/avatar jobs непосредственно перед deploy.
+Старый срез с terminal tasks не гарантирует отсутствие новых задач.
+
+### Репозитории и сохранённый код
+
+| Checkout | Последний проверенный commit | Что сохранено |
+| --- | --- | --- |
+| `R:/autorig` | `42602ea6`, branch `codex/repair-rig-transport-20261006` | V3 cutover contract, durable outbox, atomic Task bindings/lifecycle, новая task shell/resolver. **Не смонтированы.** |
+| `R:/3d_video_motion_transfer` | `4ca5bd0`, branch `main` | 20hex Unity publication bridge, source/artifact checks, gradient-only pulse. **Bridge не смонтирован.** |
+| `C:/3d/GLB_Convverter_Git/GLB_Convverter_WebServer` | `748f36da91c0faeef6f24ac3d6bc1b2635e8dd8c`, branch `agent/v3-normalizer` | Standalone GLB/FBX/OBJ normalizer. **Не merged в main, не deployed.** |
+
+Канонический converter checkout восстановлен из `eschota/autorig.online`;
+`C:/3d/GLB_Convverter_Git/autorig.online` — junction на тот же checkout.
+Checkout sparse: до runtime/deploy проверить материализацию всех зависимостей.
+`R:/autorig/.work/converter-v3-canonical-readonly` — только read-only cache,
+НЕ корень разработки/deploy. Ранее отсутствующий C-checkout теперь существует.
+
+### WIP — сохранить, не считать релизом
+
+- Public backend: `tasks.py` — admission только с server-owned V3 binding,
+  один Task+binding commit и отказ legacy poll/reset/requeue для V3.
+  `task_priority.py` — исключение V3 до SQL LIMIT; новый ownership test.
+- `v3_site_integration.py` и его тест — начатое wiring Task ACL/binding/status/
+  publication lookup. Агент прерван; окончательное ревью/проверка не выполнены.
+- `main.py` содержит большой чужой/предыдущий WIP и отличается по line endings.
+  Не stage/deploy весь файл; только точечные собственные anchors, сохраняя
+  production-only startup behavior. Есть прямые legacy bulk/stuck queries,
+  которые ещё надо изолировать от V3 перед включением.
+- Private MT: HDR/Falloff в RadialPulse math/controller/feature/shader/tests и
+  WebGL template — готовые source edits, **не committed, не built, не deployed**.
+- Converter: queue integration `normalized_source`, TEST_MATRIX, новый queue
+  test, доработки normalizer cancellation/retention — WIP после P1 ревью.
+  Callbacks/reservation уже появились в коде, но актуальная версия ещё НЕ принята.
+- Другой WIP (AI services, admin_bot/agent, layer solver, graphs, worker-4090,
+  GravityHouse и т.п.) не принадлежит этому slice: не уничтожать/не коммитить пачкой.
+
+### Проверки и артефакты — точная область доказательства
+
+- Root V3 source tranche: 28 Python + 18 subtests, 2 JS shell tests passed.
+  Runtime/outbox/adapter после P1: 18 passed; tasks admission agent: 23 passed.
+  Это source/fixture проверки, НЕ production end-to-end.
+- Unity publication: root final 13 tests + 3 subtests passed; Linux isolated
+  audit проверял предыдущую 11-test версию. Нет криптографической подписи:
+  hash-bound QA требует внешнего trusted `proof_verifier`; self-hash не approval.
+- Existing knight transport-only fixture:
+  `R:/3d_video_motion_transfer/.work/v3-publication-real-20261010/receipt.json`,
+  SHA `952c58b727b158b0800119f778c80654f72100d9dc554bfc472c91b4a10f389a`.
+  Реальные rig bytes опубликованы только в локальный nonpublic fixture layout;
+  status **needs_review**, full_agent/source_projection/scene/media = false.
+  Никакая customer Task/API submission не создавалась.
+- Normalizer root: 44 tests passed до последней cancellation/retention доработки.
+  Реальный knight GLB 8,398,056 bytes: byte-exact passthrough **0.064392 s**,
+  без Blender/GPU; это НЕ время полного рига. Receipt:
+  `C:/3d/GLB_Convverter_Git/GLB_Convverter_WebServer/.work/root-real-normalizer-20261010/normalization.json`.
+- Queue integration agent: 79 tests passed до независимого P1 review.
+  Не объявлять её production-ready: актуальные исправления ещё требуют проверки.
+- r29 WebGL **готов и staged как candidate**, не default: build wall 88.810 s,
+  BuildReport 73.568 s; initial 17.683 MiB compressed, full 23.445 MiB,
+  lazy assets 5.761 MiB, baked scenes отдельно по требованию. 17 C# tests/native
+  raster и production browser Alt/typing/bones/gradient/redarc controls passed.
+  Tar SHA `3f1f2e7dfa7e7ed27c0a9fd39a2cc79765000c5fbc491c6d68a2d209e69baa87`.
+  Root browser receipt: `.work/pulse-alt-r26-20261010/browser-1791623010017/receipt.json`.
+  Extra browser receipt: `.work/pulse-gradient-r29-20261010/browser-extra-1791623711703/receipt.json`.
+  Software ANGLE не является hardware FPS benchmark; setup lens/ground не во
+  всех capture совпал с requested settings; optional 404 и blocked settings POST сохранены.
+- r30 HDR build **не выполнен**. Builder получил внешнюю 403 от Codex transport;
+  это не ошибка AutoRig. Сейчас matching Unity/test/native процессы не обнаружены.
+  Не предполагать, что build продолжается по старому agent status.
+
+### Блокирующие технические разрывы
+
+1. Production V3 router/rig worker/analysis authority/runtime ещё не mounted.
+2. Prepared-GLB dispatch не решает raw-image/video admission и generation graph.
+3. Нет принятого общего garment/hair solver; пять моделей по full quality 0/5.
+4. Publication bridge умеет только проверенный rig preview; полный агент требует
+   source/projections/analysis/session layout и корректной private-task авторизации.
+5. Converter P1: atomic child ownership/preemption/lease release и bounded private
+   staging cleanup. Не удалять unacknowledged/last-copy outputs.
+6. FBX/OBJ queue сейчас self-contained only; sealed texture bundles ещё не подключены.
+7. Legacy scheduler/admin/stuck queries не везде отделены от V3.
+8. Subscription/export gates, FBX и настоящий Unity NPC package ещё не интегрированы.
+
+### Следующие действия
+
+1. Завершить и независимо проверить актуальный normalizer queue P1 patch,
+   source ownership/preemption/cleanup tests. Не выкладывать неподтверждённый код.
+2. Завершить site integration callbacks/atomic source admission/whole graph;
+   подключить MT V3 executor и авторитетный анализ; исключить legacy fallback.
+3. Подключить task shell к настоящим persisted Task→run→publication bindings,
+   проверить public/private ACL и результат на реальных существующих моделях.
+4. Выложить точечную immutable web release и exact converter artifact штатным
+   `deploy_farm.bat HEAD` только после clean pushed main/HEAD==origin/main;
+   зафиксировать каждый listener-owned build. F5 development-only, owner4090 не запускать.
+5. Проверить реальный новый task end-to-end, callbacks/notifications, exports/
+   subscription и не менее пяти моделей с движущимися костями/скином.
+6. Доделать r30 native float HDR→WebGL→production browser QA; затем default
+   promotion. r29/r27 rollback artifacts сохранять; новые видео /dev не дублировать.
+
+Агенты на момент handoff: normalizer и task-page прерваны; dispatcher/reviewer/
+pulse-source завершили source slices; builder errored. Перед возобновлением
+прочитать текущий Git diff и проверить реальные process/session handles.
+Не писать «всё переведено», пока production и все перечисленные gates этого не доказывают.
+
+Подробный исторический checkpoint и исследования:
+`R:/3d_video_motion_transfer/HANDOFF.md`; план:
+`R:/autorig/autorig-online/docs/V3_ONLY_CUTOVER.md`.
+
+---
+
+## Исторические checkpoints (ниже не считать текущим состоянием)
 
 CURRENT OWNER PRIORITY 2026-10-10: FULL V3-only task conveyor+fleet, replace only
 task page with currentUnity viewer/agent/effects; otherpagesunchanged. New scoped
