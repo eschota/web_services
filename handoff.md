@@ -1340,3 +1340,59 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `/api/mt/unity/test/index.html?run=d1522b45a0b1c2d3e4f5`), аудит `/srv/autorig/audits/limb-stab-20261010/`.
   **Рестарт autorig-mt после round 3 отложен**: шёл V3-ран 5ee6219f (задача 7c1b6748, numeric QA ~1 чанк/мин); фоновый
   цикл рестартует в первое окно простоя (до 2 ч). До рестарта конвейер в памяти — round 2 (без пинов суставов).
+
+## V3 triage · rig quality — список входящих задач, Астра, корни дефектов фастрига (2026-10-10 18:00 UTC, на проде)
+
+- **Триаж-лист** (MT `8f325d0`): `mt/triage.py`, цикл в autorig-mt раз в 60 с по задачам сайта за 48 ч (V3 и зеркала
+  классики) — только читает то, что уже записали проверки (category, rig.json, fast.json, limb_collision.json,
+  parts.json, rig-qa.json, joint-judge.json, веса из самого GLB раз на файл → `analysis/triage_weights.json`).
+  `GET /api/mt/triage?since=6h|<epoch>&format=text&defects=1&task=<id,…>` — только админ (cookie), ключ MT
+  owner/codex/astra или локальный вызов на хосте без прокси-заголовков; снаружи 403. CLI `python -m mt.triage --since
+  24h --text [--refresh]`. Файлы: `MT_ROOT/triage/items/<task>.json`, `classes.json` (первое появление каждого класса),
+  `feed.jsonl` (строка на новую/изменившуюся задачу). Классы — стабильные ключи: `limb_in_body.left|right`,
+  `arms_unbound.*`, `sleeve_smear.*`, `bent_arms_as_hanging.*`, `bone_outside`, `prop_skinned`, `skeleton_unfitted`
+  (топ-2 кости ≥ 85 % вершин или ≥ 2 весовых сустава вне коробки меша — то, о чём просил Skinning → converter),
+  `scale_mismatch`, `unweighted`, `rig_failed`, `rig_slow`, `run_error`, `qa.<gate>`, `judge_fix`. Новый класс →
+  `VERSION` в triage.py не трогать без нужды (кэш пересчитывается).
+- **Астра** (MT `8f325d0`): `watchloop.triage_events/triage_new_classes/triage_picture` + в `bridge.wake` источник
+  `triage` (первое пробуждение ставит базу, бэклог не повторяется); новый класс дефекта мост сам шлёт в DEV от «Astra»
+  с картинкой худшего кадра (`triage_escalate`), строки задач идут в watch-ход в UNTRUSTED-заборе. Тесты
+  `tests/test_astra_safety.py` 38/38 (как user astra). Перезапущен только `autorig-admin-bot`.
+- **arm_clearance** (MT `968f92b`, новый шаг конвейера): после ретаргета V3 вместо голой проверки `_limb_check` гоняет
+  `python -m mt.arm_clearance --dir <run> --check` (сначала тот же отчёт limb_collision; если сторона ≥ medium —
+  покадровый доворот плеча из тела по радиальной нормали, ключи с «шатром» по времени, 2 прохода); новая версия
+  рига через `skin_tools.Store` (v0 остаётся), ставится только если детектор говорит «лучше» и риг не менялся
+  за время расчёта. QA ждёт его (≤ 420 с). Выключатель `MT_ARM_CLEARANCE=off`. Корпус: рыцарь 8369addb high/high →
+  none/none; мальчик 98c1247c R high → none; af874411 medium/medium → none; 7831327b high/medium → low/none;
+  хуже — не ставится (d76f84c3, манекены). DEV 6552. Чек автотестов `mt_arm_clearance` (boy base, fastrig_arms ext).
+- **retarget: концевые кости** (прод `mt/retarget.py` 21e5270f, патч `tools/patch_retarget_end_align.py`; владелец
+  DEV 6553 «рука … должна в продолжение кисти идти»): кисть/носок/голова без дочернего направления в библиотеке не
+  выравнивались → постоянный излом запястья = угол рук модели в покое (Idle 22–96° между кистью и предплечьем на всех
+  фастригах). Теперь берут выравнивание родителя цепи: Idle 17° у всех (это собственное движение клипа), носки 0°.
+  Прод был 37b3dbf (коммит 6a278dd с `transport_world_deltas` / политикой `retarget_reference_policy` на прод не
+  выкатывался); теперь прод = Git HEAD + мой ханк (MT `a21f3da`, sha 89cc157d; политика по умолчанию
+  `aligned_reference` = прежнее поведение, `tests/test_retarget_bind_invariants.py` 4/4, запястья те же). Порог `maniac_neck/mt_numeric bad_frame_share` 0.80 → 0.85 (слой в Idle
+  101 → 504, в Walking 63 → 0; горячие точки растяжений те же) — только в прод-манифесте, в Git его ещё нет.
+- **fastrig: оболочки = тело** (MT `46bd1f1`, патч `tools/patch_fastrig_dense_attach.py`): коробки-манекены
+  (63bf5d35, 8a1b1cc5, dlv3-probe e8960693) — ложных Prop 3 → 0, позвоночник −0.33 H → центр, суставы вне тела
+  16 → 2, обе руки привязаны; меч в руке остаётся пропом. Цели манекенов в манифесте переведены в PASS. DEV 6554.
+- **fastrig: плотные меши на прокси** (MT `132487e`, `tools/patch_fastrig_proxy.py`, `FASTRIG_PROXY_VERTS`=300000):
+  Meshy-енот 7c1b6748 (943k сваренных): fastrig 43 → 28 с, rig_first 55 → 42 с (в гейте 27.9 с), растяжения 85k → 26k.
+  Кейс `meshopt_dense` (extended) в корпусе. Меши < 300k не меняются.
+- **Живой ремонт** (новые версии v1, v0 цела): 5f6f91fc (ран 6052580a) L/R high → medium/none; 8635aa06 (cc22a7e0)
+  medium/high → none/none. Остальные V3 за сутки — без флага.
+- **fast_analysis: открытые меши** (MT `8cc9600`, `tools/patch_fast_open_mesh_guard.py`; просьба Limb stabilization):
+  фикс суставов не применяется, если до него > 25 % проб «снаружи» (меш не замкнутое тело: фокс 7c9aaae7 222/528 —
+  ноги и шея уезжали в хвост на 2–5 % H). Только отчёт.
+- **Категорийные дефолты скина (91a9513a) — из данных**: сетка `influence` плечо/локоть 0.7/0.5/0.4 (engine rebuild)
+  на 9 гуманоидах корпуса против сегодняшних 1.0: leak −2826…−4218 и lag −294…−638, но stretch_2x +4686…+6030,
+  clip_4x +143…+1211, stretch_4x +895…+2068 (рыцарь, эльф — разрывы). Для фастрига значения 91a9513a (подобраны на
+  классическом риге конвертера, engine refine) хуже → `fast_registry.json → skin_options` НЕ меняю, дефолт humanoid = 1.0.
+  Данные: `/srv/autorig/data/v3triage/grid/g1|g2/results.json`.
+- **Инцидент 18:10 UTC (память)**: плотный енот 1M вершин — numeric QA (2 партии воркеров по ~0.9 ГБ, первая
+  осиротела после повтора QA), 2 joint_judge (3.7 ГБ), limb_collision — своп 16/16 ГБ, autorig-mt в D-state, API MT
+  не отвечал. Убил только осиротевших воркеров `v3_numeric_qa` (ppid 1) — API ожил. **Intake**: воркеры QA должны
+  умирать с родителем и учитывать своп; **Rig judge**: не брать 1M-вершинные раны параллельно с QA.
+- **Не сделано / кому**: (1) arm_clearance на 1M вершин: таймаут 420 с сработал на 5ee6219f (теперь одна детекция
+  вместо четырёх, но детекция limb_collision на 1M ~80 с) — для плотных брать прокси-меш; (2) v3-triage добавлен
+  Астре (`tools/bin/v3-triage`, registry, /dev/tools — виден).
