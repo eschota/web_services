@@ -250,6 +250,31 @@ def subject_of(words: str) -> str:
     return "unknown"
 
 
+QUAD = r"\b(dog|cat|horse|wolf|fox|bear|lion|tiger|deer|cow|bull|pig|rabbit|raccoon|quadruped|mouse|rat|elephant|"        r"puppy|kitten|pony|goat|sheep|camel|giraffe|hippo|rhino|boar|panther|leopard|cheetah|hyena|donkey|lizard|"        r"crocodile|turtle|dinosaur|triceratops)\b"
+BIPED_HINT = r"\b(humanoid|anthropomorphic|standing|warrior|knight|man|woman|girl|boy|person|human|character in|"              r"wearing|outfit|clothing|dress|suit|soldier|worker|robot|android|zombie|kid|child|lady|mage|wizard)\b"
+
+
+def words_plan(words: str) -> str:
+    """The body plan the task's words name (the LLM poster title and keywords, the file name): what the conveyor's
+    Vision answer would rebuild a geometry-only 'root' rig with. '' when the words do not say."""
+    w = " " + re.sub(r"[_\-.]+", " ", str(words or "").lower()) + " "
+    if re.search(r"\b(glove|gloves|gauntlet|fps arms?|first person arms?)\b", w):
+        return "hands"
+    if re.search(QUAD, w) and not re.search(BIPED_HINT, w):
+        return "quadruped"
+    if re.search(BIPED_HINT, w) or re.search(r"\b(character|figure|mannequin|base mesh|avatar)\b", w):
+        return "biped"
+    return ""
+
+
+def override(sha: str) -> dict:
+    con = db()
+    con.execute("CREATE TABLE IF NOT EXISTS overrides(sha TEXT PRIMARY KEY, plan TEXT, source TEXT, at REAL)")
+    row = con.execute("SELECT plan, source FROM overrides WHERE sha=?", (sha,)).fetchone()
+    con.close()
+    return {"plan": row[0], "source": row[1]} if row else {}
+
+
 def to_glb(src: pathlib.Path, fmt: str, dst: pathlib.Path) -> dict:
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(f".model.{os.getpid()}.tmp")
@@ -347,6 +372,15 @@ def one(sha: str) -> dict:
         t = time.time()
         rt = {}
         doc = R.build(rd, "", timings=rt)
+        out["first_plan"] = doc.get("body_plan")
+        out["plan_source"] = "geometry"
+        # the conveyor rebuilds the rig when Vision names another body plan; offline the census uses a Vision answer
+        # of its own sample (overrides) or, for a geometry-only 'root', the task's words
+        ov = override(sha)
+        want = ov.get("plan") or (words_plan(words) if doc.get("body_plan") == "root" else "")
+        if want and want != doc.get("body_plan"):
+            doc = R.build(rd, "", plan=None if want == "hands" else want, timings=rt)
+            out["plan_source"] = ov.get("source") or "words"
         T["rig_build"] = round(time.time() - t, 2)
         T["rig_steps"] = rt
         t = time.time()
@@ -391,6 +425,9 @@ def one(sha: str) -> dict:
                                "updated_at": None, "input_url": "", "poster_llm_title": ""},
                               {"session_json": json.dumps({"mt_run_id": rid}), "status": "done", "stage": "done"})
         D = [d for d in item.get("defects") or [] if not d["key"].startswith(("qa.", "run_", "poster_"))]
+        if out["first_plan"] != doc.get("body_plan"):           # the first rig in the viewer had the wrong plan
+            D.append({"key": "plan_geometry_wrong", "severity": 1,
+                      "detail": f"geometry {out['first_plan']} -> {doc.get('body_plan')} ({out['plan_source']})"})
         out["defects"] = D
         out["verdict"] = {3: "defect", 2: "review", 1: "ok_notes", 0: "ok"}[max([d["severity"] for d in D] or [0])]
         out["worst"] = D[0]["key"] if D and D[0]["severity"] >= 2 else ""
@@ -440,7 +477,7 @@ def record(con, out: dict, rev: str):
         out.get("bones"), out.get("category"), out.get("subcategory"), out.get("subject"), out.get("constitution"),
         out.get("proportion"), out.get("build"), out.get("verdict"), out.get("worst"),
         json.dumps([d["key"] for d in out.get("defects") or []]), json.dumps(out.get("metrics") or {}, default=str),
-        out.get("rig_s"), json.dumps({k: out.get(k) for k in ("features", "timings", "clips", "forward_axis",
+        out.get("rig_s"), json.dumps({k: out.get(k) for k in ("features", "timings", "clips", "forward_axis", "first_plan", "plan_source",
                                                               "convert", "bbox", "welded", "arm_clearance_error")},
                                      default=str)))
     con.commit()
