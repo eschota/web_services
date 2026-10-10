@@ -112,6 +112,8 @@ What it means for every agent:
   * The output names the `previous` release, which is the rollback.
   * `--no-promote` keeps a change in the overlay only; `ls`, `rm`, `promote`
     and `gc` manage the overlay.
+  * `put` refuses a JS file that fails `node --check` and a JSON file that
+    does not load. This is the cheap part of the release gate.
   * Backend code is not live-editable: it needs a release and a restart.
 * nginx serves `/static/` from the overlay first, then the release.
   * JS/CSS whose `?v=` is an exact 10-hex content stamp are immutable.
@@ -207,9 +209,12 @@ Owner rule, 2026-10-10:
      live;
   2. wait until `fleet_drain.py status <box>` says idle;
   3. run `deploy_farm.bat HEAD -Nodes <F..>`;
-  4. run the V3 canary driver and `rig_canary.py <box> <tunnel port>`
-     (legacy only_rig, which also runs the lazy asset preflight);
-  5. `fleet_drain.py restore <box>`.
+  4. run the V3 canary driver and
+     `sudo python3 /srv/autorig/fleet/rig_canary.py <box> <tunnel port>`
+     (legacy only_rig, which also runs the lazy asset preflight, then the
+     regression autotests on its rigged GLB; add `--corpus` on a converter
+     rollout to convert the known-bad models);
+  5. `fleet_drain.py restore <box>`, only after the canary exits 0.
 * The fleet service posts to the DEV channel (UTF-8, from the VPS) when a
   work drive of an in-fleet box drops under 10 GB. It re-arms above 15 GB,
   repeats every 12 h while low and escalates under 2 GB. Facts no probe
@@ -270,6 +275,29 @@ Owner rule, 2026-10-10:
   * The V3 conveyor rigs in 4–10 s (`fastrig`), but its analysis and QA phases
     have taken up to 400 s.
 
+## V3 Only: Live Triage of Every Incoming Task
+
+Owner rule, 2026-10-10:
+
+> мы полностью переходим на V3 и в реалтайме разбираемся со всем потоком
+> входящих задач на постоянной основе совершенствуя риг и инструменты работы
+> с 3д моделями
+
+* **V3 only.** Every new task runs on V3 (fastrig, clips, fast analysis,
+  background QA). The classic converter pipeline is cancelled for new tasks.
+  The converter stays only as an on-demand exporter where nothing else can
+  make a format.
+* **Live triage.** Every incoming task is triaged live, all the time. The
+  automatic checks (fast analysis, limb collision, joint centring, parts, QA)
+  feed one triage list.
+* **A defect is worked, not just logged:**
+  1. the model goes into the regression corpus;
+  2. the cause is fixed in the rig or the tools for every model, not only
+     this one;
+  3. the customer's task is repaired with the tools when possible.
+* **Astra's watch loop reads the triage list.** It escalates new defect
+  classes to the owner through DEV with a picture.
+
 ## Every Release Passes the Regression Autotests
 
 Owner rule, 2026-10-10:
@@ -294,6 +322,33 @@ Owner rule, 2026-10-10:
 * **One place.** The suite, the corpus manifest and the runner live in Git.
   An agent that finds a new defect adds its model to the corpus in the same
   change.
+
+How to run it (`autorig-online/deploy/autotests/`, installed in
+`/srv/autorig/autotests`; corpus copies are read-only in
+`/srv/autorig/data/autotests/corpus`; reports in `.../reports`):
+
+* MT code: `sudo /srv/autorig/autotests/autotests.py mt-deploy --mt-file
+  mt/<x>.py=<your file> [--restart]`. It stages your files over a copy of
+  production MT and runs the base suite on that tree. Only a PASS installs
+  them, with a backup in `mt.prev/`, an atomic replace and an import check.
+  It refuses if production changed meanwhile, and it restarts only when
+  nothing is running. The same check without installing:
+  `sudo /srv/autorig/autotests/gate mt --mt-file mt/<x>.py=<file>`.
+* Backend release: `sudo /srv/autorig/autotests/gate backend --release
+  "$CUR-<change>"` before `current` is repointed.
+* Converter node: `sudo python3 /srv/autorig/fleet/rig_canary.py <box>
+  <tunnel port>` before `fleet_drain.py restore`. On a rollout, add
+  `--corpus` to also convert the known-bad models.
+* Task page JS/JSON: `live_static.py put` refuses a file that does not parse.
+* Live processes (stuck classic mirror, the 60 s rig budget):
+  `sudo /srv/autorig/autotests/gate live`.
+* Every night at 02:40 UTC, `autorig-autotests-nightly.timer` runs `gate all
+  --tier extended` and posts to DEV only on a FAIL.
+* Verdicts: PASS, FAIL and ERROR block the release. XFAIL is a known defect
+  with a reason and an owner agent; XPASS means the defect is fixed, so flip
+  the case to pass. PENDING means the case's detector has not landed yet.
+  Add a case in `corpus.json`, then run `autotests.py sync --write-manifest`
+  and mirror the sha256 values back into Git.
 
 ## Tools Have Options
 
@@ -445,6 +500,7 @@ ssh autorig-vps
 CUR=$(readlink -f /srv/autorig/current)
 sudo cp -a "$CUR" "$CUR-<change>"          # stage beside the live release
 # copy in the exact changed files, run the relevant tests inside the staging dir
+sudo /srv/autorig/autotests/gate backend --release "$CUR-<change>"   # GATE PASS or stop
 sudo ln -sfn "$CUR-<change>" /srv/autorig/current.new
 sudo mv -Tf /srv/autorig/current.new /srv/autorig/current
 sudo systemctl restart autorig-storage.service
@@ -612,6 +668,7 @@ Backend Python or dependency changes:
 ```bash
 ssh autorig-vps
 # stage a release as above, copy the backend files in, then:
+sudo /srv/autorig/autotests/gate backend --release "$CUR-<change>"   # GATE PASS or stop
 sudo mv -Tf /srv/autorig/current.new /srv/autorig/current
 sudo systemctl restart autorig-storage.service
 systemctl status --no-pager autorig-storage.service
