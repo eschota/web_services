@@ -1052,3 +1052,39 @@ This scoped development checkpoint does not overwrite the unrelated historical
   захват рукояти пропа; (3) marching cubes / dual contouring → изоповерхность, ретопология под деформацию пальцев;
   (4) перенос UV/текстуры проекцией с исходной кисти; (5) сшивка по запястью (общий контур, сварка вершин);
   (6) веса Hand/пальцев геодезически, проп — жёстко к кисти; (7) QA: зазор кисть–рукоять, растяжения в Idle/Walking.
+
+## Rig tools · V3 — инструменты скина и суставов с опциями (2026-10-10 16:00 UTC, на проде)
+
+- **Зачем**: владелец в V3-сессии задачи 91a9513a: «плечи цепляют лишнее, как и локти … понизить дальность трешодов»,
+  агент ответил, что инструмента нет. Правило AGENTS.md «Tools Have Options».
+- **Код** (MT-репо): `mt/skin_tools.py` (SPEC опций, движки, метрики, версии, CLI `python -m mt.skin_tools
+  get|reskin|recentre|use|undo|list|save --run <run>`), `tools/patch_skin_options.py` (24 якорные правки
+  `mt/fastrig.py`: `skin(..., opts)`, `build(..., skin_options=None)`; дефолты = прежние константы, проверено:
+  пересборка с пустыми опциями даёт те же веса), `tools/patch_agent_rig_tools.py` (строка 7 в SYSTEM + блок
+  инструментов в конце `mt/agent.py`). Скрипты идемпотентны: **Rig path / Fast analysis, если перезаливаете
+  fastrig.py или agent.py целиком — прогоните их снова**, иначе инструменты пропадут.
+- **Опции** (`SPEC`): `influence` {shoulder elbow wrist hip knee ankle neck spine} 0.1–2 (1 = как сейчас),
+  `influence_bone`, `capture_radius`, `smooth_steps`, `smooth_joint_steps`, `smooth_keep`, `max_influences` 1–4,
+  `distance_mode` euclidean|geodesic, `recentre`/`recentre_strength`, `prop_mode` rigid|hand|skin, `hair_weld_band`,
+  `limb_root_cut`, `clavicle_distance_scale`. Ошибки — локализованные (en/ru/fa/zh/hi) с допустимым диапазоном.
+- **Движки**: `refine` (любой риг: классический 71 кость ARP, fastrig, judge) — свой вес конвертера сохраняется, у
+  каждого сустава (плечо = корень ключицы и корень плеча, локоть, запястье, бедро, колено, лодыжка, шея) кость
+  конечности держит вершины остального тела только в пределах influence × сегодняшнего радиуса (от пивота;
+  geodesic — по треугольникам), и наоборот; после сглаживания ограничения применяются снова. `rebuild` (только
+  fastrig) — fastrig.build с закреплёнными суставами и опциями, веса переносятся в текущий GLB по сварке (клипы
+  остаются).
+- **Метрики** (одни позы до/после, каждая крутит один тип сустава): leak (неподвижная группа сдвинута > 1 % H дальше
+  1.5 радиуса сустава), lag (движущаяся конечность отстаёт), stretch_2x/4x. A/B картинка `rig/skin/v<N>/ab.png`.
+- **Версии**: `<run>/rig/skin/index.json`, `v0` = риг как был (не меняется). `use` пишет версию туда, откуда читает
+  вьювер: `rig/rigged.glb` + `rig.json.built_at` (MT/V3), или для классической задачи — `glb_cache/<task>_animations*.glb`
+  (атомарно; оригинал конвертера в v0; скачивания FBX/ZIP остаются от конвертера). Вьювер перезагружает сам (~10 с).
+- **Агент**: `rig_options_get` (публичный, чтение), `reskin`, `recentre_joints`, `rig_version list|use|undo`,
+  `rig_options_save scope=run|category` — меняющие риг только для owner/admin-сессий; category — только owner
+  (`--admin`), хранится в `fast_registry.json` → `skin_options` (вне `categories`, версии + history), fastrig.build
+  применяет его к новым ригам этой категории. В `/dev/tools` все пять видны.
+- **Проверено на проде** (задача 91a9513a, ран 475f08c2ae7aae69c11d): reskin shoulder 0.4 elbow 0.4, 4 с — плечи leak
+  72→0, lag 89→36, локти leak 188→0, stretch локтей 143→130, плеч 255→257; применено как v1, вьювер задачи загрузил
+  v1 сам. Шея (2676 leak) не трогалась. DEV 6532–6533. Откат: `rig_version undo` или
+  `python -m mt.skin_tools use --run 475f08c2ae7aae69c11d --version v0`.
+- **Не сделано**: per-task-owner доступ к reskin (сейчас только admin), отдельная кнопка A/B во вьювере (A/B =
+  переключение версий), recentre для классики двигает мало (суставы ARP уже у центра своего сечения).
