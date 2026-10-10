@@ -2191,6 +2191,12 @@ async def _support_forum_message_handler(update, context):
     user = msg.from_user
     from_bot = bool(user is not None and getattr(user, "is_bot", False))
     txt = getattr(msg, "text", None) or ""
+    try:                                             # «бот …» is the owner talking to Astra, never a visitor reply
+        from support_ai import addressed_to_bot
+        if not from_bot and addressed_to_bot(txt):
+            return
+    except Exception as exc:                         # noqa: BLE001
+        print(f"[SupportAI] matcher unavailable: {exc}")
     await ingest_support_reply_from_forum_message(
         forum_chat_id=int(msg.chat_id),
         message_thread_id=int(mtid),
@@ -2208,9 +2214,12 @@ async def _start_cmd(update, context):
         forum_cid = await resolve_support_forum_chat_id(db)
     if forum_cid is not None and int(chat.id) == int(forum_cid):
         if update.message:
-            await update.message.reply_text(
-                "This forum is for support threads. Task notifications cannot be subscribed via /start here; use the site chat bubble."
-            )
+            try:                                     # the owner asked for a clear answer here (2026-10-10)
+                from support_ai import START_TEXT as start_text
+            except Exception:                        # noqa: BLE001
+                start_text = ("This forum is for support threads. Task notifications cannot be subscribed via "
+                              "/start here; use the site chat bubble.")
+            await update.message.reply_text(start_text)
         return
     title = getattr(chat, "title", None) or getattr(chat, "username", None) or getattr(chat, "full_name", None)
     print(f"[Telegram] /start command from chat_id={chat.id}, type={getattr(chat, 'type', None)}, title={title}")
@@ -2900,6 +2909,13 @@ async def run_polling() -> None:
             _support_forum_message_handler,
         )
     )
+    try:                                             # Astra's customer-safe support answers (support_ai.py)
+        import support_ai
+        app.add_handler(CallbackQueryHandler(support_ai.on_callback, pattern=support_ai.CALLBACK_PATTERN))
+        app.add_handler(CommandHandler("support", support_ai.on_command))
+    except Exception as exc:                         # noqa: BLE001 - the bot works without it
+        print(f"[Telegram] support AI unavailable: {exc}")
+        support_ai = None
 
     await app.initialize()
     await app.start()
@@ -2912,6 +2928,8 @@ async def run_polling() -> None:
     await _reattach_chargen_watchers(app.bot)
     # a finished model no longer waits behind a button
     asyncio.create_task(_auto_submit_loop())
+    if support_ai is not None:
+        asyncio.create_task(support_ai.loop(app.bot))
 
     active_chats = await get_active_chat_ids()
     print(f"[Telegram] Bot started. Active subscribers: {len(active_chats)}")
