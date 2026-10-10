@@ -144,7 +144,7 @@ Owner rule, 2026-10-10:
     * `autorig_capable_array`: converters AutoRig can dispatch to right now;
     * `autorig_dispatch_enabled_array`, `healthy_full_converters_array`;
     * `hunyuan_ready_array`, `ai_ready_array`, `v3_ready_array`;
-    * `v3_target_artifact_sha256`, `low_disk_array`.
+    * `v3_target_commit`, `low_disk_array`.
   * `queues_object`: AutoRig created/processing tasks and processing per
     box, done/error per box over 24 h, Renderfin pending/rendering, and the
     converters' own queues.
@@ -161,8 +161,12 @@ Owner rule, 2026-10-10:
       gateway) and whether the public gateway is up;
     * `build_object`: build, commit, deployed artifact SHA-256, deploy
       protocol and drift;
-    * `v3_object`: V3 endpoint present, deployed versus accepted artifact,
-      `ready` and `blocked_by`;
+    * `v3_object`: `ready` and `blocked_by`. A node is V3-ready when
+      `deploy_commit` and `boot_build_id` equal the accepted commit,
+      `feature_flags.normalized_source` is true and the V3 route answers.
+      `deploy_farm.bat` ships per-base delta artifacts, so the artifact
+      SHA-256 differs per node by design: compare commits, and each node's
+      artifact only with its own rollout record;
     * `gpu_object`, `disks_array` (every drive; `work_drive` marks the drives
       AutoRig works on) and `quarantine_array` (`_retired_*` sizes);
     * `blockers_array`, `warnings_array`, `notes_array`, `last_seen_utc`;
@@ -193,6 +197,24 @@ Owner rule, 2026-10-10:
   * It updates itself from `/api/fleet/agent.ps1`. Keys:
     `/srv/autorig/secrets/fleet-agent-keys.json`; render boxes reuse their
     LoRA sync key.
+* The accepted V3 converter is recorded in
+  `/srv/autorig/data/var/fleet/v3_target.json`: `commit`, plus one record
+  per node under `nodes` (base commit, delta artifact, canaries). Update it
+  by read-modify-write; the Converter agent and the fleet agent both edit it.
+* A converter deploy drains one node at a time:
+  1. `sudo python3 fleet_drain.py drain <box>` (in `deploy/fleet/`) turns off
+     its `worker_endpoints` row, Hunyuan pool flag and LLM routing, all read
+     live;
+  2. wait until `fleet_drain.py status <box>` says idle;
+  3. run `deploy_farm.bat HEAD -Nodes <F..>`;
+  4. run the V3 canary driver and `rig_canary.py <box> <tunnel port>`
+     (legacy only_rig, which also runs the lazy asset preflight);
+  5. `fleet_drain.py restore <box>`.
+* The fleet service posts to the DEV channel (UTF-8, from the VPS) when a
+  work drive of an in-fleet box drops under 10 GB. It re-arms above 15 GB,
+  repeats every 12 h while low and escalates under 2 GB. Facts no probe
+  can see, such as a box powered off on purpose, go into
+  `/srv/autorig/data/var/fleet/operator_notes.json`.
 * Do not probe boxes one by one over SSH to learn their state. If something
   is missing from the API, add it to the API or to the box agent.
 * AutoRig reaches the converters through the VPS tunnels.

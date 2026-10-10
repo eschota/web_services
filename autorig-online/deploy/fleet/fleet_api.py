@@ -1251,8 +1251,11 @@ def compose(col: Collector) -> Dict[str, Any]:
     ai_ready = [b["id"] for b in in_fleet
                 if (b["services_object"].get("ai_node") or {}).get("accepting")
                 or ((b["services_object"].get("converter") or {}).get("accepting") or {}).get("ai_vision")]
+    # Renderfin sends Hunyuan jobs only to registry-enabled nodes, so the pool
+    # flag counts as much as the node's own accepting flag.
     hunyuan_ready = [b["id"] for b in in_fleet
-                     if ((b["services_object"].get("converter") or {}).get("accepting") or {}).get("hunyuan")
+                     if (((b["services_object"].get("converter") or {}).get("accepting") or {}).get("hunyuan")
+                         and (b.get("dispatch_object") or {}).get("hunyuan_enabled"))
                      or ((b["services_object"].get("hunyuan") or {}).get("accepting")
                          and (b["services_object"].get("hunyuan") or {}).get("enabled_in_pool"))]
     summary = {
