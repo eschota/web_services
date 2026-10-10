@@ -1967,11 +1967,13 @@ async def find_and_reset_stale_tasks(
     lookup = get_worker_active_lookup(queue_status)
 
     # Find all non-terminal tasks.  V3 rows have their own durable runtime and
-    # an explicit needs_review state; the legacy timeout must never touch them.
+    # an explicit needs_review state; a generation row is owned by its pump and
+    # Renderfin (it may wait hours for a Hunyuan slot): the legacy stale reset and
+    # global timeout must never touch either.
     result = await db.execute(
         select(Task).where(
             Task.status.notin_(["done", "error"]),
-            Task.pipeline_kind != "v3",
+            Task.pipeline_kind.notin_(["v3", "generate"]),
         )
     )
     active_tasks = result.scalars().all()
