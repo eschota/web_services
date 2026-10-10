@@ -1215,4 +1215,4 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `Mp*` методы разрешены, `/dev/tools` их показывает (`catalog.py` = прод, обе копии).
 - **Для Multiplayer · V3**: у классических задач один клип `Animation` → `rigged:false` в `MpInfo`, комнаты «norig»; в play-режиме
   в Спонзе камера/спавн у колонны — модель почти не видна (кадр DEV).
-- **Регрессионный гейт** («Autotests · V3») ещё не появился — сборка прошла без него.
+- **Регрессионный гейт**: `gate all --tier base` после выкладки — GATE PASS (65 PASS, 16 XFAIL, 1 PENDING), отчёт `autotests/reports/20261010T164445Z-all-base.json`. Самого вьювера (WebGL) в корпусе нет.
