@@ -114,9 +114,10 @@ BOXES: List[Dict[str, Any]] = [
     {"id": "worker-4090", "hosts": ["win-giv14mf4pfc"], "render": "worker-4090", "ai": "worker-4090-ai",
      "lora": "worker-4090", "gpu_hint": "RTX 4090", "work_drives": ["C:", "R:"],
      "note": "the owner's own PC: his GPU first; never start, stop or reboot without his go-ahead"},
-    {"id": "f5", "hosts": ["f5-pc"], "render": "f5", "lora": "f5", "gpu_hint": "RTX 3070",
+    {"id": "f5", "hosts": ["f5-pc"], "render": "f5", "lora": "f5", "gpu_hint": "RTX 3070 Ti",
      "work_drives": ["C:", "D:"],
-     "out_of_fleet": "owner order 2026-10-08: another project runs there; do not touch or route work"},
+     "note": "back in the fleet by the owner's order 2026-10-11 («на нём мы разрабатывали V3, так что просто верни "
+             "его во флот … все возможности флота»); out of it 2026-10-08 → 2026-10-11"},
 ]
 BOX_BY_ID = {box["id"]: box for box in BOXES}
 
