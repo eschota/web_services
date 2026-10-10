@@ -1646,3 +1646,49 @@ This scoped development checkpoint does not overwrite the unrelated historical
   operator flags; task 2ad5c0c8 (stretched arm, 708k tris, unmeasured by the rig checks) is flagged `rig_stretch.owner_report`.
 - Open: the poster is the rest pose, not an animation frame; `/api/gallery` still returns `author_email` (public) and
   TaskCard shows its local part: replace it with the public handle (`/api/people`).
+
+## Pre-rig tessellation · V3 — тесселятор перед ригом для низкополигональных моделей (2026-10-10 ~21:30 UTC, на проде, MT `51daf27`+)
+
+- **Зачем**: владелец, задача dd498832 «Пиксельный Чибик» (580 треугольников, рёбра до 31 % H, медиана 8.5 %): огромные
+  треугольники на плечах/бёдрах берут по одному весу на угол и мнутся/рвутся в клипах. Его слова: «нужен автоматический
+  тесселятор как шаг перед полным ригом в таких случаях, в зависимости от средней тексельности треугольников».
+- **Код**: `mt/tessellate.py` + `tools/patch_tessellate.py` (якорные ханки: `fastrig.model_glb` предпочитает
+  `tess/model_tess.glb`; `rig_first.build` после первого прохода fastrig (суставы известны) решает и режет, риг
+  пересобирается на тесселированном меше; `rig_first.animate` пишет `rig/rigged_original.glb` — веса на исходной
+  топологии (исходные вершины сохраняют индексы); опции в `skin_tools.SPEC`: `tessellate auto|on|off`,
+  `tess_edge_ratio` 0.6 радиуса конечности, `tess_joint_reach` 2 радиуса, `tess_max_edge_pct_H` 8, `tess_max_factor` 4,
+  `tess_texel_ratio` 0.25 (UV-площадь/мировая против медианы модели), `tess_deliver tessellated|original`).
+  **Если перезаливаете fastrig/rig_first/skin_tools целиком — прогоните `patch_tessellate.py mt`** (и
+  `patch_fastrig_reach.py`, `patch_limb_stabilize.py`).
+- **Решение**: только грубые модели (медиана ребра > 3.5 % H, или < 3000 граней при медиане > 2 %) — плотные выходят
+  за 20 мс («dense mesh»), лошадь a742491a (10k граней, медиана 2.45 %) не трогается. Грань режется, если её длинное
+  ребро > max(0.6 × локальный радиус конечности, 2.5 % H) и центроид в 2 радиусах от сустава, или ребро > 8 % H где
+  угодно, или тексельность < 0.25 медианы у сустава. Срединный сплит рёбер (1→2/3/4 грани), все атрибуты интерполируются,
+  швы UV/жёсткие рёбра сохраняются (пары сырых вершин), квантованные источники (gltfpack) пишутся float32. Силуэт тот же.
+- **Числа** (чибик, одни кадры rig_check): 580 → 1844 граней (×3.2, 0.3 с), рёбра медиана 8.5 → 5.0 % H, max 31 → 18;
+  схлопнувшиеся грани 5 → 1, рёбра >4x 20 → 2 (v0 → тесселированный). Манекены 63bf5d35/8a1b1cc5 (416 граней) 416 → 1220,
+  stretch 0/0. Корпус без регрессий (гейт PASS 86/0, round 7). Поставка: вьювер и скачивания — тесселированный риг;
+  `rig/rigged_original.glb` — исходная топология с весами (опция `tess_deliver=original` для агента).
+- **Автотесты**: кейс `lowpoly_chibi` (вход `dd498832.upload.glb` = proj/model.glb рана 2fd6423ac6aa115b0e97), kind
+  `tessellation` (запись этапа + схлопнувшиеся грани/рёбра по 8 кадрам rig_check), контроли «не тесселировать» на
+  boy_tshirt и knight_rigpath (`deploy/autotests/patch_tessellation_case.py`).
+- **Ран клиента** перескинен `tools/rerig_version.py` (новая версия, v0 цел).
+
+## Hands rig · V3 — риг рук как отдельная категория (2026-10-11, на проде, агент «Hands rig · V3»)
+
+- Владелец: «отправь отдельно … на риг рук, это отдельная категория и ветка автоматического рига». Задача 99420015
+  (tactical combat gloves, две перчатки без тела) шла через humanoid-конвейер: план root, 1 кость, 0 клипов.
+- Сделано (MT `mt/handrig.py` + якорные ханки в rig_first / fastrig / v3_conveyor / fast_analysis; подробности в
+  R:\3d_video_motion_transfer\HANDOFF.md «Hands rig · V3»): детектор «только руки» по геометрии (ветви-пальцы на одном
+  конце каждой оболочки) + слова Vision; скелет на руку: ForeArm (если оболочка уходит за запястье), Hand, Thumb/
+  Index/Middle/Ring/Pinky 1–4 (имена Mixamo), сторона L/R по большому пальцу относительно ладони, пара: зеркало →
+  L+R, одна сетка повёрнутая → одна сторона дважды; веса по пальцу вдоль поверхности (без утечек через воздух);
+  7 клипов рук (Fist, Open, Point, Grip, Wave, Finger Curl, Finger Spread) видны во вьювере; категория `hands`
+  в `fast_registry.json` (v5) с правилами для агента сессии; op `hand_rules` (фаланги вне меша, утечки, стретч).
+- Цифры по перчаткам (ран 712321a1, версия v1, v0 цел): детект 0.03 с, риг 0.8 с, 45 костей, обе перчатки левые
+  (одна и та же сетка, повёрнута на 180°), 0 фаланг вне меша, 0 утечек, Fist 82/16 рёбер >2x/>4x.
+- Автотесты (autorig `deploy/autotests`): kinds `hand_rig`, `hand_detect`; кейсы hands_gloves,
+  hands_synthetic_{left,fps_arm,mitten,pair} (синтетика `make_hand_corpus.py`, без скачиваний),
+  hands_detector_controls (мальчик, лошадь, воин с мечом — не руки). Гейт 20261010T211933Z: 33 кейса PASS.
+- DEV: до/после отправлены от «Hands rig · V3». Не сделано: две руки в одной оболочке, рука без большого пальца
+  (4 пальца + пометка), Mixamo-библиотека анимаций рук конвертера (нет в Git), тесселяция на ветке рук.
