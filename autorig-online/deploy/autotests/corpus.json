@@ -179,12 +179,10 @@
    "defect": "tiny mannequins: the old fast rig put the spine at x=-0.33 (16 of 22 joints outside); 8a1b1cc5: some clips did not retarget",
    "checks": [
     {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "63bf5d35.upload.glb", "params": {"words": "mannequin ascii"},
-     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "prop_bones_n": ["<=", 3]},
-     "target": {"thresholds": {"prop_bones_n": ["==", 0]}, "reason": "the fast rig makes 3 Prop bones on a plain mannequin (Prop1 under Head, Prop3 under LeftHand): body shells taken for props", "owner": "Rig tools · V3"}},
-    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0], "spine_lateral_offset_pct_H": ["<=", 19]},
-     "target": {"thresholds": {"spine_lateral_offset_pct_H": ["<=", 3]}, "reason": "the fast rig still puts the whole spine at x=-0.33 of a symmetric mannequin centred at x=0 (Hips..Head), head joint at 0.69 H", "owner": "Rig tools · V3"}},
-    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["<=", 16]},
-     "target": {"thresholds": {"outside": ["==", 0]}, "reason": "16 of 22 joints outside the voxel solid (the spine offset above)", "owner": "Rig tools · V3"}},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "prop_bones_n": ["==", 0]}, "note": "fixed 2026-10-10 by V3 triage (fastrig body_shells): 3 false Prop bones -> 0"},
+    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0], "spine_lateral_offset_pct_H": ["<=", 3]}, "note": "fixed 2026-10-10 by V3 triage (fastrig body_shells): spine at -0.33 H -> 0"},
+    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["<=", 2]},
+     "target": {"thresholds": {"outside": ["==", 0]}, "reason": "2 joints still outside the voxel solid (16 of 22 before the body_shells fix of 2026-10-10)", "owner": "V3 triage · rig quality"}},
     {"id": "mt_numeric", "kind": "mt_numeric_qa", "paths": ["mt"], "on": "mt_rig", "thresholds": {"complete": ["==", true], "max_stretched_edges": ["<=", 70]}},
     {"id": "mt_probe", "kind": "deformation_probe", "paths": ["mt"], "on": "mt_rig", "params": {"samples": 8}, "thresholds": {"detached_components": ["==", 0], "stretched_edges": ["<=", 10], "outlier_vertices": ["<=", 5]}}
    ]},
@@ -192,12 +190,10 @@
    "defect": "rig-path test mannequin: «часть анимаций не перенеслась»",
    "checks": [
     {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "8a1b1cc5.upload.glb", "params": {"words": "rigpath test mannequin"},
-     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "prop_bones_n": ["<=", 3]},
-     "target": {"thresholds": {"prop_bones_n": ["==", 0]}, "reason": "3 false Prop bones on a plain mannequin", "owner": "Rig tools · V3"}},
-    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0], "clips": [">=", 8], "spine_lateral_offset_pct_H": ["<=", 19]},
-     "target": {"thresholds": {"spine_lateral_offset_pct_H": ["<=", 3]}, "reason": "same mannequin family as 63bf5d35: the spine at x=-0.33", "owner": "Rig tools · V3"}},
-    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["<=", 16]},
-     "target": {"thresholds": {"outside": ["==", 0]}, "reason": "16 of 22 joints outside the voxel solid", "owner": "Rig tools · V3"}}
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "prop_bones_n": ["==", 0]}, "note": "fixed 2026-10-10 by V3 triage (fastrig body_shells): 3 false Prop bones -> 0"},
+    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0], "clips": [">=", 8], "spine_lateral_offset_pct_H": ["<=", 3]}, "note": "fixed 2026-10-10 by V3 triage (fastrig body_shells): spine at -0.33 H -> 0"},
+    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["<=", 2]},
+     "target": {"thresholds": {"outside": ["==", 0]}, "reason": "2 joints still outside the voxel solid (16 of 22 before the body_shells fix of 2026-10-10)", "owner": "V3 triage · rig quality"}}
    ]},
   {"id": "limb_head_hand", "task": "8b16a847-c242-4c1e-81c4-81d46c52e68c", "cost": 1,
    "defect": "the hand inside a large head (classic converter f2)",
