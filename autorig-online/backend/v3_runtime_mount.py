@@ -45,7 +45,8 @@ STAGE_TITLES = {
     "queued": "в очереди V3", "starting": "запуск", "source": "источник", "analysis": "анализ",
     "rig": "риг", "retarget": "ретаргет", "qa": "проверка качества", "publish": "публикация",
     "complete": "готово", "qa_review": "нужна проверка", "generation": "генерация модели",
-    "running": "обработка", "resuming": "возобновление",
+    "running": "обработка", "resuming": "возобновление", "source_registered": "источник принят",
+    "model_validation": "проверка модели", "failed": "ошибка",
 }
 SUB_TITLES = {
     "projections": "проекции", "vision": "Vision-анализ", "bones_and_weights": "кости и веса",
