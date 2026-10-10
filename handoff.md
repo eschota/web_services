@@ -235,6 +235,42 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - **/faq** (релиз `live-20261010T120738Z`): серверный HTML с общими шапкой/подвалом,
   `data-i18n-scope="page"`, FAQPage JSON-LD (28 вопросов) + BreadcrumbList, без упоминаний V3.
 
+## Converter · V3 — normalized_source на проде (2026-10-10 12:40 UTC, канарейка F7)
+
+- Принятый билд конвертера: `main` `b38611581a6ebcc9848e612e95e3d8f92f9c117d`
+  (eschota/autorig.online), записан в `/srv/autorig/data/var/fleet/v3_target.json`.
+  Идентичность — коммит: `deploy_farm.bat` шлёт дельту от базы ноды, поэтому SHA
+  артефакта у каждой ноды свой (F7, база 8d2a67c: `0059f38d…62369363`). Раскатку
+  F1/F2/F13 ведёт Fleet · V3 штатным `deploy_farm.bat HEAD`; F11 выключен.
+- Что умеет: `POST /api-converter-glb/v3/normalize` (bearer узла, durable identity;
+  replay привязан к task_uuid/attempt/SHA/формату/запечатанному манифесту) → статус →
+  две роли артефактов → `/ack` (только `durably_persisted:true` и точные хэши).
+  GLB/FBX/OBJ + опциональный запечатанный бандл текстур/MTL (путь+размер+SHA-256).
+  Квитанция: исходник, зависимости, GLB, билд-производитель, иерархия (узлы, меши,
+  примитивы, материалы, скины, bounds). Легаси-риг не вызывается. Контракт:
+  `CONTRACTS/v3-normalized-source.md` в репо конвертера.
+- ASCII FBX: на ферме нет assimp, Blender его не читает → `Failed` +
+  `input_error_code=FBX_ASCII_UNSUPPORTED`; конвертирует Intake на VPS.
+- Канарейка F7 (прод, Blender 5.1.0): 7/7 — 4 реальные публичные модели (FBX
+  11 732 верш., GLB byte-exact, 2 OBJ без MTL), запечатанные FBX/OBJ, неверный SHA
+  отклонён, replay 202 / 409; байты сверены, ack принят. Найден и исправлен баг
+  FBX-импортёра Blender 5.1 (`cast_shadow`: любой FBX со светом падал). Отчёт
+  `/srv/autorig/audits/converter-v3-canary-20261010/f7-b386115/canary-report.json`,
+  драйвер `canary_driver.py` рядом. DEV `b20cdad723b8` (Telegram 6432).
+- Ревью: независимое — P0 (конвертер падал при каждом старте после первой V3-задачи),
+  P1 (Blender открывал необъявленные файлы до аудита) и 7 P2 исправлены; второй
+  ревьюер подтвердил, его P2 (строки с одиночным CR) тоже закрыт.
+- Для Fleet: `_server_status_process_control_refresh` теперь перечисляет процессы
+  один раз за обновление (8000 задач: 0,48 с вместо ~217 с) — f1/f13 больше не
+  уйдут в fail-closed из-за накопленных задач.
+- Для Intake: F7 обслуживает normalize (Unity не нужен), хотя AutoRig-диспетч на нём
+  выключен из-за лицензии Unity.
+- Не сделано: риг/ретаргет/QA/публикация, Vision, частичные превью, слои одежды/волос
+  на конвертере; инструмента нет в `/dev/tools` (каталог `mt/astra/catalog.py` у Astra).
+- Эта секция заменяет строки про конвертер ниже (748f36d «не merged/не deployed»,
+  пункты 5–6 «Блокирующих разрывов»). Подробно: канонический converter handoff
+  (`converter-source/handoff.md`, зеркала VPS/F5, SHA `bfa0d030…`).
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
