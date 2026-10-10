@@ -2,6 +2,17 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
+Latest source checkpoint d7e2362 in private MT repo: full-garment source/raw-order
+domain guards and separate semantic/control admission,47 Python tests; chat media
+layout regression passes. Canonical/server handoff SHA matched
+ef0d85d713dfacf1d12c7ba7481213744a138b67d0ae7bd7b22a795f720eb639.
+F7 whole-skirt request02 completed once50.550s/5498 tokens but malformed output
+rejects semantic admission; no physical roots/weights/sewing authorized by it.
+No restart/customer task. Whole-main boundary experimental controls and narrow
+live chat-card CSS deployment are in progress; verify fresh canonical status.
+Full body/clothing/hair acceptance remains0/5; historical snapshots below are not
+current acceptance. This section supersedes prior "no farm call yet" wording.
+
 Latest verified checkpoint: default Unity MT viewer now r22 with visible T/A
 feet, real pointer IK move/rotate, failed-save recovery, actual private-chat foot
 inspection. Targeted-foot worker is live, MT PID1232222; other production service
