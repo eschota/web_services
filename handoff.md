@@ -2,7 +2,19 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest private checkpoint42d6c3f: owner foot-chat screenshot is historical reply
+Latest preserved private source e7a1b82: exact-contact cache plus section/Foot tools
+3594c35 andfresh-active previewfix dd4eeae. NativefreshnessEXE/selftest/production
+GETHEAD passes; r25WebGL/raceQA pending, default r22 unchanged, no backendrestart.
+Clothv7 completesall5poses (new2/4 27.14/35.29s) butfinalREJECT:self/strainfail.
+Foot474 existingNovelRetarget145keys/mids+145offgrid noNR, toe-tip worsens/clearance
+unknown. LiveauditFootaliases prepared; matchedcloseuprecapture pending, noMEDIA.
+Root23 section/Foot tests pass; finalsectionkernel6c79ac04 .7088->.2558s onGirl,
+1Mgrid .3515s/peakRSS315.7MB, STAGEonly. Canonical/serverhandoff latest SHA
+a5e41c47ce28d1fdd2164e025d5ca6e3567b4cdd25aa00011275a47f3a239be3.
+Full5modelacceptance0/5. Smooth16-influence cloth/nativeproof anddirectrelocation
+CAS/materializer re-audit active; no fullproducer/fleetpromotion.
+
+Prior private checkpoint42d6c3f: owner foot-chat screenshot is historical reply
 fromOct9 13:37:58UTC, beforetargetedbackend20:10:24UTC; no laterfallback forbb6,
 currentbindingvalid/newfeetjobabsent. Reload+repeatcheck; no backendchange/restart.
 Sanitizedreceipt3581d400 inprivateproject.work/screenshot-foot-history-20261010.
