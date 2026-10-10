@@ -1284,3 +1284,52 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Не сделано**: Unity package (нужен конвертер с Unity, по запросу не подключён); старые эндпоинты скачивания
   классики остаются на прежних правилах (владелец + кредиты) — решение владельца, переводить ли их на подписку;
   второй экспорт-воркер (f2) для отказоустойчивости.
+
+## Limb stabilization · V3 — стабилизация конечностей перед ригом (2026-10-10 17:40 UTC, на проде, MT `17a38c2`+)
+
+- **Зачем**: владелец, задача d1522b45 («Fantasy warrior with a raised weapon»): меш в анимированном кадре (обе руки над
+  головой с оружием, правое колено поднято), классика на f7 за 1060 с положила T-шаблон поверх позы (руки не привязаны:
+  0 вершин предплечья/кисти, limb_collision «arm not skinned»), fastrig ставил висящие руки. Источник — Tripo FBX со
+  своим скелетом (67 суставов, скин, bind-поза = поза меша, клипов нет); V3-intake отдаёт его как assimp-GLB со скином.
+- **Код** (MT-репо, `mt/limb_stabilize.py`, монтаж `tools/patch_limb_stabilize.py` — якорные идемпотентные ханки в
+  `fastrig.py` (`model_glb(run)`, `build` читает `stab/model_canonical.glb` когда этап сработал, пинит суставы из
+  `stab/joints.json`, пишет `fit_check`+`stabilization` в каждый rig.json), `parts_cluster.py` (тот же меш),
+  `rig_first.py` (этап до fastrig, fit check после, клип «Source pose»), `v3_conveyor.py` (клип «Source pose» в
+  `_retarget`, центровка по `voxfield_rest.npz` когда меш повёрнут, **фикс живого бага** ниже), `agent.py` (блок
+  инструментов в конце). **Если перезаливаете эти файлы целиком — прогоните `patch_limb_stabilize.py mt` снова.**
+- **Этап** (`rig_first.build` → `limb_stabilize.stage`, 0.3–0.8 с на 30k вершин): состояние позы из исходного скелета
+  (цепи по `skin_tools.bone_kind` + иерархия; углы: подъём/вынос руки, локоть, наклон бедра, колено) → T | A | hanging |
+  posed; в анимациях источника ищется T/A-кадр (`frame_world`), берётся лучший. Повороты цепей сегментно-жёсткие
+  вокруг суставов (плоскость сгиба локтя/колена — к фронту/назад), меш идёт за ними LBS по весам источника,
+  **ужесточённым**: вершина следует за конечностью только в её «трубке» (≤1.5 радиуса сегмента; у кистей/пальцев уже),
+  не глубже «трубки» головы/шеи, лицом от кости; отдельный шелл (оружие) — целиком; 2 голосования по соседям; у корня
+  (плечо/бедро, 2.2 радиуса, плавный спад ×1.5) остаётся авторский бленд. Сварные контакты между группами (кисть–кисть на
+  рукояти, предплечье–волосы) режутся с дублированием вершин, петли закрываются веером (где удаётся). Выход
+  `stab/model_canonical.glb` (+573 вершин на d1522b45), `stab/stabilization.json`, `stab/before_after.png`,
+  `stab/joints.json` (суставы источника в канонической позе → пин для fastrig: без него хвост утягивал колено).
+- **Fit check** «скелет не подогнан» в каждом rig.json (`fit_check`): масса весов на 2 костях > 0.6, кость конечности
+  без вершин (< 0.2 %), кисть дальше 15 % H от своих вершин, > 1 сустав конечности вне меша. Вердикт пишется, не
+  блокирует (QA/триаж читают `rig.json.fit_check.ok`).
+- **Опции** (`SPEC`, «Tools Have Options»): mode auto|on|off, target_pose auto|T|A (auto = ближняя к рукам),
+  arm_angle_deg, limbs, straighten_elbows/knees, leg_spread_deg, foot_pitch_deg, posed_* пороги, stabilize_hanging,
+  use_animations, use_source_joints auto|on|off, blend_radius_pct_H, limb_capture, fit_*; сохранение на ран —
+  `stab/options.json`. CLI `python -m mt.limb_stabilize --dir <run> [--check|--stage|--apply --opts JSON|--undo|--describe]`.
+- **Агент сессии / /dev/tools**: `pose_check` (публичный), `stabilize_pose(options, note)` (owner/admin; пересборка
+  рига+клипов, версии `stab/versions/v<N>`, до/после), `stabilize_undo`, `stabilize_options_get`. В /dev/tools видны.
+- **Автотесты**: кейс `posed_fox_warrior` (входы `d1522b45.upload.glb` = assimp-GLB, `.upload.fbx`, `.converter.glb`),
+  kind `pose_stabilization` в `checks.py`, контроль `mt_stab_control` на `warrior_sword` (T-поза не трогается).
+  Скрипт `autorig-online/deploy/autotests/patch_limb_stabilization.py` (якорный, оба формата corpus.json).
+  Гейт `mt-deploy` PASS (83 кейса) дважды; на проде d1522b45: posed → T за 0.73 с, риг 3.3 с, 9 клипов, fit ok
+  (top2 0.27, min limb 1.1 %), limb_collision severity 0 / 722 вершин рук (конвертер: 0), skeleton_fit 0 вне bbox.
+- **Живой баг, найденный по пути (V3 triage, важно)**: с ~13:00 UTC 10.10 каждый V3-ран получал `clip_errors` на все 8
+  клипов («truth value of an array…»: `times` клипа — numpy, `or []` в live-эмите `_retarget`), и QA-гейт `clip_errors`
+  делал **каждый** ран `needs_review` («часть анимаций не перенеслась»). Раны cc22a7e0, 7b45d6a0, 9980a38a, 7c9aaae7.
+  Починено ханком в `v3_conveyor.py` (round 2, 17:35 UTC). Также: прод `mt/retarget.py` отличается от Git HEAD
+  (sha 39225aaa vs db8af918) — кто-то правил на проде без коммита.
+- **Не сделано / дальше**: (1) путь без исходного скелета (голый меш в позе — Hunyuan/Tripo без рига): детектор позы по
+  геометрии и цепи из медиального скелета не построены, `stage` честно пишет `why: no skeleton`, fit_check всё равно
+  срабатывает; (2) волосы, сваренные с кистями над головой, частично уезжают с правым предплечьем (видно на
+  `stab/before_after.png`); (3) клип «Source pose» приблизительный (ошибка ~7 % H в среднем: пивоты fastrig ≠ источник);
+  (4) fast_analysis `bone_outside_check` на открытых мешах (Tripo: 13.9k граничных рёбер) двигает суставы в хвост —
+  на ране 7c9aaae7 испортил ноги после хорошего рига (owner: V3 triage); с пином суставов источника (round 3) риг
+  устойчивее. Демо: задача 04a85183 (V3, ран 7c9aaae7ca1c5bf9618c), аудит `/srv/autorig/audits/limb-stab-20261010/`.

@@ -362,6 +362,31 @@ def limb_collision(path):
             "frames_checked": sm.get("frames_checked"), "seconds": sm.get("seconds")}
 
 
+def pose_stabilization(ctx):
+    """«Limb stabilization · V3» (mt/limb_stabilize.py, 2026-10-10): a posed input (d1522b45: both arms over the head,
+    a knee raised) read from its own skeleton, the chains turned to T / A before the fast rig; the fit check
+    «skeleton not fitted» on the rig (weight mass on two bones, limb bones without vertices, hand off its vertices)."""
+    run = ctx["run"]
+    st = json.loads((run / "stab" / "stabilization.json").read_text()) if (run / "stab" / "stabilization.json").is_file() else {}
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    fc = rig.get("fit_check") or {}
+    after = st.get("measure_after") or {}
+    arms, legs = after.get("arms") or {}, after.get("legs") or {}
+    applied = bool(st.get("applied"))
+    return {"source_skin": int(st.get("source") == "source_skin"), "state_before": st.get("state"),
+            "posed_before": int(st.get("state") == "posed"), "applied": int(applied),
+            "state_after": st.get("state_after"), "target_pose": st.get("target_pose"),
+            "arm_elevation_after_abs_max": max([abs(a["elevation_deg"]) for a in arms.values()] or [0]) if applied else None,
+            "elbow_bend_after_max": max([a["elbow_bend_deg"] for a in arms.values()] or [0]) if applied else None,
+            "knee_bend_after_max": max([l["knee_bend_deg"] for l in legs.values()] or [0]) if applied else None,
+            "max_move_pct_H": st.get("max_move_pct_H"),
+            "duplicated_vertices": (st.get("contacts_split") or {}).get("duplicated_vertices"),
+            "stabilize_s": st.get("seconds"),
+            "fit_ok": int(bool(fc.get("ok"))), "fit_reasons": fc.get("reasons"), "top2_share": fc.get("top2_share"),
+            "min_limb_share": fc.get("min_limb_share"), "hand_gap_pct_H": fc.get("hand_gap_pct_H"),
+            "clips": len(rig.get("clips") or []), "source_pose_clip": int("Source pose" in (rig.get("clips") or []))}
+
+
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
 def mt_arm_clearance(ctx):
     """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
@@ -667,6 +692,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return classic_mirror_live(a.get("wait", 12))
     if k == "rig_budget_live":
         return rig_budget_live(a.get("hours", 24), a.get("since", "2026-10-10 15:50:00"))
+    if k == "pose_stabilization":
+        return pose_stabilization(ctx)
     if k == "pending_detector":
         return {"pending": True}
     raise ValueError(f"unknown check kind {k}")
