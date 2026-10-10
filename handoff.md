@@ -2,7 +2,14 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest source checkpoint1935cc2 in private MT repo: full-garment source/raw-order
+Latest private checkpoint42d6c3f: owner foot-chat screenshot is historical reply
+fromOct9 13:37:58UTC, beforetargetedbackend20:10:24UTC; no laterfallback forbb6,
+currentbindingvalid/newfeetjobabsent. Reload+repeatcheck; no backendchange/restart.
+Sanitizedreceipt3581d400 inprivateproject.work/screenshot-foot-history-20261010.
+Canonical/serverhandoffSHA a1a7481732b3181a95347287cb9a2f874cc5f563544d56b78cc2a5750904a8fd.
+Full acceptance0/5; footmotioncapture andoptionalIvy-preservingviewerQA next.
+
+Prior source checkpoint1935cc2 in private MT repo: full-garment source/raw-order
 domain guards and separate semantic/control admission,47 Python tests; chat media
 layout regression passes. Canonical/server handoff SHA matched
 c9a0c5ac6eb565e2a43da973c4044240744fe8d40f8d2457a3916b9fef1d9e28.
