@@ -41,12 +41,15 @@ const TaskCard = {
         const videoUrl = versionTaskMediaUrl(item.video_url || `/api/video/${item.task_id}`);
         const salesCount = (typeof item.sales_count === 'number') ? item.sales_count : 0;
         
-        const authorDisplay = this.formatAuthorName(item.author_nickname, item.author_email);
-        const authorEmail = item.author_email || null;
+        // Privacy (2026-10-11): the badge carries the public handle and name, never an e-mail address.
+        const escapeHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const authorDisplay = item.author_name || item.author_nickname || null;
+        const authorHandle = /^[0-9a-f]{10}$/.test(String(item.author_handle || '')) ? item.author_handle : null;
         
         // Author badge (top-left) - use span, not <a> to avoid nested links (invalid HTML)
-        const authorHtml = authorEmail 
-            ? `<span class="tc-author" data-author="${authorEmail}" data-sort="${currentSort}" title="${authorEmail}">${authorDisplay}</span>` 
+        const authorHtml = authorHandle
+            ? `<span class="tc-author" data-author="${authorHandle}" data-sort="${currentSort}" title="${escapeHtml(authorDisplay)}">${escapeHtml(authorDisplay)}</span>`
             : '';
         
         // Sales badge (only if > 0)
@@ -75,15 +78,12 @@ const TaskCard = {
     /**
      * Navigate to author's gallery
      */
-    navigateToAuthor(authorEmail, sort) {
-        if (typeof GalleryPage !== 'undefined' && GalleryPage.updateUrl) {
-            GalleryPage.author = authorEmail;
-            GalleryPage.page = 1;
-            GalleryPage.updateUrl();
-            GalleryPage.load();
-        } else {
-            window.location.href = `/gallery?author=${encodeURIComponent(authorEmail)}&sort=${sort}`;
-        }
+    navigateToAuthor(authorHandle, sort) {
+        // the author's page: all their public models (server-rendered, /author/<handle>)
+        if (!/^[0-9a-f]{10}$/.test(String(authorHandle || ''))) return;
+        const lang = (window.__AUTORIG_LANG__ && window.__AUTORIG_LANG__.lang) || 'en';
+        const prefix = ['ru', 'zh', 'hi', 'fa'].includes(lang) ? `/${lang}` : '';
+        window.location.href = `${prefix}/author/${authorHandle}`;
     },
     
     /**

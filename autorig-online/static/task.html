@@ -5490,8 +5490,8 @@
             }
         };
 
-        // Allowed emails for admin links (Input URL, Worker Progress Page)
-        const ALLOWED_ADMIN_EMAILS = ['eschota@gmail.com', 'vladkcg@gmail.com'];
+        // Admin links (Input URL, Worker Progress Page): the server says who is an admin (/auth/me user.is_admin);
+        // no e-mail address is listed in this public page (2026-10-11).
         let _allowedAdminPromise = null;
         async function isAllowedAdmin() {
             if (_allowedAdminPromise) return _allowedAdminPromise;
@@ -5500,11 +5500,7 @@
                     const authResp = await fetch('/auth/me');
                     if (authResp.ok) {
                         const authData = await authResp.json();
-                        const email = authData?.user?.email;
-                        return (
-                            email &&
-                            ALLOWED_ADMIN_EMAILS.includes(String(email).toLowerCase())
-                        );
+                        return authData?.user?.is_admin === true;
                     }
                 } catch (e) {
                     // ignore
@@ -6469,15 +6465,14 @@
                 
                 // Update author overlay (top left)
                 const authorLink = document.getElementById('task-author-link');
-                if (authorLink && info.author_email) {
-                    // Show only username part (hide @ and domain)
-                    const email = info.author_email;
-                    const atIndex = email.indexOf('@');
-                    const authorDisplay = info.author_nickname || (atIndex > 0 ? email.substring(0, atIndex) : email);
-                    
+                if (authorLink && /^[0-9a-f]{10}$/.test(String(info.author_handle || ''))) {
+                    // Privacy (2026-10-11): the public name and the author page, never an e-mail address
+                    const authorDisplay = info.author_name || info.author_nickname || '';
+                    const uiLang = (window.__AUTORIG_LANG__ && window.__AUTORIG_LANG__.lang) || 'en';
+                    const prefix = ['ru', 'zh', 'hi', 'fa'].includes(uiLang) ? `/${uiLang}` : '';
                     authorLink.textContent = authorDisplay;
-                    authorLink.href = `/gallery?author=${encodeURIComponent(info.author_email)}`;
-                    authorLink.title = info.author_email;
+                    authorLink.href = `${prefix}/author/${info.author_handle}`;
+                    authorLink.title = authorDisplay;
                     authorLink.classList.remove('hidden');
                 }
             },

@@ -481,8 +481,11 @@ class GalleryItem(BaseModel):
     like_count: int = 0
     liked_by_me: bool = False
     sales_count: int = 0  # Number of purchases for this task
-    author_email: Optional[str] = None  # Owner email if owner_type == "user"
-    author_nickname: Optional[str] = None  # Preferred display name (fallback to email)
+    author_email: Optional[str] = None  # always null since 2026-10-11 (privacy): use author_handle / author_url
+    author_nickname: Optional[str] = None  # public display name: nickname, else User-XXXX / Guest-XXXX
+    author_handle: Optional[str] = None  # public handle (10 hex), the /author/<handle> page
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
     version: int = 1  # restart_count + 1
     content_rating: Optional[str] = None
     rig_icon_key: str = "humanoid"  # humanoid | dog | bear | … for UI icon under Icons_png/
@@ -517,8 +520,11 @@ class TaskCardInfo(BaseModel):
     like_count: int = 0
     liked_by_me: bool = False
     sales_count: int = 0
-    author_email: Optional[str] = None
+    author_email: Optional[str] = None  # always null since 2026-10-11 (privacy)
     author_nickname: Optional[str] = None
+    author_handle: Optional[str] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
     time_ago: str = ""
     version: int = 1  # restart_count + 1
     content_rating: Optional[str] = None

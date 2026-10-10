@@ -3993,6 +3993,21 @@ def _feedback_avatar_url(email: str, oauth_picture: Optional[str]) -> str:
     return f"https://www.gravatar.com/avatar/{h}?d=identicon&s=96"
 
 
+def _feedback_public_name(name: Optional[str], email: Optional[str]) -> str:
+    """A feedback author's public name: the stored name unless it is (or contains) an e-mail, else User-XXXX."""
+    import public_identity
+    text = str(name or "").strip()
+    if text and not public_identity.looks_like_email(text):
+        return text[:60]
+    return public_identity.display_name(_feedback_public_seed(email)[:10], "user")
+
+
+def _feedback_public_seed(email: Optional[str]) -> str:
+    """A stable public stand-in for an e-mail (the author handle), so the default avatar is not a hash of the address."""
+    import public_identity
+    return public_identity.handle_of_author(public_identity.hkey_for_email(str(email or "")))
+
+
 def _feedback_parent_preview(text: str, max_len: int = 100) -> str:
     t = (text or "").strip().replace("\n", " ")
     if len(t) <= max_len:
@@ -4025,17 +4040,17 @@ async def get_feedback_list(
         pid = getattr(fb, "parent_id", None)
         if pid and pid in parent_map:
             par = parent_map[pid]
-            parent_user_name = par.user_name or par.user_email
+            parent_user_name = _feedback_public_name(par.user_name, par.user_email)
             parent_preview = _feedback_parent_preview(par.text)
         out.append(
             FeedbackItem(
                 id=fb.id,
-                user_email=fb.user_email,
-                user_name=fb.user_name,
+                user_email="",                       # never public (2026-10-11): the name below is a plain name
+                user_name=_feedback_public_name(fb.user_name, fb.user_email),
                 text=fb.text,
                 created_at=fb.created_at,
                 parent_id=pid,
-                user_picture=_feedback_avatar_url(fb.user_email, user_picture),
+                user_picture=_feedback_avatar_url(_feedback_public_seed(fb.user_email), user_picture),
                 parent_user_name=parent_user_name,
                 parent_preview=parent_preview,
             )
@@ -8732,8 +8747,14 @@ async def api_get_gallery(
         _gallery_task_has_poster_sql(),
     ]
     if author:
-        base_conditions.append(Task.owner_type == "user")
-        base_conditions.append(Task.owner_id == author)
+        # Privacy (2026-10-11): authors are addressed by their public handle, never by e-mail.
+        import public_identity
+        _owner = await public_identity.owner_for_handle(db, author)
+        if _owner is None:
+            base_conditions.append(Task.id == "")
+        else:
+            base_conditions.append(Task.owner_type == _owner[0])
+            base_conditions.append(Task.owner_id == _owner[1])
 
     sort = (sort or "date").strip().lower()
     if sort not in {"date", "likes", "sales"}:
@@ -8831,12 +8852,16 @@ async def api_get_gallery(
     
     # Get author nicknames for user-owned tasks
     author_nicknames = {}
+    author_user_ids = {}
     owner_emails = [row[0].owner_id for row in rows if row[0].owner_type == "user"]
     if owner_emails:
         users_result = await db.execute(
-            select(User.email, User.nickname).where(User.email.in_(owner_emails))
+            select(User.email, User.nickname, User.id).where(User.email.in_(owner_emails))
         )
-        author_nicknames = {r[0]: r[1] for r in users_result.all()}
+        _user_rows = users_result.all()
+        author_nicknames = {r[0]: r[1] for r in _user_rows}
+        author_user_ids = {r[0]: r[2] for r in _user_rows}
+    import public_identity
     
     items = []
     for row in rows:
@@ -8851,8 +8876,13 @@ async def api_get_gallery(
             like_count=like_count,
             liked_by_me=t.id in user_likes,
             sales_count=sales_counts.get(t.id, 0),
-            author_email=t.owner_id if t.owner_type == "user" else None,
-            author_nickname=author_nicknames.get(t.owner_id) if t.owner_type == "user" else None,
+            author_email=None,
+            **public_identity.card_fields(
+                "user" if t.owner_type == "user" else "guest",
+                (public_identity.handle_for_user(author_user_ids[t.owner_id])
+                 if t.owner_type == "user" and t.owner_id in author_user_ids
+                 else (public_identity.handle_for_anon(t.owner_id) if t.owner_type == "anon" else None)),
+                author_nicknames.get(t.owner_id) if t.owner_type == "user" else None),
             content_rating=getattr(t, "content_rating", None),
             rig_icon_key=_gallery_rig_icon_key(t),
         ))
@@ -8910,25 +8940,26 @@ async def api_get_task_card(
     sales_count = sales_result.scalar() or 0
     
     # Get author info
-    author_email = None
-    author_nickname = None
+    # Privacy (2026-10-11): the public card carries the author's handle and name, never the e-mail.
+    import public_identity
+    author_fields = public_identity.card_fields(None, None)
     if task.owner_type == "user":
-        author_email = task.owner_id
-        # Get nickname from User
         user_result = await db.execute(
-            select(User.nickname).where(User.email == task.owner_id)
+            select(User.nickname, User.id).where(User.email == task.owner_id)
         )
         row = user_result.first()
         if row:
-            author_nickname = row[0]
+            author_fields = public_identity.card_fields("user", public_identity.handle_for_user(row[1]), row[0])
+    elif task.owner_type == "anon" and task.owner_id:
+        author_fields = public_identity.card_fields("guest", public_identity.handle_for_anon(task.owner_id))
     
     return TaskCardInfo(
         task_id=task_id,
         like_count=like_count,
         liked_by_me=liked_by_me,
         sales_count=sales_count,
-        author_email=author_email,
-        author_nickname=author_nickname,
+        author_email=None,
+        **author_fields,
         time_ago=format_time_ago(task.created_at),
         version=(task.restart_count or 0) + 1,
         content_rating=getattr(task, "content_rating", None),
@@ -8969,7 +9000,7 @@ async def api_get_owner_tasks(
                 "thumbnail_url": thumb_url_for(t.id) if t.status == "done" else None,
                 "content_rating": getattr(t, "content_rating", None),
                 "owner_type": t.owner_type,
-                "owner_id": t.owner_id if t.owner_type == "user" else "anon"
+                "owner_id": "user" if t.owner_type == "user" else "anon"      # never the e-mail (2026-10-11)
             }
             for t in tasks
         ],
@@ -15684,7 +15715,15 @@ async def api_get_viewer_default_settings():
     data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
     if not data:
         data = DEFAULT_VIEWER_SETTINGS
-    return data
+    def _no_admin_email(obj):
+        # the admin's e-mail (`saved_by`, also nested) is not public (2026-10-11)
+        if isinstance(obj, dict):
+            return {k: _no_admin_email(v) for k, v in obj.items() if k != "saved_by"}
+        if isinstance(obj, list):
+            return [_no_admin_email(v) for v in obj]
+        return obj
+
+    return _no_admin_email(data)
 
 
 @app.post("/api/admin/viewer-default-settings")
@@ -15975,6 +16014,15 @@ async def api_apply_task_animation_correction_export_result(
     return {"ok": True, "taskId": task_id, "revision": revision, "status": status}
 
 
+def _public_viewer_settings(obj):
+    """Viewer settings as visitors may see them: the admin's e-mail (`saved_by`, also nested) is dropped (2026-10-11)."""
+    if isinstance(obj, dict):
+        return {k: _public_viewer_settings(v) for k, v in obj.items() if k != "saved_by"}
+    if isinstance(obj, list):
+        return [_public_viewer_settings(v) for v in obj]
+    return obj
+
+
 @app.get("/api/task/{task_id}/viewer-settings")
 async def api_get_task_viewer_settings(
     task_id: str,
@@ -16007,7 +16055,7 @@ async def api_get_task_viewer_settings(
                 global_camera = _read_global_viewer_camera_preset()
                 if global_camera:
                     data = {**data, "camera": global_camera}
-                return data
+                return _public_viewer_settings(data)
         except Exception:
             # Corrupt JSON in DB: ignore and fallback to defaults.
             pass
@@ -16015,7 +16063,7 @@ async def api_get_task_viewer_settings(
     data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
     if not data:
         data = DEFAULT_VIEWER_SETTINGS
-    return data
+    return _public_viewer_settings(data)
 
 
 @app.post("/api/task/{task_id}/viewer-settings")
@@ -18105,7 +18153,7 @@ async def create_scene(
         like_count=scene.like_count,
         liked_by_me=False,
         owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
+        owner_id="user" if scene.owner_type == "user" else "anon",      # never the e-mail / anon_id (2026-10-11)
         created_at=scene.created_at,
         updated_at=scene.updated_at
     )
@@ -18173,7 +18221,7 @@ async def get_scene(
         like_count=scene.like_count,
         liked_by_me=liked_by_me,
         owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
+        owner_id="user" if scene.owner_type == "user" else "anon",      # never the e-mail / anon_id (2026-10-11)
         created_at=scene.created_at,
         updated_at=scene.updated_at
     )
@@ -18245,7 +18293,7 @@ async def update_scene(
         like_count=scene.like_count,
         liked_by_me=False,
         owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
+        owner_id="user" if scene.owner_type == "user" else "anon",      # never the e-mail / anon_id (2026-10-11)
         created_at=scene.created_at,
         updated_at=scene.updated_at
     )
