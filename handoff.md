@@ -1843,3 +1843,29 @@ This scoped development checkpoint does not overwrite the unrelated historical
   Предварительный выбор для 180 концептов: Qwen 2.1 turbo 1024² generate на f15 (единственный узел Qwen в сети сейчас, ~5-30 с на кадр, 1 задача за раз)
   либо Z-Image Turbo 1024² (~15 с); картинки смотреть глазами перед запуском (`_bench/*.png`). Суффикс промпта: изолированный предмет, нейтральный
   серый фон, полный силуэт, 3/4 сверху (см. `bench.py`). Раскладка сохранения: `concepts/<id>/v1..v3.png`, зеркало `/srv/autorig/data/scenes/italia/concepts/`.
+
+## Body constitution · V3 — типизация гуманоидов по конституции тела (2026-10-11, агент «Body constitution · V3», В РАБОТЕ)
+
+Владелец (583622f3 «Кристалл-Орион», человек-картошка): «нужна типизация моделей по конституции тела … графы, которые на ллм
+определяют конституцию тела в подкатегориях гуманоидов». Контракт ниже — стабильный; «Model census · V3» может импортировать сразу.
+
+- **Модуль**: MT `mt/constitution.py` (прод `/srv/autorig/data/motion_transfer/mt/constitution.py`).
+  - `estimate(run_dir, glb=None, forward_axis=None, opts=None) -> dict` — геометрическая оценка (numpy, без GPU, ~0.3–2 с):
+    профиль ширины/глубины по высоте, компоненты горизонтальных сечений → ветви (ноги, руки, голова), пропорции.
+  - `async judge(run_dir, client=None, what="") -> dict` — ОДИН vision-вызов на `proj/sheet_lit.png` через бесплатный роутер
+    (`mt.llm.see`: OpenRouter :free / Cloudflare / Mistral / Ollama; при недоступности — фермерский Qwen `farm.vision`). Без платных API.
+  - `combine(geo, vis) -> dict` — геометрия побеждает при `confidence >= 0.7`, иначе vision при `>= 0.6`, иначе геометрия.
+  - `classify(run_dir, vision=False|True, client=None) -> dict` — всё вместе, пишет `analysis/constitution.json`; sync-обёртка.
+  - `priors(subcategory) -> dict` — риг-приоры подкатегории (`PRIORS`), `SUBCATEGORIES`, `options_get()` / `SPEC` (Tools Have Options).
+  - CLI: `python -m mt.constitution --run <20hex> [--glb <path>] [--vision] [--json]` (одна JSON-строка).
+- **Схема** `analysis/constitution.json` = возврат `classify` (`autorig.v3.constitution/1`):
+  `subcategory` ∈ {`normal`, `athletic`, `slim_tall`, `child`, `chibi`, `ultra_fat`, `long_limbed`, `stocky`, `toy_mascot`, `heavy`, `unknown`};
+  `confidence` 0–1; `source` geometry|vision|both; `body_plan` biped|quadruped|root|hands|unknown;
+  `proportions` {`head` (высота головы/H), `legs` (промежность/H), `arms` (длина руки/H или null), `arm_pose` hanging|a|t|none,
+  `torso_width`, `torso_depth` (макс. ширина/глубина туловища /H), `shoulder_y`, `neck_y`, `hip_y`, `leg_gap`, `arm_branches` 0..2, `leg_branches` 0..2};
+  `geometry` {subcategory, confidence, scores{sub: 0..1}, seconds}; `vision` {subcategory, confidence, notes, model, seconds} | null;
+  `priors` (что получит fastrig); `built_at`.
+  Также дублируется в `rig.json.constitution` и `analysis/fast.json.results.constitution` (op `constitution`), категория
+  humanoid в `fast_registry.json` получает подкатегории конституции с правилами для промпта агента.
+- **Пороги пропорций** (таблица в `mt/constitution.py: TABLE`, откалибрована на ранах прода; будет уточняться) — см. модуль.
+- Остальное (root cause 583622f3, приоры рига, автотесты, починка) — в этом же разделе после выката.
