@@ -1723,3 +1723,16 @@ This scoped development checkpoint does not overwrite the unrelated historical
   site-modes.json) и redirect URI `https://<d>/auth/callback` в Google OAuth-клиенте (вручную, консоль Google).
 - Нужна гео-база (DB-IP Lite City или GeoLite2-City) в `/srv/autorig/data/geoip/country.mmdb` — скачивание не
   делалось, ждёт разрешения владельца. Без неё домен 18+ закрыт для всех, кроме админов.
+
+## Viewer integration · V3 — модель не грузилась (2026-10-11 22:15 UTC, на проде)
+
+- **`unity/test` → `v3-all-r2-20261011`** (откат — `unity/.test-history.log`, прошлый `v3-all-r1-20261010`).
+- **Лёгкий GLB для вьювера**: `mt/view_glb.py` + `?view=1` в `/api/mt/files/<run>/…glb` (MT `29a7999`, через `autotests.py mt-deploy`,
+  GATE PASS). Картинки ≤2048 px, JPEG (PNG только с настоящей альфой), геометрия/скин/анимации байт-в-байт; кэш
+  `rig/.view/<stem>-<ключ>.glb` на ревизию рига, первая выдача +3–5 с. a438fdd8 28,3 → 3,3 МБ, 68c845eb 24,6 → 7,1 МБ.
+  Unity (`Viewer.cs`: `RigUrl()` и `proj/model.glb`) просит `view=1`; полный `rigged.glb` без параметра не меняется.
+- **Замер на 1 МБ/с** (CDP-троттлинг, холодный кэш): вьювер готов за 33 с, сам GLB 2–4 с (было 25+ с GLB поверх Build).
+- **Адаптер комнат**: на старте агент больше не переносит в общую сцену (в Спонзе модель стояла в колонне — пустой вьювер);
+  только сообщает о комнате, если посетитель уже в ней. `join_busiest_room` переносит по просьбе.
+- 503 на `.data.unityweb` был не от `limit_req` (у него статус 429, в error.log «limiting requests» = 0).
+- Шаблон в рабочем дереве несёт чужой WIP (horizon / scene_template, HDR Codex) — в r2 страница взята с прода r1, их правки не выкатывал.
