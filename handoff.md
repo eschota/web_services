@@ -8,12 +8,20 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   Сырой алерт artifact-cache (`cache=… cap=… reserve=…; last-copy deliverables
   preserved`) чинит Localization: пользователю уходит локализованное сообщение
   `storage_paused`, фронт не показывает сырой 5xx `detail`. **Astra это не делает.**
-- Язык — поле API (деплой в процессе): `support_chat_sessions.language`,
-  `tasks.owner_language`, `GET /auth/me` → `language`, `GET/POST /api/me/language`.
-  Бэкенд-хелпер: `user_language.py` (`language_instruction(code)`,
-  `support_session_language(db, session_id)`). **Astra / support_ai.py**: брать язык
-  из сессии/API, отвечать на нём; если посетитель пишет на другом языке — на языке
-  его сообщения. Строки нового `/task` (Task page · V3) — только через `I18n.t()`.
+- Язык — поле API, **живое с 12:16 UTC** (рестарт autorig-storage; telegram-бот
+  перезапущен в 12:17, чтобы support_ai видел колонку): `support_chat_sessions.language`
+  (+`language_source`), `tasks.owner_language` (пишется при создании задачи из запроса),
+  `users/anon_sessions.preferred_language|detected_language`, `GET /auth/me` → `language`,
+  `GET/POST /api/me/language`, `GET /api/task/{id}` → `owner_language`, контракт
+  `GET /api/language`, для агентов на хосте `GET /api/language/resolve?task_id=|support_session_id=`.
+  Бэкенд: `user_language.py` (`language_instruction`, `support_session_language`,
+  `user_error_detail`). Проверено: fa-посетитель → session.language=fa → support_ai
+  ответил на фарси (сессия 56350), en → по-английски (56351). Агент сессии MT
+  (`mt/agent.py`, MT `4ba279e`) берёт язык владельца задачи из `/api/language/resolve`,
+  русского по умолчанию больше нет. Строки нового `/task` — только через `I18n.t()`.
+- Сайт: en/ru/zh/hi/fa (все ключи во всех 5), fa = RTL + Vazirmatn (`static/css/rtl.css`),
+  страницы `/fa/…`, `/ru/…`, `/zh/…`, `/hi/…` рендерятся сервером (lang/dir, текст, hreflang,
+  canonical, sitemaps). Дисклеймер чата поддержки теперь честный (отвечает Astra, ИИ).
 - **Контракт i18n для новых страниц (Viewer · V3: новый `/faq`, Task page · V3)**:
   каждая видимая строка — элемент с `data-i18n="<key>"` (атрибуты: `data-i18n-placeholder`,
   `data-i18n-title`, `data-i18n-aria-label`), английский текст внутри элемента и в
