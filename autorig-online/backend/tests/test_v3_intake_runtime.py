@@ -108,6 +108,23 @@ class IntakeTests(Work):
             finally:
                 intake.SOURCE_ROOT = old
 
+    def test_obj_normalizes_to_an_exact_glb(self):
+        obj = "\n".join([
+            "o quad", "v 0 0 0", "v 1 0 0", "v 1 1 0", "v 0 1 0", "vt 0 0", "vt 1 0", "vt 1 1", "vt 0 1",
+            "vn 0 0 1", "usemtl skin", "f 1/1/1 2/2/1 3/3/1 4/4/1", "usemtl cloth", "f -4/-4/-1 -2/-2/-1 -1/-1/-1",
+        ]).encode()
+        glb_bytes = intake.obj_to_glb(obj)
+        facts = intake.glb_facts(glb_bytes)
+        self.assertEqual((facts["primitives"], facts["materials"]), (2, 2))
+        json_len = struct.unpack_from("<I", glb_bytes, 12)[0]
+        doc = json.loads(glb_bytes[20:20 + json_len])
+        self.assertEqual(doc["accessors"][0]["count"], 4)                 # (v, vt, vn) corners deduplicated
+        self.assertEqual(doc["accessors"][0]["max"], [1.0, 1.0, 0.0])
+        self.assertEqual([doc["accessors"][p["indices"]]["count"] for p in doc["meshes"][0]["primitives"]], [6, 3])
+        self.assertIn("TEXCOORD_0", doc["meshes"][0]["primitives"][0]["attributes"])
+        with self.assertRaises(intake.V3IntakeError):
+            intake.obj_to_glb(b"v 0 0 0\n")
+
     def test_local_upload_path_accepts_only_our_upload_files(self):
         with self.temp() as tmp:
             root = pathlib.Path(tmp)

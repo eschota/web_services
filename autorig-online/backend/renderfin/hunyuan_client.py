@@ -125,20 +125,35 @@ def ordinary_conversion_waiting(*, force_refresh: bool = False) -> bool:
             timeout=0.5,
         )
         try:
+            rows = None
             try:
+                # A generation row waits for Hunyuan itself (it must not pause
+                # its own shared fallback) and a V3 row runs on Motion Transfer:
+                # neither needs converter capacity (2026-10-10).
                 rows = connection.execute(
                     "SELECT lower(status), count(*) FROM tasks "
                     "WHERE lower(coalesce(queue_class, 'interactive')) = 'interactive' "
+                    "AND lower(coalesce(pipeline_kind, '')) NOT IN ('generate', 'v3') "
                     "GROUP BY lower(status)"
                 ).fetchall()
             except sqlite3.OperationalError as exc:
-                if "queue_class" not in str(exc).lower():
+                if "pipeline_kind" not in str(exc).lower() and "queue_class" not in str(exc).lower():
                     raise
-                # Rolling-upgrade compatibility: before the additive migration,
-                # every existing task is interactive by definition.
-                rows = connection.execute(
-                    "SELECT lower(status), count(*) FROM tasks GROUP BY lower(status)"
-                ).fetchall()
+            if rows is None:
+                try:
+                    rows = connection.execute(
+                        "SELECT lower(status), count(*) FROM tasks "
+                        "WHERE lower(coalesce(queue_class, 'interactive')) = 'interactive' "
+                        "GROUP BY lower(status)"
+                    ).fetchall()
+                except sqlite3.OperationalError as exc:
+                    if "queue_class" not in str(exc).lower():
+                        raise
+                    # Rolling-upgrade compatibility: before the additive migration,
+                    # every existing task is interactive by definition.
+                    rows = connection.execute(
+                        "SELECT lower(status), count(*) FROM tasks GROUP BY lower(status)"
+                    ).fetchall()
         finally:
             connection.close()
         waiting = any(str(status or "") in _ORDINARY_ACTIVE_STATES and int(count) > 0

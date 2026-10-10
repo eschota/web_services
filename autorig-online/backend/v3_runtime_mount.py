@@ -228,8 +228,8 @@ def _shell(task) -> dict:
 def _detail(task) -> dict:
     v3 = dict(_settings(task).get("v3") or {})
     intake = v3.get("intake") if isinstance(v3.get("intake"), dict) else {}
-    return {"schema": "autorig.task-v3/1", "task_id": task.id, "pipeline_kind": "v3",
-            "task_status": task.status, **_shell(task),
+    return {**_shell(task), "schema": "autorig.task-v3/1", "task_id": task.id, "pipeline_kind": "v3",
+            "task_status": task.status,
             "state": v3.get("state"), "attempt": v3.get("attempt"),
             "requested_intent": v3.get("requested_intent") or intake.get("requested_intent"),
             "source": {"sha256": v3.get("source_sha256") or intake.get("source_sha256"),
