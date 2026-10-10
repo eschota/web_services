@@ -4,6 +4,10 @@ Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
 CURRENT OWNER PRIORITY 2026-10-10: FULL V3-only task conveyor+fleet, replace only
 task page with currentUnity viewer/agent/effects; otherpagesunchanged. New scoped
+Latestpreserved public60da1250/privatea68df07; canonical/serverSHA
+872a8ae24091ede8bdcb3d6ecd6303a330ebab7ec7c325725597b42b8b1851c6.
+Root28Python+18subtests/2JSshellpass. Dispatcheroutbox+authorizedtaskresolver
+sourceonly/unmounted. Inversepulsealpha1sourcepreserved; r29native/Webbuilderactive.
 plan autorig-online/docs/V3_ONLY_CUTOVER.md. Production /api/mt/v3=404, backend
 dispatch/store/callbackmodules absent; newoutbox/task-shellsource agentsreviewing,
 notmounted. Storagewipequeueflag1; no restart/Taskmutations. Five-modelquality0/5.
