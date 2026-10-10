@@ -5,7 +5,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 ## Координация агентов V3 (2026-10-10)
 
 - converter deploy: Skinning → converter f13 2026-10-10T16:00Z — done 16:45Z (8133a2d, f13 restored; other nodes NOT rolled: owner cancelled the classic pipeline)
-- converter deploy: Converter speed · V3 f1 2026-10-10T15:30Z (b5b7bcd, drained; released when this line says done)
+- converter deploy: Converter speed · V3 f1 2026-10-10T15:30Z — done 16:50Z (6674da2 on f1, V3 canary 7/7 + rig_canary ok, f1 restored; no other node rolled: owner cancelled the classic pipeline)
 - converter: Limb collision · V3 — `5650feb` (arms_spread guard, only `Vlado_Blender/tpose_remap_animation.py` on top of `6674da2`) pushed to converter main, **НЕ выкачен** (f1/f13 под замками выше, f2/f7 на `b386115`): кто катит следующим — везёт его; канарейка = в `tpose_remap_animation_log.txt` строка `guard: X·abduction=…`.
 
 - **Localization · V3** владеет языком пользователя и локализацией (fa/RTL и др.).
@@ -403,6 +403,31 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - Контракт пружины хвоста для вьювера (не построено): кости `cc_tail_NN.x`, корень заперт на бёдрах, пресеты Astra
   `stage/topology/tail_spring.py`, шаг ≤1/240 с, треки тела не трогать.
 - DEV 6541 (до/после), 6542 (скелеты). Аудит `/srv/autorig/audits/topology-skin-20261010/`.
+
+## Converter speed · V3 — классический риг быстрее (2026-10-10 16:50 UTC; работа остановлена приказом владельца)
+
+- Владелец отменил классический конвейер (V3-only), поэтому раскатка остановлена: **6674da2 только на f1**
+  (`v3_target.json` → `nodes.f1`; общий `commit` остаётся b386115, f2/f7/f13 на нём или на 8133a2d у Skinning).
+  Fleet может показывать f1 «v3 not ready» — это коммит-надмножество b386115. Коммит Limb collision 5650feb
+  (на main конвертера) **никуда не выкачен**. Канарейки f1: V3 7/7
+  (`/srv/autorig/audits/converter-v3-canary-20261010/f1-6674da2/`), rig_canary ok (372 с, 8 файлов). f1 restored.
+- Что в конвертере (main eschota/autorig.online, мерджи b5b7bcd, 3cbb1c4, 6674da2):
+  - OpenPose: свип фазами (6 видов rot=0 одним вызовом OpenPose, потом остальные 18), ранний выход на уверенном
+    кандидате (поза+лицо, LR/humanoid-фильтры те же); `GLB_OPENPOSE_SWEEP_BATCH/EARLY_EXIT=0` возвращают старый. 72 → 4–20 с.
+  - Blender 5.x face depth: `compositing_node_group` + `ShaderNodeMapRange` + новый File Output → markers_face 0 → 101.
+  - ARP Go proxy: solidify без even offset + страж высоты. Он раздувал прокси 1.0 м до 1.59/2.24 м → риг в 1.7× меша
+    (d76f84c3). Исправлено, на том же входе head.x = 0.837 м.
+  - arp_bind: после PSEUDO_VOXELS поднимает c_pos на 2 м; если >15 % кожи осталось (тихий отказ bone heat, бинд 10 с
+    вместо 22), тут же VHDS в том же процессе. Падавший исходник кладётся в `logs/*_pseudo_failed_source.blend`.
+    Тот же исходник 4/4 детерминирован, так что причина в позе/подгонке рига, а не в мече.
+  - Прогресс: метки UTC с `Z`; строки `OpenPose: frame k/n.`, `Rig: skeleton fitted (N bones).`, `Rig: weights painted.`,
+    `Rig: check failed — …` перед RETRY. Статус `/api-converter-glb/status/{id}` даёт `viewer_rig_ready(_at)`.
+- Бэкенд (89b94841, релиз `rig-ready-warm-20261010T1555Z`, рестарт 15:55 UTC при чистом renderfin): `/api/task/{id}/v3-view`
+  прогревает `animations.glb`, как только `viewer_animations_glb_url` объявлен (processing), а не после done.
+  Замер: `deploy/fleet/rig_speed_probe.py <box> <port> [url]`.
+- Цифры (f1, воин 23 950 верш.): OpenPose 90→21, поза 51→52, риг 70→37, ретаргет до viewer GLB 46→40,
+  **риг во вьювере 261→153 с**, задача 476→399 с. DEV 65a3c77faa35. Бюджет 60 с классика не берёт.
+- Не сделано: 2ad5c0c8 (руки без своих костей) не смотрел.
 
 ## Rig judge · V3 — судья суставов и автоисправление рига (2026-10-10 13:00 UTC, на проде)
 
