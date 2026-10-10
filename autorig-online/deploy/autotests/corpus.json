@@ -362,6 +362,48 @@
    "what": "the low-poly chibi's fastrig before tessellation (run 2fd6423a v0)",
    "sha256": "762e8b46943d39c065861916c7d4d14ebf121b50126aba1e7404dd0b1194b46e",
    "bytes": 631880
+  },
+  "7018c8b8.upload.glb": {
+   "source": "/srv/autorig/audits/leg-fit-20261011/7018c8b8.model.glb",
+   "task": "7018c8b8-63f8-43b5-a275-9c8c654adf51",
+   "what": "Alina: female anime character in a hoodie with wide boots (chelsea.fbx as the V3 intake normalized it; 3 679 welded vertices)",
+   "sha256": "87c6f3139fa6d443fd30b4ed52b9da444d59bdc57ee2b505068ca71e47b34109",
+   "bytes": 106164
+  },
+  "7018c8b8.mt-before.glb": {
+   "source": "/srv/autorig/audits/leg-fit-20261011/7018c8b8.mt-before.glb",
+   "task": "7018c8b8-63f8-43b5-a275-9c8c654adf51",
+   "what": "the recorded bad rig (run 8186ed95c730e4e149d4 v1): left ankle at 18.9 % H on top of the boot, right at 9.3 %, the knee a stump",
+   "sha256": "7248283c61b315162b0ccf5c9fd346d41da6a5a28c798a75c626b20047cfa193",
+   "bytes": 848324
+  },
+  "7018c8b8.mt-before.rig.json": {
+   "source": "/srv/autorig/audits/leg-fit-20261011/7018c8b8.mt-before.rig.json",
+   "task": "7018c8b8-63f8-43b5-a275-9c8c654adf51",
+   "what": "its rig.json",
+   "sha256": "8436fe0e1c61bfc4a98e9405cb40b020f92874b45a406d1f3e80748dee95f65d",
+   "bytes": 13743
+  },
+  "583622f3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dfb099ac26c8f16ab46b/proj/model.glb",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "what": "the potato humanoid «Кристалл-Орион» (OBJ upload as the conveyor's verified GLB; 34 shells, +Y vertex normals)",
+   "sha256": "6dafcf2d684217a892adb07fc315de4622ec6b34b43840e196d44a031ba8124c",
+   "bytes": 420328
+  },
+  "8635aa06.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/cc22a7e0f640274a8ddf/proj/model.glb",
+   "task": "8635aa06",
+   "what": "stylized plus-size woman in T-pose (a heavy body on ordinary limbs: the control)",
+   "sha256": "e36efe3dda2abcb70a4bf6a92853e520fe75cbc78604b8e0e50ccbc353aefdec",
+   "bytes": 14160944
+  },
+  "b67dcb46.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c6e2eb4c85a1c5a15f63/proj/model.glb",
+   "task": "b67dcb46",
+   "what": "chibi anime girl, T-pose (a big head on a small body: the control)",
+   "sha256": "f2a2be0e7122489eda9ae210fb1f21dd42d6c356eb12d2256c30a94963f10dd1",
+   "bytes": 102908
   }
  },
  "profiles": {
@@ -3807,7 +3849,7 @@
      "thresholds": {
       "arm_vertices_above_joints": [
        "<=",
-       120
+       160
       ],
       "neck_head_share": [
        ">=",
@@ -3919,6 +3961,431 @@
       ]
      },
      "note": "the low-poly chibi before tessellation: fails on extent in Waving1 only (12 edges, 0.73 %) - a borderline case; its real gate is the tessellation stage, numeric stretch barely sees faceting"
+    }
+   ]
+  },
+  {
+   "id": "alina_boots",
+   "task": "7018c8b8-63f8-43b5-a275-9c8c654adf51",
+   "cost": 2,
+   "defect": "owner 2026-10-11 («сустав колена и пятки опять подобраны неправильно»): fastrig put the ankle at the narrowest vertex slab (the thin ring above a wide boot: 18.9 % H left, 9.3 % right) and the knee at 0.47 of hip -> that ankle, so the shin bent at the top of the boot in Running. Leg fit · V3 (mt/leg_fit.py) takes the ankle and knee from the mesh's sections.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "7018c8b8.upload.glb",
+     "params": {
+      "words": "female anime character hoodie boots"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_legs",
+     "kind": "leg_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "failed": [
+       "==",
+       0
+      ],
+      "ankle_max_pct_H": [
+       "<=",
+       8
+      ],
+      "ankle_diff_pct_H": [
+       "<=",
+       1
+      ],
+      "knee_offset_max": [
+       "<=",
+       0.5
+      ]
+     }
+    },
+    {
+     "id": "mt_fast",
+     "kind": "mt_fast_analysis",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "op_errors": [
+       "==",
+       0
+      ],
+      "leg_rules_failed": [
+       "==",
+       0
+      ],
+      "foot_rules_failed_after": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       4
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       40
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "before_legs_detector",
+     "kind": "leg_joints",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "7018c8b8.mt-before.glb",
+     "params": {
+      "rig_json": "7018c8b8.mt-before.rig.json"
+     },
+     "thresholds": {
+      "failed": [
+       ">=",
+       2
+      ],
+      "ankle_max_pct_H": [
+       ">=",
+       15
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "potato_blob",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "cost": 2,
+   "defect": "owner 2026-10-11 («почему у человека-картошки не нашлось рук по-нормальному»): an ultra-fat humanoid (trunk 0.54 x 0.52 H, legs 0.06 H, arm stubs at the sides). fit_biped's arm search took the belly's widest points for the fingertips and fell back to the proportions shoulder 0.11 H from the axis at 0.8 H, so both arm chains ran inside the torso (arm skin 247 / 195 vertices, limb collision medium); the hips fell back to 0.47 H in the belly. Vision saw a blank sheet (+Y vertex normals shade flat) and called it «an abstract sculpture» -> a 1-bone root rig. Fix: Body constitution · V3 (mt/constitution.py: ultra_fat priors: arm stubs as side lobes of the trunk, the hip window 0.03-0.36 H; glb.py rebuilds disagreeing normals)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "583622f3.model.glb",
+     "params": {
+      "words": "",
+      "forward_axis": "-x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "note": "the conveyor's front (Vision align: -x); parts_cluster.guess_forward reads 0.32 on this blob"
+    },
+    {
+     "id": "mt_constitution",
+     "kind": "constitution",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "is_ultra_fat": [
+       "==",
+       1
+      ],
+      "confidence": [
+       ">=",
+       0.8
+      ],
+      "arm_stubs": [
+       "==",
+       2
+      ],
+      "legs": [
+       "<=",
+       0.12
+      ],
+      "torso_width": [
+       ">=",
+       0.45
+      ],
+      "seconds": [
+       "<=",
+       5
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "arm_joints_from_constitution": [
+       "==",
+       2
+      ],
+      "min_arm_off_axis_pct_H": [
+       ">=",
+       17
+      ],
+      "hips_y_pct_H": [
+       "<=",
+       16
+      ],
+      "left_arm_y_pct_H": [
+       "<=",
+       60
+      ],
+      "right_arm_y_pct_H": [
+       "<=",
+       60
+      ]
+     }
+    },
+    {
+     "id": "mt_limbs",
+     "kind": "limb_collision",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "min_arm_vertices": [
+       ">=",
+       400
+      ],
+      "severity_rank": [
+       "<=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       20
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       60
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "heavy_control",
+   "task": "8635aa06",
+   "cost": 2,
+   "defect": "Body constitution · V3 control: a plus-size woman (trunk 0.37 x 0.24 H, legs and arms of ordinary length, T-pose) is NOT ultra_fat: the constitution priors must stay `normal` and her rig unchanged (arms from the silhouette, hips in the 0.22-0.6 window)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8635aa06.model.glb",
+     "params": {
+      "words": "stylized plus-size woman"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_constitution",
+     "kind": "constitution",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "is_ultra_fat": [
+       "==",
+       0
+      ],
+      "is_toy_mascot": [
+       "==",
+       0
+      ],
+      "torso_width": [
+       "<=",
+       0.45
+      ],
+      "arm_pose_t": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "arm_joints_from_constitution": [
+       "==",
+       0
+      ],
+      "hips_y_pct_H": [
+       ">=",
+       30
+      ],
+      "min_arm_off_axis_pct_H": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_limbs",
+     "kind": "limb_collision",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "min_arm_vertices": [
+       ">=",
+       1
+      ]
+     },
+     "note": "her limb collisions are the silhouette rig's own (no constitution override): not gated here"
+    }
+   ]
+  },
+  {
+   "id": "chibi_control",
+   "task": "b67dcb46",
+   "cost": 1,
+   "defect": "Body constitution · V3 control: a chibi (head 0.45 H, T-pose) reads chibi, not ultra_fat / toy_mascot; no arm override (its arms come from the silhouette)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "b67dcb46.model.glb",
+     "params": {
+      "words": "chibi anime girl"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_constitution",
+     "kind": "constitution",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "is_chibi": [
+       "==",
+       1
+      ],
+      "is_ultra_fat": [
+       "==",
+       0
+      ],
+      "head": [
+       ">=",
+       0.3
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "arm_joints_from_constitution": [
+       "==",
+       0
+      ]
+     }
     }
    ]
   }

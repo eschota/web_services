@@ -486,6 +486,25 @@ def mt_quadruped_rig(ctx, input_name, what="", forward_axis="+z"):
             "forward_changed": int(bool(fc.get("changed"))), "rig_total_s": (out.get("timings_s") or {}).get("fastrig")}
 
 
+def leg_joints(path, rig_json=None):
+    """«Leg fit · V3» (2026-10-11, task 7018c8b8: the ankle at the top of a wide boot, 18.9 % H, the knee a stump):
+    mt/leg_fit.rules on a rigged GLB (+ rig.json): ankle height and share of the foot length, the ankle behind the
+    heel line, the knee's share of hip -> ankle and its centring, left / right ankle symmetry."""
+    try:
+        from mt import leg_fit as LF
+    except ImportError:                                   # the module is not on the tree under test yet
+        return {"pending": True, "why": "mt/leg_fit.py is not in the tree under test"}
+    r = LF.rules_for_glb(path, rig_json)
+    sides = r.get("sides") or {}
+    out = {"failed": len(r.get("failed") or []), "codes": r.get("failed"),
+           "ankle_max_pct_H": max([float(v.get("ankle_pct_H") or 0) for k, v in sides.items() if isinstance(v, dict)] or [0]),
+           "ankle_diff_pct_H": sides.get("ankle_diff_pct_H", 0.0),
+           "knee_offset_max": max([float(v.get("knee_offset_r") or 0) for k, v in sides.items() if isinstance(v, dict)] or [0]),
+           "knee_t": {k: v.get("knee_t") for k, v in sides.items() if isinstance(v, dict)},
+           "ankle_over_foot": {k: v.get("ankle_over_foot") for k, v in sides.items() if isinstance(v, dict)}}
+    return out
+
+
 def rig_stretch(ctx):
     """«Skinning · V3» (2026-10-11): does the fast rig tear its own mesh?  rig.json's rig_check stretch (fastrig's
     looping test clip at three frames: edges over 2x / 4x their rest length that also grew), the per-bone weight
@@ -550,6 +569,58 @@ def hair_limbs(ctx):
     return out
 
 
+def constitution(ctx):
+    """Body constitution · V3 (mt/constitution.py): the humanoid subcategory by body constitution of the MT run's
+    model (geometry only here; the vision judge runs in the conveyor), its confidence and proportions."""
+    try:
+        from mt import constitution as BC
+    except ImportError:
+        return {"pending": True, "why": "mt/constitution.py is not in the tree under test"}
+    run = ctx["run"]
+    doc = BC.classify(run, vision=False)
+    p = doc.get("proportions") or {}
+    sub = doc.get("subcategory")
+    out = {"subcategory": sub, "confidence": doc.get("confidence"),
+           "head": p.get("head"), "legs": p.get("legs"), "arms": p.get("arms"), "arm_pose": p.get("arm_pose"),
+           "torso_width": p.get("torso_width"), "torso_depth": p.get("torso_depth"),
+           "arm_stubs": p.get("arm_stubs"), "priors_applied": (doc.get("priors") or {}).get("applied"),
+           "priors_normal": 1 if (doc.get("priors") or {}).get("applied") == "normal" else 0,
+           "seconds": (doc.get("geometry") or {}).get("seconds")}
+    for name in BC.SUBCATEGORIES:
+        out["is_" + name] = 1 if sub == name else 0
+    out["arm_pose_t"] = 1 if p.get("arm_pose") == "t" else 0
+    return out
+
+
+def rig_joints(ctx):
+    """Where the fast rig put its joints, as shares of the height: the arm joints' distance from the mid-plane
+    (an arm inside the torso reads near 0), the shoulder and hip heights, the hand's distance from the hips.
+    The potato 583622f3: LeftArm / RightArm were the proportions guess 0.11 H from the axis, inside the belly."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    heads = {b["name"]: np.asarray(b["head"], float) for b in rig.get("bones") or []}
+    H = float(rig.get("model_height_units") or 1.0)
+    y0 = min(float(h[1]) for h in heads.values()) if heads else 0.0
+    out = {"bones": len(heads), "body_plan": rig.get("body_plan"),
+           "constitution": (rig.get("constitution") or {}).get("subcategory"),
+           "constitution_confidence": (rig.get("constitution") or {}).get("confidence"),
+           "arm_joints_from_constitution": len((rig.get("constitution") or {}).get("arm_joints_from") or [])}
+    if "Hips" in heads:
+        hips = heads["Hips"]
+        out["hips_y_pct_H"] = round(float(hips[1] - y0) / H * 100, 2)
+        for side in ("Left", "Right"):
+            if f"{side}Arm" in heads:
+                a = heads[f"{side}Arm"]
+                out[f"{side.lower()}_arm_off_axis_pct_H"] = round(float(np.hypot(a[0] - hips[0], a[2] - hips[2])) / H * 100, 2)
+                out[f"{side.lower()}_arm_y_pct_H"] = round(float(a[1] - y0) / H * 100, 2)
+            if f"{side}Hand" in heads:
+                hd = heads[f"{side}Hand"]
+                out[f"{side.lower()}_hand_off_axis_pct_H"] = round(float(np.hypot(hd[0] - hips[0], hd[2] - hips[2])) / H * 100, 2)
+        offs = [v for k, v in out.items() if k.endswith("_arm_off_axis_pct_H")]
+        out["min_arm_off_axis_pct_H"] = min(offs) if offs else None
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
 def mt_arm_clearance(ctx):
     """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
@@ -571,12 +642,16 @@ def mt_arm_clearance(ctx):
     return out
 
 
-def mt_rig_first(ctx, input_name, words=""):
+def mt_rig_first(ctx, input_name, words="", forward_axis=""):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
-    mt/classic_mirror.py does at upload time."""
+    mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
+    (proj/forward.json), for a model whose symmetry alone cannot tell it (the potato 583622f3: guess 0.32)."""
     run = pathlib.Path(ctx["work"]) / "run"
     shutil.rmtree(run, ignore_errors=True)
     run.mkdir(parents=True)
+    if forward_axis:
+        (run / "proj").mkdir(parents=True, exist_ok=True)
+        (run / "proj" / "forward.json").write_text(json.dumps({"forward_axis": forward_axis, "source": "autotests"}))
     p, wall = _child([PY, "-P", "-m", "mt.rig_first", "--dir", str(run), "--glb", str(_input(input_name)),
                       "--words", words], timeout=300)
     if p.returncode != 0:
@@ -663,6 +738,8 @@ def mt_fast_analysis(ctx):
             "bones_outside_before": ((bo.get("before") or {}).get("bones_outside") or [])[:16],
             "bones_outside_after": ((bo.get("after") or {}).get("bones_outside") or [])[:16],
             "foot_rules_failed_after": foot_bad, "op_errors": len(errors), "op_error_ids": errors,
+            "leg_rules_failed": len((res.get("leg_joint_rules") or {}).get("failed") or []),   # Leg fit V3
+            "leg_rule_codes": (res.get("leg_joint_rules") or {}).get("failed"),
             "warnings": len(fa.get("warnings") or []), "symmetry_worst_pct_H": (res.get("symmetry_check") or {}).get("worst_pct_H"),
             "ops_total_s": (fa.get("timings") or {}).get("total")}
 
@@ -914,7 +991,7 @@ def run_check(check: dict, ctx: dict) -> dict:
     elif inp:
         target = _input(inp)
     if k == "mt_rig_first":
-        return mt_rig_first(ctx, inp, a.get("words", ""))
+        return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx)
     if k == "hand_rig":
@@ -970,8 +1047,15 @@ def run_check(check: dict, ctx: dict) -> dict:
         return quadruped_legs(target, rig_json)
     if k == "rig_stretch":
         return rig_stretch(ctx)
+    if k == "leg_joints":
+        rig_json = ctx["run"] / "rig" / "rig.json" if on == "mt_rig" else (_input(a["rig_json"]) if a.get("rig_json") else None)
+        return leg_joints(target, rig_json)
     if k == "hair_limbs":
         return hair_limbs(ctx)
+    if k == "constitution":
+        return constitution(ctx)
+    if k == "rig_joints":
+        return rig_joints(ctx)
     if k == "pending_detector":
         return {"pending": True}
     raise ValueError(f"unknown check kind {k}")
