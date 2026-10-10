@@ -4571,6 +4571,25 @@ async def api_create_task(
         # Generate public URL (URL-encode filename for special chars, spaces, cyrillic)
         from urllib.parse import quote
         final_url = f"{APP_URL}/u/{upload_token}/{quote(filename)}"
+
+        # ASCII FBX (owner 2026-10-10): the converters reject it and Blender cannot
+        # import it, so it becomes a GLB here for legacy and V3 alike. The original
+        # upload stays beside the GLB; a failure is told in the visitor's language.
+        import fbx_ascii
+
+        if fbx_ascii.is_ascii_fbx(Path(filepath)):
+            glb_name = os.path.splitext(os.path.basename(filename))[0] + ".glb"
+            try:
+                receipt = await asyncio.to_thread(
+                    fbx_ascii.ascii_fbx_to_glb, Path(filepath), Path(upload_dir) / glb_name)
+            except Exception as exc:
+                print(f"[Upload] ASCII FBX {upload_token}/{filename} not convertible: {exc}")
+                from user_language import user_error_detail
+                raise HTTPException(status_code=422, detail=user_error_detail("fbx_unreadable"))
+            print(f"[Upload] ASCII FBX {upload_token}/{filename} -> {glb_name} "
+                  f"({receipt['inserted_a_keys']} array key(s) repaired, {receipt['bytes']} bytes)")
+            final_url = f"{APP_URL}/u/{upload_token}/{quote(glb_name)}"
+            uploaded_bytes = int(receipt["bytes"])
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")

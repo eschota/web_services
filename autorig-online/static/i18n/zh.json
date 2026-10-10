@@ -542,6 +542,7 @@
   "footer_image_to_rig": "图片转绑定角色",
   "lang_label": "语言",
   "error_storage_paused": "我们正在释放服务器存储空间，新上传暂停几分钟。您已完成的模型不受影响——请大约 10 分钟后再试。",
+  "error_fbx_unreadable": "无法读取此 FBX 文件。请重新导出为二进制 FBX 或 GLB 后再上传。",
   "error_server_busy": "服务器当前繁忙，请几分钟后再试。",
   "error_service_unavailable": "绑定服务暂时不可用，请几分钟后再试。",
   "error_upload_too_large": "文件过大。请上传不超过 100MB 的 GLB、FBX 或 OBJ 文件。",

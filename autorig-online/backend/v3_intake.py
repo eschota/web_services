@@ -227,7 +227,8 @@ async def admit_glb(db, *, data: bytes, original_url: str, filename: str, owner_
                     origin: str, created_via_api: bool = False, requested_intent: str = "rig",
                     input_type: str = "t_pose", input_bytes: Optional[int] = None,
                     original: Optional[Mapping[str, Any]] = None, receipt_facts: Optional[Mapping[str, Any]] = None,
-                    collection_metadata: Optional[Dict[str, Any]] = None, queue_class: str = "interactive"):
+                    collection_metadata: Optional[Dict[str, Any]] = None, queue_class: str = "interactive",
+                    normalization: Optional[Mapping[str, Any]] = None):
     """A ready GLB: one Task + binding commit; the runtime picks it up at once."""
     from tasks import create_conversion_task
 
@@ -237,7 +238,8 @@ async def admit_glb(db, *, data: bytes, original_url: str, filename: str, owner_
     receipt = generation_receipt(task_id, digest, **dict(receipt_facts or {})) \
         if requested_intent == "generate" else None
     binding = build_binding(task_id, path, digest, requested_intent=requested_intent, origin=origin,
-                            filename=filename, original=original, facts=facts, receipt=receipt)
+                            filename=filename, original=original, facts=facts, receipt=receipt,
+                            normalization=normalization)
     task, error = await create_conversion_task(
         db, original_url, input_type, owner_type, owner_id, created_via_api=created_via_api,
         pipeline_kind="v3", input_bytes=input_bytes if input_bytes is not None else len(data),
@@ -264,6 +266,23 @@ async def admit_upload(db, *, path: Path, original_url: str, filename: str, owne
                                owner_type=owner_type, owner_id=owner_id, origin=origin,
                                created_via_api=created_via_api, requested_intent=requested_intent,
                                input_type=input_type, input_bytes=input_bytes, original=original)
+    if fmt == "fbx":
+        # FBX (ASCII repaired first) -> GLB with assimp right here; only if that
+        # fails does the task wait for a converter in the intake pump.
+        import fbx_ascii
+
+        glb = Path(path).with_name(Path(path).stem + ".v3.glb")
+        try:
+            receipt = await asyncio.to_thread(fbx_ascii.fbx_to_glb, Path(path), glb)
+        except Exception as exc:
+            print(f"[V3 intake] local FBX -> GLB failed ({exc}); waiting for a converter")
+        else:
+            original["sha256"] = receipt["source_sha256"]
+            return await admit_glb(db, data=glb.read_bytes(), original_url=original_url, filename=filename,
+                                   owner_type=owner_type, owner_id=owner_id, origin=origin,
+                                   created_via_api=created_via_api, requested_intent=requested_intent,
+                                   input_type=input_type, input_bytes=input_bytes, original=original,
+                                   normalization=receipt)
     if fmt in ("fbx", "obj"):
         return await _create_normalizing_task(db, original=original, owner_type=owner_type, owner_id=owner_id,
                                               origin=origin, created_via_api=created_via_api,

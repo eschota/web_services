@@ -726,6 +726,7 @@
   "footer_image_to_rig": "Image to Rigged Character",
   "lang_label": "Language",
   "error_storage_paused": "New uploads are paused for a few minutes while we free up server storage. Your finished models are safe — please try again in about 10 minutes.",
+  "error_fbx_unreadable": "We could not read this FBX file. Please export it again as a binary FBX or GLB and upload it once more.",
   "error_server_busy": "The server is busy right now. Please try again in a few minutes.",
   "error_service_unavailable": "The rigging service is temporarily unavailable. Please try again in a few minutes.",
   "error_upload_too_large": "This file is too large. Upload a GLB, FBX, or OBJ file up to 100MB.",
