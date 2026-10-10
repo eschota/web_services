@@ -1,0 +1,28 @@
+# /etc/systemd/system/autorig-rooms.service
+# AutoRig rooms (presence / state for the multiplayer viewer): GET /api/rooms, WS /api/rooms/ws.
+# Standalone on purpose: deploying or restarting it never touches autorig-storage.
+# Lives in /srv/autorig/rooms (outside the release tree). nginx: exact locations, see nginx-rooms.conf.
+[Unit]
+Description=AutoRig rooms (/api/rooms presence service)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/rooms
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/rooms/rooms_api.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target
