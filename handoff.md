@@ -1869,3 +1869,29 @@ This scoped development checkpoint does not overwrite the unrelated historical
   humanoid в `fast_registry.json` получает подкатегории конституции с правилами для промпта агента.
 - **Пороги пропорций** (таблица в `mt/constitution.py: TABLE`, откалибрована на ранах прода; будет уточняться) — см. модуль.
 - Остальное (root cause 583622f3, приоры рига, автотесты, починка) — в этом же разделе после выката.
+
+## QA calibration · V3 — numeric QA и рывки меряют видимые дефекты (2026-10-10 23:18 UTC, на проде; для V3 triage)
+
+- **V3 triage: пересортируйте бэкфилл.** Старые `rig/numeric-qa.json` / `analysis/backfill_qa.json` посчитаны строгим
+  правилом; у новых отчётов есть `verdict_rule: "visible/1"`, у каждого клипа `visible {passed, why, worst_stretch,
+  peak_edges_over_4x, peak_share}` и `strict_status` (старый вердикт). Бэкфилл перезапускает numeric QA только когда
+  отчёт от другого GLB — для пересортировки считайте отчёт без `verdict_rule` устаревшим. `anim_qa.left` в rig.json
+  тоже старый: перепроверьте `anim_qa.check` (на 51 ране остаток рывков 36 → 0).
+- **Код** (MT `f990df9`): `mt/v3_numeric_qa.py` (LIMITS 4x / 16x площади / рост 0.5 % размера; `clip_visible`:
+  tear = худшее ребро клипа > 30x, extent = в худшем кадре ≥ 10 рёбер и > 0.6 % всех рёбер > 4x; skin_postvalidate
+  не менялся), `mt/anim_qa.py` (`pops`: рывок = кадры уходят от слерпа соседей ≥ 20° и возвращаются, сквозной
+  размах ≤ 50 % отклонения; fix() сглаживает только настоящие рывки, теперь и на кистях), `mt/v3_conveyor.py` (гейт
+  `no_limb_in_body`: сторона «high» в свежем `analysis/limb_collision.json`). Патчи: `tools/patch_numeric_visible.py`,
+  `tools/patch_anim_qa_pops.py`, `tools/patch_qa_limb_gate.py` — **перезаливаете эти файлы целиком — прогоните их**.
+- **Калибровка** (клип, худший кадр): плохие — kitbash bfbd3248 v0 84–213x, 1.7–3.9 %; лошадь v0 165x, 4.0 %;
+  tail_girl конвертер 979x; maniac конвертер 45x; arms_unbound 470x; меч в теле 90x; локоть 91a9513a 258x. Чистые —
+  kitbash после фикса ≤ 21x, 0.41 %; чиби после тесселяции ≤ 16x, 0.44 %; boy_tshirt, knight, anime_heel, horse после
+  фикса, prepared_reupload, knight_sword, maniac MT, манекены, кисть 712321a1 — все клипы проходят (было 0/9).
+  Открытые дефекты корпуса падают с цифрами: tail_girl MT (стопа/таз 47x), posed_fox (43x), warrior_sword (рёбра
+  предплечий растут на 0.44 размера модели).
+- **Честно**: чиби до тесселяции падает только по extent в Waving1 (12 рёбер, 0.73 %) — на грани; растяжение его
+  фасеточность почти не видит, его настоящий гейт — этап тесселяции. Рука сквозь тело (8369addb) растяжением не
+  видна (≤ 15x) — её ловит новый гейт `no_limb_in_body` и детектор limb collision.
+- **Автотесты**: кейс `numeric_visible` (detector: лошадь v0, kitbash v0 = вход `bfbd3248.mt-v0.glb`, чиби =
+  `dd498832.mt-untess.glb`; контроль: `mt_numeric` на boy_tshirt и warrior_kitbash = 9/9), kind `numeric_qa_file`;
+  maniac_neck XPASS → порог. Гейт mt/base PASS (104 PASS, 10 XFAIL). autorig `54975c5b`. DEV 6629.
