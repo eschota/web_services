@@ -1196,3 +1196,23 @@ This scoped development checkpoint does not overwrite the unrelated historical
   считается телом; 8b16a847 кисть в большой голове), medium 2 (9d466924, 91a9513a), чисто 7, у 2ad5c0c8 руки не
   привязаны к костям (0 вершин предплечья/кисти, всё на `root.x`). V3 fastrig 8369add — high с обеих сторон.
   DEV 6536, 6537.
+
+## Viewer integration · V3 — одна сборка вьювера со всем (2026-10-10 16:42 UTC, на проде)
+
+- **`unity/test` → `v3-all-r1-20261010`** (было `scenes-v3-r2-20261010`; откат и история — `unity/.test-history.log`).
+  Одна сборка: Scenes (лучи, бейки, плашка, рантайм-пакеты) + Multiplayer (комнаты, WASD-контроллер) + LiveLayer + HDR-пульс
+  из рабочего дерева (WIP Codex не коммитился) + исправленные стенды. Собрано `ScenesV3Build.BuildPlayer -sv3PlayerOut Builds/WebGL-v3-all`.
+- **Шаблон в Git = живая страница** (MT `7f1fe2b`, `459d54f`): все живые ханки Session agent (`agentApply`, `viewerNow`, `viewerErr`,
+  `progSnap`, `MPL`, строки агента на 5 языках, `lines.mp`), выключенный звук аватара, `live.js`, `scene-plate.js`, `mp-rooms.js`.
+  Больше не править index.html только на проде: правка → шаблон → коммит.
+- **Адаптер комнат** (хвост шаблона): `autorigUnity.multiplayer` (контракт Session agent) поверх `autorigUnity.rooms` (Multiplayer),
+  события `autorig-rooms` → `autorig-mp`. Вход в самую людную комнату ждёт модель, риг и плашку сцен; пока комната недоступна
+  (`offline`), агент не говорит «ты в общей комнате».
+- **Стенды** (studio/disco/…): `Main.unity` старше StandLit, поэтому `StandScene` без шаблона падал. Теперь берёт URP Lit из
+  `Assets/Resources/AutoRigStand/StandLit(.Emissive).mat` (в Git). Сам фолбэк — в `StandScene.cs`, а вся папка `Assets/Scripts/Runtime`
+  в MT **не отслеживается Git** (кроме Viewer.cs) — правка в рабочем дереве, в коммит не вошла.
+- **Агент сессии**: `room_stats`, `join_busiest_room` подключены (`mt/agent.py` MT `63bb9e4`, на проде, рестарт autorig-mt 16:12 UTC),
+  `Mp*` методы разрешены, `/dev/tools` их показывает (`catalog.py` = прод, обе копии).
+- **Для Multiplayer · V3**: у классических задач один клип `Animation` → `rigged:false` в `MpInfo`, комнаты «norig»; в play-режиме
+  в Спонзе камера/спавн у колонны — модель почти не видна (кадр DEV).
+- **Регрессионный гейт** («Autotests · V3») ещё не появился — сборка прошла без него.
