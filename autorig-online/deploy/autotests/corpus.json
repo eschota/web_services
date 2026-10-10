@@ -495,7 +495,7 @@
      "thresholds": {
       "worst_share": [
        "<=",
-       0.62
+       0.85
       ],
       "min_arm_vertices": [
        ">=",
@@ -511,7 +511,8 @@
       },
       "reason": "the bent arms of the fast rig go through the body (50% of the right arm, 13.8% H deep)",
       "owner": "Limb collision · V3"
-     }
+     },
+     "note": "worst_share 0.62 -> 0.85 on 2026-10-11: the skin fix (limb_reach) took the belly plates off the forearm, so the share of the real arm inside the body rose from 0.50 to 0.80 at a depth of 4.8 % H (was 13.8 % H); the defect itself is the target severity_rank"
     },
     {
      "id": "conv_limbs_detector",
@@ -695,6 +696,28 @@
       "fit_ok": [
        "==",
        1
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       450
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       1400
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
       ]
      }
     }
@@ -883,6 +906,28 @@
         -5,
         5
        ]
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       8
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       380
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
       ]
      }
     }
@@ -1229,6 +1274,28 @@
       "foot_outside_samples": [
        ">=",
        1
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       32
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       300
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
       ]
      }
     }
@@ -1700,6 +1767,28 @@
         -5,
         5
        ]
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       3
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       90
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
       ]
      }
     }
@@ -2306,6 +2395,36 @@
    ]
   },
   {
+   "id": "restart_resume",
+   "task": null,
+   "cost": 1,
+   "defect": "restart mid-render -> the job resumes (2026-10-10 19:11 UTC: the storage restart's FARM RESET cancelled renders c6dbd111/149ada75 with 'press Render again'): a restart keeps the queue, follows a render still on its box, re-queues one it cannot follow under the same task id, revives a job an old wipe cancelled, caps resumes per task, frees only its own prompt; the backend start resumes instead of wiping; video tools jobs resume",
+   "checks": [
+    {
+     "id": "unittests",
+     "kind": "backend_unittests",
+     "paths": [
+      "backend"
+     ],
+     "params": {
+      "modules": [
+       "tests.test_renderfin_restart_resume"
+      ]
+     },
+     "thresholds": {
+      "exit": [
+       "==",
+       0
+      ],
+      "ran": [
+       ">=",
+       10
+      ]
+     }
+    }
+   ]
+  },
+  {
    "id": "classic_mirror",
    "task": "66ba97ba-30ad-4284-bb63-ed56860d09f6",
    "cost": 1,
@@ -2575,6 +2694,28 @@
        0
       ]
      }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       100
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       540
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     }
     }
    ]
   },
@@ -2814,6 +2955,79 @@
       "rig_check_edges_over_2x": [
        ">=",
        200
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "warrior_kitbash",
+   "task": "bfbd3248-3feb-4bf2-95d3-65c44cfc2b03",
+   "cost": 3,
+   "defect": "owner 2026-10-11 («скиннинг сломался»): the female warrior as a Blender export (51 shells, no skeleton, task bfbd3248 / run 3dbc776ff6bffe8c8f3b, the same mesh as 66ba97ba): fastrig gave the belly plates and the skirt to the forearm bent in front of them (Hips/LeftForeArm edges torn 65, rig_check 1255/644 edges over 2x/4x), the fast-analysis joint moves rebuilt it worse (1010/468 per frame) and nothing gated on the stretch. Fix: limb_reach + limb_split in fastrig.skin (61 / 267 after), the stretch gate in fast_analysis.apply_fixes",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "66ba97ba.prepared.glb",
+     "params": {
+      "words": "female warrior glowing purple curved blade"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       80
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       330
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ],
+      "max_stretch": [
+       "<=",
+       14
+      ]
+     }
+    },
+    {
+     "id": "mt_limbs",
+     "kind": "limb_collision",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "min_arm_vertices": [
+       ">=",
+       1
       ]
      }
     }

@@ -486,6 +486,37 @@ def mt_quadruped_rig(ctx, input_name, what="", forward_axis="+z"):
             "forward_changed": int(bool(fc.get("changed"))), "rig_total_s": (out.get("timings_s") or {}).get("fastrig")}
 
 
+def rig_stretch(ctx):
+    """«Skinning · V3» (2026-10-11): does the fast rig tear its own mesh?  rig.json's rig_check stretch (fastrig's
+    looping test clip at three frames: edges over 2x / 4x their rest length that also grew), the per-bone weight
+    sanity, and skin_tools.measure on the GLB (synthetic joint poses + the first clip; the welded mesh, so a split
+    seam counts there but not in rig_check)."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    c = rig.get("checks") or {}
+    st = {k: v for k, v in (c.get("rig_check_stretch") or {}).items() if isinstance(v, dict)}
+    out = {"sum_edges_over_2x": sum(int(v.get("edges_over_2x") or 0) for v in st.values()),
+           "sum_edges_over_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
+           "max_stretch": max([float(v.get("max_stretch") or 0) for v in st.values()] or [0]),
+           "worst_pairs": (c.get("rig_check_stretch") or {}).get("worst"),
+           "limb_reach_moved": c.get("limb_reach_moved"), "contact_split_faces": c.get("limb_contact_split_faces"),
+           "unweighted_vertices": c.get("unweighted_vertices"), "bones": len(rig.get("bones") or [])}
+    try:
+        from mt import skin_tools as ST
+        r = ST.Rig((run / "rig" / "rigged.glb").read_bytes())
+        m = ST.measure(r, r.Wg)
+        out.update({f"measure_{k}": v for k, v in (m.get("total") or {}).items()})
+        dom = r.Wg.argmax(1)
+        cnt = np.bincount(dom, minlength=len(r.names))
+        deform = [i for i, n in enumerate(r.names) if not n.endswith("_End") and not n.startswith(("Prop", "Hair_"))]
+        limb = [i for i in deform if r.names[i].endswith(("Arm", "ForeArm", "UpLeg", "Leg"))]
+        out["empty_limb_bones"] = int(sum(1 for i in limb if cnt[i] == 0))
+        out["top_bone_share"] = round(float(cnt.max()) / max(int(cnt.sum()), 1), 4)
+    except Exception as exc:                                   # noqa: BLE001 - the rig.json numbers still judge
+        out["measure_error"] = f"{type(exc).__name__}: {exc}"[:160]
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
 def mt_arm_clearance(ctx):
     """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
@@ -800,6 +831,8 @@ def run_check(check: dict, ctx: dict) -> dict:
     if k == "quadruped_legs":
         rig_json = ctx["run"] / "rig" / "rig.json" if on == "mt_rig" else (_input(a["rig_json"]) if a.get("rig_json") else None)
         return quadruped_legs(target, rig_json)
+    if k == "rig_stretch":
+        return rig_stretch(ctx)
     if k == "pending_detector":
         return {"pending": True}
     raise ValueError(f"unknown check kind {k}")
