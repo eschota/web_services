@@ -1767,3 +1767,31 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `SetModelScale` инструмента `viewer` (`mt/agent.py`, через mt-deploy GATE PASS; включится при ближайшем рестарте autorig-mt — поставлен
   `autorig-mt-restart --wait`). `viewer_state.scale = {value, scene, user, in_scene, source, estimated_real_height_m, height_m}`,
   в VIEWER NOW агента — `model_scale`, `in_scene_scale`.
+
+## Scale check · V3 + «Кайо-Бей» 137bd37f (2026-10-10 ~23:10 UTC, на проде, MT `scale_check.py`)
+
+- **Гипотеза мелкого абсолютного размера — опровергнута**: в пути рига (fastrig / limb_stabilize / tessellate /
+  skin_tools / parts_cluster / bone_check / limb_collision / handrig) все пороги — доли H; абсолютные только
+  `weld tol=1e-5` и порог весов `1e-4`. Кайо (22.5 ед. = см) в масштабах 0.01× / 1× / 100× даёт **одинаковые** числа
+  rig_check (583/82 · 572/186 · 594/82), те же limb_reach/split. Нормализация не нужна.
+- **Дреды**: в v0 они — кожа Neck/Head (3512 / 17188 из 24357 вершин); к костям рук/ключиц ушли **75 вершин** кончиков у
+  плеч (Head-группа отрезается от рук в contact_cut; limb_reach не проверяет ключицы — дреды у ключицы «в зоне корня»).
+  Геометрический детектор прядей без лейблов (`geometric_hair` в fastrig: толщина поверхности по противоположной
+  нормали + PCA «трубка», опции `hair_geometry`, `hair_max_thickness`) **выключен по умолчанию**: на 70k-моделях
+  стоит 13–15 с (бюджет 60 с), на Кайо ловит 491 вершину и ухудшает stretch (583 → 1749). Включать как опцию агента.
+  Класс «длинные волосы к голове» честно требует карту частей Vision (labels) в V3 — в конвейере её сейчас нет.
+- **Ладонь/пальцы**: fastrig не ставит пальцевые цепи; `handrig.py` (Hands rig · V3: fit_hand / _skin_hand /
+  clip_channels) — кандидат для кистей полнотелых персонажей; не интегрировал (координация через этот handoff).
+- **Масштаб (сделано)**: `mt/scale_check.py` — линейка (0/25/50/75/100 % роста по маске) на `proj/front_lit.png`
+  (cv2, без GPU) → `scale/ruler.png` → ОДИН вызов `farm.vision` (Qwen через роутер бэкенда): CATEGORY
+  (adult_human/child/chibi_toy/giant/creature/animal/object/vehicle), REAL_HEIGHT_M, DISPLAY_HEIGHT_M, CONFIDENCE →
+  `scale/scale.json` (source_height_units, unit_hint см/м/мм по величине, real, display, category, confidence,
+  chosen_height_m, viewer_scale); режимы `scale/options.json` auto|real|display|manual; в auto при conf ≥ 0.4 карточка
+  `card.height_m` (по ней вьювер масштабирует модель) = display. Хук в `v3_conveyor._card` (после карточки,
+  параллельно QA, риг не ждёт); инструменты агента `scale_get` (публичный) / `scale_set(mode, height_m)`;
+  монтаж `tools/patch_scale_check.py`. Кайо: 0.28 → **1.5 м** (adult_human, real 1.75, conf 0.92, 7 с). DEV 6621/6622.
+- **Автотесты**: кейс `chibi_dreads_scale` (вход = proj/model.glb рана bcb7177166ea9b28f007), kind `hair_limbs`
+  (вершины рук выше плечевых суставов ≤ 120, target ≤ 10; доля Neck/Head ≥ 0.6) + rig_stretch;
+  `deploy/autotests/patch_hair_scale_case.py`. fit_check больше не считает Head/Neck в «масса на 2 костях» (чиби).
+- **Замечено для Viewer · V3**: на скриншоте владельца (23.jpg) скелет нарисован у пола, а меш — выше и крупнее:
+  оверлей костей и меш масштабируются по-разному.

@@ -517,6 +517,39 @@ def rig_stretch(ctx):
     return out
 
 
+def hair_limbs(ctx):
+    """Task 137bd37f (dreadlocks beside the shoulders): how much skin above the arm joints the arm bones own, per
+    side; plus the absolute-size facts of the source (the rig path is scale-invariant: same numbers at 0.01x / 100x)."""
+    from mt import fastrig as F, limb_stabilize as LS
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    data = (run / "rig" / "rigged.glb").read_bytes()
+    js, b = F.read_glb(data)
+    src = F.Source(data)
+    r = LS.SourceRig(src, js, b)
+    P = src.positions
+    H = float(np.ptp(P[:, 1])) or 1.0
+    y0 = float(P[:, 1].min())
+    dom = r.vj[np.arange(len(r.vj)), r.vw.argmax(1)]
+    names = r.names
+    heads = {bn["name"]: bn["head"] for bn in rig.get("bones") or []}
+    out = {"height_units": round(H, 4), "vertices": int(len(P))}
+    total_above = 0
+    for side in ("Left", "Right"):
+        arm = [i for i, n in enumerate(names) if n.startswith(side) and n.endswith(("Shoulder", "Arm", "ForeArm", "Hand"))]
+        if not arm or f"{side}Arm" not in heads:
+            continue
+        top = float(heads[f"{side}Arm"][1]) + 0.03 * H
+        m = np.isin(dom, arm)
+        above = int((m & (P[:, 1] > top)).sum())
+        total_above += above
+        out[f"{side.lower()}_arm_vertices"] = int(m.sum())
+        out[f"{side.lower()}_arm_above_joint"] = above
+    out["arm_vertices_above_joints"] = total_above
+    out["neck_head_share"] = round(float(np.isin(dom, [i for i, n in enumerate(names) if n in ("Neck", "Head")]).mean()), 4)
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
 def mt_arm_clearance(ctx):
     """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
@@ -887,6 +920,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return quadruped_legs(target, rig_json)
     if k == "rig_stretch":
         return rig_stretch(ctx)
+    if k == "hair_limbs":
+        return hair_limbs(ctx)
     if k == "pending_detector":
         return {"pending": True}
     raise ValueError(f"unknown check kind {k}")

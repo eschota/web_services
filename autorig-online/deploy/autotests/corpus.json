@@ -341,6 +341,13 @@
    "what": "V3 FBX upload as GLB, 444k vertices: rig_check tears 1278 edges over 4x (V3 backfill open class rig_stretch)",
    "sha256": "06d3fb27eb04a6b44e4c7be4fbf29af1888dfcac38239cf92c1df350a3321404",
    "bytes": 49668564
+  },
+  "137bd37f.upload.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/bcb7177166ea9b28f007/proj/model.glb",
+   "task": "137bd37f-09d7-49c8-b780-01c1d30d406b",
+   "what": "«Кайо-Бей»: a chibi with dreadlocks, sunglasses and a T-shirt, 22.5 units (cm) tall, one welded shell of 24 357 vertices, no skeleton (owner 2026-10-11: dreads to the arms, a poor palm, too small in the cathedral)",
+   "sha256": "323b1d38b71637f68c6647d924ec1f4c65da9e1136c788f4ce34670de5009661",
+   "bytes": 4033364
   }
  },
  "profiles": {
@@ -3641,6 +3648,89 @@
       },
       "reason": "the dense FBX's fast rig tears 1278 edges over 4x in rig_check",
       "owner": "Skinning · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "chibi_dreads_scale",
+   "task": "137bd37f-09d7-49c8-b780-01c1d30d406b",
+   "cost": 2,
+   "defect": "owner 2026-10-11: «дреды сзади на голове прицепил к рукам, ладонь плохо заригана с пальцами, и масштаб слишком мелкий для человека в соборе». Facts: the dreads are Neck / Head skin (3 512 Neck, 17 188 Head of 24 357), 75 dread-tip vertices beside the shoulders are arm skin; the rig is scale-invariant (identical rig_check at 0.01x / 1x / 100x); the 0.28 m card height came from the real-scale card (a toy), the scale check now shows it at 1.5 m (adult_human, conf 0.92). Open: finger chains (handrig) and the dread tips",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "137bd37f.upload.glb",
+     "params": {
+      "words": "stylized human figure chibi"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_hair",
+     "kind": "hair_limbs",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "arm_vertices_above_joints": [
+       "<=",
+       120
+      ],
+      "neck_head_share": [
+       ">=",
+       0.6
+      ]
+     },
+     "target": {
+      "thresholds": {
+       "arm_vertices_above_joints": [
+        "<=",
+        10
+       ]
+      },
+      "reason": "dreadlock tips beside the shoulders still go to the clavicles / arms (75)",
+      "owner": "Skinning · V3"
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       420
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       2100
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
      }
     }
    ]
