@@ -2,7 +2,13 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpoint4ca8fa9/source005183d: canonical/server SHAf0dc919e11bbe5ee6a7a66358f071184ec8b044100c9d48e9ba1bfe9e0b0e053.
+CURRENT private checkpointfd8020a/source005183d: canonical/server SHA5f34ae7870db62185a14af1e1d361a673a77c2a596799efe3a6764b9a45c678f.
+Revisedcenteredpacket pendingaudit, NOlaunch: BodyFD3.65e-10/strainFD3.27e-9;
+hard55budgetfix+freshimmutableproposal recomputation required. Historical7830
+proposal was accidentallyoverwritten, cannotreconstructfullbytes; current7c338
+isDIFFERENT dependency, neverclaimoriginalhashmatch. Incident disclosedincanonical.
+
+Prior private checkpoint4ca8fa9/source005183d: canonical/server SHAf0dc919e11bbe5ee6a7a66358f071184ec8b044100c9d48e9ba1bfe9e0b0e053.
 NOcenteredoptimizerpose yet; preflight-only2failures followedpatchedFDpass,
 independentreview blocksBodyplanepoint/sourcepacket/manifest/budget/checkpoints.
 Directresthelper root18tests pass butunmounted dueCAS/source/publication guards.
