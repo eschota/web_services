@@ -92,6 +92,7 @@ DATA_DIR = Path(os.getenv("PCHAT_DATA", "/srv/autorig/data/public-chat"))
 AVATAR_DIR = Path(os.getenv("PCHAT_AVATARS", str(DATA_DIR / "avatars")))
 AVATAR_SCRIPT = Path(os.getenv("PCHAT_AVATAR_SCRIPT", str(HERE / "avatar_make.py")))
 TASK_CACHE = Path(os.getenv("PCHAT_TASK_CACHE", "/srv/autorig/data/static/tasks"))
+V3_POSTERS = Path(os.getenv("PCHAT_V3_POSTERS", "/srv/autorig/data/static/posters-v3"))   # Gallery · V3 captures
 PAGE_SIZE = 24
 SITE_DB = os.getenv("PCHAT_SITE_DB", "/srv/autorig/data/db/autorig.db")
 LIVE_CONFIG = Path(os.getenv("PCHAT_CONFIG", "/srv/autorig/live/config/public-chat.json"))
@@ -2524,8 +2525,13 @@ def render_author(person: Dict[str, Any], *, ui: str, url_lang: Optional[str], p
     cards = []
     for task in shown:
         label = task["title"] or T("pchat_model", "3D model")
-        thumb = (f'<img src="/thumb/{task["id"]}" width="180" height="240" loading="lazy" alt="{esc(label)}">'
-                 if task.get("rating") == "safe" and task.get("poster") else _CUBE)
+        v3 = V3_POSTERS / f"{task['id']}.jpg"
+        try:
+            stamp = f"?v={int(v3.stat().st_mtime):x}" if v3.stat().st_size > 8000 else ""
+        except OSError:
+            stamp = ""
+        thumb = (f'<img src="/thumb/{task["id"]}{stamp}" width="180" height="240" loading="lazy" alt="{esc(label)}">'
+                 if task.get("rating") == "safe" and (task.get("poster") or stamp) else _CUBE)
         cards.append(f'<li><a class="ap-card" href="/task?id={task["id"]}"><span class="ap-th">{thumb}</span>'
                      f'<span class="ap-t" dir="auto">{esc(label)}</span>'
                      f'<time class="ap-d" datetime="{esc(task["created"])}">{esc(task["created"])}</time></a></li>')
