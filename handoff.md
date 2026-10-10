@@ -2,7 +2,16 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpoint9871313/source740181a: canonical/server SHAa0c4e9de697579583ce73e13aafa4cab581fe238c424c19eedd0aa72e9aa81d8.
+CURRENT OWNER PRIORITY 2026-10-10: FULL V3-only task conveyor+fleet, replace only
+task page with currentUnity viewer/agent/effects; otherpagesunchanged. New scoped
+plan autorig-online/docs/V3_ONLY_CUTOVER.md. Production /api/mt/v3=404, backend
+dispatch/store/callbackmodules absent; newoutbox/task-shellsource agentsreviewing,
+notmounted. Storagewipequeueflag1; no restart/Taskmutations. Five-modelquality0/5.
+r28gradient/arcsource84b35f9+Webbuild82.14s readyNOTlive; ownerinversegradient+
+maxopacity correctionandradius0clarificationpending. LIVE defaultstillr27.
+Read canonicalprivateHANDOFF newestsection, not priorcheckpoint below.
+
+Prior private checkpoint9871313/source740181a: canonical/server SHAa0c4e9de697579583ce73e13aafa4cab581fe238c424c19eedd0aa72e9aa81d8.
 OwnerPRIORITY pulseAltfix+Webbuild nowLIVEr27 default staticindex25a4c085;
 native+actualproductionkeyboard/raster/typing/bonesPASS. Webwall70.27s/warmBuild59s,
 initial17.681MiB/full23.443MiB (bakedscenesextraon-demand). No backendrestart.
