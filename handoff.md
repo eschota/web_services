@@ -4,6 +4,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ## Координация агентов V3 (2026-10-10)
 
+- converter deploy: Skinning → converter f13 2026-10-10T16:00Z (cf25163, draining; released when this line says done)
 - converter deploy: Converter speed · V3 f1 2026-10-10T15:30Z (b5b7bcd, drained; released when this line says done)
 
 - **Localization · V3** владеет языком пользователя и локализацией (fa/RTL и др.).
@@ -42,6 +43,31 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   сразу, с полным доступом). Ответ в чат сессии: `POST /api/mt/runs/{run}/astra/say` (ключ «astra») либо ваш
   `/api/mt/astra/escalations/{id}/reply`. Не пишите `trust`/`from: owner` ни из какого пути, кроме проверенного админа.
   `/dev/tools` показывает `ask_astra`; `viewer_state` из вашей схемы Астра читает в контексте хода.
+## Multiplayer · V3 — комнаты, WASD-контроллер, инструменты для агента сессии (2026-10-10, на проде)
+
+- **Сервис комнат** `autorig-rooms.service` (127.0.0.1:8264, исходник `autorig-online/deploy/rooms/`, на VPS `/srv/autorig/rooms/rooms_api.py`;
+  рестарт не трогает autorig-storage). nginx: точные `location = /api/rooms/ws` (WebSocket), `= /api/rooms`, `= /api/rooms/busiest`
+  (бэкап конфига `autorig.online-storage.bak-rooms-20261010`). Без персональных данных, анонимно, лимиты (20 сообщ/с, 6 сокетов на адрес, 24 в комнате).
+  - `GET /api/rooms` -> `{rooms:[{id,players,active}], busiest, default_room:"sponza", total_active}`; `GET /api/rooms/busiest?among=a,b`.
+  - Комната = id сцены плашки Scenes (`cathedral`, `sponza`, id пакетов). Свой дом (среда рана, `none`) = всегда оффлайн.
+  - Аватар чужого рига отдаётся только если задача публичная (`/api/task/{id}.is_public`); приватные не показываются (peer без модели).
+  - Спавн: кольцо вокруг центра АКТИВНЫХ игроков внутри walk area, лицом к группе; активный = вкладка видна и ввод за последние 45 с.
+- **Вьювер** (кандидат `unity/mp-r1-20261010`, страница `mp-rooms.js` рядом с index.html, грузится как scene-plate): кнопки внизу слева
+  (play/inspect, бейдж комнаты), P = переключить режим; WASD/стрелки, Shift бег, Space прыжок (в inspect Space остаётся паузой), левая кнопка мыши - обзор;
+  на телефоне джойстик + прыжок + бег. Клипы Idle/Walking/Running/Jump из рига, foot IK по земле (лучи по коллайдерам сцены, иначе террейн, иначе плоский пол).
+  Правка `Viewer.cs`: `ModelRoot`, `PanelOpen`, `BlockSpace`, `ModelMoved()`. Код: `Assets/Scripts/Player`, `Assets/Scripts/Multiplayer`.
+  - Смена настроек сцены (погода, время суток, эффекты, пресет) выбрасывает из комнаты в свою оффлайн-сессию в той же сцене; плашка «Назад в комнату».
+  - Ключи i18n `viewer_mp_*` (en/ru в en.json/ru.json на проде; fa/zh/hi допишет Localization).
+  - События страницы: `window` `autorig-rooms`; API: `autorigUnity.rooms.{state,stats,join,joinBusiest,leave,back,play}`.
+- **Для Session agent · V3** (модуль `mt/room_tools.py`, `mt/agent.py` я не трогал):
+  - инструменты `room_stats` и `join_busiest_room`; подключить: `room_tools.register(TOOL_SPECS, TOOL_FUNCS)`, добавить `room_tools.TOOL_NAMES`
+    в `PRIVATE_VIEWER_TOOLS` и `room_tools.VIEWER_METHODS` (`MpJoinBusiest`, `MpJoinRoom`, `MpLeaveRoom`, `MpPlay`) в `PRIVATE_VIEWER_METHODS`;
+    для приватного пути `_dispatch` не должен требовать `_private_viewer_allowed` значение (value "" допустимо).
+  - Правило агента: при старте выбирать комнату с наибольшим числом людей (`join_busiest_room`; если везде пусто - комната встреч `sponza`).
+  - Объяснить пользователю НА ЕГО ЯЗЫКЕ: каждая сцена - комната с другими людьми; в какой он и сколько там; что риг занимает время и какое место
+    в очереди у его задачи; что смена настроек сцены вернёт его в оффлайн, один клик по бейджу комнаты возвращает.
+  - Пока риг не готов, вьювер не входит в комнату (нет аватара): агент говорит об этом и об очереди.
+
 ## Fleet · V3 — флот одним запросом (2026-10-10 ~12:30 UTC, проверено на проде)
 
 - `GET https://autorig.online/api/fleet` (+ `?format=text`, `/api/fleet/box/<id>`) живой.

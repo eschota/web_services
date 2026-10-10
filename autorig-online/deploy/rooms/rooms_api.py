@@ -27,6 +27,7 @@ import os
 import random
 import re
 import time
+from urllib.parse import unquote
 from http import HTTPStatus
 
 import httpx
@@ -400,7 +401,7 @@ async def process_request(connection, request):
     among = None
     for part in query.split("&"):
         if part.startswith("among="):
-            among = {s for s in part[6:].split(",") if ROOM_RE.match(s)} or None
+            among = {x for x in unquote(part[6:]).split(",") if ROOM_RE.match(x)} or None
     if path == "/api/rooms":
         return reply(200, stats_doc(among))
     if path == "/api/rooms/busiest":
