@@ -6,6 +6,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 - converter deploy: Skinning → converter f13 2026-10-10T16:00Z (cf25163, draining; released when this line says done)
 - converter deploy: Converter speed · V3 f1 2026-10-10T15:30Z (b5b7bcd, drained; released when this line says done)
+- converter: Limb collision · V3 — `5650feb` (arms_spread guard, only `Vlado_Blender/tpose_remap_animation.py` on top of `6674da2`) pushed to converter main, **НЕ выкачен** (f1/f13 под замками выше, f2/f7 на `b386115`): кто катит следующим — везёт его; канарейка = в `tpose_remap_animation_log.txt` строка `guard: X·abduction=…`.
 
 - **Localization · V3** владеет языком пользователя и локализацией (fa/RTL и др.).
   Сырой алерт artifact-cache (`cache=… cap=… reserve=…; last-copy deliverables
@@ -1098,3 +1099,29 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **91a9513a сейчас v3** (`blend_width` локоть+плечо 1.0, `influence` 0.4/0.4): разрывы >4x в клипе локоть 126→5,
   плечо 315→228, всего 692→363; худший кадр 46/48 у левого локтя 140→4, у правого 43→2; плечо lag 74→0, но leak
   тестовой позы плеча 19→167 (широкий бленд тянет больше груди). v1 (только influence 0.4) шов не лечил. DEV 6535.
+
+## Limb collision · V3 — рука в теле: причина, детектор, инструмент (2026-10-10 16:50 UTC, на проде, MT `72a610a`..`ea3f503`)
+
+- **Причина 98c1247c (правое предплечье в торсе, кисть из живота):** ретаргет конвертера добавляет аддитивный
+  NLA-слой `arms_spread` (`tpose_remap_animation.py`, по ширине таза, тут 17.9°) — поворот `c_arm_fk.l/.r` вокруг их
+  ЛОКАЛЬНОЙ X. Ролл руки ARP берёт из изгиба локтя почти прямой T-позы (prepare оставил правый локоть в 6 мм от линии),
+  поэтому X куда угодно: у этой модели правая X смотрит вперёд (+X опускает руку в тело), левая — вверх (+X уводит
+  назад). Цифры: без слоя правое плечо совпадает с клипом библиотеки до 1.9° (было 16.8°), ошибка зеркала кистей в idle
+  13.5→2.5 см. Не веса и не T-поза. Фикс конвертера: знак слоя на руку, которую +X опускает (`5650feb`, не выкачен).
+- **Детектор** `mt/limb_collision.py` (numpy, 5–12 с на модель): предплечье+кисть внутри остального тела (обобщённое
+  число обмоток по кластеризованному телу без этой руки + псевдонормали), растяжение рёбер у плеча (смаз рукава),
+  асимметрия (углы рук в покое, рассогласование ролла, зеркало локтей/кистей в idle). Пишет
+  `analysis/limb_collision.json`, `analysis/limb_collision.png`, `results.limb_collision` в `analysis/fast.json`
+  (оп `limb_collision` в реестре быстрого анализа), live `rig/fast_limbs` → красные метки на костях (live.js).
+  Запуск: V3 — после каждого `_retarget` в фоне; классика — `live_classic.final_rig` в фоне, `--source classic`.
+- **Инструменты агента** (в `/dev/tools`): `limb_check`, `fix_limb_collision(side, options)` (abduction_deg, swing_deg,
+  undo_spread_deg, restraighten_rest, auto+max_auto_deg+clearance_pct_H, reweight_band+band_pct_H, clips), `limb_fix_undo`,
+  `limb_options_get`. Офсет в покое вмножается в каждый ключ плеча (точно при любом ролле). V3 — меняет `rig/rigged.glb`
+  (прежний в `analysis/limb_fix/`), классика — копия `analysis/limb_fix/classic_v<N>.glb`, файл конвертера не трогается.
+  98c1247c: `--fix right {"undo_spread_deg": 35.83}` (= фикс конвертера) → правая 89.6%→0%.
+- **Судья центровки классики** сравнивал суставы T-позы с вокселями A-позы: теперь `live_voxels --rest-glb` строит поле
+  по bind-позе самого рига (`live/voxfield_rest.npz`): 98c1247c «снаружи» 22→0.
+- **14 последних классических задач:** high 4 (98c1247c; 66ba97ba левая в бедре; e0cdbf0b рука под плащом — плащ
+  считается телом; 8b16a847 кисть в большой голове), medium 2 (9d466924, 91a9513a), чисто 7, у 2ad5c0c8 руки не
+  привязаны к костям (0 вершин предплечья/кисти, всё на `root.x`). V3 fastrig 8369add — high с обеих сторон.
+  DEV 6536, 6537.
