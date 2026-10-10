@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261010.6';
+const BUILD = 'tv3-20261010.7';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -24,6 +24,7 @@ const FALLBACK = {
     taskv3_failed: 'Processing failed', taskv3_missing: 'Task not found or private',
     taskv3_offline: 'Offline, retrying…', taskv3_copied: 'Link copied', taskv3_review: 'Needs review',
     taskv3_preparing: 'Preparing the model for the viewer',
+    taskv3_unavailable: '3D model unavailable',
   },
   ru: {
     taskv3_queued: 'В очереди', taskv3_ahead: 'впереди {count}', taskv3_next: 'следующая',
@@ -31,6 +32,7 @@ const FALLBACK = {
     taskv3_failed: 'Не удалось обработать', taskv3_missing: 'Задача не найдена или закрыта',
     taskv3_offline: 'Нет связи, повторяем…', taskv3_copied: 'Ссылка скопирована', taskv3_review: 'Нужна проверка',
     taskv3_preparing: 'Готовим модель для вьювера',
+    taskv3_unavailable: '3D-модель недоступна',
   },
 };
 
@@ -51,6 +53,7 @@ function tr(key, replacements) {
 let timer = 0;
 let shown = null; // {kind, run, revision}
 let lastState = null;
+let unavailable = false; // a finished task whose model could not be fetched stays labelled so
 
 function setSteps(map) {
   for (const li of els.steps.children) {
@@ -120,6 +123,9 @@ function render(state) {
 
   const finished = status === 'done' || status === 'needs_review';
   const hasViewer = !!viewer && showViewer(viewer);
+  if (hasViewer) unavailable = false;
+  else if (state.model && state.model.state === 'unavailable') unavailable = true;
+  els.classic.classList.toggle('ok', unavailable);
   const rigged = hasViewer && viewer.rigged;
   setSteps({
     queue: status === 'created' ? 'run' : 'done',
@@ -141,6 +147,8 @@ function render(state) {
     line = tr('taskv3_failed');
   } else if (status === 'needs_review') {
     line = tr('taskv3_review');
+  } else if (!hasViewer && unavailable) {
+    line = tr('taskv3_unavailable');
   } else if (!hasViewer) {
     line = tr('taskv3_preparing');
     waiting = true;

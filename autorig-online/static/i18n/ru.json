@@ -771,5 +771,6 @@
   "taskv3_preparing": "Готовим модель для вьювера",
   "taskv3_tool_classic": "Скачать · классический вьювер",
   "taskv3_tool_share": "Скопировать ссылку",
-  "taskv3_tool_fullscreen": "Во весь экран"
+  "taskv3_tool_fullscreen": "Во весь экран",
+  "taskv3_unavailable": "3D-модель недоступна"
 }

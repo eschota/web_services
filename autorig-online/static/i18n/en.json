@@ -759,5 +759,6 @@
   "taskv3_preparing": "Preparing the model for the viewer",
   "taskv3_tool_classic": "Downloads · classic viewer",
   "taskv3_tool_share": "Copy link",
-  "taskv3_tool_fullscreen": "Fullscreen"
+  "taskv3_tool_fullscreen": "Fullscreen",
+  "taskv3_unavailable": "3D model unavailable"
 }
