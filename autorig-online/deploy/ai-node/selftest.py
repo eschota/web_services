@@ -757,6 +757,19 @@ def integration(tmp):
             print("WARNING: something still listens on the fake llama port", llama_port)
 
 
+def game_checks(ai_node):
+    """2026-10-11: the owner's game (an executable that runs right now stands in for cs2.exe)."""
+    me = os.path.basename(sys.executable).lower()
+    cfg = ai_node.Config({"model_id": MODEL_ID, "weights": "w.gguf", "llama_server": "x", "owner_games": [me]}, HERE)
+    ai_node._GAME_CACHE.update(at=0.0, name="")
+    check("game: a running owner game is seen", ai_node.running_game(cfg) == me, ai_node.running_game(cfg))
+    ai_node._GAME_CACHE.update(at=0.0, name="")
+    cfg2 = ai_node.Config({"model_id": MODEL_ID, "weights": "w.gguf", "llama_server": "x",
+                           "owner_games": ["surely-not-running.exe"]}, HERE)
+    check("game: none running", ai_node.running_game(cfg2) == "")
+    ai_node._GAME_CACHE.update(at=0.0, name="")
+
+
 def lease_checks(tmp):
     """2026-10-11: two nodes on one card (a holder that needs the whole GPU and a yielder), max_prompt_chars and the
     temperature passthrough."""
@@ -886,6 +899,7 @@ def main():
         unit_checks(ai_node, tmp)
         integration(tmp)
         lease_checks(tmp)
+        game_checks(ai_node)
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         check("selftest ran to the end", False)

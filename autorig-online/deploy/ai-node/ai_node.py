@@ -155,6 +155,11 @@ DEFAULT_CONFIG: Dict[str, object] = {
     # The gate lease lasts while tasks wait or run, plus this grace after the last one (a caller's next call of the same
     # batch finds the model warm); a model idling in keepalive does not keep renders off the card.
     "gpu_gate_grace_seconds": 30,
+    # The owner's games (worker-4090, 2026-10-11: cs2 held 4.3 GB while the 27B waited): while one runs the node loads
+    # nothing, refuses new work, unloads an idle model and holds no gate. Executable names, plus a file with one per line
+    # (the 3D adapter's games.txt). Empty = not watched.
+    "owner_games": [],
+    "owner_games_file": "",
     # The converter/3D adapter answers 503 when it refuses NEW 3D jobs - also because an LLM took the VRAM it needs to
     # start Hunyuan. False = a 503 is not «the GPU is in use» (the VRAM check still guards the load).
     "converter_503_is_busy": True,
@@ -252,6 +257,8 @@ class Config:
         self.gpu_gate_url = str(merged.get("gpu_gate_url") or "").strip().rstrip("/")
         self.gpu_gate_owner = str(merged.get("gpu_gate_owner") or "").strip() or self.node_name
         self.gpu_gate_grace_seconds = max(0.0, float(merged.get("gpu_gate_grace_seconds") or 0))
+        self.owner_games = [str(g).strip().lower() for g in (merged.get("owner_games") or []) if str(g).strip()]
+        self.owner_games_file = (self._path(merged["owner_games_file"]) if merged.get("owner_games_file") else "")
         self.converter_503_is_busy = bool(merged.get("converter_503_is_busy", True))
         self.max_prompt_chars = max(1000, int(merged.get("max_prompt_chars") or MAX_PROMPT_CHARS))
         self.keepalive_seconds = int(merged["keepalive_seconds"])
@@ -578,6 +585,38 @@ def probe_comfy(cfg: Config) -> Dict[str, object]:
         state = dict(state, watched=True, busy=True, online=True, gpu_lease=lease,
                      queue_remaining=int(state.get("queue_remaining") or 0) + 1)
     return state
+
+
+_GAME_CACHE: Dict[str, object] = {"at": 0.0, "name": ""}
+
+
+def running_game(cfg: Config) -> str:
+    """The owner's game that is running ('' = none): owner_games + owner_games_file, checked every 5 s (tasklist)."""
+    names = set(cfg.owner_games)
+    if cfg.owner_games_file:
+        try:
+            with open(cfg.owner_games_file, encoding="utf-8") as handle:
+                names |= {line.strip().lower() for line in handle if line.strip() and not line.lstrip().startswith("#")}
+        except OSError:
+            pass
+    if not names:
+        return ""
+    if time.monotonic() - float(_GAME_CACHE["at"]) < 5:
+        return str(_GAME_CACHE["name"])
+    found = ""
+    try:
+        if IS_WINDOWS:
+            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=15,
+                                 creationflags=CREATE_NO_WINDOW).stdout
+            running = {line.split(",", 1)[0].strip().strip('"').lower() for line in out.splitlines() if line.strip()}
+        else:
+            out = subprocess.run(["ps", "-eo", "comm="], capture_output=True, text=True, timeout=15).stdout
+            running = {os.path.basename(line.strip()).lower() for line in out.splitlines() if line.strip()}
+        found = next((n for n in sorted(names) if n in running), "")
+    except (OSError, subprocess.SubprocessError):
+        found = ""
+    _GAME_CACHE.update(at=time.monotonic(), name=found)
+    return found
 
 
 def fresh_gpu_lease(cfg: Config) -> str:
@@ -1180,6 +1219,8 @@ class Node:
         self.completed = 0
         self.failed = 0
         self._comfy_freed_at = 0.0
+        self._gate_wanted = False              # set by _ensure_model: waiting for ComfyUI to drain, or loading
+        self._last_use = -1e9
 
     # --------------------------------------------------------------- token
     def token(self) -> str:
@@ -1304,6 +1345,9 @@ class Node:
             comfy = dict(self.comfy)
             vram = dict(self.vram)
             active = len(self._active_tasks())
+        game = running_game(cfg)
+        if game:
+            return ("owner_game", f"the owner is playing ({game}): the GPU is his")
         if comfy.get("busy"):
             if comfy.get("gpu_lease"):
                 return ("gpu_leased", f"{comfy.get('gpu_lease')} holds this card (gpu_lease_yield_files)")
@@ -1495,6 +1539,21 @@ class Node:
         """
         deadline = time.monotonic() + self.cfg.comfy_wait_seconds
         while True:
+            game = running_game(self.cfg)
+            if game:                           # the owner plays: no model, no gate
+                self._gate_wanted = False
+                self.hold_lease(True, gate=False)
+                if self.llama.running() and not self.llama.in_use():
+                    self.llama.stop(f"owner_game {game}")
+                reason = f"owner_game ({game})"
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise NodeError(f"gpu_unavailable: {reason}; waited {self.cfg.comfy_wait_seconds:.0f} s")
+                task.current_stage = "waiting_for_gpu"
+                task.wait_reason = reason
+                time.sleep(min(5.0, max(0.1, remaining)))
+                continue
+            self._gate_wanted = True           # waiting for ComfyUI to drain, or loading: renderfin sends nothing new
             self.hold_lease(True)
             if self.refresh_comfy().get("busy"):
                 # ComfyUI first: even a warm model is put away before the next
@@ -1510,6 +1569,10 @@ class Node:
                     # Alive but silent: free its VRAM before measuring.
                     self.llama.stop("not answering")
                 reason = self.load_blocker()
+                if reason is not None and not self.comfy_busy():
+                    # ComfyUI is idle and freed, yet the VRAM is short (the desktop, another app): renders may run
+                    self._gate_wanted = False
+                    self.hold_lease(True, gate=False)
                 if reason is None:
                     task.current_stage = "loading_model"
                     task.wait_reason = ""
@@ -1546,10 +1609,16 @@ class Node:
                         logger.info("Model unloaded after %s s idle", self.cfg.keepalive_seconds)
                 with self.lock:
                     wanted = bool(self._active_tasks())
-                if wanted:
-                    self._last_wanted = time.monotonic()
-                recent = time.monotonic() - getattr(self, "_last_wanted", -1e9) < self.cfg.gpu_gate_grace_seconds
-                self.hold_lease(wanted or self.llama.running(), gate=wanted or recent)
+                if self.llama.in_use():
+                    self._last_use = time.monotonic()
+                if not wanted:
+                    self._gate_wanted = False
+                game = running_game(self.cfg)
+                if game and self.llama.stop_if_idle(f"owner_game {game}"):
+                    logger.info("The owner plays %s: model unloaded", game)
+                recent = time.monotonic() - self._last_use < self.cfg.gpu_gate_grace_seconds
+                gate = not game and ((wanted and self._gate_wanted) or self.llama.in_use() or recent)
+                self.hold_lease(wanted or self.llama.running(), gate=gate)
                 self._prune()
             except Exception:  # noqa: BLE001 - the monitor must keep running
                 logger.exception("Monitor pass failed")
@@ -1649,6 +1718,7 @@ class Node:
                 "context_tokens": cfg.context_tokens,
                 "gpu_lease_hold_file": cfg.gpu_lease_hold_file,
                 "gpu_lease_yield_to": comfy.get("gpu_lease") or "",
+                "owner_game": running_game(cfg),
                 "last_error": self.llama.last_error,
                 "last_stop_reason": self.llama.last_stop_reason,
             },
