@@ -1079,6 +1079,7 @@
   "live_stage_cl_retarget": "Ставлю анимации на риг",
   "live_stage_cl_export": "Пакет для Unity",
   "live_stage_cl_preview": "Превью-видео",
+  "live_stage_cl_finish": "Упаковываю результат",
   "live_cl_waiting": "Жду свободный конвертер",
   "live_cl_geometry": "{vertices} вершин, {polygons} полигонов",
   "live_cl_limb": "{part}: слева {left}, справа {right}",

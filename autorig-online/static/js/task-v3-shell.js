@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261010.13';
+const BUILD = 'tv3-20261010.14';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -27,7 +27,7 @@ const FALLBACK = {
     taskv3_unavailable: '3D model unavailable',
     live_stage_cl_prepare: 'Preparing the model', live_stage_cl_openpose: 'Finding arms, legs and fingers',
     live_stage_cl_pose: 'Straightening the pose', live_stage_cl_rig: 'Rigging', live_stage_cl_retarget: 'Animations',
-    live_stage_cl_export: 'Unity package', live_stage_cl_preview: 'Preview video',
+    live_stage_cl_export: 'Unity package', live_stage_cl_preview: 'Preview video', live_stage_cl_finish: 'Packing the results',
   },
   ru: {
     taskv3_queued: 'В очереди', taskv3_ahead: 'впереди {count}', taskv3_next: 'следующая',
@@ -38,7 +38,7 @@ const FALLBACK = {
     taskv3_unavailable: '3D-модель недоступна',
     live_stage_cl_prepare: 'Готовлю модель', live_stage_cl_openpose: 'Ищу руки, ноги и пальцы',
     live_stage_cl_pose: 'Выравниваю позу', live_stage_cl_rig: 'Ригаю', live_stage_cl_retarget: 'Анимации',
-    live_stage_cl_export: 'Пакет для Unity', live_stage_cl_preview: 'Превью-видео',
+    live_stage_cl_export: 'Пакет для Unity', live_stage_cl_preview: 'Превью-видео', live_stage_cl_finish: 'Упаковываю результат',
   },
 };
 

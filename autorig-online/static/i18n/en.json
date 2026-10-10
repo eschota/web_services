@@ -1067,6 +1067,7 @@
   "live_stage_cl_retarget": "Putting animations on the rig",
   "live_stage_cl_export": "Unity package",
   "live_stage_cl_preview": "Preview video",
+  "live_stage_cl_finish": "Packing the results",
   "live_cl_waiting": "Waiting for a free converter",
   "live_cl_geometry": "{vertices} vertices, {polygons} polygons",
   "live_cl_limb": "{part}: left {left}, right {right}",
