@@ -231,6 +231,45 @@ Owner rule, 2026-10-10:
   * worker-4090: the owner's PC, and its GPU is his first.
   * f5 is out of the fleet by the owner's order of 2026-10-08.
 
+## Rig Within One Minute
+
+Owner rule, 2026-10-10:
+
+> теперь еще нужно держать скорость рига в пределах одной минуты
+
+* **Budget.** A rig takes at most 60 s, measured from the moment a worker takes
+  the task to the moment the rigged model is animated in the task viewer.
+  * Every agent who touches the rig path checks a change against this budget.
+  * A stage that breaks the budget is a bug, not a slow model.
+* **Deliverables are separate.** Unity package, FBX/blend, ZIP, preview video
+  and YouTube are produced after that point, in the background. They never
+  hold the viewer back.
+* **The viewer always shows progress.** From pickup on, the viewer shows the
+  stage the worker is in. After the rig is ready, it can replay the recorded
+  stages (voxels, erosion, bones) as a cached animation.
+* **How to measure:**
+  * classic converter: `<worker>/converter/glb/<guid>/logs/stage_timing.jsonl`,
+    over the VPS tunnel (`AUTORIG_WORKER_TRANSPORTS`). `<guid>_progress.txt` is
+    the short timeline.
+  * V3 conveyor: `seconds` per phase in `runs/<run>/phases.json` and
+    `analysis/fast.json`.
+* **Found on 2026-10-10** (task 66ba97ba on f1, only_rig, 23 950 verts, a
+  sword in hand). It took 7 min 56 s, with the rig ready at about 3.5 min:
+  * OpenPose orientation sweep: 90 s. It always runs all 24 candidates (6 views
+    × 4 rotations), each one a fresh `OpenPoseDemo.exe` with hand and face nets.
+    The perfect candidate (score 235 of 235) came third. Fix: stop early on a
+    confident candidate.
+  * Three separate binds, each starting its own Blender:
+    * prepare_tpose bind: 23 s;
+    * autorig PSEUDO_VOXELS: 22 s, failed BindCheck with 445 hits (the sword is
+      a separate shell);
+    * VHDS retry: 44 s.
+  * Blender 5.1 face aux render: `scene.node_tree` no longer exists, so face
+    markers came out as 0.
+  * Retarget 65 s, Unity 143 s, packaging 68 s, all before `done`.
+  * The V3 conveyor rigs in 4–10 s (`fastrig`), but its analysis and QA phases
+    have taken up to 400 s.
+
 ## V3 Concept: Astra and Session Agents
 
 Owner rule, 2026-10-10:
