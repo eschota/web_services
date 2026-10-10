@@ -473,6 +473,15 @@ Owner rule, 2026-10-10:
     keeps its own counter in `/var/autorig/openrouter_free_budget.json`, the
     agents' share is `limits.per_day` (28) and `key_per_day` (48) counts the
     backend's file too. Keep the backend's `AUTORIG_OPENROUTER_FREE_DAILY` at 20;
+  * **Providers in the config (priority):** OpenRouter `:free` (1), Ollama Cloud
+    free plan (2: `gpt-oss:120b`, `gemma4:31b`, `gpt-oss:20b` only; kimi-k3,
+    kimi-k2.6, glm-5.3, deepseek-v4.1-flash, minimax-m3 answer 402 = Pro, never
+    add them), Mistral free tier (3: `ministral-14b-2512`, `ministral-8b-2512`,
+    `codestral-2508`, `ministral-3b-2512`; never mistral-small/medium/large),
+    Groq (4: 8000 tokens a minute, compact requests only), Cloudflare Workers AI
+    (5: 10,000 neurons a day, the vision entry). Measured: only OpenRouter's
+    nemotron-3-super completed a full tool flow; the small models mostly answer
+    in text without calling tools;
   * a new free provider enters the config with `enabled: false` until its key
     exists in `free-llm.env`; its terms must allow serving a public site's
     visitors;

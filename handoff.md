@@ -646,6 +646,21 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   `stop.ps1`. **Не выкачен**: (1) CLI на этом ПК разлогинен (`claude auth status` → loggedIn false; нужен `claude auth login` владельцем),
   (2) гейт `mt-deploy` падает на `lowpoly_chibi/mt_tess` (чужой, риг-путь), мой код не причём. Протокол моста проверен заглушкой CLI.
 
+## Session agent · V3 — бесплатный LLM-роутер и чат создателя (2026-10-11, MT `455fc74`)
+
+- **Роутер** `mt/llm.py` (по умолчанию для агентов сессий): живой конфиг `/srv/autorig/live/config/free-llm.json` (копия в MT
+  `deploy/free-llm/`), ключи `/srv/autorig/secrets/free-llm.env`, статистика `…/motion_transfer/free_llm_stats.json`
+  (запросы/токены/429/заголовки лимитов по провайдеру и модели). Ротация при 429/5xx/ошибке формата вызова, затем ферма.
+  OpenRouter только `:free` (проверка в коде), общий дневной бюджет ключа с бэкендом (`limits.per_day` 38 из `key_per_day` 48, файл
+  `/var/autorig/openrouter_free_budget.json`). OpenCode Zen **не включён**: ToS «only for your own internal use, not for the benefit of any
+  third party» (https://opencode.ai/legal/terms-of-service) против публичных посетителей, решает владелец. Claude-мост на паузе
+  (`tools/claude_bridge/`).
+- **Чат создателя** (`GET …/viewer/session/<id>/creator-chat`, роль `viewer.role` creator|admin|visitor из `/api/task/<id>/purchases`
+  и `v3-view.admin`): создатель видит свою беседу как историю чата (одно приветствие), админ на чужой задаче — беседу создателя
+  read-only с подписью и кнопкой «Мой чат», посетитель — только безобидную сводку (инструменты и счётчики), реплик создателя нет.
+  Двойное приветствие (EN «Sparkle» из диалога рана + RU сессии) — гонка `poll()` до готовности сессии: диалог рана больше не
+  попадает в приватный чат. Страница: живой `unity/v3-all-r3-20261011/index.html` (бэкап `audits/session-agent-v3-20261010/batch5/creator-before.html`).
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
