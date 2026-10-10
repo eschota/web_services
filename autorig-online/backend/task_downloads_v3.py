@@ -279,6 +279,17 @@ def _job_path(folder: Path, fmt: str) -> Path:
     return folder / f"{fmt}.job.json"
 
 
+def workers_seen() -> dict[str, float]:
+    """worker name -> last poll (unix time), from this process and the shared file."""
+    seen = dict(WORKERS_SEEN)
+    try:
+        for name, at in json.loads((QUEUE_DIR.parent / "workers.json").read_text()).items():
+            seen[name] = max(float(at), seen.get(name, 0.0))
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    return seen
+
+
 def worker_online() -> bool:
     now = time.time()
     if any(now - t < 60 for t in WORKERS_SEEN.values()):
@@ -311,8 +322,11 @@ def job_view(job: Optional[dict[str, Any]], folder: Path, fmt: str) -> dict[str,
     return view
 
 
-def enqueue(folder: Path, task_id: str, src: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
-    """A worker job for this (task, rig, format), deduplicated: an existing live job is returned as it is."""
+def enqueue(folder: Path, task_id: str, src: dict[str, Any], spec: dict[str, Any],
+            pin: Optional[str] = None) -> dict[str, Any]:
+    """A worker job for this (task, rig, format), deduplicated: an existing live job is returned as it is.
+    Any free worker takes it (pull model: a busy worker does not poll). ``pin`` names the one worker allowed to
+    take it: canaries and autotests prove each box this way; customer jobs are never pinned."""
     fmt = spec["id"]
     path = _job_path(folder, fmt)
     job = _read_json(path)
@@ -325,12 +339,14 @@ def enqueue(folder: Path, task_id: str, src: dict[str, Any], spec: dict[str, Any
     if job and job.get("state") == "failed" and int(job.get("attempts") or 0) >= MAX_ATTEMPTS and \
             now - float(job.get("updated_at") or 0) < 600:
         return job
-    jid = job_id_of(task_id, src["sha16"], fmt)
+    jid = job_id_of(task_id, src["sha16"], fmt + (f"@{pin}" if pin else ""))   # a pinned copy is its own job
     job = {"schema": "autorig.v3-export-job/1", "id": jid, "task_id": task_id, "sha16": src["sha16"],
            "sha256": src["sha256"], "format": fmt, "clip": spec["clip"], "state": "queued", "stage": "queued",
            "progress": 0.02, "queued_at": now, "updated_at": now,
            "attempts": int((job or {}).get("attempts") or 0) if (job or {}).get("state") == "failed" else 0,
            "folder": str(folder)}
+    if pin:
+        job["pin"] = str(pin)[:40]
     _write_json(path, job)
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     _atomic_write(QUEUE_DIR / jid, str(path).encode("utf-8"))
@@ -364,10 +380,12 @@ def take_job(worker: str) -> Optional[dict[str, Any]]:
     WORKERS_SEEN[worker] = now
     try:
         QUEUE_DIR.mkdir(parents=True, exist_ok=True)
-        _write_json(QUEUE_DIR.parent / "workers.json", {k: v for k, v in WORKERS_SEEN.items()})
+        _write_json(QUEUE_DIR.parent / "workers.json", workers_seen())
     except OSError:
         pass
     for entry, path, job in _queued_jobs():
+        if job.get("pin") and job["pin"] != worker:
+            continue
         stale = job["state"] == "running" and now - float(job.get("heartbeat_at") or 0) > LEASE_SECONDS
         if job["state"] == "queued" or stale:
             if int(job.get("attempts") or 0) >= MAX_ATTEMPTS:
@@ -521,7 +539,8 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
             "plan": plan_info(task_id),
             "rig": None if src is None else {"sha": src["sha16"], "version": src["version"], "clips": src["clips"]},
             "formats": formats,
-            "exporter": {"online": worker_online()},
+            "exporter": {"online": worker_online(),
+                         "workers": sorted(k for k, v in workers_seen().items() if time.time() - v < 60)},
         }
 
     @router.get("/api/task/{task_id}/downloads-v3")

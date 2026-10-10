@@ -228,6 +228,20 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(s["state"], "ready")
         self.assertTrue(s["url"].endswith(f"?v={s['sha']}"))
 
+    def test_pinned_job_goes_only_to_its_worker(self):
+        folder = self.cache / "pin"
+        folder.mkdir()
+        (folder / "rigged.glb").write_bytes(glb(["Idle"]))
+        other = self.cache / "pin2"
+        other.mkdir()
+        D.enqueue(folder, TASK, {"sha16": "a" * 16, "sha256": "a" * 64}, D.parse_fmt("fbx", []), pin="f2")
+        D.enqueue(other, TASK, {"sha16": "a" * 16, "sha256": "a" * 64}, D.parse_fmt("fbx", []), pin="f13")
+        self.assertEqual(len(list(D.QUEUE_DIR.iterdir())), 2)       # same task/rig/format, two pinned jobs
+        self.assertIsNone(D.take_job("f7"))
+        self.assertEqual(D.take_job("f13")["pin"], "f13")
+        job = D.take_job("f2")
+        self.assertEqual((job["worker"], job["pin"]), ("f2", "f2"))
+
     def test_classic_task_points_at_its_own_files(self):
         self.task = Task(pipeline_kind="rig")
         self.patch_load()
