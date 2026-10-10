@@ -8,7 +8,8 @@
   "quality": "standard",
   "min_vram_free_mb": 0,
   "exclude_boxes": [
-   "f5"
+   "f5",
+   "f12"
   ],
   "background_needs_idle_box": true,
   "shared_box_needs_empty_autorig_queue": true,
@@ -42,7 +43,10 @@
   "background": 86400,
   "autonomous": 86400
  },
- "updated_at": "2026-10-10T19:00:00Z",
+ "updated_at": "2026-10-10T19:55:00Z",
  "updated_by": "Hunyuan queue · V3",
- "site_via_queue": true
+ "site_via_queue": true,
+ "farm_notes": {
+  "f12": "out of the free 3D pool 2026-10-10 19:55 UTC: Vertex-PBR manifest failure under repair (separate session) and a Lina Anima LoRA training holds its GPU ~2-3 h; put it back by removing f12 from farm.exclude_boxes"
+ }
 }

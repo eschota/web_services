@@ -1525,3 +1525,33 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Не сделано**: строка notice в редакторе /nodes (`ai-nodes.js` `taskStateReporter`) — правка JS меняет build-хэш
   редактора и отбивает открытые вкладки `editor_outdated`, оставил владельцу редактора; API уже отдаёт текст.
   `ai_civitai_post.JOBS` (in-memory) не трогал.
+
+## Hunyuan queue · V3 — одна очередь 3D-генерации: бесплатная ферма первой, платный Tencent по нужде (2026-10-10 ~20:00 UTC, на проде)
+
+- **Очередь**: `mt/gen3d_queue.py` (MT `1dee635`), сервис `autorig-gen3d` (127.0.0.1:8283, nginx `^~ /api/gen3d`,
+  unit/nginx/policy в `autorig-online/deploy/gen3d/`). Отдельно от autorig-mt: рестарт MT не роняет очередь; сам
+  autorig-gen3d рестартовать, когда `GET /api/gen3d` → `queue.cloud_running` 0 (фермерские задачи подхватываются,
+  облачная в полёте — нет). Деплой кода — только `autotests.py mt-deploy --mt-file mt/gen3d_queue.py=…`, потом
+  `systemctl restart autorig-gen3d`.
+- **API**: `GET /api/gen3d` (ферма, очередь, кредиты, политика), `POST /api/gen3d/jobs` (Bearer MT-ключ; prompt |
+  image_url, purpose, quality, urgency interactive|urgent|background|autonomous, deadline_seconds, backend
+  auto|farm|cloud, estimate_only), `GET /api/gen3d/jobs/<id>` (+ `/model.glb`, `/render.png`, `/input.png`),
+  `GET /api/gen3d/decisions`. Каждое решение — `/srv/autorig/data/var/hunyuan3d/routing.jsonl`.
+- **Политика живая**: `/srv/autorig/live/config/gen3d-routing.json` (без рестарта). Платят только ключи owner / codex /
+  astra / admin-media-v3 и сессии в своём credit allowance, только interactive/urgent, в рамках `daily_credit_cap`
+  (config.json Hunyuan 3D API). Background / autonomous / сайт — только ферма. Interactive дедлайн 900 с.
+  **f12 исключён** (`farm.exclude_boxes`): чинят Vertex-PBR (отдельная сессия) + обучение Lina LoRA держит GPU
+  2–3 ч — вернуть, убрав f12 из списка.
+- **Сайт**: `/api/3dmodel` (релиз `killedretry-20261010T184935-gen3d-190921`, web `6eba4c4b`) при `site_via_queue: true`
+  ставит задачу в очередь (только ферма, вместо 503), принимает `prompt`; статус `/api/3dmodel/status/gen3d.<uuid>`.
+- **Инструмент сессии** `generate_3d` (agent.py): через очередь; `backend`, `urgent`, `job` (забрать долгую);
+  автономный ход — только `backend=farm`.
+- **Бенчмарк фермы** (те же объекты, что платная серия; лист DEV 6582, `/srv/autorig/data/hunyuan3d/bench_20261011`):
+  f12 3080 Ti ~465 с, f7 1080 Ti ~850 с, f13 1080 Ti ~1320 с; картинка из текста Krea 26–41 с. Результат: 25–40k граней,
+  PBR 2048+1024+1024, LOD 10k/1k. Облако 96–159 с, 25–35 кр. Дефекты фермы: ящик падает «Vertex-PBR manifest is
+  missing» и на f12, и на f7 (не только f12 — входозависимо), у фонаря мусорные осколки, у чучела потеряна перекладина.
+  1080 Ti с резидентной LLM отказывает в первом задании по VRAM-гейту (7000 MiB), повтор через 15 с проходит.
+- **Новые бесплатные модели (без скачиваний)**: открытых весов новее Hunyuan3D 2.1 нет (2.5/3.0/3.1 — только облако).
+  Быстрее: Hunyuan3D-2 turbo / mini-turbo + FlashVDM (форма за секунды, 6 ГБ, но текстура 2.0 — 16 ГБ). Сильнее:
+  TRELLIS.2 (MIT, 4B, PBR; Linux, 24 ГБ офиц., low-VRAM ~6.5–12 ГБ на 512³; Triton → не Pascal), Pixal3D (май 2026, на
+  TRELLIS.2). Решение и скачивание — только владелец.
