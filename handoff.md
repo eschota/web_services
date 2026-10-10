@@ -1464,3 +1464,34 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Автотесты**: кейсы `horse_opens_in_viewer`, `horse_quadruped_legs` (kinds `mt_quadruped_rig`, `viewer_opens`,
   `quadruped_legs`; `deploy/autotests/patch_quadruped_horse.py`). MT `ff968dc`, gate PASS 73 + 10 XFAIL.
 - **Не сделано**: пряди хвоста, приваренные к крупу (пары Hips/Tail3 в rig_check), — это слой волос, не ноги.
+
+## Skinning · V3 — «скиннинг сломался» (bfbd3248): причина, фикс, гейт (2026-10-10 19:30 UTC, на проде, MT `1ec3fd5`)
+
+- **Что увидел владелец**: задача bfbd3248 (воин, Blender-экспорт, 51 шелл, без скелета; тот же меш, что 66ba97ba /
+  d76f84c3), ран 3dbc776ff6bffe8c8f3b, вид весов: юбка и пластины живота лоскутами между руками и ногами. Это НЕ d1522b45.
+- **Бисект** (fastrig.py по всем бэкапам 10.10 в `mt.prev/`, 98c1247c и 8a1b1cc5 — одинаковые числа на всех 7 версиях;
+  заметки Skinning-агента `.work/skin_regression_notes.md`: воин рвался одинаково с 1c87b65, 09.10 — хуже): **кодового
+  регресса нет**. «Регресс» = переход на V3-only: утром владелец видел ARP-скин классики, теперь fastrig.
+- **Причина**: fastrig отдавал вершину ближайшей кости «по воздуху» — согнутое предплечье перед животом забирало
+  пластины и юбку (ребра Hips/LeftForeArm 65, rig_check 1255/644 рёбер >2x/4x за 3 кадра); затем fast_analysis
+  `--apply` (сдвиг кистей на 9.6 % H по «outside») пересобрал риг ещё хуже — 1010/468 за кадр — и ничто не гейтило
+  растяжение (судья и arm_clearance веса не трогали).
+- **Фикс** (`tools/patch_fastrig_reach.py`, якорные ханки; гейт PASS 81/0): `fastrig.limb_reach` — кость конечности
+  владеет только тем, до чего дотягивается по поверхности (компонента с «ядром» в трубке и путём к корню плечо/бедро;
+  отдельный шелл — только если конечность у него в большинстве и он в трубке ≤1.6 радиуса); `contact_split` — сварные
+  контакты конечность|туловище / проп|волосы вне корня режутся как волосы (writer дублирует шов); опции
+  `limb_reach`, `limb_capture`, `limb_split` в `skin_tools.SPEC`; `fast_analysis.apply_fixes` не ставит пересборку, если
+  rig_check stretch вырос. Числа (sum >2x/>4x): bfbd3248 1255/644 → **231/25**, 66ba97ba.upload 1473 → 240,
+  d1522b45 539 → 81, 7c9aaae7 471 → 91; хорошие модели без изменений (16ce2f35 25, 98c1247c 5, 9a34e8c0 0, 8a1b1cc5 6→0).
+  Классика (skin_tools.measure stretch_4x на сваренном меше): воин 100, fastrig было 1736 → 403 (сваренный меш не видит
+  разрез шва; rig_check со skip-маской видит).
+- **Почему гейт пропустил**: ни один чек не мерил растяжение скина fastrig (время/кости/клипы/коллизии/центровка).
+  Теперь kind `rig_stretch` (`deploy/autotests/patch_rig_stretch.py`): rig_check stretch из rig.json + веса по костям +
+  skin_tools.measure, пороги = сегодняшняя база ×1.2 на warrior_sword, boy_tshirt, knight_rigpath, anime_heel,
+  posed_fox_warrior и новом `warrior_kitbash` (66ba97ba.prepared.glb = источник bfbd3248). Первый прогон гейта с ним
+  поймал 2 вещи (max_stretch от сварки проп|волосы → добавлен в split; warrior_sword worst_share 0.50→0.80 — доля
+  настоящей руки в теле выросла, порог 0.85, дефект — Limb collision).
+- **Перескин клиентских ранов** (`tools/rerig_version.py`, новая версия через skin_tools.Store, v0 цел, вьювер
+  перезагружает): 3dbc776f v3 3291/1675→231/25; 7c9aaae7 v3 471→91; cc22a7e0 32; 410da78e 318→0; 659d941d 2680→1278;
+  1cb4a5ea/ca12fe99 (эльф 4f85d45e, волосы) 4404→3280 — другой класс дефекта; рыцари 42–45 без изменений.
+  DEV 6575 (до/после/классика), 6576 (вьювер). Рестарт: `sudo autorig-mt-restart --wait 600` 19:30:44 UTC.
