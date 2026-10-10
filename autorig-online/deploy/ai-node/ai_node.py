@@ -152,6 +152,9 @@ DEFAULT_CONFIG: Dict[str, object] = {
     # also takes a gate lease under `gpu_gate_owner`, so the card can drain and the model load. Empty = not used.
     "gpu_gate_url": "",
     "gpu_gate_owner": "",
+    # The gate lease lasts while tasks wait or run, plus this grace after the last one (a caller's next call of the same
+    # batch finds the model warm); a model idling in keepalive does not keep renders off the card.
+    "gpu_gate_grace_seconds": 30,
     # The converter/3D adapter answers 503 when it refuses NEW 3D jobs - also because an LLM took the VRAM it needs to
     # start Hunyuan. False = a 503 is not «the GPU is in use» (the VRAM check still guards the load).
     "converter_503_is_busy": True,
@@ -248,6 +251,7 @@ class Config:
         self.gpu_lease_fresh_seconds = max(10.0, float(merged.get("gpu_lease_fresh_seconds") or 60))
         self.gpu_gate_url = str(merged.get("gpu_gate_url") or "").strip().rstrip("/")
         self.gpu_gate_owner = str(merged.get("gpu_gate_owner") or "").strip() or self.node_name
+        self.gpu_gate_grace_seconds = max(0.0, float(merged.get("gpu_gate_grace_seconds") or 0))
         self.converter_503_is_busy = bool(merged.get("converter_503_is_busy", True))
         self.max_prompt_chars = max(1000, int(merged.get("max_prompt_chars") or MAX_PROMPT_CHARS))
         self.keepalive_seconds = int(merged["keepalive_seconds"])
@@ -1271,11 +1275,11 @@ class Node:
     def _active_tasks(self) -> List[AiTask]:
         return [t for t in self.tasks.values() if t.active()]
 
-    def hold_lease(self, on: bool) -> None:
+    def hold_lease(self, on: bool, gate: Optional[bool] = None) -> None:
         """gpu_lease_hold_file: written (fresh mtime) while this node waits for, loads or holds its model, removed
         once it has let the card go, so a yielding node on the same card stays out of the way meanwhile. With
         gpu_gate_url the same span holds a lease on the card's GPU gate (renderfin sends no new render meanwhile)."""
-        self.hold_gate(on)
+        self.hold_gate(on if gate is None else gate)
         path = self.cfg.gpu_lease_hold_file
         if not path:
             return
@@ -1542,7 +1546,10 @@ class Node:
                         logger.info("Model unloaded after %s s idle", self.cfg.keepalive_seconds)
                 with self.lock:
                     wanted = bool(self._active_tasks())
-                self.hold_lease(wanted or self.llama.running())
+                if wanted:
+                    self._last_wanted = time.monotonic()
+                recent = time.monotonic() - getattr(self, "_last_wanted", -1e9) < self.cfg.gpu_gate_grace_seconds
+                self.hold_lease(wanted or self.llama.running(), gate=wanted or recent)
                 self._prune()
             except Exception:  # noqa: BLE001 - the monitor must keep running
                 logger.exception("Monitor pass failed")

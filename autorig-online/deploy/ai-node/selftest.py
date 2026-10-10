@@ -792,7 +792,7 @@ def lease_checks(tmp):
     me = os.path.abspath(__file__)
     procs, outs, apis, llama_ports = [], [], [], []
     for name, extra in (("holder", {"gpu_lease_hold_file": lease, "max_prompt_chars": 20000,
-                                    "keepalive_seconds": 2, "gpu_gate_owner": "brain",
+                                    "keepalive_seconds": 2, "gpu_gate_owner": "brain", "gpu_gate_grace_seconds": 1,
                                     "gpu_gate_url": f"http://127.0.0.1:{gate.server_address[1]}"}),
                         ("yielder", {"gpu_lease_yield_files": [lease, other], "gpu_lease_fresh_seconds": 10,
                                      "keepalive_seconds": 60})):
