@@ -299,6 +299,41 @@
    "what": "rig.json of that v0 rig (rig_check stretch: 399 edges over 2x, max 42x)",
    "sha256": "9e8cf8cc50204f6bd92fdece18cfed194a39780c4a22e77eb0c8b137c3830945",
    "bytes": 12950
+  },
+  "99420015.upload.glb": {
+   "source": "/srv/autorig/data/var/uploads/fe3d2c7f-c6ab-4df7-9c76-3e44fc8a69c5/tactical_combat_gloves_-_game_ready.glb",
+   "task": "99420015-5592-407a-810d-022c69a1841c",
+   "what": "tactical combat gloves: two identical gloves, no body (upload)",
+   "sha256": "e6b506258febdcd63b12e7ad55260328a848ab18c4714a497acbdf1c4ac980e8",
+   "bytes": 2572064
+  },
+  "synthetic.hand_left_open.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/hand_left_open.glb",
+   "task": null,
+   "what": "synthetic left hand, fingers slightly curled, palm +z, thumb -x (deploy/autotests/make_hand_corpus.py)",
+   "sha256": "38a7f07441fbb643eeb11b316523a7a330eef762a1b902174bb7641de1a54d61",
+   "bytes": 264208
+  },
+  "synthetic.arm_right_fps.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/arm_right_fps.glb",
+   "task": null,
+   "what": "synthetic right hand with a forearm (FPS arm) (deploy/autotests/make_hand_corpus.py)",
+   "sha256": "8dabefe2586b5144d8b83be34f0d57803c2e5efc00ee4da56a10c32e772f618e",
+   "bytes": 577704
+  },
+  "synthetic.glove_mitten.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/glove_mitten.glb",
+   "task": null,
+   "what": "synthetic glove with the four fingers fused (mitten), thumb apart (deploy/autotests/make_hand_corpus.py)",
+   "sha256": "5353095f9d5951e14f46753339637b8314c40ba1a2286a272fc5b1228f4d21ad",
+   "bytes": 279780
+  },
+  "synthetic.hands_pair_mirror.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/hands_pair_mirror.glb",
+   "task": null,
+   "what": "synthetic left hand and its mirror image 25 cm apart (deploy/autotests/make_hand_corpus.py)",
+   "sha256": "94a96f97c86653abb987503a4ad99d2a9f33944fe4bfdd599fda3fd915f06ce4",
+   "bytes": 530120
   }
  },
  "profiles": {
@@ -3028,6 +3063,528 @@
       "min_arm_vertices": [
        ">=",
        1
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hands_gloves",
+   "task": "99420015-5592-407a-810d-022c69a1841c",
+   "cost": 2,
+   "defect": "owner 2026-10-11 («риг рук — отдельная категория»): a hands-only GLB (two identical tactical gloves) went through the humanoid conveyor as a 1-bone root rig with no clips. Hands rig · V3 (mt/handrig.py): the detector finds finger branches at one end of every shell, each glove gets a Mixamo-named hand chain (ForeArm for the cuff, Hand, Thumb/Index/Middle/Ring/Pinky 1-4), weights grow per finger along the surface, 7 hand clips",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "99420015.upload.glb",
+     "params": {
+      "words": "tactical combat gloves"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       40
+      ],
+      "clips": [
+       ">=",
+       7
+      ],
+      "body_plan": [
+       "==",
+       "hands"
+      ]
+     }
+    },
+    {
+     "id": "mt_hands",
+     "kind": "hand_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hands": [
+       "==",
+       2
+      ],
+      "sides": [
+       "==",
+       "LL"
+      ],
+      "fingers_min": [
+       "==",
+       5
+      ],
+      "thumbs": [
+       "==",
+       2
+      ],
+      "fused": [
+       "==",
+       0
+      ],
+      "finger_outside": [
+       "==",
+       0
+      ],
+      "finger_leak": [
+       "==",
+       0
+      ],
+      "joints_outside": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "stretch_4x": [
+       "<=",
+       30
+      ]
+     }
+    },
+    {
+     "id": "mt_fast",
+     "kind": "mt_fast_analysis",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "category": [
+       "==",
+       "hands"
+      ],
+      "op_errors": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "detect_gloves",
+     "kind": "hand_detect",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "99420015.upload.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "hands": [
+       "==",
+       true
+      ],
+      "confidence": [
+       "==",
+       "strong"
+      ]
+     }
+    }
+   ],
+   "note": "sides LL: the two gloves are the same mesh turned 180 degrees about y (congruence 'rotation'), both read as left hands from the thumb against the palm (fingers lean and the thumb lies on the palm side). Flip the rule only after the owner's verdict."
+  },
+  {
+   "id": "hands_synthetic_left",
+   "task": null,
+   "cost": 1,
+   "defect": "Hands rig · V3 regression: a synthetic left hand (separated fingers, slight curl) must come out Left with 5 fingers, nothing outside, no finger leak",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.hand_left_open.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       22
+      ],
+      "clips": [
+       ">=",
+       7
+      ],
+      "body_plan": [
+       "==",
+       "hands"
+      ]
+     }
+    },
+    {
+     "id": "mt_hands",
+     "kind": "hand_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hands": [
+       "==",
+       1
+      ],
+      "fingers_min": [
+       "==",
+       5
+      ],
+      "thumbs": [
+       "==",
+       1
+      ],
+      "fused": [
+       "==",
+       0
+      ],
+      "finger_outside": [
+       "==",
+       0
+      ],
+      "finger_leak": [
+       "==",
+       0
+      ],
+      "joints_outside": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "sides": [
+       "==",
+       "L"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hands_synthetic_fps_arm",
+   "task": null,
+   "cost": 1,
+   "defect": "Hands rig · V3 regression: a synthetic right FPS arm (forearm + hand) must come out Right with a ForeArm bone",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.arm_right_fps.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       23
+      ],
+      "clips": [
+       ">=",
+       7
+      ],
+      "body_plan": [
+       "==",
+       "hands"
+      ]
+     }
+    },
+    {
+     "id": "mt_hands",
+     "kind": "hand_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hands": [
+       "==",
+       1
+      ],
+      "fingers_min": [
+       "==",
+       5
+      ],
+      "thumbs": [
+       "==",
+       1
+      ],
+      "fused": [
+       "==",
+       0
+      ],
+      "finger_outside": [
+       "==",
+       0
+      ],
+      "finger_leak": [
+       "==",
+       0
+      ],
+      "joints_outside": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "sides": [
+       "==",
+       "R"
+      ],
+      "forearms": [
+       "==",
+       1
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hands_synthetic_mitten",
+   "task": null,
+   "cost": 1,
+   "defect": "Hands rig · V3 regression: a glove with the four fingers fused (mitten): the detector needs the customer's / Vision's words, the fingers come as four lateral bands, the thumb apart",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.glove_mitten.glb",
+     "params": {
+      "words": "mitten glove"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       22
+      ],
+      "clips": [
+       ">=",
+       7
+      ],
+      "body_plan": [
+       "==",
+       "hands"
+      ]
+     }
+    },
+    {
+     "id": "mt_hands",
+     "kind": "hand_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hands": [
+       "==",
+       1
+      ],
+      "sides": [
+       "==",
+       "L"
+      ],
+      "thumbs": [
+       "==",
+       1
+      ],
+      "fingers_min": [
+       "==",
+       5
+      ],
+      "finger_outside": [
+       "<=",
+       30
+      ],
+      "finger_leak": [
+       "<=",
+       10
+      ],
+      "stretch_4x": [
+       "<=",
+       400
+      ],
+      "unweighted": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hands_synthetic_pair",
+   "task": null,
+   "cost": 1,
+   "defect": "Hands rig · V3 regression: a left hand and its mirror image must come out Left + Right (congruence 'mirror'), nothing outside, no leak",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.hands_pair_mirror.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       44
+      ],
+      "clips": [
+       ">=",
+       7
+      ],
+      "body_plan": [
+       "==",
+       "hands"
+      ]
+     }
+    },
+    {
+     "id": "mt_hands",
+     "kind": "hand_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hands": [
+       "==",
+       2
+      ],
+      "sides": [
+       "==",
+       "LR"
+      ],
+      "fingers_min": [
+       "==",
+       5
+      ],
+      "thumbs": [
+       "==",
+       2
+      ],
+      "fused": [
+       "==",
+       0
+      ],
+      "finger_outside": [
+       "==",
+       0
+      ],
+      "finger_leak": [
+       "==",
+       0
+      ],
+      "joints_outside": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hands_detector_controls",
+   "task": null,
+   "cost": 1,
+   "defect": "Hands rig · V3 control: the hands detector must stay quiet on bodies (a boy, a horse with tack, a warrior with a raised sword: three branches at the top are not fingers)",
+   "checks": [
+    {
+     "id": "ctl_98c1247c",
+     "kind": "hand_detect",
+     "role": "control",
+     "paths": [
+      "mt"
+     ],
+     "input": "98c1247c.upload.glb",
+     "params": {
+      "words": "fabian3"
+     },
+     "thresholds": {
+      "hands": [
+       "==",
+       false
+      ]
+     }
+    },
+    {
+     "id": "ctl_a742491a",
+     "kind": "hand_detect",
+     "role": "control",
+     "paths": [
+      "mt"
+     ],
+     "input": "a742491a.upload.glb",
+     "params": {
+      "words": "armored horse with tack"
+     },
+     "thresholds": {
+      "hands": [
+       "==",
+       false
+      ]
+     }
+    },
+    {
+     "id": "ctl_66ba97ba",
+     "kind": "hand_detect",
+     "role": "control",
+     "paths": [
+      "mt"
+     ],
+     "input": "66ba97ba.upload.glb",
+     "params": {
+      "words": "sword"
+     },
+     "thresholds": {
+      "hands": [
+       "==",
+       false
       ]
      }
     }

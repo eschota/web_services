@@ -565,6 +565,47 @@ def mt_rig_first(ctx, input_name, words=""):
             "prop_bones_n": sum(1 for b in rig.get("bones", []) if str(b.get("name", "")).startswith("Prop"))}
 
 
+def hand_rig(ctx):
+    """Hands rig · V3 (2026-10-11): the hands branch of rig_first on this case's MT run: the body plan, hands and
+    their sides, fingers and thumbs, forearms, finger samples outside the mesh, finger weights leaking into a
+    neighbour, the Fist clip's stretch (rig.json of mt/handrig.py)."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    hands = rig.get("hands") or []
+    hc = (rig.get("checks") or {}).get("hand_checks") or {}
+    st = {k: v for k, v in ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items() if isinstance(v, dict)}
+    return {"body_plan": rig.get("body_plan"), "hands": len(hands), "sides": "".join(h.get("side", "?")[0] for h in hands),
+            "fingers_min": min([v.get("fingers", 0) for v in hc.values()] or [0]),
+            "thumbs": sum(1 for h in hands if h.get("thumb_vertices")),
+            "forearms": sum(1 for h in hands if h.get("forearm")),
+            "fused": sum(1 for h in hands if h.get("fused")),
+            "palm_confidence_min": min([h.get("palm_confidence", 0) for h in hands] or [0]),
+            "bones": len(rig.get("bones") or []), "deform_bones": (rig.get("checks") or {}).get("deform_bones"),
+            "joints_outside": len((rig.get("checks") or {}).get("joints_outside_mesh") or []),
+            "finger_outside": sum(int(v.get("finger_samples_outside") or 0) for v in hc.values()),
+            "finger_leak": sum(int(v.get("finger_leak_vertices") or 0) for v in hc.values()),
+            "stretch_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
+            "stretch_2x": sum(int(v.get("edges_over_2x") or 0) for v in st.values()),
+            "unweighted": (rig.get("checks") or {}).get("unweighted_vertices"),
+            "clips": len(rig.get("clips") or []), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
+
+
+def hand_detect(ctx, input_name, words=""):
+    """The hands detector alone (mt.handrig --detect) on a corpus input: a control on bodies (hands must be false)
+    and a detector case on hands-only models."""
+    run = pathlib.Path(ctx["work"]) / "detect" / pathlib.Path(input_name).stem
+    shutil.rmtree(run, ignore_errors=True)
+    (run / "proj").mkdir(parents=True)
+    shutil.copyfile(_input(input_name), run / "proj" / "model.glb")
+    p, wall = _child([PY, "-P", "-m", "mt.handrig", "--dir", str(run), "--detect", "--words", words], timeout=300)
+    if p.returncode != 0:
+        raise RuntimeError(f"handrig detect exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    d = json.loads(p.stdout)
+    return {"seconds": wall, "hands": bool(d.get("hands")), "confidence": d.get("confidence"), "why": d.get("why"),
+            "groups": len(d.get("groups") or []),
+            "max_branches": max([g.get("branches") or 0 for g in d.get("groups") or []] or [0])}
+
+
 def mt_fast_analysis(ctx):
     """The V3 fast analysis stage (mt.fast_analysis: bone_check, heel rules, symmetry, proportions, parts)."""
     run = ctx["run"]
@@ -788,6 +829,10 @@ def run_check(check: dict, ctx: dict) -> dict:
         return mt_rig_first(ctx, inp, a.get("words", ""))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx)
+    if k == "hand_rig":
+        return hand_rig(ctx)
+    if k == "hand_detect":
+        return hand_detect(ctx, inp, a.get("words", ""))
     if k == "mt_arm_clearance":
         return mt_arm_clearance(ctx)
     if k == "mt_numeric_qa":
