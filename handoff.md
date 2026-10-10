@@ -49,13 +49,37 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   (по умолчанию `all`): аккаунты админов уже идут в V3, `pipeline=v3` — всегда V3.
   Глобальный перевод всех маршрутов НЕ включён: нет FBX/Unity экспорта и подписочного гейта.
   Telegram-ветка в коде, но активна только после рестарта бота и `telegram` в AUTORIG_V3_ROUTES.
-- **Доказано**: `5f6f91fc` (HTTP upload, pipeline=v3) и `16ce2f35` (аккаунт владельца)
-  прошли весь конвейер → `needs_review` (деформация, рывки в 3 клипах, слои hair/fabric);
-  `/task?id=16ce2f35…` открывает V3-вьювер. DEV: `3dbaf148ff8f`, `a431557faa7a`.
-- **Блокер генерации**: f12 C: 0 GB → каждый Hunyuan-job падал на disk gate (`d8a68e0c` error).
-  Hunyuan на f12 выключен в `renderfin-hunyuan.json` (бэкап `.bak.v3intake-f12-diskfull-*`),
-  вернуть после очистки диска (Fleet). Renderfin не считает "disk gate failed" ожиданием —
-  стоит добавить в `_FLEET_ERROR_MARKERS`. Повторная генерация владельца: `8635aa06`.
+- **Batch 2** (коммит `a7b744ff`, релиз `v3intake-20261010d`, рестарт storage+renderfin
+  11:43 UTC, сброс очереди: 1 queued + 2 running graph-рендера): OBJ → GLB прямо на VPS
+  (`obj_to_glb`); FBX → конвертер, недоступный конвертер = ожидание до 6 ч, не ошибка;
+  картинка/видео от админа → генерация (видео: кадр ffmpeg) → V3. Renderfin
+  `ordinary_conversion_waiting` больше не считает `generate`/`v3` строки обычной
+  конверсией (раньше site-генерация блокировала свой же shared fallback).
+- **Доказано (все → `needs_review`, весь конвейер)**: `5f6f91fc` HTTP GLB upload;
+  `16ce2f35` аккаунт владельца; `66094238` HTTP OBJ upload (манекен → "metallic humanoid
+  robot", 28 костей); `cfa2e6a1` из генерации (меш Renderfin `5c35c168`, intent generate).
+  Причины везде: численная деформация, спайки в Waving1/Hip Hop Dancing/Look Around
+  (системно — библиотека/ретаргет), слои hair/fabric. DEV (UTF-8): `041c4da81732`,
+  `a43162079154`, `ffc1bf308f40`, `a9715f319e12`; первые два поста с битой подписью —
+  `3dbaf148ff8f`, `a431557faa7a` (Windows curl; слать только с VPS).
+- **Свежая генерация** `8635aa06` ждёт Hunyuan: f12 выключен (C: 0 GB, бэкап
+  `renderfin-hunyuan.json.bak.v3intake-f12-diskfull-*`, вернуть после очистки — Fleet),
+  shared fallback f7/f13 на паузе, пока в обычной очереди висят legacy `a2c243b9`/`c0cda1e0`.
+  "disk gate failed" стоит добавить в `_FLEET_ERROR_MARKERS` renderfin.
+- **Приказ владельца (DEV, к посту cfa2e6a1)**: масштаб объекта определяет анализатор;
+  бесплатный AI vision граф проверяет стартовый зум и даёт вердикт инструменту (zoom или
+  scale); сцена под масштаб (100 м), нет — генерировать. Сделано у меня: V3 analysis строит
+  карточку (`card.json height_m` → масштаб вьювера и площадка сцены) + `scene_auto` после
+  publish (MT коммит `c683635`, файл выложен, **активен после рестарта MT**).
+  Передаю: **Task page · V3 / вьювер** — Vision-проверка стартового кадра (сейчас
+  кинематографическая камера на /task режет голову) и `SetCamera`; **сцена** —
+  `scene_recipe` клампит площадку до 3 м и фиксирует SIZE_M, нужен размер по `dims_m`.
+- **Рестарт MT** (ключ OpenAI координатора + мой conveyor): безопасен, когда нет running
+  веток. Агенты сессий сами запускают GPU-ветки (танец/диорама) на каждую V3-задачу
+  (`MT_AGENT_AUTOSTART`) — учесть ёмкость фермы при открытии V3 всем.
+- **Не смонтировано**: `v3_site_integration.py`/`task_v3_shell.py` (заменены read API выше),
+  `v3_cutover.py` (контроллер фермы), MT→backend push-callbacks (`task_callbacks.py`):
+  идемпотентность даёт durable outbox (poll, lease CAS, повтор проекции).
 
 ## Task page · V3 — живая страница задачи (2026-10-10 11:50 UTC, проверено на проде)
 
