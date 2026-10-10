@@ -270,6 +270,31 @@ Owner rule, 2026-10-10:
   * The V3 conveyor rigs in 4–10 s (`fastrig`), but its analysis and QA phases
     have taken up to 400 s.
 
+## Every Release Passes the Regression Autotests
+
+Owner rule, 2026-10-10:
+
+> мы должны экономить на каждом этапе у нас уже записаны модели которые дают
+> ошибку, добавляй их в автотесты, каждый новый релиз должен проходить базовые
+> автотесты утвердительно и максимально быстро
+
+* **Every bad model becomes a test.** Each model that once produced a bug
+  becomes a regression case: the input (read-only copy), the defect, the
+  metric and the threshold. Examples: the sword bound into the body, the arm
+  through the torso, palm weights on the torso, the 1.5× rig scale, a bone
+  outside the mesh, ASCII FBX.
+* **The release gate.** Every release of the converter, MT (fastrig, conveyor,
+  fast analysis) and the rig path must pass the base suite with an explicit
+  PASS before `current` is repointed or a node is restored. A FAIL blocks the
+  release, and the report names the case.
+* **Fast.** The base suite runs in minutes, not hours: cached inputs, small
+  meshes where they suffice, parallel cases. A heavy check belongs in the
+  suite, not in every customer run, so production pays for it once per
+  release.
+* **One place.** The suite, the corpus manifest and the runner live in Git.
+  An agent that finds a new defect adds its model to the corpus in the same
+  change.
+
 ## Tools Have Options
 
 Owner rule, 2026-10-10:
