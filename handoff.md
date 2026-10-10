@@ -2,7 +2,15 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpoint321ae0b/source7bc0381: canonical/server SHA3908f1a465ee65402127c7d9540f384020e64f2d209e14bc24beb8e706769cb6.
+CURRENT private checkpointdf694a4/source7bc0381: canonical/server SHAcec4f3c26f7eb77cad2d1119d99714813a14607ab1d98905848078bfa84ee238.
+Root reviewedactualFoot8f3 sideWalking/Running/Jump and comparison; NEWMEDIA
+sentONCE HTTP200 UID71bca804bd9d/video4a6deb83, deliveryNOTapproval/globalFAILED.
+Independentcert audit rejects c221 identity/gap/orientation/continuity admission;
+guardrepairinprogress, no centeredsolver approved. Actualv1candidate strain
+proof3202b9d7 closes2/3 IDs gap:all10MAIN/rank6/upper0. No unlock orrestart.
+Full modelquality0/5. This section supersedes pendingMEDIA/certcoverageclaims.
+
+Prior private checkpoint321ae0b/source7bc0381: canonical/server SHA3908f1a465ee65402127c7d9540f384020e64f2d209e14bc24beb8e706769cb6.
 R5fa47 actualserializedREST/alias native+Web15 gates pass; smooth48 v1 FINALREJECT
 onlypose0 strictintermediatepass, Bodystillcolliding/notproduction-safe. Centered
 sourcevalidated, no optimizer yet; self-safe paircert957/1006 with49unknown,
