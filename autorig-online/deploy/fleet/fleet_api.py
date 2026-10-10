@@ -71,6 +71,7 @@ DB_SECONDS = 15.0
 VPS_SECONDS = 15.0
 AGENT_STALE_SECONDS = 15 * 60
 LOW_DISK_GB = 15.0
+HOT_DISK_C = 70.0  # a physical disk at or above this is flagged (worker-4090 crashed from a hot SSD, 2026-10-10)
 LOW_DISK_SYSTEM_GB = 10.0
 # DEV-channel disk alerts (owner rule via the main session, 2026-10-10): any
 # AutoRig work drive of an in-fleet box under 10 GB. Re-armed above 15 GB,
@@ -1123,6 +1124,7 @@ def compose(col: Collector) -> Dict[str, Any]:
                 services["blender_worker"] = {"name": worker_name, "last_seen_seconds": age}
 
         # ---- box agent (per-drive disk, GPU, tasks, quarantine)
+        disk_health = []
         if agent:
             services["fleet_agent"] = {"reported_age_seconds": agent_age,
                                        "agent_version": agent.get("agent_version"), "fresh": agent_fresh}
@@ -1156,6 +1158,25 @@ def compose(col: Collector) -> Dict[str, Any]:
                     if isinstance(t, dict)]
                 if agent.get("listeners"):
                     services["fleet_agent"]["listening_ports"] = agent.get("listeners")
+                for dh in (agent.get("disk_health") or []):
+                    if not isinstance(dh, dict):
+                        continue
+                    drives_txt = ",".join(dh.get("drives") or []) or "no letter"
+                    label = f"{dh.get('name') or 'disk'} #{dh.get('number')} ({drives_txt})"
+                    temp, warn_c, crit_c = dh.get("temp_c"), dh.get("warn_c"), dh.get("critical_c")
+                    disk_health.append({"number": dh.get("number"), "name": dh.get("name"), "media": dh.get("media"),
+                                        "health": dh.get("health"), "operational": dh.get("operational"),
+                                        "temp_c": temp, "warn_c": warn_c, "critical_c": crit_c,
+                                        "drives": dh.get("drives") or []})
+                    if temp is not None and crit_c and temp >= crit_c:
+                        blockers.append(f"disk {label} CRITICAL temperature {temp:g} C (limit {crit_c:g} C)")
+                    elif temp is not None and warn_c and temp >= warn_c:
+                        warnings.append(f"disk {label} temperature {temp:g} C over its warning {warn_c:g} C")
+                    elif temp is not None and temp >= HOT_DISK_C:
+                        warnings.append(f"disk {label} hot: {temp:g} C (warning at {warn_c:g} C)" if warn_c
+                                        else f"disk {label} hot: {temp:g} C")
+                    if dh.get("health") and str(dh.get("health")).lower() not in ("healthy", "unknown"):
+                        blockers.append(f"disk {label} health {dh.get('health')}")
         quarantine = []
         for item in (agent.get("quarantine") or []):
             if isinstance(item, dict) and item.get("gb"):
@@ -1231,6 +1252,7 @@ def compose(col: Collector) -> Dict[str, Any]:
             "disks_array": disks,
             "disk_source_string": disk_source or "none",
             "quarantine_array": quarantine,
+            "disk_health_array": disk_health,
             "blockers_array": blockers,
             "warnings_array": warnings,
             "notes_array": notes,
@@ -1365,6 +1387,10 @@ def render_text(snapshot: Dict[str, Any]) -> str:
         if gpu.get("error"):
             gpu_text += f" ERR {gpu.get('error')}"
         disks = " ".join(f"{d.get('drive')}{d.get('free_gb')}G" for d in box.get("disks_array") or [])
+        temps = " ".join(f"#{d.get('number')}:{d.get('temp_c'):g}C" for d in box.get("disk_health_array") or []
+                         if d.get("temp_c") is not None)
+        if temps:
+            disks = (disks + "  disktemp=" + temps).strip()
         busy = "; ".join(
             f"{b.get('service')}:{b.get('what')}" + (f"[{b.get('stage')}]" if b.get("stage") else "")
             for b in box.get("busy_with_array") or [])
@@ -1450,6 +1476,16 @@ def _clean_report(bid: str, body: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(q, dict):
             quarantine.append({"path": str(q.get("path") or "")[:200], "gb": num(q.get("gb")),
                                "measured_at": str(q.get("measured_at") or "")[:30]})
+    disk_health = []
+    for dh in (body.get("disk_health") or [])[:16]:
+        if isinstance(dh, dict):
+            disk_health.append({"number": int(num(dh.get("number")) or 0), "name": str(dh.get("name") or "")[:60],
+                                "media": str(dh.get("media") or "")[:12], "health": str(dh.get("health") or "")[:20],
+                                "operational": str(dh.get("operational") or "")[:30],
+                                "temp_c": num(dh.get("temp_c")), "warn_c": num(dh.get("warn_c")),
+                                "critical_c": num(dh.get("critical_c")),
+                                "drives": [str(x)[:3] for x in (dh.get("drives") or [])[:12]]
+                                if isinstance(dh.get("drives"), list) else []})
     processes = {str(k)[:30]: int(v) for k, v in (body.get("processes") or {}).items()
                  if isinstance(v, (int, float))} if isinstance(body.get("processes"), dict) else {}
     listeners = [int(p) for p in (body.get("listeners") or [])[:40] if isinstance(p, (int, float))]
@@ -1459,7 +1495,7 @@ def _clean_report(bid: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "host": str(body.get("host") or "")[:60],
         "boot_utc": str(body.get("boot_utc") or "")[:40],
         "ram_total_gb": num(body.get("ram_total_gb")), "ram_free_gb": num(body.get("ram_free_gb")),
-        "drives": drives, "gpu": gpu, "tasks": tasks, "quarantine": quarantine,
+        "drives": drives, "disk_health": disk_health, "gpu": gpu, "tasks": tasks, "quarantine": quarantine,
         "processes": processes, "listeners": listeners,
     }
 

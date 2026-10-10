@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$UserTask, [string]$Box = '', [string]$HomeDir =
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$AgentVersion = 'fleet-agent/2026-10-10b'
+$AgentVersion = 'fleet-agent/2026-10-10c'
 $Api = 'https://autorig.online/api/fleet'
 $Home_ = if ($HomeDir) { $HomeDir } else { 'C:\ProgramData\AutoRig\fleet-agent' }
 $LogFile = Join-Path $Home_ 'agent.log'
@@ -116,6 +116,50 @@ try {
             used_percent = [math]::Round(100 * (1 - $d.FreeSpace / $d.Size), 1) }
     }
     $report.drives = $drives
+
+    # Physical disk temperature and health (read-only). The NVMe/SATA temperature comes from
+    # IOCTL_STORAGE_QUERY_PROPERTY (StorageDeviceTemperatureProperty), which needs no admin rights.
+    # Added after worker-4090 crashed from an overheating SSD on 2026-10-10.
+    try {
+        if (-not ('AutoRigDiskTemp' -as [type])) {
+            Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;
+public static class AutoRigDiskTemp {
+  [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern SafeFileHandle CreateFile(string n, uint a, uint s, IntPtr sa, uint cd, uint fl, IntPtr t);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool DeviceIoControl(SafeFileHandle h, uint code, byte[] inb, int inl, byte[] outb, int outl, out int ret, IntPtr ov);
+  public static int[] Query(int n) {
+    var h = CreateFile("\\\\.\\PhysicalDrive" + n, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+    if (h.IsInvalid) return null;
+    using (h) {
+      byte[] q = new byte[12]; BitConverter.GetBytes(52).CopyTo(q, 0);
+      byte[] o = new byte[512]; int r;
+      if (!DeviceIoControl(h, 0x2D1400, q, q.Length, o, o.Length, out r, IntPtr.Zero)) return null;
+      int cnt = BitConverter.ToUInt16(o, 12);
+      if (cnt < 1) return null;
+      return new int[] { BitConverter.ToInt16(o, 26), BitConverter.ToInt16(o, 10), BitConverter.ToInt16(o, 8) };
+    }
+  }
+}
+"@
+        }
+        $letters = @{}
+        foreach ($pt in (Get-Partition -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter })) {
+            $k = [string]$pt.DiskNumber
+            if (-not $letters.ContainsKey($k)) { $letters[$k] = @() }
+            $letters[$k] += ([string]$pt.DriveLetter + ':')
+        }
+        $dt = @()
+        foreach ($pd in (Get-PhysicalDisk -ErrorAction SilentlyContinue)) {
+            $num = [int]$pd.DeviceId
+            $t = $null; try { $t = [AutoRigDiskTemp]::Query($num) } catch {}
+            $dt += [ordered]@{ number = $num; name = [string]$pd.FriendlyName; media = [string]$pd.MediaType
+                health = [string]$pd.HealthStatus; operational = [string]$pd.OperationalStatus
+                temp_c = $(if ($t) { $t[0] } else { $null }); warn_c = $(if ($t) { $t[1] } else { $null })
+                critical_c = $(if ($t) { $t[2] } else { $null })
+                drives = @($letters[[string]$num]) }
+        }
+        $report.disk_health = $dt
+    } catch { Log ('disk health failed: ' + $_.Exception.Message) }
 
     $smi = $null
     foreach ($c in @("$env:SystemRoot\System32\nvidia-smi.exe", 'C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe')) {
