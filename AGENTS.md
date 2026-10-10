@@ -48,6 +48,81 @@ release. `/root` is the old VPS layout and does not apply to this host.
 Use this `AGENTS.md` as the project rule source. Do not create or rely on
 Cursor `.cursor/rules` instructions for this project.
 
+## Первая Заповедь Авторига (the First Commandment)
+
+The owner's main rule, 2026-10-10. It is a concept he wants to test in
+practice:
+
+> Реалтайм параллельная разработка в продакшене … всегда всё пишется в прод,
+> без локального тестирования, только живое обновление сервисов и
+> тестирование на проде.
+
+What it means for every agent:
+
+* Every change goes to production right away and is tested there with curl,
+  logs, a browser and real tasks. No local servers, no local QA gate.
+* The task page always runs the newest code. Its JS and CSS are served so that
+  every new task opened on the site loads the version an agent just wrote. They
+  revalidate on every load and are never served stale from a cache.
+* Live file writes are atomic: write a temp file, then rename it. A
+  half-written file is never served, and a file shared by hardlink with an old
+  release is never modified in place.
+* A release is still how a change reaches `current`. Staging one and
+  repointing `current` takes seconds, and it keeps rollback. Deploy every small
+  change at once.
+* Mirror every live change into Git right away (commit and push), so
+  production and Git never drift.
+* All activity goes to the owner visually for validation. Owner, 2026-10-10:
+
+  > всю деятельность надо визуально медиа сообщениями отправлять в этот чат
+  > мне на валидацию
+
+  * Send every visible result (a render, a screenshot, a short video of the
+    live page or the viewer) as a media message to the DEV channel
+    `https://autorig.online/dev`: `POST https://autorig.online/dev/api/send`.
+    The send contract is the skill
+    `https://autorig.online/dev/skills/telegram-developer-validator`.
+  * The message names the agent and the project and carries a one-line
+    caption.
+  * His verdicts (✅ Принять / 🔁 Улучшить) come back through
+    `GET /dev/api/inbox?agent=<name>` and are orders.
+* Agents work in parallel, one agent per project entity: Astra, fleet, task
+  page, intake/dispatch, converter, and so on. Re-read the production copy of a
+  shared file just before patching it. Never overwrite another agent's change.
+* These still apply:
+  * Secrets stay out of Git, logs and prompts.
+  * Customer sources and outputs are never deleted.
+  * A restart that wipes queues (`autorig-storage`, renderfin) is batched,
+    and in-flight work is checked first.
+
+## AutoRig Fleet Status Is One API Call
+
+Owner rule, 2026-10-10:
+
+> сделай флот авторига правилом, чтобы каждый агент работая с сессией знал
+> текущий статус каждого агента флота, надо сделать чтобы это было обычным
+> базовым запросом к апи. иначе мы слишком много тратим на это времени.
+
+* Every agent gets the state of the whole fleet with one request:
+  Astra, session agents, Claude and Codex sessions.
+  * The target is `GET https://autorig.online/api/fleet`, being built on
+    2026-10-10.
+  * Until it is live, `GET https://autorig.online/api/ai/fleet` covers only
+    the render and LLM nodes.
+* The answer lists every box and fleet agent with:
+  * its roles and whether it is online;
+  * what it is busy with and its queue;
+  * its build and V3 readiness;
+  * GPU/VRAM and free disk;
+  * its last error or blocker.
+* Do not probe boxes one by one over SSH to learn their state. If something
+  is missing from the API, add it to the API.
+* Fleet members:
+  * converters with LLM: f1, f2, f7, f11, f13;
+  * render with LLM: f12, f15, Raptor;
+  * worker-4090: the owner's PC, and its GPU is his first.
+  * f5 is out of the fleet by the owner's order of 2026-10-08.
+
 ## V3 Concept: Astra and Session Agents
 
 Owner rule, 2026-10-10:
