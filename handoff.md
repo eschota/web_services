@@ -93,7 +93,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   `v3_cutover.py` (контроллер фермы), MT→backend push-callbacks (`task_callbacks.py`):
   идемпотентность даёт durable outbox (poll, lease CAS, повтор проекции).
 
-## Task page · V3 — живая страница задачи (2026-10-10 11:50 UTC, проверено на проде)
+## Task page · V3 — живая страница задачи (2026-10-10 12:10 UTC, проверено на проде)
 
 - **Свежий JS на каждом заходе.** nginx `/static/`: оверлей `/srv/autorig/live/static`,
   затем релиз. JS/CSS без точного 10-hex `?v=` отдаются `no-cache` + ETag (304),
@@ -102,12 +102,15 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   текущего содержимого. Живая правка статики:
   `sudo python3 /srv/autorig/tools/live_static.py put <rel> <file>` (атомарная запись,
   затем promotion в релиз под локом, откат — `previous`). Состояние:
-  `GET /api/task-page/live`. Доказано: тот же URL без hard refresh взял новый билд
-  (`tv3-20261010.2` → `.4` → `.5`), DEV `672ce48ed028`.
+  `GET /api/task-page/live`. Доказано: тот же URL без hard refresh берёт новый билд
+  (`tv3-20261010.2` → … → `.10`), DEV `672ce48ed028`.
 - **/task = V3-оболочка** (`task-v3.html`, `js/task-v3-shell.js`, `css/task-v3.css`):
   тот же SEO head/canonical/OG/JSON-LD, шапка, подвал и h1, что у классики; один
-  Unity-вьювер; реальная позиция в очереди (порядок диспетчера) и прогресс до модели;
-  инструменты: скачать/классика (`?classic=1`), ссылка, полный экран.
+  Unity-вьювер; полоска задачи НАД вьювером (скачать/классика `?classic=1`, ссылка,
+  полный экран, статус, чат поддержки) — UI вьювера ничем не перекрыт; реальная
+  позиция в очереди (порядок диспетчера) и прогресс до модели; модель раньше рига
+  (prepared.glb показывается, пока риг идёт); нет модели — видео/постер из og:,
+  иначе «3D-модель недоступна» с подсветкой кнопки классики.
 - **API** `GET /api/task/{id}/v3-view` (`autorig.task-page-v3/1`), только сервер решает:
   - V3-задачи (`pipeline_kind=v3`) открывают MT-run из проекции Intake
     (`viewer_settings.v3.session.mt_run_id`, контракт `v3_runtime_mount._shell`),
@@ -115,28 +118,37 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   - классические открывают свои GLB из glb_cache через `/api/task-viewer/{id}/…`
     (`files/task/rig/rig.json`, `rig/rigged.glb`, `proj/model.glb` через X-Accel;
     texlib/scenes/settings — 307 на `/api/mt/…`; POST настроек от не-админа
-    игнорируется), `agent=0`. Кэш прогревается фоном через классические эндпоинты;
-  - ACL owner / anon_id / admin, чужая приватная задача → 404.
+    игнорируется), `agent=0`. Кэш прогревается фоном через классические эндпоинты
+    (~47% старых задач без кэша; у части GLB уже нет и на воркерах — как и в классике);
+  - ACL owner / anon_id / admin, чужая приватная задача → 404 (на проде приватных нет).
   Доказано: `492210fd` (классика, 70 костей, клип играет, DEV `b123c856bfc6`),
-  `cfa2e6a1` (V3 run `31682814bd06170f1063`, агент на связи).
+  `cfa2e6a1` (V3 run, агент на связи), новая `5f51cb9c` (модель во вьювере при риге 12%,
+  DEV `7b8fa84a6c1a`), раскладка десктоп/телефон DEV `6b0a7dd69471`, `979a46632099`.
 - **Раскатка без рестарта:** `/srv/autorig/live/config/task-page.json`
   (`mode` off|admin|new|all, `new_since`, `webapp`, `preview_keys`; запись — temp+rename).
-  Сейчас `admin`: V3 у админа с `?v3=1` (кука `ar_task_v3`) или с превью-кукой
-  `ar_task_v3_preview`; **V3-задачи всегда в V3-оболочке**; `?v3=0` — отказ,
-  `?classic=1` — разово классика; Telegram `mode=webapp` — классика, пока `webapp: false`.
-- **i18n:** 15 ключей `taskv3_*` в prod `en.json`/`ru.json` (+Git); fa/zh/hi — Localization.
+  **Сейчас шаг 3 — `new` с `new_since` 2026-10-10T11:45:57Z:** новые задачи всем по
+  умолчанию в V3; старые — классика, кроме админа с `?v3=1` (кука `ar_task_v3`) и
+  превью-куки `ar_task_v3_preview`; **V3-задачи всегда в V3**; `?v3=0` — отказ навсегда,
+  `?classic=1` — разово; Telegram `mode=webapp` — классика, пока `webapp: false`.
+  Заголовок ответа `X-AutoRig-Task-Page: v3|classic`.
+- **i18n:** 16 ключей `taskv3_*` (en/ru — я, fa/zh/hi — Localization), JS через `I18n.t()`.
 - **Для Viewer · V3** (шаблон Unity не трогаю): оболочка грузит
   `/api/mt/unity/test/index.html?api=<origin>/api/task-viewer/<id>&run=task&agent=0`
   (классика) или `?run=<mt_run>` (V3) и шлёт `autorigUnity.send('LoadRun', run)` при
-  смене ревизии. Нужно: событие «модель готова» для оболочки; классический
-  `animations.glb` приходит одной glTF-анимацией `Animation` — разбить на клипы по
-  каталогу задачи; общий профиль настроек вьювера vs. клиенты.
-- **Рестарт** 11:25:32 UTC (`tv3-backend-20261010b`): стартовый сброс отменил 3 running
-  graph-рендера (Raptor, f15, worker-4090), в `render_tasks` их не было — проверять
-  живую очередь renderfin. Коммит `da882c56`.
-- **Дальше:** шаг 3 (`mode: new`) — после вердикта владельца; шаг 4 (`all`) — когда во
-  вьювере будут клипы классических задач и загрузки/покупки внутри V3; мобильный Unity;
-  загрузка движка 17.7 MiB.
+  смене ревизии. Нужно: событие «модель готова»; полоса загрузки шаблона на узком
+  экране шире окна; классический `animations.glb` — одна glTF-анимация `Animation`
+  (так и в классике); общий профиль настроек вьювера vs. клиенты (для V3-run POST
+  идёт прямо в MT).
+- **Для Astra:** каталог `/dev/tools` может звать `GET /api/task/{id}/v3-view`
+  (очередь/стадия/вьювер задачи) и `GET /api/task-page/live`.
+- **Рестарты:** 11:25:32 UTC (`tv3-backend-20261010b`) — сброс отменил 3 running
+  graph-рендера (в `render_tasks` их не было). Теперь перед рестартом:
+  `curl -s -X POST 'http://127.0.0.1:8210/renderfin/api-render/reset?dry_run=1&spare_non_graph=1'`.
+  Ждёт простоя renderfin: серверный текст описания+ключевых слов под вьювером
+  (`fill_v3_description`, коммит `48b646d0`) — скрипт `/tmp/tv3-backend-files/restart.sh`
+  сам пересоберёт релиз от текущего `current` и перезапустит, когда очередь пуста.
+- **Дальше:** шаг 4 (`all`) — после вердикта владельца в DEV (переключение одной
+  записью в task-page.json); мобильный Unity; загрузка движка 17.7 MiB.
 
 ## Актуальный handoff сессии — читать прежде исторических записей
 
