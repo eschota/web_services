@@ -1786,10 +1786,13 @@ This scoped development checkpoint does not overwrite the unrelated historical
   (cv2, без GPU) → `scale/ruler.png` → ОДИН вызов `farm.vision` (Qwen через роутер бэкенда): CATEGORY
   (adult_human/child/chibi_toy/giant/creature/animal/object/vehicle), REAL_HEIGHT_M, DISPLAY_HEIGHT_M, CONFIDENCE →
   `scale/scale.json` (source_height_units, unit_hint см/м/мм по величине, real, display, category, confidence,
-  chosen_height_m, viewer_scale); режимы `scale/options.json` auto|real|display|manual; в auto при conf ≥ 0.4 карточка
-  `card.height_m` (по ней вьювер масштабирует модель) = display. Хук в `v3_conveyor._card` (после карточки,
+  chosen_height_m); режимы `scale/options.json` auto|real|display|manual. **Карточка не меняется** (реальный масштаб):
+  по контракту Viewer · V3 пишется `analysis/scale.json` — `viewer_scale` = множитель к `card.height_m` (0.05–20,
+  общие сцены), `estimated_real_height_m`. Линейка — с абсолютными значениями (владелец: «а 100 % что даёт?»): слева
+  размер в файле (22.5 ед. = 22.5 см), справа реальный рост судьи с категорией и conf, внизу «shown at». Хук в `v3_conveyor._card` (после карточки,
   параллельно QA, риг не ждёт); инструменты агента `scale_get` (публичный) / `scale_set(mode, height_m)`;
-  монтаж `tools/patch_scale_check.py`. Кайо: 0.28 → **1.5 м** (adult_human, real 1.75, conf 0.92, 7 с). DEV 6621/6622.
+  монтаж `tools/patch_scale_check.py`. Кайо: карточка 0.28 м (файл 22.5 см), судья chibi_toy, real 1.70, показывать
+  1.40 м → `viewer_scale` ×5.0, conf 0.92, 7 с. DEV 6621/6622 (первый вариант), 6624 (абсолютная линейка).
 - **Автотесты**: кейс `chibi_dreads_scale` (вход = proj/model.glb рана bcb7177166ea9b28f007), kind `hair_limbs`
   (вершины рук выше плечевых суставов ≤ 120, target ≤ 10; доля Neck/Head ≥ 0.6) + rig_stretch;
   `deploy/autotests/patch_hair_scale_case.py`. fit_check больше не считает Head/Neck в «масса на 2 костях» (чиби).
