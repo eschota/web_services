@@ -16711,6 +16711,21 @@ app.include_router(
     )
 )
 
+# Task page V3 (Task page · V3 agent, 2026-10-10): the live task page, its
+# state API and the feed that opens a task's own models in the Unity viewer.
+import task_page_live
+from task_page_v3_routes import build_task_page_v3_router
+
+app.include_router(
+    build_task_page_v3_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+        glb_cache_dir=GLB_CACHE_DIR,
+    )
+)
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -16731,27 +16746,36 @@ async def index():
     return _static_html_response("index.html")
 
 
-def _task_html_response(html_content: str) -> HTMLResponse:
-    return HTMLResponse(
-        content=_inject_static_layout(html_content),
+def _task_html_response(html_content: str, request: Optional[Request] = None) -> HTMLResponse:
+    # Task page V3 (2026-10-10): the layout partials and every /static JS/CSS
+    # reference are resolved per request from the live static roots (overlay,
+    # then the current release) and content-stamped, so an agent's atomic live
+    # edit reaches the next task page load without a restart (task_page_live.py).
+    response = HTMLResponse(
+        content=task_page_live.render_task_html(html_content),
         headers={
             "Cache-Control": "no-store, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
         },
     )
+    return task_page_live.apply_switch_cookie(response, request)
 
 
 @app.get("/task")
 async def task_page(
+    request: Request,
     id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
 ):
     """Serve task page with dynamic OG meta tags for Telegram/social sharing"""
-    
-    # Read base template
-    task_html_path = STATIC_DIR / "task.html"
-    html_content = task_html_path.read_text(encoding="utf-8")
+
+    # Read base template: the classic page or the V3 Unity-viewer shell, chosen
+    # per request (live rollout file + ?v3= switch), from the live static roots.
+    html_content = await task_page_live.task_template(
+        request, id, user, db, is_admin_email=is_admin_email,
+    )
     
     # If no task_id, return default page (non-indexable)
     if not id:
@@ -16823,8 +16847,8 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{base_url}/task">',
         )
-        return HTMLResponse(content=_inject_static_layout(html_content))
-    
+        return HTMLResponse(content=task_page_live.render_task_html(html_content))
+
     title_suffix = f" | AutoRig task {task_id[:8]}"
     compact_task_title = re.sub(r"\s+", " ", task_title).strip() or "Rigged 3D model"
     max_task_title_len = max(24, 70 - len(title_suffix))
@@ -16937,7 +16961,7 @@ async def task_page(
         f'<h1 class="task-status-header-title" id="task-seo-heading">{safe_task_heading}</h1>',
     )
     
-    return _task_html_response(html_content)
+    return _task_html_response(html_content, request)
 
 
 @app.post("/api/task/{task_id}/purchase-intent")

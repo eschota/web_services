@@ -1,36 +1,62 @@
-<!doctype html>
-<html lang="ru">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="robots" content="noindex,nofollow">
-  <!-- TASK_SEO_PLACEHOLDER -->
-  <title>AutoRig V3</title>
-  <link rel="icon" href="/favicon.ico">
-  <style>
-    :root{color-scheme:dark;--bg:#080b11;--panel:rgba(14,18,27,.92);--line:#263246;--text:#f5f7fb;--muted:#aab4c5;--accent:#66e3bf;--danger:#ff7385}
-    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden}
-    .task-v3{position:fixed;inset:0;background:radial-gradient(circle at 50% 35%,#172034 0,#080b11 62%)}
-    #viewer{position:absolute;inset:0;width:100%;height:100%;border:0;background:#080b11}
-    .status{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 32px));padding:24px;border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:0 24px 80px #000b;backdrop-filter:blur(18px)}
-    .status[hidden]{display:none}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;letter-spacing:.14em;text-transform:uppercase}.status h1{margin:0 0 8px;font-size:clamp(22px,4vw,34px)}
-    #message{margin:0 0 18px;color:var(--muted);line-height:1.5}.bar{height:10px;overflow:hidden;border-radius:99px;background:#222a38}.bar>i{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#51b5ff,var(--accent));transition:width .45s ease}
-    .meta{display:flex;justify-content:space-between;gap:16px;margin-top:10px;color:var(--muted);font-size:12px}.error{color:var(--danger)}
-    .noscript{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+    <!-- TASK_SEO_PLACEHOLDER -->
+    <title>Task Progress | AutoRig.online</title>
+    <script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('autorig_theme')||'dark')}catch(e){}</script>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/task-v3.css">
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
 </head>
-<body>
-  <main class="task-v3" aria-live="polite">
-    <iframe id="viewer" title="AutoRig V3 viewer" allow="fullscreen; autoplay" hidden></iframe>
-    <section id="status-card" class="status">
-      <p class="eyebrow">AutoRig V3</p>
-      <h1 id="title">Подготавливаем модель</h1>
-      <p id="message">Проверяем состояние задачи…</p>
-      <div class="bar" role="progressbar" aria-label="Прогресс V3" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="bar-fill"></i></div>
-      <div class="meta"><span id="stage">ожидание</span><span id="percent">0%</span></div>
-    </section>
-    <noscript><div class="noscript">Для интерактивного V3-вьювера требуется JavaScript.</div></noscript>
-  </main>
-  <script type="module" src="/static/js/task-v3-shell.js?v=1"></script>
+<body class="task-v3-page" data-task-page="v3">
+    <div id="site-header"></div>
+
+    <main class="tv3" id="tv3">
+        <section class="tv3-stage" id="tv3-stage" aria-label="3D viewer">
+            <iframe id="tv3-viewer" class="tv3-viewer" title="AutoRig 3D viewer" allow="fullscreen; autoplay; xr-spatial-tracking" allowfullscreen hidden></iframe>
+
+            <div class="tv3-card" id="tv3-card" aria-live="polite">
+                <ol class="tv3-steps" id="tv3-steps">
+                    <li data-step="queue" title="Queue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></li>
+                    <li data-step="process" title="Processing"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/></svg></li>
+                    <li data-step="model" title="Model"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></li>
+                    <li data-step="rig" title="Rig"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="1.8"/><path d="M12 6.5v6M12 12.5l-4 7M12 12.5l4 7M7 9h10"/></svg></li>
+                </ol>
+                <div class="tv3-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="tv3-fill"></i></div>
+                <p class="tv3-line"><span id="tv3-line">…</span><b id="tv3-pct"></b></p>
+            </div>
+
+            <div class="tv3-chip" id="tv3-chip" hidden></div>
+
+            <nav class="tv3-tools" id="tv3-tools" aria-label="Task">
+                <a class="tv3-tool" id="tv3-classic" href="#" title="Downloads · classic viewer" aria-label="Downloads and classic viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/></svg></a>
+                <button class="tv3-tool" id="tv3-share" type="button" title="Copy link" aria-label="Copy link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg></button>
+                <button class="tv3-tool" id="tv3-full" type="button" title="Fullscreen" aria-label="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
+                <span class="tv3-build" id="tv3-build" hidden></span>
+            </nav>
+        </section>
+
+        <section class="tv3-info container-sm">
+            <h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>
+            <p class="tv3-desc"><!-- TASK_V3_DESCRIPTION --></p>
+        </section>
+    </main>
+
+    <div id="site-footer"></div>
+
+    <script src="/static/js/header.js"></script>
+    <script src="/static/js/footer.js"></script>
+    <script src="/static/js/site-layout.js"></script>
+    <script src="/static/js/i18n.js"></script>
+    <script type="module" src="/static/js/task-v3-shell.js"></script>
 </body>
 </html>

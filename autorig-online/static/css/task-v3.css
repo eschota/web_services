@@ -1,0 +1,43 @@
+/* Task page V3: one task, one Unity viewer (Task page · V3, 2026-10-10). */
+.task-v3-page{--tv3-hdr:72px;--tv3-ink:#f2f4f8;--tv3-dim:#a3acbd;--tv3-glass:rgba(13,16,24,.78);--tv3-line:rgba(255,255,255,.12);--tv3-accent:var(--accent,#6366f1);--tv3-ok:#5fe3b5;--tv3-bad:#ff7a8a}
+.tv3{display:block;padding:0;margin:0}
+.tv3-stage{position:relative;height:calc(100vh - var(--tv3-hdr));height:calc(100dvh - var(--tv3-hdr));min-height:420px;background:radial-gradient(120% 90% at 50% 30%,#1b2233 0,#090b11 70%);overflow:hidden;color:var(--tv3-ink);isolation:isolate}
+.tv3-viewer{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;background:#090b11}
+.tv3-viewer[hidden]{display:none}
+
+.tv3-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:3;width:min(420px,calc(100% - 32px));padding:20px 22px 16px;border-radius:18px;background:var(--tv3-glass);border:1px solid var(--tv3-line);box-shadow:0 24px 70px rgba(0,0,0,.55);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:opacity .35s ease,transform .35s ease}
+.tv3-card[hidden]{display:block;opacity:0;pointer-events:none;transform:translate(-50%,-46%)}
+.tv3-steps{display:flex;justify-content:space-between;gap:8px;list-style:none;margin:0 0 16px;padding:0}
+.tv3-steps li{flex:1;display:grid;place-items:center;height:44px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--tv3-line);color:var(--tv3-dim);opacity:.45;transition:opacity .3s,color .3s,border-color .3s,background .3s}
+.tv3-steps svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tv3-steps li.done{opacity:1;color:var(--tv3-ok);border-color:rgba(95,227,181,.35)}
+.tv3-steps li.run{opacity:1;color:#fff;border-color:var(--tv3-accent);background:rgba(99,102,241,.16);animation:tv3-pulse 1.4s ease-in-out infinite}
+.tv3-steps li.fail{opacity:1;color:var(--tv3-bad);border-color:rgba(255,122,138,.4)}
+@keyframes tv3-pulse{50%{box-shadow:0 0 0 4px rgba(99,102,241,.18)}}
+.tv3-bar{position:relative;height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.tv3-bar>i{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background:linear-gradient(90deg,#4cc9ff,var(--tv3-accent),#5fe3b5);transition:width .5s ease}
+.tv3-bar.wait>i{width:35%!important;animation:tv3-slide 1.6s ease-in-out infinite}
+@keyframes tv3-slide{0%{left:-35%}100%{left:100%}}
+.tv3-line{display:flex;justify-content:space-between;gap:12px;margin:10px 0 0;font-size:13px;line-height:1.4;color:var(--tv3-dim)}
+.tv3-line b{color:var(--tv3-ink);font-variant-numeric:tabular-nums;font-weight:600}
+.tv3-card.failed .tv3-line span{color:var(--tv3-bad)}
+
+.tv3-chip{position:absolute;left:14px;bottom:14px;z-index:3;padding:6px 11px;border-radius:99px;background:var(--tv3-glass);border:1px solid var(--tv3-line);color:var(--tv3-ink);font-size:12px;font-variant-numeric:tabular-nums;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);pointer-events:none}
+.tv3-chip[hidden]{display:none}
+
+.tv3-tools{position:absolute;left:14px;top:14px;z-index:4;display:flex;align-items:center;gap:6px}
+.tv3-tool{display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:10px;border:1px solid var(--tv3-line);background:var(--tv3-glass);color:var(--tv3-ink);cursor:pointer;text-decoration:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:background .2s,border-color .2s}
+.tv3-tool:hover,.tv3-tool:focus-visible{background:rgba(99,102,241,.28);border-color:var(--tv3-accent);outline:none}
+.tv3-tool svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tv3-tool.ok{border-color:var(--tv3-ok);color:var(--tv3-ok)}
+.tv3-build{margin-left:4px;padding:3px 8px;border-radius:8px;background:rgba(0,0,0,.55);color:#9fb3ff;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.02em}
+.tv3-build[hidden]{display:none}
+
+.tv3-info{padding:22px 16px 34px}
+.tv3-info .task-status-header-title{margin:0 0 8px;font-size:clamp(20px,2.6vw,28px);line-height:1.25}
+.tv3-desc{margin:0;max-width:72ch;color:var(--text-secondary,#a0a0b0);font-size:14px;line-height:1.6}
+.tv3-desc:empty{display:none}
+
+.tv3-stage:fullscreen{height:100vh}
+@media (max-width:640px){.tv3-stage{min-height:360px}.tv3-card{padding:16px 16px 12px}.tv3-steps li{height:38px}}
+@media (prefers-reduced-motion:reduce){.tv3-steps li.run,.tv3-bar.wait>i{animation:none}}
