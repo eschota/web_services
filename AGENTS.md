@@ -453,9 +453,17 @@ Owner rule, 2026-10-10:
   user is asked to add the files or a ZIP.
 * **Auto-texture what has none.** A model with no textures, or with only a
   flat default material, gets PBR textures automatically, free on the fleet,
-  from its own projections, the Vision description and the concept. This runs
-  in the background after the rig and never delays the 60 s rig. The result
-  is a new model version; the original stays.
+  from its own projections, the Vision description and the concept. The
+  result is a new model version; the original stays.
+* **Texture before rig validation** (owner, 2026-10-11: «сначала шло
+  текстурирование … только затекстуренную полностью отправляй на валидацию
+  рига, чтобы вижену было проще понять где ботинок, где пятка, где пальцы, где
+  ладонь, сколько их»).
+  * An untextured model is textured first, by Qwen on the farm.
+  * Only the fully textured model goes to the Vision rig validation and the
+    QA renders (joint placement, feet and heels, fingers and palms, parts).
+  * The fast rig itself still shows in the viewer within the 60 s budget. Its
+    Vision verdict waits for the textures.
 * **Method (owner, 2026-10-11):** a planar screen-space bake in the T-pose,
   front and back.
   * Guide passes per view: depth, a materialID mask, an objectID mask,
