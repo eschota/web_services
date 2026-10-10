@@ -1,0 +1,33 @@
+# AutoRig fleet status: GET https://autorig.online/api/fleet (one call for every box).
+# Standalone on purpose: deploying or restarting it never touches autorig-storage,
+# whose restart wipes the render queue. Lives in /srv/autorig/fleet (outside the
+# release tree, like devbot and MT), so a parallel web release cannot drop it.
+# Deploy: write fleet_api.py / fleet-agent.ps1 there atomically (tmp + mv), then
+# `systemctl restart autorig-fleet`. nginx: `location = /api/fleet` and
+# `location ^~ /api/fleet/` proxy to 127.0.0.1:8255 (deploy/fleet/nginx-fleet.conf).
+[Unit]
+Description=AutoRig fleet status API (/api/fleet)
+After=network-online.target autorig-storage-tunnels.service
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/fleet
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/fleet/fleet_api.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# autorig.db is in WAL mode: even a read-only reader needs its -shm file.
+ReadWritePaths=/srv/autorig/data/var/fleet /srv/autorig/data/db
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
