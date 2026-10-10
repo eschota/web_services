@@ -8696,7 +8696,7 @@ async def api_get_history(
                 created_at=t.created_at,
                 input_url=t.input_url,
                 video_ready=t.video_ready,
-                thumbnail_url=f"/thumb/{t.id}" if t.status == "done" and t.video_ready else None,
+                thumbnail_url=thumb_url_for(t.id) if t.status == "done" and t.video_ready else None,
                 content_rating=getattr(t, "content_rating", None),
             )
             for t in tasks
@@ -8845,7 +8845,7 @@ async def api_get_gallery(
         items.append(GalleryItem(
             task_id=t.id,
             video_url=f"/api/video/{t.id}",
-            thumbnail_url=f"/thumb/{t.id}",
+            thumbnail_url=thumb_url_for(t.id),
             created_at=t.created_at,
             time_ago=format_time_ago(t.created_at),
             like_count=like_count,
@@ -8966,7 +8966,7 @@ async def api_get_owner_tasks(
                 "status": t.status,
                 "progress": t.progress,
                 "created_at": t.created_at,
-                "thumbnail_url": f"/thumb/{t.id}" if t.status == "done" else None,
+                "thumbnail_url": thumb_url_for(t.id) if t.status == "done" else None,
                 "content_rating": getattr(t, "content_rating", None),
                 "owner_type": t.owner_type,
                 "owner_id": t.owner_id if t.owner_type == "user" else "anon"
@@ -14496,18 +14496,58 @@ async def api_proxy_blueprint_model_glb(
     raise HTTPException(status_code=404, detail="Blueprint model not available yet")
 
 
+# Gallery · V3 (2026-10-11): one V3 capture per public task, made by autorig-gallery-poster
+# (deploy/gallery-poster/gallery_poster.py). /thumb/<task> serves it first, so the homepage gallery, /gallery, the
+# author pages, the chat cards and og:image all show the same viewer-style picture; a task without one keeps its
+# old poster. The URL of a capture carries ?v=<mtime> so a new capture is never hidden by a browser cache.
+V3_POSTER_DIR = Path(os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3"))
+_V3_POSTER_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def v3_poster_path(task_id: str) -> Optional[Path]:
+    if not _V3_POSTER_ID.match(str(task_id or "")):
+        return None
+    path = V3_POSTER_DIR / f"{task_id}.jpg"
+    try:
+        return path if path.stat().st_size > 8000 else None
+    except OSError:
+        return None
+
+
+def thumb_url_for(task_id: str) -> str:
+    path = v3_poster_path(task_id)
+    if path is None:
+        return f"/thumb/{task_id}"
+    try:
+        return f"/thumb/{task_id}?v={int(path.stat().st_mtime):x}"
+    except OSError:
+        return f"/thumb/{task_id}"
+
+
 @app.head("/thumb/{task_id}")
 @app.get("/thumb/{task_id}")
 @app.head("/api/thumb/{task_id}")
 @app.get("/api/thumb/{task_id}")
 async def api_proxy_thumb(
     task_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy video poster/thumbnail image from worker"""
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    v3_poster = v3_poster_path(task_id)
+    if v3_poster is not None and getattr(task, "is_public", True) is not False \
+            and getattr(task, "content_rating", None) != "adult":
+        return FileResponse(
+            v3_poster,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=604800, immutable" if request.query_params.get("v")
+                     else "public, max-age=300, must-revalidate",
+                     "Access-Control-Allow-Origin": "*"},
+        )
 
     poster_url = resolve_poster_url_for_task(task)
     if not poster_url:

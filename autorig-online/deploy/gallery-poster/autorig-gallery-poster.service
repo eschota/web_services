@@ -1,0 +1,32 @@
+# /etc/systemd/system/autorig-gallery-poster.service
+# Gallery posters from the V3 side (Gallery · V3, 2026-10-11): renders one 9:16 capture per public task into
+# /srv/autorig/data/static/posters-v3/<task>.jpg, newest and V3 tasks first, forever (new tasks join within ~90 s).
+# The backend's /thumb/<task> serves that file first. Standalone and niced: a restart touches nothing else.
+# Source: deploy/gallery-poster/gallery_poster.py, installed by deploy/gallery-poster/install.sh.
+[Unit]
+Description=AutoRig gallery posters (V3 captures of every public task)
+After=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/gallery-poster
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+ExecStart=/srv/autorig/venv/bin/python3 -P /srv/autorig/gallery-poster/gallery_poster.py loop
+Nice=15
+CPUQuota=150%
+MemoryMax=1500M
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/data/static/posters-v3 /srv/autorig/data/db
+
+[Install]
+WantedBy=multi-user.target
