@@ -2,7 +2,13 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpointb44789b/sourceb4a7b33: canonical/server SHA1af551c2bdc75316fd89d30edea8576c2875b19b3ba408c3296be959f84deba8.
+CURRENT private checkpointeb9caa7/source67abb9f+f7e19bf: canonical/server SHA87f69d7e20b38b774db3f59e2646bb6eac09f05443489017193ed1aab6bd7f24.
+Root19constraint/trust/id tests and22clipset/direct tests pass, sourcepreserved.
+Actualanalytictrustsupport9/10edgeviolations exceed8controlbounds (worst26.39x);
+NOTglobalnonlinearinfeasibility. Nextadaptive localtopology-awarebasis top4beta
+max16influences/locked259, noinflate/rerunoldsolver. No runtimechange/quality0of5.
+
+Prior private checkpointb44789b/sourceb4a7b33: canonical/server SHA1af551c2bdc75316fd89d30edea8576c2875b19b3ba408c3296be959f84deba8.
 BodyRESTpairdiagnostic5713/5707 NOTadmittedv2coverage: wrongoldpacket andno
 currentproperreclassification. Exactv2arrays/times/canonicalstatuses immutable
 recomputeassigned, no newsolverrun. GlobalBody normalsunknown/open/nonmanifold.
