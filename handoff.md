@@ -2,7 +2,18 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest preserved private source e7a1b82: exact-contact cache plus section/Foot tools
+CURRENT private checkpoint06b4cb1/sourcebe6f432: r25defaultviewer LIVE (indexddf0),
+T/A-IK/Cancel/keyboard/retargetrace browser gates pass, oldr22 rollback andoldBuild
+assets retained, NO backendrestart; actualRenderfinunit autorig-storage-renderfin.
+FootMEDIA sentonce uid64f5bb91f5be/deliverynotapproval. RealglTFast16-weightnative+
+isolatedWebGL raster15/15 passed259efd3f, softwareANGLEonly; NOTfullviewercloth.
+Producerretargetauthority isoriginal7c79/caac, NOTviewer-derived7c5. Oldreproduction
+aligned_reference+authoredanimQA+helpers exact25channels/full9same4982. All5model
+body/clothing/hair acceptance0/5. R4actualREST652+73aliases+sidecar gate next;
+directresteditendpoint/fleetmigration unfinished. Canonical/serverhandoff SHA
+d523fd0bb48ec6304c77e11aa2942ab1ab92cfaa19c548d8cbc43298e314ac38.
+
+Prior preserved private source e7a1b82: exact-contact cache plus section/Foot tools
 3594c35 andfresh-active previewfix dd4eeae. NativefreshnessEXE/selftest/production
 GETHEAD passes; r25WebGL/raceQA pending, default r22 unchanged, no backendrestart.
 Clothv7 completesall5poses (new2/4 27.14/35.29s) butfinalREJECT:self/strainfail.
