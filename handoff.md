@@ -1578,3 +1578,34 @@ This scoped development checkpoint does not overwrite the unrelated historical
   Быстрее: Hunyuan3D-2 turbo / mini-turbo + FlashVDM (форма за секунды, 6 ГБ, но текстура 2.0 — 16 ГБ). Сильнее:
   TRELLIS.2 (MIT, 4B, PBR; Linux, 24 ГБ офиц., low-VRAM ~6.5–12 ГБ на 512³; Triton → не Pascal), Pixal3D (май 2026, на
   TRELLIS.2). Решение и скачивание — только владелец.
+
+## V3 backfill — каждый V3-ран проверяется, чинится и сортируется непрерывно (2026-10-11, на проде, MT `25c788e`..`3fe9b79`)
+
+- **Владелец 2026-10-11**: «никаких возвратов, чиним на проде … всё что обработано уже V3 — должно автотестироваться
+  пока не будет всё отлично заригано, отсортировано». Без отката на классику.
+- **Сервис** `autorig-v3-backfill` (`deploy/backfill/autorig-v3-backfill.service`, `python -m mt.backfill --loop`,
+  user autorig, Nice 19, IO idle, CPUQuota 400 %, **MemoryMax 6G без свопа** — сервер больше не уходит в своп из-за
+  него). Один дочерний процесс за раз; ждёт, пока живой V3-ран клиента до стадии QA (source/analysis/rig/retarget)
+  не закончится; свой numeric QA не запускает, пока идёт QA клиента (ран вернётся позже); MemAvailable ≥ 5 ГБ.
+- **На каждый V3-ран** (последняя попытка каждой V3-задачи из dispatch, в т. ч. пробы, которых нет в БД сайта):
+  1. проверки на АКТИВНОЙ версии рига, только если устарели: limb_collision, fast_analysis (отчёт, без --apply),
+     numeric QA (`analysis/backfill_qa.json`, 2 воркера) если QA на записи от другого GLB; триаж добавляет
+     rig_stretch (rig_check >4x ≥150 review, ≥500 defect), skeleton_unfitted, legs_mixed и остальное;
+  2. дефект ≥ 2 → ремонт новыми версиями (Store, v0 цела): полный пере-риг в scratch-копии
+     (`/srv/autorig/data/v3triage/backfill_scratch`: rig_first.build со стабилизацией позы, limb_reach/limb_split,
+     лапы четвероногих, fast fix со стражем растяжения, ретаргет, arm_clearance) → ставится ТОЛЬКО если мерится
+     лучше (`backfill.score`: вес дефектов, рёбра >4x, доля руки в теле, рёбра >2x) и живой риг не менялся; иначе
+     arm_clearance отдельно (сам ставит только «лучше»);
+  3. перепроверка, ведро: `ok` (дефектов не было) | `repaired` (наша или чужая версия починила) | `open` (худший
+     оставшийся класс + агент-владелец, `backfill.OWNERS`). Попытка ремонта одна на (sha рига, ревизия
+     инструментов рига); правка правил триажа только пересортировывает.
+- **Где смотреть**: `<run>/analysis/backfill.json`, сводка `MT_ROOT/triage/backfill/summary.json`, лог `log.jsonl`;
+  `GET /api/mt/triage` → `buckets` {counts, open_classes}, у V3-задач `bucket` / `open_class` / `open_owner`; текст —
+  вторая строка шапки. Новые открытые классы → `triage/backfill/corpus_candidates.json` (кандидаты в корпус) и
+  через ленту триажа — в DEV через Астру.
+- **Триаж**: QA засчитывается только для того GLB, который проверяли (иначе `qa.stale`, нота);
+  `bone_outside` review только при 5–25 % проб снаружи, выше 25 % — `bone_outside.unreliable` (меш не тело);
+  `arms_unbound` относительно числа вершин (бокс на 224 вершины), `limb_unchecked` (морф-таргеты/плотный меш).
+- **Важное для всех**: `qa.numeric_deformation` падает почти у всех ранов — порог numeric QA 1.25 по ребру и любой
+  плохой кадр валит клип (рыцарь 0/9, 505665ad 0/9 при чистом риге). Это открытый класс владельца «Rig tools · V3»:
+  либо гейт меряет то, что видно глазу (как rig_check / clip_4x), либо он навсегда «open».
