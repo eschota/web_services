@@ -322,10 +322,19 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   Task page / Intake. **V3-статус и dispatch-store я не трогаю** — Intake, перечитайте
   QA по `rig/joint-judge.json` (score, moved, next).
 - **Session agent · V3**: цикл «POST → poll → next» безопасен для повторов; инструмент
-  в `/dev/tools` (Astra `tools/bin/rig-judge`, коммит Astra `adb41fb`).
-- **16ce2f35** (сессия `252ed6e85fdaf29e8bb2`, джоба `f3caf724e3f0`, 237 с): колени
-  −6.3% H и лодыжки −7.3% H по ИИ-позе (ControlNet → 3D), плечи к центру руки;
-  оценка 0.78 → 0.97, рывки в клипах 6 → 0, V3 numeric stretch −22%. DEV 6438–6441.
+  в `/dev/tools` (Astra `tools/bin/rig-judge`, коммит Astra `adb41fb`). `next.action`
+  ещё `run_fix` (судили с `fix:false`). `give_up` старой версии судьи (`JUDGE_VERSION`)
+  судится заново автоматически.
+- **Вторая версия по вердикту владельца** («пятку не нашли … каждый сустав изолированно
+  с глубиной … пятка, колени, локти, ладони»): к ригу добавляются неформирующие кости
+  `LeftHeel`/`RightHeel` (лодыжка → пятка внутри стопы, `mt/heel_bones.py`; ретаргет их
+  не трогает); Vision судит 8 главных суставов пакетами «рендер + глубина + кости, спереди /
+  сбоку / вдоль конечности» (JSON inside_mesh / issue / suggested_shift_direction /
+  confidence), остальные — числами. Кандидат = текущий риг + сдвиги (а не перефит с нуля).
+- **16ce2f35** (сессия `252ed6e85fdaf29e8bb2`): джоба `f3caf724e3f0` (237 с) — колени
+  −6.3% H и лодыжки −7.3% H по ИИ-позе (ControlNet → 3D), плечи к центру руки,
+  0.78 → 0.97, рывки в клипах 6 → 0, V3 numeric stretch −22%; джоба `f2aa92eca1b7` —
+  пятки, 0.96 → 1.00, `next: done`. DEV 6438–6441, 6464–6468 (сетки 8 суставов до/после).
 
 ## Актуальный handoff сессии — читать прежде исторических записей
 
