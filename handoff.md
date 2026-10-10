@@ -2,14 +2,15 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest source checkpoint d7e2362 in private MT repo: full-garment source/raw-order
+Latest source checkpoint0477540 in private MT repo: full-garment source/raw-order
 domain guards and separate semantic/control admission,47 Python tests; chat media
 layout regression passes. Canonical/server handoff SHA matched
-ef0d85d713dfacf1d12c7ba7481213744a138b67d0ae7bd7b22a795f720eb639.
+34693c28833e1780f24b00ea72f621920f26da1b115a44004fed69c9df780826.
 F7 whole-skirt request02 completed once50.550s/5498 tokens but malformed output
 rejects semantic admission; no physical roots/weights/sewing authorized by it.
-No restart/customer task. Whole-main boundary experimental controls and narrow
-live chat-card CSS deployment are in progress; verify fresh canonical status.
+No restart/customer task. Live chat-card CSS deployed/public SHA3c70ffd7; browser
+firstrow/longtitle checks pass. Whole-main experimental rigid-pelvis control field
+passes5strain checks, Body/self audit running; not flexiblecloth acceptance.
 Full body/clothing/hair acceptance remains0/5; historical snapshots below are not
 current acceptance. This section supersedes prior "no farm call yet" wording.
 
