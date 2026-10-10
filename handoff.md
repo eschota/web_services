@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest source checkpoint3a16766 in private MT repo: full-garment source/raw-order
+Latest source checkpointfd4cf86 in private MT repo: full-garment source/raw-order
 domain guards and separate semantic/control admission,47 Python tests; chat media
 layout regression passes. Canonical/server handoff SHA matched
-158feda8c818d197fcfc47e1462e086f69c753c879760c170b82d71b1354e68d.
+a2c54d27f846b29d71e4497f74b7bde7934ae1cc01a9701335fb692af7bd6479.
 F7 whole-skirt request02 completed once50.550s/5498 tokens but malformed output
 rejects semantic admission; no physical roots/weights/sewing authorized by it.
 No restart/customer task. Live chat-card CSS deployed/public SHA3c70ffd7; browser
@@ -15,7 +15,14 @@ but finalaudit typedtimeout300s, no acceptedartifact. ActualF5 GPUcontact resear
 full5 Body/Face parity43.83sCPU→~1.90sGPUwarm (~23x), ONLYproper/separated corpus;
 broader touching/coplanar fallback pending. Fullclothmembrane/ARAP J.033s,41tests.
 FootVision11/69registeredpoints andHairQwenmaskleak bothrejected, no defaultchange.
-DurableGPU-backedsolver preparation/current4modelBodyselection inventory active.
+ConservativeGPU+CPUfallback nowfullBody/self/touch parity, memorybounded7e864source;
+F5v2/v3actual5pose solves terminalREJECTED. v3hardstrain0violations but contacts
+worseoriginal; do not repeat Hip-onlybasis. Original5jointcloth aliasbasis30DOF
+restparity2.24e-16, feasibility/selfobjective next. Red Hair53candidate0151 has0
+numericregressions/0improvements, Headaliasnoflex; stablelivevideo sentMEDIAonce
+uidbd1856ec7957, deliveryNOTapproval. ResearchFoot3f32 from4e5 preservesgeometry
+andrebakes9clips120fps, arbitrarytime matrixdrift2.21e-4 notcontinuousproof.
+ActualBodyrootbinding certificate3/20 known, externalwitness researchcontinues.
 Full body/clothing/hair acceptance remains0/5; historical snapshots below are not
 current acceptance. This section supersedes prior "no farm call yet" wording.
 
