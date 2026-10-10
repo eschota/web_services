@@ -560,5 +560,20 @@
   "image_gen_status_none_started": "कोई भी टास्क शुरू नहीं हो सका",
   "image_gen_files_count": "{count} चित्र",
   "image_gen_created_all": "{count} टास्क बने — खोलें: ",
-  "image_gen_created_some": "{total} में से {count} टास्क बने — खोलें: "
+  "image_gen_created_some": "{total} में से {count} टास्क बने — खोलें: ",
+  "taskv3_queued": "कतार में",
+  "taskv3_ahead": "आगे {count}",
+  "taskv3_next": "अगला",
+  "taskv3_processing": "प्रोसेसिंग",
+  "taskv3_rigging": "रिग और एनिमेशन",
+  "taskv3_ready": "तैयार",
+  "taskv3_failed": "प्रोसेसिंग विफल रही",
+  "taskv3_missing": "टास्क नहीं मिला या निजी है",
+  "taskv3_offline": "ऑफ़लाइन, फिर से कोशिश कर रहे हैं…",
+  "taskv3_copied": "लिंक कॉपी हो गया",
+  "taskv3_review": "समीक्षा ज़रूरी",
+  "taskv3_preparing": "व्यूअर के लिए मॉडल तैयार हो रहा है",
+  "taskv3_tool_classic": "डाउनलोड · क्लासिक व्यूअर",
+  "taskv3_tool_share": "लिंक कॉपी करें",
+  "taskv3_tool_fullscreen": "फ़ुलस्क्रीन"
 }

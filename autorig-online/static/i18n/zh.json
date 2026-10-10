@@ -560,5 +560,20 @@
   "image_gen_status_none_started": "没有任务能够启动",
   "image_gen_files_count": "{count} 张图片",
   "image_gen_created_all": "已创建 {count} 个任务——打开：",
-  "image_gen_created_some": "已创建 {count}/{total} 个任务——打开："
+  "image_gen_created_some": "已创建 {count}/{total} 个任务——打开：",
+  "taskv3_queued": "排队中",
+  "taskv3_ahead": "前面还有 {count} 个",
+  "taskv3_next": "下一个",
+  "taskv3_processing": "处理中",
+  "taskv3_rigging": "绑定与动画",
+  "taskv3_ready": "已就绪",
+  "taskv3_failed": "处理失败",
+  "taskv3_missing": "任务不存在或为私有",
+  "taskv3_offline": "网络断开，正在重试…",
+  "taskv3_copied": "链接已复制",
+  "taskv3_review": "需要审核",
+  "taskv3_preparing": "正在为查看器准备模型",
+  "taskv3_tool_classic": "下载 · 经典查看器",
+  "taskv3_tool_share": "复制链接",
+  "taskv3_tool_fullscreen": "全屏"
 }

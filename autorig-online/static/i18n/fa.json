@@ -756,5 +756,20 @@
   "seo_guides_title": "راهنماهای AutoRig برای حیوانات، کاراکترها و مدل‌های سه‌بعدی",
   "seo_guides_description": "راهنماهای ریگینگ خودکار برای انسان‌نماها، حیوانات و مدل‌های غیرانسانی؛ روند کار با GLB، FBX، OBJ، Unity، Unreal و Blender.",
   "seo_developers_title": "API توسعه‌دهندگان | AutoRig.online",
-  "seo_developers_description": "REST API سرویس AutoRig: احراز هویت، ساخت تسک، پیگیری وضعیت و دانلود GLB و فایل‌های انیمیشن."
+  "seo_developers_description": "REST API سرویس AutoRig: احراز هویت، ساخت تسک، پیگیری وضعیت و دانلود GLB و فایل‌های انیمیشن.",
+  "taskv3_queued": "در صف",
+  "taskv3_ahead": "{count} مورد جلوتر",
+  "taskv3_next": "نفر بعدی",
+  "taskv3_processing": "در حال پردازش",
+  "taskv3_rigging": "ریگ و انیمیشن‌ها",
+  "taskv3_ready": "آماده است",
+  "taskv3_failed": "پردازش ناموفق بود",
+  "taskv3_missing": "تسک پیدا نشد یا خصوصی است",
+  "taskv3_offline": "اتصال قطع است، دوباره تلاش می‌کنیم…",
+  "taskv3_copied": "لینک کپی شد",
+  "taskv3_review": "نیاز به بررسی",
+  "taskv3_preparing": "در حال آماده‌سازی مدل برای نمایشگر",
+  "taskv3_tool_classic": "دانلودها · نمایشگر کلاسیک",
+  "taskv3_tool_share": "کپی لینک",
+  "taskv3_tool_fullscreen": "تمام‌صفحه"
 }

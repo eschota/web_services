@@ -744,5 +744,20 @@
   "image_gen_status_none_started": "No task could be started",
   "image_gen_files_count": "{count} images",
   "image_gen_created_all": "{count} task(s) created — open: ",
-  "image_gen_created_some": "{count} of {total} task(s) created — open: "
+  "image_gen_created_some": "{count} of {total} task(s) created — open: ",
+  "taskv3_queued": "In queue",
+  "taskv3_ahead": "{count} ahead",
+  "taskv3_next": "next up",
+  "taskv3_processing": "Processing",
+  "taskv3_rigging": "Rig and animations",
+  "taskv3_ready": "Ready",
+  "taskv3_failed": "Processing failed",
+  "taskv3_missing": "Task not found or private",
+  "taskv3_offline": "Offline, retrying…",
+  "taskv3_copied": "Link copied",
+  "taskv3_review": "Needs review",
+  "taskv3_preparing": "Preparing the model for the viewer",
+  "taskv3_tool_classic": "Downloads · classic viewer",
+  "taskv3_tool_share": "Copy link",
+  "taskv3_tool_fullscreen": "Fullscreen"
 }

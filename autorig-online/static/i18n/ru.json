@@ -756,5 +756,20 @@
   "seo_guides_title": "Гайды AutoRig по риггингу животных, персонажей и 3D-моделей",
   "seo_guides_description": "Гайды по авториггингу гуманоидов, животных и нечеловеческих моделей: GLB, FBX, OBJ, Unity, Unreal и Blender.",
   "seo_developers_title": "API для разработчиков | AutoRig.online",
-  "seo_developers_description": "REST API AutoRig: авторизация, создание задач, проверка статуса и скачивание GLB и анимаций."
+  "seo_developers_description": "REST API AutoRig: авторизация, создание задач, проверка статуса и скачивание GLB и анимаций.",
+  "taskv3_queued": "В очереди",
+  "taskv3_ahead": "впереди {count}",
+  "taskv3_next": "следующая",
+  "taskv3_processing": "Обработка",
+  "taskv3_rigging": "Риг и анимации",
+  "taskv3_ready": "Готово",
+  "taskv3_failed": "Не удалось обработать",
+  "taskv3_missing": "Задача не найдена или закрыта",
+  "taskv3_offline": "Нет связи, повторяем…",
+  "taskv3_copied": "Ссылка скопирована",
+  "taskv3_review": "Нужна проверка",
+  "taskv3_preparing": "Готовим модель для вьювера",
+  "taskv3_tool_classic": "Скачать · классический вьювер",
+  "taskv3_tool_share": "Скопировать ссылку",
+  "taskv3_tool_fullscreen": "Во весь экран"
 }
