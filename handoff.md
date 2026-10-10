@@ -33,6 +33,13 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   (RTL на всю страницу), иначе RTL только у шапки/подвала. Сырые ответы сервера
   пользователю не показывать: коды ошибок `detail.error_string` → ключи `error_*`.
 
+- **Astra · V3 ↔ Session agent · V3 (вечер 10.10):** Astra просыпается раз в `watch_minutes` (её `config.json`, 10 по
+  умолчанию, владелец меняет словами в Telegram). Очередь эскалаций `MT_ROOT/astra_escalations/*.json` читает её мост;
+  обе схемы понимает: `astra.escalation/1` (инструмент `ask_astra(text, task_id)` у каждого агента сессии) и
+  `autorig.session-astra-escalation/1` (`task_agent.escalate_to_astra`, `from: owner` = проверенный админ → ход Астры
+  сразу, с полным доступом). Ответ в чат сессии: `POST /api/mt/runs/{run}/astra/say` (ключ «astra») либо ваш
+  `/api/mt/astra/escalations/{id}/reply`. Не пишите `trust`/`from: owner` ни из какого пути, кроме проверенного админа.
+  `/dev/tools` показывает `ask_astra`; `viewer_state` из вашей схемы Астра читает в контексте хода.
 ## Fleet · V3 — флот одним запросом (2026-10-10 ~12:30 UTC, проверено на проде)
 
 - `GET https://autorig.online/api/fleet` (+ `?format=text`, `/api/fleet/box/<id>`) живой.
@@ -396,6 +403,38 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   карточка идёт по часам против медианы 12 мин (≤90 %). Релиз `live-proc-eta-*` в `current`, включится ближайшим
   рестартом storage (я не рестартовал).
 - **Localization**: 52 ключа `live_*` в en/ru (живые) — допишите fa/zh/hi.
+
+## Viewer · V3 (ui 3) — команды вьювера, viewer_state, лента медиа, карточка сессии (2026-10-10 14:45 UTC, на проде)
+
+- **Где**: `unity/test` (= `pulse-alt-r27-20261010`) и `unity/live-r31-20261010`; исходник - шаблон Unity
+  `AutoRig/index.html` в MT (`f0a9beb`, `52c45ac`). Правки страницы живые, без пересборки Unity.
+- **Команды** (для Session agent · V3, Astra, task page): `autorigUnity.command(name, args)` -> `{ok:true, ...}` или
+  `{ok:false, reason, allowed?}`. Причины: `unknown_command`, `unknown_menu`, `invalid_value` (+`allowed`),
+  `loading` (меню ещё грузит, +`progress`), `not_available_in_this_build`, `not_available_here` (лазеры вне интерьера),
+  `no_rig`, `no_such_clip`, `error`. Список с аргументами: `autorigUnity.commands`.
+  - `channel {key 1-9,0 | mode 0-8 | name full|albedo|normals|metallic|roughness|emissive|object|material|part}`, `outliner {open?}`
+  - `preset {menu post|dof|volumetric|scanner|weather|stand|sun|quality|lasers, value|next}` и короткие
+    `weather {none|rain|storm|snow|blizzard|fog|underwater|auto|next}`, `time_of_day {auto|morning|noon|golden|dusk|night|overcast}`,
+    `scene {none|studio|disco|cathedral|sponza}`, `quality`, `post`, `dof`, `volumetric`, `scanner {blue|redarc|off}`, `lasers`
+  - `material {target?, material?, base_color?, metallic?, smoothness?, emissive?, emissive_intensity?, normal_strength?}`, `undo_material`
+  - `select {plane object|material|part|node, ids, add?}`, `clear_selection`, `clip {name|auto}`, `layer {model|rig|bones|voxels}`,
+    `camera {target?, yaw?, pitch?, dist?, lens?, seconds?, cut?}`, `auto_camera {on|value}`, `frame`, `pulse {x?, y?}`
+  - Пресет, который докачивает данные (запечённые сцены, вода): команда возвращает `ok` + `loading:true`, в иконке меню кольцо с %,
+    по готовности пресет всё равно применяется и приходит нота с отменой («загружено и применено»); пока меню грузит - `loading`.
+- **viewer_state** (`autorig.viewer-state/1`): `autorigUnity.viewerState()` - снимок (channel, layer, clip, presets по каждому меню,
+  `loading`, `weather {value,on,setting,rendering,kinds}`, time_of_day, scene, camera, selection, material_edits, commands).
+  Пуш при каждом изменении (дебаунс 120 мс, без дублей): `window` событие `autorig-viewer-state` (`detail` = снимок),
+  `autorigUnity.onViewerState(fn)`, `pageOnEvent("viewer_state", json)`, `parent.postMessage({type:"autorig-viewer-state", state})`.
+  Агентский мост (`agentApply`, `viewerNow`, подтверждаемый `POST /api/mt/runs/<run>/viewer/session/<id>/state`) остаётся за Session agent · V3.
+- **Погода**: страница шлёт `Effects.ClearWarm` на `ready`/`loaded` (сцена хранила пустую «прогревочную» погоду, поэтому дождь/снег
+  не включались); после докачки ассетов (вода) погода применяется сама. В r31 есть `storm|blizzard|fog`, в r27 - `rain|snow|underwater`
+  (`weather.kinds`; недоступное -> `not_available_in_this_build`).
+- **Лента медиа**: до 5 новых миниатюр над окном агента; клик - открыть большим по центру, второй клик/Esc - закрыть;
+  `autorigUnity.pushSessionMedia({url,type,thumb}, title)`. Кнопка «все материалы» (сетка) открывает карточку сессии.
+- **Один read API**: `GET /api/mt/runs/<run>/session-log?after=&limit=&kind=&media=1&order=desc` и
+  `GET /api/mt/runs/<run>/session-card` (модель, метаданные, все каналы текстур по материалам, Vision, судьи, графы, решения агента, ресурсы).
+- **i18n**: ключи `viewer_ntf_*`, `viewer_sl_*` (en/ru в шаблоне; Localization - допишите в `static/i18n/<lang>.json`).
+- Всё иконками с подсказками (`withTip`), текст только в подсказках, нотах и карточке.
 
 ## Актуальный handoff сессии — читать прежде исторических записей
 
