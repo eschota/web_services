@@ -150,6 +150,39 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - **Дальше:** шаг 4 (`all`) — после вердикта владельца в DEV (переключение одной
   записью в task-page.json); мобильный Unity; загрузка движка 17.7 MiB.
 
+## Viewer · V3 — каналы, карусели, своё контекстное меню, новый /faq (2026-10-10 12:10 UTC, на проде)
+
+- **Вьювер** (`/api/mt/unity/test/index.html` = `pulse-alt-r27-20261010`, тот же патч в
+  кандидате `pulse-gradient-r29-20261010`; бэкапы `/srv/autorig/audits/viewer-v3ui-20261010/`;
+  шаблон Unity — приватный MT `88a6538`, WIP Codex по HDR не тронут):
+  - слева внизу панель каналов `1`–`0` (анимированные SVG, тултипы, подсветка текущего):
+    1 свет, 2 альбедо, 3 нормали, 4 металл, 5 шероховатость, 6 свечение, 7 ID объектов,
+    8 ID материалов, 9 аутлайнер, **0 части тела** (новая клавиша страницы; «8 дважды» тоже);
+  - правая панель — карусели: клик = следующий пресет, последний шаг = выкл, точки-пипы
+    показывают позицию по реальным событиям `effects`/`scanner`/`stand`; удержание, бейдж ⋯
+    или Shift+клик открывают настройки группы;
+  - правая кнопка: браузерное меню не открывается (кроме полей ввода), наше меню «FAQ» →
+    `/faq` в новой вкладке (`noopener`); правый drag по-прежнему панорамирует.
+- **Для Task page · V3:** над iframe ваши элементы (`#tv3-tools`, карточка) сами решают
+  `contextmenu`; чтобы показать наше меню, вызовите
+  `viewer.contentWindow.autorigUnity.showContextMenu({x, y})` (координаты внутри iframe),
+  закрыть — `hideContextMenu()`.
+- **i18n (Localization: допишите fa/zh/hi):** en/ru уже в `en.json`/`ru.json`.
+  - Вьювер, 59 ключей: `viewer_ch_{bar,full,albedo,normals,metallic,roughness,emissive,object,material,outliner,part}`,
+    `viewer_fx_{post,dof,volumetric,scanner,weather,stand,sun,quality,lasers,settings,hint,hint_toggle}`,
+    `viewer_p_{off,on,auto,scene,cinematic,vivid,film,noir,clean,bokeh,tilt,rays,volume,blue,redarc,rain,snow,underwater,clear,studio,disco,cathedral,sponza,source,morning,noon,golden,dusk,night,overcast,low,medium,high,ultra}`,
+    `viewer_ctx_{faq,faq_tip}`. Вьювер берёт язык из `autorig_lang` и читает `viewer_*` из
+    `/static/i18n/<lang>.json`, так что новые языки подхватятся без правки шаблона.
+  - FAQ, 71 ключ: `faq_{title,lead,nav_label,link_developers,cta_title,cta_upload,cta_support}`,
+    `faq_sec_{viewer,agent,rig,animation,editing,generation,channels,export}` и пары
+    `faq_q_<id>`/`faq_a_<id>` для id: viewer_open, viewer_camera, viewer_tools, agent_what,
+    agent_talk, agent_sees, agent_original, rig_how, rig_inspect, rig_fix, rig_models,
+    anim_which, anim_retarget, anim_frame, edit_what, edit_agent, edit_scene, gen_image,
+    gen_text, gen_video, gen_media, ch_keys, ch_ids, ch_kept, export_formats,
+    export_engines, export_rights, export_api. В ответах есть `<code>` (клавиши) — сохраните теги.
+- **/faq** (релиз `live-20261010T120738Z`): серверный HTML с общими шапкой/подвалом,
+  `data-i18n-scope="page"`, FAQPage JSON-LD (28 вопросов) + BreadcrumbList, без упоминаний V3.
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
