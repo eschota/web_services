@@ -562,7 +562,14 @@ def mt_rig_first(ctx, input_name, words=""):
                                if str(b.get("name", "")).startswith("Prop")],
             "prop_bones_held": sum(1 for b in rig.get("bones", []) if str(b.get("name", "")).startswith("Prop")
                                    and re.search(r"(Hand|ForeArm)$", str(b.get("parent") or ""))),
-            "prop_bones_n": sum(1 for b in rig.get("bones", []) if str(b.get("name", "")).startswith("Prop"))}
+            "prop_bones_n": sum(1 for b in rig.get("bones", []) if str(b.get("name", "")).startswith("Prop")),
+            # V3 triage rig_stretch: the rig's own rig_check, edges over 2x / 4x summed over its check times
+            "rig_check_2x": sum(int(v.get("edges_over_2x") or 0) for k, v in
+                                ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items()
+                                if str(k).startswith("t=") and isinstance(v, dict)),
+            "rig_check_4x": sum(int(v.get("edges_over_4x") or 0) for k, v in
+                                ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items()
+                                if str(k).startswith("t=") and isinstance(v, dict))}
 
 
 def hand_rig(ctx):

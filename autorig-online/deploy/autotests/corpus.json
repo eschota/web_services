@@ -334,6 +334,13 @@
    "what": "synthetic left hand and its mirror image 25 cm apart (deploy/autotests/make_hand_corpus.py)",
    "sha256": "94a96f97c86653abb987503a4ad99d2a9f33944fe4bfdd599fda3fd915f06ce4",
    "bytes": 530120
+  },
+  "66d83b2e.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/659d941d72e7c9f86ca8/proj/model.glb",
+   "task": "66d83b2e-704f-454a-8747-cf2a2935002b",
+   "what": "V3 FBX upload as GLB, 444k vertices: rig_check tears 1278 edges over 4x (V3 backfill open class rig_stretch)",
+   "sha256": "06d3fb27eb04a6b44e4c7be4fbf29af1888dfcac38239cf92c1df350a3321404",
+   "bytes": 49668564
   }
  },
  "profiles": {
@@ -3586,6 +3593,54 @@
        "==",
        false
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "rig_stretch_dense",
+   "task": "66d83b2e-704f-454a-8747-cf2a2935002b",
+   "cost": 4,
+   "defect": "V3 backfill open class rig_stretch: the fast rig of a 444k-vertex FBX tears 1278 edges over 4x in its own rig_check (10168 over 2x); a re-rig with today's tools gives the same",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "66d83b2e.model.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "rig_check_4x": [
+       "<=",
+       1400
+      ]
+     },
+     "target": {
+      "thresholds": {
+       "rig_check_4x": [
+        "<",
+        150
+       ]
+      },
+      "reason": "the dense FBX's fast rig tears 1278 edges over 4x in rig_check",
+      "owner": "Skinning · V3"
      }
     }
    ]
