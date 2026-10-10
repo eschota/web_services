@@ -1174,6 +1174,18 @@ def compose(col: Collector) -> Dict[str, Any]:
                     if isinstance(t, dict)]
                 if agent.get("listeners"):
                     services["fleet_agent"]["listening_ports"] = agent.get("listeners")
+                if isinstance(agent.get("blender"), dict):
+                    bl_in = agent["blender"]
+                    bl_env = str(bl_in.get("env_exe") or "")
+                    bl_list = [b for b in (bl_in.get("installs") or []) if isinstance(b, dict)]
+                    bl_main = next((b for b in bl_list if bl_env and str(b.get("path") or "").lower() == bl_env.lower()),
+                                   bl_list[0] if bl_list else None)
+                    services["blender"] = {
+                        "version": (bl_main or {}).get("version") or "",
+                        "path": (bl_main or {}).get("path") or "",
+                        "env_exe": bl_env,
+                        "env_registered": bool(bl_env and bl_main and (bl_main.get("path") or "").lower() == bl_env.lower()),
+                        "installs": bl_list}
                 for dh in (agent.get("disk_health") or []):
                     if not isinstance(dh, dict):
                         continue
@@ -1310,6 +1322,8 @@ def compose(col: Collector) -> Dict[str, Any]:
         "hunyuan_ready_array": hunyuan_ready,
         "ai_ready_array": ai_ready,
         "v3_ready_array": [b["id"] for b in in_fleet if (b.get("v3_object") or {}).get("ready")],
+        "blender_versions_object": {b["id"]: ((b.get("services_object") or {}).get("blender") or {}).get("version") or None
+                                    for b in in_fleet if (b.get("services_object") or {}).get("blender")},
         "v3_target_commit": target_commit,
         "v3_target_note": str(target.get("note") or "")[:300],
         "low_disk_array": sorted({b["id"] for b in in_fleet
@@ -1415,6 +1429,7 @@ def render_text(snapshot: Dict[str, Any]) -> str:
         lines.append(
             f"{box['id']:<12} {box['state_string']:<12} roles={','.join(box.get('roles_array') or []) or '-'}"
             f"  q={box.get('queue_depth_int')}  gpu={gpu_text}  disk={disks or '?'}  build={version or '-'}"
+            f"  blender={((box.get('services_object') or {}).get('blender') or {}).get('version') or '-'}"
             f"  v3={'ready' if (box.get('v3_object') or {}).get('ready') else ('no' if (box.get('v3_object') or {}).get('target_bool') else 'n/a')}")
         if busy:
             lines.append(f"{'':<12} busy: {busy}")
@@ -1505,6 +1520,11 @@ def _clean_report(bid: str, body: Dict[str, Any]) -> Dict[str, Any]:
     processes = {str(k)[:30]: int(v) for k, v in (body.get("processes") or {}).items()
                  if isinstance(v, (int, float))} if isinstance(body.get("processes"), dict) else {}
     listeners = [int(p) for p in (body.get("listeners") or [])[:40] if isinstance(p, (int, float))]
+    blender_in = body.get("blender") if isinstance(body.get("blender"), dict) else {}
+    blender = {"env_exe": str(blender_in.get("env_exe") or "")[:260],
+               "installs": [{"path": str(b.get("path") or "")[:260], "version": str(b.get("version") or "")[:20],
+                             "build_hash": str(b.get("build_hash") or "")[:20]}
+                            for b in (blender_in.get("installs") or [])[:8] if isinstance(b, dict)]}
     return {
         "box": bid, "received_at": _now(),
         "agent_version": str(body.get("agent_version") or "")[:40],
@@ -1512,7 +1532,7 @@ def _clean_report(bid: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "boot_utc": str(body.get("boot_utc") or "")[:40],
         "ram_total_gb": num(body.get("ram_total_gb")), "ram_free_gb": num(body.get("ram_free_gb")),
         "drives": drives, "disk_health": disk_health, "gpu": gpu, "tasks": tasks, "quarantine": quarantine,
-        "processes": processes, "listeners": listeners,
+        "processes": processes, "listeners": listeners, "blender": blender,
     }
 
 

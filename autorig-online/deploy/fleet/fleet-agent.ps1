@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$UserTask, [string]$Box = '', [string]$HomeDir =
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$AgentVersion = 'fleet-agent/2026-10-10c'
+$AgentVersion = 'fleet-agent/2026-10-11a'
 $Api = 'https://autorig.online/api/fleet'
 $Home_ = if ($HomeDir) { $HomeDir } else { 'C:\ProgramData\AutoRig\fleet-agent' }
 $LogFile = Join-Path $Home_ 'agent.log'
@@ -218,6 +218,52 @@ public static class AutoRigDiskTemp {
         }
     } catch {}
     $report.processes = $procs
+
+    # Blender installs (read-only). AUTORIG_BLENDER_EXE (machine env) plus the usual install roots.
+    # `blender.exe -b --version` runs only when a file's path, size or mtime changed, never on every report.
+    try {
+        $envExe = [Environment]::GetEnvironmentVariable('AUTORIG_BLENDER_EXE', 'Machine')
+        $cand = New-Object System.Collections.Generic.List[string]
+        if ($envExe) { $cand.Add($envExe) }
+        foreach ($g in @('C:\Program Files\Blender Foundation\Blender *\blender.exe', 'C:\ProgramData\AutoRig\blender-*\blender.exe')) {
+            foreach ($f in (Get-ChildItem -Path $g -ErrorAction SilentlyContinue)) { $cand.Add($f.FullName) }
+        }
+        $seen = @{}
+        $sig = @()
+        $files = @()
+        foreach ($c in $cand) {
+            $k = $c.ToLowerInvariant()
+            if ($seen.ContainsKey($k) -or -not (Test-Path -LiteralPath $c -PathType Leaf)) { continue }
+            $seen[$k] = 1
+            $fi = Get-Item -LiteralPath $c
+            $files += $fi
+            $sig += ($fi.FullName + '|' + $fi.Length + '|' + $fi.LastWriteTimeUtc.Ticks)
+        }
+        $sigText = ($sig -join ';')
+        $installs = $null
+        if ($state.ContainsKey('blender_sig') -and $state['blender_sig'] -eq $sigText -and $state.ContainsKey('blender_installs')) {
+            $installs = @($state['blender_installs'])
+        } else {
+            $installs = @()
+            foreach ($fi in $files) {
+                $ver = ''; $hash = ''
+                try {
+                    $psi = New-Object Diagnostics.ProcessStartInfo
+                    $psi.FileName = $fi.FullName; $psi.Arguments = '-b --version'
+                    $psi.RedirectStandardOutput = $true; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+                    $proc = [Diagnostics.Process]::Start($psi)
+                    $out = $proc.StandardOutput.ReadToEnd()
+                    if (-not $proc.WaitForExit(30000)) { try { $proc.Kill() } catch {} }
+                    if ($out -match 'Blender\s+(\d+\.\d+\.\d+)') { $ver = $Matches[1] }
+                    if ($out -match 'build hash:\s*(\w+)') { $hash = $Matches[1] }
+                } catch {}
+                $installs += [ordered]@{ path = $fi.FullName; version = $ver; build_hash = $hash }
+            }
+            $state['blender_sig'] = $sigText
+            $state['blender_installs'] = $installs
+        }
+        $report.blender = [ordered]@{ env_exe = [string]$envExe; installs = @($installs) }
+    } catch {}
 
     # Quarantine folders at drive roots (_retired_*): sized at most every 6 hours.
     $q = @()
