@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from html import escape
 import logging
 import os
 import re
@@ -177,14 +178,41 @@ def inject_layout(html: str) -> str:
 
 
 _META_DESCRIPTION = re.compile(r'<meta name="description" content="([^"]*)">')
+_JSON_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
+
+
+def _creative_work(html: str) -> dict:
+    for match in _JSON_LD.finditer(html):
+        try:
+            doc = json.loads(match.group(1))
+        except ValueError:
+            continue
+        if isinstance(doc, dict) and doc.get("@type") == "CreativeWork":
+            return doc
+    return {}
 
 
 def fill_v3_description(html: str) -> str:
-    """The V3 shell repeats the (already escaped) meta description as page text."""
+    """Server-rendered text of the V3 shell, for readers and crawlers alike.
+
+    The route has already put the task's CreativeWork (full description and
+    keywords) and meta description in the head; the shell repeats them as page
+    text: the description paragraphs, then the keywords.  Without a CreativeWork
+    (a task still in progress) it repeats the escaped meta description.
+    """
     if "<!-- TASK_V3_DESCRIPTION -->" not in html:
         return html
-    found = _META_DESCRIPTION.search(html)
-    return html.replace("<!-- TASK_V3_DESCRIPTION -->", found.group(1) if found else "", 1)
+    work = _creative_work(html)
+    paragraphs = [line.strip() for line in str(work.get("description") or "").splitlines() if line.strip()]
+    if paragraphs:
+        body = "".join(f"<p>{escape(line, quote=False)}</p>" for line in paragraphs[:16])
+        keywords = [k.strip() for k in str(work.get("keywords") or "").split(",") if k.strip()][:24]
+        if keywords:
+            body += '<ul class="tv3-tags">' + "".join(f"<li>{escape(k, quote=False)}</li>" for k in keywords) + "</ul>"
+    else:
+        found = _META_DESCRIPTION.search(html)
+        body = f"<p>{found.group(1)}</p>" if found and found.group(1) else ""
+    return html.replace("<!-- TASK_V3_DESCRIPTION -->", body, 1)
 
 
 def render_task_html(html: str) -> str:

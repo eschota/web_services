@@ -96,6 +96,9 @@ What it means for every agent:
     and in-flight work is checked first.
     `render_tasks` alone is not enough: the startup reset also cancels graph
     renders that are only running in renderfin (3 were lost on 2026-10-10).
+    Ask renderfin what a restart would cancel, on the VPS:
+    `curl -s -X POST 'http://127.0.0.1:8210/renderfin/api-render/reset?dry_run=1&spare_non_graph=1'`
+    (`queued_int` and `running_int` should both be 0).
 
 ### How a live static edit is made (2026-10-10)
 

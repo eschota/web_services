@@ -43,6 +43,9 @@
 .tv3-info .task-status-header-title{margin:0 0 8px;font-size:clamp(20px,2.6vw,28px);line-height:1.25}
 .tv3-desc{margin:0;max-width:72ch;color:var(--text-secondary,#a0a0b0);font-size:14px;line-height:1.6}
 .tv3-desc:empty{display:none}
+.tv3-desc p{margin:0 0 10px}
+.tv3-tags{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 0;padding:0;list-style:none}
+.tv3-tags li{padding:3px 9px;border-radius:99px;border:1px solid var(--border,#2a2a3a);font-size:12px;color:var(--text-muted,#8b8b9e)}
 
 .tv3-stage:fullscreen{height:100vh;height:100dvh}
 @media (max-width:640px){.tv3-stage{min-height:360px}.tv3-card{padding:16px 16px 12px}.tv3-steps li{height:38px}}

@@ -97,9 +97,21 @@ class StampingTests(LiveRootsCase):
 
     def test_v3_description_repeats_the_escaped_meta_description(self):
         html = ('<meta name="description" content="A &quot;knight&quot; &amp; horse">'
-                '<p><!-- TASK_V3_DESCRIPTION --></p>')
-        self.assertIn('<p>A &quot;knight&quot; &amp; horse</p>', live.fill_v3_description(html))
-        self.assertEqual(live.fill_v3_description("<p><!-- TASK_V3_DESCRIPTION --></p>"), "<p></p>")
+                '<div class="tv3-desc"><!-- TASK_V3_DESCRIPTION --></div>')
+        self.assertIn('<div class="tv3-desc"><p>A &quot;knight&quot; &amp; horse</p></div>',
+                      live.fill_v3_description(html))
+        self.assertEqual(live.fill_v3_description('<div><!-- TASK_V3_DESCRIPTION --></div>'), "<div></div>")
+
+    def test_v3_description_renders_the_creative_work_text_and_keywords(self):
+        work = {"@context": "https://schema.org", "@type": "CreativeWork", "name": "Knight",
+                "description": "A knight <b>in armour</b>.\n\nRigged & animated.", "keywords": "knight, armour , ,rig"}
+        html = ('<meta name="description" content="short">'
+                f'<script type="application/ld+json">{json.dumps(work)}</script>'
+                '<div class="tv3-desc"><!-- TASK_V3_DESCRIPTION --></div>')
+        out = live.fill_v3_description(html)
+        self.assertIn('<div class="tv3-desc"><p>A knight &lt;b&gt;in armour&lt;/b&gt;.</p><p>Rigged &amp; animated.</p>'
+                      '<ul class="tv3-tags"><li>knight</li><li>armour</li><li>rig</li></ul></div>', out)
+        self.assertNotIn("<!-- TASK_V3_DESCRIPTION -->", out)
 
 
 class RolloutTests(LiveRootsCase):
