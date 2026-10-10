@@ -34,7 +34,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import and_, case, func, or_, select
 
 import task_page_live
@@ -87,6 +87,25 @@ def cached_glb(cache_dir: Path, task_id: str, kinds: tuple[str, ...]) -> Optiona
 
 RIGGED_KINDS = ("animations_viewer", "animations")
 STATIC_KINDS = ("prepared_viewer", "prepared")
+MT_ROOT = Path(os.getenv("AUTORIG_MT_ROOT", "/srv/autorig/data/motion_transfer"))
+
+
+def fast_rig(task_id: str) -> Optional[tuple[Path, os.stat_result, dict]]:
+    """Rig path V3 (2026-10-10, «риг в пределах одной минуты»): the task's mirror run gets a fast rig at upload
+    (MT mt/classic_mirror.py -> mt/rig_first.py, ~5-10 s); it feeds the viewer until the classic rig is cached."""
+    try:
+        binding = json.loads((MT_ROOT / "task_agents" / f"{task_id}.json").read_text(encoding="utf-8"))
+        run = str(binding.get("run_id") or "")
+        if not _MT_RUN.fullmatch(run):
+            return None
+        rig_dir = MT_ROOT / "runs" / run / "rig"
+        doc = json.loads((rig_dir / "rig.json").read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or doc.get("source") != "fast-v3" or not doc.get("built_at"):
+            return None
+        st = _valid_glb(rig_dir / "rigged.glb")
+        return (rig_dir / "rigged.glb", st, doc) if st is not None else None
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def _accel(cache_dir: Path, path: Path, filename: str) -> Response:
@@ -349,6 +368,15 @@ async def _classic_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path
         model_state = "unavailable"
     else:
         model_state = "pending"
+    if rigged is None and status != "error":
+        fast = fast_rig(task_id)
+        if fast is not None:
+            viewer = {"kind": "legacy", "page": UNITY_PAGE,
+                      "api_path": f"/api/task-viewer/{task_id}",
+                      "params": {"run": LEGACY_RUN, "agent": "0"},
+                      "rigged": True, "fast_rig": True,
+                      "revision": f"fast-{int(fast[1].st_mtime)}"}
+            model_state = "ready"
     return {
         "stage": {"created": "queued", "processing": "processing", "done": "ready", "error": "failed"}[status],
         "stage_title": None,
@@ -431,6 +459,10 @@ def build_task_page_v3_router(*, get_db: Callable[..., Any], get_current_user: C
         head = request.method == "HEAD"
         if rel == "rig/rig.json":
             rigged = cached_glb(cache_dir, task_id, RIGGED_KINDS)
+            fast = fast_rig(task_id) if rigged is None else None
+            if fast is not None:
+                return JSONResponse({**fast[2], "task_id": task_id, "built_at": _iso(fast[1].st_mtime)},
+                                    headers={"Cache-Control": "no-cache"})
             if rigged is None:
                 raise HTTPException(status_code=404, detail="no rig yet")
             return JSONResponse({
@@ -444,6 +476,10 @@ def build_task_page_v3_router(*, get_db: Callable[..., Any], get_current_user: C
             hit = cached_glb(cache_dir, task_id, RIGGED_KINDS if rig else STATIC_KINDS)
             if hit is not None:
                 return _accel(cache_dir, hit[0], f"{task_id}_{'animations' if rig else 'prepared'}.glb")
+            fast = fast_rig(task_id) if rig else None
+            if fast is not None:
+                return FileResponse(fast[0], media_type="model/gltf-binary", headers={
+                    "Cache-Control": "no-cache", "X-AutoRig-Task-Viewer": "fast-v3"})
             if head:
                 raise HTTPException(status_code=404, detail="not cached yet")
             kind = "animations" if rig else "prepared"
