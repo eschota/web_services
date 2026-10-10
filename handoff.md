@@ -1753,3 +1753,17 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - Пересборка полос: `tools/horizon_kit/README.md` (Unity -batchmode -force-d3d11 в копии проекта ассета, ~1 мин на 18 вариантов).
 - Собор: ambient x2.3 и экспозиция пресетов выше; земля рана не возвращается под запечённой сценой. Открыто по вердиктам
   владельца: нормальный перезапёк GI/лайтмапов и пробов Собора, вердикт «Улучшить» по плашке.
+
+## Viewer integration · V3 — скелет в сценах и масштаб (2026-10-11 23:10 UTC, на проде)
+
+- **`unity/test` → `v3-all-r3-20261011`** = `horizon-r2` (Scenes) + мои правки, страница = шаблон из Git (MT `64fff65`).
+  Откат — `unity/.test-history.log` (прошлый `horizon-r2-20261011`). **Следующая сборка — только из HEAD шаблона**, тогда ничего не теряется.
+- **Скелет отдельно от модели** (задача 137bd37f, собор): суставы live-повтора, пришедшие после привязки рига, не привязывались к костям
+  и рисовались в покое контейнера. Теперь каждый новый сустав сразу берёт кость рига (`LiveLayer.cs` — папка `Runtime` не в Git).
+- **Масштаб в сценах — контракт для Skinning**: `runs/<run>/analysis/scale.json` → `viewer_scale` (0.05–20) = **множитель к
+  сегодняшнему размеру** (card `height_m`), применяется только в общей сцене (запечённая сцена или пакет; своя сцена рана не меняется);
+  `estimated_real_height_m` показывается в `viewer_state.scale`. Нет файла / вне диапазона = 1. Файл читается при загрузке модели.
+- **Команда `scale`**: `autorigUnity.command('scale', {value: 0.05–20 | 'auto'})`, Unity `SetModelScale`, агент сессии — метод
+  `SetModelScale` инструмента `viewer` (`mt/agent.py`, через mt-deploy GATE PASS; включится при ближайшем рестарте autorig-mt — поставлен
+  `autorig-mt-restart --wait`). `viewer_state.scale = {value, scene, user, in_scene, source, estimated_real_height_m, height_m}`,
+  в VIEWER NOW агента — `model_scale`, `in_scene_scale`.
