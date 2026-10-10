@@ -1389,6 +1389,13 @@ This scoped development checkpoint does not overwrite the unrelated historical
   clip_4x +143…+1211, stretch_4x +895…+2068 (рыцарь, эльф — разрывы). Для фастрига значения 91a9513a (подобраны на
   классическом риге конвертера, engine refine) хуже → `fast_registry.json → skin_options` НЕ меняю, дефолт humanoid = 1.0.
   Данные: `/srv/autorig/data/v3triage/grid/g1|g2/results.json`.
+- **Дополнение V3 triage (18:40 UTC)**: рестарт autorig-mt в 18:20:16 — мой: сервис висел (главный поток 100 % CPU,
+  310 непрочитанных соединений, своп 16/16 после енота), он убил проекции 66d83b2e → я перезапустил задачу attempt 2
+  (`v3_retry` из бэкенда, ран 659d941d). Дальше только `sudo autorig-mt-restart --wait`. Триаж: класс
+  `run_error.killed` (пустой stderr / сигнал) — **Intake**: такие раны надо ретраить автоматически и не слать как ERROR.
+  `mt/reanimate.py` (MT `db52891`): клипы рана заново текущим ретаргетом как новая версия рига; применён к клиентам
+  47dc80e9 (ран 9980a38a: v3 reanimate, затем arm_clearance v4 — L medium/R high → none/none) и 7c1b6748
+  (5ee6219f: v1 reanimate, arm_clearance идёт). Данные всех прогонов — `/srv/autorig/data/v3triage/` (bench, grid, exp).
 - **Инцидент 18:10 UTC (память)**: плотный енот 1M вершин — numeric QA (2 партии воркеров по ~0.9 ГБ, первая
   осиротела после повтора QA), 2 joint_judge (3.7 ГБ), limb_collision — своп 16/16 ГБ, autorig-mt в D-state, API MT
   не отвечал. Убил только осиротевших воркеров `v3_numeric_qa` (ppid 1) — API ожил. **Intake**: воркеры QA должны
