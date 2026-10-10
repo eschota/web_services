@@ -2,7 +2,14 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpointdf694a4/source7bc0381: canonical/server SHAcec4f3c26f7eb77cad2d1119d99714813a14607ab1d98905848078bfa84ee238.
+CURRENT private checkpoint27abeb6/source005183d: canonical/server SHA0af1238c94b4c0a4a70f0add2a80a2f9f685d16f84c5cb12d7a3701f07ba1803.
+Root24tests pass. Conservativecertguard f4b78 independentlypassesfailclosed,
+admitted0; priornonzero certgradientREVOKED. Linearhomotopy1554 mechanical
+proposal1165/1258 stable, NOTactualanimationCCD/anatomy/sewing. ONE isolated
+centered-v2research authorized preflightFD/fullhashes+5x55s/audit, handlepending.
+FiveDISTINCT matrix Girl/Elf/Braid/Red/Knight,4rigs/0passes; nofleetpromotion.
+
+Prior private checkpointdf694a4/source7bc0381: canonical/server SHAcec4f3c26f7eb77cad2d1119d99714813a14607ab1d98905848078bfa84ee238.
 Root reviewedactualFoot8f3 sideWalking/Running/Jump and comparison; NEWMEDIA
 sentONCE HTTP200 UID71bca804bd9d/video4a6deb83, deliveryNOTapproval/globalFAILED.
 Independentcert audit rejects c221 identity/gap/orientation/continuity admission;
