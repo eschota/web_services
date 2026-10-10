@@ -233,3 +233,43 @@ class TaskPageV3RoutesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClassicEstimateTests(unittest.TestCase):
+    """Live processing · V3: a classic task without outputs moves by the clock against the measured median."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = (routes.start_warmup, dict(routes._TYPICAL))
+        routes.start_warmup = lambda task_id, kind: "started"
+        import time as _time
+        routes._TYPICAL.update(at=_time.monotonic(), processing=600.0, queue=None, n=12)
+
+    def tearDown(self):
+        routes.start_warmup = self.saved[0]
+        routes._TYPICAL.clear()
+        routes._TYPICAL.update(self.saved[1])
+        self.tmp.cleanup()
+
+    def state(self, progress, seconds):
+        from datetime import timezone
+        started = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=seconds)
+        task = SimpleNamespace(id=STATIC, status="processing", progress=progress, processing_started_at=started,
+                               created_at=started, queue_class="interactive")
+        return asyncio.run(routes._classic_state(task, None, task_model=None, cache_dir=pathlib.Path(self.tmp.name)))
+
+    def test_no_outputs_yet_moves_by_the_clock(self):
+        state = self.state(0, 300)
+        self.assertEqual(state["progress_basis"], "elapsed")
+        self.assertAlmostEqual(state["progress"], 0.45, places=2)
+        self.assertTrue(290 <= state["eta_s"] <= 305, state["eta_s"])
+
+    def test_never_past_ninety_percent_by_the_clock(self):
+        state = self.state(0, 5000)
+        self.assertEqual(state["progress"], 0.9)
+        self.assertEqual(state["eta_s"], 30)
+
+    def test_reported_outputs_keep_their_own_progress(self):
+        state = self.state(50, 300)
+        self.assertEqual((state["progress"], state["progress_basis"]), (0.5, "outputs"))
+        self.assertTrue(state["eta_s"] >= 150)

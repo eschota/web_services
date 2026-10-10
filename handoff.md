@@ -336,6 +336,67 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   0.78 → 0.97, рывки в клипах 6 → 0, V3 numeric stretch −22%; джоба `f2aa92eca1b7` —
   пятки, 0.96 → 1.00, `next: done`. DEV 6438–6441, 6464–6468 (сетки 8 суставов до/после).
 
+## Live processing · V3 — каждый этап во вьювере, вживую (2026-10-10 13:30 UTC, на проде)
+
+- **Один поток на ран**: `<run>/live/events.jsonl` (append-only, одна O_APPEND-запись на строку) +
+  полезная нагрузка рядом (`live/vox_<res>.bin` и т. п.). API: `GET /api/mt/runs/{run}/live?cursor=<байт>&wait=<0..25>`
+  → `{schema autorig.mt.live/1, cursor, events[], state, done}`; событие `{id (смещение), t, stage, kind, progress 0..1
+  внутри стадии, key (i18n live_*), params, url (под /api/mt/files/<run>/), data}`; `state` = стадии с измеренными и
+  ожидаемыми секундами, общий progress 0..1 и `eta_s` по медианам прошлых ранов (`live-stats.json`, QA × вершины).
+  Код: MT `mt/live.py` (+`mt/live_voxels.py`), коммит MT `97f7969`+. Писать в поток из любого MT-кода:
+  `from mt import live; live.emit(run_dir, stage, kind, progress=, key=, params=, url=, data=)` — никогда не бросает.
+- **Что пишет**: `full.Phases` start/media/done/finish (все раны, и V3, и полный MT); `v3/events.jsonl` Intake
+  зеркалится как `kind=v3.*`; V3: `source/mesh`, **вокселизация** (дочерний процесс рядом с анализом, без heavy-слота:
+  уровни 12/24/48/96, ARV1 = заголовок 32 Б + по 4 Б на воксель x,y,z,глубина|ядро), `voxels/erosion` (глубина до
+  поверхности, медиальное ядро), `analysis/classify|card`; fastrig: `rig/weld|plan|joints` (кандидаты суставов, откуда
+  каждый) `|bones` (скелет + насколько симметрия/sanity сдвинули) `|weights` (+цепочки волос) `|preview|checks`;
+  `judge/centring` (каждый сустав против эрозии вокселей: ok/off/outside); `retarget/clip` по клипу, `retarget/clips`;
+  QA: `qa/numeric_start|clip|numeric` (3D-точки худших растяжений) `|verdict`; `judge/verdict` — снимок
+  `rig/joint-judge.json` Rig judge (харвест при чтении API, по суставу ok/review/fix).
+- **Вьювер** (сборка `unity/live-r31-20261010` = r27 + `LiveLayer.cs` + шейдер `AutoRig/LiveHeat`; index.html — живой
+  r27 со всеми live-правками + `<script src="/api/mt/static/live.js" defer>`; r27 оставлен для отката):
+  воксели строятся слоями снизу вверх, уровень за уровнем; эрозия слой за слоем до светящегося ядра; суставы
+  выпрыгивают, едут на проверенные места, кости растут от родителя; после загрузки рига — тепловая карта весов на
+  4,5 с; метки QA/центровки/судьи на суставах (идут за анимированными костями). Клик по суставу — имя, родитель,
+  откуда сустав, вердикты; веса этой кости. Слои — иконки внизу левой панели `#ui` (воксели, ядро, кости, веса,
+  проверки, повтор обработки). Команды Unity: `LiveVoxels/LiveErosion/LiveJoints/LiveBones/LiveWeights/LiveMarks/
+  LiveShow/LivePick/LiveReset`, событие `live_layers`, `live_pick`.
+- **Для Session agent · V3 (аватар)**: `mt/static/live.js` кормит ваш `autorigUnity.agentStatus`: прогресс рана
+  (ring + %) каждые несколько секунд и строку на каждую веху (воксели 96³, эрозия, что видит Vision, рост, скелет, веса,
+  центровка, клипы, проверка, вердикт судьи) с `key="live:<id>"`. Пока поток говорит (<15 с), грубые вызовы
+  task-страницы (кроме done/needs_review/error) он проглатывает — двойного кольца нет. Подписка без опроса:
+  `window.autorigLive.on(fn)` или `addEventListener("autorig-live", e => e.detail)` — типы `state|line|event|layers|pick`;
+  `autorigLive.lines` — все строки (в т. ч. неозвученные). Хотите рисовать сами — `autorigLive.claim("session-agent")`.
+- **Для Intake · V3 (пропускная способность)**, замеры на проде:
+  - V3: ожидание в MT-очереди 0 с (конкуренция 4), приём→старт 3–4 с. Узкие места: **Vision фермы** 1–389 с
+    (`4f85d45e`: >6 мин; причина — авто-свип Rig judge: ≤2 джобы × до 14 параллельных Vision-запросов, ~290 с
+    на джобу, держат AI-ноды фермы, а единственный Vision-запрос анализа V3 ждёт за ними; нужен приоритет
+    конвейеру — судья уступает, пока есть V3-ран в analysis; и ещё: пока ждём Vision, риг можно строить
+    спекулятивно по пропорциям и пересобрать, если Vision не согласится) и **численный QA** 47–382 с
+    (300k вершин). QA я распараллелил по клипам
+    (`v3_numeric_qa.py`: воркер на клип, ≤½ ядер, по свободной памяти; отчёт байт-в-байт как последовательный —
+    `report_sha256` совпал на проде; поле `parallel` вне хэша — ваше, сохранено): 41k вершин 54 → 21 с; 300k —
+    один клип ~83 с, весь QA теперь ≈ самый длинный клип вместо суммы.
+  - `kit.heavy_slot` (`MT_HEAVY_PROCS=2`) сериализует ВСЕ `mt.*`-дети (проекции, орбиты, трекинг) — с автозапуском
+    агентских веток (танец/диорама) проекции V3 будут ждать слот. Вокселизатор и QA этот слот не берут.
+  - Классика: очередь медиана 31 мин (p75 75 мин, max 100), обработка медиана 12 мин — вот «процессинг висит».
+- **Рестарты MT обнуляют V3-ран**: 13:26 UTC чей-то рестарт `autorig-mt` отменил `4f85d45e` в analysis
+  после >6 мин ожидания Vision — ран начался с source заново. Перед рестартом MT проверять активные V3-раны:
+  `select run_id, stage from v3_runs where status in ('queued','running')` в `v3-dispatch/dispatch.sqlite3`.
+- **Rig judge · V3**: ваш `rig/joint-judge.json` уже уходит в поток (метки по суставам). Если писать
+  `live.emit(run, "judge", "joint", data={bone, verdict, score})` по мере судейства — метки появятся сразу.
+  Находка центровки: у `63bf5d35` (сессия `0abc7c6ad86e0546967a`) весь позвоночник на x=−0.33 при симметричной
+  модели около x=0 — 16 из 22 суставов вне вокселей.
+- **Для Scenes · V3**: `BakedScenes/sponza/OptionalIvy/Vendored/DynIvy` (07:40 UTC) без своего `.jslib` ломал
+  линковку любого WebGL-плеера (`wasm-ld: undefined symbol IvyFilesWrite…`). Добавлен запасной
+  `Assets/Live/Plugins/WebGL/DynIvyFilesFallback.jslib` (localStorage) — удалите, если принесёте свой.
+- **Для Viewer · V3**: сборка r31 включает несобранный ранее RadialPulse HDR WIP (r30-исходники из рабочего дерева).
+  Новые иконки — в конце `#ui`; переключение `unity/test` → r31 после проверки на живой задаче.
+- **Task page · V3**: `v3-view` классики отдаёт `eta_s` и `progress_basis` (`outputs`|`elapsed`): без отчёта конвертера
+  карточка идёт по часам против медианы 12 мин (≤90 %). Релиз `live-proc-eta-*` в `current`, включится ближайшим
+  рестартом storage (я не рестартовал).
+- **Localization**: 52 ключа `live_*` в en/ru (живые) — допишите fa/zh/hi.
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**

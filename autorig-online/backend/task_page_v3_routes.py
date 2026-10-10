@@ -213,6 +213,40 @@ async def queue_snapshot(db: Any, task_model: Any, task: Any) -> dict[str, Any]:
     return {"ahead": int(ahead), "processing": int(processing)}
 
 
+# --------------------------------------------------------------------------- measured classic durations
+# Live processing · V3 (owner 2026-10-10: the card sat at «Processing 0 %»): a classic task reports outputs late (0/8
+# for minutes), so until it does the card moves by the elapsed time against the median of recent classic tasks.
+_TYPICAL: dict[str, Any] = {"at": 0.0, "processing": None, "queue": None, "n": 0}
+
+
+def _median(values: list[float]) -> Optional[float]:
+    values = sorted(v for v in values if v is not None and v > 0)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+async def classic_typical(db: Any, task_model: Any) -> dict[str, Any]:
+    """Median processing and queue seconds of the last 60 finished classic rig tasks (cached for 10 minutes)."""
+    now = time.monotonic()
+    if _TYPICAL["processing"] is not None and now - _TYPICAL["at"] < 600:
+        return _TYPICAL
+    try:
+        rows = (await db.execute(
+            select(task_model.created_at, task_model.processing_started_at, task_model.last_progress_at)
+            .where(task_model.status == "done", task_model.pipeline_kind == "rig",
+                   task_model.processing_started_at.isnot(None), task_model.last_progress_at.isnot(None))
+            .order_by(task_model.created_at.desc()).limit(60))).all()
+    except Exception as exc:  # a failed estimate never fails the page
+        log.info("classic durations unavailable: %s", exc)
+        rows = []
+    proc = [(r[2] - r[1]).total_seconds() for r in rows if r[1] and r[2]]
+    queue = [(r[1] - r[0]).total_seconds() for r in rows if r[0] and r[1]]
+    _TYPICAL.update(at=now, processing=_median(proc) or 700.0, queue=_median(queue), n=len(proc))
+    return _TYPICAL
+
+
 # --------------------------------------------------------------------------- state
 
 def _task_status(task: Any) -> str:
@@ -278,6 +312,18 @@ async def _classic_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path
     if status == "created":
         queue = await queue_snapshot(db, task_model, task)
         queue["wait_seconds"] = _seconds_since(getattr(task, "created_at", None))
+    eta = None
+    basis = "outputs" if progress > 0 else None
+    if status == "processing":
+        typical = await classic_typical(db, task_model)
+        elapsed = _seconds_since(getattr(task, "processing_started_at", None))
+        expected = float(typical.get("processing") or 0)
+        if elapsed is not None and expected > 0:
+            if progress < 0.02:                       # no outputs reported yet: move by the clock, never past 90 %
+                progress, basis = min(0.9, 0.9 * elapsed / expected), "elapsed"
+                eta = max(expected * 0.05, expected - elapsed)
+            else:                                     # outputs arrive: their own pace, the median as a floor
+                eta = max(elapsed / progress * (1 - progress), (expected - elapsed) * 0.5, 0.0)
     rigged = cached_glb(cache_dir, task_id, RIGGED_KINDS)
     static = cached_glb(cache_dir, task_id, STATIC_KINDS)
     warming = None
@@ -312,6 +358,8 @@ async def _classic_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path
         "viewer": viewer,
         "model": {"state": model_state},
         "v3": None,
+        "eta_s": round(eta) if eta is not None else None,
+        "progress_basis": basis,
     }
 
 
@@ -329,6 +377,8 @@ async def build_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path,
         "stage": part["stage"],
         "stage_title": part["stage_title"],
         "progress": round(1.0 if part["status"] == "done" else part["progress"], 4),
+        "eta_s": part.get("eta_s"),
+        "progress_basis": part.get("progress_basis"),
         "queue": part["queue"],
         "pipeline": "v3" if v3_task else "classic",
         "v3": part["v3"],
