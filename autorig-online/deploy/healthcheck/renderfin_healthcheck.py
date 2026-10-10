@@ -246,6 +246,16 @@ def check_llm_credentials(report: Report) -> None:
     lost on 2026-08-09. So the balance is probed on a timer too, not only on
     demand.
     """
+    if os.environ.get("AUTORIG_PAID_LLM", "").strip().lower() not in ("1", "on", "true", "yes", "allow"):
+        # Owner 2026-10-11: no paid LLM APIs, so there is no balance to probe (a probe is itself a paid call).
+        # What has to be alive is the farm: ask the site which ai-nodes it can see.
+        try:
+            models = _get_json("http://127.0.0.1:8200/api/ai/models")
+            report.ok(f"vision/text run on the fleet's Qwen; models: "
+                      f"{', '.join(m.get('id', '?') for m in models.get('models_array', [])) or 'none'}")
+        except Exception as exc:
+            report.warn(f"fleet LLM catalogue unreachable: {exc!r}")
+        return
     creds = _llm_credentials()
     if not creds:
         report.fail("no vision credential configured at all")

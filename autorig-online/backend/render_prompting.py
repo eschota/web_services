@@ -505,6 +505,12 @@ def _vision_config() -> Dict[str, Any]:
 
 def _llm_attempts() -> list:
     """(url, key, model, extra_headers) candidates, best first, deduped by key."""
+    import paid_llm
+
+    paid_llm.scrub_environ()
+    if not paid_llm.enabled():
+        # Owner 2026-10-11: no paid LLM APIs; the fleet's Qwen answers behind the local OpenAI-shaped shim.
+        return [(paid_llm.FARM_CHAT_URL, paid_llm.FARM_KEY, paid_llm.FARM_MODEL, {})]
     config = _vision_config()
     openai_url = os.getenv("OPENAI_API_URL", "").strip() or str(
         config.get("open_ai_api_url_string") or ""

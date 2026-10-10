@@ -233,7 +233,11 @@ async def _farm(system, user):
 async def compose(thread_text, lang, facts):
     system = SYSTEM.format(language=LANG_NAMES.get(lang, lang), faq=FAQ)
     user = f"{facts}\n\n{untrusted(thread_text)}\n\nWrite the reply to the visitor's latest message."
-    for brain in (_openai, _farm):
+    import paid_llm
+
+    # Owner 2026-10-11: no paid LLM. _openai goes through the Astra gateway (OpenAI upstream); only the farm answers
+    # unless AUTORIG_PAID_LLM is switched on.
+    for brain in ((_openai, _farm) if paid_llm.enabled() else (_farm,)):
         try:
             out = sanitize(await brain(system, user))
         except (httpx.HTTPError, ValueError) as exc:

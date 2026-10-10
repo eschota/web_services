@@ -98,7 +98,12 @@ U3D_YOUTUBE_EXPECTED_CHANNEL_ID = os.getenv("U3D_YOUTUBE_EXPECTED_CHANNEL_ID", "
 # Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()
 
-# OpenAI (poster vision metadata for YouTube / task UI; set in production env only)
+# OpenAI (poster vision metadata for YouTube / task UI; set in production env only).
+# Owner 2026-10-11: no paid LLM APIs. Unless AUTORIG_PAID_LLM is switched on, the paid keys are forgotten here
+# (paid_llm.py) and every vision/text consumer runs on the fleet's own models instead.
+from paid_llm import scrub_environ as _scrub_paid_llm_environ  # noqa: E402
+
+_scrub_paid_llm_environ()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
 # =============================================================================

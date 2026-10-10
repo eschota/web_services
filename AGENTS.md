@@ -473,6 +473,28 @@ Owner rule, 2026-10-10:
   long Codex threads, so their whole context was re-read every time. The site's
   session agents took 3.1 M input tokens on 10.10.
 
+## Paid LLM APIs Are Off (owner order, 2026-10-11)
+
+> платные нам нельзя использовать, будем думать как обходиться возможностями флота
+
+* **The switch.** `AUTORIG_PAID_LLM` (default off; on only for `1/on/true/yes/allow`) in
+  `backend/paid_llm.py`. While off, `config.py` and `render_prompting.py` forget `OPENAI_API_KEY`,
+  `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` in the process. Nothing is deleted from
+  `/srv/autorig/secrets`; `AUTORIG_PAID_LLM=on` plus a restart brings the paid path back.
+* **Where the work goes.** `backend/farm_llm_api.py` serves
+  `POST /api/farm-llm/chat/completions` (OpenAI chat shape) in front of `/api/vision` and
+  `/api/text2text`, i.e. the fleet's Qwen. Poster metadata and generation routing
+  (`content_moderation`), render prompting, the appearance check, viewer themes, idle-LTX and the
+  support chat answer from it. Content rating stays NudeNet.
+* **OpenRouter `:free` only** (owner decision): the rig-type check tries up to 3 `:free` models first,
+  the shim falls back to them when the farm cannot answer. `paid_llm.free_only()` drops any other id;
+  the allowance is `AUTORIG_OPENROUTER_FREE_DAILY` (40) per UTC day, counted in
+  `/var/autorig/openrouter_free_budget.json`.
+* **Not done here:** MT session agents (`mt/llm.py`, own owner order), Tencent Hunyuan cloud
+  (`gen3d-routing.json`, `cloud.enabled=false`), Astra (stopped), and the other projects on the same
+  VPS that hold their own OpenAI keys (qwertystock bots, m_plus_trends, analytics-core).
+* **Tests:** `backend/tests/test_farm_llm_api.py`.
+
 ## V3 Concept: Astra and Session Agents
 
 Owner rule, 2026-10-10:

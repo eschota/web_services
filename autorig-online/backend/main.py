@@ -82,6 +82,8 @@ from viewer_environment import build_viewer_environment_from_settings
 from viewer_theme_contract import validate_viewer_theme_lighting
 from worker_artifact_urls import canonical_worker_artifact_url, is_viewer_artifact_url
 from worker_transport import worker_http_client
+import paid_llm
+from farm_llm_api import router as farm_llm_router
 from artifact_cache import (
     ArtifactSource,
     creation_block_reason as artifact_creation_block_reason,
@@ -1395,6 +1397,7 @@ app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
 app.include_router(ai_vision_router)
+app.include_router(farm_llm_router)
 app.include_router(namecheap_remote_router)
 
 
@@ -5011,7 +5014,9 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
     configured_prompt = str(cfg.get("prompt") or "").strip()
     if safety_contract not in configured_prompt:
         cfg["prompt"] = f"{configured_prompt}\n\n{safety_contract}".strip()
-    return cfg
+    # Owner 2026-10-11: no paid LLM APIs. While AUTORIG_PAID_LLM is off this swaps OpenAI/OpenRouter for the shim
+    # in front of the fleet's Qwen (farm_llm_api.py); the file itself is never rewritten.
+    return paid_llm.vision_cfg(cfg)
 
 
 def _rig_v2_normalize_image_data_url(image_value: str) -> str:
@@ -5185,7 +5190,7 @@ async def _rig_v2_call_openrouter_vision(
     image_data_url: str,
     prompt_override: str = "",
 ) -> Dict[str, Any]:
-    api_key = str(cfg.get("open_router_api_key") or "").strip()
+    api_key = str(cfg.get("open_router_api_key") or cfg.get("open_router_free_key") or "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="OpenRouter API key is not configured")
     api_url = str(cfg.get("open_router_api_url_string") or "").strip()
@@ -5208,6 +5213,8 @@ async def _rig_v2_call_openrouter_vision(
     for model in configured_models + discovered_models:
         if model not in models:
             models.append(model)
+    if cfg.get("paid_llm_off_bool"):
+        models = paid_llm.free_only(models)[:3]     # owner 2026-10-11: a non-:free id never goes out; 3 tries per call keep the daily allowance
     if not models:
         raise HTTPException(status_code=500, detail="No OpenRouter vision models configured or discovered")
 
@@ -5233,6 +5240,9 @@ async def _rig_v2_call_openrouter_vision(
                 }
             ],
         }
+        if cfg.get("paid_llm_off_bool") and not paid_llm.openrouter_free_take():
+            last_error = "OpenRouter free daily allowance spent"
+            break
         try:
             async with worker_http_client(timeout=45.0, follow_redirects=True) as client:
                 resp = await client.post(api_url, headers=headers, json=payload)
@@ -5278,6 +5288,10 @@ async def _rig_v2_call_openrouter_vision(
         "error_string": last_error[:500],
         "server_time_unix_int": _rig_v2_server_time(),
     }
+
+
+def _rig_v2_model_label(cfg: Dict[str, Any], model: str) -> str:
+    return f"farm/{model}" if cfg.get("paid_llm_off_bool") else f"openai/{model}"
 
 
 async def _rig_v2_call_openai_vision(
@@ -5363,9 +5377,9 @@ async def _rig_v2_call_openai_vision(
                 "status_string": (
                     "unsupported"
                     if assessment.get("status_string") == "unsupported"
-                    else "ok_openai_fallback"
+                    else ("ok" if cfg.get("paid_llm_off_bool") else "ok_openai_fallback")
                 ),
-                "model_used_string": f"openai/{model}",
+                "model_used_string": _rig_v2_model_label(cfg, model),
                 "view_id_string": view_id,
                 "fallback_reason_string": fallback_reason[:500],
                 "server_time_unix_int": _rig_v2_server_time(),
@@ -5471,11 +5485,29 @@ async def api_rig_v2_vision_animal_type(request: Request):
             prompt_override=prompt_override,
             model_override=model_override,
         )
-    openrouter_result = await _rig_v2_call_openrouter_vision(
-        cfg=cfg,
-        image_data_url=image_data_url,
-        prompt_override=prompt_override,
-    )
+    # Owner 2026-10-11: no paid LLM. OpenRouter FREE models first (low volume, quality-critical), the fleet's Qwen
+    # behind the shim when they fail or the daily allowance is spent.
+    try:
+        openrouter_result = await _rig_v2_call_openrouter_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            prompt_override=prompt_override,
+        )
+    except HTTPException:
+        if not cfg.get("paid_llm_off_bool"):
+            raise
+        openrouter_result = {"success_bool": False, "status_string": "vision_failed",
+                             "error_string": "OpenRouter free models are not configured"}
+    if cfg.get("paid_llm_off_bool") and not openrouter_result.get("success_bool"):
+        return await _rig_v2_call_openai_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            fallback_reason="openrouter_free_failed: " + str(openrouter_result.get("error_string")
+                                                              or openrouter_result.get("status_string") or ""),
+            view_id=view_id,
+            prompt_override=prompt_override,
+            model_override=model_override,
+        )
     if openrouter_result.get("status_string") == "vision_rate_limited":
         fallback_reason = str(openrouter_result.get("error_string") or openrouter_result.get("status_string") or "")
         return await _rig_v2_call_openai_vision(
@@ -5523,7 +5555,7 @@ async def api_rig_v2_vision_appearance(request: Request):
         return {"success_bool": False, "status_string": "vision_failed",
                 "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
     return {"success_bool": True, "status_string": "ok", **result,
-            "model_used_string": f"openai/{model}",
+            "model_used_string": _rig_v2_model_label(cfg, model),
             "elapsed_seconds_float": round(time.time() - started, 2),
             "server_time_unix_int": _rig_v2_server_time()}
 
@@ -5574,7 +5606,7 @@ async def api_rig_v2_vision_appearance_depth(request: Request):
                 "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
     return {"success_bool": True, "status_string": "ok", **result,
             "painted_url_string": painted, "depth_url_string": depth_url,
-            "model_used_string": f"openai/{model}",
+            "model_used_string": _rig_v2_model_label(cfg, model),
             "elapsed_seconds_float": round(time.time() - started, 2),
             "server_time_unix_int": _rig_v2_server_time()}
 

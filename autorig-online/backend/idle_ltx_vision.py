@@ -388,6 +388,9 @@ class VisionPromptAnalyzer:
     ) -> Tuple[Dict[str, Any], str]:
         upt = (user_prompt_string or "").strip() or IDLE_LTX_USER_PROMPT_DEFAULT
         last_err = ""
+        import paid_llm
+
+        cfg = paid_llm.vision_cfg(cfg)   # owner 2026-10-11: no paid LLM; the fleet's Qwen answers behind the shim
         # Prefer OpenAI when both available (reliable json_object).
         if str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip() and str(
             cfg.get("open_ai_api_url_string") or ""

@@ -89,6 +89,13 @@ _OPENROUTER_HEADERS = {
 }
 
 
+def _poster_model_label() -> str:
+    """The model name recorded in content_classifier_version."""
+    import paid_llm
+
+    return OPENAI_POSTER_MODEL if paid_llm.enabled() else paid_llm.FARM_MODEL
+
+
 def _vision_config() -> Dict[str, Any]:
     try:
         data = json.loads(VISION_CONFIG_PATH.read_text(encoding="utf-8"))
@@ -113,6 +120,12 @@ def _llm_candidates() -> List[Tuple[str, str, Optional[str], str, Dict[str, str]
     OpenRouter. OpenRouter matters because its allowance resets on its own,
     so it is often alive precisely when a prepaid OpenAI balance is not.
     """
+    import paid_llm
+
+    if not paid_llm.enabled():
+        # Owner 2026-10-11: no paid LLM APIs. The one candidate is the fleet's Qwen behind the local shim.
+        return [paid_llm.farm_candidate()]
+
     from config import OPENAI_API_KEY
 
     config = _vision_config()
@@ -192,7 +205,9 @@ def _vision_completion(messages: List[dict], *, max_tokens: int, temperature: fl
             ):
                 spent = (label, detail)
     detail = str(last)[:300] if last else "no candidate answered"
-    _safe_alert(llm_credit_alert.alert_all_credentials_down, detail)
+    if not all(c[0] == "farm" for c in candidates):
+        # The credit alert is about money; the farm has none to run out of.
+        _safe_alert(llm_credit_alert.alert_all_credentials_down, detail)
     raise last if last else RuntimeError("no vision credential answered")
 
 
@@ -962,7 +977,7 @@ async def _run_task_poster_classification_impl(task_id: str) -> None:
                     if llm_title and llm_desc and isinstance(kws, list):
                         llm_keywords_json = json.dumps(_normalize_keyword_list(kws))
                         llm_at = datetime.utcnow()
-                        clipped = _clip_classifier_version(f"{version}+{OPENAI_POSTER_MODEL}")
+                        clipped = _clip_classifier_version(f"{version}+{_poster_model_label()}")
                         cv = clipped if clipped else f"{version}+llm"
                     else:
                         cv = _clip_classifier_version(f"{version}:openai_error")
