@@ -867,3 +867,13 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - Author gallery: `/author/<handle>` and `/<ru|zh|hi|fa>/author/<handle>`, server-rendered, i18n keys `pchat_author_*`.
   Handle = 10 hex HMAC; guests are Guest-XXXX; a user without nickname shows User-XXXX unless they already chatted.
 - nginx: locations appended to `/etc/nginx/snippets/autorig-public-chat.conf`.
+
+## Scenes · V3 (2026-10-10 15:15 UTC, на проде)
+
+- `unity/test` теперь -> `scenes-v3-r2-20261010` = страница r32 (все live-правки Viewer) + wasm/data со сценами
+  (SceneDirector, ScenePackage, LiveLayer). Откат: `ln -sfn .../pulse-alt-r27-20261010 test`. r31/r32 сцен-кода не имели.
+  Multiplayer-сборка (замок 14:42Z) включит Scenes-скрипты из общего проекта сама.
+- Собор: лучи работают (свой луч + тень + 75 м теней), солнце az90/el50 на центр прохода, 2 лайтмапа; бандл
+  `cathedral-v3-4ea469ed1097f287` опубликован, прошлый - в `previous` каталога. Спонза: дождь только в зоне двора,
+  в галереях сухо. Каталог `/api/mt/scenes`: Собор, Спонза, затем рантайм-пакеты (icon.jpg, glTFast + scene.json).
+- Публикация сцены: `tools/scenes_v3_catalog.py` (R:\3d_video_motion_transfer) -> index.json + thumbs в `unity/scene-media/<id>/`.
