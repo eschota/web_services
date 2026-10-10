@@ -7,9 +7,11 @@
 
     let state = null;
     let selectedAmount = 20;
-    const language = ['en', 'ru', 'zh', 'hi'].includes(localStorage.getItem('autorig_lang'))
+    const LANGS = ['en', 'ru', 'zh', 'hi', 'fa'];
+    const language = (window.I18n && LANGS.includes(window.I18n.currentLang)) ? window.I18n.currentLang
+        : LANGS.includes(localStorage.getItem('autorig_lang'))
         ? localStorage.getItem('autorig_lang')
-        : (['en', 'ru', 'zh', 'hi'].includes(navigator.language.split('-')[0]) ? navigator.language.split('-')[0] : 'en');
+        : (LANGS.includes(navigator.language.split('-')[0]) ? navigator.language.split('-')[0] : 'en');
     const messages = {
         en: {
             title: 'Offer to buy this 3D model', button: 'Offer to buy this model',
@@ -38,6 +40,13 @@
             custom: 'अपनी राशि, USD (न्यूनतम $1)', submit: 'प्रस्ताव भेजें', sent: 'प्रस्ताव लेखक को भेज दिया गया है।',
             login: 'प्रस्ताव भेजने के लिए साइन इन करें।', unavailable: 'इस कार्य का लेखक प्रस्ताव प्राप्त नहीं कर सकता।',
             cancel: 'रद्द करें', latest: 'नवीनतम प्रस्ताव'
+        },
+        fa: {
+            title: 'پیشنهاد خرید این مدل سه‌بعدی', button: 'پیشنهاد خرید این مدل',
+            copy: 'مبلغ پیشنهاد را انتخاب کنید. برای سازنده و مدیر ایمیل ارسال می‌شود. پرداخت و دانلود به‌طور خودکار فعال نمی‌شود.',
+            custom: 'مبلغ دلخواه، دلار آمریکا (حداقل ۱ دلار)', submit: 'ارسال پیشنهاد', sent: 'پیشنهاد برای سازنده ارسال شد.',
+            login: 'برای ارسال پیشنهاد وارد شوید.', unavailable: 'سازنده این تسک نمی‌تواند پیشنهاد دریافت کند.',
+            cancel: 'لغو', latest: 'آخرین پیشنهاد'
         }
     };
     const text = messages[language];
