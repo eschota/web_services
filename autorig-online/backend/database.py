@@ -95,6 +95,10 @@ class User(Base):
     email_last_bounce_at = Column(DateTime, nullable=True)
     email_last_bounce_type = Column(String(32), nullable=True)
     email_transient_bounce_count = Column(Integer, default=0, nullable=False)
+    # Localization V3 (user_language.py): the user's own language choice and what the browser last said.
+    preferred_language = Column(String(16), nullable=True)
+    detected_language = Column(String(64), nullable=True)
+    language_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, default=datetime.utcnow)
     
@@ -176,6 +180,10 @@ class AnonSession(Base):
     agent_name = Column(String(255), nullable=True)
     agent_description = Column(Text, nullable=True)
     registered_as_agent = Column(Boolean, default=False)
+    # Localization V3 (user_language.py): the visitor's own language choice and what the browser last said.
+    preferred_language = Column(String(16), nullable=True)
+    detected_language = Column(String(64), nullable=True)
+    language_updated_at = Column(DateTime, nullable=True)
 
 
 class TaskLike(Base):
@@ -286,6 +294,8 @@ class Task(Base):
     # Status
     status = Column(String(20), default="created")  # created, processing, done, error
     error_message = Column(Text, nullable=True)
+    # Localization V3: the owner's language when the task was created (user_language.py)
+    owner_language = Column(String(16), nullable=True)
     
     # Auto-restart tracking for stale tasks
     restart_count = Column(Integer, default=0)  # Number of times task was auto-restarted
@@ -856,6 +866,9 @@ class SupportChatSession(Base):
     telegram_chat_id = Column(BigInteger, nullable=True)
     telegram_thread_id = Column(Integer, nullable=True)
     topic_name = Column(String(512), nullable=True)
+    # Localization V3: the visitor's language (support_ai answers in it) and where it came from.
+    language = Column(String(16), nullable=True)
+    language_source = Column(String(24), nullable=True)
     status = Column(String(32), nullable=False, default="open", index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1193,6 +1206,19 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN email_last_bounce_type VARCHAR(32)")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_transient_bounce_count INTEGER DEFAULT 0")
             await _try_add_column("ALTER TABLE feedback ADD COLUMN parent_id INTEGER")
+            # Localization V3 (2026-10-10): the user's language is an API field.
+            for _lang_sql in (
+                "ALTER TABLE users ADD COLUMN preferred_language VARCHAR(16)",
+                "ALTER TABLE users ADD COLUMN detected_language VARCHAR(64)",
+                "ALTER TABLE users ADD COLUMN language_updated_at DATETIME",
+                "ALTER TABLE anon_sessions ADD COLUMN preferred_language VARCHAR(16)",
+                "ALTER TABLE anon_sessions ADD COLUMN detected_language VARCHAR(64)",
+                "ALTER TABLE anon_sessions ADD COLUMN language_updated_at DATETIME",
+                "ALTER TABLE support_chat_sessions ADD COLUMN language VARCHAR(16)",
+                "ALTER TABLE support_chat_sessions ADD COLUMN language_source VARCHAR(24)",
+                "ALTER TABLE tasks ADD COLUMN owner_language VARCHAR(16)",
+            ):
+                await _try_add_column(_lang_sql)
 
             try:
                 await conn.exec_driver_sql(

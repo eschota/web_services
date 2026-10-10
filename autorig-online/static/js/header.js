@@ -108,6 +108,7 @@ function renderSiteHeader(options = {}) {
                             <button class="lang-option" data-lang="ru">Русский</button>
                             <button class="lang-option" data-lang="zh">中文</button>
                             <button class="lang-option" data-lang="hi">हिंदी</button>
+                            <button class="lang-option" data-lang="fa" lang="fa" dir="rtl">فارسی</button>
                         </div>
                     </div>
                     
@@ -260,10 +261,18 @@ async function initSiteHeader() {
                     if (avatar && data.user.picture) avatar.src = data.user.picture;
                     if (name) name.textContent = data.user.name || data.user.email;
                 }
-                if (creditsCount) creditsCount.textContent = data.user.balance_credits || 0;
-                if (creditsLabel) {
-                    creditsLabel.textContent = 'Credits';
-                    creditsLabel.setAttribute('data-i18n', 'credits_balance');
+                if (data.user.subscription_active) {
+                    if (creditsCount) creditsCount.textContent = '∞';
+                    if (creditsLabel) {
+                        creditsLabel.textContent = 'Unlimited Monthly';
+                        creditsLabel.removeAttribute('data-i18n');
+                    }
+                } else {
+                    if (creditsCount) creditsCount.textContent = data.user.balance_credits || 0;
+                    if (creditsLabel) {
+                        creditsLabel.textContent = 'Credits';
+                        creditsLabel.setAttribute('data-i18n', 'credits_balance');
+                    }
                 }
             } else if (data.anon && data.anon.free_remaining !== undefined) {
                 // Anonymous user

@@ -130,8 +130,105 @@
                 'सत्र समाप्त — चैट दोबारा खोलें।',
             support_chat_arialabel_open: 'सहायता चैट खोलें',
             support_chat_arialabel_panel: 'सहायता चैट विंडो',
+            support_chat_system_label: 'सिस्टम',
+            support_chat_error_rate_limited: 'बहुत सारे संदेश। कृपया एक मिनट रुककर फिर भेजें।',
+            support_chat_error_too_long: 'संदेश बहुत लंबा है। कृपया इसे छोटा करें।',
+            support_chat_error_generic: 'संदेश नहीं भेजा जा सका। कृपया फिर कोशिश करें।',
+        },
+        fa: {
+            support_chat_title: 'پشتیبانی',
+            support_chat_disclaimer:
+                'شما با یک اپراتور واقعی (Escho) گفتگو می‌کنید — پاسخ‌ها از هوش مصنوعی یا ربات‌های خودکار نیستند.',
+            support_chat_placeholder: 'پیامی بنویسید…',
+            support_chat_send: 'ارسال',
+            support_chat_send_aria: 'ارسال پیام',
+            support_chat_phase_session: 'در حال آماده‌سازی گفتگو…',
+            support_chat_phase_message: 'در حال ارسال به اپراتور…',
+            support_chat_phase_sync: 'در حال همگام‌سازی گفتگو…',
+            support_chat_phase_done: 'ارسال شد',
+            support_chat_operator_label: 'Escho · اپراتور',
+            support_chat_you_label: 'شما',
+            support_chat_support_disabled: 'پشتیبانی روی سرور غیرفعال است.',
+            support_chat_telegram_missing: 'پشتیبانی موقتاً در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.',
+            support_chat_ready_thread: '',
+            support_chat_linked: '',
+            support_chat_error_api_connect:
+                'اتصال به سرویس پشتیبانی برقرار نشد. صفحه را دوباره بارگیری کنید و کمی بعد امتحان کنید.',
+            support_chat_error_session_missing: 'نشست گفتگو منقضی شده است — گفتگو را دوباره باز کنید.',
+            support_chat_arialabel_open: 'باز کردن گفتگوی پشتیبانی',
+            support_chat_arialabel_panel: 'پنجره گفتگوی پشتیبانی',
+            support_chat_system_label: 'سیستم',
+            support_chat_error_rate_limited: 'پیام‌ها زیاد شد. لطفاً یک دقیقه صبر کنید و دوباره بفرستید.',
+            support_chat_error_too_long: 'پیام خیلی طولانی است. لطفاً کوتاه‌ترش کنید.',
+            support_chat_error_generic: 'پیام ارسال نشد. لطفاً دوباره تلاش کنید.',
         },
     };
+
+    // Keys added after the first packs: fill the older languages so the widget
+    // never shows a raw server string.
+    (function () {
+        var extra = {
+            en: {
+                support_chat_system_label: 'System',
+                support_chat_error_rate_limited: 'Too many messages. Please wait a minute and send again.',
+                support_chat_error_too_long: 'This message is too long. Please shorten it.',
+                support_chat_error_generic: 'The message could not be sent. Please try again.',
+            },
+            ru: {
+                support_chat_system_label: 'Система',
+                support_chat_error_rate_limited: 'Слишком много сообщений. Подождите минуту и отправьте снова.',
+                support_chat_error_too_long: 'Сообщение слишком длинное. Сократите его, пожалуйста.',
+                support_chat_error_generic: 'Не удалось отправить сообщение. Попробуйте ещё раз.',
+            },
+            zh: {
+                support_chat_system_label: '系统',
+                support_chat_error_rate_limited: '消息过多，请稍等一分钟后再发送。',
+                support_chat_error_too_long: '消息过长，请缩短后再发送。',
+                support_chat_error_generic: '消息发送失败，请重试。',
+            },
+        };
+        Object.keys(extra).forEach(function (l) {
+            Object.keys(extra[l]).forEach(function (k) {
+                if (PACK[l] && PACK[l][k] == null) PACK[l][k] = extra[l][k];
+            });
+        });
+    })();
+
+    function uiDir() {
+        try {
+            if (window.I18n && typeof window.I18n.dir === 'function') return window.I18n.dir();
+        } catch (e) {}
+        return lang() === 'fa' ? 'rtl' : 'ltr';
+    }
+
+    function localeTag() {
+        try {
+            if (window.I18n && typeof window.I18n.localeTag === 'function') return window.I18n.localeTag();
+        } catch (e) {}
+        return { ru: 'ru-RU', zh: 'zh-CN', hi: 'hi-IN', fa: 'fa-IR' }[lang()] || 'en-US';
+    }
+
+    function browserLanguages() {
+        try {
+            var list = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language];
+            return Array.prototype.slice.call(list, 0, 6).join(',').slice(0, 200);
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function formatWhen(iso) {
+        var raw = String(iso || '');
+        try {
+            var d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw + 'Z');
+            if (!isNaN(d.getTime())) {
+                return d.toLocaleString(localeTag(), {
+                    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                });
+            }
+        } catch (e) {}
+        return raw.replace('T', ' ').slice(0, 19);
+    }
 
     function lang() {
         try {
@@ -345,6 +442,8 @@
 
         var root = el('div', 'ar-support-chat');
         root.id = 'ar-support-chat-root';
+        root.setAttribute('dir', uiDir());
+        root.setAttribute('lang', lang());
         if (isWebApp()) root.classList.add('ar-support-chat--webapp');
 
         var bubble = el('button', 'ar-support-chat-bubble', '');
@@ -381,6 +480,7 @@
         var ta = document.createElement('textarea');
         ta.className = 'ar-support-chat-textarea';
         ta.rows = 2;
+        ta.dir = 'auto';
         ta.placeholder = translation('support_chat_placeholder');
         var send = el('button', 'ar-support-chat-send ar-support-chat-send--idle', '');
         send.type = 'button';
@@ -427,6 +527,8 @@
             disclaimer.textContent = tr('support_chat_disclaimer');
             ta.placeholder = tr('support_chat_placeholder');
             send.setAttribute('aria-label', tr('support_chat_send_aria'));
+            root.setAttribute('dir', uiDir());
+            root.setAttribute('lang', lang());
         }
 
         applyAriaAndLabels();
@@ -499,7 +601,7 @@
                     ? tr('support_chat_operator_label')
                     : dir === 'user'
                       ? tr('support_chat_you_label')
-                      : 'System';
+                      : tr('support_chat_system_label');
 
             if (dir === 'admin') {
                 var av = document.createElement('img');
@@ -513,12 +615,10 @@
 
             var col = el('div', 'ar-support-chat-msg-col');
             var hdr = el('div', 'ar-support-chat-msg-hdr', '');
-            hdr.textContent =
-                whoLabel +
-                ' · ' +
-                String(item.created_at_string || '').replace('T', ' ').slice(0, 19);
+            hdr.textContent = whoLabel + ' · ' + formatWhen(item.created_at_string);
 
             var body = el('div', 'ar-support-chat-msg-body', '');
+            body.dir = 'auto';
             body.textContent = item.body_text_string || '';
             col.appendChild(hdr);
             col.appendChild(body);
@@ -551,22 +651,33 @@
             updateBadge();
         }
 
+        // Server text is never shown to the visitor: every failure maps to a
+        // translated message.
         function mapNetworkError(err) {
             var st = err && err.status;
-            var m = ((err && err.message) || '').trim();
-            if (st === 404 || /^not found$/i.test(m)) return tr('support_chat_error_api_connect');
-            if (st === 503) return tr('support_chat_telegram_missing');
-            return m || tr('support_chat_error_api_connect');
+            var m = ((err && err.message) || '').trim().toLowerCase();
+            if (m.indexOf('support session not found') !== -1) return tr('support_chat_error_session_missing');
+            if (st === 404) return tr('support_chat_error_api_connect');
+            if (st === 429) return tr('support_chat_error_rate_limited');
+            if (st === 400 && m.indexOf('too long') !== -1) return tr('support_chat_error_too_long');
+            if (st === 502 || st === 503 || st === 504) return tr('support_chat_telegram_missing');
+            if (!st) return tr('support_chat_error_api_connect');
+            return tr('support_chat_error_generic');
+        }
+
+        function sessionBody() {
+            return JSON.stringify({
+                visitor_id_string: state.visitorId,
+                page_url_string: String(window.location.href || '').slice(0, 4096),
+                language_string: lang(),
+                browser_languages_string: browserLanguages(),
+            });
         }
 
         function ensureSession(showErr) {
-            var urlPg = String(window.location.href || '').slice(0, 4096);
             return apiJson('/api/support-chat/session', {
                 method: 'POST',
-                body: JSON.stringify({
-                    visitor_id_string: state.visitorId,
-                    page_url_string: urlPg,
-                }),
+                body: sessionBody(),
             })
                 .then(function (j) {
                     state.sessionIdInt = j.session_id_int;
@@ -679,10 +790,7 @@
 
             apiJson('/api/support-chat/session', {
                 method: 'POST',
-                body: JSON.stringify({
-                    visitor_id_string: state.visitorId,
-                    page_url_string: String(window.location.href || '').slice(0, 4096),
-                }),
+                body: sessionBody(),
             })
                 .then(function (sess) {
                     sendPhase.textContent = tr('support_chat_phase_message');
@@ -710,19 +818,11 @@
                 })
                 .catch(function (e) {
                     var msg = (((e && e.message) || '') + '').toLowerCase();
-                    if (e && e.status === 404 && msg.indexOf('support session not found') === -1) {
-                        setMeta(tr('support_chat_error_api_connect'));
-                    } else if (e && e.status === 503) {
-                        setMeta(tr('support_chat_telegram_missing'));
-                    } else if (msg.indexOf('support session not found') !== -1) {
+                    if (msg.indexOf('support session not found') !== -1) {
                         setStoredSessionId(null);
                         state.sessionIdInt = null;
-                        setMeta(tr('support_chat_error_session_missing'));
-                    } else {
-                        setMeta(
-                            e && e.message ? String(e.message) : tr('support_chat_error_api_connect')
-                        );
                     }
+                    setMeta(mapNetworkError(e));
                     setSendChrome('err', '');
                     send.disabled = false;
                     ta.disabled = false;

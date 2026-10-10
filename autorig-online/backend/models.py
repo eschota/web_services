@@ -123,6 +123,9 @@ class TaskStatusResponse(BaseModel):
     rig_v2_animal_detection: Optional[dict] = None
     viewer_theme_selection: Optional[dict] = None
     viewer_environment: Optional[dict] = None
+    # Localization V3: the task owner's language (user_language.py; agents answer in owner_language_code)
+    owner_language: Optional[dict] = None
+    owner_language_code: Optional[str] = None
 
 
 class AnimalVariantFileState(BaseModel):
@@ -222,6 +225,9 @@ class AuthStatusResponse(BaseModel):
     anon: Optional[AnonInfo] = None
     credits_remaining: int
     login_required: bool
+    # Localization V3: the requester's language (code to answer in, ui, dir, source ...)
+    language: Optional[dict] = None
+    language_code: Optional[str] = None
 
 
 # =============================================================================
@@ -806,6 +812,9 @@ class RoadmapVoteRequest(BaseModel):
 class SupportChatSessionPostRequest(BaseModel):
     visitor_id_string: str = Field(..., min_length=8, max_length=96)
     page_url_string: Optional[str] = Field(None, max_length=4096)
+    # Localization V3: the widget's interface language and navigator.languages ("fa-IR,fa,en-US")
+    language_string: Optional[str] = Field(None, max_length=32)
+    browser_languages_string: Optional[str] = Field(None, max_length=256)
 
 
 class SupportChatSessionPostResponse(BaseModel):
@@ -816,6 +825,9 @@ class SupportChatSessionPostResponse(BaseModel):
     support_configured_bool: bool
     page_url_string: Optional[str] = None
     user_email_string: Optional[str] = None
+    # Localization V3: the visitor's language, stored on support_chat_sessions.language
+    language_string: Optional[str] = None
+    language: Optional[dict] = None
 
 
 class SupportChatMessagePostRequest(BaseModel):

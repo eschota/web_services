@@ -121,7 +121,7 @@
             if (document.querySelector('script[data-support-chat-js="1"]')) return;
 
             const s = document.createElement('script');
-            s.src = '/static/js/support-chat.js?v=20260509-pollbackoff1';
+            s.src = '/static/js/support-chat.js?v=2a82556929';
             s.async = true;
             s.setAttribute('data-support-chat-js', '1');
             s.onload = function () {

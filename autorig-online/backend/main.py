@@ -2983,9 +2983,14 @@ async def auth_me(
     db: AsyncSession = Depends(get_db)
 ):
     """Get current auth status"""
+    from user_language import subject_language_fields as _i18n_subject_language
+
     if user:
+        _lang = await _i18n_subject_language(db, request, user=user)
         return AuthStatusResponse(
             authenticated=True,
+            language=_lang["language"],
+            language_code=_lang["language_code"],
             user=UserInfo(
                 id=user.id,
                 email=user.email,
@@ -3005,8 +3010,11 @@ async def auth_me(
     anon_session = await get_anon_session(request, response, db)
     remaining = get_remaining_credits_anon(anon_session)
     
+    _lang = await _i18n_subject_language(db, request, anon=anon_session)
     return AuthStatusResponse(
         authenticated=False,
+        language=_lang["language"],
+        language_code=_lang["language_code"],
         anon=AnonInfo(
             anon_id=anon_session.anon_id,
             free_used=anon_session.free_used,
@@ -4115,6 +4123,17 @@ async def api_support_chat_session_post(
     email = getattr(user, "email", None) if user else None
 
     row = await _get_or_create_support_chat_session(db, visitor, email, page)
+    _support_lang = None
+    try:  # Localization V3: the visitor's language lives on the session (support_ai answers in it)
+        from user_language import record_support_session_language
+
+        _support_lang = await record_support_session_language(
+            db, row, request, user=user,
+            widget_language=getattr(body, "language_string", None),
+            browser_languages=getattr(body, "browser_languages_string", None),
+        )
+    except Exception as exc:
+        print(f"[SupportChat] language: {type(exc).__name__}: {exc}")
 
     topic_ready_bool = row.telegram_thread_id is not None
     configured = bool(await support_forum_configured_bool(db))
@@ -4126,6 +4145,8 @@ async def api_support_chat_session_post(
         support_configured_bool=configured,
         page_url_string=row.page_url,
         user_email_string=row.user_email,
+        language_string=_support_lang.code if _support_lang else getattr(row, "language", None),
+        language=_support_lang.payload() if _support_lang else None,
     )
 
 
@@ -4221,9 +4242,18 @@ async def api_support_chat_message_post(
         p = html.escape((sess.page_url or "")[:500])
         page_snip = f"\n🌐 {p}"
 
+    lang_snip = ""
+    try:  # Localization V3: the operator sees which language to answer in
+        from user_language import record_support_session_language, support_language_line
+
+        await record_support_session_language(db, sess, request, user=user, only_if_missing=True)
+        lang_snip = support_language_line(sess)
+    except Exception as exc:
+        print(f"[SupportChat] language line: {type(exc).__name__}: {exc}")
+
     tg_html = (
         f"💬 <b>Support session</b> <code>{int(sess.id)}</code>\n"
-        f"👤 <b>Visitor</b> {who}{page_snip}\n\n{escaped_text}"
+        f"👤 <b>Visitor</b> {who}{page_snip}{lang_snip}\n\n{escaped_text}"
     )
 
     try:
@@ -5926,7 +5956,12 @@ async def api_get_task(
         downloadable_output_urls,
         downloadable_ready_urls,
     )
+    from user_language import task_language_fields as _i18n_task_language
+
+    _owner_lang = await _i18n_task_language(db, task)
     return TaskStatusResponse(
+        owner_language=_owner_lang["owner_language"],
+        owner_language_code=_owner_lang["owner_language_code"],
         task_id=task.id,
         status=task.status,
         progress=task.progress,
@@ -12997,9 +13032,14 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
         await asyncio.to_thread(run_artifact_cache_retention)
         cache_block = artifact_creation_block_reason()
     if cache_block:
+        # The storage numbers are for the log; the visitor gets a sentence in their language
+        # (Localization V3: a Persian customer once saw this raw string in an alert).
+        print(f"[Request Disk] new work paused before {context}: {cache_block}")
+        from user_language import user_error_detail
+
         raise HTTPException(
             status_code=503,
-            detail=cache_block,
+            detail=user_error_detail("storage_paused", retry_after_seconds=600),
             headers={"Retry-After": "600"},
         )
     try:
@@ -13017,13 +13057,16 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
 
     free_gb = shutil.disk_usage("/").free / (1024**3)
     if free_gb < NEW_TASK_MIN_FREE_GB:
+        print(
+            f"[Request Disk] new work paused before {context}: {free_gb:.2f}GB free, "
+            f"target is {NEW_TASK_MIN_FREE_GB:.2f}GB"
+        )
+        from user_language import user_error_detail
+
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Server disk is under pressure. "
-                f"{free_gb:.2f}GB free, target is {NEW_TASK_MIN_FREE_GB:.2f}GB. "
-                "Please try again later."
-            ),
+            detail=user_error_detail("storage_paused", retry_after_seconds=600),
+            headers={"Retry-After": "600"},
         )
     return result
 
@@ -16132,6 +16175,14 @@ def _inject_static_layout(html_content: str, canonical_path: Optional[str] = Non
             flags=re.IGNORECASE,
         )
 
+    # Localization V3: lang/dir, data-i18n text, hreflang and canonical for the request's language.
+    try:
+        from user_language import localize_page
+
+        html_content = localize_page(html_content, canonical_path)
+    except Exception as exc:
+        print(f"[i18n] localize_page: {type(exc).__name__}: {exc}")
+
     return html_content
 
 
@@ -17873,3 +17924,16 @@ try:
     print("[Generation] image-to-rig routes registered")
 except Exception as _gen_routes_error:  # never take the API down over one feature
     print(f"[Generation] route registration failed: {_gen_routes_error}")
+
+
+# --- user language (Localization V3, 2026-10-10) -------------------------------
+# GET/POST /api/me/language, /api/language(/resolve), /<lang>/ page URLs and
+# server-side page localization. See user_language.py.
+try:
+    from user_language import install as _install_user_language
+
+    _install_user_language(
+        app, get_db=get_db, get_current_user=get_current_user, get_anon_session=get_anon_session,
+    )
+except Exception as _i18n_error:  # never take the API down over one feature
+    print(f"[i18n] user language not installed: {_i18n_error}")

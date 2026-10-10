@@ -291,14 +291,64 @@ const App = {
         }
     },
 
-    taskCreateErrorMessage(status, data, text) {
-        const detail = data && typeof data.detail === 'string' ? data.detail.trim() : '';
-        if (detail) return detail;
-
+    /**
+     * Turns a failed response into a sentence for the visitor, in the visitor's
+     * language. Internal server text (5xx details, storage numbers, tracebacks)
+     * is never shown: it stays in the server log. Server errors that carry a
+     * code ({detail: {error_string}}) map to translation keys.
+     */
+    userFacingError(status, data, text, fallbackKey = 'error_generic') {
         const translatedOr = (key, fallback) => {
             const value = typeof t === 'function' ? t(key) : '';
             return value && value !== key ? value : fallback;
         };
+        const generic = () => translatedOr(fallbackKey, translatedOr('error_generic', 'Something went wrong. Please try again.'));
+        const raw = data && data.detail;
+        const code = raw && typeof raw === 'object' && !Array.isArray(raw)
+            ? String(raw.error_string || raw.code || '')
+            : '';
+        const CODE_KEYS = {
+            storage_paused: 'error_storage_paused',
+            disk_pressure: 'error_storage_paused',
+            server_busy: 'error_server_busy',
+            backend_restarting: 'error_service_unavailable',
+            rate_limited: 'error_rate_limited',
+            login_required: 'error_login_required',
+            payment_required: 'error_payment_required',
+            upload_too_large: 'error_upload_too_large',
+        };
+        if (code && CODE_KEYS[code]) {
+            return translatedOr(CODE_KEYS[code], generic());
+        }
+        if (raw && typeof raw === 'object' && raw.user_message_bool && typeof raw.message_string === 'string') {
+            return raw.message_string;
+        }
+        const detail = typeof raw === 'string' ? raw.trim() : '';
+        const internal = /cache=|reserve=|deliverables preserved|disk reserve|disk is under pressure|traceback|exception|errno|\/srv\/|\/var\/|\.py\b/i;
+        if (detail && internal.test(detail)) {
+            return /cache=|reserve=|disk/i.test(detail)
+                ? translatedOr('error_storage_paused', 'New uploads are paused for a few minutes. Please try again later.')
+                : generic();
+        }
+        if (status === 413) {
+            return translatedOr('error_upload_too_large', 'This file is too large. Upload a GLB, FBX, or OBJ file up to 100MB.');
+        }
+        if (status === 429) {
+            return translatedOr('error_rate_limited', 'Too many attempts. Please wait a minute and try again.');
+        }
+        if (!status || status >= 500) {
+            return translatedOr('error_service_unavailable', 'The rigging service is temporarily unavailable. Please try again in a few minutes.');
+        }
+        if (detail && detail.length <= 300) return detail;
+        return generic();
+    },
+
+    taskCreateErrorMessage(status, data, text) {
+        const translatedOr = (key, fallback) => {
+            const value = typeof t === 'function' ? t(key) : '';
+            return value && value !== key ? value : fallback;
+        };
+        if (data && data.detail) return this.userFacingError(status, data, text, 'error_generic');
 
         if (status === 413) {
             return translatedOr(
@@ -740,6 +790,43 @@ const App = {
                 return { view_id_string: view.id, ...data };
             };
             const preflightRender = capture(views[0]);
+            // Hair, loose clothing and pose, from the four side renders on one
+            // sheet. Runs alongside the rig-type check; the review waits for it.
+            this._rigAppearancePromise = null;
+            if (window.RigAppearance) {
+                let untextured = true;
+                object.traverse?.((node) => {
+                    if (!node?.isMesh) return;
+                    const mats = Array.isArray(node.material) ? node.material : [node.material];
+                    if (mats.some((m) => m && m.name !== 'vision_detector_neutral_gray')) untextured = false;
+                });
+                const sides = views.filter((v) => ['front', 'back', 'left', 'right'].includes(v.id)).map(capture);
+                // No textures: also a front Z-depth, near = white, for the farm to
+                // repaint the character from. The camera's near and far planes are
+                // pulled in around the model so its depth spans the whole grey range.
+                let depth = '';
+                if (untextured) {
+                    const front = views.find((v) => v.id === 'front');
+                    const saved = { near: camera.near, far: camera.far, bg: scene.background, ground: ground.visible };
+                    try {
+                        camera.near = Math.max(0.001, dist - maxDim * 0.8);
+                        camera.far = dist + maxDim * 0.8;
+                        camera.updateProjectionMatrix();
+                        scene.overrideMaterial = new THREE.MeshDepthMaterial();
+                        scene.background = new THREE.Color(0x000000);
+                        ground.visible = false;
+                        depth = capture(front);
+                    } finally {
+                        scene.overrideMaterial = null;
+                        scene.background = saved.bg;
+                        ground.visible = saved.ground;
+                        camera.near = saved.near;
+                        camera.far = saved.far;
+                        camera.updateProjectionMatrix();
+                    }
+                }
+                this._rigAppearancePromise = window.RigAppearance.start(sides, { untextured, depth });
+            }
             const first = await analyze(views[0], preflightRender);
             // Array.map passes (value, index, array). Keep the index from being
             // mistaken for analyze()'s optional capturedImage argument.
@@ -831,6 +918,9 @@ const App = {
     buildRigDetectionSubmitPayload(detection, selectedRigKey) {
         const d = JSON.parse(JSON.stringify(detection));
         delete d.preflight_render_jpg_base64_string;
+        if (this._rigAppearancePanel) {
+            d.appearance = this._rigAppearancePanel.choice();
+        }
         const autoKey = this.rigDetectAutoKey(detection);
         const sel = String(selectedRigKey || 'humanoid').toLowerCase();
         if (sel === 'humanoid') {
@@ -1017,6 +1107,25 @@ const App = {
                 renderReviewCopy();
             });
 
+            this._rigAppearancePanel = null;
+            const ctaRow = review?.querySelector('.rig-detect-cta-row');
+            if (window.RigAppearance && this._rigAppearancePromise && ctaRow) {
+                const host = document.createElement('div');
+                ctaRow.parentNode.insertBefore(host, ctaRow);
+                const holdTimer = () => {
+                    // Someone ticking boxes is not done choosing: the countdown
+                    // must not start the job under them.
+                    if (interval) clearInterval(interval);
+                    interval = 0;
+                    if (hint) hint.textContent = '';
+                    if (startBtn && typeof t === 'function') {
+                        // The label without its countdown, in any language's brackets.
+                        startBtn.textContent = t('upload_rig_start_now_with_timer', { timer: '' }).split(/[(（]/)[0].trim();
+                    }
+                };
+                this._rigAppearancePanel = window.RigAppearance.mount(host, this._rigAppearancePromise, holdTimer, holdTimer);
+            }
+
             renderReviewCopy();
             refreshFooter();
             refreshStartBtn();
@@ -1202,8 +1311,8 @@ const App = {
             status.classList.remove('hidden');
             status.style.color = '';
             const label = ids.length === total
-                ? `${ids.length} task(s) created — open: `
-                : `${ids.length} of ${total} task(s) created — open: `;
+                ? t('image_gen_created_all', { count: ids.length })
+                : t('image_gen_created_some', { count: ids.length, total });
             status.appendChild(document.createTextNode(label));
             ids.forEach((id, i) => {
                 if (i) status.appendChild(document.createTextNode(' · '));
@@ -1232,7 +1341,7 @@ const App = {
             const chosen = Array.from(input.files || []);
             if (!chosen.length) return;
             if (nameEl) nameEl.textContent = chosen.length > 1
-                ? `${chosen.length} images` : chosen[0].name;
+                ? t('image_gen_files_count', { count: chosen.length }) : chosen[0].name;
             info?.classList.remove('hidden');
             this.startBatchGeneration(chosen, say, sayCreated);
         });
@@ -1243,7 +1352,7 @@ const App = {
         this.state.imageGenerationInProgress = true;
         if (nameEl) nameEl.textContent = file.name;
         info?.classList.remove('hidden');
-        say('Uploading and detecting the character...');
+        say(t('image_gen_status_uploading'));
         try {
             const body = new FormData();
             body.append('file', file);
@@ -1251,25 +1360,26 @@ const App = {
                 method: 'POST', body, credentials: 'same-origin'
             });
             if (resp.status === 401) {
-                say('Signing you in...');
+                say(t('image_gen_status_signing_in'));
                 window.location.href = '/auth/login';
                 return;
             }
             if (resp.status === 402) {
-                say('Opening credits...');
+                say(t('image_gen_status_opening_credits'));
                 window.location.href = '/buy-credits';
                 return;
             }
             const data = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                say(data.detail || `Generation could not start (HTTP ${resp.status})`, true);
+                say(this.userFacingError(resp.status, data, '', 'error_generation_start'), true);
                 this.state.imageGenerationInProgress = false;
                 return;
             }
-            say('Generating your character...');
+            say(t('image_gen_status_generating'));
             window.location.href = data.progress_url || `/task?id=${data.task_id}`;
         } catch (err) {
-            say(`Generation could not start: ${err}`, true);
+            console.error('Generation start failed:', err);
+            say(t('error_generation_start'), true);
             this.state.imageGenerationInProgress = false;
         }
     },
@@ -1379,7 +1489,7 @@ const App = {
             return;
         }
         if (models.length > 1) {
-            alert('One model per rig task - starting with the first file. Drop images to create several tasks at once.');
+            alert(t('error_one_model_per_task'));
         }
         this.handleFileSelect(models[0]);
     },
@@ -1392,8 +1502,8 @@ const App = {
         for (let i = 0; i < total; i++) {
             const file = files[i];
             say(total > 1
-                ? `Starting ${i + 1} of ${total}: ${file.name}...`
-                : 'Uploading and detecting the character...');
+                ? t('image_gen_status_batch_item', { index: i + 1, total, name: file.name })
+                : t('image_gen_status_uploading'));
             try {
                 const body = new FormData();
                 body.append('file', file);
@@ -1405,7 +1515,7 @@ const App = {
                     // credits ran out part-way: keep what was started and send
                     // the user where they can top up
                     if (created.length) {
-                        say(`Started ${created.length} of ${total}; out of credits - opening the credits page...`);
+                        say(t('image_gen_status_batch_out_of_credits', { started: created.length, total }));
                         await new Promise((r) => setTimeout(r, 1200));
                     }
                     window.location.href = '/buy-credits';
@@ -1413,16 +1523,17 @@ const App = {
                 }
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) {
-                    say(`${file.name}: ${data.detail || `HTTP ${resp.status}`}`, true);
+                    say(`${file.name}: ${this.userFacingError(resp.status, data, '', 'error_generation_start')}`, true);
                     continue;
                 }
                 created.push(data.task_id);
             } catch (err) {
-                say(`${file.name}: ${err}`, true);
+                console.error('Generation start failed:', err);
+                say(`${file.name}: ${t('error_generation_start')}`, true);
             }
         }
         this.state.imageGenerationInProgress = false;
-        if (!created.length) { say('No task could be started', true); return; }
+        if (!created.length) { say(t('image_gen_status_none_started'), true); return; }
         if (created.length === 1) {
             window.location.href = `/task?id=${created[0]}`;
             return;
@@ -1447,7 +1558,7 @@ const App = {
         }
 
         if (!allowedExtensions.includes(ext)) {
-            alert('Please select a GLB, FBX or OBJ model - or drop a PNG/JPG/WEBP picture to generate a character from it');
+            alert(t('error_select_model_file'));
             return;
         }
         
@@ -2230,7 +2341,7 @@ const App = {
                     navigatingAway = true;
                     window.location.href = '/buy-credits';
                 } else {
-                    alert(data.detail || t('error_generic'));
+                    alert(this.userFacingError(response.status, data, '', 'error_generic'));
                 }
             }
         } catch (error) {

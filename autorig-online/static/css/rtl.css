@@ -1,0 +1,232 @@
+/* =============================================================================
+   AutoRig.online — right-to-left layer (Persian / fa)
+
+   Loaded only when the interface language is written right to left: the server
+   links it in the <head> of a right-to-left page, and i18n.js adds it when a
+   visitor switches language in place.
+
+   dir="rtl" sits on <html> for pages whose content is translated (home,
+   gallery, buy, how it works, ...). On pages whose article text exists only in
+   English it sits on the shared chrome alone: #site-header, #site-footer and the
+   support chat, so English paragraphs never get mirrored punctuation.
+   ============================================================================= */
+
+/* Persian web font: Vazirmatn (SIL OFL 1.1). Only Arabic-script characters use
+   it; Latin text keeps the site's Outfit face. Tahoma / Noto / Geeza Pro cover
+   the case where the CDN is unreachable. */
+@font-face {
+    font-family: 'Vazirmatn';
+    src: url('https://cdn.jsdelivr.net/npm/vazirmatn@33.0.3/fonts/webfonts/Vazirmatn%5Bwght%5D.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF, U+200C-200F, U+FB50-FDFF, U+FE70-FEFF;
+}
+
+:root {
+    --font-rtl: 'Outfit', 'Vazirmatn', Tahoma, 'Segoe UI', 'Noto Sans Arabic', 'Noto Naskh Arabic', 'Geeza Pro', system-ui, sans-serif;
+}
+
+[dir="rtl"],
+:lang(fa) {
+    font-family: var(--font-rtl);
+}
+
+[dir="rtl"] button,
+[dir="rtl"] input,
+[dir="rtl"] select,
+[dir="rtl"] textarea,
+[dir="rtl"] .btn {
+    font-family: inherit;
+}
+
+html[dir="rtl"] body {
+    line-height: 1.75;
+}
+
+html[dir="rtl"] h1,
+html[dir="rtl"] h2,
+html[dir="rtl"] h3 {
+    line-height: 1.45;
+    letter-spacing: 0;
+}
+
+/* Code, URLs, e-mail addresses and keys always read left to right. */
+[dir="rtl"] code,
+[dir="rtl"] pre,
+[dir="rtl"] kbd,
+[dir="rtl"] samp,
+[dir="rtl"] input[type="url"],
+[dir="rtl"] input[type="email"],
+[dir="rtl"] .api-key-value,
+[dir="rtl"] .api-copy-target {
+    direction: ltr;
+    unicode-bidi: isolate;
+}
+
+[dir="rtl"] pre,
+[dir="rtl"] input[type="url"],
+[dir="rtl"] input[type="email"] {
+    text-align: left;
+}
+
+/* Text that comes from users or models (titles, file names, chat lines) takes
+   the direction of its own first letter. */
+[dir="rtl"] .tc-author,
+[dir="rtl"] .tc-version,
+[dir="rtl"] .tc-card [class*="title"],
+[dir="rtl"] .file-item-name,
+[dir="rtl"] #file-name,
+[dir="rtl"] #image-name,
+[dir="rtl"] .history-item-name,
+[dir="rtl"] .ar-support-chat-msg-body,
+[dir="rtl"] .ar-support-chat-textarea,
+.ar-support-chat[dir="rtl"] .ar-support-chat-msg-body,
+.ar-support-chat[dir="rtl"] .ar-support-chat-textarea {
+    unicode-bidi: plaintext;
+}
+
+/* ----------------------------------------------------------------- header */
+[dir="rtl"] .header-actions {
+    margin-left: 0;
+    margin-right: auto;
+}
+
+[dir="rtl"] .lang-dropdown {
+    right: auto;
+    left: 0;
+}
+
+[dir="rtl"] .lang-option {
+    text-align: right;
+}
+
+[dir="rtl"] .lang-option[dir="ltr"] {
+    text-align: left;
+}
+
+@media (max-width: 1080px) {
+    [dir="rtl"] .header-actions {
+        margin-left: 0;
+        margin-right: auto;
+    }
+}
+
+/* ------------------------------------------------------------- home page */
+[dir="rtl"] .demo-youtube-arrow,
+[dir="rtl"] .product-hunt-arrow {
+    margin-left: 0;
+    margin-right: auto;
+    transform: scaleX(-1);
+}
+
+[dir="rtl"] .demo-youtube-chip {
+    right: auto;
+    left: 0.85rem;
+}
+
+@media (max-width: 768px) {
+    [dir="rtl"] .demo-youtube-chip {
+        right: auto;
+        left: 0.65rem;
+    }
+}
+
+[dir="rtl"] .form-busy-inner {
+    text-align: right;
+}
+
+[dir="rtl"] .form-busy-progress-pct {
+    text-align: left;
+}
+
+[dir="rtl"] .form-busy-tips-list {
+    padding-left: 0;
+    padding-right: 1.15rem;
+}
+
+[dir="rtl"] .file-item-name {
+    margin-right: 0;
+    margin-left: 1rem;
+}
+
+[dir="rtl"] .rig-detect-card-weight {
+    right: auto;
+    left: 1px;
+}
+
+/* ------------------------------------------------------------ task cards */
+[dir="rtl"] .tc-author,
+[dir="rtl"] .tc-version {
+    left: auto;
+    right: 12px;
+}
+
+[dir="rtl"] .gallery-rig-icon {
+    right: auto;
+    left: 10px;
+}
+
+[dir="rtl"] .tc-badges {
+    right: auto;
+    left: 12px;
+}
+
+[dir="rtl"] .api-copy {
+    right: auto;
+    left: 10px;
+}
+
+[dir="rtl"] .admin-table td,
+[dir="rtl"] .admin-table th {
+    text-align: right;
+}
+
+[dir="rtl"] .img2rig-checklist {
+    padding-left: 0;
+    padding-right: 1.25rem;
+}
+
+/* ----------------------------------------------------------- support chat */
+[dir="rtl"] .ar-support-chat,
+.ar-support-chat[dir="rtl"] {
+    right: auto;
+    left: max(14px, env(safe-area-inset-left));
+    font-family: var(--font-rtl);
+}
+
+[dir="rtl"] .ar-support-chat--webapp,
+.ar-support-chat--webapp[dir="rtl"] {
+    right: auto;
+    left: max(12px, env(safe-area-inset-left));
+}
+
+[dir="rtl"] .ar-support-chat-badge,
+.ar-support-chat[dir="rtl"] .ar-support-chat-badge {
+    right: auto;
+    left: -2px;
+}
+
+[dir="rtl"] .ar-support-chat-panel,
+.ar-support-chat[dir="rtl"] .ar-support-chat-panel {
+    right: auto;
+    left: 0;
+}
+
+[dir="rtl"] .ar-support-chat-msg--user .ar-support-chat-msg-col,
+.ar-support-chat[dir="rtl"] .ar-support-chat-msg--user .ar-support-chat-msg-col {
+    text-align: left;
+}
+
+[dir="rtl"] .ar-support-send-plane,
+.ar-support-chat[dir="rtl"] .ar-support-send-plane {
+    transform: scaleX(-1);
+}
+
+@media (max-width: 480px) {
+    [dir="rtl"] .ar-support-chat-panel,
+    .ar-support-chat[dir="rtl"] .ar-support-chat-panel {
+        left: auto;
+        right: auto;
+    }
+}
