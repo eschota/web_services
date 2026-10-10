@@ -25,6 +25,9 @@ PIPELINE_REVISION = "autorig-v3-rig/1"
 RUNTIME_SCHEMA_VERSION = 1
 NONTERMINAL_BINDING_STATES = frozenset({"pending", "dispatching", "queued", "running",
                                         "awaiting_artifact_verification", "needs_review"})
+# A binding in one of these states needs no more dispatch work.  needs_review is
+# final for its attempt: only an explicit retry creates the next attempt.
+SETTLED_BINDING_STATES = ("done", "failed", "blocked_protocol", "superseded", "needs_review")
 
 
 class RuntimeContractError(ValueError):
@@ -59,14 +62,18 @@ class TaskStatusPatch:
 
 
 def task_status_patch(record: OutboxRecord) -> TaskStatusPatch:
-    """Map V3 state without ever presenting review/unverified work as done."""
+    """Map V3 state without ever presenting review/unverified work as done.
+
+    ``needs_review`` stays an explicit Task status: the attempt finished, its
+    preview is kept, and the QA reasons are shown instead of a fake success.
+    """
     state = record.state
     if state == "done":
         return TaskStatusPatch("done", None, state, True)
     if state in {"failed", "blocked_protocol"}:
         return TaskStatusPatch("error", record.error or "V3 processing failed", state, True)
     if state == "needs_review":
-        return TaskStatusPatch("processing", "V3 result requires review", state, False)
+        return TaskStatusPatch("needs_review", "V3 result requires review", state, True)
     if state in {"pending_register", "pending_submit"}:
         return TaskStatusPatch("created", None, state, False)
     return TaskStatusPatch("processing", None, state, False)
@@ -195,15 +202,30 @@ class SameTaskDbBindings:
                 "intent_plan": json.dumps(canonical.intent_plan, sort_keys=True) if canonical.intent_plan else None})
 
     async def recover_pending(self, session: Any) -> list[TaskBinding]:
-        result = await session.execute(_sql("""
+        settled = ",".join(f"'{state}'" for state in SETTLED_BINDING_STATES)
+        result = await session.execute(_sql(f"""
             SELECT b.* FROM v3_dispatch_task_bindings b
             JOIN tasks t ON t.id=b.task_id
-            WHERE b.state NOT IN ('done','failed','blocked_protocol','superseded')
+            WHERE b.state NOT IN ({settled})
               AND b.attempt=(SELECT MAX(x.attempt) FROM v3_dispatch_task_bindings x WHERE x.task_id=b.task_id)
             ORDER BY b.created_at,b.task_id
         """))
         rows = result.mappings().all()
         return [self._binding(row) for row in rows]
+
+    async def get(self, session: Any, task_id: str, attempt: int) -> TaskBinding | None:
+        result = await session.execute(_sql(
+            "SELECT * FROM v3_dispatch_task_bindings WHERE task_id=:task_id AND attempt=:attempt"
+        ), {"task_id": task_id, "attempt": attempt})
+        rows = result.mappings().all()
+        return self._binding(rows[0]) if rows else None
+
+    async def latest(self, session: Any, task_id: str) -> TaskBinding | None:
+        result = await session.execute(_sql(
+            "SELECT * FROM v3_dispatch_task_bindings WHERE task_id=:task_id ORDER BY attempt DESC LIMIT 1"
+        ), {"task_id": task_id})
+        rows = result.mappings().all()
+        return self._binding(rows[0]) if rows else None
 
     async def record_outbox(self, session: Any, record: OutboxRecord) -> None:
         result = await session.execute(_sql("""
@@ -257,7 +279,7 @@ class V3TaskRuntime:
     def __init__(self, *, session_factory: Callable[[], Any], bindings: SameTaskDbBindings,
                  outbox: V3DispatchOutbox, remote_factory: Callable[[], Any],
                  projector: Projector, artifact_verifier: Any, workers: int = 1,
-                 idle_seconds: float = 1.0) -> None:
+                 idle_seconds: float = 2.0, after_commit: Any = None) -> None:
         if workers < 1 or workers > 8:
             raise RuntimeContractError("V3 runtime worker count must be between 1 and 8")
         if artifact_verifier is None:
@@ -266,6 +288,7 @@ class V3TaskRuntime:
         self.remote_factory, self.projector = remote_factory, projector
         self.artifact_verifier, self.worker_count = artifact_verifier, workers
         self.idle_seconds = max(.05, float(idle_seconds))
+        self.after_commit = after_commit
         self._stop = asyncio.Event()
         self._workers: list[asyncio.Task] = []
 
@@ -286,34 +309,50 @@ class V3TaskRuntime:
         self._workers.clear()
 
     async def _recover(self) -> None:
-        async with self.session_factory() as session:
-            for binding in await self.bindings.recover_pending(session):
-                self.outbox.enqueue(binding.identity, binding.source_manifest)
-
-    async def run_once(self) -> bool:
-        worked = await self.outbox.process_one(
-            self.remote_factory(), artifact_verifier=self.artifact_verifier)
-        if not worked:
-            await self._recover()
-            return False
-        await self._project_all()
-        return True
-
-    async def _project_all(self) -> None:
+        """Enqueue every unsettled binding (idempotent) and re-project any whose
+        durable outbox state moved on while the projection was lost (restart)."""
         async with self.session_factory() as session:
             bindings = await self.bindings.recover_pending(session)
-            for binding in bindings:
-                try:
-                    record = self.outbox.get(binding.identity)
-                except KeyError:
-                    continue
-                await self.bindings.record_outbox(session, record)
-                await self.projector(session, binding, task_status_patch(record), record)
+        for binding in bindings:
+            record = self.outbox.enqueue(binding.identity, binding.source_manifest)
+            if record.state != binding.state and record.state != "pending_register":
+                await self.project(binding.identity)
+
+    async def run_once(self) -> bool:
+        identity = await self.outbox.process_one(
+            self.remote_factory(), artifact_verifier=self.artifact_verifier)
+        if identity is None:
+            await self._recover()
+            return False
+        await self.project(identity)
+        return True
+
+    async def project(self, identity: DispatchIdentity) -> None:
+        """Copy one attempt's durable outbox state into its binding and Task row."""
+        record = self.outbox.get(identity)
+        async with self.session_factory() as session:
+            binding = await self.bindings.get(session, identity.task_id, identity.attempt)
+            if binding is None or binding.identity != identity or binding.state == "superseded":
+                return
+            patch = task_status_patch(record)
+            await self.bindings.record_outbox(session, record)
+            await self.projector(session, binding, patch, record)
             await session.commit()
+        if self.after_commit is not None:
+            # Notifications read committed state; they must never run inside
+            # the projection transaction (SQLite would block them on its lock).
+            await self.after_commit(binding, patch, record)
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
-            if not await self.run_once():
+            try:
+                worked = await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:                              # one bad row never stops the runtime
+                print(f"[V3] runtime step failed: {type(exc).__name__}: {exc}")
+                worked = False
+            if not worked:
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=self.idle_seconds)
                 except asyncio.TimeoutError:

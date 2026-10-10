@@ -2575,6 +2575,19 @@ async def _submit_generated_model(
     from tasks import create_conversion_task
 
     async with AsyncSessionLocal() as db:
+        # V3 conveyor (2026-10-10): with the "telegram" route switched on
+        # (AUTORIG_V3_ROUTES) the generated GLB enters V3, never the legacy rig.
+        from v3_intake import admit_generated_glb, route_enabled
+
+        if route_enabled("telegram"):
+            try:
+                v3_task = await admit_generated_glb(
+                    db, glb_url=glb_url, owner_type="anon", owner_id="telegram-bot", origin="telegram",
+                    receipt_facts={"source": "renderfin-telegram"},
+                    collection_metadata=collection_metadata, queue_class=queue_class)
+            except Exception as exc:
+                return None, f"V3 admission failed: {type(exc).__name__}: {exc}"[:300]
+            return v3_task.id, None
         task, error = await create_conversion_task(
             db,
             input_url=glb_url,

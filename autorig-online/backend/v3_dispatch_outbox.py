@@ -19,9 +19,11 @@ import inspect
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol
+
+import httpx
 
 from v3_pipeline_adapter import (
     V2_REQUIRED_ARTIFACTS,
@@ -153,6 +155,10 @@ class OutboxRecord:
     progress: float
     error: str
     next_run_at: float
+    # Last validated remote document: qa, artifact_manifest, viewer session and,
+    # for done, the independent artifact verification receipt.
+    remote_status: Mapping[str, Any] = field(default_factory=dict)
+    updated_at: float = 0.0
 
 
 class V3DispatchOutbox:
@@ -301,7 +307,7 @@ class V3DispatchOutbox:
 
     def _update(self, key: str, lease_token: str, *, state: str, source_ref: str | None = None,
                 idempotency_key: str | None = None, run_id: str | None = None,
-                remote_stage: str = "", progress: float = 0, error: str = "",
+                remote_stage: str | None = None, progress: float | None = None, error: str = "",
                 remote_status: Mapping[str, Any] | None = None,
                 delay: float = 0) -> None:
         if state not in ALL_STATES:
@@ -313,7 +319,8 @@ class V3DispatchOutbox:
             changed = db.execute("""
                 UPDATE v3_dispatch_outbox SET state=?,source_ref=COALESCE(?,source_ref),
                     idempotency_key=COALESCE(?,idempotency_key),run_id=COALESCE(?,run_id),
-                    remote_stage=?,progress=?,remote_status_json=COALESCE(?,remote_status_json),
+                    remote_stage=COALESCE(?,remote_stage),progress=COALESCE(?,progress),
+                    remote_status_json=COALESCE(?,remote_status_json),
                     error=?,next_run_at=?,lease_until=NULL,lease_token=NULL,updated_at=?
                 WHERE identity_key=? AND lease_token=?
             """, (state, source_ref, idempotency_key, run_id, remote_stage, progress,
@@ -361,15 +368,15 @@ class V3DispatchOutbox:
 
     async def process_one(self, remote: DispatchRemote, *, artifact_verifier: ArtifactVerifier | None = None,
                           poll_seconds: float = 5,
-                          retry_seconds: float = 15, lease_seconds: float = 120) -> bool:
-        """Advance one due row exactly one remote step.
+                          retry_seconds: float = 15, lease_seconds: float = 120) -> DispatchIdentity | None:
+        """Advance one due row exactly one remote step; return its identity (``None`` = idle).
 
         Transport failures are retried from durable state.  Contract violations
         become ``blocked_protocol`` and never fall through to the legacy path.
         """
         row = self._claim(lease_seconds)
         if row is None:
-            return False
+            return None
         identity = DispatchIdentity.create(
             row["task_id"], row["source_sha256"], row["intent"],
             row["pipeline_revision"], row["attempt"],
@@ -392,7 +399,7 @@ class V3DispatchOutbox:
                 )
                 self._update(identity.key, lease_token, state="pending_submit", source_ref=source_ref,
                              idempotency_key=submission.idempotency_key)
-                return True
+                return identity
 
             submission = V3DispatchSubmission.create(
                 identity.task_id, source_ref, identity.source_sha256, identity.attempt,
@@ -400,9 +407,19 @@ class V3DispatchOutbox:
             )
             if row["idempotency_key"] and row["idempotency_key"] != submission.idempotency_key:
                 raise V3ProtocolError("durable idempotency key mismatch")
-            status = await (remote.status(submission, row["run_id"]) if row["run_id"]
-                            else remote.submit(submission))
+            try:
+                status = await (remote.status(submission, row["run_id"]) if row["run_id"]
+                                else remote.submit(submission))
+            except httpx.HTTPStatusError as exc:
+                code = exc.response.status_code
+                if code == 404 and row["run_id"]:
+                    raise V3ProtocolError("the V3 worker no longer knows this run") from exc
+                if code in (409, 422):
+                    raise V3ProtocolError(f"the V3 worker rejected the submission: HTTP {code}") from exc
+                raise
             mapped = status.state.value
+            remote_doc = {"qa": status.qa, "artifact_manifest": status.artifact_manifest,
+                          "session": dict(status.session)}
             if status.state is V3State.DONE:
                 if artifact_verifier is None:
                     self._update(identity.key, lease_token,
@@ -410,25 +427,23 @@ class V3DispatchOutbox:
                                  idempotency_key=submission.idempotency_key, run_id=status.run_id,
                                  remote_stage=status.stage, progress=status.progress,
                                  error="independent artifact verification required",
-                                 remote_status={"qa": status.qa,
-                                                "artifact_manifest": status.artifact_manifest},
-                                 delay=poll_seconds)
-                    return True
+                                 remote_status=remote_doc, delay=poll_seconds)
+                    return identity
                 receipt = artifact_verifier(status)
                 receipt = await receipt if inspect.isawaitable(receipt) else receipt
                 self._validate_verification_receipt(status, receipt)
+                remote_doc["artifact_verification"] = dict(receipt)
             delay = poll_seconds if mapped in {"queued", "running"} else 0
             self._update(
                 identity.key, lease_token, state=mapped, source_ref=source_ref,
                 idempotency_key=submission.idempotency_key, run_id=status.run_id,
                 remote_stage=status.stage, progress=status.progress, error=status.error,
-                remote_status={"qa": status.qa, "artifact_manifest": status.artifact_manifest},
-                delay=delay,
+                remote_status=remote_doc, delay=delay,
             )
-            return True
+            return identity
         except V3ProtocolError as exc:
             self._update(identity.key, lease_token, state="blocked_protocol", error=str(exc))
-            return True
+            return identity
         except LeaseLost:
             raise
         except Exception as exc:
@@ -437,7 +452,7 @@ class V3DispatchOutbox:
             self._update(identity.key, lease_token, state=row["state"],
                          error=f"{type(exc).__name__}: {exc}",
                          delay=retry_seconds)
-            return True
+            return identity
 
     @staticmethod
     def _record(row: sqlite3.Row) -> OutboxRecord:
@@ -445,10 +460,15 @@ class V3DispatchOutbox:
             row["task_id"], row["source_sha256"], row["intent"],
             row["pipeline_revision"], row["attempt"],
         )
+        try:
+            remote = json.loads(row["remote_status_json"] or "{}")
+        except (TypeError, ValueError):
+            remote = {}
         return OutboxRecord(identity, row["state"], row["source_ref"],
                             row["idempotency_key"], row["run_id"],
                             row["remote_stage"], float(row["progress"]), row["error"],
-                            float(row["next_run_at"]))
+                            float(row["next_run_at"]), remote if isinstance(remote, dict) else {},
+                            float(row["updated_at"]))
 
 
 def http_remote(base_url: str, token: str, client: Any) -> V3DispatchClient:

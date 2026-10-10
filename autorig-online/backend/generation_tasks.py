@@ -281,6 +281,27 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
         print(f"[Generation] task {task.id} finished as a model (not riggable)")
         return
 
+    # V3 conveyor (2026-10-10): the generated mesh re-enters the same V3
+    # conveyor as an uploaded one, bound to this row with a generation receipt.
+    # A failed binding is retried on the next tick; it never becomes a legacy rig.
+    from config import is_admin_email
+    from v3_intake import bind_generated_task, route_enabled
+
+    if route_enabled("generation", is_admin=task.owner_type == "user" and is_admin_email(task.owner_id),
+                     explicit=bool(meta.get("v3"))):
+        set_generation_meta(task, stage=GEN_STAGE_RIGGING, conveyor="v3")
+        try:
+            await bind_generated_task(db, task, glb_url=glb_url, receipt_facts={
+                "renderfin_job_id": job_id, "subject": str(meta.get("subject") or "")[:200],
+                "pose": str(meta.get("pose") or "")[:120], "animal_type": str(meta.get("animal_type") or ""),
+                "detect_reason": str(meta.get("detect_reason") or "")[:200]})
+        except Exception as exc:
+            await db.rollback()
+            print(f"[Generation] task {task.id} V3 binding failed (retrying): {type(exc).__name__}: {exc}")
+            return
+        print(f"[Generation] task {task.id} generated {glb_url} -> V3 conveyor")
+        return
+
     # Riggable: the same row becomes the convert task for the mesh we just made.
     # Everything downstream then treats it as an ordinary conversion.
     task.input_url = glb_url

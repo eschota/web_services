@@ -84,6 +84,9 @@ def dispatch_queue_statement(task_model: Any, dispatch_now: datetime, *, limit: 
         .where(
             task_model.status == "created",
             task_model.pipeline_kind != "generate",
+            # V3 has its own durable dispatcher. Exclude before LIMIT so a
+            # backlog cannot starve old work or silently become a legacy rig.
+            task_model.pipeline_kind != "v3",
             or_(
                 task_model.source_next_retry_at.is_(None),
                 task_model.source_next_retry_at <= dispatch_now,

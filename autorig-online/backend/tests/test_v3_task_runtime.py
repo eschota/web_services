@@ -87,7 +87,9 @@ class V3TaskRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                            source_manifest=source_manifest(path), requested_intent="rig")
             await store.bind_in_task_transaction(session, first)
             db.execute("UPDATE v3_dispatch_task_bindings SET state='needs_review' WHERE task_id=?", (TASK,))
-            current = (await store.recover_pending(session))[0]
+            # needs_review is settled for its attempt: recovery no longer re-dispatches it
+            self.assertEqual(await store.recover_pending(session), [])
+            current = await store.latest(session, TASK)
             retry = await store.create_retry_in_transaction(session, current)
             db.commit()
             recovered = await store.recover_pending(session)
@@ -131,7 +133,8 @@ class V3TaskRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                           requested_intent="rig").identity
         def record(state, error=""):
             return OutboxRecord(identity, state, None, None, None, "", 0, error, 0)
-        self.assertEqual(task_status_patch(record("needs_review")).status, "processing")
+        self.assertEqual(task_status_patch(record("needs_review")).status, "needs_review")
+        self.assertTrue(task_status_patch(record("needs_review")).terminal)
         self.assertEqual(task_status_patch(record("awaiting_artifact_verification")).status, "processing")
         self.assertEqual(task_status_patch(record("done")).status, "done")
         self.assertEqual(task_status_patch(record("blocked_protocol", "bad")).status, "error")

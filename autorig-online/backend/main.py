@@ -645,6 +645,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
+                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -730,6 +731,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
+                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -926,6 +928,8 @@ async def background_task_updater():
                 # a generation task has no worker progress to go stale on;
                 # its own pump owns the lifecycle until the mesh exists
                 Task.pipeline_kind != "generate",
+                # V3 rows belong to the durable V3 runtime (v3_runtime_mount)
+                Task.pipeline_kind != "v3",
             )
         )
         processing_tasks = result.scalars().all()
@@ -1235,6 +1239,15 @@ async def lifespan(app: FastAPI):
         _artifact_cache_retention_loop(),
         name="artifact-cache-retention",
     )
+    # V3 task runtime (2026-10-10): durable outbox -> Motion Transfer /api/mt/v3.
+    # Restart-safe: unsettled bindings are re-enqueued, lost projections replayed.
+    app.state.v3_runtime = None
+    try:
+        from v3_runtime_mount import start_v3_runtime
+
+        app.state.v3_runtime = await start_v3_runtime(AsyncSessionLocal)
+    except Exception as exc:
+        print(f"[V3] runtime not started: {type(exc).__name__}: {exc}")
     
     # Send Telegram startup notification (fire-and-forget)
     try:
@@ -1260,6 +1273,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     background_task_running = False
+    try:
+        from v3_runtime_mount import stop_v3_runtime
+
+        await stop_v3_runtime(getattr(app.state, "v3_runtime", None))
+    except Exception as exc:
+        print(f"[V3] runtime stop: {type(exc).__name__}: {exc}")
     background_worker = getattr(app.state, "background_worker", None)
     youtube_worker = getattr(app.state, "youtube_retry_worker", None)
     startup_disk_maintenance = getattr(app.state, "startup_disk_maintenance", None)
@@ -4474,6 +4493,7 @@ async def api_create_task(
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
             file = fu
 
+    explicit_v3 = pipeline == "v3"
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
@@ -4527,6 +4547,33 @@ async def api_create_task(
 
     if not disk_headroom_checked:
         await ensure_request_disk_headroom(db, context="task_create")
+
+    # V3 conveyor (2026-10-10): the route switch picks V3; a V3 task never
+    # falls back to the legacy rig (v3_intake.route_enabled, AUTORIG_V3_ROUTES).
+    from v3_intake import route_enabled as _v3_route_enabled
+
+    if _v3_route_enabled("api" if via_api else "website",
+                         is_admin=bool(user and is_admin_email(user.email)), explicit=explicit_v3):
+        from v3_intake import V3IntakeError, admit_upload as _v3_admit_upload, local_upload_path
+
+        v3_source = local_upload_path(final_url)
+        if v3_source is None:
+            raise HTTPException(status_code=400, detail={
+                "code": "v3_upload_required",
+                "message": "V3 needs the model file itself (GLB, FBX or OBJ upload).",
+            })
+        try:
+            task = await _v3_admit_upload(
+                db, path=v3_source, original_url=final_url, filename=v3_source.name,
+                owner_type=owner_type, owner_id=owner_id, origin="api" if via_api else "website",
+                created_via_api=via_api, requested_intent="convert" if pipeline == "convert" else "rig",
+                input_type=input_type, input_bytes=uploaded_bytes,
+            )
+        except V3IntakeError as exc:
+            raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.detail})
+        _save_preflight_render_image(task.id, preflight_render_image_data_url
+                                     or _pop_preflight_render_image_from_meta(rig_v2_detection_meta))
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     preflight_render_image_data_url = (
         preflight_render_image_data_url
@@ -7391,6 +7438,11 @@ async def api_retry_task(
     
     if not is_owner:
         raise HTTPException(status_code=403, detail="Not authorized to retry this task")
+    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
+        from v3_runtime_mount import v3_retry
+
+        await v3_retry(db, task)
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
     
     # Check if task is eligible for retry
     if task.status == "done":
@@ -7460,6 +7512,12 @@ async def api_restart_task(
     )
     if not (is_owner or is_admin):
         raise HTTPException(status_code=403, detail="Not authorized to restart this task")
+
+    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
+        from v3_runtime_mount import v3_retry
+
+        await v3_retry(db, task)
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     # Age gate: 1 minute
     task_age = datetime.utcnow() - task.created_at
@@ -9654,9 +9712,12 @@ async def api_admin_restart_incomplete_tasks(
     """
     from database import Task
     
-    # Count incomplete tasks
+    # Count incomplete tasks (V3 rows restart only as a new V3 attempt)
     result = await db.execute(
-        select(Task).where(Task.status.in_(["created", "processing", "error"]))
+        select(Task).where(
+            Task.status.in_(["created", "processing", "error"]),
+            Task.pipeline_kind != "v3",
+        )
     )
     incomplete_tasks = result.scalars().all()
     task_count = len(incomplete_tasks)
@@ -12605,6 +12666,7 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
     r = await db.execute(
         select(Task).where(
             Task.status == "processing",
+            Task.pipeline_kind != "v3",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )
@@ -16634,6 +16696,18 @@ app.include_router(
         task_model=Task,
         is_admin_email=is_admin_email,
         static_dir=STATIC_DIR,
+    )
+)
+
+# V3 conveyor read API for the task page: /api/task/{id}/v3-shell and /api/task/{id}/v3.
+from v3_runtime_mount import build_v3_read_router
+
+app.include_router(
+    build_v3_read_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
     )
 )
 

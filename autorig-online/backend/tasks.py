@@ -7,6 +7,7 @@ import os
 import re
 import time
 import uuid
+from enum import Enum
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
@@ -583,6 +584,34 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
 # =============================================================================
 # Task Creation
 # =============================================================================
+class TaskDispatchOwner(str, Enum):
+    LEGACY = "legacy"
+    V3_RUNTIME = "v3_runtime"
+
+
+class V3RuntimeOwned:
+    """Typed refusal returned when legacy dispatch is called for a V3 task."""
+
+    owner = TaskDispatchOwner.V3_RUNTIME
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __str__(self) -> str:
+        return "V3 task is owned by the durable V3 runtime"
+
+
+V3_RUNTIME_OWNED = V3RuntimeOwned()
+
+
+def task_dispatch_owner(task: Task) -> TaskDispatchOwner:
+    """A pipeline_kind=v3 row belongs to the V3 runtime: legacy dispatch,
+    progress polling, stale reset and requeue never touch it."""
+    return (TaskDispatchOwner.V3_RUNTIME
+            if str(getattr(task, "pipeline_kind", "") or "").strip().lower() == "v3"
+            else TaskDispatchOwner.LEGACY)
+
+
 async def create_conversion_task(
     db: AsyncSession,
     input_url: str,
@@ -595,15 +624,43 @@ async def create_conversion_task(
     input_bytes: Optional[int] = None,
     collection_metadata: Optional[Dict[str, Any]] = None,
     queue_class: str = "interactive",
+    v3_binding: Optional[Any] = None,
+    viewer_settings: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
     Returns: (task, error_message)
+
+    pipeline_kind="v3" requires a server-owned, already-normalized TaskBinding;
+    the Task row and its binding are written in one commit.
     """
     task_type = normalize_task_type(task_type)
     pk = (pipeline_kind or "rig").strip().lower()
-    if pk not in ("rig", "convert", "generate"):
+    if pk not in ("rig", "convert", "generate", "v3"):
         pk = "rig"
+    canonical = None
+    if pk == "v3":
+        if v3_binding is None:
+            raise ValueError("pipeline_kind=v3 requires a server-owned validated TaskBinding")
+        from v3_dispatch_outbox import V3DispatchOutbox
+        from v3_task_runtime import normalize_task_binding
+
+        canonical = normalize_task_binding(
+            task_id=v3_binding.task_id,
+            source_sha256=v3_binding.source_sha256,
+            source_manifest=v3_binding.source_manifest,
+            requested_intent=v3_binding.requested_intent,
+            attempt=v3_binding.attempt,
+            upstream_receipt=v3_binding.upstream_receipt,
+            intent_plan=v3_binding.intent_plan,
+        )
+        if canonical != v3_binding or canonical.state != "pending":
+            raise ValueError("pipeline_kind=v3 requires the canonical pending TaskBinding")
+        # Creation is a post-normalization operation: the exact source bytes
+        # must exist before a V3 Task row does.
+        V3DispatchOutbox._verify_source_file(canonical.source_manifest, canonical.source_sha256)
+    elif v3_binding is not None:
+        raise ValueError("V3 TaskBinding cannot be attached to a legacy pipeline")
 
     from main import ensure_disk_headroom_for_new_task, enforce_task_cache_max_size
 
@@ -611,7 +668,7 @@ async def create_conversion_task(
     await ensure_disk_headroom_for_new_task(db)
 
     # Create task record
-    task_id = str(uuid.uuid4())
+    task_id = canonical.task_id if canonical is not None else str(uuid.uuid4())
     collection = collection_metadata if isinstance(collection_metadata, dict) else {}
     collection_tags = collection.get("collection_tags")
     if not isinstance(collection_tags, list):
@@ -643,9 +700,23 @@ async def create_conversion_task(
             str(collection.get("collection_member_title") or "").strip()[:256] or None
         ),
     )
+    if viewer_settings:
+        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
 
     db.add(task)
-    await db.commit()
+    if canonical is not None:
+        # Task and durable V3 binding share this caller-owned transaction.
+        # Schema installation belongs to startup, never this path.
+        from v3_task_runtime import SameTaskDbBindings
+
+        try:
+            await SameTaskDbBindings().bind_in_task_transaction(db, canonical)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    else:
+        await db.commit()
     await db.refresh(task)
 
     # This function also runs in the Telegram service.  Use the loopback UDP
@@ -663,6 +734,8 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     Workers accept GLB, FBX, OBJ directly via input_url.
     Returns: (task, error_message)
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        return task, V3_RUNTIME_OWNED
     pk = getattr(task, "pipeline_kind", None) or "rig"
     if pk not in ("rig", "convert"):
         pk = "rig"
@@ -1384,6 +1457,8 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     Check and update task progress.
     Checks a batch of URLs and updates ready count.
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        return task
     if _restore_worker_api_from_progress_page(task):
         task.updated_at = datetime.utcnow()
         print(f"[Tasks] Restored worker_api from progress_page for task {task.id}: {task.worker_api}")
@@ -1725,6 +1800,9 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> bool:
     Operator recovery: move task back to queue like stale reset but restart_count := 0
     (does not increment). Caller should commit.
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        print(f"[V3] Refusing legacy admin requeue for runtime-owned task: {task.id}")
+        return False
     if preemption_in_progress(task):
         print(f"[Priority] Refusing admin requeue during preemption: {task.id}")
         return False
@@ -1762,6 +1840,10 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     Reset a stale task for re-processing.
     Returns True if task was reset, False if max restarts exceeded.
     """
+    if task_dispatch_owner(task) is TaskDispatchOwner.V3_RUNTIME:
+        print(f"[V3] Refusing legacy stale reset for runtime-owned task: {task.id}")
+        return False
+
     from config import MAX_TASK_RESTARTS
 
     if preemption_in_progress(task):
@@ -1826,6 +1908,7 @@ async def find_and_retry_failed_collection_tasks(db: AsyncSession) -> int:
         select(Task).where(
             Task.status == "error",
             Task.collection_guid.is_not(None),
+            Task.pipeline_kind != "v3",
         )
     )
     failed_members = list(result.scalars().all())
@@ -1883,10 +1966,12 @@ async def find_and_reset_stale_tasks(
     partial_cutoff = now - timedelta(minutes=PARTIAL_PROGRESS_STALE_MINUTES)
     lookup = get_worker_active_lookup(queue_status)
 
-    # Find all non-terminal tasks
+    # Find all non-terminal tasks.  V3 rows have their own durable runtime and
+    # an explicit needs_review state; the legacy timeout must never touch them.
     result = await db.execute(
         select(Task).where(
             Task.status.notin_(["done", "error"]),
+            Task.pipeline_kind != "v3",
         )
     )
     active_tasks = result.scalars().all()
@@ -2009,6 +2094,7 @@ async def get_stalled_processing_tasks_by_worker(
             # a generation task has no worker progress to go stale on;
             # its own pump owns the lifecycle until the mesh exists
             Task.pipeline_kind != "generate",
+            Task.pipeline_kind != "v3",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )

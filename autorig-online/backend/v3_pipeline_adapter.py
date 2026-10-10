@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping
 from urllib.parse import urljoin, urlsplit
@@ -390,3 +390,173 @@ class V3PipelineClient:
             response.raise_for_status()
             fetched[artifact.role] = response.content
         return parse_status(payload, submission, artifact_bytes=fetched)
+
+
+# ---------------------------------------------------------------------------
+# V3 dispatch v2: registered private source refs and intent-specific artifacts.
+DISPATCH_V2_SCHEMA = "autorig.v3.dispatch/2"
+DISPATCH_V2_CAPABILITY_PATH = "/api/mt/v3"
+_SOURCE_REF = re.compile(r"^src-[0-9a-f]{64}$")
+V2_REQUIRED_ARTIFACTS = {
+    "accessory": frozenset({"model_glb", "source_manifest", "qa_report", "attachment_mask"}),
+    "rig": REQUIRED_RIG_ARTIFACTS,
+}
+
+
+def dispatch_v2_idempotency_key(task_id: str, source_ref: str, source_sha256: str, attempt: int,
+                                intent: str, pipeline_revision: str) -> str:
+    task, source = _task_uuid(task_id), _sha256(source_sha256, "source_sha256")
+    ref = str(source_ref or "")
+    if not _SOURCE_REF.fullmatch(ref) or isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1 or \
+            intent not in V2_REQUIRED_ARTIFACTS or not str(pipeline_revision or ""):
+        raise V3ProtocolError("V3 dispatch v2 identity is invalid")
+    raw = f"{DISPATCH_V2_SCHEMA}\0{task}\0{ref}\0{source}\0{attempt}\0{intent}\0{pipeline_revision}".encode("ascii")
+    return "v3-" + hashlib.sha256(raw).hexdigest()
+
+
+@dataclass(frozen=True)
+class V3DispatchSubmission:
+    task_id: str
+    source_ref: str
+    source_sha256: str
+    attempt: int
+    intent: str
+    pipeline_revision: str
+    idempotency_key: str
+
+    @classmethod
+    def create(cls, task_id, source_ref, source_sha256, attempt, intent, pipeline_revision):
+        if not _SOURCE_REF.fullmatch(str(source_ref or "")):
+            raise V3ProtocolError("source_ref is invalid")
+        key = dispatch_v2_idempotency_key(task_id, source_ref, source_sha256, attempt, intent, pipeline_revision)
+        return cls(_task_uuid(task_id), str(source_ref), _sha256(source_sha256, "source_sha256"),
+                   attempt, intent, str(pipeline_revision), key)
+
+    def payload(self):
+        return {"schema": DISPATCH_V2_SCHEMA, "task_id": self.task_id, "source_ref": self.source_ref,
+                "source_sha256": self.source_sha256, "attempt": self.attempt, "intent": self.intent,
+                "pipeline_revision": self.pipeline_revision, "idempotency_key": self.idempotency_key}
+
+
+@dataclass(frozen=True)
+class V3DispatchCapabilities:
+    register_source_path: str
+    submit_path: str
+    status_template: str
+    intents: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class V3DispatchStatus:
+    state: V3State
+    run_id: str
+    submission: V3DispatchSubmission
+    stage: str
+    progress: float
+    qa: Mapping[str, Any]
+    artifact_manifest: Mapping[str, Any]
+    error: str
+    # The run's viewer session (20-hex Motion Transfer run), known long before
+    # the rig: partial previews are shown from it while the conveyor works.
+    session: Mapping[str, Any] = field(default_factory=dict)
+
+
+def parse_dispatch_v2_capabilities(response: httpx.Response) -> V3DispatchCapabilities:
+    if response.status_code != 200 or response.headers.get("content-type", "").split(";", 1)[0] != "application/json":
+        raise UnsupportedServerRevision("Motion Transfer does not advertise V3 dispatch v2")
+    payload = response.json()
+    if not isinstance(payload, dict) or payload.get("schema") != DISPATCH_V2_SCHEMA:
+        raise UnsupportedServerRevision("unsupported V3 dispatch capability revision")
+    endpoints = payload.get("endpoints") or {}
+    roles = payload.get("required_artifact_roles") or {}
+    intents = tuple(str(x) for x in payload.get("intents") or [])
+    if not intents or any(intent not in V2_REQUIRED_ARTIFACTS for intent in intents):
+        raise UnsupportedServerRevision("V3 intent contract mismatch")
+    for intent in intents:
+        required = V2_REQUIRED_ARTIFACTS[intent]
+        if set(roles.get(intent) or []) != set(required):
+            raise UnsupportedServerRevision(f"V3 {intent} artifact contract mismatch")
+    return V3DispatchCapabilities(
+        _relative_endpoint(endpoints.get("register_source"), "register_source endpoint"),
+        _relative_endpoint(endpoints.get("submit"), "submit endpoint"),
+        _relative_endpoint(endpoints.get("status"), "status endpoint", template=True), intents)
+
+
+def parse_dispatch_v2_status(payload: Any, submission: V3DispatchSubmission) -> V3DispatchStatus:
+    if not isinstance(payload, dict) or payload.get("schema") != DISPATCH_V2_SCHEMA:
+        raise V3ProtocolError("status has no V3 dispatch v2 schema")
+    for key, value in submission.payload().items():
+        if key != "schema" and payload.get(key) != value:
+            raise V3ProtocolError(f"V3 dispatch status {key} mismatch")
+    try:
+        state = V3State(str(payload.get("status") or ""))
+    except ValueError as exc:
+        raise V3ProtocolError("V3 dispatch status is invalid") from exc
+    run_id = str(payload.get("run_id") or "")
+    if not re.fullmatch(r"v3run-[0-9a-f]{32}", run_id):
+        raise V3ProtocolError("V3 dispatch run_id is invalid")
+    progress = payload.get("progress")
+    if isinstance(progress, bool) or not isinstance(progress, (int, float)) or not 0 <= progress <= 1:
+        raise V3ProtocolError("V3 dispatch progress is invalid")
+    manifest = payload.get("artifact_manifest") or {}
+    if state is V3State.DONE:
+        rows = manifest.get("artifacts") if isinstance(manifest, dict) else None
+        roles = {str(row.get("role")) for row in rows or [] if isinstance(row, dict)}
+        if V2_REQUIRED_ARTIFACTS[submission.intent] - roles or (payload.get("qa") or {}).get("status") != "accepted":
+            raise V3ProtocolError("done lacks accepted QA or intent-specific artifacts")
+    return V3DispatchStatus(state, run_id, submission, str(payload.get("stage") or ""), float(progress),
+                            payload.get("qa") or {}, manifest, str(payload.get("error") or ""),
+                            _dispatch_session(payload.get("session")))
+
+
+_VIEWER_RUN = re.compile(r"^[0-9a-f]{20}$")
+
+
+def _dispatch_session(value: Any) -> dict[str, Any]:
+    """Keep only a well-formed viewer session; anything else is no session."""
+    if not isinstance(value, Mapping) or not _VIEWER_RUN.fullmatch(str(value.get("mt_run_id") or "")):
+        return {}
+    run = str(value["mt_run_id"])
+    return {"mt_run_id": run, "viewer_url": f"/api/mt/unity/test/index.html?run={run}",
+            "phases_url": f"/api/mt/files/{run}/phases.json", "files_base": f"/api/mt/files/{run}/"}
+
+
+class V3DispatchClient:
+    def __init__(self, base_url: str, token: str, client: httpx.AsyncClient):
+        self.base_url = base_url.rstrip("/") + "/"
+        self.token, self.client = str(token or "").strip(), client
+        if not self.token:
+            raise V3ProtocolError("token is required")
+
+    async def capabilities(self):
+        response = await self.client.get(urljoin(self.base_url, DISPATCH_V2_CAPABILITY_PATH.lstrip("/")),
+                                         headers={"Authorization": "Bearer " + self.token})
+        return parse_dispatch_v2_capabilities(response)
+
+    async def register_source(self, manifest: Mapping[str, Any]):
+        caps = await self.capabilities()
+        response = await self.client.post(urljoin(self.base_url, caps.register_source_path.lstrip("/")),
+                                          json=dict(manifest), headers={"Authorization": "Bearer " + self.token})
+        response.raise_for_status()
+        payload = response.json()
+        if not _SOURCE_REF.fullmatch(str(payload.get("source_ref") or "")):
+            raise V3ProtocolError("server returned no registered source_ref")
+        return payload
+
+    async def submit(self, submission: V3DispatchSubmission):
+        caps = await self.capabilities()
+        if submission.intent not in caps.intents:
+            raise UnsupportedServerRevision(f"V3 {submission.intent} worker is not advertised")
+        response = await self.client.post(urljoin(self.base_url, caps.submit_path.lstrip("/")),
+                                          json=submission.payload(), headers={"Authorization": "Bearer " + self.token,
+                                          "Idempotency-Key": submission.idempotency_key})
+        response.raise_for_status()
+        return parse_dispatch_v2_status(response.json(), submission)
+
+    async def status(self, submission: V3DispatchSubmission, run_id: str):
+        caps = await self.capabilities()
+        path = caps.status_template.replace("{run_id}", run_id)
+        response = await self.client.get(urljoin(self.base_url, path.lstrip("/")),
+                                         headers={"Authorization": "Bearer " + self.token})
+        response.raise_for_status()
+        return parse_dispatch_v2_status(response.json(), submission)
