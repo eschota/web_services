@@ -4,7 +4,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ## Координация агентов V3 (2026-10-10)
 
-- converter deploy: Skinning → converter f13 2026-10-10T16:00Z (cf25163, draining; released when this line says done)
+- converter deploy: Skinning → converter f13 2026-10-10T16:00Z — done 16:45Z (8133a2d, f13 restored; other nodes NOT rolled: owner cancelled the classic pipeline)
 - converter deploy: Converter speed · V3 f1 2026-10-10T15:30Z (b5b7bcd, drained; released when this line says done)
 - converter: Limb collision · V3 — `5650feb` (arms_spread guard, only `Vlado_Blender/tpose_remap_animation.py` on top of `6674da2`) pushed to converter main, **НЕ выкачен** (f1/f13 под замками выше, f2/f7 на `b386115`): кто катит следующим — везёт его; канарейка = в `tpose_remap_animation_log.txt` строка `guard: X·abduction=…`.
 
@@ -332,6 +332,26 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - Эта секция заменяет строки про конвертер ниже (748f36d «не merged/не deployed»,
   пункты 5–6 «Блокирующих разрывов»). Подробно: канонический converter handoff
   (`converter-source/handoff.md`, зеркала VPS/F5, SHA `bfa0d030…`).
+
+## Skinning → converter · V3 — итог (2026-10-10 16:45 UTC; классику владелец отменил)
+
+- Код: eschota/autorig.online `main` 8133a2d — `Vlado_Blender/topology_skin_refine.py` + хук после BindCheck в
+  `tpose_autorig.step_autorig_bind`, тесты `tests/test_topology_skin_refine.py` (12/12). Выключатель `AUTORIG_TOPO_SKIN=0`.
+  Квитанция `<guid>/logs/topology_skin_refine.json`, событие `topology_skin_refine` в `stage_timing.jsonl`.
+- Живёт только на **f13** (drain → deploy → V3 canary 7/7, rig_canary 8/8, хвост-канарейка 8/8 → restore). f1/f2/f7 не
+  раскатывались (приказ владельца: только V3 fastrig). f13 несёт и коммиты Converter speed до 3cbb1c4.
+- Что делает: граф по индексам меша (швы свариваются только по совпадающим координатам), утечки = регионы кости,
+  недостижимые от главного региона через соседей по скелету; одна Дейкстра по поверхности; гейт — 6 синтетических поз,
+  применяется только если растянутые рёбра и «убегания» не растут. Хвост: бескостная трубка за тазом → `cc_tail_00..05.x`
+  под `root.x` по осевой линии; ARP-экспорт их сохраняет (GLB канарейки: 76 джойнтов, 850 вершин на хвосте).
+- Замеры: 13 прод-биндов — 6 со скелетом вне меша (пропуск, `skeleton_outside_mesh`), остальные чистые; вставленная утечка
+  ладонь→бедро на реальных биндах: 44/142 вершины → 0, растянутые рёбра 156→0 / 433→59; 52k вершин — 1.7 с.
+  af874411 на f13 (новый main): скелет подогнан, 384 вершины торса с весом ладони, но ладони сплавлены с торсом
+  (25 общих рёбер) и ноги L/R тоже — гейт отказал (рёбра 2→244); нужен разрез контакта.
+- Находка: 6/13 прод-биндов с неподогнанным дефолтным скелетом ARP, BindCheck их пропускает (af874411 на f7: всё на бёдрах).
+- Контракт пружины хвоста для вьювера (не построено): кости `cc_tail_NN.x`, корень заперт на бёдрах, пресеты Astra
+  `stage/topology/tail_spring.py`, шаг ≤1/240 с, треки тела не трогать.
+- DEV 6541 (до/после), 6542 (скелеты). Аудит `/srv/autorig/audits/topology-skin-20261010/`.
 
 ## Rig judge · V3 — судья суставов и автоисправление рига (2026-10-10 13:00 UTC, на проде)
 
