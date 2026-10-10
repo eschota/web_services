@@ -906,3 +906,46 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `cathedral-v3-4ea469ed1097f287` опубликован, прошлый - в `previous` каталога. Спонза: дождь только в зоне двора,
   в галереях сухо. Каталог `/api/mt/scenes`: Собор, Спонза, затем рантайм-пакеты (icon.jpg, glTFast + scene.json).
 - Публикация сцены: `tools/scenes_v3_catalog.py` (R:\3d_video_motion_transfer) -> index.json + thumbs в `unity/scene-media/<id>/`.
+
+## Live processing · V3 — классические задачи конвертера (2026-10-10 15:30 UTC, на проде)
+
+Владелец, задача `66ba97ba` (конвертер f1): минуты вообще никакого прогресса, пока воркер ригал; нужны (a) полоса с момента,
+когда воркер взял задачу, (b) вьювер показывает вокселизацию, потом эрозию / создание костей интерактивно, (c) после рига
+модель проигрывает КЭШИРОВАННУЮ анимацию всей визуализации рига стадия за стадией.
+
+- **Как устроено** (MT, коммит `mt/live_classic.py` + хвост `live.mount`): у классической задачи нет MT-рана, поэтому MT делает
+  синтетический ран `runs/<sha1("classic:"+task_id)[:20]>/` (phases.json conveyor=`classic` + `live/`) и кормит его тремя источниками:
+  1. **лог конвертера** `<guid>_progress.txt` (бэкенд отдаёт его как `GET /api/task/{id}/progress_log?full=1`, без авторизации), строка
+     за строкой, в стадии `cl_prepare, cl_openpose, cl_pose, cl_rig, cl_retarget, cl_export, cl_preview` + мелкие факты
+     (конечности, маркеры, дорожки), каждое с i18n-ключом `live_cl_*` / `live_stage_cl_*`, никакого сырого текста;
+  2. **вокселизация и «первый скелет»** по `glb_cache/<task>_prepared.glb` (он есть через секунды после старта воркера):
+     `mt.live_voxels` и `mt.fastrig --no-labels` детьми, пока конвертер занят OpenPose/позой (90 + 50 с мёртвой зоны);
+  3. **настоящий риг конвертера** из `glb_cache/<task>_animations.glb` (когда бэкенд его закэшировал после TASK_COMPLETE):
+     суставы/кости из skin GLB, каждый сустав против глубины эрозии вокселей (красные метки = вне тела), потом `run/finish`.
+  Ран «done»-задачи собирается так же заново из лога и кэша (бэкфилл, ~5 с), поэтому старые задачи тоже можно проиграть.
+- **API** (MT, nginx `/api/mt/` уже проксирует): `GET /api/mt/classic/{task_id}/live-run` → `{run}` (+ запускает слежение; доступ —
+  тем же cookie, что `/api/task/{id}`, через бэкенд) и `GET /api/mt/classic/{task_id}/state` → `state` стрима (стадии с
+  измеренными/ожидаемыми секундами, progress 0..1, eta_s). Дальше обычные `/api/mt/runs/<run>/live` и `/api/mt/files/<run>/live/...`.
+- **Вьювер**: `mt/static/live.js` сам распознаёт `run=task&api=…/api/task-viewer/<id>` и берёт ран у `live-run`; если страница
+  открылась уже ПОСЛЕ стадий (задача только что завершилась), то при загрузке рига кэш-стрим проигрывается заново: воксели по
+  уровням, эрозия до ядра, суставы, кости, тепловая карта весов (кнопка «повтор» в `#ui` делает то же вручную).
+  Новое в потоке Fast analysis: `rig/fast_category`, `rig/fast_bones` (кости вне меша — красные метки), строки в аватар.
+- **Что мне нужно от конвертера / Opus (замеры стадий, 1-минутный бюджет рига)**:
+  - формат лога — сейчас `YYYY-MM-DD HH:MM:SS.mmm <текст>` в **местном времени воркера (UTC+7, без зоны)**; нужен UTC или смещение
+    (`…Z`), чтобы считать стадии по часам без догадок;
+  - строки, которые я разбираю (не менять формулировки без записи сюда; новые строки добавлю в `_RULES` за минуту):
+    `Conversion started.`, `Geometry: N vertices, M polygons.`, `Model preparation completed.`, `OpenPose analysis: detecting…`,
+    `Arm|Leg|Fingers (left): yes|no; … (right): …`, `OpenPose analysis completed: markers saved (N markers).`,
+    `Pose preparation…`, `Markers positioned.`, `Leg pose corrected.`, `Hands straightened.`, `Fingers detected by raycast: left a, right b.`,
+    `Pose correction completed.`, `Starting rigging process…` / `RETRY n: Starting rigging process…`, `Rig created.`,
+    `Starting animation retargeting…`, `Created N action tracks.`, `Animation retargeting completed.`, `Unity export started.`,
+    `Unity package exported.`, `Preview video created.`, `Conversion completed. It took …`, `TASK_COMPLETE`, `FAILURE|ERROR: …`;
+  - замер `66ba97ba`: prepare 3 с, OpenPose 89 с, поза 49 с, **rig 67 с (с одним RETRY: попытка 1 ≈ 23 с впустую + ещё 45 с)**,
+    retarget 63 с, Unity export 94 с, preview 70 с; итого 7 мин 56 с. Рига «внутри» (voxel / skeleton fit / weights) лог не показывает;
+  - чтобы стадия рига была видна изнутри, нужны строки с отметкой времени: `Rig: voxel solid ready`, `Rig: skeleton fitted (N bones)`,
+    `Rig: weights painted`, `Rig: check failed — <причина>` перед `RETRY n`, и для OpenPose `OpenPose: frame k/n`
+    (полоса без «мёртвых» 90 с); тогда live.js покажет их без догадок вместо моей оценки по медианам;
+  - и бэкенду: запускать прогрев `animations.glb` уже по `Rig created.` / `Starting animation retargeting`, а не после TASK_COMPLETE —
+    настоящие кости появятся на экране на ~4 минуты раньше (сейчас до конца задачи вьювер показывает «первый скелет по геометрии»).
+- **Страница задачи**: `task-v3-shell.js` для классической задачи берёт реальные стадии/процент из `/api/mt/classic/<id>/state`
+  (вместо часов против медианы 12 мин), а запрос же стартует слежение ещё в очереди — полоса и вокселизация начинаются сразу, когда воркер взял задачу.

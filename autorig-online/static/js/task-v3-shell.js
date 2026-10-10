@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261010.10';
+const BUILD = 'tv3-20261010.13';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -25,6 +25,9 @@ const FALLBACK = {
     taskv3_offline: 'Offline, retrying…', taskv3_copied: 'Link copied', taskv3_review: 'Needs review',
     taskv3_preparing: 'Preparing the model for the viewer',
     taskv3_unavailable: '3D model unavailable',
+    live_stage_cl_prepare: 'Preparing the model', live_stage_cl_openpose: 'Finding arms, legs and fingers',
+    live_stage_cl_pose: 'Straightening the pose', live_stage_cl_rig: 'Rigging', live_stage_cl_retarget: 'Animations',
+    live_stage_cl_export: 'Unity package', live_stage_cl_preview: 'Preview video',
   },
   ru: {
     taskv3_queued: 'В очереди', taskv3_ahead: 'впереди {count}', taskv3_next: 'следующая',
@@ -33,6 +36,9 @@ const FALLBACK = {
     taskv3_offline: 'Нет связи, повторяем…', taskv3_copied: 'Ссылка скопирована', taskv3_review: 'Нужна проверка',
     taskv3_preparing: 'Готовим модель для вьювера',
     taskv3_unavailable: '3D-модель недоступна',
+    live_stage_cl_prepare: 'Готовлю модель', live_stage_cl_openpose: 'Ищу руки, ноги и пальцы',
+    live_stage_cl_pose: 'Выравниваю позу', live_stage_cl_rig: 'Ригаю', live_stage_cl_retarget: 'Анимации',
+    live_stage_cl_export: 'Пакет для Unity', live_stage_cl_preview: 'Превью-видео',
   },
 };
 
@@ -81,11 +87,43 @@ function viewerUrl(viewer) {
     if (api !== `/api/task-viewer/${taskId}` || p.run !== 'task') return null;
     url.searchParams.set('api', location.origin + api);
     url.searchParams.set('run', 'task');
-    url.searchParams.set('agent', '0');
   } else {
     return null;
   }
+  // Session agent V3: every task has its public session agent; the viewer asks /api/mt/task-agent/<id> for its run
+  // (a classic task gets a lightweight one) and greets in the page's language.
+  url.searchParams.set('agent_task', taskId);
+  url.searchParams.set('agent_lang', agentLang());
   return url;
+}
+
+function agentLang() {
+  const lang = (window.I18n && window.I18n.currentLang) || document.documentElement.lang || uiLang();
+  return String(lang || 'en').slice(0, 2).toLowerCase();
+}
+
+// Session agent V3 (owner 2026-10-10: «вот это всё должен аватар показывать, а не отдельная строчка какая то»): the
+// task's stage and progress go to the session agent in the viewer: a ring around its call window, the percent in its
+// header, each new stage told by it as a short line. The pill stays hidden while the agent shows them.
+function agentStatus(state, status, finished, stageTitle) {
+  let bridge = null;
+  try { bridge = els.viewer.contentWindow && els.viewer.contentWindow.autorigUnity; } catch (e) { return false; }
+  if (!bridge || typeof bridge.agentStatus !== 'function') return false;
+  const active = !finished && status !== 'error';
+  let line = '';
+  // Session agent V3 (browser language): the queue position is told again whenever it moves
+  if (status === 'created') line = `${tr('taskv3_queued')} · ${state.queue && state.queue.ahead > 0 ? tr('taskv3_ahead', { count: state.queue.ahead }) : tr('taskv3_next')}`;
+  else if (status === 'processing') line = stageTitle || tr('taskv3_rigging');
+  else if (status === 'needs_review') line = tr('taskv3_review');
+  else if (status === 'error') line = tr('taskv3_failed');
+  else if (status === 'done') line = tr('taskv3_ready');
+  try {
+    return bridge.agentStatus({
+      active, progress: Number(state.progress || 0), status, stage: state.stage, queue: state.queue || null,
+      key: `${status}:${state.stage || ''}:${status === 'created' && state.queue ? state.queue.ahead : ''}`,
+      line, mood: status === 'error' ? 'oops' : (active ? 'think' : 'excited'),
+    }) !== false;
+  } catch (e) { return false; }
 }
 
 function showViewer(viewer) {
@@ -179,7 +217,8 @@ function render(state) {
   });
 
   // V3 tasks name their stage (Intake's titles); classic tasks show the queue and a percent.
-  const stageTitle = state.pipeline === 'v3' && state.stage_title ? `V3 · ${state.stage_title}` : '';
+  const stageTitle = state.pipeline === 'v3' && state.stage_title ? `V3 · ${state.stage_title}`
+    : (state.live_stage ? tr(`live_stage_${state.live_stage}`) : '');
   let line = '';
   let waiting = false;
   if (status === 'created') {
@@ -215,6 +254,8 @@ function render(state) {
   els.chip.hidden = !chip;
   els.chip.textContent = chip;
   els.chip.title = (v3 && v3.message) || '';
+  // Session agent V3: the agent tells the stage and shows the progress; no separate pill while it does
+  if (hasViewer && agentStatus(state, status, finished, stageTitle)) els.chip.hidden = true;
 
   if ((finished && rigged) || status === 'error') return 30000;
   return status === 'created' ? 4000 : 2500;
@@ -226,6 +267,29 @@ function showMissing() {
   setProgress(0, false);
 }
 
+// Live processing V3: a classic task reports outputs late, so its real stage and progress come from the converter's
+// own log, followed by the MT service (mt/live_classic.py). The same request starts the voxelization and the first
+// skeleton for the viewer while the task is still in the queue. Without it the clock-based progress stays.
+async function mergeLive(state) {
+  if (state.pipeline !== 'classic' || (state.status !== 'processing' && state.status !== 'created')) return;
+  const ctl = new AbortController();
+  const abort = setTimeout(() => ctl.abort(), 4000);
+  try {
+    const r = await fetch(`/api/mt/classic/${encodeURIComponent(taskId)}/state`, {
+      credentials: 'same-origin', cache: 'no-store', signal: ctl.signal,
+    });
+    if (!r.ok || state.status !== 'processing') return;
+    const st = (await r.json()).state || {};
+    const rows = st.stages || [];
+    const current = rows.find((x) => x.status === 'running');
+    if (!current && !rows.some((x) => x.status === 'done')) return; // no worker line yet
+    state.progress = Math.max(0.01, Math.min(0.99, Number(st.progress) || 0));
+    state.progress_basis = 'stages';
+    if (current) state.live_stage = current.id;
+    if (st.eta_s) state.eta_s = Math.round(Number(st.eta_s));
+  } catch (e) { /* the clock-based progress stays */ } finally { clearTimeout(abort); }
+}
+
 async function poll() {
   clearTimeout(timer);
   if (!UUID.test(taskId)) { showMissing(); return; }
@@ -235,7 +299,9 @@ async function poll() {
     });
     if (response.status === 404) { showMissing(); return; }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const next = render(await response.json());
+    const doc = await response.json();
+    await mergeLive(doc);
+    const next = render(doc);
     if (next > 0) timer = setTimeout(poll, next);
   } catch (error) {
     els.line.textContent = tr('taskv3_offline');
