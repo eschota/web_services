@@ -242,6 +242,46 @@ class RouterTests(unittest.TestCase):
         job = D.take_job("f2")
         self.assertEqual((job["worker"], job["pin"]), ("f2", "f2"))
 
+    def test_custom_exports_clips_model_names_and_versions(self):
+        self.patch_load()
+        self.user = User("owner@example.com", "active", days=5)
+        rig = D.MT_ROOT / "runs" / RUN
+        (rig / "analysis").mkdir()
+        (rig / "analysis" / "fast.json").write_text(json.dumps({"category": {"category": "humanoid", "body": "biped"}}))
+        skin = rig / "rig" / "skin"
+        (skin / "v0").mkdir(parents=True)
+        (skin / "v0" / "rigged.glb").write_bytes(glb(["Idle"]))
+        (skin / "index.json").write_text(json.dumps({"active": "v1", "versions": [
+            {"id": "v0", "sha256": "x"}, {"id": "v1", "sha256": "y"}]}))
+        m = self.client.get(f"/api/task/{TASK}/downloads-v3").json()
+        self.assertTrue(m["options"]["mixamo"])
+        self.assertEqual([v["id"] for v in m["versions"]], ["v0"])       # v1 has no file: not offered
+        # a GLB with the model and two chosen clips is cut here at once
+        r = self.client.post(f"/api/task/{TASK}/downloads-v3-custom",
+                             json={"target": "glb", "clips": ["Walking"], "mesh": True}).json()
+        self.assertEqual(r["state"], "ready")
+        self.assertTrue(r["format"].startswith("x-") and r["format"].endswith(".glb"))
+        f = self.client.get(r["url"])
+        self.assertIn("knight-lady-glb-walking.glb", f.headers["content-disposition"])
+        # Unreal FBX, animations only, Mixamo names: a worker job carrying exactly that spec
+        r = self.client.post(f"/api/task/{TASK}/downloads-v3-custom",
+                             json={"target": "unreal", "clips": ["Idle", "Walking"], "mesh": False, "mixamo": True}).json()
+        self.assertEqual(r["state"], "queued")
+        job = D.take_job("f7")
+        self.assertEqual(job["worker_spec"], {"clips": ["Idle", "Walking"], "mesh": False, "mixamo": True,
+                                              "format": "fbx", "preset": "unreal"})
+        # an older rig version is its own source; unknown clips and empty exports are refused
+        r = self.client.post(f"/api/task/{TASK}/downloads-v3-custom", json={"target": "blender", "version": "v0"}).json()
+        self.assertTrue(r["format"].endswith(".blend"))
+        self.assertEqual(self.client.post(f"/api/task/{TASK}/downloads-v3-custom",
+                                          json={"target": "unity", "clips": ["Nope"]}).status_code, 422)
+        self.assertEqual(self.client.post(f"/api/task/{TASK}/downloads-v3-custom",
+                                          json={"target": "unity", "clips": [], "mesh": False}).status_code, 422)
+        # no subscription: refused before any spec is written
+        self.user = User("owner@example.com")
+        self.assertEqual(self.client.post(f"/api/task/{TASK}/downloads-v3-custom",
+                                          json={"target": "fbx"}).status_code, 402)
+
     def test_classic_task_points_at_its_own_files(self):
         self.task = Task(pipeline_kind="rig")
         self.patch_load()

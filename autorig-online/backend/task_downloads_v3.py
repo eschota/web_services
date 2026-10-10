@@ -53,6 +53,9 @@ _MT_RUN = re.compile(r"^[0-9a-f]{20}$")
 _SHA16 = re.compile(r"^[0-9a-f]{16}$")
 _JOB_ID = re.compile(r"^[0-9a-f]{20}$")
 _FMT = re.compile(r"^(glb|fbx|zip|clip-(\d{1,2})\.(glb|fbx))$")
+_CUSTOM = re.compile(r"^x-([0-9a-f]{12})\.(fbx|glb|blend)$")       # a custom export (spec in specs/<hash>.json)
+TARGETS = {"unity": "fbx", "unreal": "fbx", "blender": "blend", "glb": "glb"}
+MIXAMO_CATEGORIES = {"humanoid"}
 _NO_STORE = {"Cache-Control": "private, no-store, max-age=0", "X-Robots-Tag": "noindex"}
 
 # id -> (kind shown in the menu, file extension, made by)
@@ -180,13 +183,46 @@ def rig_version(run_dir: Path, sha256: str) -> Optional[str]:
     return None
 
 
-def source_of(task: Any) -> Optional[dict[str, Any]]:
-    """The rigged GLB of the task's V3 run, its content hash, rig version and user clips (None: not ready)."""
+def rig_versions(run_dir: Path) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """Rig tools' versions of the run (v0 = the rig as it was) and the active one."""
+    try:
+        doc = json.loads((run_dir / "rig" / "skin" / "index.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], None
+    rows = []
+    for ver in doc.get("versions") or []:
+        vid = str((ver or {}).get("id") or "") if isinstance(ver, dict) else ""
+        if re.fullmatch(r"v\d{1,3}", vid) and (run_dir / "rig" / "skin" / vid / "rigged.glb").is_file():
+            rows.append({"id": vid, "engine": str(ver.get("engine") or "")[:40], "note": str(ver.get("note") or "")[:120],
+                         "at": ver.get("at"), "sha256": str(ver.get("sha256") or "")})
+    active = str(doc.get("active") or "") or None
+    return rows, active
+
+
+def category_of(run_dir: Path) -> dict[str, Any]:
+    """The fast analysis category (humanoid / quadruped / hands / prop …) that decides which options make sense."""
+    try:
+        doc = json.loads((run_dir / "analysis" / "fast.json").read_text(encoding="utf-8"))
+        cat = doc.get("category") or {}
+        return {"category": str(cat.get("category") or "unknown")[:24], "body": str(cat.get("body") or "")[:24],
+                "what": str(cat.get("what") or "")[:80]}
+    except (OSError, ValueError, AttributeError):
+        return {"category": "unknown", "body": "", "what": ""}
+
+
+def source_of(task: Any, version: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """The rigged GLB of the task's V3 run (the active rig, or one of Rig tools' versions), its content hash, rig
+    version and clips (None: not ready). The clips are the ones the viewer plays: whatever the run's rig carries,
+    including clips added in the viewport later."""
     run = v3_run_of(task)
     if not run:
         return None
     run_dir = MT_ROOT / "runs" / run
     path = run_dir / "rig" / "rigged.glb"
+    if version:
+        if not re.fullmatch(r"v\d{1,3}", str(version)):
+            return None
+        path = run_dir / "rig" / "skin" / str(version) / "rigged.glb"
     doc = _glb_json(path)
     if not doc or not doc.get("skins"):
         return None
@@ -194,7 +230,58 @@ def source_of(task: Any) -> Optional[dict[str, Any]]:
     clips = [str(a.get("name") or f"clip {i}")[:80] for i, a in enumerate(doc.get("animations") or [])
              if str(a.get("name") or "") not in INTERNAL_CLIPS]
     return {"run": run, "run_dir": run_dir, "path": path, "sha256": sha256, "sha16": sha256[:16],
-            "version": rig_version(run_dir, sha256), "clips": clips[:50]}
+            "version": version or rig_version(run_dir, sha256), "clips": clips[:50]}
+
+
+def normalize_spec(body: Any, clips: list[str], category: str) -> dict[str, Any]:
+    """A custom export request -> its canonical spec, or a localized 422. Unknown clips and options are refused,
+    never ignored, so the file matches what the person chose."""
+    if not isinstance(body, dict):
+        raise _error(422, "download_unknown_format")
+    target = str(body.get("target") or "")
+    if target not in TARGETS:
+        raise _error(422, "download_unknown_format")
+    want = body.get("clips", "all")
+    if want in (None, "all"):
+        chosen = list(clips)
+    elif isinstance(want, list) and all(isinstance(c, str) for c in want):
+        chosen = [c for c in clips if c in set(want)]
+        if len(chosen) != len(set(want)):
+            raise _error(422, "download_unknown_format")
+    else:
+        raise _error(422, "download_unknown_format")
+    mesh = bool(body.get("mesh", True))
+    if not mesh and not chosen:
+        raise _error(422, "download_unknown_format")      # no model and no animation: nothing to export
+    mixamo = bool(body.get("mixamo", False)) and category in MIXAMO_CATEGORIES
+    version = body.get("version") or None
+    if version is not None and not re.fullmatch(r"v\d{1,3}", str(version)):
+        raise _error(422, "download_unknown_format")
+    return {"target": target, "ext": TARGETS[target], "clips": chosen, "all_clips": chosen == list(clips),
+            "mesh": mesh, "mixamo": mixamo, "version": version}
+
+
+def spec_hash(spec: dict[str, Any], sha16: str) -> str:
+    body = json.dumps({**{k: spec[k] for k in ("target", "clips", "mesh", "mixamo")}, "sha16": sha16},
+                      sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+
+
+def split_clips(glb: Path, keep: list[str], dst: Path) -> None:
+    """The same GLB container with only the chosen animations (buffers untouched, still valid glTF)."""
+    raw = glb.read_bytes()
+    length = struct.unpack_from("<I", raw, 12)[0]
+    doc = json.loads(raw[20:20 + length].decode("utf-8"))
+    wanted = set(keep)
+    doc["animations"] = [a for a in doc.get("animations") or [] if str(a.get("name") or "") in wanted]
+    if not doc["animations"]:
+        doc.pop("animations", None)
+    body = json.dumps(doc, separators=(",", ":")).encode("utf-8")
+    body += b" " * ((4 - len(body) % 4) % 4)
+    rest = raw[20 + length:]
+    out = b"glTF" + struct.pack("<II", 2, 12 + 8 + len(body) + len(rest)) + \
+        struct.pack("<II", len(body), 0x4E4F534A) + body + rest
+    _atomic_write(dst, out)
 
 
 # --------------------------------------------------------------------------- cache layout
@@ -205,6 +292,10 @@ def export_dir(cache_root: Path, task_id: str, sha16: str) -> Path:
 
 def out_name(fmt: str) -> str:
     return "bundle.zip" if fmt == "zip" else ("rigged." + fmt if fmt in ("glb", "fbx") else fmt)
+
+
+def specs_dir(cache_root: Path, task_id: str) -> Path:
+    return cache_root / f"{task_id}_v3exports" / "specs"
 
 
 def parse_fmt(fmt: str, clips: list[str]) -> Optional[dict[str, Any]]:
@@ -341,7 +432,8 @@ def enqueue(folder: Path, task_id: str, src: dict[str, Any], spec: dict[str, Any
         return job
     jid = job_id_of(task_id, src["sha16"], fmt + (f"@{pin}" if pin else ""))   # a pinned copy is its own job
     job = {"schema": "autorig.v3-export-job/1", "id": jid, "task_id": task_id, "sha16": src["sha16"],
-           "sha256": src["sha256"], "format": fmt, "clip": spec["clip"], "state": "queued", "stage": "queued",
+           "sha256": src["sha256"], "format": fmt, "clip": spec["clip"], "worker_spec": spec.get("worker_spec"),
+           "ext": spec["ext"], "state": "queued", "stage": "queued",
            "progress": 0.02, "queued_at": now, "updated_at": now,
            "attempts": int((job or {}).get("attempts") or 0) if (job or {}).get("state") == "failed" else 0,
            "folder": str(folder)}
@@ -512,6 +604,12 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
 
     def describe(task: Any, src: Optional[dict[str, Any]], access: dict[str, Any]) -> dict[str, Any]:
         task_id = str(task.id)
+        versions, active, cat = [], None, {"category": "unknown", "body": "", "what": ""}
+        if src is not None:
+            versions, active = rig_versions(src["run_dir"])
+            versions = [{**{k: v for k, v in row.items() if k != "sha256"},
+                         "active": row["sha256"] == src["sha256"] or row["id"] == active} for row in versions]
+            cat = category_of(src["run_dir"])
         is_v3 = str(getattr(task, "pipeline_kind", "") or "").strip().lower() == "v3"
         formats = []
         if src is not None:
@@ -538,6 +636,14 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
                                               "subscription_active", "view_as_free", "can_view_as")},
             "plan": plan_info(task_id),
             "rig": None if src is None else {"sha": src["sha16"], "version": src["version"], "clips": src["clips"]},
+            "versions": versions,
+            "category": cat,
+            "options": None if src is None else {
+                "targets": list(TARGETS) + ["zip"],
+                "clips": bool(src["clips"]),
+                "animation_only": bool(src["clips"]),
+                "mixamo": cat["category"] in MIXAMO_CATEGORIES,
+            },
             "formats": formats,
             "exporter": {"online": worker_online(),
                          "workers": sorted(k for k, v in workers_seen().items() if time.time() - v < 60)},
@@ -558,6 +664,9 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
             await asyncio.to_thread(snapshot, src, folder)
             target = folder / out_name(fmt)
             if target.is_file():
+                return job_view(None, folder, fmt)
+            if spec["by"] == "here" and spec.get("keep") is not None:   # a custom GLB: the chosen clips, here
+                await asyncio.to_thread(split_clips, folder / "rigged.glb", spec["keep"], target)
                 return job_view(None, folder, fmt)
             if spec["by"] == "here" and fmt != "zip":       # a clip GLB: cut here, now
                 await asyncio.to_thread(split_clip, folder / "rigged.glb", spec["clip"], target)
@@ -585,12 +694,28 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
         access = access_of(task, user, request)
         if not access["allowed"]:
             _deny(access, task_id)                            # fail closed: nothing below runs
-        src = await asyncio.to_thread(source_of, task)
-        if src is None:
-            raise _error(409, "download_not_ready")
-        spec = parse_fmt(fmt, src["clips"])
-        if spec is None:
-            raise _error(404, "download_unknown_format")
+        custom = _CUSTOM.fullmatch(str(fmt or ""))
+        if custom:
+            rec = _read_json(specs_dir(cache_root, str(task.id)) / f"{custom.group(1)}.json")
+            if not rec or rec.get("format") != fmt:
+                raise _error(404, "download_unknown_format")
+            src = await asyncio.to_thread(source_of, task, rec.get("version"))
+            if src is None:
+                raise _error(409, "download_not_ready")
+            if src["sha16"] != rec.get("sha16"):
+                raise _error(409, "download_rig_changed")
+            here = rec["ext"] == "glb" and rec["mesh"] and not rec["mixamo"]
+            spec = {"id": fmt, "ext": rec["ext"], "clip": None, "clip_index": None,
+                    "by": "here" if here else "worker", "keep": rec["clips"],
+                    "worker_spec": {"clips": rec["clips"], "mesh": rec["mesh"], "mixamo": rec["mixamo"],
+                                    "format": rec["ext"], "preset": rec["target"]}}
+        else:
+            src = await asyncio.to_thread(source_of, task)
+            if src is None:
+                raise _error(409, "download_not_ready")
+            spec = parse_fmt(fmt, src["clips"])
+            if spec is None:
+                raise _error(404, "download_unknown_format")
         folder = export_dir(cache_root, str(task.id), src["sha16"])
         if start:
             view = await ensure(task, src, spec)
@@ -602,6 +727,33 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
         if view["state"] == "ready":
             doc["url"] = file_url(str(task.id), fmt, src["sha16"])
         return JSONResponse(doc, headers=_NO_STORE)
+
+    @router.post("/api/task/{task_id}/downloads-v3-custom")
+    async def downloads_custom(task_id: str, request: Request, user: Any = Depends(get_current_user),
+                               db: Any = Depends(get_db)):
+        """{target: unity|unreal|blender|glb, clips: "all"|[names], mesh: bool, mixamo: bool, version: "v1"|null}
+        -> the custom export's format id (x-<hash>.<ext>), queued or ready, with the same progress contract."""
+        task = await load(task_id, request, user, db)
+        access = access_of(task, user, request)
+        if not access["allowed"]:
+            _deny(access, task_id)                            # fail closed: nothing below runs
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        version = body.get("version") if isinstance(body, dict) else None
+        src = await asyncio.to_thread(source_of, task, version)
+        if src is None:
+            raise _error(409, "download_not_ready")
+        spec = normalize_spec(body, src["clips"], category_of(src["run_dir"])["category"])
+        hid = spec_hash(spec, src["sha16"])
+        fmt = f"x-{hid}.{spec['ext']}"
+        sdir = specs_dir(cache_root, str(task.id))
+        sdir.mkdir(parents=True, exist_ok=True)
+        if not (sdir / f"{hid}.json").is_file():
+            _write_json(sdir / f"{hid}.json", {**spec, "sha16": src["sha16"], "sha256": src["sha256"],
+                                               "format": fmt, "at": time.time()})
+        return await request_or_status(task_id, fmt, request, user, db, start=True)
 
     @router.post("/api/task/{task_id}/downloads-v3/{fmt}")
     async def downloads_request(task_id: str, fmt: str, request: Request, user: Any = Depends(get_current_user),
@@ -620,20 +772,35 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
         access = access_of(task, user, request)
         if not access["allowed"]:
             _deny(access, task_id)
-        if not _SHA16.fullmatch(v or "") or not _FMT.fullmatch(fmt or ""):
+        custom = _CUSTOM.fullmatch(fmt or "")
+        if not _SHA16.fullmatch(v or "") or not (_FMT.fullmatch(fmt or "") or custom):
             raise _error(404, "download_unknown_format")
         folder = export_dir(cache_root, str(task.id), v)
         target = folder / out_name(fmt)
         if not target.is_file():
             raise _error(404, "download_not_ready")
-        src = source_of(task)
-        slug = file_slug(task, src) if src and src["sha16"] == v else f"autorig-{str(task.id)[:8]}"
-        m = _FMT.fullmatch(fmt)
-        name = f"{slug}.{fmt}" if m.group(2) is None else f"{slug}-clip{int(m.group(2)) + 1}.{m.group(3)}"
-        if src and src["sha16"] == v and m.group(2) is not None and int(m.group(2)) < len(src["clips"]):
-            name = f"{slug}-{_slug(src['clips'][int(m.group(2))]) or 'clip'}.{m.group(3)}"
-        ctype = {"glb": "model/gltf-binary", "fbx": "application/octet-stream", "zip": "application/zip"}[
-            name.rsplit(".", 1)[-1]]
+        if custom:
+            rec = _read_json(specs_dir(cache_root, str(task.id)) / f"{custom.group(1)}.json") or {}
+            src = source_of(task, rec.get("version"))
+            slug = file_slug(task, src) if src and src["sha16"] == v else f"autorig-{str(task.id)[:8]}"
+            if rec.get("version") and not slug.endswith("-" + str(rec["version"])):
+                slug += f"-{rec['version']}"
+            parts = [slug, str(rec.get("target") or "")]
+            clips = rec.get("clips") or []
+            if not rec.get("all_clips"):
+                parts.append(_slug(clips[0]) if len(clips) == 1 else f"{len(clips)}clips")
+            if rec.get("mesh") is False:
+                parts.append("anim")
+            name = "-".join(p for p in parts if p) + "." + custom.group(2)
+        else:
+            src = source_of(task)
+            slug = file_slug(task, src) if src and src["sha16"] == v else f"autorig-{str(task.id)[:8]}"
+            m = _FMT.fullmatch(fmt)
+            name = f"{slug}.{fmt}" if m.group(2) is None else f"{slug}-clip{int(m.group(2)) + 1}.{m.group(3)}"
+            if src and src["sha16"] == v and m.group(2) is not None and int(m.group(2)) < len(src["clips"]):
+                name = f"{slug}-{_slug(src['clips'][int(m.group(2))]) or 'clip'}.{m.group(3)}"
+        ctype = {"glb": "model/gltf-binary", "fbx": "application/octet-stream", "zip": "application/zip",
+                 "blend": "application/x-blender"}[name.rsplit(".", 1)[-1]]
         rel = target.resolve(strict=True).relative_to(cache_root.resolve())
         return Response(status_code=200, media_type=ctype, headers={
             "X-Accel-Redirect": "/_autorig_glb_cache/" + "/".join(quote(p, safe="") for p in rel.parts),
@@ -691,7 +858,7 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
         if job is None:
             return Response(status_code=204)
         return JSONResponse({"id": job["id"], "lease": job["lease"], "format": job["format"],
-                             "spec": {"clip": job.get("clip")}, "sha256": job["sha256"],
+                             "spec": job.get("worker_spec") or {"clip": job.get("clip")}, "sha256": job["sha256"],
                              "source": f"/api/v3-export/worker/jobs/{job['id']}/source.glb",
                              "script": "/api/v3-export/worker/script"}, headers=_NO_STORE)
 
@@ -731,9 +898,14 @@ def build_task_downloads_v3_router(*, get_db: Callable[..., Any], get_current_us
                     if size % (16 << 20) < len(chunk):
                         job.update(heartbeat_at=time.time())
                         _write_json(path, job)
+            ext = job.get("ext") or "fbx"
             with tmp.open("rb") as fh:
-                if fh.read(18) != b"Kaydara FBX Binary":
-                    raise HTTPException(status_code=422, detail="not a binary FBX")
+                head = fh.read(18)
+            ok = {"fbx": head == b"Kaydara FBX Binary",
+                  "glb": head[:4] == b"glTF",
+                  "blend": head[:7] == b"BLENDER" or head[:4] == bytes.fromhex("28b52ffd")}.get(ext, False)
+            if not ok:
+                raise HTTPException(status_code=422, detail=f"not a {ext} file")
             report = request.headers.get("x-export-report", "")
             os.replace(tmp, folder / out_name(job["format"]))
         finally:

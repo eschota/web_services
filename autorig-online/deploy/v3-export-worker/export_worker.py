@@ -96,9 +96,9 @@ def run(doc):
     with tempfile.TemporaryDirectory(prefix="v3x_", dir=WORK) as tmp:
         tmp = pathlib.Path(tmp)
         job.progress(0.06, "download", force=True)
-        _, script = request("GET", doc["script"], timeout=60, raw=True)
+        _, script = request("GET", doc["script"], timeout=45, raw=True)   # a stalled link fails fast: the job goes back to the queue
         (tmp / "v3_export_blender.py").write_bytes(script)
-        _, glb = request("GET", doc["source"], headers=job.headers, timeout=600, raw=True)
+        _, glb = request("GET", doc["source"], headers=job.headers, timeout=90, raw=True)
         (tmp / "rigged.glb").write_bytes(glb)
         (tmp / "spec.json").write_text(json.dumps(doc.get("spec") or {}), encoding="utf-8")
         job.progress(0.15, "import", force=True)
@@ -129,11 +129,12 @@ def run(doc):
             proc.wait()
         finally:
             killer.cancel()
-        fbx = out / "out.fbx"
+        names = list((report.get("files") or {}).keys()) or ["out.fbx"]
+        fbx = out / names[0]                                # out.fbx | out.glb | out.blend (the spec's format)
         if proc.returncode != 0 or not fbx.is_file() or not (report.get("verify") or {}).get("ok"):
             raise RuntimeError(f"blender exit {proc.returncode}: " + " | ".join(tail[-6:])[-400:])
         job.progress(0.9, "upload", force=True)
-        slim = {k: report.get(k) for k in ("seconds", "blender", "bones", "verify", "clips")}
+        slim = {k: report.get(k) for k in ("seconds", "blender", "bones", "verify", "clips", "exported_clips")}
         request("PUT", f"/api/v3-export/worker/jobs/{doc['id']}/result", Upload(fbx, job),
                 headers={**job.headers, "Content-Type": "application/octet-stream",
                          "X-Export-Report": json.dumps(slim, ensure_ascii=True)[:4000]}, timeout=900)

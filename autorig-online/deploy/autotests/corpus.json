@@ -2625,6 +2625,74 @@
        240
       ]
      }
+    },
+    {
+     "id": "export_options",
+     "kind": "v3_export_fbx",
+     "paths": [
+      "backend"
+     ],
+     "tier": "extended",
+     "input": "8369addb.mt-rig.glb",
+     "params": {
+      "timeout": 300,
+      "spec": {
+       "clips": [
+        "Idle",
+        "Walking"
+       ],
+       "mesh": false,
+       "mixamo": true,
+       "format": "fbx",
+       "preset": "unreal"
+      }
+     },
+     "thresholds": {
+      "fbx_valid": [
+       "==",
+       1
+      ],
+      "verify_ok": [
+       "==",
+       1
+      ],
+      "seconds": [
+       "<=",
+       240
+      ]
+     }
+    },
+    {
+     "id": "export_blend",
+     "kind": "v3_export_fbx",
+     "paths": [
+      "backend"
+     ],
+     "tier": "extended",
+     "input": "8369addb.mt-rig.glb",
+     "params": {
+      "timeout": 300,
+      "spec": {
+       "clips": null,
+       "mesh": true,
+       "format": "blend",
+       "preset": "blender"
+      }
+     },
+     "thresholds": {
+      "fbx_valid": [
+       "==",
+       1
+      ],
+      "verify_ok": [
+       "==",
+       1
+      ],
+      "seconds": [
+       "<=",
+       240
+      ]
+     }
     }
    ]
   },

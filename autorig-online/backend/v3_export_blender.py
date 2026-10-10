@@ -1,10 +1,10 @@
-"""Downloads · V3: one rigged V3 GLB -> the FBX downloads, inside Blender (run by an export worker).
+"""Downloads · V3: one rigged V3 GLB -> the FBX / GLB / .blend downloads, inside Blender (run by an export worker).
 
-    blender -b --factory-startup -P v3_export_blender.py -- rigged.glb out_dir [spec.json | '{"clip": "Idle"}']
+    blender -b --factory-startup -P v3_export_blender.py -- rigged.glb out_dir [spec.json | '{"clips": ["Idle"]}']
 
 Writes into out_dir:
-    out.fbx               armature + skinned meshes with every user clip as its own take (Unity / Unreal / Blender),
-                          or with the one clip the spec names
+    out.<fbx|glb|blend>   armature (+ skinned meshes unless spec.mesh is false) with the chosen clips, every clip
+                          its own take / action; spec.mixamo prefixes the bones «mixamorig:» (humanoids)
     export.json           clips, bones, meshes, the file with its size and seconds, warnings, the re-import check
 
 Prints «PROGRESS <0..1> <stage>» lines; the worker relays them to the task page's progress bar.
@@ -82,6 +82,46 @@ def assign(arm, action):
     return f0, f1
 
 
+def action_fcurves(action):
+    """Every F-curve of an action: the legacy list, or the channel bags of a slotted action (Blender 4.4+)."""
+    legacy = getattr(action, "fcurves", None)
+    if legacy is not None:
+        try:
+            return list(legacy)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+    curves = []
+    for layer in getattr(action, "layers", []) or []:
+        for strip in layer.strips:
+            for bag in getattr(strip, "channelbags", []) or []:
+                curves.extend(bag.fcurves)
+    return curves
+
+
+def rename_bones(arm, actions):
+    """Prefix every bone with «mixamorig:». Blender fixes the vertex groups and only the assigned action, so the
+    action is unassigned first and every clip's paths and groups are rewritten here, the same way for all."""
+    if arm.animation_data:
+        arm.animation_data.action = None
+    mapping = {}
+    for b in arm.data.bones:
+        if not b.name.startswith("mixamorig:"):
+            new = "mixamorig:" + b.name
+            mapping[b.name] = new
+            b.name = new
+    for act in actions:
+        for fc in action_fcurves(act):
+            path = fc.data_path
+            if path.startswith('pose.bones["'):
+                old = path[len('pose.bones["'):].split('"]', 1)[0]
+                if old in mapping:
+                    fc.data_path = path.replace(f'pose.bones["{old}"]', f'pose.bones["{mapping[old]}"]', 1)
+            group = getattr(fc, "group", None)
+            if group is not None and group.name in mapping:
+                group.name = mapping[group.name]
+    return mapping
+
+
 def export_fbx(path, *, all_actions):
     bpy.ops.export_scene.fbx(
         filepath=path, use_selection=True, object_types={"ARMATURE", "MESH"}, use_mesh_modifiers=False,
@@ -93,18 +133,25 @@ def export_fbx(path, *, all_actions):
         apply_scale_options="FBX_SCALE_ALL", mesh_smooth_type="FACE")
 
 
-def verify(path, takes):
-    """Re-import the main FBX: one armature, skinned meshes, every take back. A failed check fails the export."""
+def verify(path, fmt, takes, mesh):
+    """Re-open what was written: one armature, the skinned meshes when the model was asked for, every take back.
+    A failed check fails the export."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.fbx(filepath=path)
+    if fmt == "fbx":
+        bpy.ops.import_scene.fbx(filepath=path)
+    elif fmt == "glb":
+        bpy.ops.import_scene.gltf(filepath=path)
+    else:
+        bpy.ops.wm.open_mainfile(filepath=path)
     objs = bpy.context.scene.objects
     arms = [o for o in objs if o.type == "ARMATURE"]
     skinned = [o for o in objs if o.type == "MESH" and any(m.type == "ARMATURE" for m in o.modifiers)]
-    doc = {"armatures": len(arms), "skinned_meshes": len(skinned), "actions": len(bpy.data.actions),
+    doc = {"format": fmt, "armatures": len(arms), "skinned_meshes": len(skinned), "actions": len(bpy.data.actions),
            "bones": len(arms[0].data.bones) if arms else 0}
-    doc["ok"] = bool(len(arms) == 1 and skinned and doc["bones"] > 1 and (takes == 0 or doc["actions"] >= takes))
+    doc["ok"] = bool(len(arms) == 1 and doc["bones"] > 1 and (bool(skinned) == bool(mesh))
+                     and (takes == 0 or doc["actions"] >= takes))
     if not doc["ok"]:
-        raise SystemExit("FBX re-import check failed: " + json.dumps(doc))
+        raise SystemExit("re-import check failed: " + json.dumps(doc))
     return doc
 
 
@@ -115,11 +162,20 @@ def main():
     if len(argv) > 2 and argv[2].strip():                # a spec file (the worker writes one) or inline JSON
         raw = argv[2].strip()
         spec = json.loads(open(raw, encoding="utf-8").read() if os.path.isfile(raw) else raw)
-    clip = spec.get("clip") or None
+    # spec: {"clip": name} (one clip, older jobs) or {"clips": [names] | null (all), "mesh": bool, "mixamo": bool,
+    #        "format": "fbx" | "glb" | "blend", "preset": "unity" | "unreal" | "blender" | "glb"}
+    keep = spec.get("clips")
+    if spec.get("clip"):
+        keep = [spec["clip"]]
+    mesh_wanted = bool(spec.get("mesh", True))
+    mixamo = bool(spec.get("mixamo", False))
+    fmt = str(spec.get("format") or "fbx")
+    if fmt not in ("fbx", "glb", "blend"):
+        raise SystemExit(f"unknown format {fmt!r}")
     os.makedirs(out, exist_ok=True)
     t0 = time.time()
     rep = {"schema": "autorig.v3-export/1", "source": os.path.basename(src), "files": {}, "clips": [],
-           "warnings": [], "blender": bpy.app.version_string}
+           "warnings": [], "blender": bpy.app.version_string, "spec": spec}
     progress(0.02, "import")
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -154,6 +210,22 @@ def main():
         act.use_fake_user = True
         actions.append(act)
     rep["clips"] = [a.name for a in actions]
+    if keep is not None:
+        missing = [c for c in keep if c not in {a.name for a in actions}]
+        if missing:
+            raise SystemExit(f"no clip(s) {missing!r} in {src}")
+        wanted = set(keep)
+        kept = [a for a in actions if a.name in wanted]
+        for other in [a for a in actions if a.name not in wanted]:
+            bpy.data.actions.remove(other)
+        actions = kept
+    rep["exported_clips"] = [a.name for a in actions]
+    if not mesh_wanted:                                  # animation only: the skeleton and its clips
+        for o in meshes:
+            bpy.data.objects.remove(o, do_unlink=True)
+        meshes = []
+    if mixamo:                                           # Mixamo / Unreal retarget names; clips and groups follow
+        rename_bones(arm, actions)
     rep["bones"] = len(arm.data.bones)
     rep["deform_bones"] = sum(b.use_deform for b in arm.data.bones)
     rep["meshes"] = len(meshes)
@@ -163,25 +235,27 @@ def main():
     bpy.context.view_layer.objects.active = arm
 
     t = time.time()
-    progress(0.35, "fbx")
-    if clip is not None:
-        chosen = [a for a in actions if a.name == clip]
-        if not chosen:
-            raise SystemExit(f"no clip {clip!r} in {src}")
-        for other in [a for a in actions if a is not chosen[0]]:
-            bpy.data.actions.remove(other)
-        actions = chosen
+    progress(0.35, fmt)
     if actions:
         f0, f1 = assign(arm, actions[0])
         rep["frames"] = [f0, f1]
     elif arm.animation_data:
         arm.animation_data.action = None
-    path = os.path.join(out, "out.fbx")
-    export_fbx(path, all_actions=len(actions) > 1)
-    rep["files"]["out.fbx"] = {"bytes": size(path), "seconds": round(time.time() - t, 2), "takes": len(actions),
-                               "clip": clip}
+    path = os.path.join(out, f"out.{fmt}")
+    if fmt == "fbx":
+        export_fbx(path, all_actions=len(actions) > 1)
+    elif fmt == "glb":
+        bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True, export_skins=True,
+                                  export_animations=bool(actions), export_animation_mode="ACTIONS",
+                                  export_force_sampling=True)
+    else:
+        if arm.animation_data:
+            arm.animation_data.action = actions[0] if actions else None
+        bpy.ops.file.pack_all()
+        bpy.ops.wm.save_as_mainfile(filepath=path, compress=True, copy=True)
+    rep["files"][f"out.{fmt}"] = {"bytes": size(path), "seconds": round(time.time() - t, 2), "takes": len(actions)}
     progress(0.96, "verify")
-    rep["verify"] = verify(os.path.join(out, "out.fbx"), len(actions))
+    rep["verify"] = verify(path, fmt, len(actions), bool(meshes))
     rep["seconds"] = round(time.time() - t0, 2)
     with open(os.path.join(out, "export.json"), "w", encoding="utf-8") as fh:
         json.dump(rep, fh, indent=1)

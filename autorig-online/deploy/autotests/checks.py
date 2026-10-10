@@ -788,10 +788,12 @@ def task_page_js(files):
     return {"checked": checked, "failed": len(bad), "failures": bad}
 
 
-def v3_export_fbx(input_name, timeout=300, worker=None):
+def v3_export_fbx(input_name, timeout=300, worker=None, spec=None):
     """Downloads · V3: a corpus V3 rig through the real export queue and a Blender export worker -> a binary FBX
     whose re-import (inside the worker) finds one armature, the skinned mesh and every take. ``worker`` pins the
-    job to one box (f1, f2, f7, f13) to prove that box; without it any free worker takes it."""
+    job to one box (f1, f2, f7, f13) to prove that box; without it any free worker takes it. ``spec`` is a custom
+    export (the task page's options: {"clips": [...], "mesh": false, "mixamo": true, "format": "fbx"|"glb"|"blend",
+    "preset": …}); the file is then checked for its own format."""
     import importlib
     import pwd
     import time
@@ -802,7 +804,8 @@ def v3_export_fbx(input_name, timeout=300, worker=None):
     D = importlib.import_module("task_downloads_v3")
     data = _input(input_name).read_bytes()
     sha = hashlib.sha256(data).hexdigest()
-    folder = D.QUEUE_DIR.parent / "autotests" / (sha[:16] + (f"-{worker}" if worker else ""))
+    tag = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:8] if spec else ""
+    folder = D.QUEUE_DIR.parent / "autotests" / (sha[:16] + (f"-{worker}" if worker else "") + (f"-{tag}" if tag else ""))
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir(parents=True)
     (folder / "rigged.glb").write_bytes(data)
@@ -814,19 +817,28 @@ def v3_export_fbx(input_name, timeout=300, worker=None):
         pass
     online = D.worker_online()
     t0 = time.time()
-    D.enqueue(folder, "autotests", {"sha16": sha[:16], "sha256": sha}, D.parse_fmt("fbx", []), pin=worker)
+    if spec:
+        ext = spec.get("format", "fbx")
+        job_spec = {"id": f"x-{'0' * 12}.{ext}", "ext": ext, "clip": None, "clip_index": None, "by": "worker",
+                    "worker_spec": spec}
+    else:
+        ext, job_spec = "fbx", D.parse_fmt("fbx", [])
+    D.enqueue(folder, "autotests", {"sha16": sha[:16], "sha256": sha}, job_spec, pin=worker)
+    target = folder / D.out_name(job_spec["id"])
     job = {}
-    while time.time() - t0 < timeout and not (folder / "rigged.fbx").is_file():
-        job = D._read_json(D._job_path(folder, "fbx")) or {}
+    while time.time() - t0 < timeout and not target.is_file():
+        job = D._read_json(D._job_path(folder, job_spec["id"])) or {}
         if job.get("state") == "failed":
             break
         time.sleep(2)
-    job = D._read_json(D._job_path(folder, "fbx")) or job
-    fbx = folder / "rigged.fbx"
+    job = D._read_json(D._job_path(folder, job_spec["id"])) or job
+    fbx = target
     head = fbx.read_bytes()[:18] if fbx.is_file() else b""
+    magic = {"fbx": head == b"Kaydara FBX Binary", "glb": head[:4] == b"glTF",
+             "blend": head[:7] == b"BLENDER" or head[:4] == bytes.fromhex("28b52ffd")}[ext]
     report = job.get("report") or {}
     return {"seconds": round(time.time() - t0, 1), "worker_online": int(online),
-            "fbx_valid": int(head == b"Kaydara FBX Binary"), "bytes": fbx.stat().st_size if fbx.is_file() else 0,
+            "fbx_valid": int(magic), "bytes": fbx.stat().st_size if fbx.is_file() else 0,
             "verify_ok": int(bool((report.get("verify") or {}).get("ok"))),
             "takes": len(report.get("clips") or []), "worker": job.get("worker"),
             "blender": report.get("blender"), "error": str(job.get("error") or "")[:200]}
@@ -942,7 +954,7 @@ def run_check(check: dict, ctx: dict) -> dict:
     if k == "task_page_js":
         return task_page_js(a["files"])
     if k == "v3_export_fbx":
-        return v3_export_fbx(inp, a.get("timeout", 300), a.get("worker"))
+        return v3_export_fbx(inp, a.get("timeout", 300), a.get("worker"), a.get("spec"))
     if k == "classic_mirror_live":
         return classic_mirror_live(a.get("wait", 12))
     if k == "rig_budget_live":

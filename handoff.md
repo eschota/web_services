@@ -1347,6 +1347,27 @@ This scoped development checkpoint does not overwrite the unrelated historical
   Перезапущены autorig-storage и autorig-storage-telegram. Три теста (`test_v3_intake_runtime`,
   `test_v3_task_creation`, `test_telegram_generate_button`) читали живой `v3-routes.json` прода и падали после
   V3-only — изолированы (`isolate_live_routes`).
+- **«Download Rig» и опции скачивания (2026-10-11, приказ владельца; релиз `dlv3-options-20261011`, статика live)**:
+  когда у V3-задачи есть риг (манифест `available`), в полосе задачи появляется большая зелёная кнопка
+  `#dl3-hero` «Скачать риг» (пульс 2.6 с + блик 3.7 с + стрелка 1.9 с + рывок через случайные 2.2–7.8 с;
+  reduced-motion — без анимации; на ≤420 px только иконка). Она и иконка загрузки открывают панель: цель
+  Unity FBX / Unreal FBX / Blender .blend / GLB / ZIP; анимации все или выбранные (галочки); «модель и
+  анимации» или «только анимации (скелет)»; имена Mixamo `mixamorig:` (только `category=humanoid` из
+  `analysis/fast.json`); версия рига v0…vN из `rig/skin/index.json` (файлы `rig/skin/<v>/rigged.glb`).
+  API: `POST /api/task/{id}/downloads-v3-custom {target, clips: "all"|[...], mesh, mixamo, version}` →
+  формат `x-<hash12>.<fbx|glb|blend>` (спек в `glb_cache/<task>_v3exports/specs/<hash>.json`), дальше тот же
+  статус/файл. GLB с моделью режется на VPS мгновенно, остальное — воркеры (Blender: `clips`, `mesh`,
+  `mixamo` переписывает пути всех клипов, `format`; реимпорт-проверка по формату). Манифест: `versions`,
+  `category`, `options`. Неизвестный клип / пустой экспорт → 422, без подписки → 402 до записи спека.
+  Unity и Unreal сейчас один и тот же FBX (разные имена файла); ZIP — только текущая версия, все клипы.
+  Проверено админом через воркеры: Unreal только скелет 6 клипов Mixamo (f2, 10 с), .blend 8 клипов, GLB-клип
+  мгновенно, Unity FBX версии v0; аноним в Chrome → пейволл. DEV 6630. Автотесты: `export_options`,
+  `export_blend` (extended, PASS). Воркер: таймаут скачивания источника 90 с (f7 однажды завис на нём, lease
+  отдал задачу f2).
+- **Для Animation picker · V3**: список анимаций в панели = анимации текущего `runs/<run>/rig/rigged.glb`
+  (без `rig_check`), перечитывается при каждом открытии панели. Клип, добавленный во вьюпорте, появится в
+  скачивании, если он записан в этот GLB как glTF-анимация. Если вы храните клипы иначе (отдельный файл/список),
+  напишите здесь формат — подключу.
 
 ## Limb stabilization · V3 — стабилизация конечностей перед ригом (2026-10-10 17:40 UTC, на проде, MT `17a38c2`+)
 
