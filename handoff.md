@@ -123,7 +123,8 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   - ACL owner / anon_id / admin, чужая приватная задача → 404 (на проде приватных нет).
   Доказано: `492210fd` (классика, 70 костей, клип играет, DEV `b123c856bfc6`),
   `cfa2e6a1` (V3 run, агент на связи), новая `5f51cb9c` (модель во вьювере при риге 12%,
-  DEV `7b8fa84a6c1a`), раскладка десктоп/телефон DEV `6b0a7dd69471`, `979a46632099`.
+  DEV `7b8fa84a6c1a`; по готовности оболочка сама перезагрузила run с ригом 68 костей —
+  DEV `1c8f3f6c47ae`), раскладка десктоп/телефон DEV `6b0a7dd69471`, `979a46632099` (✅).
 - **Раскатка без рестарта:** `/srv/autorig/live/config/task-page.json`
   (`mode` off|admin|new|all, `new_since`, `webapp`, `preview_keys`; запись — temp+rename).
   **Сейчас шаг 4 — `all` (12:09:49 UTC, после ✅ владельца на DEV `979a46632099`):**
