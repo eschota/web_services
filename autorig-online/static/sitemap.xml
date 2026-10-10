@@ -129,6 +129,14 @@
   </url>
 
   <url>
+    <loc>https://autorig.online/rig</loc>
+    <lastmod>2026-09-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rig"/>
+  </url>
+
+  <url>
     <loc>https://autorig.online/faq</loc>
     <lastmod>2026-01-01</lastmod>
     <changefreq>monthly</changefreq>
@@ -776,6 +784,108 @@
     <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/image-to-rigged-3d-character-zh"/>
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character"/>
+  </url>
+
+  <!-- Localized interface pages (ru, fa) -->
+  <url>
+    <loc>https://autorig.online/ru/</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/gallery</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/gallery"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/gallery"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/gallery"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/gallery"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/gallery</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/gallery"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/gallery"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/gallery"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/gallery"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/buy-credits</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/buy-credits"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/buy-credits</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/buy-credits"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/how-it-works</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/how-it-works</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/developers</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/developers</loc>
+    <lastmod>2026-10-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
   </url>
 
 </urlset>

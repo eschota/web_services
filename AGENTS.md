@@ -236,6 +236,38 @@ Every V3 decision for the site and its services follows from it:
   tool is not finished until it appears there. As of 2026-10-10 the URL
   returns 404 and still has to be built.
 
+## User Language
+
+Owner rule, 2026-10-10:
+
+> мне надо чтобы и Агент понимал по английски и отвечал по английски тем у кого
+> язык английский, чтобы он это знал от апи сайта, и чтобы сайт был переведен
+> на вот этот язык и локализован
+
+* Every agent (Astra, support_ai, session agents) answers each user in that
+  user's language: English to English speakers, Persian to Persian speakers,
+  and so on. It reads the language from the site API and never guesses. If the
+  user writes in another language, it answers in the language of the message.
+  It never defaults to Russian.
+* The language is an API field (`backend/user_language.py`, contract
+  `GET https://autorig.online/api/language`):
+  * `GET /auth/me`, `GET /api/me/language`: `language`, `language_code`;
+  * `GET /api/task/{id}`: `owner_language`, `owner_language_code`;
+  * `POST /api/support-chat/session`: `language`, stored on
+    `support_chat_sessions.language`;
+  * admins and agents on the host: `GET /api/language/resolve?task_id=` or
+    `support_session_id=`, `email=`, `anon_id=`.
+* `language.code` is the language to answer in (any ISO 639-1 code). Put
+  `language.agent_instruction` into the prompt. `language.ui` is the site
+  interface: en, ru, zh, hi or fa. The order is the user's own choice, then the
+  browser's languages, then `Accept-Language`, then the language recorded on the
+  task, then `en`.
+* Every user-visible string on the site goes through i18n keys
+  (`static/i18n/<lang>.json`, `data-i18n`, `I18n.t()`). Raw server text never
+  reaches a user: errors carry `detail.error_string` and a localized
+  `message_string`. Persian is right to left. Page URLs per language are
+  `/fa/...` and `/ru/...`; English has no prefix.
+
 ## General Workflow
 
 ### Persistent development handoff
