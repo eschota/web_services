@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest source checkpointfd4cf86 in private MT repo: full-garment source/raw-order
+Latest source checkpoint134cced in private MT repo: full-garment source/raw-order
 domain guards and separate semantic/control admission,47 Python tests; chat media
 layout regression passes. Canonical/server handoff SHA matched
-a2c54d27f846b29d71e4497f74b7bde7934ae1cc01a9701335fb692af7bd6479.
+79bd6e750f15d23a8b261d860991efa13af337cb624ce76554ca3fba5987f8c9.
 F7 whole-skirt request02 completed once50.550s/5498 tokens but malformed output
 rejects semantic admission; no physical roots/weights/sewing authorized by it.
 No restart/customer task. Live chat-card CSS deployed/public SHA3c70ffd7; browser
@@ -22,7 +22,8 @@ restparity2.24e-16, feasibility/selfobjective next. Red Hair53candidate0151 has0
 numericregressions/0improvements, Headaliasnoflex; stablelivevideo sentMEDIAonce
 uidbd1856ec7957, deliveryNOTapproval. ResearchFoot3f32 from4e5 preservesgeometry
 andrebakes9clips120fps, arbitrarytime matrixdrift2.21e-4 notcontinuousproof.
-ActualBodyrootbinding certificate3/20 known, externalwitness researchcontinues.
+ActualBodyrootbinding voxel3/20 +external9/20 =>union11/20known,9unknown;
+localexterior only, no globalBody/thickness/physicalpinchange claims.
 Full body/clothing/hair acceptance remains0/5; historical snapshots below are not
 current acceptance. This section supersedes prior "no farm call yet" wording.
 
