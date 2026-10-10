@@ -93,7 +93,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   `v3_cutover.py` (контроллер фермы), MT→backend push-callbacks (`task_callbacks.py`):
   идемпотентность даёт durable outbox (poll, lease CAS, повтор проекции).
 
-## Task page · V3 — живая страница задачи (2026-10-10 12:10 UTC, проверено на проде)
+## Task page · V3 — живая страница задачи (2026-10-10 12:15 UTC, проверено на проде)
 
 - **Свежий JS на каждом заходе.** nginx `/static/`: оверлей `/srv/autorig/live/static`,
   затем релиз. JS/CSS без точного 10-hex `?v=` отдаются `no-cache` + ETag (304),
@@ -126,11 +126,12 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   DEV `7b8fa84a6c1a`), раскладка десктоп/телефон DEV `6b0a7dd69471`, `979a46632099`.
 - **Раскатка без рестарта:** `/srv/autorig/live/config/task-page.json`
   (`mode` off|admin|new|all, `new_since`, `webapp`, `preview_keys`; запись — temp+rename).
-  **Сейчас шаг 3 — `new` с `new_since` 2026-10-10T11:45:57Z:** новые задачи всем по
-  умолчанию в V3; старые — классика, кроме админа с `?v3=1` (кука `ar_task_v3`) и
-  превью-куки `ar_task_v3_preview`; **V3-задачи всегда в V3**; `?v3=0` — отказ навсегда,
-  `?classic=1` — разово; Telegram `mode=webapp` — классика, пока `webapp: false`.
-  Заголовок ответа `X-AutoRig-Task-Page: v3|classic`.
+  **Сейчас шаг 4 — `all` (12:09:49 UTC, после ✅ владельца на DEV `979a46632099`):**
+  все задачи по умолчанию в V3 (25/25 случайных задач: страница и `v3-view` 200);
+  `?v3=0` — отказ навсегда (кука `ar_task_v3=0`), `?classic=1` — классика разово;
+  Telegram `mode=webapp` — классика, пока `webapp: false`. Откат — `mode` в файле
+  (`new`/`admin`/`off`), без рестарта. Заголовок `X-AutoRig-Task-Page: v3|classic`.
+  DEV шагов: 1 `b123c856bfc6`, 3 `6b0a7dd69471`/`7b8fa84a6c1a`, 4 `57a2d12ed9aa`.
 - **i18n:** 16 ключей `taskv3_*` (en/ru — я, fa/zh/hi — Localization), JS через `I18n.t()`.
 - **Для Viewer · V3** (шаблон Unity не трогаю): оболочка грузит
   `/api/mt/unity/test/index.html?api=<origin>/api/task-viewer/<id>&run=task&agent=0`
@@ -144,11 +145,13 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - **Рестарты:** 11:25:32 UTC (`tv3-backend-20261010b`) — сброс отменил 3 running
   graph-рендера (в `render_tasks` их не было). Теперь перед рестартом:
   `curl -s -X POST 'http://127.0.0.1:8210/renderfin/api-render/reset?dry_run=1&spare_non_graph=1'`.
-  Ждёт простоя renderfin: серверный текст описания+ключевых слов под вьювером
-  (`fill_v3_description`, коммит `48b646d0`) — скрипт `/tmp/tv3-backend-files/restart.sh`
-  сам пересоберёт релиз от текущего `current` и перезапустит, когда очередь пуста.
-- **Дальше:** шаг 4 (`all`) — после вердикта владельца в DEV (переключение одной
-  записью в task-page.json); мобильный Unity; загрузка движка 17.7 MiB.
+  Серверный текст описания+ключевых слов под вьювером (`fill_v3_description`, коммит
+  `48b646d0`) уже лежит в `current` (`tv3-backend-desc-*`) и включится при ближайшем
+  рестарте `autorig-storage` (любым агентом); `/tmp/tv3-backend-files/activate.sh`
+  ждёт простоя renderfin и перезапустит сам, если раньше никто не перезапустит.
+- **Дальше:** Telegram WebApp (`webapp: true`) после проверки Unity во встроенном
+  браузере Telegram; мобильный Unity; загрузка движка 17.7 MiB; покупки/подписка и
+  экспорт прямо в V3 вместо перехода на классику.
 
 ## Viewer · V3 — каналы, карусели, своё контекстное меню, новый /faq (2026-10-10 12:10 UTC, на проде)
 
