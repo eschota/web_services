@@ -1,0 +1,22 @@
+#!/bin/bash
+# The only way agents restart autorig-mt (owner incident 2026-10-10: task 66d83b2e was killed by an
+# "idle window" restart whose own check missed a 15-min V3 run). Uses the release gate's mt_busy():
+# MT run.json running/queued, running branches, V3 dispatch v3_runs. Refuses while anything runs.
+# Usage: sudo autorig-mt-restart [--wait SECONDS]   (waits up to SECONDS for idle, default 0)
+set -u
+WAIT=0; [ "${1:-}" = "--wait" ] && WAIT="${2:-0}"
+deadline=$(( $(date +%s) + WAIT ))
+while :; do
+  busy=$(cd /srv/autorig/autotests && /srv/autorig/venv/bin/python3 -c "import autotests; print('\n'.join(autotests.mt_busy()))")
+  if [ -z "$busy" ]; then
+    systemctl restart autorig-mt && sleep 4 && systemctl is-active autorig-mt
+    logger -t autorig-mt-restart "restarted by ${SUDO_USER:-root}"
+    exit 0
+  fi
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    echo "REFUSED: autorig-mt is busy:"; echo "$busy"
+    logger -t autorig-mt-restart "refused for ${SUDO_USER:-root}: $(echo "$busy" | tr '\n' ';')"
+    exit 1
+  fi
+  sleep 15
+done
