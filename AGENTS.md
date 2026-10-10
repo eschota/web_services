@@ -484,6 +484,22 @@ Owner rule, 2026-10-10:
     (https://opencode.ai/legal/terms-of-service), so serving public visitors
     is NOT enabled until the owner decides on that conflict.
 
+## SFW Main Site, Adult Content On Its Own Domain (owner order, 2026-10-11)
+
+> весь NSFW контент по всем регуляционным правилам стран перенести на
+> отдельный защищенный домен ... и только с согласия и подтверждения возраста
+> и авторизации через гугл oAuth
+
+* autorig.online never lists, links or embeds adult content. Any new listing,
+  sitemap, card or feed of tasks uses `site_mode.listing_conditions(request, Task)`
+  or `site_mode.hides(request, task)`.
+* Adult content and the node editor family (/nodes, /workflows, /queue,
+  /lora, /system_prompts and their APIs) belong to the adult domain, where
+  `site_mode.py` gates every request: Google sign-in, a recorded 18+ consent,
+  the geo block list. Switches: `/srv/autorig/live/config/site-modes.json`.
+* `/nsfw` on autorig.online is the owner's Telegram validator; do not reuse it.
+* The geo list and the gate are measures, not a claim of legal compliance.
+
 ## Astra Is Stopped (owner order, 2026-10-11)
 
 > останови Астра бота, он все токены сожрал, полностью, уже платить начали,

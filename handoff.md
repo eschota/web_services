@@ -1697,3 +1697,29 @@ This scoped development checkpoint does not overwrite the unrelated historical
   hands_detector_controls (мальчик, лошадь, воин с мечом — не руки). Гейт 20261010T211933Z: 33 кейса PASS.
 - DEV: до/после отправлены от «Hands rig · V3». Не сделано: две руки в одной оболочке, рука без большого пальца
   (4 пальца + пометка), Mixamo-библиотека анимаций рук конвертера (нет в Git), тесселяция на ветке рук.
+
+## NSFW split · V3 — отдельный защищённый домен 18+ (2026-10-11, агент «NSFW split»; код на проде, домен НЕ куплен)
+
+- Владелец: весь NSFW-контент — на отдельный домен (autorig.red или подобный), фильтр-разделитель между доменами,
+  /nodes целиком туда, вход только с Google OAuth + согласие и подтверждение 18+, правила стран.
+- На проде (релиз `…-nsfwsplit-badge`, коммиты `63cd8936`, `974b23a5`): `backend/site_mode.py` — режим по Host;
+  `backend/geo_country.py` — чтение .mmdb (страна + штат США) без пакетов; i18n en/ru/zh/hi/fa (`adult_*`,
+  `error_nsfw_domain_only`, `error_adult_*`); 18 тестов `tests/test_site_mode.py`.
+  - Уже действует: `/api/gallery` (и авторские страницы) и `owner_tasks` на autorig.online не показывают `adult`.
+  - Готово, но выключено до домена (`/srv/autorig/live/config/site-modes.json`, перечитывается без рестарта, файла
+    пока нет = дефолты): `nsfw_hosts`, `main_split_section` (/nodes, /workflows, /queue, /lora, /system_prompts и их
+    API → нейтральная страница / 403 `nsfw_domain_only`), `main_split_items` (adult-задача → нейтральная страница,
+    thumb/video 404). Внутренние вызовы 127.0.0.1:8200 (autorig-mt, surabot, режиссёр) не трогаются никогда.
+  - На домене 18+ каждый запрос проходит гейт: сессия Google → запись согласия в `adult_consents` (user_id, версия,
+    страна по IP, время) → гео. Без гео-базы страна неизвестна → закрыто (проверено вживую: 451). Админ — без гео.
+    Админ-ключ API проходит без согласия. nginx-шаблон ставит `auth_request /api/age-gate/check` на всё, кроме гейта.
+  - Стейджинг: админ открывает `https://autorig.online/api/site-mode/stage?mode=nsfw` (или `main-split`), выход —
+    `?mode=off` (бейдж в углу). Статус: `GET /api/site-mode`, `GET /api/age-gate/status`.
+  - `/nsfw` на autorig.online — Telegram-валидатор (8221), не тронут. На домене 18+ `/nsfw` → `/nodes`.
+- Домен: `deploy/nsfw-domain/namecheap_domain.py check` (только чтение). 2026-10-11: autorig.red свободен,
+  $9.68 первый год / $32.18 продление; autorigonline.red то же; autorigred.com $11.18/$18.68; .xxx/.adult $70/$155.
+  Покупка — только по подтверждению владельца: `namecheap_domain.py register <d> --confirm <d>`; затем
+  `sudo bash deploy/nsfw-domain/activate.sh <d>` (DNS, certbot --nginx, серверный блок без `listen IP:443`,
+  site-modes.json) и redirect URI `https://<d>/auth/callback` в Google OAuth-клиенте (вручную, консоль Google).
+- Нужна гео-база (DB-IP Lite City или GeoLite2-City) в `/srv/autorig/data/geoip/country.mmdb` — скачивание не
+  делалось, ждёт разрешения владельца. Без неё домен 18+ закрыт для всех, кроме админов.
