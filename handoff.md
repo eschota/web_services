@@ -1736,3 +1736,20 @@ This scoped development checkpoint does not overwrite the unrelated historical
   только сообщает о комнате, если посетитель уже в ней. `join_busiest_room` переносит по просьбе.
 - 503 на `.data.unityweb` был не от `limit_req` (у него статус 429, в error.log «limiting requests» = 0).
 - Шаблон в рабочем дереве несёт чужой WIP (horizon / scene_template, HDR Codex) — в r2 страница взята с прода r1, их правки не выкатывал.
+
+## Scenes · V3: «Лесной горизонт» и модуль horizon (2026-10-11 22:30 UTC, на проде)
+
+- `unity/test` -> `horizon-r2-20261011` (= v3-all-r2 wasm/страница + модуль; откат в `unity/.test-history.log`).
+- Real Millions of Trees 2D (R:\AssetStore, read-only) на WebGL2 не работает (D3D11 compute, indirect draw), поэтому его дальний
+  лес и холмы запечены офлайн в 360-градусные полосы (цвет + маска, 18 вариантов: 8 регионов, время, плотность, seed) и
+  показываются 2D-куполом `Assets/Horizon/HorizonDome.cs` (шейдер `AutoRigHorizonDome`, без геометрии). Подгружается
+  только при выборе сцены с `modules.horizon` (manifest `horizon.json` + пара полос ~0,3 МБ), прогресс в плашке сцен;
+  стартовая загрузка вьювера не меняется (18,4 МБ).
+- Пакет `scenes/forest-horizon` (scene.glb луг, scene.json 7 пресетов со своими `horizon`-опциями, horizon.json, hz-*.jpg).
+  `GET /api/mt/scenes?caps=horizon` отдаёт модульные сцены только вьюверу с этой способностью (старые вьюверы их не видят).
+- Опции (агенту): страница `autorigUnity.command("horizon", {region, time, seed, density, relief, distance, exposure,
+  saturation, opacity, yaw, lift, tint, haze})` и `command("scene_template", {value: id})`; событие `horizon`, поле
+  `scene_template` в `viewerState()`. Тест: `?rooms=0` отключает автозаход в комнату.
+- Пересборка полос: `tools/horizon_kit/README.md` (Unity -batchmode -force-d3d11 в копии проекта ассета, ~1 мин на 18 вариантов).
+- Собор: ambient x2.3 и экспозиция пресетов выше; земля рана не возвращается под запечённой сценой. Открыто по вердиктам
+  владельца: нормальный перезапёк GI/лайтмапов и пробов Собора, вердикт «Улучшить» по плашке.
