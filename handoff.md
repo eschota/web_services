@@ -2,7 +2,12 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpointbfba8d9/sourceb4a7b33: canonical/server SHAee9d983abc4130717dc3c1b3b822b12f7f607473bfe00f81fd4bb6f508ac63e2.
+CURRENT private checkpointb44789b/sourceb4a7b33: canonical/server SHA1af551c2bdc75316fd89d30edea8576c2875b19b3ba408c3296be959f84deba8.
+BodyRESTpairdiagnostic5713/5707 NOTadmittedv2coverage: wrongoldpacket andno
+currentproperreclassification. Exactv2arrays/times/canonicalstatuses immutable
+recomputeassigned, no newsolverrun. GlobalBody normalsunknown/open/nonmanifold.
+
+Prior private checkpointbfba8d9/sourceb4a7b33: canonical/server SHAee9d983abc4130717dc3c1b3b822b12f7f607473bfe00f81fd4bb6f508ac63e2.
 Actualcentered-v2 F5a6c run TERMINALREJECT/INCOMPLETE8e6bfc09/archivee5ee536b;
 p0smallimprovement Body604->588/self254->250,1/3/4noacceptedsteps,2timeout54.12
 intermediatecheckpointNOTfinal; physicalallfailed/quality0of5. No retry/deploy.
