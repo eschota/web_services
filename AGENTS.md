@@ -475,6 +475,26 @@ Owner rule, 2026-10-10:
 * **Example, task 583622f3** (the «potato»): only `dpgoe.obj` was uploaded.
   It has UVs and `usemtl Apotat0o1Mtl`, but no .mtl and no images.
 
+## Only Current-Version Rigs Are Shown (owner order, 2026-10-11)
+
+> сделай чтобы все задачи если их кто то открывает, а версия сервера не
+> совпадает чтобы заново ригались … я хочу видеть все готовые риги только
+> текущей версии Авторига, и чтобы уже превьюшки в галерее от V3 были, но
+> только при открытии сцены триггерить перериг
+
+* **Version stamp.** Every rig carries the AutoRig rig version it was made
+  with. The server publishes its current rig version.
+* **Re-rig on open.** When anyone opens a task whose rig version differs
+  from the server's (classic converter rigs, older V3), the opening starts a
+  re-rig on the current V3 pipeline. It is a new rig version; the old one and
+  the customer's files stay.
+  * The viewer shows the progress stages, as for a new task.
+  * One re-rig per task and version, never duplicated by parallel visitors.
+  * NSFW tasks follow the site mode.
+* **Only on open.** Nothing re-rigs the whole database in bulk for this.
+* **The gallery shows V3 previews.** A re-rig produces the V3 viewer render
+  that the gallery and the task's OG preview use.
+
 ## Viewer Load Order, Scenes and Saved Settings (owner order, 2026-10-11)
 
 > до полной загрузки 3д меша, все этапы … проигрывались на фоне черной сцены
