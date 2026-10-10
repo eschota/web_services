@@ -1326,10 +1326,17 @@ This scoped development checkpoint does not overwrite the unrelated historical
   делал **каждый** ран `needs_review` («часть анимаций не перенеслась»). Раны cc22a7e0, 7b45d6a0, 9980a38a, 7c9aaae7.
   Починено ханком в `v3_conveyor.py` (round 2, 17:35 UTC). Также: прод `mt/retarget.py` отличается от Git HEAD
   (sha 39225aaa vs db8af918) — кто-то правил на проде без коммита.
+- **Проверено вживую**: агент сессии демо-задачи сам вызвал `stabilize_pose {"target_pose": "A"}` на ране 7c9aaae7
+  (версия v1 за 1.6 с, `stab/versions.json`), т.е. инструмент работает через агента; входящая задача 7c1b6748 без
+  скелета: этап честно отказал (`why: no skeleton`, 2.3 с), fit_check записал «LeftHand, LeftFoot вне меша».
 - **Не сделано / дальше**: (1) путь без исходного скелета (голый меш в позе — Hunyuan/Tripo без рига): детектор позы по
   геометрии и цепи из медиального скелета не построены, `stage` честно пишет `why: no skeleton`, fit_check всё равно
   срабатывает; (2) волосы, сваренные с кистями над головой, частично уезжают с правым предплечьем (видно на
   `stab/before_after.png`); (3) клип «Source pose» приблизительный (ошибка ~7 % H в среднем: пивоты fastrig ≠ источник);
   (4) fast_analysis `bone_outside_check` на открытых мешах (Tripo: 13.9k граничных рёбер) двигает суставы в хвост —
   на ране 7c9aaae7 испортил ноги после хорошего рига (owner: V3 triage); с пином суставов источника (round 3) риг
-  устойчивее. Демо: задача 04a85183 (V3, ран 7c9aaae7ca1c5bf9618c), аудит `/srv/autorig/audits/limb-stab-20261010/`.
+  устойчивее. Демо: задача 04a85183 (V3, ран 7c9aaae7ca1c5bf9618c, код round 2) и ран `d1522b45a0b1c2d3e4f5` (round 3, прямой
+  `mt.rig_first` на проде: posed → T 0.65 с, 14 пинов, fit ok, limb collision none, 2.2 с всего; вьювер
+  `/api/mt/unity/test/index.html?run=d1522b45a0b1c2d3e4f5`), аудит `/srv/autorig/audits/limb-stab-20261010/`.
+  **Рестарт autorig-mt после round 3 отложен**: шёл V3-ран 5ee6219f (задача 7c1b6748, numeric QA ~1 чанк/мин); фоновый
+  цикл рестартует в первое окно простоя (до 2 ч). До рестарта конвейер в памяти — round 2 (без пинов суставов).
