@@ -88,6 +88,7 @@
     {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["==", 0]}},
     {"id": "mt_limbs", "kind": "limb_collision", "paths": ["mt"], "on": "mt_rig", "thresholds": {"worst_share": ["<=", 0.36], "min_arm_vertices": [">=", 1]},
      "target": {"thresholds": {"severity_rank": ["<=", 1]}, "reason": "the fast rig's right forearm also enters the torso in the library clips (28% of the arm, 4.5% H deep)", "owner": "Limb collision · V3"}},
+    {"id": "mt_cleared", "kind": "mt_arm_clearance", "paths": ["mt"], "on": "mt_rig", "thresholds": {"severity_rank": ["<=", 1], "min_arm_vertices": [">=", 1]}, "note": "V3 triage: the conveyor's arm clearance after the retarget (mt/arm_clearance.py); 2026-10-10: right high 28% -> none"},
     {"id": "conv_limbs_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "thresholds": {"right_rank": ["==", 3]}},
     {"id": "conv_fit_control", "kind": "skeleton_fit", "role": "control", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "thresholds": {"joints_outside_bbox": ["<=", 0]}},
     {"id": "conv_hands_control", "kind": "hand_weights", "role": "control", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "thresholds": {"palm_on_torso": ["<=", 0], "far_hand_weight": ["<=", 0]}},
@@ -234,6 +235,7 @@
      "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
     {"id": "mt_limbs", "kind": "limb_collision", "paths": ["mt"], "on": "mt_rig", "thresholds": {"min_arm_vertices": [">=", 1], "worst_share": ["<=", 0.58]},
      "target": {"thresholds": {"severity_rank": ["<=", 1]}, "reason": "both arms of the fast rig go through the body", "owner": "Limb collision · V3"}},
+    {"id": "mt_cleared", "kind": "mt_arm_clearance", "paths": ["mt"], "on": "mt_rig", "tier": "extended", "thresholds": {"severity_rank": ["<=", 1], "min_arm_vertices": [">=", 1]}, "note": "V3 triage: the conveyor's arm clearance after the retarget (mt/arm_clearance.py); 2026-10-10: high/high (47% of the right forearm) -> none/none"},
     {"id": "recorded_limbs_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt"], "input": "8369addb.mt-rig.glb", "thresholds": {"left_rank": ["==", 3], "right_rank": ["==", 3]}}
    ]},
   {"id": "elf_hair", "task": "4f85d45e-0bbb-4073-bc19-d8ff3ba125cc", "cost": 5,

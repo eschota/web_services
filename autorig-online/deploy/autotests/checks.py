@@ -363,6 +363,26 @@ def limb_collision(path):
 
 
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
+def mt_arm_clearance(ctx):
+    """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
+    limb check, then, a side flagged, the clips keep the forearm / hand out of the body (a new rig version, only when
+    the detector says better). The metrics are limb_collision's on the rig the customer then gets. Run it last in a
+    case: it may replace the case run's rig/rigged.glb."""
+    run = ctx["run"]
+    try:
+        from mt import arm_clearance  # noqa: F401
+    except ImportError:
+        return {"pending": True, "why": "mt/arm_clearance.py is not in the tree under test"}
+    p, wall = _child([PY, "-P", "-m", "mt.arm_clearance", "--dir", str(run), "--check"], timeout=900)
+    if p.returncode != 0:
+        raise RuntimeError(f"arm_clearance exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    doc = json.loads(p.stdout)
+    out = limb_collision(run / "rig" / "rigged.glb")
+    out.update(clearance_seconds=wall, clearance_applied=bool(doc.get("version") and doc.get("better")),
+               clearance_skipped=doc.get("skipped"))
+    return out
+
+
 def mt_rig_first(ctx, input_name, words=""):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time."""
@@ -569,6 +589,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return mt_rig_first(ctx, inp, a.get("words", ""))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx)
+    if k == "mt_arm_clearance":
+        return mt_arm_clearance(ctx)
     if k == "mt_numeric_qa":
         return mt_numeric_qa(ctx, a.get("clips"), a.get("cap", 2000))
     if k == "skeleton_fit":
