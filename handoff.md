@@ -2,16 +2,20 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest source checkpoint94d34f8 in private MT repo: full-garment source/raw-order
+Latest source checkpoint3a16766 in private MT repo: full-garment source/raw-order
 domain guards and separate semantic/control admission,47 Python tests; chat media
 layout regression passes. Canonical/server handoff SHA matched
-5366e93db28d02a5be668b74e4c2c02b40fab8aa01f351ea818e83ec70815ce9.
+158feda8c818d197fcfc47e1462e086f69c753c879760c170b82d71b1354e68d.
 F7 whole-skirt request02 completed once50.550s/5498 tokens but malformed output
 rejects semantic admission; no physical roots/weights/sewing authorized by it.
 No restart/customer task. Live chat-card CSS deployed/public SHA3c70ffd7; browser
 firstrow/longtitle checks pass. Whole-main rigid-pelvis field rejected:Bodycontacts
-regress all5poses despite strainpass. One bounded independent48DOF helper research
-experiment authorized, no serialized/default candidate; verifycanonical latest.
+regress all5poses despite strainpass. Corrected48DOF experiment completed5poses
+but finalaudit typedtimeout300s, no acceptedartifact. ActualF5 GPUcontact research
+full5 Body/Face parity43.83sCPU→~1.90sGPUwarm (~23x), ONLYproper/separated corpus;
+broader touching/coplanar fallback pending. Fullclothmembrane/ARAP J.033s,41tests.
+FootVision11/69registeredpoints andHairQwenmaskleak bothrejected, no defaultchange.
+DurableGPU-backedsolver preparation/current4modelBodyselection inventory active.
 Full body/clothing/hair acceptance remains0/5; historical snapshots below are not
 current acceptance. This section supersedes prior "no farm call yet" wording.
 
