@@ -1676,7 +1676,7 @@ This scoped development checkpoint does not overwrite the unrelated historical
   Walking/Running паутина и разрывы торса/юбки ушли; **остаток**: короткие руки-варежки — Hand владеет 33 вершинами,
   Arm 55, ForeArm 426, и кисть «звездит» в клипах (collapsed-граней по 8 кадрам Walking 5 → 23 из-за этого).
   Дальше: на грубых моделях сливать кости конечности с < N вершинами в соседнюю (Hand → ForeArm) или ставить
-  суставы по длине стаба. DEV 6579 (до/после). Round 9: установлен только tessellate.py (ханки fastrig/rig_first
+  суставы по длине стаба. DEV 6603 (до/после), 6604 (вьювер). Round 9: установлен только tessellate.py (ханки fastrig/rig_first
   переживают чужие перезаливки — проверено по маркерам после деплоя Hands-агента).
 
 ## Hands rig · V3 — риг рук как отдельная категория (2026-10-11, на проде, агент «Hands rig · V3»)
