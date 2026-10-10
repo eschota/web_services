@@ -387,6 +387,105 @@ def pose_stabilization(ctx):
             "clips": len(rig.get("clips") or []), "source_pose_clip": int("Source pose" in (rig.get("clips") or []))}
 
 
+# Astra TODO · horse (a742491a): what the Unity viewer's glTFast 6.20 loads (no Draco / meshopt / KTX packages)
+GLTFAST_REQUIRED_OK = {"KHR_mesh_quantization", "KHR_texture_transform", "KHR_materials_pbrSpecularGlossiness",
+                       "KHR_materials_unlit", "KHR_materials_variants", "KHR_materials_transmission",
+                       "EXT_mesh_gpu_instancing", "KHR_lights_punctual", "KHR_materials_clearcoat"}
+LEG_BONE_RX = re.compile(r"^(Left|Right)(Front|Hind)(UpLeg|Leg|Foot|Toe)$")
+
+
+def viewer_opens(path):
+    """Astra TODO · horse: the viewer refuses a GLB that requires an extension glTFast lacks (EXT_texture_webp, Draco,
+    meshopt, KTX2) and cannot decode WebP / KTX2 images. -> the counts the thresholds judge."""
+    from mt import skin_postvalidate as SP
+    doc = SP.read_glb(pathlib.Path(path).read_bytes())[0]
+    req = list(doc.get("extensionsRequired") or [])
+    bad = [e for e in req if e not in GLTFAST_REQUIRED_OK]
+    imgs = []
+    for im in doc.get("images") or []:
+        mime = im.get("mimeType") or ("image/png" if str(im.get("uri", "")).lower().endswith(".png") else
+                                      "image/jpeg" if re.search(r"\.jpe?g$", str(im.get("uri", "")).lower()) else "?")
+        imgs.append(mime)
+    bad_img = [m for m in imgs if m not in ("image/png", "image/jpeg")]
+    return {"required": req, "unsupported_required": len(bad), "unsupported_list": bad, "images": len(imgs),
+            "unsupported_images": len(bad_img), "image_types": sorted(set(imgs)),
+            "bytes": pathlib.Path(path).stat().st_size}
+
+
+def quadruped_legs(path, rig_json=None):
+    """Astra TODO · horse: a quadruped rig's legs isolated by topology. From the GLB alone (bone names Left/Right +
+    Front/Hind + UpLeg/Leg/Foot/Toe): vertices weighted (> 5 %) to a front and a hind leg, welded edges whose ends
+    belong to two different legs (dominant), front|hind among them; from rig.json: the rig_check stretch."""
+    s = Skin(path)
+    keys = sorted({m.group(1) + m.group(2) for n in s.names for m in [LEG_BONE_RX.match(n)] if m})
+    if len(keys) < 4:
+        return {"legs": len(keys), "front_hind_vertices": None}
+    G = np.zeros((len(s.J), len(keys)))
+    for k, key in enumerate(keys):
+        cols = [i for i, n in enumerate(s.names) if (m := LEG_BONE_RX.match(n)) and m.group(1) + m.group(2) == key]
+        G[:, k] = (np.isin(s.J, cols) * s.W).sum(1)
+    front = np.array(["Front" in k for k in keys])
+    has = G > 0.05
+    fh_v = int((has[:, front].any(1) & has[:, ~front].any(1)).sum())
+    rest = np.concatenate([r["rest"] for r in s.rows])
+    q = np.round((rest - rest.min(0)) / max(float(np.ptp(rest, 0).max()), 1e-12) * 1e5).astype(np.int64)
+    _, wid = np.unique(q, axis=0, return_inverse=True)
+    wid = wid.reshape(-1)
+    dom = np.where(G.max(1) >= 0.5, G.argmax(1), -1)
+    wdom = np.full(int(wid.max()) + 1, -1)
+    wdom[wid] = dom
+    e = np.concatenate([s.F[:, [0, 1]], s.F[:, [1, 2]], s.F[:, [2, 0]]])
+    eu, ev = wid[e[:, 0]], wid[e[:, 1]]
+    key = np.unique(np.sort(np.stack([eu, ev], 1), 1), axis=0)
+    a, b = wdom[key[:, 0]], wdom[key[:, 1]]
+    cross = (a >= 0) & (b >= 0) & (a != b)
+    fh_e = cross & (front[np.maximum(a, 0)] != front[np.maximum(b, 0)])
+    out = {"legs": len(keys), "front_hind_vertices": fh_v, "cross_leg_edges": int(cross.sum()),
+           "front_hind_edges": int(fh_e.sum()), "vertices": int(len(s.J))}
+    if rig_json and pathlib.Path(rig_json).is_file():
+        rig = json.loads(pathlib.Path(rig_json).read_text(encoding="utf-8"))
+        st = (rig.get("checks") or {}).get("rig_check_stretch") or {}
+        frames = [v for k, v in st.items() if k.startswith("t=") and isinstance(v, dict)]
+        out.update(rig_check_edges_over_2x=max([int(v.get("edges_over_2x") or 0) for v in frames] or [0]),
+                   rig_check_edges_over_4x=max([int(v.get("edges_over_4x") or 0) for v in frames] or [0]),
+                   rig_check_max_stretch=max([float(v.get("max_stretch") or 0) for v in frames] or [0]),
+                   forward_axis=rig.get("forward_axis"), forward_check=rig.get("forward_check"))
+    return out
+
+
+def mt_quadruped_rig(ctx, input_name, what="", forward_axis="+z"):
+    """Astra TODO · horse: the rig the V3 conveyor builds once Vision has answered (mt.rig_first.build on a run whose
+    classify says quadruped and whose projections carry Vision's front), so a front across the body is exercised."""
+    run = pathlib.Path(ctx["work"]) / "run"
+    shutil.rmtree(run, ignore_errors=True)
+    (run / "proj").mkdir(parents=True)
+    shutil.copyfile(_input(input_name), run / "proj" / "model.glb")
+    (run / "proj" / "manifest.json").write_text(json.dumps({"forward_axis": forward_axis}))
+    (run / "phases.json").write_text(json.dumps({"phases": [{"id": "classify", "result": {
+        "what": what, "body": "quadruped", "props": ""}}]}))
+    code = ("import json, sys; from mt import rig_first as R; d = R.build(sys.argv[1], sys.argv[2]); "
+            "print(json.dumps({k: d.get(k) for k in ('body_plan', 'forward_axis', 'forward_check', 'timings_s')} "
+            "| {'bones': len(d.get('bones') or [])}, default=str))")
+    p, wall = _child([PY, "-P", "-c", code, str(run), what], timeout=300)
+    if p.returncode != 0:
+        raise RuntimeError(f"rig_first.build exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    ctx["run"], ctx["words"] = run, what
+    from mt import skin_postvalidate as SP
+    doc, binary = SP.read_glb((run / "proj" / "model.glb").read_bytes())
+    P = np.concatenate([r["rest"] for r in SP.prepare_primitives(doc, binary)[0]]) if doc.get("skins") else None
+    if P is None:
+        from mt import fastrig as F
+        P = F.Source((run / "proj" / "model.glb").read_bytes()).positions
+    ext = np.ptp(P, 0)
+    long_ax = "z" if ext[2] >= ext[0] else "x"
+    fc = out.get("forward_check") or {}
+    return {"seconds": wall, "bones": out.get("bones"), "body_plan": out.get("body_plan"),
+            "forward_axis": out.get("forward_axis"), "forward_given": forward_axis,
+            "forward_axis_along_body": int(str(out.get("forward_axis") or "")[-1:] == long_ax),
+            "forward_changed": int(bool(fc.get("changed"))), "rig_total_s": (out.get("timings_s") or {}).get("fastrig")}
+
+
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
 def mt_arm_clearance(ctx):
     """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
@@ -694,6 +793,13 @@ def run_check(check: dict, ctx: dict) -> dict:
         return rig_budget_live(a.get("hours", 24), a.get("since", "2026-10-10 15:50:00"))
     if k == "pose_stabilization":
         return pose_stabilization(ctx)
+    if k == "mt_quadruped_rig":
+        return mt_quadruped_rig(ctx, inp, a.get("what", ""), a.get("forward_axis", "+z"))
+    if k == "viewer_opens":
+        return viewer_opens(target)
+    if k == "quadruped_legs":
+        rig_json = ctx["run"] / "rig" / "rig.json" if on == "mt_rig" else (_input(a["rig_json"]) if a.get("rig_json") else None)
+        return quadruped_legs(target, rig_json)
     if k == "pending_detector":
         return {"pending": True}
     raise ValueError(f"unknown check kind {k}")

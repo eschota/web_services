@@ -1440,3 +1440,27 @@ This scoped development checkpoint does not overwrite the unrelated historical
   с убитой ошибкой; в `triage.py` заодно починен regex (в нём был символ backspace вместо `\b`).
 - Тест на проде: задача 9d2a5ae8 (маленький корпус-манекен): `mt.project` убит SIGTERM дважды подряд, ран дошёл до
   needs_review без ошибок; тесты `tests/test_v3_killed_runs.py` (MT), `tests/test_v3_killed_retry.py` (backend).
+
+## Astra TODO · horse — вьювер, четвероногие ноги, триаж (2026-10-11, агент «Astra TODO · horse»)
+
+- **Задача** a742491a / run 3ef6defe (gltfpack-лошадь, 18 483 вершины, один сварной shell, хвост до скакательных
+  суставов). Аудит и исходники: `/srv/autorig/audits/astra-todo-horse-20261011/` (source_model.glb, run_v0/,
+  unity_loader_log.txt, horse_before_after.png, repair.py / reqa.py).
+- **Вьювер**: glTFast 6.20 в Unity-вьювере не знает `EXT_texture_webp` (required) -> `ExtensionUnsupported;EXT_texture_webp`,
+  крутилка навсегда. `KHR_mesh_quantization` он умеет. Фикс в `fastrig.Writer._viewer_safe`: WebP -> JPEG (PNG при альфе),
+  квантованные атрибуты -> float, оба расширения уходят из Used/Required; исходник `proj/model.glb` не трогаем (sha-контракт
+  конвейера). `rig.json.viewer_safe` пишет, что поменялось.
+- **Риг боком**: Vision выбрал боковой тайл как «перед» (+x), риг пересобрался поперёк тела, «левые» ноги = задние.
+  `fastrig.quadruped_forward`: у четвероногого перед вдоль длинной горизонтали (иначе гео-догадка / выше конец),
+  `rig.json.forward_check`; `v3_conveyor._rig_disagrees` не пересобирает по такому ответу Vision и сам пересобирает боковой риг.
+- **Ноги по топологии** (`leg_regions`/`isolate_legs`/`hanging_tail`): копыта сидят семенами, Dijkstra по поверхности;
+  ниже колена вершина только своей ноги, перед+зад не смешиваются нигде, висящее ниже колен (хвост, кисти) ногам не
+  достаётся, боковые суставы ноги ставятся на свою ногу. `rig.json.checks.leg_isolation` / `leg_topology`.
+- **Триаж** (VERSION 5): проваленный гейт QA = review, никогда не зелёный (в т.ч. rig-qa.json без `failing`, как у
+  123ac7be / ada7f10a); новый класс `legs_mixed` (sev 3).
+- **Ремонт клиента**: `rig/skin` v0 = старый риг (не тронут), v1 активен. v0 -> v1: rig_check рёбер >2x 399 -> 25,
+  max 42x -> 8.4x, вершин перед+зад 26 -> 0, межножных рёбер 896 -> 10; numeric max stretched edges 2493 -> 723 (bad_frames
+  145/145 остаются: гейт 1.25 проваливают все риги). Статус QA needs_review, триаж 🟠.
+- **Автотесты**: кейсы `horse_opens_in_viewer`, `horse_quadruped_legs` (kinds `mt_quadruped_rig`, `viewer_opens`,
+  `quadruped_legs`; `deploy/autotests/patch_quadruped_horse.py`). MT `ff968dc`, gate PASS 73 + 10 XFAIL.
+- **Не сделано**: пряди хвоста, приваренные к крупу (пары Hips/Tail3 в rig_check), — это слой волос, не ноги.

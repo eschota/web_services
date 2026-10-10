@@ -278,6 +278,27 @@
    "what": "Meshy «Raccoon Commando» (upload): EXT_meshopt_compression 19.8 MB -> 48.6 MB, 1.08 M vertices",
    "sha256": "5451cb66d58cb8cd183c5037194c7712f5a7663c3095958ffc4ba88ac8381a20",
    "bytes": 19793976
+  },
+  "a742491a.upload.glb": {
+   "source": "/srv/autorig/data/var/uploads/3ab9ad74-782b-4f00-8750-a806aa6de2bb/3D_Tuyet_Dia.glb",
+   "task": "a742491a-981e-43aa-bfcb-3b465be8ff91",
+   "what": "armored horse with tack (upload: gltfpack 1.2, KHR_mesh_quantization + EXT_texture_webp required, 18 483 vertices, one welded shell, a tail hanging to the hocks)",
+   "sha256": "f5508e12e78b3fe91d6c662b3da0dbfbb1989e8bb70aa3eb14e48211ced7b793",
+   "bytes": 2845548
+  },
+  "a742491a.mt-before.glb": {
+   "source": "/srv/autorig/audits/astra-todo-horse-20261011/run_v0/rig/rigged.glb",
+   "task": "a742491a-981e-43aa-bfcb-3b465be8ff91",
+   "what": "V3 rig v0 of run 3ef6defe (2026-10-10): the source's required webp / quantization kept (Unity viewer refuses it), rigged sideways after Vision's front +x: front and hind legs share weights",
+   "sha256": "9ded74fe5c4a5b534a65d41fd69bcb1457f9f22b9959984dac58ea82981656c1",
+   "bytes": 3321768
+  },
+  "a742491a.mt-before.rig.json": {
+   "source": "/srv/autorig/audits/astra-todo-horse-20261011/run_v0/rig/rig.json",
+   "task": "a742491a-981e-43aa-bfcb-3b465be8ff91",
+   "what": "rig.json of that v0 rig (rig_check stretch: 399 edges over 2x, max 42x)",
+   "sha256": "9e8cf8cc50204f6bd92fdece18cfed194a39780c4a22e77eb0c8b137c3830945",
+   "bytes": 12950
   }
  },
  "profiles": {
@@ -2613,6 +2634,187 @@
       },
       "reason": "both arms of the dense raccoon go through the body (left 23%, right 46%) before the arm clearance",
       "owner": "V3 triage · rig quality"
+     }
+    }
+   ]
+  },
+  {
+   "id": "horse_opens_in_viewer",
+   "task": "a742491a-981e-43aa-bfcb-3b465be8ff91",
+   "cost": 1,
+   "defect": "a gltfpack horse (task a742491a, run 3ef6defe, Astra TODO 2026-10-11): the rig kept the source's required EXT_texture_webp / KHR_mesh_quantization and the Unity viewer (glTFast) refused it; Vision took the side view for the front, the quadruped was rigged sideways and its front and hind legs shared weights (rig_check 145/145 bad frames, max 24x) while the triage showed it green",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_quadruped_rig",
+     "paths": [
+      "mt"
+     ],
+     "input": "a742491a.upload.glb",
+     "params": {
+      "what": "armored horse with tack",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       26
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "forward_axis_along_body": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "opens",
+     "kind": "viewer_opens",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "unsupported_required": [
+       "==",
+       0
+      ],
+      "unsupported_images": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "before_opens_detector",
+     "kind": "viewer_opens",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "a742491a.mt-before.glb",
+     "thresholds": {
+      "unsupported_required": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "source_detector",
+     "kind": "viewer_opens",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "a742491a.upload.glb",
+     "thresholds": {
+      "unsupported_required": [
+       ">=",
+       1
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "horse_quadruped_legs",
+   "task": "a742491a-981e-43aa-bfcb-3b465be8ff91",
+   "cost": 1,
+   "defect": "a gltfpack horse (task a742491a, run 3ef6defe, Astra TODO 2026-10-11): the rig kept the source's required EXT_texture_webp / KHR_mesh_quantization and the Unity viewer (glTFast) refused it; Vision took the side view for the front, the quadruped was rigged sideways and its front and hind legs shared weights (rig_check 145/145 bad frames, max 24x) while the triage showed it green",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_quadruped_rig",
+     "paths": [
+      "mt"
+     ],
+     "input": "a742491a.upload.glb",
+     "params": {
+      "what": "armored horse with tack",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       26
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "forward_axis_along_body": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "legs",
+     "kind": "quadruped_legs",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "legs": [
+       "==",
+       4
+      ],
+      "front_hind_vertices": [
+       "==",
+       0
+      ],
+      "front_hind_edges": [
+       "==",
+       0
+      ],
+      "cross_leg_edges": [
+       "<=",
+       40
+      ],
+      "rig_check_edges_over_2x": [
+       "<=",
+       60
+      ],
+      "rig_check_max_stretch": [
+       "<=",
+       12
+      ]
+     },
+     "note": "2026-10-11 fix: 0 / 0 / 20 cross-leg edges (forelegs at the brisket) / 25 over 2x / 8.4x; v0: 26 front+hind vertices, 896 cross-leg edges, 399 over 2x, 42x"
+    },
+    {
+     "id": "before_legs_detector",
+     "kind": "quadruped_legs",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "a742491a.mt-before.glb",
+     "params": {
+      "rig_json": "a742491a.mt-before.rig.json"
+     },
+     "thresholds": {
+      "front_hind_edges": [
+       ">=",
+       100
+      ],
+      "rig_check_edges_over_2x": [
+       ">=",
+       200
+      ]
      }
     }
    ]
