@@ -2,7 +2,15 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpoint27abeb6/source005183d: canonical/server SHA0af1238c94b4c0a4a70f0add2a80a2f9f685d16f84c5cb12d7a3701f07ba1803.
+CURRENT private checkpoint4ca8fa9/source005183d: canonical/server SHAf0dc919e11bbe5ee6a7a66358f071184ec8b044100c9d48e9ba1bfe9e0b0e053.
+NOcenteredoptimizerpose yet; preflight-only2failures followedpatchedFDpass,
+independentreview blocksBodyplanepoint/sourcepacket/manifest/budget/checkpoints.
+Directresthelper root18tests pass butunmounted dueCAS/source/publication guards.
+Directlabelwriter root4tests pass butGLB/code/camera strictproof repairpending;
+originalElf/BraidQwen mapsmissing, diffusedoutputsNOTdirectsemanticauthority.
+Fullacceptance0/5; no restart/customer/fleet/activepointer changes.
+
+Prior private checkpoint27abeb6/source005183d: canonical/server SHA0af1238c94b4c0a4a70f0add2a80a2f9f685d16f84c5cb12d7a3701f07ba1803.
 Root24tests pass. Conservativecertguard f4b78 independentlypassesfailclosed,
 admitted0; priornonzero certgradientREVOKED. Linearhomotopy1554 mechanical
 proposal1165/1258 stable, NOTactualanimationCCD/anatomy/sewing. ONE isolated
