@@ -613,12 +613,12 @@ def gate_page(lang: str, direction: str, decision: Dict[str, Any], next_url: str
     title = _t("adult_gate_title", lang)
     reason = decision.get("reason")
     if reason == "geo_blocked":
-        body = (f'<div class="card"><div class="badge">18+</div><h1>{esc(_t("adult_geo_title", lang))}</h1>'
+        body = (f'<div class="card"><div class="badge" dir="ltr">18+</div><h1>{esc(_t("adult_geo_title", lang))}</h1>'
                 f'<p>{esc(_t("adult_geo_body", lang))}</p>'
                 f'<div class="row"><a class="btn" href="https://autorig.online/">{esc(_t("adult_neutral_back", lang))}</a></div></div>')
         return _page(lang, direction, _t("adult_geo_title", lang), body, adult=True, staged=staged)
     terms = f'<a href="{TERMS_PATH}" target="_blank" rel="noopener">{esc(_t("adult_gate_terms_link", lang))}</a>'
-    head = (f'<div class="card"><div class="badge">18+</div><h1>{esc(title)}</h1>'
+    head = (f'<div class="card"><div class="badge" dir="ltr">18+</div><h1>{esc(title)}</h1>'
             f'<p>{esc(_t("adult_gate_lead", lang))}</p>')
     if reason == "sign_in":
         login = "/auth/login?" + urlencode({"next": GATE_PATH + "?" + urlencode({"next": nxt})})
@@ -645,7 +645,7 @@ def gate_page(lang: str, direction: str, decision: Dict[str, Any], next_url: str
 def terms_page(lang: str, direction: str, staged: bool) -> str:
     esc = _html.escape
     items = "".join(f"<li>{esc(_t(f'adult_terms_{i}', lang))}</li>" for i in range(1, 8))
-    body = (f'<div class="card"><div class="badge">18+</div><h1>{esc(_t("adult_terms_title", lang))}</h1>'
+    body = (f'<div class="card"><div class="badge" dir="ltr">18+</div><h1>{esc(_t("adult_terms_title", lang))}</h1>'
             f'<ol>{items}</ol><p class="note">{esc(_t("adult_terms_version", lang, version=config().get("consent_version")))}</p>'
             f'<div class="row"><a class="btn" href="{GATE_PATH}">{esc(_t("adult_gate_title", lang))}</a></div></div>')
     return _page(lang, direction, _t("adult_terms_title", lang), body, adult=True, staged=staged)
@@ -661,7 +661,7 @@ def neutral_body(lang: str) -> str:
     else:
         text = _t("adult_neutral_body_pending", lang)
         open_btn = ""
-    return (f'<div class="card"><div class="badge">18+</div><h1>{esc(_t("adult_neutral_title", lang))}</h1>'
+    return (f'<div class="card"><div class="badge" dir="ltr">18+</div><h1>{esc(_t("adult_neutral_title", lang))}</h1>'
             f'<p>{esc(text)}</p><div class="row">{open_btn}'
             f'<a class="btn" href="/">{esc(_t("adult_neutral_back", lang))}</a></div></div>')
 
