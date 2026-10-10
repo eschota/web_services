@@ -129,8 +129,113 @@ async def api_render_cancel_pending(request: Request) -> Dict[str, Any]:
     free, and enumerating ids from outside would race the pump. Access is the
     caller's business - this port is bound to localhost, and the public site
     only reaches it through an endpoint that requires an administrator.
+    nginx does publish /renderfin/ though, so a forwarded request is refused.
     """
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="clearing the queue is not public")
     return await _queue(request).cancel_all_pending()
+
+
+@router.get("/api-render/graph/{graph_id}")
+async def api_render_graph(request: Request, graph_id: str) -> Dict[str, Any]:
+    """This graph's share of the queue: its queued/running jobs and the rest."""
+    return _queue(request).graph_summary(graph_id)
+
+
+@router.post("/api-render/cancel-stale-graph")
+async def api_render_cancel_stale_graph(request: Request) -> Dict[str, Any]:
+    """Stand down queued jobs a saved graph no longer wants (2026-09-28).
+
+    Body: {"graph_id": ..., "wanted": {node_id: signature, ...}, "reason": ...}.
+    The site calls this after every save of a graph; it decides what "wanted"
+    means (present, not bypassed, current signature). Only queued jobs go;
+    a job on a card finishes and the editor drops a stale result itself.
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    graph_id = str(body.get("graph_id") or "").strip()
+    wanted = body.get("wanted")
+    if not graph_id or not isinstance(wanted, dict):
+        raise HTTPException(status_code=400, detail="graph_id and wanted{} are required")
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    identities = body.get("identities") if isinstance(body.get("identities"), dict) else {}
+    return await _queue(request).cancel_stale_for_graph(
+        graph_id, {str(k): str(v) for k, v in wanted.items()}, reason=reason,
+        identities={str(k): str(v) for k, v in identities.items()})
+
+
+@router.post("/api-render/cancel-graph")
+async def api_render_cancel_graph(request: Request) -> Dict[str, Any]:
+    """Stand down every queued job of one graph (the editor's button).
+
+    Body: {"graph_id": ..., "task_ids": [...optional subset...], "reason": ...}.
+    Ownership is the site's business (it passes the subset the caller owns).
+    """
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid json: {exc}") from None
+    graph_id = str(body.get("graph_id") or "").strip()
+    if not graph_id:
+        raise HTTPException(status_code=400, detail="graph_id is required")
+    task_ids = body.get("task_ids")
+    if task_ids is not None and not isinstance(task_ids, list):
+        raise HTTPException(status_code=400, detail="task_ids must be a list")
+    reason = " ".join(str(body.get("reason") or "").split())[:CANCEL_REASON_MAX_CHARS]
+    return await _queue(request).cancel_graph_pending(
+        graph_id, task_ids=[str(t) for t in task_ids] if task_ids is not None else None,
+        reason=reason)
+
+
+@router.get("/api-render/last-start-wipe")
+async def api_render_last_start_wipe(request: Request) -> Dict[str, Any]:
+    """What the last start wiped (owner rule: every restart clears the queue)."""
+    return getattr(_queue(request), "last_start_wipe", None) or {"note_string": "no wipe at the last start"}
+
+
+@router.post("/api-render/resume")
+async def api_render_resume(request: Request, dry_run: int = Query(default=0),
+                            task_id: List[str] = Query(default=[]),
+                            window_seconds: float = Query(default=-1.0)) -> Dict[str, Any]:
+    """Bring back jobs a server restart cancelled, under their own ids (2026-10-11).
+
+    Localhost only, like reset. `dry_run=1` lists what would come back.
+    """
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="the restart resume is not public")
+    return await _queue(request).resume_after_restart(
+        task_ids=[t for t in task_id if t] or None, dry_run=bool(dry_run),
+        window_seconds=None if window_seconds < 0 else window_seconds, reason="api")
+
+
+@router.get("/api-render/last-start-resume")
+async def api_render_last_start_resume(request: Request) -> Dict[str, Any]:
+    """What the last renderfin start resumed (owner rule 2026-10-11)."""
+    from . import config as _config
+    queue = _queue(request)
+    return {"policy_string": _config.RESTART_POLICY,
+            "resurrect_object": getattr(queue, "_resurrect_counts", None) or {},
+            "revive_object": getattr(queue, "last_start_resume", None) or {}}
+
+
+@router.post("/api-render/reset")
+async def api_render_reset(request: Request, dry_run: int = Query(default=0),
+                           spare_non_graph: int = Query(default=0),
+                           reason: str = Query(default="")) -> Dict[str, Any]:
+    """Cancel everything queued and running and clear every box's ComfyUI queue.
+
+    Localhost only, like cancel-pending: the site reaches it through an
+    administrator endpoint (ai_queue_admin.py).
+    """
+    # nginx publishes this service under /renderfin/ and sets X-Real-IP on
+    # everything it forwards; only a direct loopback call (the site's admin
+    # endpoint) may reset the farm.
+    if request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail="the farm reset is not public")
+    kwargs = {"reason": reason[:200]} if reason else {}
+    return await _queue(request).reset_farm(dry_run=bool(dry_run), spare_non_graph=bool(spare_non_graph), **kwargs)
 
 
 @router.post("/api-render")

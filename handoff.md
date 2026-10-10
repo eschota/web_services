@@ -4,6 +4,8 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ## Координация агентов V3 (2026-10-10)
 
+- restarts: **Renderfin resume · V3** — 19:35Z: рестарт autorig-storage/renderfin больше не теряет рендеры (resume под тем же id), ждать простоя НЕ нужно; см. раздел «Renderfin resume · V3» внизу.
+
 - converter deploy: Skinning → converter f13 2026-10-10T16:00Z — done 16:45Z (8133a2d, f13 restored; other nodes NOT rolled: owner cancelled the classic pipeline)
 - converter deploy: Converter speed · V3 f1 2026-10-10T15:30Z — done 16:50Z (6674da2 on f1, V3 canary 7/7 + rig_canary ok, f1 restored; no other node rolled: owner cancelled the classic pipeline)
 - converter: Limb collision · V3 — `5650feb` (arms_spread guard, only `Vlado_Blender/tpose_remap_animation.py` on top of `6674da2`) pushed to converter main, **НЕ выкачен** (f1/f13 под замками выше, f2/f7 на `b386115`): кто катит следующим — везёт его; канарейка = в `tpose_remap_animation_log.txt` строка `guard: X·abduction=…`.
@@ -1495,3 +1497,31 @@ This scoped development checkpoint does not overwrite the unrelated historical
   перезагружает): 3dbc776f v3 3291/1675→231/25; 7c9aaae7 v3 471→91; cc22a7e0 32; 410da78e 318→0; 659d941d 2680→1278;
   1cb4a5ea/ca12fe99 (эльф 4f85d45e, волосы) 4404→3280 — другой класс дефекта; рыцари 42–45 без изменений.
   DEV 6575 (до/после/классика), 6576 (вьювер). Рестарт: `sudo autorig-mt-restart --wait 600` 19:30:44 UTC.
+
+## Renderfin resume · V3 — рестарт без потерь (2026-10-10 19:35 UTC, на проде, агент «Renderfin resume · V3»)
+
+- **Правило владельца 2026-10-11**: «перезапускай сервер не дожидаясь завершения графов, они должны подхватываться
+  автоматически при рестарте». Правило 2026-09-27 (рестарт = вайп очереди) снято; ждать простоя renderfin перед
+  рестартом `autorig-storage`/renderfin больше не нужно (AGENTS.md, «These still apply»).
+- **Renderfin** (`renderfin/config.py`, `models.py`, `queue.py`, `api.py`): `RENDERFIN_RESTART_POLICY=resume` (по умолчанию;
+  `wipe` = старое поведение). На старте: queued остаются, running на известном боксе — `followed@<box>` (опрос того же
+  prompt), иначе свой prompt снимается с бокса (`/queue delete` или `/interrupt`+`/free`, чужие не трогаются) и задача
+  снова Pending под ТЕМ ЖЕ id (тот же output URL, новая lease-идентичность). Кап `RENDERFIN_RESTART_RESUME_MAX`=3 ->
+  `restart_resume_exhausted: …`. Задачи, отменённые рестартом (ошибка `cancelled: server restarted…`) за последний час,
+  возвращаются сами на старте; `POST /renderfin/api-render/resume[?dry_run=1][&task_id=…]` (только localhost) — любые id;
+  `GET /renderfin/api-render/last-start-resume` — что вернулось. Статус задачи: `restart_resumes_int`, `notice_string`.
+- **Backend**: `main.py` на старте больше не зовёт `/api-render/reset`, а зовёт `/api-render/resume` (`AUTORIG_RESTART_POLICY`,
+  по умолчанию resume; переменная `AUTORIG_WIPE_QUEUE_ON_START=1` в backend.env теперь действует только при `wipe`).
+  `task_owner.py`: редактору больше не отвечают 409 `cancelled_by_restart`. `ai_avatar_build.py`: незаконченная сборка
+  возобновляется (кап 3). `ai_video_tools.py`: запрос задания лежит в `…/ai-video-tools/pending/<id>.json` до конца,
+  после рестарта статус/повторный POST перезапускает его под тем же `vt_` id. `/api/ai/render-status/{id}`:
+  `notice_string` + локализованный `notice_message_string` (i18n `render_resumed_after_restart`,
+  `render_restart_resume_exhausted`, en/ru/fa/zh/hi).
+- **Восстановлено**: c6dbd111 (была на f15) и 149ada75 (Raptor) — Done на Raptor с тем же id/URL (владелец ip:12ca…,
+  запросы `qwen_image`, кэш запросов указывает на те же id). f8ad7030 не терялась: Done на worker-4090 в 19:10:55, до вайпа.
+- **Проверено на проде**: свой тест 4d8dc53f шёл на f15 в момент рестарта renderfin -> followed -> Done; 76b25dc1 шёл
+  во время рестарта autorig-storage -> Done, 0 отмен. Релиз `restart-resume-20261010T1930Z` (гейт backend PASS 6/6, новый
+  кейс `restart_resume`), затем `i18n-restart-resume-20261010T1935Z` (live_static, i18n).
+- **Не сделано**: строка notice в редакторе /nodes (`ai-nodes.js` `taskStateReporter`) — правка JS меняет build-хэш
+  редактора и отбивает открытые вкладки `editor_outdated`, оставил владельцу редактора; API уже отдаёт текст.
+  `ai_civitai_post.JOBS` (in-memory) не трогал.

@@ -926,5 +926,7 @@
   "error_download_not_ready": "ریگ این کار هنوز آماده نیست.",
   "error_download_unknown_format": "این قالب فایل برای این کار در دسترس نیست.",
   "error_download_rig_changed": "ریگ همین الان به‌روز شد. لطفاً دوباره تلاش کنید.",
-  "error_classic_pipeline_off": "تبدیل کلاسیک بسته است. مدل را دوباره بارگذاری کنید تا از خط تولید جدید عبور کند."
+  "error_classic_pipeline_off": "تبدیل کلاسیک بسته است. مدل را دوباره بارگذاری کنید تا از خط تولید جدید عبور کند.",
+  "render_resumed_after_restart": "پس از راه‌اندازی مجدد سرور، دوباره اجرا شد",
+  "render_restart_resume_exhausted": "متوقف شد: سرور در طول این رندر بیش از حد راه‌اندازی مجدد شد"
 }

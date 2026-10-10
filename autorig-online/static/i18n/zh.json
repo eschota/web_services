@@ -916,5 +916,7 @@
   "error_download_not_ready": "此任务的骨骼尚未就绪。",
   "error_download_unknown_format": "此任务不提供该文件格式。",
   "error_download_rig_changed": "骨骼刚刚更新，请重试。",
-  "error_classic_pipeline_off": "经典转换已关闭。请重新上传模型，它将通过新流程处理。"
+  "error_classic_pipeline_off": "经典转换已关闭。请重新上传模型，它将通过新流程处理。",
+  "render_resumed_after_restart": "服务器重启后已自动恢复",
+  "render_restart_resume_exhausted": "已停止：渲染期间服务器重启次数过多"
 }

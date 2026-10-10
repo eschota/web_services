@@ -92,13 +92,37 @@ What it means for every agent:
 * These still apply:
   * Secrets stay out of Git, logs and prompts.
   * Customer sources and outputs are never deleted.
-  * A restart that wipes queues (`autorig-storage`, renderfin) is batched,
-    and in-flight work is checked first.
-    `render_tasks` alone is not enough: the startup reset also cancels graph
-    renders that are only running in renderfin (3 were lost on 2026-10-10).
-    Ask renderfin what a restart would cancel, on the VPS:
-    `curl -s -X POST 'http://127.0.0.1:8210/renderfin/api-render/reset?dry_run=1&spare_non_graph=1'`
-    (`queued_int` and `running_int` should both be 0).
+  * Restarts never lose render work, so `autorig-storage` and renderfin
+    are restarted without waiting for renders or graphs. Owner, 2026-10-11:
+
+    > перезапускай сервер не дожидаясь завершения графов, они должны
+    > подхватываться автоматически при рестарте
+
+    * Queued jobs stay queued.
+    * A running job is followed on its box. If it cannot be followed, its
+      own prompt is taken off the box first (deleted from the box queue, or
+      interrupted and `/free`), then it is re-queued under the same task id,
+      so the output URL is the same and nothing is duplicated. A job is
+      resumed at most 3 times (`RENDERFIN_RESTART_RESUME_MAX`); after that
+      it fails with `restart_resume_exhausted`.
+    * A job that a restart cancelled anyway, for example under an older
+      release, comes back at the next renderfin start if it was cancelled
+      less than an hour ago. `POST /renderfin/api-render/resume?task_id=…`
+      brings back given ids at any age.
+    * The status carries `notice_string: resumed_after_restart` and a
+      localized `notice_message_string` (i18n `render_resumed_after_restart`).
+      It never says "press Render again".
+    * The backend's in-memory jobs resume too: avatar builds and the video
+      tools (`ai_video_tools`, whose request is kept on disk until it ends).
+    * To see what a restart would resume, run this on the VPS:
+      `curl -s -X POST 'http://127.0.0.1:8210/renderfin/api-render/reset?dry_run=1&spare_non_graph=1'`
+      (`on_restart_string`). After a start,
+      `GET http://127.0.0.1:8210/renderfin/api-render/last-start-resume`
+      shows what came back.
+    * `AUTORIG_RESTART_POLICY=wipe` / `RENDERFIN_RESTART_POLICY=wipe`
+      restore the 2026-09-27 wipe. Only the owner orders that.
+    * Regression case: `restart_resume`
+      (`backend/tests/test_renderfin_restart_resume.py`).
   * Never restart autorig-mt with `systemctl restart`. Run
     `sudo autorig-mt-restart [--wait SECONDS]` instead.
     * It refuses while any MT run, branch or V3 dispatch run is running (the

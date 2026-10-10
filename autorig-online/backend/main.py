@@ -58,6 +58,8 @@ from config import (
     GUMROAD_PRODUCT_CREDITS,
     BLENDER_PLUGIN_AB_VARIANTS,
     AUTORIG_DONATION_PRODUCT_KEYS,
+    AUTORIG_SUBSCRIPTION_PRODUCT_KEYS,
+    AUTORIG_SUBSCRIPTION_PRICE_USD,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
     AUTORIG_CRYPTO_TIERS,
@@ -79,6 +81,7 @@ from config import (
 from viewer_environment import build_viewer_environment_from_settings
 from viewer_theme_contract import validate_viewer_theme_lighting
 from worker_artifact_urls import canonical_worker_artifact_url, is_viewer_artifact_url
+from worker_transport import worker_http_client
 from artifact_cache import (
     ArtifactSource,
     creation_block_reason as artifact_creation_block_reason,
@@ -222,10 +225,10 @@ from animation_correction_exports import (
 
 import re
 import httpx
-from worker_transport import worker_http_client
 
 from ai_fleet import router as ai_fleet_router
 from ai_graph import router as ai_graph_router
+from ai_video_tools import router as ai_video_tools_router
 from ai_controlnet_api import router as ai_controlnet_router
 from ai_model_catalogue import router as ai_model_catalogue_router
 from ai_services import router as ai_services_router
@@ -1193,6 +1196,43 @@ async def lifespan(app: FastAPI):
     global background_task_running
     
     # Startup
+    # Owner rule 2026-10-11 (replaces the 2026-09-27 wipe): a site restart
+    # never loses render work. Renderfin keeps its queue; the start only asks
+    # it to bring back what an older wipe cancelled moments ago.
+    # AUTORIG_RESTART_POLICY=wipe brings the old wipe back.
+    if os.getenv("AUTORIG_RESTART_POLICY", "resume").strip().lower() != "wipe":
+        async def _resume_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with worker_http_client() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/resume", timeout=60.0)
+                data = response.json()
+                print(f"[Startup] render queue kept (restart resume): revived "
+                      f"{data.get('revived_int')} job(s) a restart had cancelled")
+            except Exception as exc:
+                print(f"[Startup] render queue resume skipped: {exc}")
+        asyncio.create_task(_resume_render_queue_on_start())
+    elif os.getenv("AUTORIG_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", ""):
+        async def _wipe_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with worker_http_client() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/reset",
+                        params={"spare_non_graph": 1, "reason": "cancelled: server restarted — press Render again"}, timeout=120.0)
+                data = response.json()
+                print(f"[Startup] render queue wiped: {data.get('cancelled_queued_int')} queued, "
+                      f"{data.get('cancelled_running_int')} running; boxes {data.get('boxes_object')}")
+            except Exception as exc:
+                print(f"[Startup] render queue wipe skipped: {exc}")
+        asyncio.create_task(_wipe_render_queue_on_start())
+    # Deferred Civitai posting (2026-09-30): the queue drains with no tab open.
+    try:
+        import ai_civitai_post
+        ai_civitai_post.start_schedule_loop()
+    except Exception as exc:
+        print(f"[Startup] civitai schedule loop not started: {exc}")
     if AUTORIG_MIGRATION_READ_ONLY:
         # The staging database is migrated once offline before this mode is
         # enabled. Runtime startup performs no schema or filesystem writes.
@@ -1331,16 +1371,26 @@ app = FastAPI(
 
 # Add GZip compression for responses > 500 bytes.
 # GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
+from task_owner import TaskOwnerMiddleware
+
+# Inside GZip, so it reads plain JSON: records who submitted each render task.
+app.add_middleware(TaskOwnerMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 # Civitai pages and CDN previews as media inputs (civitai_media.py).
 from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
 app.add_middleware(CivitaiMediaMiddleware)
 app.include_router(civitai_media_router)
+# Search node: popular / random Civitai media (ai_civitai_search.py, 2026-09-28).
+from ai_civitai_search import router as civitai_search_router
+app.include_router(civitai_search_router)
 
 app.state.limiter = limiter
 
 app.include_router(ai_fleet_router)
 app.include_router(ai_graph_router)
+app.include_router(ai_video_tools_router)
+from ai_wan_image import router as ai_wan_image_router
+app.include_router(ai_wan_image_router)
 app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
@@ -1565,14 +1615,18 @@ from ai_avatar_video import build_avatar_video_router
 from ai_avatar_build import build_avatar_build_router
 from ai_video_reference import router as ai_video_reference_router
 from ai_graph_edits import router as ai_graph_edits_router
+from ai_pipelines_api import router as ai_pipelines_router
 
 app.include_router(build_avatar_router(get_avatar_owner))
 app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))
 app.include_router(build_avatar_build_router(get_avatar_owner))
+from ai_avatar_ready import build_avatar_ready_router
+app.include_router(build_avatar_ready_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
 app.include_router(ai_graph_edits_router)
+app.include_router(ai_pipelines_router)
 
 
 async def require_admin(
@@ -1602,6 +1656,30 @@ from ai_lora_manager import build_lora_admin_router, router as ai_lora_router
 
 app.include_router(ai_lora_router)
 app.include_router(build_lora_admin_router(require_admin))
+
+from ai_character_swap import build_character_swap_router
+
+# Subgraph · Character swap (2026-10-02): admins and scripts on this server start jobs.
+app.include_router(build_character_swap_router(get_current_user, is_admin_email))
+
+from ai_civitai_post import build_civitai_post_router
+
+app.include_router(build_civitai_post_router(require_admin))
+# /queue - the phone's gallery of finished renders (owner 2026-09-30).
+from ai_queue_page import router as queue_page_router
+
+app.include_router(queue_page_router)
+# /system_prompts - the live prompt library (owner 2026-09-30).
+from ai_prompts_page import build_prompts_router
+
+app.include_router(build_prompts_router(require_admin))
+# Join texts - many small text nodes into one prompt, no model (owner 2026-09-30).
+from ai_text_join import router as text_join_router
+
+app.include_router(text_join_router)
+from ai_fleet_models import build_admin_router as build_fleet_models_admin_router, router as ai_fleet_models_router
+app.include_router(ai_fleet_models_router)
+app.include_router(build_fleet_models_admin_router(require_admin))
 
 
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
@@ -1756,6 +1834,8 @@ def _safe_checkout_task_id(value: Any) -> Optional[str]:
 
 def _checkout_pack_price_label(product_key: str) -> str:
     key = _normalize_gumroad_product_key(product_key)
+    if key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
+        return f"{_format_usd_price(AUTORIG_SUBSCRIPTION_PRICE_USD)}/month"
     for tier_key, _credits, usd in AUTORIG_CRYPTO_TIERS:
         if _normalize_gumroad_product_key(tier_key) == key:
             if float(usd).is_integer():
@@ -2807,12 +2887,51 @@ async def auth_callback(
     return redirect
 
 
-# Keep the standalone upload API admin-only; API keys resolve to their owner
-# through get_current_user, so only keys belonging to an admin can use it.
+# Keep video uploads behind administrator authentication.
 from youtube_api import build_youtube_upload_api_router
-
 app.include_router(build_youtube_upload_api_router(require_admin, get_db))
+@app.get("/api/admin/u3d-youtube/oauth/start")
+async def admin_u3d_youtube_oauth_start(admin: User = Depends(require_admin)):
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
+    if not U3D_YOUTUBE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
+    state = secrets.token_urlsafe(32)
+    query = urlencode({"client_id": U3D_YOUTUBE_CLIENT_ID, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "response_type": "code", "scope": YOUTUBE_UPLOAD_SCOPE, "access_type": "offline", "prompt": "consent", "state": state})
+    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
+    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
+    return response
 
+
+@app.get("/api/oauth/u3d-youtube/callback")
+async def admin_u3d_youtube_oauth_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, db: AsyncSession = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
+    if error:
+        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
+    if not user or not is_admin_email(user.email):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
+    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
+    if not code:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    async with worker_http_client() as client:
+        token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": U3D_YOUTUBE_CLIENT_ID, "client_secret": U3D_YOUTUBE_CLIENT_SECRET, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "grant_type": "authorization_code"}, timeout=30.0)
+    if token_response.status_code != 200:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
+    refresh = token_response.json().get("refresh_token")
+    if not refresh:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
+    from database import U3dYoutubeCredentials
+    row = await db.get(U3dYoutubeCredentials, 1)
+    now = datetime.utcnow()
+    if row:
+        row.refresh_token, row.updated_at = refresh, now
+    else:
+        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
+    await db.commit()
+    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
+    response.delete_cookie("u3d_yt_oauth_state")
+    return response
 
 @app.get("/api/admin/youtube/oauth/start")
 async def admin_youtube_oauth_start(
@@ -2862,85 +2981,11 @@ async def admin_youtube_oauth_callback(
     refresh = tokens.get("refresh_token")
     if not refresh:
         return RedirectResponse(url="/?youtube_error=no_refresh_token_reauthorize_with_prompt")
-    # Channel selection happens in Google's Brand Account chooser. The upload
-    # response includes channelId for validation against the owner channel.
+    # The Google Brand Account chooser selects the channel. The first upload
+    # response reports channelId so the client can verify the destination.
     await save_youtube_refresh_token(db, refresh)
     response = RedirectResponse(url="/?youtube_connected=1")
     response.delete_cookie("yt_oauth_state")
-    return response
-
-
-@app.get("/api/admin/u3d-youtube/oauth/start")
-async def admin_u3d_youtube_oauth_start(
-    admin: User = Depends(require_admin),
-):
-    """Start the separate U3D provider OAuth flow; never changes AutoRig credentials."""
-    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
-    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
-    if not U3D_YOUTUBE_CLIENT_ID:
-        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
-    state = secrets.token_urlsafe(32)
-    query = urlencode({
-        "client_id": U3D_YOUTUBE_CLIENT_ID,
-        "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI,
-        "response_type": "code",
-        "scope": YOUTUBE_UPLOAD_SCOPE,
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": state,
-    })
-    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
-    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
-    return response
-
-
-@app.get("/api/oauth/u3d-youtube/callback")
-async def admin_u3d_youtube_oauth_callback(
-    request: Request,
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
-):
-    """Store U3D provider OAuth in its own table; do not alter AutoRig's token."""
-    if error:
-        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
-    if not user or not is_admin_email(user.email):
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
-    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
-    if not code:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
-    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
-    async with worker_http_client() as client:
-        token_response = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": U3D_YOUTUBE_CLIENT_ID,
-                "client_secret": U3D_YOUTUBE_CLIENT_SECRET,
-                "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            },
-            timeout=30.0,
-        )
-    if token_response.status_code != 200:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
-    refresh = token_response.json().get("refresh_token")
-    if not refresh:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
-    from database import U3dYoutubeCredentials
-    row = await db.get(U3dYoutubeCredentials, 1)
-    now = datetime.utcnow()
-    if row:
-        row.refresh_token = refresh
-        row.updated_at = now
-    else:
-        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
-    await db.commit()
-    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
-    response.delete_cookie("u3d_yt_oauth_state")
     return response
 
 
@@ -3601,7 +3646,10 @@ async def buy_credits_checkout(
     if required_credits is not None and required_credits <= 0:
         required_credits = None
     page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
-    package_label = _checkout_pack_label(product_key)
+    package_label = (
+        "AutoRig Unlimited Monthly" if product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
+        else _checkout_pack_label(product_key)
+    )
     price_label = _checkout_pack_price_label(product_key)
     intent_id = None
 
@@ -5425,6 +5473,97 @@ async def api_rig_v2_vision_animal_type(request: Request):
         )
     return openrouter_result
 
+@app.post("/api/rig-v2/vision/appearance")
+@limiter.limit("20/minute")
+async def api_rig_v2_vision_appearance(request: Request):
+    """Hair, loose clothing, tail and pose of an uploaded model, from one sheet of views.
+
+    Decides which rig pipeline to offer before the task exists: the simple rig,
+    or the AI pipeline that animates hair and cloth. The upload page tiles the
+    four side renders it already takes for the rig-type check into one picture.
+    """
+    import rig_appearance
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    image_data_url = _rig_v2_normalize_image_data_url(str(body.get("image_jpg_base64_string") or ""))
+    cfg = _rig_v2_load_vision_config()
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    model = str(cfg.get("open_ai_strong_vision_model_string")
+                or cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    if not api_key or not api_url:
+        return {"success_bool": False, "status_string": "vision_not_configured",
+                "server_time_unix_int": _rig_v2_server_time()}
+    started = time.time()
+    try:
+        result = await rig_appearance.assess(api_url=api_url, api_key=api_key,
+                                             model=model, image_data_url=image_data_url,
+                                             lang=str(body.get("lang_string") or "en"))
+    except Exception as exc:  # the page falls back to manual choice
+        print(f"[rig-v2] appearance check failed: {exc}")
+        return {"success_bool": False, "status_string": "vision_failed",
+                "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
+    return {"success_bool": True, "status_string": "ok", **result,
+            "model_used_string": f"openai/{model}",
+            "elapsed_seconds_float": round(time.time() - started, 2),
+            "server_time_unix_int": _rig_v2_server_time()}
+
+
+@app.post("/api/rig-v2/vision/appearance-depth")
+@limiter.limit("6/minute")
+async def api_rig_v2_vision_appearance_depth(request: Request):
+    """Appearance of an untextured model, judged on a repaint of its Z-depth.
+
+    Grey clay hides the difference between hair and a hood, a robe and a body.
+    The page sends the model's front depth map; the farm paints a character
+    over exactly that silhouette, and the painting is judged. Takes about a
+    minute, so the page asks for it only when the model has no textures.
+    """
+    import rig_appearance
+    from ai_vision_api import _decode_inline_image, _publish_inline_image
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    depth = str(body.get("depth_png_base64_string") or "")
+    if not depth:
+        raise HTTPException(status_code=400, detail="depth_png_base64_string is required")
+    cfg = _rig_v2_load_vision_config()
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    model = str(cfg.get("open_ai_strong_vision_model_string")
+                or cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    if not api_key or not api_url:
+        return {"success_bool": False, "status_string": "vision_not_configured",
+                "server_time_unix_int": _rig_v2_server_time()}
+    started = time.time()
+    try:
+        async with worker_http_client() as client:
+            depth_url = await _publish_inline_image(client, _decode_inline_image(depth))
+        painted = await rig_appearance.paint_from_depth(
+            site_base="http://127.0.0.1:8200", depth_url=depth_url)
+        result = await rig_appearance.assess(
+            api_url=api_url, api_key=api_key, model=model, image_data_url=painted,
+            lang=str(body.get("lang_string") or "en"), front_only=True)
+    except HTTPException:
+        raise
+    except Exception as exc:  # the page keeps the clay result
+        print(f"[rig-v2] depth appearance check failed: {exc}")
+        return {"success_bool": False, "status_string": "depth_check_failed",
+                "error_string": str(exc)[:300], "server_time_unix_int": _rig_v2_server_time()}
+    return {"success_bool": True, "status_string": "ok", **result,
+            "painted_url_string": painted, "depth_url_string": depth_url,
+            "model_used_string": f"openai/{model}",
+            "elapsed_seconds_float": round(time.time() - started, 2),
+            "server_time_unix_int": _rig_v2_server_time()}
+
+
 @app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
 async def api_create_convert_from_rig_task(
@@ -5631,8 +5770,15 @@ async def api_gumroad_ping(
         or is_plugin_product
     )
     should_notify_purchase = False
+    # The monthly membership is not a credit pack: it gets its own branch below
+    # and must never be paid out as credits.
+    is_subscription_product = product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
 
-    if _is_autorig_credit_product(product_key) and email and email != "unknown":
+    if (
+        _is_autorig_credit_product(product_key)
+        and not is_subscription_product
+        and email and email != "unknown"
+    ):
         try:
             async with AsyncSessionLocal() as db:
                 purchase = GumroadPurchase(
@@ -5682,6 +5828,56 @@ async def api_gumroad_ping(
         except Exception as e:
             print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
 
+    if is_subscription_product and email and email != "unknown":
+        # Every membership event (first sale, monthly renewal, cancellation,
+        # refund) is stored in the ledger, then the ledger is replayed onto the
+        # user with the same code that runs at login, so a buyer who is already
+        # signed in gets the plan at once and one who signs up later gets it then.
+        try:
+            from auth import apply_pending_gumroad_credits
+
+            async with AsyncSessionLocal() as db:
+                purchase = GumroadPurchase(
+                    sale_id=sale_id,
+                    email=email,
+                    product_permalink=product_key,
+                    product_name=product_name,
+                    price=price_cents,
+                    refunded=refunded,
+                    is_recurring_charge=is_recurring_charge,
+                    subscription_id=subscription_id,
+                    license_key=license_key,
+                    test=is_test,
+                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                    credited=False,
+                    credits_added=0,
+                )
+                db.add(purchase)
+                try:
+                    await db.flush()
+                except IntegrityError:
+                    await db.rollback()
+                    purchase = None
+                if purchase is not None:
+                    user_result = await db.execute(
+                        select(User).where(func.lower(User.email) == email.lower())
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if user:
+                        await apply_pending_gumroad_credits(db, user)
+                        if checkout_email != "unknown":
+                            user.gumroad_email = checkout_email
+                        print(
+                            f"[Gumroad] Subscription event sale={sale_id} user={email} "
+                            f"status={user.autorig_subscription_status} "
+                            f"until={user.autorig_subscription_period_end}",
+                            flush=True,
+                        )
+                    await db.commit()
+                    should_notify_purchase = True
+        except Exception as e:
+            print(f"[Gumroad] Subscription handling failed for {sale_id}: {e}", flush=True)
+
     if is_plugin_product:
         try:
             async with AsyncSessionLocal() as db:
@@ -5726,9 +5922,12 @@ async def api_gumroad_ping(
         notice_package = (
             f"Blender Plugin ABCD {notice_price}" if is_plugin_product else _checkout_pack_label(product_key)
         )
+        if is_subscription_product:
+            notice_kind = "subscription"
+            notice_package = "AutoRig Unlimited Monthly" + (" (renewal)" if is_recurring_charge else "")
         asyncio.create_task(
             broadcast_credits_purchased(
-                credits=0 if is_plugin_product else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
+                credits=0 if (is_plugin_product or is_subscription_product) else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
                 price=notice_price,
                 user_email=email,
                 product=product_key or product,
@@ -16088,9 +16287,6 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
     return candidates
 
 STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
-    # The farm's LoRA manager: operational, like /models, so it is left out
-    # of the sitemaps too.
-    "lora.html": "/lora",
     "index.html": "/",
     "gallery.html": "/gallery",
     "guides.html": "/guides",
@@ -16143,6 +16339,16 @@ STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "image-to-rigged-3d-character-ru.html": "/image-to-rigged-3d-character-ru",
     "image-to-rigged-3d-character-zh.html": "/image-to-rigged-3d-character-zh",
     "image-to-rigged-3d-character-hi.html": "/image-to-rigged-3d-character-hi",
+    # Deliberately absent from every sitemap: a saved composition is whatever
+    # its author wired up, and the library is for people who have the link.
+    "workflows.html": "/workflows",
+    # The support matrix names the farm's computers and what each one
+    # cost today: operational detail for whoever is running work on it,
+    # of no use in a search result.
+    "models.html": "/models",
+    # The farm's LoRA manager: operational, like /models, so it is left out
+    # of the sitemaps too.
+    "lora.html": "/lora",
 }
 
 PUBLIC_QUERY_NOINDEX_PATHS = {"/", "/gallery"}
@@ -17250,10 +17456,34 @@ async def model3d_page():
     return _static_html_response("3dmodel.html")
 
 
+@app.get("/system_prompts")
+async def system_prompts_page():
+    """Every system prompt of the graphs and the server's own rules, edited live."""
+    return _static_html_response("system_prompts.html")
+
+
+@app.get("/queue")
+async def queue_page():
+    """Every finished render of this device, a page at a time, made for a phone."""
+    return _static_html_response("queue.html")
+
+
 @app.get("/nodes")
 async def nodes_page():
     """Wire the services together and render the whole composition at once."""
     return _static_html_response("nodes.html")
+
+
+@app.get("/workflows")
+async def workflows_page():
+    """Every saved composition at once, with what went in and what came out."""
+    return _static_html_response("workflows.html")
+
+
+@app.get("/models")
+async def models_page():
+    """Which computer can run which pipeline, and what it took in a day."""
+    return _static_html_response("models.html")
 
 
 @app.get("/lora")

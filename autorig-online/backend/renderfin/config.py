@@ -44,6 +44,48 @@ TASK_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_TASK_TIMEOUT_SECONDS", "5400")
 MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS = float(
     os.getenv("RENDERFIN_MANAGED_COMFY_NO_PROGRESS_TIMEOUT_SECONDS", "3600")
 )
+
+# GPU memory / hang recovery for farm renders (owner, 2026-09-29: "such errors
+# must be auto-retried, the box's ComfyUI restarted, and the hang fixed").
+# A job that runs out of GPU memory is moved (to a bigger box when it is over
+# the failed box's budget) up to OOM_MAX_RETRIES times; a job whose box stops
+# answering for UNREACHABLE_REQUEUE_SECONDS, or whose prompt runs HANG_FACTOR x
+# its expected time (never less than HANG_MIN_SECONDS), is moved up to
+# HANG_MAX_RETRIES times. Budgets live in renderfin.gpu_budget.
+OOM_RECOVERY_ENABLED = os.getenv("RENDERFIN_OOM_RECOVERY", "1").strip().lower() not in (
+    "0", "false", "no", "off", ""
+)
+OOM_MAX_RETRIES = int(os.getenv("RENDERFIN_OOM_MAX_RETRIES", "2"))
+HANG_MAX_RETRIES = int(os.getenv("RENDERFIN_HANG_MAX_RETRIES", "2"))
+UNREACHABLE_REQUEUE_SECONDS = float(os.getenv("RENDERFIN_UNREACHABLE_REQUEUE_SECONDS", "300"))
+HANG_FACTOR = float(os.getenv("RENDERFIN_HANG_FACTOR", "3"))
+HANG_MIN_SECONDS = float(os.getenv("RENDERFIN_HANG_MIN_SECONDS", "1200"))
+# After an out-of-memory, the same family is kept off that box for jobs at
+# least that large for this long (other boxes first; the box is used again when
+# nothing else can take the job).
+OOM_CEILING_TTL_SECONDS = float(os.getenv("RENDERFIN_OOM_CEILING_TTL_SECONDS", str(6 * 3600)))
+# One failed poll switches that task to short, spaced polls so a box that
+# accepts connections but never answers cannot stall the whole pump (every
+# poll used to wait its full 30 s timeout, once per 1.5 s tick).
+POLL_FAILURE_BACKOFF_SECONDS = float(os.getenv("RENDERFIN_POLL_FAILURE_BACKOFF_SECONDS", "15"))
+POLL_FAILURE_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_POLL_FAILURE_TIMEOUT_SECONDS", "8"))
+BOX_VRAM_REFRESH_SECONDS = float(os.getenv("RENDERFIN_BOX_VRAM_REFRESH_SECONDS", "600"))
+# Boxes whose ComfyUI renderfin may restart through ComfyUI-Manager
+# (/manager/reboot). worker-4090 is the owner's own workstation and is never
+# restarted by the farm, whatever this list says.
+COMFY_RESTART_BOXES = {
+    name.strip().lower()
+    for name in os.getenv("RENDERFIN_COMFY_RESTART_BOXES", "f5,f15,Raptor").split(",")
+    if name.strip()
+}
+NEVER_RESTART_BOXES = frozenset({"worker-4090"})
+COMFY_RESTART_WAIT_SECONDS = float(os.getenv("RENDERFIN_COMFY_RESTART_WAIT_SECONDS", "240"))
+COMFY_RESTART_MIN_INTERVAL_SECONDS = float(
+    os.getenv("RENDERFIN_COMFY_RESTART_MIN_INTERVAL_SECONDS", "600")
+)
+# Idle free VRAM below this share of the card after /free means the process
+# leaks or holds a broken context: restart it.
+UNHEALTHY_FREE_VRAM_SHARE = float(os.getenv("RENDERFIN_UNHEALTHY_FREE_VRAM_SHARE", "0.6"))
 PUMP_TICK_SECONDS = float(os.getenv("RENDERFIN_PUMP_TICK_SECONDS", "1.5"))
 DISPATCH_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_DISPATCH_INTERVAL_SECONDS", "5"))
 STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
@@ -278,6 +320,30 @@ DELIVERY_TICK_SECONDS = float(os.getenv("RENDERFIN_DELIVERY_TICK_SECONDS", "5"))
 
 # Turntable rendering (character_gen stage 3)
 TURNTABLE_NODE = os.getenv("RENDERFIN_TURNTABLE_NODE", "node")
+# Owner rule 2026-09-27: newest submission first. Jobs sent together (one X9
+# batch, one list/segment run: gaps under LIFO_GROUP_SECONDS) stay one group in
+# their own order; anything waiting longer than STARVE_MIN minutes goes first.
+LIFO = os.getenv("RENDERFIN_LIFO", "1").strip() not in ("0", "false", "no", "")
+STARVE_MINUTES = float(os.getenv("RENDERFIN_STARVE_MIN", "30"))
+LIFO_GROUP_SECONDS = float(os.getenv("RENDERFIN_LIFO_GROUP_SECONDS", "10"))
+# Owner rule 2026-10-11 (replaces the 2026-09-27 wipe): «перезапускай сервер не
+# дожидаясь завершения графов, они должны подхватываться автоматически при
+# рестарте». A restart of renderfin or autorig-storage never loses work: a
+# queued job stays queued, a running one is followed on its box or put back in
+# the queue under the same task id (same output URL, nothing duplicated), at
+# most RESTART_RESUME_MAX times per task. RENDERFIN_RESTART_POLICY=wipe brings
+# the old wipe back.
+RESTART_POLICY = (os.getenv("RENDERFIN_RESTART_POLICY", "resume").strip().lower() or "resume")
+WIPE_QUEUE_ON_START = RESTART_POLICY == "wipe"
+RESTART_RESUME_MAX = int(os.getenv("RENDERFIN_RESTART_RESUME_MAX", "3"))
+# A job that a restart cancelled anyway (the old policy, an older release) is
+# brought back at the next start when it was cancelled less than this ago.
+RESTART_REVIVE_WINDOW_SECONDS = float(os.getenv("RENDERFIN_RESTART_REVIVE_WINDOW_SECONDS", "3600"))
+RESTART_CANCEL_REASON = "cancelled: server restarted — press Render again"
+# The status a resumed job carries (i18n key render_<notice>, e.g.
+# render_resumed_after_restart), and the error prefix once the cap is used up.
+RESUMED_NOTICE = "resumed_after_restart"
+RESTART_RESUME_EXHAUSTED = "restart_resume_exhausted"
 TURNTABLE_SCRIPT = os.getenv(
     "RENDERFIN_TURNTABLE_SCRIPT",
     str(PACKAGE_DIR.parent.parent / "tools" / "renderfin" / "glb_turntable.mjs"),

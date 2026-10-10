@@ -1121,5 +1121,7 @@
   "error_download_not_ready": "The rig of this task is not ready yet.",
   "error_download_unknown_format": "This file format is not available for this task.",
   "error_download_rig_changed": "The rig was just updated. Please try again.",
-  "error_classic_pipeline_off": "Classic conversion is closed. Upload the model again: it goes through the new pipeline."
+  "error_classic_pipeline_off": "Classic conversion is closed. Upload the model again: it goes through the new pipeline.",
+  "render_resumed_after_restart": "resumed after a server restart",
+  "render_restart_resume_exhausted": "stopped: the server restarted too many times during this render"
 }

@@ -916,5 +916,7 @@
   "error_download_not_ready": "इस कार्य का रिग अभी तैयार नहीं है।",
   "error_download_unknown_format": "इस कार्य के लिए यह फ़ाइल फ़ॉर्मेट उपलब्ध नहीं है।",
   "error_download_rig_changed": "रिग अभी अपडेट हुआ है। कृपया फिर से कोशिश करें।",
-  "error_classic_pipeline_off": "क्लासिक रूपांतरण बंद है। मॉडल दोबारा अपलोड करें: यह नई पाइपलाइन से गुज़रेगा।"
+  "error_classic_pipeline_off": "क्लासिक रूपांतरण बंद है। मॉडल दोबारा अपलोड करें: यह नई पाइपलाइन से गुज़रेगा।",
+  "render_resumed_after_restart": "सर्वर रीस्टार्ट के बाद फिर से शुरू हुआ",
+  "render_restart_resume_exhausted": "रोका गया: इस रेंडर के दौरान सर्वर बहुत बार रीस्टार्ट हुआ"
 }

@@ -49,6 +49,9 @@ class RenderPrompt(BaseModel):
     # the scene/composition reference last. The order is meaningful to the
     # prompt ("image 1", "image 2", ...), so it must survive persistence.
     reference_image_urls: List[str] = Field(default_factory=list)
+    # Qwen-Image 2.1 edit: influence 0..1 of each reference, in the same order
+    # (missing = 1). See multiref.inject_qwen21_references.
+    reference_strengths: List[float] = Field(default_factory=list)
     type: str = ""
     work_flow: str = ""
     main_size_width: int = 0
@@ -80,6 +83,20 @@ class RenderPrompt(BaseModel):
     loras: List["LoraStackItem"] = Field(default_factory=list)
     user_name: str = "default_user"
     render_mode: str = ""
+    # Music (renderfin.music): clip length in seconds; 0 = the default 30 s.
+    audio_seconds: float = 0
+    # Which node of which saved /nodes graph asked for this (2026-09-28), the
+    # node's signature at submit time (computed by the site from the stored
+    # graph) and the Render press that sent it. Empty for anything that is
+    # not a graph node. A save whose node no longer matches stands the task
+    # down while it is still queued; see RenderQueue.cancel_stale_for_graph.
+    graph_id: str = ""
+    node_id: str = ""
+    node_signature: str = ""
+    submit_session: str = ""
+    # The text behind node_signature (what the site hashed), kept so a later
+    # "node changed" cancel can say what changed (journal), never compared.
+    node_identity: str = ""
 
     @field_validator("frame_count")
     @classmethod
@@ -219,6 +236,18 @@ class RenderTask(BaseModel):
     managed_comfy_last_progress_at: float = 0
     managed_comfy_host_stale_at: float = 0
     managed_comfy_watchdog_requested_at: float = 0
+    # GPU memory / hang recovery (2026-09-29). How often this task was moved
+    # after running out of GPU memory or after its box hung, the boxes it
+    # should not go back to while another box can take it, and a short
+    # history ("oom@f15") that the final error text names.
+    oom_retries: int = 0
+    hang_retries: int = 0
+    avoid_servers: List[str] = Field(default_factory=list)
+    recovery_log: List[str] = Field(default_factory=list)
+    # Restart resume (2026-10-11): how often a server restart put this task
+    # back in the queue, and the notice its status shows meanwhile.
+    restart_resumes: int = 0
+    notice: str = ""
 
     def public_dict(self) -> Dict[str, Any]:
         return {
@@ -235,11 +264,18 @@ class RenderTask(BaseModel):
             "error": self.error,
             "error_string": self.error,
             "user_name": self.prompt.user_name,
+            "graph_id_string": self.prompt.graph_id,
+            "node_id_string": self.prompt.node_id,
+            "submit_session_string": self.prompt.submit_session,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "workload_class_string": self.workload_class,
             "workload_lease_state_string": self.workload_lease_state,
+            "retries_int": int(self.oom_retries or 0) + int(self.hang_retries or 0),
+            "recovery_log_array": list(self.recovery_log or []),
+            "restart_resumes_int": int(self.restart_resumes or 0),
+            "notice_string": self.notice or "",
         }
 
 
