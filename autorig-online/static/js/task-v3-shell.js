@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261010.7';
+const BUILD = 'tv3-20261010.9';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -107,6 +107,49 @@ function showViewer(viewer) {
   return true;
 }
 
+// A finished task whose model cannot be loaded still shows what the server
+// published for it: the preview video, else the poster (the same og: media the
+// server put in this page's head). Same-origin paths only.
+function headMedia(property) {
+  const meta = document.querySelector(`meta[property="${property}"]`);
+  if (!meta || !meta.content) return '';
+  try {
+    const url = new URL(meta.content, location.origin);
+    return url.pathname.startsWith(`/api/video/${taskId}`) || url.pathname.startsWith(`/api/thumb/${taskId}`)
+      ? url.pathname : '';
+  } catch (e) { return ''; }
+}
+
+let mediaShown = false;
+const mediaFailed = new Set();
+function showMedia() {
+  if (mediaShown) return true;
+  const video = mediaFailed.has('video') ? '' : headMedia('og:video');
+  const poster = mediaFailed.has('image') ? '' : headMedia('og:image');
+  if (!video && !poster) return false;
+  const box = document.createElement('div');
+  box.className = 'tv3-media';
+  const el = document.createElement(video ? 'video' : 'img');
+  if (video) {
+    Object.assign(el, { src: video, muted: true, autoplay: true, loop: true, playsInline: true, controls: true });
+    if (poster) el.poster = poster;
+  } else {
+    el.src = poster;
+    el.alt = '';
+  }
+  // A media file that is gone too must not leave a broken frame: fall back to the next one, then to the card.
+  el.addEventListener('error', () => {
+    mediaFailed.add(video ? 'video' : 'image');
+    box.remove();
+    mediaShown = false;
+    if (lastState) render(lastState);
+  }, { once: true });
+  box.appendChild(el);
+  els.viewer.parentNode.insertBefore(box, els.viewer);
+  mediaShown = true;
+  return true;
+}
+
 function render(state) {
   if (!state || state.schema !== 'autorig.task-page-v3/1') throw new Error('contract');
   lastState = state;
@@ -160,9 +203,11 @@ function render(state) {
   setProgress(finished ? 1 : progress, waiting);
 
   // The viewer owns the screen as soon as any model exists; progress moves to a chip.
-  els.card.hidden = hasViewer;
+  const media = !hasViewer && unavailable && finished && showMedia();
+  els.card.hidden = hasViewer || media;
   let chip = '';
-  if (hasViewer && status === 'needs_review') chip = tr('taskv3_review');
+  if (media) chip = tr('taskv3_unavailable');
+  else if (hasViewer && status === 'needs_review') chip = tr('taskv3_review');
   else if (hasViewer && status === 'error') chip = tr('taskv3_failed');
   else if (hasViewer && !finished) chip = `${stageTitle || (status === 'created' ? tr('taskv3_queued') : tr('taskv3_rigging'))} · ${Math.round(progress * 100)}%`;
   else if (hasViewer && !rigged && state.model && state.model.state === 'warming') chip = tr('taskv3_rigging');
