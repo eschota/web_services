@@ -441,6 +441,23 @@ Owner rule, 2026-10-10:
   tool is missing, it says so. The missing tool is then built and listed in
   `/dev/tools`.
 
+## No Paid APIs (owner order, 2026-10-11)
+
+> платные нам нельзя использовать будем думать как обходиться возможностями
+> флота
+
+* **No paid API calls from any service:** OpenAI, Tencent Hunyuan cloud,
+  anything billed per call or per token. Use the fleet's own models: farm
+  Qwen on the ai-nodes, ComfyUI, local Hunyuan, NudeNet.
+* **Switch by config, not by deleting keys:**
+  * autorig-mt: the drop-in
+    `/etc/systemd/system/autorig-mt.service.d/zz-no-paid-llm.conf` clears
+    mt-openai.env, so `mt.llm` answers from the farm;
+  * gen3d: `cloud.enabled=false` in `/srv/autorig/live/config/gen3d-routing.json`.
+  * Other consumers get an explicit switch from the «No paid APIs» agent.
+* **The Claude Code CLI on worker-4090** (the owner's subscription) may
+  serve only our own internal tests, never public visitors.
+
 ## Astra Is Stopped (owner order, 2026-10-11)
 
 > останови Астра бота, он все токены сожрал, полностью, уже платить начали,
