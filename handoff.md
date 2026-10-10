@@ -2,10 +2,10 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-Latest source checkpoint134cced in private MT repo: full-garment source/raw-order
+Latest source checkpoint1935cc2 in private MT repo: full-garment source/raw-order
 domain guards and separate semantic/control admission,47 Python tests; chat media
 layout regression passes. Canonical/server handoff SHA matched
-79bd6e750f15d23a8b261d860991efa13af337cb624ce76554ca3fba5987f8c9.
+c9a0c5ac6eb565e2a43da973c4044240744fe8d40f8d2457a3916b9fef1d9e28.
 F7 whole-skirt request02 completed once50.550s/5498 tokens but malformed output
 rejects semantic admission; no physical roots/weights/sewing authorized by it.
 No restart/customer task. Live chat-card CSS deployed/public SHA3c70ffd7; browser
@@ -24,6 +24,14 @@ uidbd1856ec7957, deliveryNOTapproval. ResearchFoot3f32 from4e5 preservesgeometry
 andrebakes9clips120fps, arbitrarytime matrixdrift2.21e-4 notcontinuousproof.
 ActualBodyrootbinding voxel3/20 +external9/20 =>union11/20known,9unknown;
 localexterior only, no globalBody/thickness/physicalpinchange claims.
+CURRENT liveactive-retarget APIhelperdb1/serviceba81 MT PID2364036, owner705
+newClip43545/e927 actualbytes/rotationcalibrationverified; privateinputs outside
+RUNS andGETHEAD404. NativepreviewEXE48ef productionnewclipselected+actualSHA
+verified, isolatedWebGLcandidate next. Agentperformed3MTrestarts vsrootcap1,
+explicitlydisclosed; storage/renderfinPIDs/queuepreserved, no furtherrestarts.
+Footpivot814 rejectedbyROI; new474 lowerlegweights eliminateFoottri9→0,
+transitionseverityimproves, full9/2341 zeroNR butglobal4982failed. Researchonly,
+no full rig/fleetpromotion. Clothv6partial3/5 checkpoints,2timeouts no audit.
 Full body/clothing/hair acceptance remains0/5; historical snapshots below are not
 current acceptance. This section supersedes prior "no farm call yet" wording.
 
