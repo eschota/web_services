@@ -441,6 +441,24 @@ Owner rule, 2026-10-10:
   tool is missing, it says so. The missing tool is then built and listed in
   `/dev/tools`.
 
+## Every Model Gets Textures (owner order, 2026-10-11)
+
+> я уже просил делать обязательное текстурирование … почему тогда до сих пор
+> картошка без материалов PBR?
+
+* **A model's own textures are never lost:** not in the viewer, not in the
+  viewer-light GLB, not in downloads.
+* **Ask for missing files.** An upload whose textures are missing (an OBJ
+  without its .mtl / images, broken texture paths) is detected at intake. The
+  user is asked to add the files or a ZIP.
+* **Auto-texture what has none.** A model with no textures, or with only a
+  flat default material, gets PBR textures automatically, free on the fleet,
+  from its own projections, the Vision description and the concept. This runs
+  in the background after the rig and never delays the 60 s rig. The result
+  is a new model version; the original stays.
+* **Example, task 583622f3** (the «potato»): only `dpgoe.obj` was uploaded.
+  It has UVs and `usemtl Apotat0o1Mtl`, but no .mtl and no images.
+
 ## No Paid APIs (owner order, 2026-10-11)
 
 > платные нам нельзя использовать будем думать как обходиться возможностями
