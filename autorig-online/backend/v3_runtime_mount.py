@@ -21,7 +21,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -45,15 +46,21 @@ STAGE_TITLES = {
     "queued": "в очереди V3", "starting": "запуск", "source": "источник", "analysis": "анализ",
     "rig": "риг", "retarget": "ретаргет", "qa": "проверка качества", "publish": "публикация",
     "complete": "готово", "qa_review": "нужна проверка", "generation": "генерация модели",
-    "running": "обработка", "resuming": "возобновление", "source_registered": "источник принят",
+    "running": "обработка", "resuming": "возобновление", "retrying": "повтор после сбоя", "source_registered": "источник принят",
     "model_validation": "проверка модели", "failed": "ошибка",
 }
 SUB_TITLES = {
     "projections": "проекции", "vision": "Vision-анализ", "bones_and_weights": "кости и веса",
     "library_clips": "анимации", "numeric": "численная проверка", "scale": "масштаб",
     "detect": "распознавание картинки", "waiting_3d_worker": "ждёт 3D-воркер", "hunyuan": "Hunyuan 3D",
-    "turntable": "оборот модели", "ready": "модель готова",
+    "turntable": "оборот модели", "ready": "модель готова", "killed_retry": "повтор после сбоя",
 }
+# V3 · killed runs (owner 2026-10-10, task 66d83b2e): a run whose stage child was killed from outside (a service restart,
+# the OOM killer) is retried by itself, at most AUTO_KILLED_RETRIES times, and is never shown to the customer or sent to
+# Telegram as «Task failed».  Motion Transfer retries in its own process first; its error then says "exhausted", and this
+# backend does not retry it again.
+AUTO_KILLED_RETRIES = 2
+KILLED_ERROR = re.compile(r"killed by signal|ChildKilled|failed:\s*$|SIGTERM|SIGKILL|code -(9|15)(?!\d)")
 ACTIVE_FLOOR = .01            # a task that is being worked on never shows 0 %
 
 
@@ -108,6 +115,9 @@ async def project_task(session, binding, patch, record) -> None:
     remote = record.remote_status if isinstance(record.remote_status, dict) else {}
     settings = _settings(task)
     v3 = dict(settings.get("v3") or {})
+    retry_killed = killed_retry_due(record, v3)
+    if retry_killed:                         # not an error: the attempt is replaced by a new one right after the commit
+        patch = replace(patch, status="processing", error_message=None, terminal=False)
     qa = remote.get("qa") if isinstance(remote.get("qa"), dict) else {}
     artifacts = _public_artifacts(remote.get("artifact_manifest"))
     session_doc = remote.get("session") or v3.get("session") or {}
@@ -123,6 +133,11 @@ async def project_task(session, binding, patch, record) -> None:
         error=record.error if record.state in {"failed", "blocked_protocol"} else None,
         updated_at=datetime.utcnow().isoformat() + "Z",
     )
+    if retry_killed:
+        v3.update(state="retrying", stage="resuming", error=None, progress=0.0,
+                  auto_retries=int(v3.get("auto_retries") or 0) + 1,
+                  last_killed={"attempt": binding.attempt, "run_id": record.run_id,
+                               "error": str(record.error or "")[:300], "at": datetime.utcnow().isoformat() + "Z"})
     if qa:
         v3["qa"] = {key: qa.get(key) for key in ("status", "reasons", "gates", "layers", "body_plan",
                                                  "clips", "candidate_glb_sha256") if key in qa}
@@ -158,9 +173,70 @@ async def project_task(session, binding, patch, record) -> None:
     task.updated_at = now
 
 
+def killed_retry_due(record, v3: dict) -> bool:
+    """A failed attempt whose child was killed from outside, with automatic retries left."""
+    err = str(getattr(record, "error", "") or "")
+    return (getattr(record, "state", "") == "failed" and bool(KILLED_ERROR.search(err)) and "exhausted" not in err
+            and int((v3 or {}).get("auto_retries") or 0) < AUTO_KILLED_RETRIES)
+
+
+async def retry_killed_task(task_id: str) -> bool:
+    """New attempt of a task whose projection says "retrying" (idempotent; also swept on start).  If the retry cannot
+    be made, the failure is reported as the real failure it then is."""
+    from sqlalchemy import select
+
+    from database import AsyncSessionLocal, Task
+
+    async with AsyncSessionLocal() as db:
+        task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+        if task is None or str(_settings(task).get("v3", {}).get("state") or "") != "retrying":
+            return False
+        v3 = _settings(task).get("v3") or {}
+        try:
+            await v3_retry(db, task)
+            print(f"[V3] {task_id} killed run: automatic retry {v3.get('auto_retries')}/{AUTO_KILLED_RETRIES}")
+            return True
+        except Exception as exc:                                 # noqa: BLE001 - then it is a real failure
+            await db.rollback()
+            print(f"[V3] {task_id} automatic retry impossible: {type(exc).__name__}: {exc}")
+            settings = _settings(task)
+            v3 = dict(settings.get("v3") or {})
+            err = str((v3.get("last_killed") or {}).get("error") or "V3 processing failed")
+            v3.update(state="failed", stage="failed", error=err)
+            settings["v3"] = v3
+            task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+            task.status, task.error_message, task.updated_at = "error", err, datetime.utcnow()
+            await db.commit()
+    from telegram_bot import reserve_and_broadcast_task_error
+    asyncio.create_task(reserve_and_broadcast_task_error(task_id))
+    return False
+
+
+async def sweep_retrying() -> None:
+    """After a restart: a task left in "retrying" (the restart came between the projection and its retry)."""
+    from sqlalchemy import select
+
+    from database import AsyncSessionLocal, Task
+
+    async with AsyncSessionLocal() as db:
+        ids = [row for row in (await db.execute(select(Task.id).where(
+            Task.pipeline_kind == "v3", Task.viewer_settings.like('%"state": "retrying"%')))).scalars()]
+    for task_id in ids:
+        await retry_killed_task(task_id)
+
+
 async def after_commit(binding, patch, record) -> None:
     """Terminal notifications through the existing idempotent broadcasters."""
     try:
+        if record.state == "failed" and patch.status == "error":
+            from database import AsyncSessionLocal, Task
+
+            async with AsyncSessionLocal() as db:
+                task = await db.get(Task, binding.task_id)
+                retrying = task is not None and str(_settings(task).get("v3", {}).get("state") or "") == "retrying"
+            if retrying:                                         # a killed child: retried, never reported
+                await retry_killed_task(binding.task_id)
+                return
         if record.state == "done":
             from telegram_bot import reserve_and_broadcast_task_done
             asyncio.create_task(reserve_and_broadcast_task_done(binding.task_id))
@@ -208,6 +284,7 @@ async def start_v3_runtime(session_factory) -> Optional[V3RuntimeHandle]:
     await runtime.start()
     stop = asyncio.Event()
     intake = asyncio.create_task(intake_loop(session_factory, stop), name="v3-intake")
+    asyncio.create_task(sweep_retrying(), name="v3-sweep-retrying")
     print(f"[V3] runtime started: dispatch {ORIGIN}, outbox {OUTBOX_PATH}")
     return V3RuntimeHandle(runtime, http, stop, intake)
 
