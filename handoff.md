@@ -25,6 +25,37 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   (RTL на всю страницу), иначе RTL только у шапки/подвала. Сырые ответы сервера
   пользователю не показывать: коды ошибок `detail.error_string` → ключи `error_*`.
 
+## Fleet · V3 — флот одним запросом (2026-10-10 ~12:30 UTC, проверено на проде)
+
+- `GET https://autorig.online/api/fleet` (+ `?format=text`, `/api/fleet/box/<id>`) живой.
+  Сервис `autorig-fleet` (`/srv/autorig/fleet/fleet_api.py`, 127.0.0.1:8255, вне релизного
+  дерева, рестарт не трогает storage). Исходник `autorig-online/deploy/fleet/`, поля — в AGENTS.md.
+- Бокс-агент «AutoRig Fleet Agent» (раз в 2 мин, read-only) на f1/f2/f7/f11/f13/f12/f15/Raptor/
+  worker-4090: все диски, GPU, задачи планировщика, порты, `_retired_*`. f5 не тронут.
+- Почему 3 дня всё шло на f2: с 06.10 `AUTORIG_DISABLED_WORKERS` выключал f1/f7/f11/f13, а
+  публичный шлюз `converter-fX.freestock.online` отвечает «Node tunnel is offline» для
+  f1/f2/f11/f13. Теперь f1 и f13 идут через туннели VPS (`AUTORIG_WORKER_TRANSPORTS`, бэкап env
+  `/srv/autorig/secrets/backups/autorig-rig-worker-transport.env.bak-fleet-20261010T114240Z`);
+  storage перезапущен 11:43:34 UTC в окно без рендеров. Реальные задачи уже идут на f1 и f13.
+- f13 был заклинен: снапшот process_control старше 60 с (скан 7.8k задач в памяти × все
+  процессы) → admission fail-closed, 5 мёртвых AI-задач 20–77 ч. Процесс убит и перезапущен
+  задачей планировщика; f1 (3.1k задач, флапал) перезапущен через management API. Канарейки
+  only_rig на f1/f13 прошли (221/272 с, 8 файлов), preflight healthy.
+- **Для Converter · V3**: `_server_status_process_control_refresh` сканирует все задачи в памяти;
+  без фикса (только активные / чистить терминальные) f1 и f13 снова встанут через 1–2 недели.
+- f7: истекла лицензия Unity (UnityEntitlementLicense.xml от 02.09, «No valid Unity Editor
+  license»), экспорт висит на окне лицензии. Нужен вход владельца в Unity Hub на f7. Диспетч off.
+- f11: GPU Code 43 после TDR-шторма 07.10; ребут и `pnputil /restart-device` не помогли.
+  Выключен 11:55 UTC для холодного старта, WoL не разбудил: нужна кнопка питания, потом вход
+  в консоль (автологон без сохранённого пароля, задача конвертера InteractiveToken).
+  f11-ai теперь уступает GPU конвертеру (`converter_status_url`, бэкап config).
+- V3: на f1/f2/f7/f13 deploy-агент e7af0338, протокол 3, по 3 rollback-архива, журнал чист,
+  места хватает — готовы к `deploy_farm.bat` (из чистого main, можно отдельным worktree).
+  Принятого V3-артефакта нет; хэш записать в `/srv/autorig/data/var/fleet/v3_target.json`.
+- Диски: `_retired_*` 695 ГБ (f15 420, Raptor 218, worker-4090 56.5) — только с OK владельца.
+  Raptor C: 5 ГБ (безопасно чистить нечего). f1/f2: idle-gated чистка дампов/autosave/логов
+  (~69/39 ГБ) запущена, `autorig-online/deploy/converter-cleanup/*-20261010-nozip.ps1`.
+
 ## Intake · V3 — конвейер смонтирован (2026-10-10 11:20 UTC, проверено на проде)
 
 - **MT** `GET /api/mt/v3` → 200, intents `rig`+`accessory` (`mt/v3_conveyor.py`,
