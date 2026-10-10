@@ -54,7 +54,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
 
-VERSION = "ai-node-20261007"
+VERSION = "ai-node-20261011"
 API_PREFIX = "/api-converter-glb"
 WORKLOAD_AI_VISION = "ai_vision"
 
@@ -140,6 +140,24 @@ DEFAULT_CONFIG: Dict[str, object] = {
     # (any processing or queued converter task = busy, like a ComfyUI prompt). Empty = not watched.
     "converter_status_url": "",
     "converter_token_file": "",
+    # Two nodes on one card (worker-4090, 2026-10-11: the 9B pool node and the film director's 27B): the node that
+    # needs the whole card writes `gpu_lease_hold_file` while it waits for, loads or holds its model; a node that
+    # lists that file in `gpu_lease_yield_files` treats a fresh lease like a busy ComfyUI (refuses new work, unloads
+    # when idle, a running answer finishes). Empty = no lease, the old behaviour.
+    "gpu_lease_hold_file": "",
+    "gpu_lease_yield_files": [],
+    "gpu_lease_fresh_seconds": 60,
+    # worker-4090's GPU gate (C:\AI\HY3D2\fleet-adapter\gate.py, control 127.0.0.1:18778): renderfin reaches ComfyUI
+    # through it, and while someone holds a gate lease renderfin sends no NEW render to the card. The holder above
+    # also takes a gate lease under `gpu_gate_owner`, so the card can drain and the model load. Empty = not used.
+    "gpu_gate_url": "",
+    "gpu_gate_owner": "",
+    # The converter/3D adapter answers 503 when it refuses NEW 3D jobs - also because an LLM took the VRAM it needs to
+    # start Hunyuan. False = a 503 is not «the GPU is in use» (the VRAM check still guards the load).
+    "converter_503_is_busy": True,
+    # Characters of system_prompt + prompt one request may carry. The backend's own limit is 8000; a node that only a
+    # long-context caller talks to directly (the film director) raises it with its context_tokens.
+    "max_prompt_chars": MAX_PROMPT_CHARS,
     "keepalive_seconds": 120,
     "max_tasks": 2,
     "comfy_wait_seconds": 300,
@@ -224,6 +242,14 @@ class Config:
         self.converter_status_url = str(merged.get("converter_status_url") or "").strip()
         self.converter_token_file = (self._path(merged["converter_token_file"])
                                      if merged.get("converter_token_file") else "")
+        self.gpu_lease_hold_file = (self._path(merged["gpu_lease_hold_file"])
+                                    if merged.get("gpu_lease_hold_file") else "")
+        self.gpu_lease_yield_files = [self._path(p) for p in (merged.get("gpu_lease_yield_files") or []) if p]
+        self.gpu_lease_fresh_seconds = max(10.0, float(merged.get("gpu_lease_fresh_seconds") or 60))
+        self.gpu_gate_url = str(merged.get("gpu_gate_url") or "").strip().rstrip("/")
+        self.gpu_gate_owner = str(merged.get("gpu_gate_owner") or "").strip() or self.node_name
+        self.converter_503_is_busy = bool(merged.get("converter_503_is_busy", True))
+        self.max_prompt_chars = max(1000, int(merged.get("max_prompt_chars") or MAX_PROMPT_CHARS))
         self.keepalive_seconds = int(merged["keepalive_seconds"])
         self.max_tasks = max(1, int(merged["max_tasks"]))
         self.comfy_wait_seconds = max(0.0, float(merged["comfy_wait_seconds"]))
@@ -305,14 +331,27 @@ def validate_bearer_header(header: str, configured_token: str) -> Tuple[bool, st
     return True, "ok"
 
 
-def validate_prompt(raw: object) -> str:
-    """Copied from bonsai_adapter.validate_prompt (60101f4, line 216)."""
+def validate_prompt(raw: object, limit: int = MAX_PROMPT_CHARS) -> str:
+    """Copied from bonsai_adapter.validate_prompt (60101f4, line 216); `limit` is the node's max_prompt_chars."""
     prompt = str(raw or "").strip()
     if not prompt:
         raise RequestError("prompt is required")
-    if len(prompt) > MAX_PROMPT_CHARS:
-        raise RequestError(f"prompt exceeds {MAX_PROMPT_CHARS} characters")
+    if len(prompt) > limit:
+        raise RequestError(f"prompt exceeds {limit} characters")
     return prompt
+
+
+def validate_temperature(raw: object) -> Optional[float]:
+    """An optional sampling temperature, 0-1.5; absent = the node's default (0.3)."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise RequestError("temperature must be a number") from None
+    if not 0.0 <= value <= 1.5:
+        raise RequestError("temperature must be between 0 and 1.5")
+    return value
 
 
 def validate_max_tokens(raw: object, ceiling: int) -> int:
@@ -523,10 +562,34 @@ def probe_comfy(cfg: Config) -> Dict[str, object]:
             state["converter_tasks"] = tasks
             if tasks > 0:              # Hunyuan / a conversion holds or is about to take the GPU
                 state.update(busy=True, online=True, queue_remaining=int(state.get("queue_remaining") or 0) + tasks)
+        except urllib.error.HTTPError as exc:
+            state["converter_error"] = f"HTTP {exc.code}"
+            if exc.code != 503 or cfg.converter_503_is_busy:
+                state["busy"] = True   # an unreadable converter is treated as busy: Hunyuan comes first
         except (urllib.error.URLError, OSError, ValueError, AttributeError) as exc:
             state["converter_error"] = str(exc)[:200]
             state["busy"] = True       # an unreadable converter is treated as busy: Hunyuan comes first
+    lease = fresh_gpu_lease(cfg)
+    if lease:                          # another node on this card holds it (gpu_lease_yield_files)
+        state = dict(state, watched=True, busy=True, online=True, gpu_lease=lease,
+                     queue_remaining=int(state.get("queue_remaining") or 0) + 1)
     return state
+
+
+def fresh_gpu_lease(cfg: Config) -> str:
+    """The node name in a fresh lease file this node yields to, or ''."""
+    for path in cfg.gpu_lease_yield_files:
+        try:
+            age = time.time() - os.path.getmtime(path)
+        except OSError:
+            continue
+        if age <= cfg.gpu_lease_fresh_seconds:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    return str(json.load(handle).get("node") or path)
+            except (OSError, ValueError, AttributeError):
+                return path
+    return ""
 
 
 def _probe_comfy_only(cfg: Config) -> Dict[str, object]:
@@ -1022,8 +1085,9 @@ class AiTask:
 
     def __init__(self, *, mode: str, prompt: str, system_prompt: str, image_url: str,
                  model: str, requested_model: str, max_output_tokens: int,
-                 queue_class: str, backend_task_id: str):
+                 queue_class: str, backend_task_id: str, temperature: Optional[float] = None):
         self.task_id = str(uuid.uuid4())
+        self.temperature = temperature
         self.status = "Pending"
         self.mode = mode
         self.prompt = prompt
@@ -1175,8 +1239,57 @@ class Node:
             logger.warning("ComfyUI /free failed: %s", exc)
             return False
 
+    def hold_gate(self, on: bool) -> None:
+        """Take / renew (every 20 s, TTL 60 s) or release this node's lease on the GPU gate."""
+        url = self.cfg.gpu_gate_url
+        if not url:
+            return
+        now = time.monotonic()
+        held = getattr(self, "_gate_held", False)
+        if on and held and now - getattr(self, "_gate_at", 0.0) < 20:
+            return
+        if not on and not held:
+            return
+        body = ({"owner": self.cfg.gpu_gate_owner, "ttl": 60, "reason": f"{self.cfg.model_id} needs the card"}
+                if on else {"owner": self.cfg.gpu_gate_owner})
+        try:
+            request = urllib.request.Request(url + ("/lease" if on else "/release"), method="POST",
+                                             data=json.dumps(body).encode("utf-8"),
+                                             headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=5.0) as response:
+                response.read()
+            if on and not held:
+                logger.info("GPU gate lease taken: renderfin sends no new render to this card")
+            elif not on:
+                logger.info("GPU gate lease released")
+            self._gate_held, self._gate_at = on, now
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            logger.warning("GPU gate %s failed: %s", "lease" if on else "release", exc)
+            if not on:
+                self._gate_held = False   # the gate lets an unrenewed lease expire within its TTL anyway
+
     def _active_tasks(self) -> List[AiTask]:
         return [t for t in self.tasks.values() if t.active()]
+
+    def hold_lease(self, on: bool) -> None:
+        """gpu_lease_hold_file: written (fresh mtime) while this node waits for, loads or holds its model, removed
+        once it has let the card go, so a yielding node on the same card stays out of the way meanwhile. With
+        gpu_gate_url the same span holds a lease on the card's GPU gate (renderfin sends no new render meanwhile)."""
+        self.hold_gate(on)
+        path = self.cfg.gpu_lease_hold_file
+        if not path:
+            return
+        try:
+            if on:
+                tmp = f"{path}.tmp{os.getpid()}"
+                with open(tmp, "w", encoding="utf-8") as handle:
+                    json.dump({"node": self.cfg.node_name, "model": self.cfg.model_id, "pid": os.getpid(),
+                               "ts": time.time(), "need_mb": self.cfg.need_mb()}, handle)
+                os.replace(tmp, path)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError as exc:
+            logger.warning("GPU lease file %s: %s", path, exc)
 
     def blocker(self) -> Optional[Tuple[str, str]]:
         """Why a new submission would be refused right now, from the last probes."""
@@ -1188,6 +1301,8 @@ class Node:
             vram = dict(self.vram)
             active = len(self._active_tasks())
         if comfy.get("busy"):
+            if comfy.get("gpu_lease"):
+                return ("gpu_leased", f"{comfy.get('gpu_lease')} holds this card (gpu_lease_yield_files)")
             if comfy.get("online"):
                 return ("gpu_busy_comfyui",
                         f"ComfyUI has {comfy.get('queue_remaining', 0)} prompt(s) running "
@@ -1242,13 +1357,14 @@ class Node:
                          "requested_model": requested_model,
                          "available_models": [cfg.model_id] if cfg.installed() else []}
         try:
-            prompt = validate_prompt(payload.get("prompt"))
+            prompt = validate_prompt(payload.get("prompt"), cfg.max_prompt_chars)
             system_prompt = str(payload.get("system_prompt") or "").strip()
-            if len(system_prompt) + len(prompt) > MAX_PROMPT_CHARS:
+            if len(system_prompt) + len(prompt) > cfg.max_prompt_chars:
                 raise RequestError(
-                    f"system_prompt and prompt exceed {MAX_PROMPT_CHARS} characters")
+                    f"system_prompt and prompt exceed {cfg.max_prompt_chars} characters")
             max_output_tokens = validate_max_tokens(
                 payload.get("max_output_tokens"), cfg.max_output_tokens)
+            temperature = validate_temperature(payload.get("temperature"))
             image_url = ""
             if mode == "vision":
                 image_url = str(payload.get("image_url") or "").strip()
@@ -1274,6 +1390,7 @@ class Node:
                 max_output_tokens=max_output_tokens,
                 queue_class=str(payload.get("queue_class") or "interactive"),
                 backend_task_id=str(payload.get("backend_task_id") or ""),
+                temperature=temperature,
             )
             self.tasks[task.task_id] = task
             self.work.put(task.task_id)
@@ -1360,6 +1477,7 @@ class Node:
             image_bytes=image_bytes,
             image_media_type=media_type,
             max_output_tokens=task.max_output_tokens or None,
+            **({"temperature": task.temperature} if task.temperature is not None else {}),
         )
         task.answer = answer
         task.reasoning = reasoning
@@ -1373,6 +1491,7 @@ class Node:
         """
         deadline = time.monotonic() + self.cfg.comfy_wait_seconds
         while True:
+            self.hold_lease(True)
             if self.refresh_comfy().get("busy"):
                 # ComfyUI first: even a warm model is put away before the next
                 # queued task would hold the card next to a running prompt.
@@ -1421,6 +1540,9 @@ class Node:
                     if self.llama.stop_if_idle("keepalive expired",
                                                min_idle=self.cfg.keepalive_seconds):
                         logger.info("Model unloaded after %s s idle", self.cfg.keepalive_seconds)
+                with self.lock:
+                    wanted = bool(self._active_tasks())
+                self.hold_lease(wanted or self.llama.running())
                 self._prune()
             except Exception:  # noqa: BLE001 - the monitor must keep running
                 logger.exception("Monitor pass failed")
@@ -1516,6 +1638,10 @@ class Node:
                 "idle_seconds": round(self.llama.idle_seconds(), 1),
                 "loads": self.llama.loads,
                 "max_tasks": cfg.max_tasks,
+                "max_prompt_chars": cfg.max_prompt_chars,
+                "context_tokens": cfg.context_tokens,
+                "gpu_lease_hold_file": cfg.gpu_lease_hold_file,
+                "gpu_lease_yield_to": comfy.get("gpu_lease") or "",
                 "last_error": self.llama.last_error,
                 "last_stop_reason": self.llama.last_stop_reason,
             },
@@ -1524,6 +1650,7 @@ class Node:
     def shutdown(self) -> None:
         self.stopping.set()
         self.llama.stop("ai_node shutting down")
+        self.hold_lease(False)
 
 
 # ----------------------------------------------------------------------- HTTP

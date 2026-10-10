@@ -307,6 +307,11 @@ and uncensored.
 | `start_timeout_seconds` / `request_timeout_seconds` | 300 / 900 | Same values as the converter. |
 | `task_retention_seconds` | 21600 | How long finished tasks stay queryable. At most 1000 are kept. |
 | `allow_private_image_urls` | false | **Test only.** Turns off the SSRF guard. |
+| `max_prompt_chars` | 8000 | Characters of system_prompt + prompt one request may carry (2026-10-11). The backend's own cap stays 8000; a node that a long-context caller talks to directly (the film director) raises it with its `context_tokens`. |
+| `gpu_lease_hold_file` | empty | Two nodes on one card (2026-10-11). The node that needs most of the card writes this file while it waits for, loads or holds its model, and removes it once the card is free again. |
+| `gpu_lease_yield_files` / `gpu_lease_fresh_seconds` | `[]` / 60 | A node listing another node's lease file treats a fresh lease (mtime within the window) like a busy ComfyUI. It refuses new work with `503 gpu_leased`, unloads when idle, and lets a running answer finish. |
+
+A request may also carry `temperature` (0-1.5, default 0.3; 2026-10-11).
 | `log_file` / `log_level` | `ai-node.log` / `INFO` | Service log. |
 
 ## Deployed nodes (2026-10-07)
@@ -324,3 +329,17 @@ copied between our own boxes (f11 → worker-4090 over SSH, then over each site'
 The farm tunnel key may only open each box's nginx port, hence the `/ai/` location on f11 and f7 (the converter
 route next to it is untouched). `max_tasks` is 8 on f11/f7 and 4 at home: with 2, bursts of parallel requests got
 `503 queue_full`, which the backend sees as `worker_busy`.
+
+## The film director's brain (worker-4090, 2026-10-11)
+
+`C:\ProgramData\AutoRigi-director` is a second node on the owner's card: `ai_node.py` ai-node-20261011 with
+`config.json`, `ensure.ps1` and the task `AutoRig 4090 AI Director`.
+
+* It serves `qwen38-27b-uncensored` (Qwen3.8 27B IQ4_XS, our own file).
+* llama-server flags: `-c 131072 -fa on -ctk q4_0 -ctv q4_0 -np 1`, text only.
+* `max_prompt_chars` is 450000. It listens on 127.0.0.1:5482, with llama on 8094.
+* The VPS reaches it through `ssh -R 15420`, with the token in `/srv/autorig/secrets/film-director-brain.token`.
+* It needs about 18.9 GB. The owner's desktop keeps ~4 GB of the 24, so q8_0 KV at 128k (~21 GB) does not fit.
+* It writes `gpu.lease`. The 9B pool node `C:\ProgramData\AutoRigi-node` lists that file in `gpu_lease_yield_files`
+  and steps aside.
+* It is not in the backend's AI registry: only the film director (`/srv/autorig/data/red_film`) calls it.

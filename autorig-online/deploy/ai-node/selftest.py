@@ -757,6 +757,119 @@ def integration(tmp):
             print("WARNING: something still listens on the fake llama port", llama_port)
 
 
+def lease_checks(tmp):
+    """2026-10-11: two nodes on one card (a holder that needs the whole GPU and a yielder), max_prompt_chars and the
+    temperature passthrough."""
+    tmp = os.path.join(tmp, "lease")
+    os.makedirs(tmp, exist_ok=True)
+    comfy = FakeComfy()
+    smi_state = os.path.join(tmp, "smi.json")
+    with open(smi_state, "w", encoding="utf-8") as handle:
+        json.dump({"total": 24564, "free": 23000}, handle)
+    weights = os.path.join(tmp, "w.gguf")
+    with open(weights, "wb") as handle:
+        handle.write(b"GGUF" + b"\0" * 64)
+    with open(os.path.join(tmp, "token.txt"), "w", encoding="utf-8") as handle:
+        handle.write(TOKEN + "\n")
+    lease = os.path.join(tmp, "gpu.lease")
+    other = os.path.join(tmp, "other.lease")      # a lease nobody here holds: only its age decides
+    gate_calls = []                               # worker-4090's GPU gate (control API), faked
+
+    class G(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            gate_calls.append((self.path, body.get("owner")))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+    gate = ThreadingHTTPServer(("127.0.0.1", 0), G)
+    gate.daemon_threads = True
+    threading.Thread(target=gate.serve_forever, daemon=True).start()
+    me = os.path.abspath(__file__)
+    procs, outs, apis, llama_ports = [], [], [], []
+    for name, extra in (("holder", {"gpu_lease_hold_file": lease, "max_prompt_chars": 20000,
+                                    "keepalive_seconds": 2, "gpu_gate_owner": "brain",
+                                    "gpu_gate_url": f"http://127.0.0.1:{gate.server_address[1]}"}),
+                        ("yielder", {"gpu_lease_yield_files": [lease, other], "gpu_lease_fresh_seconds": 10,
+                                     "keepalive_seconds": 60})):
+        port, llama_port = free_port(), free_port()
+        config = dict({"node_name": name, "listen_port": port, "token_file": "token.txt", "model_id": MODEL_ID,
+                       "weights": weights, "vram_need_mb": 8000, "vram_margin_mb": 1000,
+                       "llama_server": [sys.executable, me, "--fake-llama", "--fake-load-delay", "0.5"],
+                       "llama_port": llama_port, "nvidia_smi": [sys.executable, me, "--fake-smi"],
+                       "comfy_url": f"http://127.0.0.1:{comfy.port}", "comfy_poll_seconds": 0.5,
+                       "max_tasks": 2, "comfy_wait_seconds": 6, "start_timeout_seconds": 30,
+                       "log_file": f"{name}.log", "log_level": "DEBUG"}, **extra)
+        path = os.path.join(tmp, f"{name}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle)
+        env = dict(os.environ, FAKE_SMI_STATE=smi_state, FAKE_LLAMA_LOG=os.path.join(tmp, f"{name}_llama.log"))
+        env.pop("AI_NODE_TOKEN", None)
+        out = open(os.path.join(tmp, f"{name}.stdout.log"), "wb")
+        outs.append(out)
+        procs.append(subprocess.Popen([sys.executable, os.path.join(HERE, "ai_node.py"), "--config", path],
+                                      env=env, stdout=out, stderr=subprocess.STDOUT))
+        apis.append(Client(port))
+        llama_ports.append(llama_port)
+    holder, yielder = apis
+    try:
+        for api in apis:
+            check("lease: node boots", wait_until(lambda: api.call("GET", "/healthz", token=None)[0] == 200, 20))
+        wait_until(lambda: yielder.status()["ai_node"]["vram"].get("ok"), 5)
+        check("lease: yielder accepts with no lease", yielder.status().get("accepting_ai_vision") is True)
+        code, body = holder.submit("text", {"prompt": "L" * 15000 + " SLOW", "temperature": 0.9})
+        check("options: max_prompt_chars 20000 takes a 15000-char prompt", code == 202, (code, body))
+        check("lease: holder writes the lease while it works", wait_until(lambda: os.path.isfile(lease), 5))
+        check("lease: yielder refuses while the lease is fresh",
+              wait_until(lambda: yielder.status()["ai_node"]["blocker"] == "gpu_leased", 5),
+              yielder.status()["ai_node"])
+        code, body2 = yielder.submit("text", {"prompt": "hi"})
+        check("lease: yielder submit -> 503 gpu_leased", code == 503 and body2.get("error") == "gpu_leased",
+              (code, body2))
+        done = holder.finish(body.get("task_id", ""), 30)
+        check("options: temperature reaches llama-server",
+              done.get("status") == "Completed" and "temperature=0.9" in str(done.get("answer")), done)
+        code, body = holder.submit("text", {"prompt": "x", "temperature": 3})
+        check("options: temperature over 1.5 -> 400", code == 400, (code, body))
+        code, body = yielder.submit("text", {"prompt": "y" * 9000})
+        check("options: default max_prompt_chars still 8000", code == 400, (code, body))
+        check("lease: removed after the holder unloads",
+              wait_until(lambda: not os.path.isfile(lease), 15))
+        check("gate: the holder took a GPU gate lease", ("/lease", "brain") in gate_calls, gate_calls)
+        check("gate: and released it after unloading",
+              wait_until(lambda: ("/release", "brain") in gate_calls, 10), gate_calls)
+        check("lease: yielder accepts again",
+              wait_until(lambda: yielder.status().get("accepting_ai_vision") is True, 5), yielder.status()["ai_node"])
+        with open(other, "w", encoding="utf-8") as handle:
+            json.dump({"node": "someone"}, handle)
+        check("lease: another node's fresh lease is obeyed",
+              wait_until(lambda: yielder.status()["ai_node"]["blocker"] == "gpu_leased", 5), yielder.status()["ai_node"])
+        old = time.time() - 60
+        os.utime(other, (old, old))
+        check("lease: a stale lease is ignored",
+              wait_until(lambda: yielder.status().get("accepting_ai_vision") is True, 5), yielder.status()["ai_node"])
+        os.remove(other)
+    finally:
+        for proc in procs:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(15)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        for out in outs:
+            out.close()
+        comfy.stop()
+        gate.shutdown()
+        for port in llama_ports:
+            if port_open(port):
+                print("WARNING: something still listens on the fake llama port", port)
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--fake-llama":
         fake_llama_main(sys.argv[2:])
@@ -772,6 +885,7 @@ def main():
     try:
         unit_checks(ai_node, tmp)
         integration(tmp)
+        lease_checks(tmp)
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         check("selftest ran to the end", False)
