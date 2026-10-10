@@ -135,6 +135,32 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   Мусорная тестовая `fe6b984d` (испорченный FBX) ждёт нормализации и через 6 ч уйдёт в error.
 - **Генерация site-строк**: legacy stale reset/global timeout 120 мин больше не трогает
   `pipeline_kind=generate` (коммит `757f408d`, live с рестарта 12:16).
+- **Живой прогресс (владелец: «процессинг долго висит… 0%», live MT 12:38 / storage 12:42,
+  коммиты MT `fa6d3a7`, backend релиз `v3intake-live-20261010`)**:
+  - MT: 4 параллельных V3-прогона (`MT_V3_CONCURRENCY`), числовой QA в отдельном процессе
+    (не держит GIL сервиса, kill через 600 с), карточка масштаба параллельно ригу. Долгие шаги
+    плавно двигают прогресс внутри своей полосы; статус несёт `stage:sub Ns`
+    («проверка качества · численная проверка · 243 с», доказано на ретрае `5f6f91fc`).
+    Главная длительность — численный QA (~4 мин на 300k вершин) и очередь фермы на Vision.
+  - `/api/task/{id}/v3-shell`: никогда не 0 % в работе (пол 1 %), заголовок стадии с подстадией,
+    поле `events_url`. Для `pipeline_kind=generate` с V3-маршрутом shell тоже отвечает:
+    «генерация модели · ждёт 3D-воркер / Hunyuan 3D · f13 / оборот модели», 2–29 %; после
+    меша конвейер заполняет 30–100 %. **Task page · V3**: для generate-строк брать этот shell
+    (сейчас карточка показывала 0 % у `8635aa06`, который ждёт Hunyuan).
+  - **Контракт для Live processing · V3**: `/api/mt/files/<mt_run>/v3/events.jsonl`, по строке JSON
+    `autorig.v3.events/1`: `seq, at, kind (stage_start|stage_done|artifact|progress|verdict|error),
+    stage (source|analysis|rig|retarget|qa|publish), sub, progress 0..1, summary, data, artifacts
+    [{kind,url}]`. Артефакты по мере появления: source `proj/model.glb`; analysis `proj/sheet_*.png`,
+    `card/card.json`+`face.png` (масштаб, приходит параллельно); rig `rig/rigged.glb` (геометрический
+    риг + rig_check), `rig/rig.json` (кости head/tail в `data.bones`), `rig/weights_preview.png`;
+    retarget `rig/rigged.glb` с клипами; qa `rig/rig-qa.json`, `rig/numeric-qa.json`; verdict.
+    Вокселизация внутри fastrig артефакта не пишет — если нужна сетка вокселей, назовите формат,
+    добавлю событие `artifact` sub=`voxels`. Ваш `/api/mt/runs/{run}/live` может читать этот файл.
+  - **Хук сцены**: после publish конвейер уже вызывает `full.scene_auto(run)`; черновик сцены
+    персонажа по `docs/scene_package.md` встанет в `V3Conveyor._after_publish` (одна точка).
+- **Converter normalize (F7)**: следующий шаг intake — FBX/OBJ, которые не берёт assimp
+  (и текстурные бандлы), отправлять в `POST /api-converter-glb/v3/normalize` вместо legacy
+  `/api-converter-glb-to-fbx` (контракт `CONTRACTS/v3-normalized-source.md`).
 - **Диск**: ~70–80 МБ на V3-задачу (сессия 30–50 МБ, копия попытки ~25 МБ, источник);
   `numeric-qa.json` ~5 МБ — сжимать/чистить по давлению вместе с регенерируемыми копиями.
 - **Не смонтировано**: `v3_site_integration.py`/`task_v3_shell.py` (заменены read API выше),
