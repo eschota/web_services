@@ -1672,7 +1672,12 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Автотесты**: кейс `lowpoly_chibi` (вход `dd498832.upload.glb` = proj/model.glb рана 2fd6423ac6aa115b0e97), kind
   `tessellation` (запись этапа + схлопнувшиеся грани/рёбра по 8 кадрам rig_check), контроли «не тесселировать» на
   boy_tshirt и knight_rigpath (`deploy/autotests/patch_tessellation_case.py`).
-- **Ран клиента** перескинен `tools/rerig_version.py` (новая версия, v0 цел).
+- **Ран клиента** 2fd6423ac6aa115b0e97 перескинен `tools/rerig_version.py` → v8 (580 → 1900 граней; v0 цел). На кадрах
+  Walking/Running паутина и разрывы торса/юбки ушли; **остаток**: короткие руки-варежки — Hand владеет 33 вершинами,
+  Arm 55, ForeArm 426, и кисть «звездит» в клипах (collapsed-граней по 8 кадрам Walking 5 → 23 из-за этого).
+  Дальше: на грубых моделях сливать кости конечности с < N вершинами в соседнюю (Hand → ForeArm) или ставить
+  суставы по длине стаба. DEV 6579 (до/после). Round 9: установлен только tessellate.py (ханки fastrig/rig_first
+  переживают чужие перезаливки — проверено по маркерам после деплоя Hands-агента).
 
 ## Hands rig · V3 — риг рук как отдельная категория (2026-10-11, на проде, агент «Hands rig · V3»)
 
