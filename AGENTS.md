@@ -441,6 +441,21 @@ Owner rule, 2026-10-10:
   tool is missing, it says so. The missing tool is then built and listed in
   `/dev/tools`.
 
+## Astra Is Stopped (owner order, 2026-10-11)
+
+> останови Астра бота, он все токены сожрал, полностью, уже платить начали,
+> это не приемлемо. Останови, я пока разбираюсь как решать эту проблему
+
+* `astra-runner`, `astra-gateway` and `autorig-admin-bot` are stopped and
+  disabled. Only `astra-web` (the /dev/tools catalogue) runs.
+* **Nobody starts, enables or restarts them,** and nobody routes work to
+  Astra (`ask_astra`, triage escalations, `site_as_owner`), until the owner
+  decides how to fix the cost.
+* **The measured cause:** 27 Codex sessions on 10–11.10 took 56.1 M input
+  tokens (53.1 M cached) and 0.4 M output. Each 5-minute watch wake resumed
+  long Codex threads, so their whole context was re-read every time. The site's
+  session agents took 3.1 M input tokens on 10.10.
+
 ## V3 Concept: Astra and Session Agents
 
 Owner rule, 2026-10-10:
