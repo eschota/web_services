@@ -1163,7 +1163,8 @@ def compose(col: Collector) -> Dict[str, Any]:
                         continue
                     drives_txt = ",".join(dh.get("drives") or []) or "no letter"
                     label = f"{dh.get('name') or 'disk'} #{dh.get('number')} ({drives_txt})"
-                    temp, warn_c, crit_c = dh.get("temp_c"), dh.get("warn_c"), dh.get("critical_c")
+                    temp, warn_c, crit_c = (v if isinstance(v, (int, float)) and 0 < v <= 150 else None
+                                            for v in (dh.get("temp_c"), dh.get("warn_c"), dh.get("critical_c")))
                     disk_health.append({"number": dh.get("number"), "name": dh.get("name"), "media": dh.get("media"),
                                         "health": dh.get("health"), "operational": dh.get("operational"),
                                         "temp_c": temp, "warn_c": warn_c, "critical_c": crit_c,
@@ -1476,14 +1477,20 @@ def _clean_report(bid: str, body: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(q, dict):
             quarantine.append({"path": str(q.get("path") or "")[:200], "gb": num(q.get("gb")),
                                "measured_at": str(q.get("measured_at") or "")[:30]})
+    def _sane_c(v):
+        # Windows reports an unset threshold as -32768 (and some drives 0 or 255):
+        # anything outside 1..150 C is "unknown", never a limit.
+        v = num(v)
+        return v if v is not None and 0 < v <= 150 else None
+
     disk_health = []
     for dh in (body.get("disk_health") or [])[:16]:
         if isinstance(dh, dict):
             disk_health.append({"number": int(num(dh.get("number")) or 0), "name": str(dh.get("name") or "")[:60],
                                 "media": str(dh.get("media") or "")[:12], "health": str(dh.get("health") or "")[:20],
                                 "operational": str(dh.get("operational") or "")[:30],
-                                "temp_c": num(dh.get("temp_c")), "warn_c": num(dh.get("warn_c")),
-                                "critical_c": num(dh.get("critical_c")),
+                                "temp_c": _sane_c(dh.get("temp_c")), "warn_c": _sane_c(dh.get("warn_c")),
+                                "critical_c": _sane_c(dh.get("critical_c")),
                                 "drives": [str(x)[:3] for x in (dh.get("drives") or [])[:12]]
                                 if isinstance(dh.get("drives"), list) else []})
     processes = {str(k)[:30]: int(v) for k, v in (body.get("processes") or {}).items()
