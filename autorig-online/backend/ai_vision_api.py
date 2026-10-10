@@ -1955,6 +1955,86 @@ class ModelRequest(BaseModel):
     image_base64: Optional[str] = Field(None, description="Picture, inline")
     quality: Optional[str] = Field(None, description="draft, standard or high")
     background_method: Optional[str] = Field(None, description="auto, alpha or solid")
+    # The one 3D generation queue (mt/gen3d_queue.py, 2026-10-11): a text prompt instead of a picture, what the
+    # model is for, how long the caller can wait. The site never pays: the queue routes it to the free farm.
+    prompt: Optional[str] = Field(None, description="Text instead of a picture (the farm draws it first)")
+    purpose: Optional[str] = Field(None, description="concept, background, prop, hero, character")
+    urgency: Optional[str] = Field(None, description="interactive (default) or background")
+    deadline_seconds: Optional[float] = Field(None, description="How long the caller can wait")
+
+
+# Owner 2026-10-11: «добавляй хуньянь в общую очередь с бесплатной очередью». /api/3dmodel is a caller of the one
+# 3D generation queue (autorig-gen3d.service, GET /api/gen3d): it queues instead of answering 503 when every box is
+# busy, logs the routing decision and serves the model from autorig.online. Live switch, no restart:
+# "site_via_queue" in /srv/autorig/live/config/gen3d-routing.json (false = the direct farm path below).
+GEN3D_QUEUE_URL = os.getenv("AUTORIG_GEN3D_QUEUE_URL", "http://127.0.0.1:8283")
+GEN3D_POLICY_FILE = pathlib.Path(os.getenv("AUTORIG_GEN3D_POLICY", "/srv/autorig/live/config/gen3d-routing.json"))
+GEN3D_TOKEN_FILE = pathlib.Path(os.getenv("AUTORIG_V3_DISPATCH_TOKEN_FILE", "/srv/autorig/secrets/v3-dispatch.token"))
+GEN3D_PREFIX = "gen3d."
+
+
+def _gen3d_on() -> bool:
+    try:
+        return bool(json.loads(GEN3D_POLICY_FILE.read_text(encoding="utf-8")).get("site_via_queue"))
+    except Exception:
+        return False
+
+
+def _gen3d_answer(job: Dict[str, object], task_id: str) -> Dict[str, object]:
+    status = str(job.get("status") or "queued")
+    done = status in ("done", "failed", "cancelled")
+    return {
+        "success_bool": status not in ("failed", "cancelled"),
+        "task_id_string": task_id,
+        "status_string": {"done": "completed", "queued": "pending"}.get(status, status),
+        "finished_bool": done,
+        "model_url_string": str(job.get("model_url") or ""),
+        "preview_url_string": str(job.get("preview_url") or ""),
+        "outputs_object": {"glb": job.get("model_url")} if job.get("model_url") else {},
+        "error_string": str(job.get("error") or ""),
+        "stage_string": str(job.get("stage") or status),
+        "progress_int": int(job.get("progress") or 0),
+        "elapsed_seconds_float": float(job.get("seconds") or 0.0),
+        "node_string": str(job.get("box") or job.get("backend") or ""),
+        "backend_string": str(job.get("backend") or ""),
+        "routing_reason_string": str((job.get("decision") or {}).get("reason") or ""),
+        "status_url_string": f"/api/3dmodel/status/{task_id}",
+        "server_time_unix_int": int(time.time()),
+    }
+
+
+async def _3dmodel_via_queue(client: httpx.AsyncClient, body: "ModelRequest", picture: str):
+    import uuid as _uuid
+    payload: Dict[str, object] = {
+        "purpose": str(body.purpose or "prop").strip().lower(),
+        "urgency": "background" if str(body.urgency or "").strip().lower() == "background" else "interactive",
+        "backend": "farm",                       # the site never pays
+        "label": "site /api/3dmodel",
+    }
+    if picture:
+        payload["image_url"] = picture
+    else:
+        payload["prompt"] = str(body.prompt or "").strip()[:1024]
+    if body.deadline_seconds is not None:
+        payload["deadline_seconds"] = float(body.deadline_seconds)
+    if body.quality:
+        payload["farm_quality"] = str(body.quality).strip().lower()
+    if body.background_method:
+        payload["background_method"] = str(body.background_method).strip().lower()
+    token = GEN3D_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    response = await client.post(GEN3D_QUEUE_URL + "/api/gen3d/jobs", json=payload, timeout=30.0,
+                                 headers={"Authorization": f"Bearer {token}"})
+    if response.status_code == 400:
+        detail = (response.json() or {}).get("detail") or {}
+        raise HTTPException(status_code=400, detail={
+            "error_string": "3d_request_refused",
+            "message_string": str(detail.get("message_string") or "The 3D queue refused the request")})
+    response.raise_for_status()
+    job = response.json() or {}
+    task_id = GEN3D_PREFIX + str(_uuid.UUID(hex=str(job["id"])))
+    answer = _gen3d_answer(job, task_id)
+    answer["source_image_url_string"] = picture
+    return answer
 
 
 @router.get("/api/3dmodel")
@@ -1975,16 +2055,28 @@ async def api_3dmodel_docs():
 @router.post("/api/3dmodel")
 async def api_3dmodel(body: ModelRequest):
     """Turn a picture into a 3D model on a farm node cleared for Hunyuan."""
-    if not body.image_url and not body.image_base64:
+    text = str(body.prompt or "").strip()
+    if not body.image_url and not body.image_base64 and not text:
         raise HTTPException(status_code=400, detail={
             "error_string": "image_required",
-            "message_string": "Provide image_url or image_base64"})
+            "message_string": "Provide image_url, image_base64 or prompt"})
     async with httpx.AsyncClient() as client:
         picture = str(body.image_url or "").strip()
-        if not picture:
+        if not picture and body.image_base64:
             picture = await _publish_inline_image(
                 client, _decode_inline_image(body.image_base64 or "")
             )
+        if _gen3d_on() or (text and not picture):
+            try:
+                return await _3dmodel_via_queue(client, body, picture)
+            except HTTPException:
+                raise
+            except Exception:
+                logger.exception("The 3D generation queue did not take a /api/3dmodel job")
+                if not picture:
+                    raise HTTPException(status_code=503, detail={
+                        "error_string": "no_3d_node_available",
+                        "message_string": "The 3D queue is not answering; try again shortly"}) from None
         workers = _load_hunyuan_workers()
         if not workers:
             raise HTTPException(status_code=503, detail={
@@ -2029,6 +2121,19 @@ async def api_3dmodel(body: ModelRequest):
 @router.get("/api/3dmodel/status/{task_id}")
 async def api_3dmodel_status(task_id: str):
     """Hunyuan has its own status path, so 3D tasks cannot share /api/ai/status."""
+    if str(task_id).startswith(GEN3D_PREFIX):
+        job_id = str(task_id)[len(GEN3D_PREFIX):].replace("-", "").lower()
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(f"{GEN3D_QUEUE_URL}/api/gen3d/jobs/{job_id}", timeout=10.0)
+            except Exception:
+                raise HTTPException(status_code=502, detail={
+                    "error_string": "worker_unreachable",
+                    "message_string": "The 3D queue did not answer"}) from None
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail={
+                "error_string": "task_not_found", "message_string": "No such task"})
+        return _gen3d_answer(response.json() or {}, str(task_id))
     node_key, _, worker_task_id = str(task_id).partition(".")
     if not node_key or not worker_task_id:
         raise HTTPException(status_code=400, detail={

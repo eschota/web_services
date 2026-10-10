@@ -1,0 +1,28 @@
+# /etc/systemd/system/autorig-gen3d.service
+# AutoRig 3D generation queue: one job type for every caller, the free farm Hunyuan first, the paid Tencent cloud
+# only when needed (owner 2026-10-11). Code: MT repo mt/gen3d_queue.py (installed by autotests.py mt-deploy into
+# /srv/autorig/data/motion_transfer/mt). Live policy: /srv/autorig/live/config/gen3d-routing.json (no restart).
+# Standalone so an autorig-mt restart never drops a queued or running job. Restart it only while
+# GET /api/gen3d says cloud_running 0 (a farm job resumes after a restart, a cloud job in flight does not).
+# nginx: `location ^~ /api/gen3d` -> 127.0.0.1:8283 (deploy/gen3d/nginx-gen3d.conf).
+[Unit]
+Description=AutoRig 3D generation queue (/api/gen3d: free farm Hunyuan first, paid cloud when needed)
+After=network-online.target autorig-storage-tunnels.service autorig-fleet.service
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/data/motion_transfer
+Environment="PYTHONUNBUFFERED=1" "OMP_NUM_THREADS=2" "OPENBLAS_NUM_THREADS=2"
+ExecStart=/srv/autorig/venv/bin/python3 -m uvicorn mt.gen3d_queue:app --host 127.0.0.1 --port 8283 --workers 1 --no-access-log
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target

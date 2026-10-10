@@ -1,0 +1,48 @@
+{
+ "schema": "autorig.gen3d-routing/1",
+ "why": "owner 2026-10-11: «добавляй хуньянь в общую очередь с бесплатной очередью … бесплатно, если ферма более менее свободна»; paid never for background / autonomous work",
+ "doc": "Merged over DEFAULT_POLICY in mt/gen3d_queue.py and read on every decision (no restart). Every decision: /srv/autorig/data/var/hunyuan3d/routing.jsonl. The cloud's daily_credit_cap lives in /srv/autorig/data/var/hunyuan3d/config.json. site_via_queue: the site /api/3dmodel goes through this queue (false = the old direct farm path, read per request).",
+ "enabled": true,
+ "farm": {
+  "enabled": true,
+  "quality": "standard",
+  "min_vram_free_mb": 0,
+  "exclude_boxes": [
+   "f5"
+  ],
+  "background_needs_idle_box": true,
+  "shared_box_needs_empty_autorig_queue": true,
+  "session_daily_jobs": {
+   "owner": null,
+   "account": 5,
+   "anonymous": 2,
+   "run_chat": 0
+  }
+ },
+ "cloud": {
+  "enabled": true,
+  "max_parallel": 3,
+  "paid_callers": [
+   "owner",
+   "codex",
+   "astra",
+   "admin-media-v3",
+   "session"
+  ],
+  "paid_urgencies": [
+   "interactive",
+   "urgent"
+  ],
+  "paid_for_background": false,
+  "paid_for_autonomous": false
+ },
+ "deadlines": {
+  "interactive": 900,
+  "urgent": 0,
+  "background": 86400,
+  "autonomous": 86400
+ },
+ "updated_at": "2026-10-10T19:00:00Z",
+ "updated_by": "Hunyuan queue · V3",
+ "site_via_queue": true
+}
