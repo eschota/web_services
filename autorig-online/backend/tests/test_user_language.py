@@ -148,9 +148,19 @@ class Pages(Base):
         self.assertNotIn("rtl.css", out)
 
     def test_unadvertised_prefix_is_noindex(self):
-        out = self.render(ul.resolve_language(url_lang="zh", path="/"))
+        token = ul._REQUEST_LANG.set(ul.resolve_language(url_lang="zh", path="/faq"))
+        try:
+            out = ul.localize_page(PAGE, "/faq")
+        finally:
+            ul._REQUEST_LANG.reset(token)
         self.assertIn('name="robots" content="noindex, follow"', out)
-        self.assertIn('rel="canonical" href="https://autorig.online/"', out)
+        self.assertIn('rel="canonical" href="https://autorig.online/faq"', out)
+
+    def test_all_five_languages_advertised(self):
+        out = self.render(ul.resolve_language(url_lang="zh", path="/"))
+        for lang in ("en", "ru", "zh", "hi", "fa"):
+            self.assertIn(f'hreflang="{lang}"', out)
+        self.assertIn('rel="canonical" href="https://autorig.online/zh/"', out)
 
     def test_chrome_scope_page(self):
         token = ul._REQUEST_LANG.set(ul.resolve_language(explicit="fa", path="/faq"))

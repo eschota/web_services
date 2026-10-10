@@ -43,9 +43,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 UI_LANGUAGES: Tuple[str, ...] = ("en", "ru", "zh", "hi", "fa")
 PREFIX_LANGUAGES: Tuple[str, ...] = ("ru", "zh", "hi", "fa")
-# Languages whose /<lang>/ pages are offered to search engines (hreflang, self canonical). zh and hi pages
-# still have untranslated keys, so they stay reachable but are not advertised yet.
-ADVERTISED_LANGUAGES: Tuple[str, ...] = ("en", "ru", "fa")
+# Languages whose /<lang>/ pages are offered to search engines (hreflang, self canonical). Every interface
+# key exists in all five (2026-10-10); a language with gaps would stay reachable but unadvertised.
+ADVERTISED_LANGUAGES: Tuple[str, ...] = ("en", "ru", "zh", "hi", "fa")
 DEFAULT_LANGUAGE = "en"
 COOKIE_NAME = "autorig_lang"
 RTL_LANGUAGES = frozenset({"fa", "ar", "he", "ur", "ps", "ckb", "sd", "ug", "yi", "dv"})
