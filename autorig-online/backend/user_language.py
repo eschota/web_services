@@ -9,14 +9,17 @@ Two answers are kept apart:
            German interface). Agents (Astra, support_ai, session agents) answer in it.
     ui     the site interface language actually rendered: en, ru, zh, hi, fa (fa is right to left).
 
-Resolution, first match wins:
-    explicit         the person's own choice: the language menu (cookie autorig_lang + POST /api/me/language),
-                     stored on the account or the anonymous session
-    url              /fa/..., /ru/... page URLs fix the interface language of that page
+`code`, first match wins (owner 2026-10-10: agents answer in the person's native language, from the browser
+locale; the interface language they picked never decides it):
     browser          navigator.languages reported by the page (POST /api/me/language, explicit=false)
-    accept_language  the browser's Accept-Language header
+    accept_language  the browser's Accept-Language header on this request
+    profile          the browser languages last recorded for the account / anonymous session
+    explicit         the language menu choice (cookie autorig_lang + POST /api/me/language), when nothing
+                     about the browser is known
     task             the language recorded on a task when it was created (tasks.owner_language)
     default          en
+`ui`: the /fa/, /ru/ ... URL of the page, then the language menu choice, then the browser languages, then en.
+A chat binds to its owner: a viewer or support chat keeps the language of the person who opened it.
 
 API (machine-readable contract: GET /api/language):
     GET  /auth/me                  -> language {code, name, native_name, dir, ui, source, ...}, language_code
@@ -221,16 +224,18 @@ def resolve_language(*, explicit: Any = None, url_lang: Any = None, browser: Any
     stored_codes = parse_language_list(stored_detected) if stored_detected else []
     detected = browser_codes or accept_codes or stored_codes
     task_code = normalize_language(task_language)
-    if exp:
-        code, source = exp, "explicit"
-    elif browser_codes:
+    # The language to answer in is the browser locale of the person (owner 2026-10-10: «на родном языке из
+    # локали браузера пользователя»). The interface choice (menu, /fa/ URL) only sets `ui`.
+    if browser_codes:
         code, source = browser_codes[0], "browser"
     elif accept_codes:
         code, source = accept_codes[0], "accept_language"
-    elif task_code:
-        code, source = task_code, "task"
     elif stored_codes:
         code, source = stored_codes[0], "profile"
+    elif exp:
+        code, source = exp, "explicit"
+    elif task_code:
+        code, source = task_code, "task"
     elif url:
         code, source = url, "url"
     else:
@@ -678,7 +683,7 @@ def _localize(doc: str, info: LanguageInfo, canonical_path: Optional[str]) -> st
         head.append(f'<link rel="stylesheet" id="autorig-rtl-css" href="/static/css/rtl.css?v={asset_version("css/rtl.css")}">')
     if info.url_lang:
         boot_source = "url"
-    elif info.source == "explicit":
+    elif info.explicit and info.explicit == ui:              # how the interface language was chosen
         boot_source = "explicit"
     elif ui in info.detected:
         boot_source = "accept_language"
@@ -732,9 +737,6 @@ async def subject_language(db, request=None, *, user=None, anon=None, record: bo
         changed = False
         if detected and detected != getattr(subject, "detected_language", None):
             subject.detected_language = detected
-            changed = True
-        if req.explicit and not getattr(subject, "preferred_language", None) and _mapped(subject, "preferred_language"):
-            subject.preferred_language = req.explicit
             changed = True
         if changed:
             subject.language_updated_at = datetime.utcnow()
@@ -878,16 +880,18 @@ def _task_before_insert(_mapper, _connection, target) -> None:
 
 # ---------------------------------------------------------------------------------------------- API
 CONTRACT: Dict[str, Any] = {
-    "purpose_string": ("The language to talk to each AutoRig user in. Agents (Astra, support_ai, session agents) "
-                       "read it from this API and never guess. Answer in language.code; if the user writes in "
-                       "another language, answer in the language of their message."),
+    "purpose_string": ("The language to talk to each AutoRig user in: the native language of their browser locale. "
+                       "Agents (Astra, support_ai, session agents) read it from this API and never guess. Answer in "
+                       "language.code; if the user writes in another language, answer in the language of their "
+                       "message. A chat binds to its owner: it keeps the language of the person who opened it, and "
+                       "another visitor's language never enters it."),
     "fields_json": {
         "code": "ISO 639-1 language to answer in (any language, e.g. de)",
         "name / native_name": "English and native name",
         "dir": "ltr | rtl for code",
         "ui": "site interface language in use: en | ru | zh | hi | fa",
-        "source": "explicit | browser | accept_language | task | profile | url | ui | default",
-        "explicit": "the user's own choice or null",
+        "source": "browser | accept_language | profile | explicit | task | url | ui | default (first known wins)",
+        "explicit": "the interface language the user picked in the menu, or null; it sets ui, not code",
         "detected": "browser languages, priority order",
         "agent_instruction": "ready sentence for a system prompt",
     },

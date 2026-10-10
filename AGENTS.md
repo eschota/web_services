@@ -262,9 +262,36 @@ Owner rule, 2026-10-10:
     `support_session_id=`, `email=`, `anon_id=`.
 * `language.code` is the language to answer in (any ISO 639-1 code). Put
   `language.agent_instruction` into the prompt. `language.ui` is the site
-  interface: en, ru, zh, hi or fa. The order is the user's own choice, then the
-  browser's languages, then `Accept-Language`, then the language recorded on the
-  task, then `en`.
+  interface: en, ru, zh, hi or fa.
+
+Owner rule, 2026-10-10:
+
+> надо чтобы на родном языке из локали браузера пользователя, а в конкретном
+> чате АИ должен привязываться к своему овнеру
+
+* The language to answer in is the native language of the person's browser
+  locale. The order:
+  * `navigator.languages`, sent by the page;
+  * the `/api/me/language` field, which is browser-first too;
+  * `Accept-Language`;
+  * the browser languages recorded for the account or visitor;
+  * only then the language-menu choice and the language recorded on the task;
+  * then `en`.
+* The interface language never decides the reply language. That covers the
+  language menu, the cookie `autorig_lang` and `/fa/` URLs: they set
+  `language.ui` only. A Russian browser with the menu on Persian gets Russian
+  answers.
+* A chat binds to its owner, the person who opened it:
+  * A viewer chat or a support chat takes that person's language when it opens
+    and keeps it.
+  * The run's own chat belongs to the task owner.
+  * Another visitor's language never enters someone else's chat.
+  * The task owner's language is never used for a different person.
+  * If the person writes in another language, the agent answers in the
+    language of the message.
+* Persian (`fa`) is not Hebrew (`he`); both are right to left. Tests:
+  `backend/tests/test_user_language.py` (EN, RU, FA, HE, DE browsers and chat
+  binding).
 * Every user-visible string on the site goes through i18n keys
   (`static/i18n/<lang>.json`, `data-i18n`, `I18n.t()`). Raw server text never
   reaches a user: errors carry `detail.error_string` and a localized
