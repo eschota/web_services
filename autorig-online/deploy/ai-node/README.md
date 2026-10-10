@@ -313,6 +313,7 @@ and uncensored.
 | `gpu_gate_url` / `gpu_gate_owner` / `gpu_gate_grace_seconds` | empty / node name / 30 | worker-4090's GPU gate (`C:\AI\HY3D2\fleet-adapter\gate.py`, control 127.0.0.1:18778). While the node waits for ComfyUI to drain, loads or answers (plus the grace), it holds a gate lease, so renderfin sends the card no new render. |
 | `owner_games` / `owner_games_file` | `[]` / empty | Executables (plus a file with one per line). While one runs the node loads nothing and takes no work. Empty = not watched. The owner, 2026-10-11: «он должен брать мозг пока идёт игра», so both worker-4090 nodes run with it empty. |
 | `fit_when_short` / `fit_min_vram_mb` / `fit_target_mb` | false / 0 / 1536 | A model that does not fit whole (2026-10-11: cs2 and the desktop leave the 27B some GB short). With ComfyUI put away and at least `fit_min_vram_mb` + margin free, llama-server starts with `-ngl auto --fit on --fit-target <MiB>`: as many layers on the GPU as fit, the rest in RAM, the same context. `server-status` shows `llama_fit`. |
+| `owner_priority` / `owner_preempt_comfy` / `owner_warm_seconds` | false / false / 600 | The owner's priority (2026-10-11: «приоритет с отменой других задач именно для задач с режиссёром или другими личностями на этой ноде»). A request with `"priority": "owner"` is admitted while ComfyUI renders and goes first. `owner_preempt_comfy` deletes ComfyUI's queued prompts and interrupts the running one; renderfin sends each back to Pending on another box under the same task id. For `owner_warm_seconds` after an owner request the node keeps the gate and the model. |
 | `converter_503_is_busy` | true | false = the 3D adapter's 503 (it refuses new 3D jobs, e.g. because an LLM took the VRAM) is not «the GPU is in use». |
 | `log_file` / `log_level` | `ai-node.log` / `INFO` | Service log. |
 
@@ -347,6 +348,10 @@ route next to it is untouched). `max_tasks` is 8 on f11/f7 and 4 at home: with 2
 * It runs while the owner plays (owner 2026-10-11, `owner_games` empty). cs2 and the desktop leave ~16.5 GB, so it
   loads with `fit_when_short` (`fit_min_vram_mb` 9000, `fit_target_mb` 1536): part of the layers in RAM, still
   128k. The first such load took 61 s.
+* Owner priority is on (`owner_priority`, `owner_preempt_comfy`, `owner_warm_seconds` 600). The film director and the
+  personalities mark the calls that answer the owner. The first one interrupts the 4090's render and loads the
+  model (56 s, measured 2026-10-11); later ones inside the warm window take 4 s. renderfin moved the interrupted job
+  to f12 (retry 1/2).
 * It writes `gpu.lease`. The 9B pool node `C:\ProgramData\AutoRig\ai-node` lists that file in `gpu_lease_yield_files`
   and steps aside.
 * It is not in the backend's AI registry: only the film director (`/srv/autorig/data/red_film`) calls it.

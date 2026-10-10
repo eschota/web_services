@@ -54,7 +54,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
 
-VERSION = "ai-node-20261011b"
+VERSION = "ai-node-20261011c"
 API_PREFIX = "/api-converter-glb"
 WORKLOAD_AI_VISION = "ai_vision"
 
@@ -170,6 +170,13 @@ DEFAULT_CONFIG: Dict[str, object] = {
     # The converter/3D adapter answers 503 when it refuses NEW 3D jobs - also because an LLM took the VRAM it needs to
     # start Hunyuan. False = a 503 is not «the GPU is in use» (the VRAM check still guards the load).
     "converter_503_is_busy": True,
+    # The owner's priority (2026-10-11: «приоритет с отменой других задач именно для задач с режиссёром или другими
+    # личностями на этой ноде»): a request with "priority": "owner" is admitted while ComfyUI renders and goes first;
+    # owner_preempt_comfy deletes ComfyUI's queued prompts and interrupts the running one (renderfin requeues each on
+    # another box, same task id); for owner_warm_seconds after an owner request the gate and the model stay held.
+    "owner_priority": False,
+    "owner_preempt_comfy": False,
+    "owner_warm_seconds": 600,
     # Characters of system_prompt + prompt one request may carry. The backend's own limit is 8000; a node that only a
     # long-context caller talks to directly (the film director) raises it with its context_tokens.
     "max_prompt_chars": MAX_PROMPT_CHARS,
@@ -270,6 +277,9 @@ class Config:
         self.fit_min_vram_mb = max(0, int(merged.get("fit_min_vram_mb") or 0))
         self.fit_target_mb = max(256, int(merged.get("fit_target_mb") or 1536))
         self.converter_503_is_busy = bool(merged.get("converter_503_is_busy", True))
+        self.owner_priority = bool(merged.get("owner_priority"))
+        self.owner_preempt_comfy = bool(merged.get("owner_preempt_comfy"))
+        self.owner_warm_seconds = max(0.0, float(merged.get("owner_warm_seconds") or 0))
         self.max_prompt_chars = max(1000, int(merged.get("max_prompt_chars") or MAX_PROMPT_CHARS))
         self.keepalive_seconds = int(merged["keepalive_seconds"])
         self.max_tasks = max(1, int(merged["max_tasks"]))
@@ -563,6 +573,13 @@ def query_vram(cfg: Config) -> Dict[str, object]:
 def _get_json(url: str, timeout: float) -> object:
     with urllib.request.urlopen(url, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _post_json(url: str, body: object, timeout: float) -> None:
+    request = urllib.request.Request(url, method="POST", data=json.dumps(body).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        response.read()
 
 
 def probe_comfy(cfg: Config) -> Dict[str, object]:
@@ -1147,7 +1164,8 @@ class AiTask:
 
     def __init__(self, *, mode: str, prompt: str, system_prompt: str, image_url: str,
                  model: str, requested_model: str, max_output_tokens: int,
-                 queue_class: str, backend_task_id: str, temperature: Optional[float] = None):
+                 queue_class: str, backend_task_id: str, temperature: Optional[float] = None,
+                 priority: str = ""):
         self.task_id = str(uuid.uuid4())
         self.temperature = temperature
         self.status = "Pending"
@@ -1170,6 +1188,7 @@ class AiTask:
         self.wait_reason = ""
         self.queue_class = queue_class
         self.backend_task_id = backend_task_id
+        self.priority = priority                # "owner": the owner waits for this answer
         self.workload_class = WORKLOAD_AI_VISION
 
     def active(self) -> bool:
@@ -1201,6 +1220,7 @@ class AiTask:
             "model_usage": self.model_usage,
             "backend_task_id": self.backend_task_id,
             "queue_class": self.queue_class,
+            "priority": self.priority,
             "current_stage": self.current_stage,
             "wait_reason": self.wait_reason,
             "workload_class": self.workload_class,
@@ -1229,6 +1249,9 @@ class Node:
         self.tasks: Dict[str, AiTask] = {}
         self.lock = threading.RLock()
         self.work: "queue.Queue[str]" = queue.Queue()
+        self.work_owner: "queue.Queue[str]" = queue.Queue()   # the owner's requests, taken first
+        self._comfy_preempted_at = 0.0
+        self._last_owner = -1e9
         self.running_task_id = ""
         self.comfy: Dict[str, object] = {"watched": bool(cfg.comfy_url), "online": False,
                                           "busy": False, "checked_at": 0.0}
@@ -1284,6 +1307,31 @@ class Node:
         """free_comfy_when_idle and ComfyUI is online with nothing running or queued."""
         return bool(self.cfg.free_comfy_when_idle and self.cfg.comfy_url and comfy.get("online")
                     and not comfy.get("busy") and not int(comfy.get("queue_remaining") or 0))
+
+    def owner_warm(self) -> bool:
+        """Within owner_warm_seconds of the owner's last request: the gate and the model stay held."""
+        return time.monotonic() - self._last_owner < self.cfg.owner_warm_seconds
+
+    def preempt_comfy(self) -> bool:
+        """For the owner's request: ComfyUI's queued prompts are deleted and the running one interrupted; renderfin
+        sends each back to Pending on another box under the same task id. At most every 15 s."""
+        if not self.cfg.comfy_url or time.monotonic() - self._comfy_preempted_at < 15:
+            return False
+        self._comfy_preempted_at = time.monotonic()
+        base = self.cfg.comfy_url
+        try:
+            queued = _get_json(base + "/queue", 5.0)
+            ids = ([item[1] for item in (queued.get("queue_pending") or [])
+                    if isinstance(item, (list, tuple)) and len(item) > 1] if isinstance(queued, dict) else [])
+            if ids:
+                _post_json(base + "/queue", {"delete": ids}, 10.0)
+            _post_json(base + "/interrupt", {}, 10.0)
+            logger.info("Owner priority: ComfyUI interrupted, %d queued prompt(s) deleted (renderfin requeues them)",
+                        len(ids))
+            return True
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            logger.warning("ComfyUI preemption for the owner failed: %s", exc)
+            return False
 
     def free_comfy(self) -> bool:
         """Ask the idle ComfyUI to unload its models and free its VRAM; at most once per 30 s."""
@@ -1452,8 +1500,11 @@ class Node:
         self.refresh_comfy()
         if not self.llama.loaded_model_id():
             self.refresh_vram()
+        owner = cfg.owner_priority and str(payload.get("priority") or "").strip().lower() == "owner"
         with self.lock:
             blocked = self.blocker()
+            if blocked and owner and blocked[0] in ("gpu_busy_comfyui", "gpu_leased", "insufficient_vram"):
+                blocked = None                 # the owner's request takes the card
             if blocked:
                 code, message = blocked
                 return 503, {"error": code, "message": message, "retryable": True,
@@ -1465,9 +1516,13 @@ class Node:
                 queue_class=str(payload.get("queue_class") or "interactive"),
                 backend_task_id=str(payload.get("backend_task_id") or ""),
                 temperature=temperature,
+                priority="owner" if owner else "",
             )
             self.tasks[task.task_id] = task
-            self.work.put(task.task_id)
+            if owner:
+                self._last_owner = time.monotonic()      # the gate is held from now on: no new render here
+                self._gate_wanted = True
+            (self.work_owner if owner else self.work).put(task.task_id)
         logger.info("Accepted %s task %s (prompt %d chars, system %d chars, max_tokens %s)",
                     mode, task.task_id, len(prompt), len(system_prompt), max_output_tokens)
         return 202, {
@@ -1490,9 +1545,12 @@ class Node:
     def worker_loop(self) -> None:
         while not self.stopping.is_set():
             try:
-                task_id = self.work.get(timeout=1.0)
+                task_id = self.work_owner.get_nowait()        # the owner's requests first
             except queue.Empty:
-                continue
+                try:
+                    task_id = self.work.get(timeout=1.0)
+                except queue.Empty:
+                    continue
             with self.lock:
                 task = self.tasks.get(task_id)
                 if task is None or task.status != "Pending":
@@ -1524,9 +1582,11 @@ class Node:
                 self.llama.release()
                 with self.lock:
                     self.running_task_id = ""
+                if task.priority == "owner":
+                    self._last_owner = time.monotonic()  # the conversation goes on: keep the card warm
                 # Hand the card back now when ComfyUI wants it or when there is
                 # no keepalive; otherwise the monitor unloads after keepalive.
-                if self.comfy_busy() or self.cfg.keepalive_seconds <= 0:
+                if not self.owner_warm() and (self.comfy_busy() or self.cfg.keepalive_seconds <= 0):
                     if self.llama.stop_if_idle(
                             "comfyui_busy" if self.comfy_busy() else "keepalive 0"):
                         logger.info("Model unloaded after task %s", task.task_id)
@@ -1582,11 +1642,16 @@ class Node:
             self._gate_wanted = True           # waiting for ComfyUI to drain, or loading: renderfin sends nothing new
             self.hold_lease(True)
             if self.refresh_comfy().get("busy"):
-                # ComfyUI first: even a warm model is put away before the next
-                # queued task would hold the card next to a running prompt.
-                if self.llama.running():
-                    self.llama.stop("comfyui_busy before a queued task")
-                reason = "comfyui_busy"
+                if self.cfg.owner_preempt_comfy and (task.priority == "owner" or not self.work_owner.empty()):
+                    # the owner waits: ComfyUI's prompts go back to renderfin's queue, another box renders them
+                    self.preempt_comfy()
+                    reason = "comfyui_preempted_for_owner"
+                else:
+                    # ComfyUI first: even a warm model is put away before the next
+                    # queued task would hold the card next to a running prompt.
+                    if self.llama.running():
+                        self.llama.stop("comfyui_busy before a queued task")
+                    reason = "comfyui_busy"
             else:
                 if self.llama.loaded_model_id():
                     if self.llama.answering():
@@ -1626,7 +1691,9 @@ class Node:
                 # Free VRAM only gates a cold load; skip nvidia-smi while warm.
                 if not self.llama.running():
                     self.refresh_vram()
-                if comfy.get("busy"):
+                if self.owner_warm():
+                    pass                       # the owner's conversation: the model stays, ComfyUI gets nothing new
+                elif comfy.get("busy"):
                     if self.llama.stop_if_idle("comfyui_busy"):
                         logger.info("ComfyUI is busy; model unloaded to free VRAM")
                 elif self.cfg.keepalive_seconds > 0:
@@ -1643,8 +1710,9 @@ class Node:
                 if game and self.llama.stop_if_idle(f"owner_game {game}"):
                     logger.info("The owner plays %s: model unloaded", game)
                 recent = time.monotonic() - self._last_use < self.cfg.gpu_gate_grace_seconds
-                gate = not game and ((wanted and self._gate_wanted) or self.llama.in_use() or recent)
-                self.hold_lease(wanted or self.llama.running(), gate=gate)
+                warm = self.owner_warm()
+                gate = not game and ((wanted and self._gate_wanted) or self.llama.in_use() or recent or warm)
+                self.hold_lease(wanted or self.llama.running() or warm, gate=gate)
                 self._prune()
             except Exception:  # noqa: BLE001 - the monitor must keep running
                 logger.exception("Monitor pass failed")
@@ -1743,6 +1811,9 @@ class Node:
                 "max_prompt_chars": cfg.max_prompt_chars,
                 "context_tokens": cfg.context_tokens,
                 "fit_when_short": cfg.fit_when_short,
+                "owner_priority": cfg.owner_priority,
+                "owner_warm_left": round(max(0.0, cfg.owner_warm_seconds - (time.monotonic() - self._last_owner)), 1),
+                "owner_queue": self.work_owner.qsize(),
                 "llama_fit": bool(self.llama.fit and loaded),
                 "gpu_lease_hold_file": cfg.gpu_lease_hold_file,
                 "gpu_lease_yield_to": comfy.get("gpu_lease") or "",

@@ -153,6 +153,7 @@ class FakeComfy:
         self.running = 0
         self.pending = 0
         self.prompt_endpoint = True
+        self.posts = []
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -167,6 +168,15 @@ class FakeComfy:
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                outer.posts.append((self.path, body))
+                if self.path == "/queue" and isinstance(body.get("delete"), list):
+                    outer.pending = max(0, outer.pending - len(body["delete"]))
+                elif self.path == "/interrupt":
+                    outer.running = 0
+                self._send(200, {})
 
             def do_GET(self):
                 if self.path == "/prompt" and outer.prompt_endpoint:
@@ -787,6 +797,71 @@ def fit_checks(ai_node):
     check("fit: off by default", not off.fit_when_short and off.min_need_mb() == 18900, off.min_need_mb())
 
 
+def owner_checks(tmp):
+    """2026-10-11: the owner's request takes the card: admitted while ComfyUI renders, first in line, ComfyUI's queue
+    deleted and its prompt interrupted, the model kept warm afterwards; a normal request still waits."""
+    tmp = os.path.join(tmp, "owner")
+    os.makedirs(tmp, exist_ok=True)
+    comfy = FakeComfy()
+    comfy.running, comfy.pending = 1, 2
+    smi_state = os.path.join(tmp, "smi.json")
+    with open(smi_state, "w", encoding="utf-8") as handle:
+        json.dump({"total": 24564, "free": 23000}, handle)
+    weights = os.path.join(tmp, "w.gguf")
+    with open(weights, "wb") as handle:
+        handle.write(b"GGUF" + b"\0" * 64)
+    with open(os.path.join(tmp, "token.txt"), "w", encoding="utf-8") as handle:
+        handle.write(TOKEN + "\n")
+    me = os.path.abspath(__file__)
+    port, llama_port = free_port(), free_port()
+    config = {"node_name": "owner", "listen_port": port, "token_file": "token.txt", "model_id": MODEL_ID,
+              "weights": weights, "vram_need_mb": 8000, "vram_margin_mb": 1000,
+              "llama_server": [sys.executable, me, "--fake-llama", "--fake-load-delay", "0.3"],
+              "llama_port": llama_port, "nvidia_smi": [sys.executable, me, "--fake-smi"],
+              "comfy_url": f"http://127.0.0.1:{comfy.port}", "comfy_poll_seconds": 0.5, "max_tasks": 4,
+              "comfy_wait_seconds": 20, "start_timeout_seconds": 30, "keepalive_seconds": 1,
+              "owner_priority": True, "owner_preempt_comfy": True, "owner_warm_seconds": 5,
+              "log_file": "owner.log", "log_level": "DEBUG"}
+    path = os.path.join(tmp, "owner.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(config, handle)
+    env = dict(os.environ, FAKE_SMI_STATE=smi_state, FAKE_LLAMA_LOG=os.path.join(tmp, "owner_llama.log"))
+    env.pop("AI_NODE_TOKEN", None)
+    out = open(os.path.join(tmp, "owner.stdout.log"), "wb")
+    proc = subprocess.Popen([sys.executable, os.path.join(HERE, "ai_node.py"), "--config", path], env=env,
+                            stdout=out, stderr=subprocess.STDOUT)
+    api = Client(port)
+    try:
+        check("owner: node boots", wait_until(lambda: api.call("GET", "/healthz", token=None)[0] == 200, 20))
+        wait_until(lambda: api.status()["ai_node"]["comfy"].get("busy"), 5)
+        code, body = api.submit("text", {"prompt": "a normal request"})
+        check("owner: a normal request waits while ComfyUI renders", code == 503, (code, body))
+        code, body = api.submit("text", {"prompt": "the owner asks", "priority": "owner"})
+        check("owner: the owner's request is admitted while ComfyUI renders", code == 202, (code, body))
+        tid = (body or {}).get("task_id")
+        done = wait_until(lambda: api.task(tid).get("status") in ("Completed", "Failed"), 25)
+        check("owner: the owner's request is answered", done and api.task(tid).get("status") == "Completed",
+              api.task(tid))
+        paths = [p for p, _ in comfy.posts]
+        check("owner: ComfyUI's queued prompts are deleted",
+              ("/queue", {"delete": ["p0", "p1"]}) in comfy.posts, comfy.posts)
+        check("owner: ComfyUI's running prompt is interrupted", "/interrupt" in paths, paths)
+        st = api.status()["ai_node"]
+        check("owner: the model stays warm afterwards", st.get("owner_warm_left", 0) > 0 and st.get("llama_pid"), st)
+        comfy.running = 1
+        time.sleep(2.0)
+        check("owner: no unload for ComfyUI inside the warm window", api.status()["ai_node"].get("llama_pid"),
+              api.status()["ai_node"])
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        out.close()
+        comfy.stop()
+
+
 def lease_checks(tmp):
     """2026-10-11: two nodes on one card (a holder that needs the whole GPU and a yielder), max_prompt_chars and the
     temperature passthrough."""
@@ -918,6 +993,7 @@ def main():
         lease_checks(tmp)
         game_checks(ai_node)
         fit_checks(ai_node)
+        owner_checks(tmp)
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         check("selftest ran to the end", False)
