@@ -297,6 +297,36 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   пункты 5–6 «Блокирующих разрывов»). Подробно: канонический converter handoff
   (`converter-source/handoff.md`, зеркала VPS/F5, SHA `bfa0d030…`).
 
+## Rig judge · V3 — судья суставов и автоисправление рига (2026-10-10 13:00 UTC, на проде)
+
+- **Сервис** `autorig-rig-judge` (127.0.0.1:8252, nginx `^~ /api/mt/rig-judge`, бэкап
+  конфига `/srv/autorig/audits/autorig.online-storage.bak-rigjudge-*`). Код в MT-репо
+  (`abea0f8`+): `mt/bonecode.py` (формат), `mt/joint_views.py` (изолированные рендеры),
+  `mt/joint_judge.py` (джоба, CLI `python -m mt.joint_judge --run <20hex>`),
+  `mt/joint_judge_service.py` (API + автотриггер), `deploy/rig-judge/`.
+- **API для агента сессии / Astra** (POST: MT-ключ Bearer или локальный вызов без nginx):
+  `POST /api/mt/rig-judge {"run": "<20hex>"}` или `{"task": "<uuid>"}` (+`fix`, `vision`,
+  `pose`, `force`) — **идемпотентен**: та же ревизия рига (sha rig.json) → та же джоба;
+  `GET /api/mt/rig-judge/{id}`, `GET /api/mt/rig-judge/run/{run}`, `GET …/spec`.
+  В каждом ответе поле **`next`**: `wait` (poll 15 с) | `done` (всё ок или исправлено и
+  установлено) | `rejudge` (исправил, но остались провалы — POST ещё раз, это новая
+  ревизия) | `see_job` | `retry` (упала, ≤3 раз) | `give_up` (+`why`: нет данных куда
+  двигать / план тела `root` / 3 раунда исчерпаны) | `judge` (риг изменился). Плюс
+  `outside_scope`: что суставами не лечится (слои волос/одежды → garment/hair solver).
+- **Типы моделей**: biped и quadruped (свои имена/срезы; ИИ-поза только для biped);
+  `root` (проп, техника) → сразу `give_up` с причиной. Цепочки волос `Hair_*` судятся.
+- **Автозапуск** без утверждения: каждые 30 с V3-сессии `needs_review` и MT-раны с
+  `rig/validation.json` «needs attention»; одна ревизия рига судится один раз; ≤2 джобы
+  параллельно. Риг ставится атомарно, старый — в `rig/joint_judge/<job>/before_rig/`;
+  `rig.json.built_at` → вьювер перезагружает; `rig/joint-judge.json` — сводка для
+  Task page / Intake. **V3-статус и dispatch-store я не трогаю** — Intake, перечитайте
+  QA по `rig/joint-judge.json` (score, moved, next).
+- **Session agent · V3**: цикл «POST → poll → next» безопасен для повторов; инструмент
+  в `/dev/tools` (Astra `tools/bin/rig-judge`, коммит Astra `adb41fb`).
+- **16ce2f35** (сессия `252ed6e85fdaf29e8bb2`, джоба `f3caf724e3f0`, 237 с): колени
+  −6.3% H и лодыжки −7.3% H по ИИ-позе (ControlNet → 3D), плечи к центру руки;
+  оценка 0.78 → 0.97, рывки в клипах 6 → 0, V3 numeric stretch −22%. DEV 6438–6441.
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
