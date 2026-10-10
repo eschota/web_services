@@ -118,6 +118,15 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - **Каталог инструментов**: реестр V3-инструментов `/srv/autorig/data/v3-intake/tools.json`
   (`autorig.tools-registry/1`: v3_upload, v3_task_shell, v3_task, v3_retry, mt_v3). **Astra**:
   добавить группу `v3` в `mt/astra/catalog.py` из этого файла.
+- **ASCII FBX на входе (срочно от владельца, live 12:21 UTC, релиз `v3intake-fbx-20261010`,
+  коммит `a7c40245`)**: `fbx_ascii.py` вставляет пропущенный `a:` после `Name: *N {`
+  (AssetStudio/Unity Studio), `assimp export … -f glb2` → GLB рядом с оригиналом, он и
+  становится входом задачи (legacy и V3). Нечитаемый → 422 `error_fbx_unreadable`
+  (en/ru/zh/hi/fa в `static/i18n`). FBX-экспортёр assimp не использовать (битый бинарник).
+  V3 бинарный FBX тоже сначала через assimp, потом конвертер. Доказано: `63bf5d35`.
+  Мусорная тестовая `fe6b984d` (испорченный FBX) ждёт нормализации и через 6 ч уйдёт в error.
+- **Генерация site-строк**: legacy stale reset/global timeout 120 мин больше не трогает
+  `pipeline_kind=generate` (коммит `757f408d`, live с рестарта 12:16).
 - **Диск**: ~70–80 МБ на V3-задачу (сессия 30–50 МБ, копия попытки ~25 МБ, источник);
   `numeric-qa.json` ~5 МБ — сжимать/чистить по давлению вместе с регенерируемыми копиями.
 - **Не смонтировано**: `v3_site_integration.py`/`task_v3_shell.py` (заменены read API выше),
