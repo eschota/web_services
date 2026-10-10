@@ -1,0 +1,10 @@
+[Unit]
+Description=AutoRig regression autotests, extended tier (nightly; posts to DEV only on FAIL)
+After=network.target autorig-mt.service
+
+[Service]
+Type=oneshot
+Nice=15
+IOSchedulingClass=idle
+ExecStart=/srv/autorig/venv/bin/python3 -P /srv/autorig/autotests/autotests.py gate all --tier extended --jobs 4 --card --post-dev-on-fail
+TimeoutStartSec=3600

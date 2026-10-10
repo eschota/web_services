@@ -1,0 +1,266 @@
+{
+ "schema": "autorig.autotests.corpus/1",
+ "doc": "Known-bad models as regression cases (AGENTS.md «Every Release Passes the Regression Autotests»). inputs: read-only copies in /srv/autorig/data/autotests/corpus (autotests.py sync). cases[].checks[]: kind (checks.py), paths (which release it gates: mt | backend | converter | live), tier (base: every release, minutes; extended: nightly / converter rollout), thresholds {metric: [op, value]}, role (regression: the code under test must pass; detector: the metric must flag the recorded bad artifact; control: no false alarm on a good artifact), xfail {reason, owner} for a defect not yet fixed. An agent that finds a new defect adds its model here in the same change.",
+ "template_fingerprints": ["3e5ee0254878ddc5"],
+ "template_fingerprints_doc": "the 67-joint skeleton the converter ships unfitted (identical joints in d76f84c3, af874411, 7831327b; 1.4668 high, arms at x=+-0.685)",
+ "inputs": {
+  "66ba97ba.upload.glb": {"source": "/srv/autorig/data/var/uploads/8f8a45e1-9a39-41e1-bf44-b39a2769fe90/tripo_female_warrior_rigged.glb", "task": "66ba97ba-30ad-4284-bb63-ed56860d09f6", "what": "female warrior with a sword (upload)", "sha256": "0dbd75db4becc66886f65a8d51e6e3f7de82527dd1b9f9ddabb312238542220b", "bytes": 5288616},
+  "66ba97ba.prepared.glb": {"source": "/srv/autorig/data/static/glb_cache/66ba97ba-30ad-4284-bb63-ed56860d09f6_prepared.glb", "task": "66ba97ba-30ad-4284-bb63-ed56860d09f6", "what": "converter f1 prepared", "sha256": "5de900a8b5104d8949a1ca597f646ea60d4528b4368c9c6eb55e195755e1f96d", "bytes": 4583200},
+  "66ba97ba.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/66ba97ba-30ad-4284-bb63-ed56860d09f6_animations.glb", "task": "66ba97ba-30ad-4284-bb63-ed56860d09f6", "what": "converter f1 rig: sword skinned into the body (BindCheck 445, retry)", "sha256": "e5aad296ed8e6114d1774487ff418d40feca4c9d2a33215bb1fa0474bd3b4784", "bytes": 8352660},
+  "98c1247c.upload.glb": {"source": "/srv/autorig/data/var/uploads/27af2b7e-33e3-48b9-b46d-d7aa744acbd8/fabian3.glb", "task": "98c1247c-f878-4212-a587-ec2c76889d4d", "what": "boy in a T-shirt (upload)", "sha256": "53386d21b7158498014965479676429951d7c71d917393edd0e683be47dae2dd", "bytes": 6858364},
+  "98c1247c.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/98c1247c-f878-4212-a587-ec2c76889d4d_animations.glb", "task": "98c1247c-f878-4212-a587-ec2c76889d4d", "what": "converter f7 rig: right forearm through the torso in Idle", "sha256": "6d3b58624dd336a9adb90f3201e95c8c8f83819bcab61cdcb5cb542799b1c918", "bytes": 10990552},
+  "98c1247c.prepared.glb": {"source": "/srv/autorig/data/static/glb_cache/98c1247c-f878-4212-a587-ec2c76889d4d_prepared.glb", "task": "98c1247c-f878-4212-a587-ec2c76889d4d", "what": "converter f7 prepared", "sha256": "96f64b90c3b0bbc9f0ba754ba2c19661bdae102358a9db011937feeea2382a13", "bytes": 6858324},
+  "af874411.upload.fbx": {"source": "/srv/autorig/data/var/uploads/ada9260c-96a1-42de-99c6-93aa1983bf62/Female Start Walking (1).fbx", "task": "af874411-7197-419b-b09b-b7834a332c91", "what": "FBX girl with a tail, Mixamo skin (upload)", "sha256": "c43609307ff44432756ab57100b30dc234b2a0bc6fccc774935d53258cb544c9", "bytes": 2853616},
+  "af874411.prepared.glb": {"source": "/srv/autorig/data/static/glb_cache/af874411-7197-419b-b09b-b7834a332c91_prepared.glb", "task": "af874411-7197-419b-b09b-b7834a332c91", "what": "converter f7 prepared", "sha256": "83efc9067d3a942b4f792bd225c59c2f20b6882d50054869248539ab2324928c", "bytes": 1705448},
+  "af874411.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/af874411-7197-419b-b09b-b7834a332c91_animations.glb", "task": "af874411-7197-419b-b09b-b7834a332c91", "what": "converter f7 rig: unfitted 67-joint template 1.63x the mesh, palm weights on the torso, no tail", "sha256": "8ba476c77c39ab4173fbbe154f32f01128c96ef099a4fe047a3fc14cad82856f", "bytes": 5235880},
+  "d76f84c3.upload.glb": {"source": "/srv/autorig/data/var/uploads/f4470e57-b668-4247-8584-ac09820b9368/live_probe_warrior.glb", "task": "d76f84c3-5c1e-4f73-a444-c1efe88e9c01", "what": "re-upload of a converter prepared.glb", "sha256": "5de900a8b5104d8949a1ca597f646ea60d4528b4368c9c6eb55e195755e1f96d", "bytes": 4583200},
+  "d76f84c3.prepared.glb": {"source": "/srv/autorig/data/static/glb_cache/d76f84c3-5c1e-4f73-a444-c1efe88e9c01_prepared.glb", "task": "d76f84c3-5c1e-4f73-a444-c1efe88e9c01", "what": "converter f1 prepared", "sha256": "b6eabf0bb6dcfc0318badbe83da2f3946fc7df294a998fa3aae51947e2413dba", "bytes": 4583296},
+  "d76f84c3.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/d76f84c3-5c1e-4f73-a444-c1efe88e9c01_animations.glb", "task": "d76f84c3-5c1e-4f73-a444-c1efe88e9c01", "what": "converter f1 rig 1.47x taller than the mesh (unfitted template)", "sha256": "3089e2a7ce486ae54f56c47ea19c2e005d1ce109904a56f23a18b859183b025c", "bytes": 7842800},
+  "16ce2f35.upload.glb": {"source": "/srv/autorig/data/var/uploads/2e3f3b2e-b325-4b8a-9181-ea7802d06d87/anime_girl_cat_ears.glb", "task": "16ce2f35-12b8-47bf-8130-3dfdfe373cd0", "what": "anime girl with cat ears (upload, V3)", "sha256": "9f4cf8e7821abcd1b582310e219c699d7b49f66b9a7625a194ab340b0c02307e", "bytes": 8471572},
+  "16ce2f35.mt-before.glb": {"source": "/srv/autorig/data/motion_transfer/runs/252ed6e85fdaf29e8bb2/rig/joint_judge/f3caf724e3f0/before_rig/rigged.glb", "task": "16ce2f35-12b8-47bf-8130-3dfdfe373cd0", "what": "MT run 252ed6e85fdaf29e8bb2 rig before the joint judge: heel / LeftToeBase outside the foot", "sha256": "9d74ab3e3e283c3070ae33c0708fe1446b595ba3e2b8eb6ad96330b81c2f0f90", "bytes": 9509104},
+  "16ce2f35.mt-before.rig.json": {"source": "/srv/autorig/data/motion_transfer/runs/252ed6e85fdaf29e8bb2/rig/joint_judge/f3caf724e3f0/before_rig/rig.json", "task": "16ce2f35-12b8-47bf-8130-3dfdfe373cd0", "what": "its rig.json", "sha256": "907936d5495048344dc3856ff7a66ec588c97e5777369f4b321595530ddaf691", "bytes": 10637},
+  "7831327b.upload.obj": {"source": "/srv/autorig/data/var/uploads/c0e5e5e9-3f5b-4271-a629-e3d91c20a720/Demented_Maniac.obj", "task": "7831327b-8e49-4c49-91ef-f42a64b2bdac", "what": "OBJ maniac (upload)", "sha256": "d90c2fc21db1d41e2116856a99fc3928b7716a93755157a39c11d0af89e66805", "bytes": 1362712},
+  "7831327b.prepared.glb": {"source": "/srv/autorig/data/static/glb_cache/7831327b-8e49-4c49-91ef-f42a64b2bdac_prepared.glb", "task": "7831327b-8e49-4c49-91ef-f42a64b2bdac", "what": "converter f1 prepared (neck intact)", "sha256": "01671e726bb6e6974acb02c2564379c8fc1bb15d0d1bc77b9012ed1cb495f545", "bytes": 373412},
+  "7831327b.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/7831327b-8e49-4c49-91ef-f42a64b2bdac_animations.glb", "task": "7831327b-8e49-4c49-91ef-f42a64b2bdac", "what": "converter f1 rig: 1543 neck vertices moved up 0.79 in the rig rest", "sha256": "92778ab5fd68000adf5f96bb8e840dff13a5c0d9562e06ab5e513b443c209d7f", "bytes": 4182836},
+  "b5b2a520.ascii.fbx": {"source": "/srv/autorig/data/ops-backups/ascii-fbx-20261010/3fcb5d0c-cb70-4015-949c-7ee29df4361a/chr_halloweenrouge.ascii-original.fbx", "task": "b5b2a520-254b-46f4-ac78-494ad1c47fb6", "what": "AssetStudio ASCII FBX without the a: key (FBX_ASCII_UNSUPPORTED)", "sha256": "8b549b92e337f1611898a88d3ffdfe976ce50f00a3a0551a4668b3d86ffc7132", "bytes": 413147},
+  "b5b2a520.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/b5b2a520-254b-46f4-ac78-494ad1c47fb6_animations.glb", "task": "b5b2a520-254b-46f4-ac78-494ad1c47fb6", "what": "converter f1 rig of the rescued FBX", "sha256": "6e42228e250cba715e754394c401ed63c6c0610b85918226a949194f69e1c271", "bytes": 4189268},
+  "63bf5d35.ascii.fbx": {"source": "/srv/autorig/data/var/uploads/5072e695-244e-43e6-8b66-f518f69f764b/mannequin_ascii.fbx", "task": "63bf5d35-9aa8-491d-a166-9efc0dc3cee0", "what": "ASCII FBX mannequin (intake proof)", "sha256": "360d5b5d34ba4afa1f882ac1f6d3280c0819add84fc5f52399e79e21c3d94d9b", "bytes": 9021},
+  "63bf5d35.upload.glb": {"source": "/srv/autorig/data/var/uploads/5072e695-244e-43e6-8b66-f518f69f764b/mannequin_ascii.glb", "task": "63bf5d35-9aa8-491d-a166-9efc0dc3cee0", "what": "its GLB: the old fast rig put the whole spine at x=-0.33 (16 of 22 joints outside the voxels)", "sha256": "eb5fd7d15f0140076a6d24f22f730974447785acc1664ac6bd25ed50f8c8e56c", "bytes": 8764},
+  "8a1b1cc5.upload.glb": {"source": "/srv/autorig/data/var/uploads/120b39d9-1817-4f66-b71c-63710ce2574b/rigpath_test_mannequin.glb", "task": "8a1b1cc5-d655-41e5-8874-380d827c5b28", "what": "rig-path test mannequin: some clips did not retarget", "sha256": "100ff4f81235c9cf95acf554c2e538c7e73c0f1c128d5ff146f83137268c43e4", "bytes": 8832},
+  "9fb7d4d9.model.glb": {"source": "/srv/autorig/data/motion_transfer/runs/9fb7d4d9be18ae658844/proj/model.glb", "task": "9fd5e054-2c44-4b43-bc79-10e89a26b557", "what": "knight with a sword (MT run 9fb7d4d9be18ae658844)", "sha256": "b6ff7409f7c6530df9fea952e3aa3103d184d5e2e73c68981142a6346e6c221b", "bytes": 8398056},
+  "9a34e8c0.upload.glb": {"source": "/srv/autorig/data/var/uploads/58ea18ce-0780-47bb-99b7-92056400839c/rigpath_test_knight_sword.glb", "task": "9a34e8c0-1ded-4b92-b080-8b15dd057f95", "what": "rig-path test knight with a sword (2.7 s rig in the viewer)", "sha256": "9fe4583f9453938a0d379ee9c4d008b6af707952b846057dd89da6cf11e26dc3", "bytes": 11945148},
+  "9a34e8c0.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/9a34e8c0-1ded-4b92-b080-8b15dd057f95_animations.glb", "task": "9a34e8c0-1ded-4b92-b080-8b15dd057f95", "what": "converter f13 rig of the knight", "sha256": "92ed6619d9935191312148276ba5c5a9b8fc1872379a77c9e14d4b86b8501ebe", "bytes": 16212208},
+  "9a34e8c0.prepared.glb": {"source": "/srv/autorig/data/static/glb_cache/9a34e8c0-1ded-4b92-b080-8b15dd057f95_prepared.glb", "task": "9a34e8c0-1ded-4b92-b080-8b15dd057f95", "what": "converter f13 prepared", "sha256": "766e8489c7ef0ed48de92634620a714ba2d5d8c9420c10b081c382006956f433", "bytes": 10025832},
+  "8b16a847.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/8b16a847-c242-4c1e-81c4-81d46c52e68c_animations.glb", "task": "8b16a847-c242-4c1e-81c4-81d46c52e68c", "what": "converter f2 rig: the hand inside a large head (limb collision high)", "sha256": "c8a3ad29569bec426f061380a7fd8778c6d64a3bdcddd361f1a149e9d5724c33", "bytes": 4445508},
+  "e0cdbf0b.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/e0cdbf0b-124e-4d54-b2af-1ea3ea717d88_animations.glb", "task": "e0cdbf0b-124e-4d54-b2af-1ea3ea717d88", "what": "converter f1 rig: an arm under a cloak (the cloak counts as body: debatable)", "sha256": "6af335a1d5107b029f39cc907d73524348470ff79f5d92bcd54509d2eec6ea77", "bytes": 4054412},
+  "9d466924.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/9d466924-2b0a-413f-914a-05760c6636fa_animations.glb", "task": "9d466924-2b0a-413f-914a-05760c6636fa", "what": "converter f1 rig of a PS1-style character: right arm medium", "sha256": "14b2d52b3153acfd155f670e42fb53f9873891f697f84902afa631069d6e2557", "bytes": 3946012},
+  "91a9513a.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/91a9513a-9bc7-403f-99b4-01d8f70bcf0d_animations.glb", "task": "91a9513a-9bc7-403f-99b4-01d8f70bcf0d", "what": "converter f1 rig: right arm medium", "sha256": "58c7cf49d9480a766780f7e3c84eab5965d2a3806dd54ba23cc52119f1068aa8", "bytes": 8912084},
+  "2ad5c0c8.converter.glb": {"source": "/srv/autorig/data/static/glb_cache/2ad5c0c8-fdb2-4ab6-a4b2-26060a07d2f3_animations.glb", "task": "2ad5c0c8-fdb2-4ab6-a4b2-26060a07d2f3", "what": "converter f7 rig: the arms are not bound to their bones at all (0 forearm/hand vertices)", "sha256": "ea29940312d3d6e07656931e1ed3120a410b0fba7d1c4c4c9251b7c367bca9dd", "bytes": 38341112},
+  "8369addb.model.glb": {"source": "/srv/autorig/data/motion_transfer/runs/8369addbb06c325d5839/proj/model.glb", "task": "c3aa3c9e-88e7-4626-8108-f770da3427e5", "what": "V3 run 8369addbb06c325d5839 input", "sha256": "b6ff7409f7c6530df9fea952e3aa3103d184d5e2e73c68981142a6346e6c221b", "bytes": 8398056},
+  "8369addb.mt-rig.glb": {"source": "/srv/autorig/data/motion_transfer/runs/8369addbb06c325d5839/rig/rigged.glb", "task": "c3aa3c9e-88e7-4626-8108-f770da3427e5", "what": "V3 fastrig rig of run 8369addbb06c325d5839: both arms through the body (high)", "sha256": "7b07d3edd9e35b9da583f8919c97d6363a7350a121ca145a0e9e68ec189bf8d1", "bytes": 12557608},
+  "4f85d45e.upload.glb": {"source": "/srv/autorig/data/var/uploads/e677bfd2-8041-4fb3-9b37-505ed2745a6d/elf_baseline.glb", "task": "4f85d45e-0bbb-4073-bc19-d8ff3ba125cc", "what": "elf with long hair (V3, 15 MB)", "sha256": "d04e218e49687778dd870dd08a656cd4ddd28b6e8cc8374ccd03b329ab3e2cec", "bytes": 15540912}
+ },
+ "profiles": {
+  "converter_default": {
+   "doc": "checks on every converter output the canary produces (rig_canary.py); the thresholds come from the fitted controls of the corpus",
+   "checks": [
+    {"id": "fit", "kind": "skeleton_fit", "thresholds": {"joints_outside_bbox": ["<=", 0], "height_ratio": ["<=", 1.0], "unfitted_template": ["==", 0], "spine_lateral_offset_pct_H": ["<=", 3]}},
+    {"id": "centring", "kind": "centring", "thresholds": {"outside": ["<=", 2]}},
+    {"id": "hands", "kind": "hand_weights", "thresholds": {"palm_on_torso": ["<=", 10], "far_hand_weight": ["<=", 10]}},
+    {"id": "limbs", "kind": "limb_collision", "thresholds": {"severity_rank": ["<=", 1]}},
+    {"id": "arms_bound", "kind": "limb_collision", "thresholds": {"min_arm_vertices": [">=", 1]}},
+    {"id": "drift", "kind": "rest_drift", "thresholds": {"height_change_pct": ["between", [-5, 5]]}},
+    {"id": "prop", "kind": "prop_rigidity", "thresholds": {"props_found": [">=", 1], "rigid_fraction": [">=", 0.95], "one_bone_fraction": [">=", 0.95]}}
+   ]
+  }
+ },
+ "cases": [
+  {"id": "warrior_sword", "task": "66ba97ba-30ad-4284-bb63-ed56860d09f6", "cost": 4,
+   "defect": "the sword is a separate prop parented to the hand, the classic converter skins it (BindCheck 445, retry); OpenPose sweep 90 s",
+   "converter": {"input_url": "https://autorig.online/u/8f8a45e1-9a39-41e1-bf44-b39a2769fe90/tripo_female_warrior_rigged.glb", "words": "sword",
+                 "xfail": {"prop": {"reason": "the classic converter still skins the sword into the body", "owner": "Skinning → converter · V3"},
+                           "limbs": {"reason": "the left (sword) forearm inside the body in most clips, high smear", "owner": "Limb collision · V3"},
+                           "centring": {"reason": "the right forearm twist chain lies outside the bent forearm (5 joints)", "owner": "Converter · V3"}}},
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "66ba97ba.upload.glb", "params": {"words": "tripo female warrior rigged"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "props_in_hand": [">=", 1], "prop_bones_held": [">=", 1]}},
+    {"id": "mt_prop_rigid", "kind": "prop_rigidity", "paths": ["mt"], "on": "mt_rig", "thresholds": {"props_found": [">=", 1], "one_bone_fraction": [">=", 0.99], "rigid_fraction": [">=", 0.99]}},
+    {"id": "mt_limbs", "kind": "limb_collision", "paths": ["mt"], "on": "mt_rig", "thresholds": {"worst_share": ["<=", 0.62], "min_arm_vertices": [">=", 1]},
+     "target": {"thresholds": {"severity_rank": ["<=", 1]}, "reason": "the bent arms of the fast rig go through the body (50% of the right arm, 13.8% H deep)", "owner": "Limb collision · V3"}},
+    {"id": "conv_limbs_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "66ba97ba.converter.glb", "thresholds": {"left_rank": ["==", 3]}},
+    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["<=", 2]},
+     "target": {"thresholds": {"outside": ["==", 0]}, "reason": "Hips and Spine of the fast rig sit outside the voxel solid (live judge)", "owner": "Rig tools · V3"}},
+    {"id": "mt_fast", "kind": "mt_fast_analysis", "paths": ["mt"], "on": "mt_rig", "thresholds": {"op_errors": ["==", 0], "outside_after": ["<=", 48]},
+     "target": {"thresholds": {"outside_after": ["==", 0]}, "reason": "fastrig places the bent arms of the warrior as hanging: the hand sits 0.3 H off; Hips, Spine2 and both hands stay outside after the fix", "owner": "Rig tools · V3"}},
+    {"id": "mt_numeric", "kind": "mt_numeric_qa", "paths": ["mt"], "on": "mt_rig", "tier": "extended", "thresholds": {"complete": ["==", true], "max_stretched_edges": ["<=", 4400]},
+     "target": {"thresholds": {"clips_passed": ["==", 9]}, "reason": "numeric QA fails every clip of the fast rig (3529 stretched edges at worst)", "owner": "Rig tools · V3"}},
+    {"id": "mt_probe", "kind": "deformation_probe", "paths": ["mt"], "on": "mt_rig", "tier": "extended", "params": {"samples": 8}, "thresholds": {"detached_components": ["==", 0], "stretched_edges": ["<=", 1500], "outlier_vertices": ["<=", 850]}},
+    {"id": "conv_prop_detector", "kind": "prop_rigidity", "role": "detector", "paths": ["mt", "converter"], "input": "66ba97ba.converter.glb", "params": {"words": "sword"}, "thresholds": {"props_found": [">=", 1], "rigid_fraction": ["<", 0.5]}},
+    {"id": "conv_forearm_detector", "kind": "centring", "role": "detector", "paths": ["mt", "converter"], "input": "66ba97ba.converter.glb", "thresholds": {"outside": [">=", 5]}}
+   ]},
+  {"id": "boy_tshirt", "task": "98c1247c-f878-4212-a587-ec2c76889d4d", "cost": 3,
+   "defect": "the right forearm passes through the torso in Idle (converter f7)",
+   "converter": {"input_url": "https://autorig.online/u/27af2b7e-33e3-48b9-b46d-d7aa744acbd8/fabian3.glb",
+                 "xfail": {"limbs": {"reason": "the converter's arms_spread layer turns the right arm into the torso; fix 5650feb (arms_spread flip) not rolled out yet", "owner": "Limb collision · V3"}}},
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "98c1247c.upload.glb", "params": {"words": "fabian3"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
+    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["==", 0]}},
+    {"id": "mt_limbs", "kind": "limb_collision", "paths": ["mt"], "on": "mt_rig", "thresholds": {"worst_share": ["<=", 0.36], "min_arm_vertices": [">=", 1]},
+     "target": {"thresholds": {"severity_rank": ["<=", 1]}, "reason": "the fast rig's right forearm also enters the torso in the library clips (28% of the arm, 4.5% H deep)", "owner": "Limb collision · V3"}},
+    {"id": "conv_limbs_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "thresholds": {"right_rank": ["==", 3]}},
+    {"id": "conv_fit_control", "kind": "skeleton_fit", "role": "control", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "thresholds": {"joints_outside_bbox": ["<=", 0]}},
+    {"id": "conv_hands_control", "kind": "hand_weights", "role": "control", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "thresholds": {"palm_on_torso": ["<=", 0], "far_hand_weight": ["<=", 0]}},
+    {"id": "conv_centring_control", "kind": "centring", "role": "control", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "thresholds": {"outside": ["<=", 2]}},
+    {"id": "conv_drift_control", "kind": "rest_drift", "role": "control", "paths": ["mt", "converter"], "input": "98c1247c.converter.glb", "params": {"prepared": "98c1247c.prepared.glb"}, "thresholds": {"height_change_pct": ["between", [-5, 5]]}}
+   ]},
+  {"id": "tail_girl", "task": "af874411-7197-419b-b09b-b7834a332c91", "cost": 2,
+   "defect": "FBX humanoid with a tail: the converter shipped an unfitted template skeleton (1.63x the mesh), palm weights on 586 torso vertices, no tail bones",
+   "converter": {"input_url": "https://autorig.online/u/ada9260c-96a1-42de-99c6-93aa1983bf62/Female%20Start%20Walking%20%281%29.fbx",
+                 "xfail": {"fit": {"reason": "the converter does not fit the skeleton to an input that already carries a Mixamo skin", "owner": "Skinning → converter · V3"},
+                           "hands": {"reason": "palm weights on torso vertices (distal topology skin not installed in the converter)", "owner": "Skinning → converter · V3"}}},
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "af874411.prepared.glb", "params": {"words": "Female Start Walking 1"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
+    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0]}},
+    {"id": "mt_hands", "kind": "hand_weights", "paths": ["mt"], "on": "mt_rig", "thresholds": {"palm_on_torso": ["<=", 0], "far_hand_weight": ["<=", 0]}},
+    {"id": "mt_tail", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"tail_joints": [">=", 1]},
+     "xfail": {"reason": "the fast rig has no tail chain for a humanoid + tail", "owner": "Rig tools · V3"}},
+    {"id": "conv_fit_detector", "kind": "skeleton_fit", "role": "detector", "paths": ["mt", "converter"], "input": "af874411.converter.glb", "thresholds": {"joints_outside_bbox": [">=", 10], "height_ratio": [">", 1.2], "unfitted_template": ["==", 1]}},
+    {"id": "palm_on_torso", "kind": "pending_detector", "paths": ["mt", "converter"], "pending": {"reason": "hand weights >1% on 586 torso vertices of the SOURCE skin, measured by Astra on the FBX parts (evidence topology-tail/leakage-and-tail.json); a region-free detector of ours finds 0 on the assimp skin, so it needs Astra's source-part labels", "owner": "Skinning → converter · V3"}}
+   ]},
+  {"id": "prepared_reupload", "task": "d76f84c3-5c1e-4f73-a444-c1efe88e9c01", "cost": 2,
+   "defect": "a re-uploaded prepared.glb: the converter rig is 1.47x taller than the mesh (66 of 67 joints red in the live judge)",
+   "converter": {"input_url": "https://autorig.online/u/f4470e57-b668-4247-8584-ac09820b9368/live_probe_warrior.glb",
+                 "xfail": {"fit": {"reason": "the converter keeps an unfitted template on an already prepared input", "owner": "Converter · V3"},
+                           "centring": {"reason": "same unfitted template", "owner": "Converter · V3"}}},
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "d76f84c3.upload.glb", "params": {"words": "live probe warrior"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
+    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0], "height_ratio": ["between", [0.7, 1.0]]}},
+    {"id": "conv_fit_detector", "kind": "skeleton_fit", "role": "detector", "paths": ["mt", "converter"], "input": "d76f84c3.converter.glb", "thresholds": {"joints_outside_bbox": [">=", 10], "height_ratio": [">", 1.2], "unfitted_template": ["==", 1]}},
+    {"id": "conv_centring_detector", "kind": "centring", "role": "detector", "paths": ["mt", "converter"], "input": "d76f84c3.converter.glb", "thresholds": {"outside": [">=", 30]}}
+   ]},
+  {"id": "anime_heel", "task": "16ce2f35-12b8-47bf-8130-3dfdfe373cd0", "cost": 3,
+   "defect": "heel / LeftToeBase outside the mesh (MT run 252ed6e85fdaf29e8bb2, fixed afterwards by the joint judge)",
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "16ce2f35.upload.glb", "params": {"words": "anime girl cat ears"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
+    {"id": "mt_bones", "kind": "bone_outside", "paths": ["mt"], "on": "mt_rig", "thresholds": {"foot_outside_samples": ["<=", 60]},
+     "target": {"thresholds": {"foot_outside_samples": ["==", 0]}, "reason": "the first rig still puts LeftFoot/LeftToeBase/RightFoot/RightToeBase outside the foot (56 samples, as in the recorded bad rig); only the later joint judge fixes it", "owner": "Rig tools · V3"}},
+    {"id": "mt_fast", "kind": "mt_fast_analysis", "paths": ["mt"], "on": "mt_rig", "thresholds": {"op_errors": ["==", 0], "outside_after": ["<=", 30], "foot_rules_failed_after": ["==", 0]},
+     "target": {"thresholds": {"outside_after": ["==", 0]}, "reason": "the fix of fast analysis leaves LeftFoot/RightFoot partly outside (24 samples)", "owner": "Rig tools · V3"}},
+    {"id": "before_heel_detector", "kind": "bone_outside", "role": "detector", "paths": ["mt"], "input": "16ce2f35.mt-before.glb", "params": {"rig_json": "16ce2f35.mt-before.rig.json"}, "thresholds": {"foot_outside_samples": [">=", 1]}}
+   ]},
+  {"id": "maniac_neck", "task": "7831327b-8e49-4c49-91ef-f42a64b2bdac", "cost": 2,
+   "defect": "the converter rig rest moved 1543 neck vertices up 0.79 (bind valid, so QA could not see it); also an unfitted template skeleton",
+   "converter": {"input_url": "https://autorig.online/u/c0e5e5e9-3f5b-4271-a629-e3d91c20a720/Demented_Maniac.obj",
+                 "xfail": {"fit": {"reason": "unfitted template skeleton on this OBJ", "owner": "Converter · V3"},
+                           "drift": {"reason": "neck vertices displaced in the rig rest", "owner": "Converter · V3"}}},
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "7831327b.prepared.glb", "params": {"words": "Demented Maniac"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
+    {"id": "mt_drift", "kind": "rest_drift", "paths": ["mt"], "on": "mt_rig", "params": {"prepared": "7831327b.prepared.glb"}, "thresholds": {"moved_vertices": ["<=", 0]}},
+    {"id": "mt_numeric", "kind": "mt_numeric_qa", "paths": ["mt"], "on": "mt_rig", "params": {"clips": ["Idle", "Walking"]}, "thresholds": {"complete": ["==", true], "bad_frame_share": ["<=", 0.8], "max_stretched_edges": ["<=", 710]},
+     "target": {"thresholds": {"clips_passed": ["==", 2]}, "reason": "numeric deformation QA fails Idle and Walking of the fast rig (stretched edges)", "owner": "Rig tools · V3"}},
+    {"id": "mt_probe", "kind": "deformation_probe", "paths": ["mt"], "on": "mt_rig", "params": {"samples": 8}, "thresholds": {"detached_components": ["==", 0], "stretched_edges": ["<=", 300], "outlier_vertices": ["<=", 35]}},
+    {"id": "conv_drift_detector", "kind": "rest_drift", "role": "detector", "paths": ["mt", "converter"], "input": "7831327b.converter.glb", "params": {"prepared": "7831327b.prepared.glb"}, "thresholds": {"moved_vertices": [">=", 1000], "height_change_pct": [">", 20]}},
+    {"id": "conv_fit_detector", "kind": "skeleton_fit", "role": "detector", "paths": ["mt", "converter"], "input": "7831327b.converter.glb", "thresholds": {"joints_outside_bbox": [">=", 10], "unfitted_template": ["==", 1]}},
+    {"id": "conv_probe_detector", "kind": "deformation_probe", "role": "detector", "paths": ["mt"], "input": "7831327b.converter.glb", "tier": "extended", "params": {"samples": 16}, "thresholds": {"failed_poses": [">=", 8]}}
+   ]},
+  {"id": "ascii_fbx", "task": "b5b2a520-254b-46f4-ac78-494ad1c47fb6", "cost": 1,
+   "defect": "ASCII FBX upload: FBX_ASCII_UNSUPPORTED on the farm; the intake must convert it on the VPS (fbx_ascii.py + assimp)",
+   "checks": [
+    {"id": "intake_b5b2a520", "kind": "ascii_fbx_intake", "paths": ["backend"], "input": "b5b2a520.ascii.fbx", "thresholds": {"is_ascii": ["==", true], "ok": ["==", true], "glb_vertices": [">=", 100], "seconds": ["<=", 60]}},
+    {"id": "intake_63bf5d35", "kind": "ascii_fbx_intake", "paths": ["backend"], "input": "63bf5d35.ascii.fbx", "thresholds": {"is_ascii": ["==", true], "ok": ["==", true], "glb_vertices": [">=", 8], "seconds": ["<=", 60]}}
+   ]},
+  {"id": "knight_sword", "task": "9fd5e054-2c44-4b43-bc79-10e89a26b557", "cost": 3,
+   "defect": "knight with a sword: the sword must be a rigid prop on the hand, not skinned",
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "9fb7d4d9.model.glb", "params": {"words": "knight with a sword"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "prop_bones_held": [">=", 1]}},
+    {"id": "mt_prop_rigid", "kind": "prop_rigidity", "paths": ["mt"], "on": "mt_rig", "thresholds": {"props_found": [">=", 1], "one_bone_fraction": [">=", 0.99], "rigid_fraction": [">=", 0.99]}},
+    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["==", 0]}}
+   ]},
+  {"id": "knight_rigpath", "task": "9a34e8c0-1ded-4b92-b080-8b15dd057f95", "cost": 3,
+   "defect": "rig-path test knight with a sword: the 60 s rig budget (2.7 s to the viewer on 2026-10-10)",
+   "converter": {"input_url": "https://autorig.online/u/58ea18ce-0780-47bb-99b7-92056400839c/rigpath_test_knight_sword.glb", "words": "sword", "xfail": {}},
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "9a34e8c0.upload.glb", "params": {"words": "rigpath test knight sword"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "props_in_hand": [">=", 1], "prop_bones_held": [">=", 1]}},
+    {"id": "mt_prop_rigid", "kind": "prop_rigidity", "paths": ["mt"], "on": "mt_rig", "thresholds": {"props_found": [">=", 1], "one_bone_fraction": [">=", 0.99], "rigid_fraction": [">=", 0.99]}},
+    {"id": "conv_prop_control", "kind": "prop_rigidity", "role": "control", "paths": ["mt", "converter"], "input": "9a34e8c0.converter.glb", "params": {"words": "sword"}, "thresholds": {"props_found": [">=", 1], "rigid_fraction": [">=", 0.95], "one_bone_fraction": [">=", 0.95]}},
+    {"id": "conv_fit_control", "kind": "skeleton_fit", "role": "control", "paths": ["mt", "converter"], "input": "9a34e8c0.converter.glb", "thresholds": {"joints_outside_bbox": ["<=", 0]}},
+    {"id": "conv_limbs_control", "kind": "limb_collision", "role": "control", "paths": ["mt", "converter"], "input": "9a34e8c0.converter.glb", "thresholds": {"severity_rank": ["<=", 1]}},
+    {"id": "conv_drift_control", "kind": "rest_drift", "role": "control", "paths": ["mt", "converter"], "input": "9a34e8c0.converter.glb", "params": {"prepared": "9a34e8c0.prepared.glb"}, "thresholds": {"height_change_pct": ["between", [-5, 5]]}}
+   ]},
+  {"id": "mannequin_tiny", "task": "63bf5d35-9aa8-491d-a166-9efc0dc3cee0", "cost": 1,
+   "defect": "tiny mannequins: the old fast rig put the spine at x=-0.33 (16 of 22 joints outside); 8a1b1cc5: some clips did not retarget",
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "63bf5d35.upload.glb", "params": {"words": "mannequin ascii"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "prop_bones_n": ["<=", 3]},
+     "target": {"thresholds": {"prop_bones_n": ["==", 0]}, "reason": "the fast rig makes 3 Prop bones on a plain mannequin (Prop1 under Head, Prop3 under LeftHand): body shells taken for props", "owner": "Rig tools · V3"}},
+    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0], "spine_lateral_offset_pct_H": ["<=", 19]},
+     "target": {"thresholds": {"spine_lateral_offset_pct_H": ["<=", 3]}, "reason": "the fast rig still puts the whole spine at x=-0.33 of a symmetric mannequin centred at x=0 (Hips..Head), head joint at 0.69 H", "owner": "Rig tools · V3"}},
+    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["<=", 16]},
+     "target": {"thresholds": {"outside": ["==", 0]}, "reason": "16 of 22 joints outside the voxel solid (the spine offset above)", "owner": "Rig tools · V3"}},
+    {"id": "mt_numeric", "kind": "mt_numeric_qa", "paths": ["mt"], "on": "mt_rig", "thresholds": {"complete": ["==", true], "max_stretched_edges": ["<=", 70]}},
+    {"id": "mt_probe", "kind": "deformation_probe", "paths": ["mt"], "on": "mt_rig", "params": {"samples": 8}, "thresholds": {"detached_components": ["==", 0], "stretched_edges": ["<=", 10], "outlier_vertices": ["<=", 5]}}
+   ]},
+  {"id": "mannequin_rigpath", "task": "8a1b1cc5-d655-41e5-8874-380d827c5b28", "cost": 1,
+   "defect": "rig-path test mannequin: «часть анимаций не перенеслась»",
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "8a1b1cc5.upload.glb", "params": {"words": "rigpath test mannequin"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8], "prop_bones_n": ["<=", 3]},
+     "target": {"thresholds": {"prop_bones_n": ["==", 0]}, "reason": "3 false Prop bones on a plain mannequin", "owner": "Rig tools · V3"}},
+    {"id": "mt_fit", "kind": "skeleton_fit", "paths": ["mt"], "on": "mt_rig", "thresholds": {"joints_outside_bbox": ["<=", 0], "clips": [">=", 8], "spine_lateral_offset_pct_H": ["<=", 19]},
+     "target": {"thresholds": {"spine_lateral_offset_pct_H": ["<=", 3]}, "reason": "same mannequin family as 63bf5d35: the spine at x=-0.33", "owner": "Rig tools · V3"}},
+    {"id": "mt_centring", "kind": "centring", "paths": ["mt"], "on": "mt_rig", "thresholds": {"outside": ["<=", 16]},
+     "target": {"thresholds": {"outside": ["==", 0]}, "reason": "16 of 22 joints outside the voxel solid", "owner": "Rig tools · V3"}}
+   ]},
+  {"id": "limb_head_hand", "task": "8b16a847-c242-4c1e-81c4-81d46c52e68c", "cost": 1,
+   "defect": "the hand inside a large head (classic converter f2)",
+   "converter": {"input_url": "https://autorig.online/u/d212d565-f42d-4f8b-81cf-5fa676db9269/character_from_peak.glb",
+                 "xfail": {"limbs": {"reason": "hand inside the large head", "owner": "Limb collision · V3"}}},
+   "checks": [
+    {"id": "conv_limbs_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "8b16a847.converter.glb", "thresholds": {"severity_rank": ["==", 3]}}
+   ]},
+  {"id": "limb_cloak", "task": "e0cdbf0b-124e-4d54-b2af-1ea3ea717d88", "cost": 1,
+   "defect": "an arm under a cloak; the cloak counts as body, so the verdict is debatable (lenient)",
+   "converter": {"input_url": "https://autorig.online/u/31bc556e-d3fa-45c0-8d70-4171290417c4/Untitled.fbx",
+                 "xfail": {"limbs": {"reason": "the cloak counts as body: debatable", "owner": "Limb collision · V3"},
+                           "arms_bound": {"reason": "the right arm under the cloak has no arm-dominant vertices (debatable: cloak)", "owner": "Limb collision · V3"}}},
+   "checks": [
+    {"id": "conv_limbs_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "e0cdbf0b.converter.glb", "thresholds": {"severity_rank": [">=", 2]}}
+   ]},
+  {"id": "limb_medium", "task": "9d466924-2b0a-413f-914a-05760c6636fa", "cost": 1,
+   "defect": "medium limb collisions of the right arm (9d466924 PS1-style, 91a9513a)",
+   "converter": {"input_url": "https://autorig.online/u/8bca71b2-c98d-4a99-8584-a686900d23d2/ps1%20style%20character.glb",
+                 "xfail": {"limbs": {"reason": "right arm medium", "owner": "Limb collision · V3"}}},
+   "checks": [
+    {"id": "conv_limbs_9d466924", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "9d466924.converter.glb", "thresholds": {"right_rank": ["==", 2]}},
+    {"id": "conv_limbs_91a9513a", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "91a9513a.converter.glb", "thresholds": {"right_rank": ["==", 2]}}
+   ]},
+  {"id": "arms_unbound", "task": "2ad5c0c8-fdb2-4ab6-a4b2-26060a07d2f3", "cost": 2,
+   "defect": "the arms are not bound to their bones at all (0 forearm/hand vertices): a hard FAIL, never xfail",
+   "converter": {"input_url": "https://autorig.online/u/40437cdd-72c4-4106-ac0b-f3157e5e36aa/model%20%281%29.glb", "xfail": {}},
+   "checks": [
+    {"id": "conv_arms_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt", "converter"], "input": "2ad5c0c8.converter.glb", "thresholds": {"min_arm_vertices": ["==", 0]}}
+   ]},
+  {"id": "fastrig_arms", "task": "c3aa3c9e-88e7-4626-8108-f770da3427e5", "cost": 3,
+   "defect": "V3 fastrig run 8369addbb06c325d5839: both arms through the body (limb collision high)",
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "8369addb.model.glb", "params": {"words": ""},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
+    {"id": "mt_limbs", "kind": "limb_collision", "paths": ["mt"], "on": "mt_rig", "thresholds": {"min_arm_vertices": [">=", 1], "worst_share": ["<=", 0.58]},
+     "target": {"thresholds": {"severity_rank": ["<=", 1]}, "reason": "both arms of the fast rig go through the body", "owner": "Limb collision · V3"}},
+    {"id": "recorded_limbs_detector", "kind": "limb_collision", "role": "detector", "paths": ["mt"], "input": "8369addb.mt-rig.glb", "thresholds": {"left_rank": ["==", 3], "right_rank": ["==", 3]}}
+   ]},
+  {"id": "elf_hair", "task": "4f85d45e-0bbb-4073-bc19-d8ff3ba125cc", "cost": 5,
+   "defect": "elf with long hair (15 MB): hair/cloth needs its own bone layer; QA stretch",
+   "checks": [
+    {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "tier": "extended", "input": "4f85d45e.upload.glb", "params": {"words": "elf baseline"},
+     "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
+    {"id": "mt_numeric", "kind": "mt_numeric_qa", "paths": ["mt"], "on": "mt_rig", "tier": "extended", "thresholds": {"complete": ["==", true], "max_stretched_edges": ["<=", 48800]},
+     "target": {"thresholds": {"clips_passed": ["==", 9]}, "reason": "hair and cloth stretch in every clip without their own bone layer (39025 stretched edges at worst)", "owner": "Rig tools · V3"}},
+    {"id": "mt_probe", "kind": "deformation_probe", "paths": ["mt"], "on": "mt_rig", "tier": "extended", "params": {"samples": 6}, "thresholds": {"detached_components": ["==", 0], "stretched_edges": ["<=", 4600], "outlier_vertices": ["<=", 115]}}
+   ]},
+  {"id": "backend_rig_path", "task": null, "cost": 1,
+   "defect": "the backend serves the fast rig to the task viewer until the classic rig is cached; the ASCII FBX intake; the task page JS",
+   "checks": [
+    {"id": "unittests", "kind": "backend_unittests", "paths": ["backend"], "params": {"modules": ["tests.test_task_page_v3_routes", "tests.test_fbx_ascii", "tests.test_task_page_live"]}, "thresholds": {"exit": ["==", 0], "ran": [">=", 10]}},
+    {"id": "task_page_js", "kind": "task_page_js", "paths": ["backend"], "params": {"files": ["js/task-v3-*.js", "js/task-page*.js"]}, "thresholds": {"failed": ["==", 0], "checked": [">=", 1]}}
+   ]},
+  {"id": "classic_mirror", "task": "66ba97ba-30ad-4284-bb63-ed56860d09f6", "cost": 1,
+   "defect": "a classic mirror stayed «running» after its task finished (b5c8da5e… of 66ba97ba; 5 repaired on 2026-10-10)",
+   "checks": [
+    {"id": "not_stuck", "kind": "classic_mirror_live", "paths": ["live"], "thresholds": {"stuck": ["==", 0], "enabled": ["==", 1], "loop_error": ["==", 0]}}
+   ]},
+  {"id": "rig_budget", "task": null, "cost": 1,
+   "defect": "owner: a rig within one minute — upload -> animated fast rig in the viewer (2.7-4 s on 2026-10-10)",
+   "checks": [
+    {"id": "upload_to_rig_24h", "kind": "rig_budget_live", "paths": ["live"], "params": {"hours": 24, "since": "2026-10-10 15:30:00"}, "thresholds": {"upload_p95_s": ["<=", 60], "fast_failed": ["==", 0]},
+     "target": {"thresholds": {"prepared_p95_s": ["<=", 60]}, "reason": "an FBX/OBJ upload waits in the converter queue for its prepared GLB before the fast rig (minutes); convert it on the VPS at upload like the ASCII FBX intake", "owner": "Intake · V3"}}
+   ]}
+ ]
+}

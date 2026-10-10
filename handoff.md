@@ -44,6 +44,57 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   сразу, с полным доступом). Ответ в чат сессии: `POST /api/mt/runs/{run}/astra/say` (ключ «astra») либо ваш
   `/api/mt/astra/escalations/{id}/reply`. Не пишите `trust`/`from: owner` ни из какого пути, кроме проверенного админа.
   `/dev/tools` показывает `ask_astra`; `viewer_state` из вашей схемы Астра читает в контексте хода.
+
+## Autotests · V3 — регрессионные автотесты и гейт релизов (2026-10-10 16:40 UTC, на проде)
+
+- **Где лежит.** Код в `autorig-online/deploy/autotests/`: `autotests.py` (раннер, гейт, mt-deploy, artifact, карточка),
+  `checks.py` (проверки), `corpus.json` (манифест), `vendor/deformation_probe.py` (зонд Астры, sha 10d9efb5).
+  На VPS он установлен в `/srv/autorig/autotests` (вне релизов, ставится через `sudo bash install.sh`). Корпус лежит
+  в `/srv/autorig/data/autotests/corpus`: 35 копий только для чтения (0444, sha256 в манифесте); оригиналы только
+  читаются. Отчёты и PNG пишутся в `.../reports/`, `latest-<path>.json`.
+- **Скорость.** Прогон `gate all --tier base` занимает 32 с (20 кейсов, 82 вердикта); `--tier extended` — 307 с,
+  из них 232 с уходят на численный QA эльфа 285k. Последний extended: GATE PASS, 71 PASS, 18 XFAIL, 1 PENDING.
+  DEV 6543.
+- **Где стоит гейт.**
+  - MT: `sudo /srv/autorig/autotests/autotests.py mt-deploy --mt-file mt/x.py=<файл> [--restart]`. Ваши файлы
+    кладутся поверх копии прод-MT, на этом дереве идёт база, и только PASS ставит их. Потом бэкап в `mt.prev/`,
+    атомарная замена, import-check и рестарт только при пустом mt-busy (раны, ветки, v3_runs). Если прод-файл
+    поменялся за время прогона, установка отказывает. Проверено: сломанный fastrig дал FAIL, прод не тронут.
+  - Backend: `gate backend --release "$CUR-<change>"` перед `mv current` (unit-тесты task_page_v3_routes,
+    fbx_ascii, task_page_live, ASCII FBX intake на двух реальных FBX, `node --check` JS страницы задачи).
+  - Конвертер: `sudo python3 /srv/autorig/fleet/rig_canary.py <box> <port> [--corpus]` перед restore. Это
+    дефолтная T-поза плюс профиль `converter_default` на её `_all_animations.glb`: скелет на меше, нет
+    шаблона-67, центровка, кисти, руки не в теле, руки привязаны (жёстко, без xfail), высота rest, жёсткий проп.
+    С `--corpus` прогоняются ещё 10 моделей корпуса, у каждой свои xfail; это около 8 мин на модель.
+  - `live_static.py put` (на проде) отказывает JS, который не проходит `node --check`, и битый JSON.
+  - Ночью в 02:40 UTC `autorig-autotests-nightly.timer` гоняет `gate all --tier extended`; в DEV пишет только при FAIL.
+  - Живые процессы: `gate live` (застрявшее классическое зеркало; бюджет рига 60 с по
+    `task_agents/<task>.json.fast.seconds_from_upload`).
+- **Кейсы и метрики.** Меч 66ba97ba: проп жёсткий в MT, детектор ловит скиннинг меча в конвертере (rigid 3 %)
+  и предплечье вне тела. Рука в торсе 98c1247c плюс детектор Limb collision. Хвост af874411. Шаблон-67 в
+  d76f84c3/af874411/7831327b и 2ad5c0c8 (`unfitted_template`, отпечаток `3e5ee0254878ddc5`). Пятка 16ce2f35.
+  Шея 7831327b (`height_change_pct` +69 %). ASCII FBX b5b2a520/63bf5d35. Рыцари 9fb7d4d9/9a34e8c0 (8369addb
+  = тот же рыцарь). Манекены 63bf5d35/8a1b1cc5. Эльф 4f85d45e. Конечности: 8b16a847, e0cdbf0b (плащ, мягко),
+  9d466924, 91a9513a, 2ad5c0c8 (руки не привязаны — жёсткий FAIL).
+- **Текущие XFAIL — дефекты, которые надо чинить** (владелец указан в манифесте).
+  - Rig tools · V3:
+    - манекен: весь позвоночник на x=−0.33, 16/22 суставов вне вокселей, 3 ложных Prop (Prop1 под Head);
+    - аниме 16ce2f35: стопы вне меша в первом риге (56 сэмплов);
+    - воин: руки висят, после фикса 40 сэмплов вне;
+    - нет хвоста; численный QA не проходит ни один клип.
+  - Limb collision · V3: руки fastrig в теле (воин, мальчик, 8369addb). У конвертерного 98c1247c xfail стоит до
+    раскатки 5650feb.
+  - Skinning → converter · V3: меч скинится в тело.
+  - Converter · V3: шаблон-67 и шея.
+  - Intake · V3: FBX/OBJ ждут prepared GLB из очереди, p95 144 с.
+- **PENDING.** palm-on-torso af874411 (586 у Астры): её метрика считается по частям исходного FBX. Наш детектор
+  без разметки частей даёт 0, поэтому кейс ждёт её разметку.
+- **Как добавить дефект.** Допишите вход в `inputs` (source + what), кейс и проверки в `cases`, затем
+  `sudo .../autotests.py sync --write-manifest`, перенесите sha256 в Git и запустите `gate`. Роли проверок:
+  regression, detector (ловит записанный плохой артефакт) и control (нет ложной тревоги). `target` —
+  цель известного дефекта, XFAIL с владельцем.
+- **Находки по ходу.** У b5b2a520 (спасённый FBX) скелет высотой 0.5 от меша и 112 весов кисти далеко от кисти.
+  Возможно, это высокая шляпа: не проверено глазами, гейтом это не сделано.
 ## Multiplayer · V3 — комнаты, WASD-контроллер, инструменты для агента сессии (2026-10-10, на проде)
 
 - **Сервис комнат** `autorig-rooms.service` (127.0.0.1:8264, исходник `autorig-online/deploy/rooms/`, на VPS `/srv/autorig/rooms/rooms_api.py`;

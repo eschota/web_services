@@ -1,0 +1,9 @@
+[Unit]
+Description=AutoRig regression autotests, extended tier, nightly
+
+[Timer]
+OnCalendar=*-*-* 02:40:00 UTC
+Persistent=false
+
+[Install]
+WantedBy=timers.target

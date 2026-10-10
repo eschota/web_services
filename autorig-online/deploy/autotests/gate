@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# AutoRig release gate (AGENTS.md «Every Release Passes the Regression Autotests»).
+#   sudo /srv/autorig/autotests/gate mt|backend|converter|live|all [--tier base|extended] [--release DIR]
+#        [--mt-file mt/x.py=/path/x.py ...] [--card] [--post-dev]
+# Exit 0 = PASS (switch / restore allowed); exit 1 = FAIL, the failing case is named in the output.
+set -euo pipefail
+exec /srv/autorig/venv/bin/python3 -P /srv/autorig/autotests/autotests.py gate "$@"

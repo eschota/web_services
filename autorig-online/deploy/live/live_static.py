@@ -14,6 +14,8 @@ every load.
     sudo python3 /srv/autorig/tools/live_static.py promote [--name <release>]
     sudo python3 /srv/autorig/tools/live_static.py gc
 
+put first refuses a JS file that does not parse (node --check) or a JSON file
+that does not load (the cheap part of the regression autotests' release gate).
 put writes the overlay atomically (temp file + rename in the same directory):
 the next request sees the whole new file, never half of it.  It then promotes:
 under one lock it stages a release beside `current` (`cp -al`, hardlinks), puts
@@ -205,11 +207,33 @@ def gc() -> list[str]:
     return removed
 
 
+def syntax_gate(rel: PurePosixPath, src: Path) -> None:
+    """The cheap part of the release gate (AGENTS.md «Every Release Passes the Regression Autotests»): a JS file must
+    parse (node --check), a JSON file must load, before any page can fetch it."""
+    suffix = rel.suffix.lower()
+    if suffix in (".js", ".mjs"):
+        node = shutil.which("node") or shutil.which("nodejs")
+        if not node:
+            return
+        with tempfile.TemporaryDirectory() as tmp:          # node decides module vs script by the extension
+            probe = Path(tmp) / rel.name
+            shutil.copyfile(src, probe)
+            p = subprocess.run([node, "--check", str(probe)], capture_output=True, text=True, timeout=60)
+        if p.returncode:
+            die(f"autotests: {rel} does not parse, not published: {(p.stderr or p.stdout)[-1200:]}")
+    elif suffix == ".json":
+        try:
+            json.loads(src.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            die(f"autotests: {rel} is not valid JSON, not published: {exc}")
+
+
 def cmd_put(args) -> None:
     rel = clean_rel(args.rel)
     src = Path(args.file)
     if not src.is_file():
         die(f"no such file {src}")
+    syntax_gate(rel, src)
     ensure_dirs()
     dest = OVERLAY.joinpath(*rel.parts)
     atomic_copy(src, dest)
