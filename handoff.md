@@ -15,6 +15,38 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   из сессии/API, отвечать на нём; если посетитель пишет на другом языке — на языке
   его сообщения. Строки нового `/task` (Task page · V3) — только через `I18n.t()`.
 
+## Intake · V3 — конвейер смонтирован (2026-10-10 11:20 UTC, проверено на проде)
+
+- **MT** `GET /api/mt/v3` → 200, intents `rig`+`accessory` (`mt/v3_conveyor.py`,
+  `mt/v3_dispatch.py`, коммит MT `e1fbea6`). Каждый dispatch-run = своя 20-hex
+  сессия вьювера: source → analysis (проекции+Vision) → rig (fastrig) → retarget
+  (8 клипов) → qa (численная деформация, flips/spikes, слои hair/cloth) → publish
+  (неизменяемая копия попытки в `motion_transfer/v3-dispatch/runs/<v3run>/`).
+  QA-провал = `needs_review` с причинами; legacy-fallback нет. Ключ бэкенда —
+  `autorig-v3-dispatch` (хэш в `mt-api-keys.json`, токен `/srv/autorig/secrets/v3-dispatch.token`).
+- **Backend** (коммит `24b52a4f`, релиз `v3intake-20261010b`, сверху `tv3-backend-20261010b`):
+  `v3_intake.py` (GLB сразу Task+binding одним commit; FBX/OBJ → нормализация
+  конвертером в intake-pump; генерация → `bind_generated_task`), `v3_runtime_mount.py`
+  (outbox `/srv/autorig/data/v3-intake/dispatch-outbox.sqlite3`, проекция в Task,
+  `done` только после собственной сверки байтов/хэшей), источники
+  `/srv/autorig/data/v3-intake/sources/<sha>.glb`. Legacy dispatch/progress/stale/
+  stuck-hour/bulk-restart/preemption пропускают `pipeline_kind=v3`.
+- **Read API для Task page · V3**: `GET /api/task/{id}/v3-shell` (`autorig.task-v3-shell/1`:
+  status created|processing|needs_review|done|failed, stage, progress 0..1, viewer_url,
+  viewer_state, message) и `GET /api/task/{id}/v3` (binding, session, QA gates/reasons,
+  artifacts). 404 для не-V3 задач. Task.status `needs_review` — явный статус.
+- **Маршрутизация**: `AUTORIG_V3_ROUTES` (по умолчанию пусто) и `AUTORIG_V3_ADMIN_ROUTES`
+  (по умолчанию `all`): аккаунты админов уже идут в V3, `pipeline=v3` — всегда V3.
+  Глобальный перевод всех маршрутов НЕ включён: нет FBX/Unity экспорта и подписочного гейта.
+  Telegram-ветка в коде, но активна только после рестарта бота и `telegram` в AUTORIG_V3_ROUTES.
+- **Доказано**: `5f6f91fc` (HTTP upload, pipeline=v3) и `16ce2f35` (аккаунт владельца)
+  прошли весь конвейер → `needs_review` (деформация, рывки в 3 клипах, слои hair/fabric);
+  `/task?id=16ce2f35…` открывает V3-вьювер. DEV: `3dbaf148ff8f`, `a431557faa7a`.
+- **Блокер генерации**: f12 C: 0 GB → каждый Hunyuan-job падал на disk gate (`d8a68e0c` error).
+  Hunyuan на f12 выключен в `renderfin-hunyuan.json` (бэкап `.bak.v3intake-f12-diskfull-*`),
+  вернуть после очистки диска (Fleet). Renderfin не считает "disk gate failed" ожиданием —
+  стоит добавить в `_FLEET_ERROR_MARKERS`. Повторная генерация владельца: `8635aa06`.
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
