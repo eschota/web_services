@@ -1,7 +1,9 @@
 /* Task page V3: one task, one Unity viewer (Task page · V3, 2026-10-10). */
 .task-v3-page{--tv3-hdr:72px;--tv3-ink:#f2f4f8;--tv3-dim:#a3acbd;--tv3-glass:rgba(13,16,24,.78);--tv3-line:rgba(255,255,255,.12);--tv3-accent:var(--accent,#6366f1);--tv3-ok:#5fe3b5;--tv3-bad:#ff7a8a}
 .tv3{display:block;padding:0;margin:0}
-.tv3-stage{position:relative;height:calc(100vh - var(--tv3-hdr));height:calc(100dvh - var(--tv3-hdr));min-height:420px;background:radial-gradient(120% 90% at 50% 30%,#1b2233 0,#090b11 70%);overflow:hidden;color:var(--tv3-ink);isolation:isolate}
+/* the stage is a tool bar above the viewer, so the shell never covers the viewer's own UI */
+.tv3-stage{position:relative;display:flex;flex-direction:column;height:calc(100vh - var(--tv3-hdr));height:calc(100dvh - var(--tv3-hdr));min-height:420px;background:#090b11;overflow:hidden;color:var(--tv3-ink);isolation:isolate}
+.tv3-viewport{position:relative;flex:1 1 auto;min-height:0;background:radial-gradient(120% 90% at 50% 30%,#1b2233 0,#090b11 70%)}
 .tv3-viewer{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;background:#090b11}
 .tv3-viewer[hidden]{display:none}
 
@@ -26,8 +28,9 @@
 .tv3-chip{padding:6px 11px;border-radius:99px;background:var(--tv3-glass);border:1px solid var(--tv3-line);color:var(--tv3-ink);font-size:12px;line-height:1.2;font-variant-numeric:tabular-nums;white-space:nowrap;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .tv3-chip[hidden]{display:none}
 
-.tv3-tools{position:absolute;left:14px;top:14px;z-index:4;display:flex;align-items:center;gap:6px}
-.tv3-tool{display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:10px;border:1px solid var(--tv3-line);background:var(--tv3-glass);color:var(--tv3-ink);cursor:pointer;text-decoration:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:background .2s,border-color .2s}
+.tv3-tools{position:relative;z-index:4;flex:0 0 auto;display:flex;align-items:center;gap:6px;min-height:46px;padding:6px 12px;background:#0b0e15;border-bottom:1px solid var(--tv3-line);overflow-x:auto;scrollbar-width:none}
+.tv3-tools::-webkit-scrollbar{display:none}
+.tv3-tool{flex:0 0 auto;display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:10px;border:1px solid var(--tv3-line);background:var(--tv3-glass);color:var(--tv3-ink);cursor:pointer;text-decoration:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:background .2s,border-color .2s}
 .tv3-tool:hover,.tv3-tool:focus-visible{background:rgba(99,102,241,.28);border-color:var(--tv3-accent);outline:none}
 .tv3-tool svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tv3-tool.ok{border-color:var(--tv3-ok);color:var(--tv3-ok)}
@@ -39,6 +42,6 @@
 .tv3-desc{margin:0;max-width:72ch;color:var(--text-secondary,#a0a0b0);font-size:14px;line-height:1.6}
 .tv3-desc:empty{display:none}
 
-.tv3-stage:fullscreen{height:100vh}
+.tv3-stage:fullscreen{height:100vh;height:100dvh}
 @media (max-width:640px){.tv3-stage{min-height:360px}.tv3-card{padding:16px 16px 12px}.tv3-steps li{height:38px}}
 @media (prefers-reduced-motion:reduce){.tv3-steps li.run,.tv3-bar.wait>i{animation:none}}

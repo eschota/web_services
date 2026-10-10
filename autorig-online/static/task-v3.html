@@ -22,19 +22,6 @@
 
     <main class="tv3" id="tv3">
         <section class="tv3-stage" id="tv3-stage" aria-label="3D viewer">
-            <iframe id="tv3-viewer" class="tv3-viewer" title="AutoRig 3D viewer" allow="fullscreen; autoplay; xr-spatial-tracking" allowfullscreen hidden></iframe>
-
-            <div class="tv3-card" id="tv3-card" aria-live="polite">
-                <ol class="tv3-steps" id="tv3-steps">
-                    <li data-step="queue" title="Queue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></li>
-                    <li data-step="process" title="Processing"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/></svg></li>
-                    <li data-step="model" title="Model"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></li>
-                    <li data-step="rig" title="Rig"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="1.8"/><path d="M12 6.5v6M12 12.5l-4 7M12 12.5l4 7M7 9h10"/></svg></li>
-                </ol>
-                <div class="tv3-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="tv3-fill"></i></div>
-                <p class="tv3-line"><span id="tv3-line">…</span><b id="tv3-pct"></b></p>
-            </div>
-
             <nav class="tv3-tools" id="tv3-tools" aria-label="Task">
                 <a class="tv3-tool" id="tv3-classic" href="#" title="Downloads · classic viewer" aria-label="Downloads · classic viewer" data-i18n-title="taskv3_tool_classic" data-i18n-aria-label="taskv3_tool_classic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/></svg></a>
                 <button class="tv3-tool" id="tv3-share" type="button" title="Copy link" aria-label="Copy link" data-i18n-title="taskv3_tool_share" data-i18n-aria-label="taskv3_tool_share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg></button>
@@ -42,6 +29,20 @@
                 <span class="tv3-build" id="tv3-build" hidden></span>
                 <span class="tv3-chip" id="tv3-chip" hidden></span>
             </nav>
+            <div class="tv3-viewport">
+                <iframe id="tv3-viewer" class="tv3-viewer" title="AutoRig 3D viewer" allow="fullscreen; autoplay; xr-spatial-tracking" allowfullscreen hidden></iframe>
+
+                <div class="tv3-card" id="tv3-card" aria-live="polite">
+                    <ol class="tv3-steps" id="tv3-steps">
+                        <li data-step="queue" title="Queue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></li>
+                        <li data-step="process" title="Processing"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/></svg></li>
+                        <li data-step="model" title="Model"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></li>
+                        <li data-step="rig" title="Rig"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="1.8"/><path d="M12 6.5v6M12 12.5l-4 7M12 12.5l4 7M7 9h10"/></svg></li>
+                    </ol>
+                    <div class="tv3-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="tv3-fill"></i></div>
+                    <p class="tv3-line"><span id="tv3-line">…</span><b id="tv3-pct"></b></p>
+                </div>
+            </div>
         </section>
 
         <section class="tv3-info container-sm">
