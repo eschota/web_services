@@ -436,6 +436,35 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - **i18n**: ключи `viewer_ntf_*`, `viewer_sl_*` (en/ru в шаблоне; Localization - допишите в `static/i18n/<lang>.json`).
 - Всё иконками с подсказками (`withTip`), текст только в подсказках, нотах и карточке.
 
+## Session agent · V3 — мост к вьюверу, подтверждение из состояния, старт сессии (2026-10-10 15:25 UTC, на проде)
+
+- **Код**: `mt/agent.py`, `agent_session_routes.py`, `task_agent.py`, `agent_work.py` (MT `5397380`); страница - живые правки
+  в `unity/scenes-v3-r2-20261010` (= `test`) и `pulse-alt-r27-20261010`, бэкапы `audits/session-agent-v3-20261010/batch4|5`.
+  **Viewer / Scenes: новая сборка страницы должна нести эти ханки** (искать `agentApply`, `viewerNow`, `viewerErr`, `progSnap`, `MPL`).
+- **Мост**: агент ставит действие в очередь сессии, страница применяет (`agentApply`), сверяет с состоянием вьювера и шлёт
+  `POST /api/mt/runs/<run>/viewer/session/<id>/state` с `ack` `{ok, confirmed, why, observed}`; результат инструмента `viewer`
+  говорит «подтверждено» или причину отказа. Методы: SetChannel(1-9,0), SetWeather, SetTimeOfDay, SetStandScene, SetPost,
+  SetQuality, SetEffect, SetMaterial/UndoMaterial, PlayClip/ClipPlay, ShowLayer, SetCamera, Outliner, **ShowProgress on|off**.
+  Проверено вживую (все 10 каналов, дождь вкл/выкл, снег, время суток, материал/цвет): каждое подтверждено состоянием.
+- **Причины отказа - от самого вьювера**: ошибки движка (событие `error`, напр. «Stand lit material is not serialized in this
+  build» - стенд-сцены `disco/studio/...` в текущей сборке Unity **не работают**, это для Viewer/Scenes) попадают в `why`
+  и в `viewer_state.engine_error`; погода вне `weather.kinds` отказывается сразу (`not_available_in_this_build`).
+- **viewer_state в контексте агента** (`VIEWER NOW`): сцена, погода (`raining`), время суток, канал, клип, линза, выделение,
+  `progress {status,pct,queue_ahead,eta_s,card}`, `multiplayer` (если есть `autorigUnity.multiplayer.state()`), `engine_error`.
+- **Контракт с Multiplayer · V3** (пока модуля нет, страница ждёт): `autorigUnity.multiplayer = {joinBusiestRoom(): Promise<{room, players}>,
+  state(): {room, players, online, scene}}` и события `window` `autorig-mp` `{detail:{type: ready|joined|left|offline|online|players}}`.
+  Агент при старте сам входит в самую людную комнату и объясняет правила (общая комната, смена настроек сцены = офлайн) на
+  языке пользователя; строки приходят с сервера в ответе `POST .../viewer/session` как `lines.mp`.
+- **Старт сессии**: приветствие сервера теперь содержит «риг собирается несколько минут» + собственное место задачи
+  (очередь `#N`, впереди, сколько в работе / процент и ~минут), данные - `GET /api/task/<id>/v3-view` с куками посетителя.
+  Язык вне en/ru/fa/zh/hi переводится моделью один раз и кэшируется (`task_agents/lang_<код>.json`, проверено de).
+- **Кнопка «скопировать весь чат»** в шапке окна агента; **«Астра …»** от владельца/админа уходит Астре («передано Астре» + её ответ, роль `astra`).
+- **Инструменты** (владелец, задача 66ba97ba): `viewer ShowProgress` (карточка прогресса в вьювере), `catalogue {query}`
+  (живой реестр `/dev/tools`: инструменты агента, ноды фермы, проверки fast analysis; если не нашлось - честно «такого нет»),
+  `parts {status|separate}` (метки частей кластеризатора; `separate` честно отвечает, что разрезания меша ещё нет - **когда
+  появится, подключить в `t_parts`**). `analysis/fast.json` агент читает через `fast_analysis.agent_digest` (Fast analysis · V3).
+- Цикл инструментов агента 8 шагов (было 4) + итоговая реплика вместо падения в «Команда не выполнилась».
+
 ## Актуальный handoff сессии — читать прежде исторических записей
 
 **Полный переход AutoRig на V3 НЕ выполнен. Новая task-страница НЕ выложена.**
