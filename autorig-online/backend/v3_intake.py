@@ -262,6 +262,7 @@ async def admit_glb(db, *, data: bytes, original_url: str, filename: str, owner_
     if task is None:
         raise V3IntakeError("task_create_failed", error or "the task could not be created")
     print(f"[V3 intake] {task.id} admitted {origin} GLB sha={digest[:12]} ({len(data)} bytes)")
+    _notify_new(task.id)
     return task
 
 
@@ -343,6 +344,7 @@ async def _create_generation_task(db, *, path: Path, fmt: str, original_url: str
                         source_url=original_url if fmt == "video" else None)
     await db.commit()
     print(f"[V3 intake] {task.id} {fmt} -> generation first, then the V3 conveyor")
+    _notify_new(task.id)
     return task
 
 
@@ -363,7 +365,18 @@ async def _create_normalizing_task(db, *, original, owner_type, owner_id, origin
     await db.commit()
     await db.refresh(task)
     print(f"[V3 intake] {task.id} waiting for {original['format'].upper()} -> GLB normalization ({origin})")
+    _notify_new(task.id)
     return task
+
+
+def _notify_new(task_id: str) -> None:
+    """The owner's «New task started» for every V3 creation path (once per task, v3_notify)."""
+    try:
+        from v3_notify import schedule_new
+
+        schedule_new(task_id)
+    except Exception as exc:                             # noqa: BLE001 - a notification never blocks intake
+        print(f"[V3 intake] new-task notification for {task_id} not scheduled: {exc}")
 
 
 def _settings(task) -> Dict[str, Any]:
@@ -409,6 +422,7 @@ async def bind_existing_task(db, task, *, data: bytes, origin: str, requested_in
         await db.rollback()
         raise
     print(f"[V3 intake] {task.id} bound to {origin} source sha={digest[:12]}")
+    _notify_new(task.id)          # a generation row (/api/generate) is announced once, when it becomes V3
 
 
 async def fetch_bytes(url: str, *, timeout: float = 300.0) -> bytes:

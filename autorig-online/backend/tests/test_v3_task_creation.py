@@ -60,7 +60,27 @@ def load_functions(*names):
     return ns
 
 
+def isolate_live_routes(case):
+    """Downloads · V3: production's live switch file is not this test's input; point v3_intake at a missing one."""
+    import pathlib
+
+    import v3_intake
+
+    old = v3_intake.ROUTES_FILE
+    v3_intake.ROUTES_FILE = pathlib.Path("/nonexistent/v3-routes.json")
+    v3_intake._ROUTES_CACHE.update(key=None, value=None)
+
+    def restore():
+        v3_intake.ROUTES_FILE = old
+        v3_intake._ROUTES_CACHE.update(key=None, value=None)
+    case.addCleanup(restore)
+
+
 class V3TaskCreationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        super().setUp()
+        isolate_live_routes(self)
+
     def make_source(self):
         work = BACKEND / ".work" / "v3-task-creation-tests"
         work.mkdir(parents=True, exist_ok=True)

@@ -237,9 +237,11 @@ async def after_commit(binding, patch, record) -> None:
             if retrying:                                         # a killed child: retried, never reported
                 await retry_killed_task(binding.task_id)
                 return
-        if record.state == "done":
-            from telegram_bot import reserve_and_broadcast_task_done
-            asyncio.create_task(reserve_and_broadcast_task_done(binding.task_id))
+        if record.state in {"done", "needs_review"}:
+            # Downloads · V3: rate the content like the classic path, then the classic «Task completed» with the
+            # V3 viewer link and the phase timings (v3_notify).
+            from v3_notify import schedule_terminal
+            schedule_terminal(binding.task_id, record.state)
         elif record.state in {"failed", "blocked_protocol"}:
             from telegram_bot import reserve_and_broadcast_task_error
             asyncio.create_task(reserve_and_broadcast_task_error(binding.task_id))

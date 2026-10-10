@@ -1700,7 +1700,8 @@ async def broadcast_bulk_restart_summary(total: int, restarted: int, errors: lis
     ])
 
 
-async def reserve_and_broadcast_task_done(task_id: str) -> None:
+async def reserve_and_broadcast_task_done(task_id: str, *, extra_html: str | None = None,
+                                          video_wait_seconds: int = 180) -> None:
     """
     Atomically reserve telegram_done_notified_at and enqueue the Telegram "task completed"
     message. Call only after Task.content_rating / content_classified_at are committed so
@@ -1795,6 +1796,8 @@ async def reserve_and_broadcast_task_error(task_id: str) -> None:
                 queue_wait_seconds=queue_wait,
                 processing_time_seconds=processing_time,
                 progress_page=progress_url,
+                extra_html=extra_html,
+                video_wait_seconds=video_wait_seconds,
             )
         )
 
@@ -1901,7 +1904,11 @@ async def broadcast_task_done(
     queue_wait_seconds: int | None = None,
     processing_time_seconds: int | None = None,
     progress_page: str | None = None,
+    extra_html: str | None = None,
+    video_wait_seconds: int = 180,
 ) -> None:
+    """``extra_html``: lines the caller built (V3: viewer link, phase timings); ``video_wait_seconds=0`` when the
+    task has no worker video to wait for (V3)."""
     print(f"[Telegram] broadcast_task_done called for task {task_id}")
     token = _get_token()
     if not token:
@@ -1971,6 +1978,8 @@ async def broadcast_task_done(
             text += f" · {html.escape(str(collection_member_title)[:120])}"
     if resolved_progress:
         text += f'\n🔧 <a href="{html.escape(resolved_progress)}">Worker Logs</a>'
+    if extra_html:
+        text += "\n" + extra_html
 
     # Try to find cached video
     mp4_path = f"/var/autorig/videos/{task_id}.mp4"
@@ -1980,7 +1989,8 @@ async def broadcast_task_done(
 
     # If not cached, try to download from worker
     if not video_path:
-        video_path, video_wait_seconds, last_video_status = await _download_video_from_worker(task_id)
+        video_path, video_wait_seconds, last_video_status = await _download_video_from_worker(
+            task_id, wait_timeout_seconds=video_wait_seconds)
 
     chat_ids = await get_broadcast_chat_ids()
     # a model submitted from the generation flow belongs to that private chat

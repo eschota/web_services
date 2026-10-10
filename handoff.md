@@ -1295,6 +1295,20 @@ This scoped development checkpoint does not overwrite the unrelated historical
   Проверено настоящим экспортом корпусного `8369addb.mt-rig.glb` на каждом боксе (закреплено): f1 32 с, f2 28 с,
   f13 32 с, f7 34 с — валидный FBX, реимпорт ok, 8 takes; незакреплённый extended-гейт PASS 26 с. Релиз
   `dlv3-pin2-20261011`, коммит `c24b7382`. Заметки во флоте: `operator_notes.json` для f1/f2/f7/f13.
+- **Уведомления V3 в Telegram (регрессия V3-only, починено 2026-10-10 20:24 UTC, релиз `v3notify-20261011`)**:
+  с 17:00 «New task started» шёл только из `tasks.start_task_on_worker` (классический диспатч), а «Task completed»
+  только для `done` (у V3 почти всё `needs_review`) и без контент-рейтинга. Теперь `backend/v3_notify.py`:
+  `schedule_new` из всех путей создания V3 (`v3_intake.admit_glb` — сайт/API/Telegram/retry, нормализация FBX/OBJ,
+  генерация, `bind_existing_task`), один раз на задачу (`telegram_new_notified_at`); `schedule_terminal` из
+  `v3_runtime_mount.after_commit` для `done` и `needs_review` (убитый и перезапущенный ран сюда не доходит):
+  NudeNet-рейтинг по preflight-рендеру или `proj/front_lit.png` рана, затем классический «Task completed» +
+  строка needs review с причинами QA, ссылка «V3 viewer», тайминги фаз; без ожидания видео (`video_wait_seconds=0`).
+  `telegram_bot.reserve_and_broadcast_task_done/broadcast_task_done` получили `extra_html` и `video_wait_seconds`.
+  Ошибки V3 — прежний `reserve_and_broadcast_task_error`. Проверено задачей `21da1b8e` (оба сообщения в канале,
+  рейтинг safe). Бэкфил: один дайджест о 20 задачах 17:00–20:19 без уведомлений, им проставлены флаги.
+  Перезапущены autorig-storage и autorig-storage-telegram. Три теста (`test_v3_intake_runtime`,
+  `test_v3_task_creation`, `test_telegram_generate_button`) читали живой `v3-routes.json` прода и падали после
+  V3-only — изолированы (`isolate_live_routes`).
 
 ## Limb stabilization · V3 — стабилизация конечностей перед ригом (2026-10-10 17:40 UTC, на проде, MT `17a38c2`+)
 
