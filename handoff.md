@@ -2,7 +2,16 @@
 
 Updated: 2026-10-10, Asia/Novosibirsk. Owner-required persistent checkpoint.
 
-CURRENT private checkpointfd8020a/source005183d: canonical/server SHA5f34ae7870db62185a14af1e1d361a673a77c2a596799efe3a6764b9a45c678f.
+CURRENT private checkpointbfba8d9/sourceb4a7b33: canonical/server SHAee9d983abc4130717dc3c1b3b822b12f7f607473bfe00f81fd4bb6f508ac63e2.
+Actualcentered-v2 F5a6c run TERMINALREJECT/INCOMPLETE8e6bfc09/archivee5ee536b;
+p0smallimprovement Body604->588/self254->250,1/3/4noacceptedsteps,2timeout54.12
+intermediatecheckpointNOTfinal; physicalallfailed/quality0of5. No retry/deploy.
+CriticalBodyterms0/hundredsunknown, trialrejecttelemetrymissing; constrained
+inequality+lexicographic/sourceRESTBodypairproposal next, NOTrescaledoldrun.
+Sourcepreserved directresthelper21root tests/independentreview, provenance7root
+REALGLBtests includingretainedpalette/validmask; bothunmounted/runtimeunchanged.
+
+Prior private checkpointfd8020a/source005183d: canonical/server SHA5f34ae7870db62185a14af1e1d361a673a77c2a596799efe3a6764b9a45c678f.
 Revisedcenteredpacket pendingaudit, NOlaunch: BodyFD3.65e-10/strainFD3.27e-9;
 hard55budgetfix+freshimmutableproposal recomputation required. Historical7830
 proposal was accidentallyoverwritten, cannotreconstructfullbytes; current7c338
