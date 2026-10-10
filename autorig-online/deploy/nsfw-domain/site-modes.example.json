@@ -1,0 +1,14 @@
+{
+  "nsfw_hosts": ["autorig.red"],
+  "nsfw_canonical_host": "autorig.red",
+  "main_list_filter": true,
+  "main_split_items": true,
+  "main_split_section": true,
+  "nsfw_ratings": ["adult"],
+  "consent_version": "2026-10-11",
+  "admin_geo_exempt": true,
+  "geo": {
+    "unknown_country": "block",
+    "us_unknown_state": "block"
+  }
+}

@@ -2811,9 +2811,15 @@ async def _claim_anonymous_task_for_user(
 async def auth_login(request: Request, next: Optional[str] = None):
     """Redirect to Google OAuth"""
     state = str(uuid.uuid4())
-    auth_url = get_google_auth_url(state)
+    # site_mode (NSFW split, 2026-10-11): the adult domain signs in on its own callback.
+    import site_mode as _site_mode
+    _sm_redirect = _site_mode.oauth_redirect_uri(request, None)
+    auth_url = _site_mode.google_auth_url(state, _sm_redirect) if _sm_redirect else get_google_auth_url(state)
     
     response = RedirectResponse(url=auth_url)
+    if _sm_redirect:
+        response.set_cookie(_site_mode.OAUTH_STATE_COOKIE, state, max_age=600, httponly=True, secure=True,
+                            samesite="lax")
     # Save return URL in cookie (max 5 minutes) for redirect after OAuth
     if next and next.startswith("/"):  # Security: only allow relative URLs
         response.set_cookie("auth_next", next, max_age=300, httponly=True, samesite="lax")
@@ -2836,7 +2842,12 @@ async def auth_callback(
         return RedirectResponse(url="/?error=no_code")
     
     # Exchange code for tokens
-    tokens = await exchange_code_for_tokens(code)
+    import site_mode as _site_mode  # site_mode (NSFW split, 2026-10-11)
+    _sm_redirect = _site_mode.oauth_redirect_uri(request, None)
+    if _sm_redirect and not _site_mode.oauth_state_ok(request):
+        return RedirectResponse(url="/?error=state")
+    tokens = await (_site_mode.exchange_code(code, _sm_redirect) if _sm_redirect
+                    else exchange_code_for_tokens(code))
     if not tokens:
         return RedirectResponse(url="/?error=token_exchange_failed")
     
@@ -8778,6 +8789,9 @@ async def api_get_gallery(
         Task.video_ready == True,
         _gallery_task_has_poster_sql(),
     ]
+    # site_mode (NSFW split, 2026-10-11): adult tasks are listed only on the adult domain.
+    import site_mode as _site_mode
+    base_conditions.extend(_site_mode.listing_conditions(request, Task))
     if author:
         # Privacy (2026-10-11): authors are addressed by their public handle, never by e-mail.
         import public_identity
@@ -9001,6 +9015,7 @@ async def api_get_task_card(
 @app.get("/api/task/{task_id}/owner_tasks")
 async def api_get_owner_tasks(
     task_id: str,
+    request: Request,
     page: int = 1,
     per_page: int = 12,
     db: AsyncSession = Depends(get_db)
@@ -9013,6 +9028,8 @@ async def api_get_owner_tasks(
         raise HTTPException(status_code=404, detail="Task not found")
     
     tasks, total = await get_user_tasks(db, task.owner_type, task.owner_id, page, per_page)
+    import site_mode as _site_mode  # site_mode (NSFW split, 2026-10-11)
+    tasks = [t for t in tasks if not _site_mode.hides(request, t)]
     
     # Get author nicknames if needed
     author_nicknames = {}
@@ -18407,3 +18424,21 @@ try:
     )
 except Exception as _i18n_error:  # never take the API down over one feature
     print(f"[i18n] user language not installed: {_i18n_error}")
+
+
+# --- site_mode (NSFW split, 2026-10-11) -----------------------------------------
+# Host-based site modes: autorig.online stays SFW, the adult domain is gated
+# (Google sign-in + 18+ consent + geo). See site_mode.py.
+try:
+    import site_mode as _site_mode_module
+
+    async def _site_mode_api_key_user(request, db):
+        _user, _anon = await resolve_api_key_identity(request, db)
+        return _user
+
+    _site_mode_module.install(
+        app, require_admin=require_admin, is_admin_email=is_admin_email,
+        api_key_user=_site_mode_api_key_user, layout=_inject_static_layout,
+    )
+except Exception as _site_mode_error:  # the main site never goes down over this; nginx gates the adult host
+    print(f"[site-mode] not installed: {_site_mode_error}")

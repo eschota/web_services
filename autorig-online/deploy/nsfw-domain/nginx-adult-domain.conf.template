@@ -1,0 +1,166 @@
+# AutoRig adult domain __HOST__ (owner order 2026-10-11: NSFW content on its own gated domain).
+# Installed by deploy/nsfw-domain/activate.sh as /etc/nginx/sites-available/__HOST__.
+#
+# * Every location passes the age gate first: auth_request asks the backend
+#   (site_mode.py, /api/age-gate/check) for a Google session + 18+ consent +
+#   an allowed region. 401 / 403 send the visitor to /age-gate. If the backend
+#   is down or site_mode is missing, auth_request fails and nothing is served.
+# * Only the gate itself, sign-in and site code (JS/CSS/i18n) skip the check.
+# * Never `listen <IP>:443` here: one IP-bound 443 listener takes every HTTPS
+#   site of this box (2026-10-08). Port 80 is IP-bound like the other blocks.
+# * The rate-limit zones and maps come from autorig.online-storage (http level).
+
+server {
+    listen 37.187.57.177:80;
+    server_name __HOST__ www.__HOST__;
+    location / { return 301 https://__HOST__$request_uri; }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name www.__HOST__;
+    ssl_certificate /etc/letsencrypt/live/__HOST__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__HOST__/privkey.pem;
+    return 301 https://__HOST__$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __HOST__;
+    ssl_certificate /etc/letsencrypt/live/__HOST__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__HOST__/privkey.pem;
+
+    root /srv/autorig/current/autorig-online/static;
+    index index.html;
+    client_max_body_size 128m;
+    sendfile on;
+    gzip on;
+    gzip_proxied any;
+    gzip_types text/plain text/css text/xml application/json application/javascript image/svg+xml;
+
+    add_header Rating "RTA-5042-1996-1400-1577-RTA" always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # ---- the gate, inherited by every location that does not switch it off
+    auth_request /_age_gate_check;
+    error_page 401 403 = @age_gate;
+
+    location = /_age_gate_check {
+        internal;
+        proxy_pass http://127.0.0.1:8200/api/age-gate/check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+    }
+    location @age_gate {
+        add_header Cache-Control "no-store" always;
+        return 302 /age-gate?next=$uri;
+    }
+
+    # ---- open before the gate: the gate, the terms, sign-in, language
+    location ~ ^/(age-gate|adult-terms|robots\.txt|favicon\.ico)$ {
+        auth_request off;
+        proxy_pass http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location ~ ^/(auth/|api/age-gate/|api/site-mode|api/language|api/me/language) {
+        auth_request off;
+        limit_req zone=autorig_api_limit burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    # Site code (JS/CSS/i18n/icons). No content of any task or graph lives here.
+    location ^~ /static/tasks/ { return 404; }
+    location /static/ {
+        auth_request off;
+        root /srv/autorig;
+        try_files /live$uri /current/autorig-online$uri =404;
+        add_header Cache-Control $autorig_static_cache_control;
+    }
+
+    # ---- behind the gate
+    location ^~ /_autorig_artifacts/ { internal; alias /srv/autorig/data/artifact-cache/; default_type application/octet-stream; }
+    location ^~ /_autorig_glb_cache/ { internal; alias /srv/autorig/data/static/glb_cache/; default_type model/gltf-binary; }
+    location ^~ /_autorig_task_cache/ { internal; alias /srv/autorig/data/static/tasks/; default_type application/octet-stream; }
+    location /u/ {
+        alias /srv/autorig/data/var/uploads/;
+        add_header Cache-Control "private, max-age=600" always;
+    }
+    location ^~ /renderfin/render/ {
+        alias /srv/autorig/data/var/renderfin/render/;
+        add_header Cache-Control "private, max-age=60" always;
+    }
+    location /renderfin/ {
+        proxy_pass http://127.0.0.1:8210;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        client_max_body_size 20m;
+    }
+    # The node editor's uploads (the /dev validator's scratch store).
+    location ^~ /dev/api/scratch {
+        proxy_pass http://127.0.0.1:8220;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_request_buffering off;
+        client_max_body_size 512m;
+        proxy_read_timeout 120s;
+    }
+    location ~ "^/api/ai/(render-status/|status/|graphs/[a-f0-9]{12}$|graphs/[a-f0-9]{12}/(revision|results)$|media/resolve$|media-size$|thumb$|my-tasks$|queue/admin$)" {
+        limit_req zone=autorig_ai_read_limit burst=100 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location /api/ {
+        limit_req zone=autorig_api_limit burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+    location ~ /\. { deny all; }
+}
