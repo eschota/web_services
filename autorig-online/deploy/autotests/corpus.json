@@ -4640,6 +4640,37 @@
    ]
   },
   {
+   "id": "gallery_smoke",
+   "task": null,
+   "cost": 1,
+   "defect": "SEO · gallery: /api/gallery must answer with items (a NameError in the handler took the gallery down for 3 min on 2026-10-11); V3 first, a V3 task only once its poster exists",
+   "checks": [
+    {
+     "id": "unittests",
+     "kind": "backend_unittests",
+     "paths": [
+      "backend"
+     ],
+     "params": {
+      "modules": [
+       "tests.test_gallery_smoke",
+       "tests.test_seo_social"
+      ]
+     },
+     "thresholds": {
+      "exit": [
+       "==",
+       0
+      ],
+      "ran": [
+       ">=",
+       15
+      ]
+     }
+    }
+   ]
+  },
+  {
    "id": "samurai_front",
    "task": "6e356067-59f7-461c-b8a5-5997b3e2d0b0",
    "cost": 3,
@@ -4696,37 +4727,6 @@
    ],
    "tier": "extended",
    "note": "1M vertices: 25 s alone, 120-260 s under the parallel base suite, so the full rig runs nightly; the base suite checks the front (samurai_front_guess)"
-  },
-  {
-   "id": "gallery_smoke",
-   "task": null,
-   "cost": 1,
-   "defect": "SEO · gallery: /api/gallery must answer with items (a NameError in the handler took the gallery down for 3 min on 2026-10-11); V3 first, a V3 task only once its poster exists",
-   "checks": [
-    {
-     "id": "unittests",
-     "kind": "backend_unittests",
-     "paths": [
-      "backend"
-     ],
-     "params": {
-      "modules": [
-       "tests.test_gallery_smoke",
-       "tests.test_seo_social"
-      ]
-     },
-     "thresholds": {
-      "exit": [
-       "==",
-       0
-      ],
-      "ran": [
-       ">=",
-       15
-      ]
-     }
-    }
-   ]
   },
   {
    "id": "samurai_front_guess",

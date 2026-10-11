@@ -2088,3 +2088,15 @@ This scoped development checkpoint does not overwrite the unrelated historical
   (6e356067, 64 МБ: front_ok 0, 227 с > 60) и `knight_sword` 67–75 с под той же нагрузкой (у меня локально 6.4 с, этап не
   срабатывает). Стейдж готов: `/srv/autorig/audits/limb-stab-20261010/stage16/mt` (limb_stabilize, rig_first, pose_skeleton);
   после XFAIL samurai — `mt-deploy` + `autorig-mt-restart --wait 600`, затем перериг 66ba97ba/bfbd3248 (`tools/rerig_version.py`).
+
+## Rig path · V3 — ориентатор (2026-10-11 03:05 UTC, MT `7c41b50`/`40b49a7`)
+
+- `mt/orient.py`: ось высоты (ось зеркала, длиннее из двух других, две стопы внизу; ~1 с на 1M вершин) и фронт
+  (плоскость зеркала по рысканию шагом 5°, ширина на уровне груди, стопы, лицо; привязка к 4 осям, residual и
+  флаг review, опции `options_get`). `guess_forward` теперь через него. `rig_first` ставит лежащую модель вертикально
+  (корневой узел, вершины не трогаются), кроме hash-bound V3-источников — их должен поворачивать Intake при приёме.
+- 6e356067 (самурай, 1M вершин, без скелета): тест зеркала дал фронт -x, верно +z (ошибка 90°). Новый — +z.
+  Кейсы `samurai_front_guess` (база), `samurai_front` (extended: 1M вершин под нагрузкой > 60 с), `lying_upright`.
+- **Limb stabilization**: ваш `rig_first` в Git (f4bfa7c) не содержал моих ханков, на проде стоит мой; слито в
+  `40b49a7` — ставьте из него. Самурай-ран dc7e4afa висит в `rig:fast_analysis` 40+ мин (1M вершин) и держит
+  `live_busy`, поэтому rerig_open не берёт очередь.
