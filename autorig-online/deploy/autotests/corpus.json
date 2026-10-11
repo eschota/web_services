@@ -6095,6 +6095,254 @@
      }
     }
    ]
+  },
+  {
+   "id": "bird_duck",
+   "task": "ddc0b9ba-9357-4951-8390-5dd094261767",
+   "cost": 1,
+   "defect": "owner 2026-10-11 («птица, надо с ней тоже разбираться»): a flying duck got one Root bone (body plan root) and only root moves; mt/creature.py gives birds a skeleton (neck, head, tail, wings, legs) and the bird clip set",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "ddc0b9ba.model.glb",
+     "params": {
+      "words": "bird flying duck"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "cyborg_one_arm",
+   "task": "bdc37cc9-23df-4d48-81f4-af62a669b421",
+   "tier": "extended",
+   "cost": 5,
+   "defect": "triage limb_in_body.left (17 tasks, 2026-10-11): on a posed bare mesh fastrig fitted ONE arm into the torso (LeftArm at hip height) while the other arm was right; the degenerate side is now mirrored from the good one and the limbs are traced on the voxel solid",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "eaec2b0b.upload.glb",
+     "params": {
+      "words": "cyborg character"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       300
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_arms",
+     "kind": "arm_fit",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "thresholds": {
+      "arms_found": [
+       "==",
+       2
+      ],
+      "arm_y_min_pct_H": [
+       ">=",
+       55
+      ],
+      "arm_y_diff_pct_H": [
+       "<=",
+       10
+      ],
+      "elbow_above_shoulder": [
+       "==",
+       0
+      ]
+     },
+     "xfail": {
+      "reason": "restored after a corpus overwrite; the arm-fit code (Limb stage41+) is not installed yet",
+      "owner": "Limb stabilization · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "goose_bird_soldier",
+   "task": "64a7907d",
+   "cost": 1,
+   "defect": "Limb audit 2026-10-11: Vision read the armored duck soldier as a humanoid and it never reached the bird template; the bird words win, folded wings take the upright roles",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "64a7907d.model.glb",
+     "params": {
+      "words": "armored duck soldier"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       150
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     },
+     "note": "2M-triangle mesh; 60 s budget is measured on customer runs, the gate runs under load (2026-10-11 main session)"
+    }
+   ]
+  },
+  {
+   "id": "kangaroo_upright",
+   "task": "96b0566c-77b3-4fb7-9037-3895014bd813",
+   "cost": 1,
+   "defect": "Limb audit 2026-10-11: the upright kangaroo got the quadruped plan and its front paws were fitted on the floor; mt/creature.py upright plan: two legs, arms, head, tail",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "96b0566c.model.glb",
+     "params": {
+      "words": "kangaroo"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "upright"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "skirt_flaps_arms",
+   "task": "432f7bf3-d372-4e92-9a26-782028557132",
+   "tier": "extended",
+   "cost": 8,
+   "defect": "owner 2026-10-11 «руки неверно вообще подобрались по какой то причине, хотя они очевидны»: the arm reach took the skirt flaps (a sheet sticking out sideways at hip height) for arms; pose_skeleton traced the flap chains off the hips as bent arms and stage_traced turned them to T",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "432f7bf3.upload.glb",
+     "params": {
+      "words": "woman standing arms at her sides frilly skirt"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       240
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_arms",
+     "kind": "arm_fit",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "thresholds": {
+      "arms_found": [
+       "==",
+       2
+      ],
+      "arm_y_min_pct_H": [
+       ">=",
+       60
+      ],
+      "arm_y_diff_pct_H": [
+       "<=",
+       8
+      ],
+      "hand_lateral_max_pct_H": [
+       "<=",
+       22
+      ],
+      "elbow_above_shoulder": [
+       "==",
+       0
+      ]
+     },
+     "xfail": {
+      "reason": "restored after a corpus overwrite; the arm-fit code (Limb stage41+) is not installed yet",
+      "owner": "Limb stabilization · V3"
+     }
+    }
+   ]
   }
  ]
 }
