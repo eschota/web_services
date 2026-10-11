@@ -1,0 +1,5 @@
+[Unit]
+Description=autorig-mt watchdog (restart MT when its API stops answering)
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/autorig-mt-watchdog
