@@ -87,8 +87,7 @@ if "0d39aaba.upload.glb" not in doc["inputs"]:
         "task": "0d39aaba-f657-4130-8982-5880ea1c82ad",
         "what": "red demon: four arms (two big clawed, two small), membrane wings, an abdomen tail, antennae (upload)"}
     changed = True
-if not any(c["id"] == "demon_four_arms_wings" for c in doc["cases"]):
-    doc["cases"].append({
+_new_case = ({
         "id": "demon_four_arms_wings",
         "task": "0d39aaba-f657-4130-8982-5880ea1c82ad",
         "cost": 4,
@@ -128,6 +127,9 @@ if not any(c["id"] == "demon_four_arms_wings" for c in doc["cases"]):
                 "orientator: see lying_upright). The control runs FIRST (checks share one run dir): a plain biped (the warrior) "
                 "gets no extra chain. Extra chains need a second opinion (words / Vision) past the geometry: require=confirmed. Known gaps: "
                 "fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."})
+_old = next((c for c in doc["cases"] if c["id"] == "demon_four_arms_wings"), None)
+if _old != _new_case:                                            # upsert: the case as this script defines it
+    doc["cases"] = [c for c in doc["cases"] if c["id"] != "demon_four_arms_wings"] + [_new_case]
     changed = True
 # warrior_sword_posed/mt_pose_fit: asserts Limb stabilization's stage_traced, which is NOT installed on production
 # (its own handoff: the gate was blocked by other cases). AGENTS.md: an unfixed defect enters as XFAIL, never as a

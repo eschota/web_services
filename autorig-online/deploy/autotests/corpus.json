@@ -478,7 +478,9 @@
   "0d39aaba.upload.glb": {
    "source": "/srv/autorig/data/var/uploads/fbbcd866-b414-4907-aa13-0f4621994d21/PixelArtistry_lowpoly_00012.glb",
    "task": "0d39aaba-f657-4130-8982-5880ea1c82ad",
-   "what": "red demon: four arms (two big clawed, two small), membrane wings, an abdomen tail, antennae (upload)"
+   "what": "red demon: four arms (two big clawed, two small), membrane wings, an abdomen tail, antennae (upload)",
+   "sha256": "62b2e93bcee05c9f3a961136de970be4c4746f4d505f235da35ca0a115c8db55",
+   "bytes": 98110664
   }
  },
  "profiles": {
@@ -1104,13 +1106,14 @@
       ],
       "sum_edges_over_2x": [
        "<=",
-       380
+       480
       ],
       "empty_limb_bones": [
        "==",
        0
       ]
-     }
+     },
+     "note": "Leg fit V3 2026-10-11: the ankle moved from 0.45 to 0.3 of the foot length (anatomical) and both knees/ankles share one height; the squat frame of rig_check gains 2x edges inside the shin (311 -> 436), 4x unchanged (5); over_2x 380 -> 480"
     },
     {
      "id": "mt_numeric",
@@ -1978,13 +1981,14 @@
       ],
       "sum_edges_over_2x": [
        "<=",
-       90
+       120
       ],
       "empty_limb_bones": [
        "==",
        0
       ]
-     }
+     },
+     "note": "Leg fit V3 2026-10-11: ankle 0.4 -> 0.3 of the foot length, knees/ankles symmetric; squat frame 2x edges in the boot 55 -> 99, 4x stays 0; over_2x 90 -> 120"
     }
    ]
   },
@@ -4628,11 +4632,7 @@
        8
       ]
      },
-     "note": "2026-10-11: PASS since Limb stabilization turns the traced bent arms to T on the mesh (stage_traced)",
-     "xfail": {
-      "reason": "Limb stabilization flipped this to pass before its stage_traced reached production; flip it in that deploy",
-      "owner": "Limb stabilization · V3"
-     }
+     "note": "2026-10-11 04:3x UTC: stage_traced installed (mt-deploy21, 89cd3be6e4b7); XPASS -> PASS"
     },
     {
      "id": "mt_prop_rigid",
@@ -4653,37 +4653,6 @@
       "rigid_fraction": [
        ">=",
        0.99
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "gallery_smoke",
-   "task": null,
-   "cost": 1,
-   "defect": "SEO · gallery: /api/gallery must answer with items (a NameError in the handler took the gallery down for 3 min on 2026-10-11); V3 first, a V3 task only once its poster exists",
-   "checks": [
-    {
-     "id": "unittests",
-     "kind": "backend_unittests",
-     "paths": [
-      "backend"
-     ],
-     "params": {
-      "modules": [
-       "tests.test_gallery_smoke",
-       "tests.test_seo_social"
-      ]
-     },
-     "thresholds": {
-      "exit": [
-       "==",
-       0
-      ],
-      "ran": [
-       ">=",
-       15
       ]
      }
     }
@@ -4746,6 +4715,37 @@
    ],
    "tier": "extended",
    "note": "1M vertices: 25 s alone, 120-260 s under the parallel base suite, so the full rig runs nightly; the base suite checks the front (samurai_front_guess)"
+  },
+  {
+   "id": "gallery_smoke",
+   "task": null,
+   "cost": 1,
+   "defect": "SEO · gallery: /api/gallery must answer with items (a NameError in the handler took the gallery down for 3 min on 2026-10-11); V3 first, a V3 task only once its poster exists",
+   "checks": [
+    {
+     "id": "unittests",
+     "kind": "backend_unittests",
+     "paths": [
+      "backend"
+     ],
+     "params": {
+      "modules": [
+       "tests.test_gallery_smoke",
+       "tests.test_seo_social"
+      ]
+     },
+     "thresholds": {
+      "exit": [
+       "==",
+       0
+      ],
+      "ran": [
+       ">=",
+       15
+      ]
+     }
+    }
+   ]
   },
   {
    "id": "samurai_front_guess",
@@ -5158,6 +5158,10 @@
        "==",
        "biped"
       ]
+     },
+     "xfail": {
+      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5220,6 +5224,10 @@
        "<=",
        800
       ]
+     },
+     "xfail": {
+      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5289,6 +5297,10 @@
        "==",
        0
       ]
+     },
+     "xfail": {
+      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Multi-limb rig · V3"
      }
     }
    ],

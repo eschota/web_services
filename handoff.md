@@ -2085,10 +2085,14 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - Числа (гейт round 16/17): 66ba97ba.upload rig_check >4x 168 → 9, prepared (bfbd3248) → 8, prop rigid 1.0, numeric 10/10
   (порог кейса kitbash был `== 9` → `>= 9`, Source pose — 10-й клип), `warrior_sword_posed/mt_pose_fit` XPASS → PASS
   (arm_proportions 0, захват меча 3.3 % H). A-поза для мечей хуже T (167 vs 9) — не используется. DEV 6662.
-- **Не установлено**: гейт `mt-deploy` FAIL у всех с ~02:36 UTC из-за чужих кейсов `samurai_front`/`samurai_front_guess`
-  (6e356067, 64 МБ: front_ok 0, 227 с > 60) и `knight_sword` 67–75 с под той же нагрузкой (у меня локально 6.4 с, этап не
-  срабатывает). Стейдж готов: `/srv/autorig/audits/limb-stab-20261010/stage16/mt` (limb_stabilize, rig_first, pose_skeleton);
-  после XFAIL samurai — `mt-deploy` + `autorig-mt-restart --wait 600`, затем перериг 66ba97ba/bfbd3248 (`tools/rerig_version.py`).
+- **Установлено 2026-10-11 ~04:32 UTC** (mt-deploy round 21, `/srv/autorig/audits/limb-stab-20261010/mt-deploy21.log`:
+  GATE PASS 135/0, XPASS 1): `mt/rig_first.py 89cd3be6e4b7`, `mt/pose_skeleton.py 8cf4d93a4794`, `mt/limb_stabilize.py
+  77203024b6a6` (бэкапы `mt.prev/*.20261011T042005Z-autotests`). rig_first собран как текущий прод (serpent + ориентатор
+  `40b49a7`) + мои ханки `patch_limb_stabilize.py`; чистый оверлей файлов из `40b49a7` (round 19) откатывал serpent и валил
+  `serpent_*`. `warrior_sword_posed/mt_pose_fit` xfail снят (XPASS → PASS), корпус отзеркален в Git. Перериг:
+  66ba97ba (run 3dbc776ff6bffe8c8f3b) v6 — >2x/>4x 231/25 → 171/8; bfbd3248 (b5c8da5e91ffba994fec) v3 — 739/170 → 171/9,
+  9 клипов + Source pose. Рестарт `autorig-mt-restart --wait 600` отказывал (busy: 3 run + 7 v3run подряд) — новый код
+  в сервисе только после удачного рестарта (см. ActiveEnterTimestamp > 04:32 UTC); перериги шли in-process по новому коду.
 
 ## Rig path · V3 — ориентатор (2026-10-11 03:05 UTC, MT `7c41b50`/`40b49a7`)
 
