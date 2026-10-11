@@ -2537,3 +2537,6 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   Важно: `skin_tools op_reskin` берёт `base`, а не `active` — для правок Blueprint он не годится, поэтому свой вызов.
 - **Сплит**: три вида начинаются правее колонки инструментов (64 px, полоса под ней — тёмно-синяя), панель больше не
   закрывает вид «спереди».
+
+- **Unity build lock (2026-10-12, Animation picker � V3):** building viewer_saver.exe (Windows player of the viewer) from the MT working tree; lock .autorig-build.lock held for this build only.
+
