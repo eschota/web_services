@@ -486,6 +486,57 @@ def mt_quadruped_rig(ctx, input_name, what="", forward_axis="+z"):
             "forward_changed": int(bool(fc.get("changed"))), "rig_total_s": (out.get("timings_s") or {}).get("fastrig")}
 
 
+def cloth_report(rig_json):
+    """«Skinning · V3» cloth mode (owner 2026-10-11): rig.json checks.cloth - the garment layers found and the vertices
+    that took their weights from the body under them."""
+    c = (json.loads(pathlib.Path(rig_json).read_text()).get("checks") or {}).get("cloth") or {}
+    if not c:
+        return {"present": 0, "pending": {"reason": "rig.json carries no checks.cloth: the cloth mode is not installed on this tree", "owner": "Skinning · V3"}}
+    return {"present": int(bool(c)), "mode": c.get("mode"), "why": c.get("why"), "layers_n": len(c.get("layers") or []),
+            "layer_verts": sum(c.get("layers") or []), "transferred": c.get("transferred") or 0, "fused": int(bool(c.get("fused")))}
+
+
+def cloth_nochange(ctx):
+    """«не давать общей регрессии»: the case's rig rebuilt with cloth_mode off must carry the same weights as the rig
+    the run made (cloth auto): changed vertices (> 1e-3) and the largest weight difference."""
+    import tempfile
+    from mt import fastrig as F, skin_tools as ST
+    run = ctx["run"]
+    if "cloth_mode" not in ST.SPEC:
+        return {"comparable": 0, "pending": {"reason": "skin_tools.SPEC has no cloth_mode: the cloth mode is not installed on this tree", "owner": "Skinning · V3"}}
+    doc = json.loads((run / "rig" / "rig.json").read_text())
+    a = ST.Rig((run / "rig" / "rigged.glb").read_bytes())
+    with tempfile.TemporaryDirectory(prefix="nochange-", dir=str(ctx["work"])) as tmp:
+        pinned = {b["name"]: b["head"] for b in doc["bones"] if not b["name"].startswith(("Prop", "Hair_")) and "Heel" not in b["name"]}
+        F.build(str(run), tmp, bool(doc.get("labels_used")), doc.get("body_plan"), None, {"joints": pinned},
+                skin_options={"cloth_mode": "off"})
+        b = ST.Rig((pathlib.Path(tmp) / "rigged.glb").read_bytes())
+    if a.g.n != b.g.n:
+        return {"comparable": 0, "changed_vertices": -1, "max_diff": -1.0}
+    Wb = np.zeros_like(a.Wg)
+    for j, nm in enumerate(b.names):
+        if nm in a.index:
+            Wb[:, a.index[nm]] = b.Wg[:, j]
+    d = np.abs(a.Wg - Wb).max(1)
+    return {"comparable": 1, "changed_vertices": int((d > 1e-3).sum()), "max_diff": round(float(d.max()), 4),
+            "cloth": ((doc.get("checks") or {}).get("cloth") or {}).get("why")}
+
+
+def weight_bleed(rig_json):
+    """«Skinning · V3» (owner 2026-10-11, «автотесты после скининга»): rig.json checks.weight_bleed from fastrig's
+    geodesic assignment - the share of vertices whose top bone belongs to a body part the mesh surface does not
+    connect it to (hand | leg, arm | arm, leg | leg, coil | coil), and the cross-part pairs."""
+    rig = json.loads(pathlib.Path(rig_json).read_text())
+    c = rig.get("checks") or {}
+    wb = c.get("weight_bleed") or {}
+    ga = c.get("geodesic_assign") or {}
+    if not wb:                                               # the geodesic engine is not on this MT tree yet
+        return {"present": 0, "pending": {"reason": "rig.json carries no checks.weight_bleed: fastrig geodesic assignment not installed on this tree", "owner": "Skinning · V3"}}
+    return {"disagree_pct": wb.get("disagree_pct"), "cross_part": wb.get("cross_part"), "pairs": wb.get("pairs"),
+            "ok": int(bool(wb.get("ok"))) if wb else None, "present": int(bool(wb)),
+            "geodesic_changed": ga.get("changed"), "geodesic_unreached": ga.get("unreached")}
+
+
 def leg_joints(path, rig_json=None):
     """«Leg fit · V3» (2026-10-11, task 7018c8b8: the ankle at the top of a wide boot, 18.9 % H, the knee a stump):
     mt/leg_fit.rules on a rigged GLB (+ rig.json): ankle height and share of the foot length, the ankle behind the
@@ -1067,17 +1118,6 @@ def posed_prop_fit(ctx, front=""):
             "prop_grip_pct_H": round(min(grip), 2) if grip else 99.0}
 
 
-def front_guess(input_name):
-    """The geometry front guess alone (mt.parts_cluster.guess_forward), seconds even on a dense mesh."""
-    p, wall = _child([PY, "-P", "-c", "import json,sys; from mt import fastrig as F, parts_cluster as PC; "
-                      "print(json.dumps(PC.guess_forward(F.Source(open(sys.argv[1], 'rb').read()))))",
-                      str(_input(input_name))], timeout=300)
-    if p.returncode != 0:
-        raise RuntimeError(f"guess_forward exit {p.returncode}: {(p.stderr or p.stdout)[-400:]}")
-    out = json.loads(p.stdout.strip().splitlines()[-1])
-    return {"forward_axis": out.get("forward_axis"), "source": out.get("source"), "seconds": wall}
-
-
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1150,6 +1190,12 @@ def run_check(check: dict, ctx: dict) -> dict:
         return quadruped_legs(target, rig_json)
     if k == "rig_stretch":
         return rig_stretch(ctx)
+    if k == "cloth_report":
+        return cloth_report(ctx["run"] / "rig" / "rig.json")
+    if k == "cloth_nochange":
+        return cloth_nochange(ctx)
+    if k == "weight_bleed":
+        return weight_bleed(ctx["run"] / "rig" / "rig.json" if on == "mt_rig" else _input(a["rig_json"]))
     if k == "leg_joints":
         rig_json = ctx["run"] / "rig" / "rig.json" if on == "mt_rig" else (_input(a["rig_json"]) if a.get("rig_json") else None)
         return leg_joints(target, rig_json)
@@ -1167,7 +1213,9 @@ def run_check(check: dict, ctx: dict) -> dict:
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
-    if k == "front_guess":                                         # Rig path V3 orient (restored 2026-10-11 11:40)
+    if k == "multilimb_rig":
+        return multilimb_rig(ctx)
+    if k == "front_guess":
         out = front_guess(inp)
         out["front_ok"] = int(out["forward_axis"] == a.get("front"))
         return out

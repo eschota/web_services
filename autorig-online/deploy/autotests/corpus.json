@@ -489,12 +489,26 @@
    "sha256": "9ced76a419c301636e6b00db1271c8256336b9c6e56b2543075290f6fbb7e3ba",
    "bytes": 65082916
   },
+  "b94999ad.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/06f232e5a64f2f1c5700/proj/model.glb",
+   "task": "b94999ad-d50e-4b52-8f42-659493e15cbf",
+   "what": "stylized cat (FBX -> GLB), standing at ~26 deg of yaw between the axes",
+   "sha256": "2a1a6bb616640a28dadc9686342788d33e53258fb98039c28b25986ac2065922",
+   "bytes": 462896
+  },
   "3a099711.model.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/a315580101635000b6b6/proj/model.glb",
    "task": "3a099711-1fd4-4563-aa6e-40a148e26cd0",
    "what": "low-poly lamprey worm with an open maw of tooth rings (V3 verified GLB, 9.8k vertices)",
    "sha256": "86e4e5e17aa3a4df31b0202593275cd8c2ed759e776121e90e5f05750bf7541f",
    "bytes": 3495724
+  },
+  "4c555032.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9d095598c0e8944f483d/proj/model.glb",
+   "task": "4c555032-766c-420f-bf74-b87698bd7fca",
+   "what": "chibi deer, legs 12 % H, ~27 deg off the axis",
+   "sha256": "0818492b113c32278cf3b5cee977d077adf7c808e4e8610ca3c5b9f806fa2d79",
+   "bytes": 3670312
   }
  },
  "profiles": {
@@ -917,6 +931,48 @@
        0
       ]
      }
+    },
+    {
+     "id": "mt_bleed",
+     "kind": "weight_bleed",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "present": [
+       "==",
+       1
+      ],
+      "disagree_pct": [
+       "<=",
+       3.0
+      ]
+     },
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+    },
+    {
+     "id": "mt_cloth",
+     "kind": "cloth_report",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "present": [
+       "==",
+       1
+      ],
+      "layers_n": [
+       ">=",
+       1
+      ],
+      "transferred": [
+       ">=",
+       1
+      ]
+     },
+     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)"
     }
    ]
   },
@@ -1147,6 +1203,44 @@
       ]
      },
      "note": "QA calibration V3: a clean fast rig passes numeric QA (was 0 of 9 clips with the strict rule)"
+    },
+    {
+     "id": "mt_bleed",
+     "kind": "weight_bleed",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "present": [
+       "==",
+       1
+      ],
+      "disagree_pct": [
+       "<=",
+       3.0
+      ]
+     },
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+    },
+    {
+     "id": "mt_cloth_nochange",
+     "kind": "cloth_nochange",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "comparable": [
+       "==",
+       1
+      ],
+      "changed_vertices": [
+       "==",
+       0
+      ]
+     },
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
     }
    ]
   },
@@ -1429,20 +1523,11 @@
      "on": "mt_rig",
      "thresholds": {
       "foot_outside_samples": [
-       "<=",
-       60
+       "==",
+       0
       ]
      },
-     "target": {
-      "thresholds": {
-       "foot_outside_samples": [
-        "==",
-        0
-       ]
-      },
-      "reason": "the first rig still puts LeftFoot/LeftToeBase/RightFoot/RightToeBase outside the foot (56 samples, as in the recorded bad rig); only the later joint judge fixes it",
-      "owner": "Rig tools · V3"
-     }
+     "note": "2026-10-11 XPASS -> PASS (bone_check tolerance + pull-in, mt-deploy26): was: the first rig still puts LeftFoot/LeftToeBase/RightFoot/RightToeBase outside the foot (56 samples, as in the recorded ba"
     },
     {
      "id": "mt_fast",
@@ -1457,24 +1542,15 @@
        0
       ],
       "outside_after": [
-       "<=",
-       30
+       "==",
+       0
       ],
       "foot_rules_failed_after": [
        "==",
        0
       ]
      },
-     "target": {
-      "thresholds": {
-       "outside_after": [
-        "==",
-        0
-       ]
-      },
-      "reason": "the fix of fast analysis leaves LeftFoot/RightFoot partly outside (24 samples)",
-      "owner": "Rig tools · V3"
-     }
+     "note": "2026-10-11 XPASS -> PASS (bone_check tolerance + pull-in, mt-deploy26): was: the fix of fast analysis leaves LeftFoot/RightFoot partly outside (24 samples)"
     },
     {
      "id": "before_heel_detector",
@@ -2003,6 +2079,25 @@
       ]
      },
      "note": "Leg fit V3 2026-10-11: ankle 0.4 -> 0.3 of the foot length, knees/ankles symmetric; squat frame 2x edges in the boot 55 -> 99, 4x stays 0; over_2x 90 -> 120"
+    },
+    {
+     "id": "mt_cloth_nochange",
+     "kind": "cloth_nochange",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "comparable": [
+       "==",
+       1
+      ],
+      "changed_vertices": [
+       "==",
+       0
+      ]
+     },
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
     }
    ]
   },
@@ -2070,20 +2165,11 @@
      "on": "mt_rig",
      "thresholds": {
       "outside": [
-       "<=",
-       2
+       "==",
+       0
       ]
      },
-     "target": {
-      "thresholds": {
-       "outside": [
-        "==",
-        0
-       ]
-      },
-      "reason": "2 joints still outside the voxel solid (was 16 of 22 before the body_shells fix of 2026-10-10)",
-      "owner": "V3 triage · rig quality"
-     }
+     "note": "2026-10-11 XPASS -> PASS (bone_check tolerance + pull-in, mt-deploy26): was: 2 joints still outside the voxel solid (was 16 of 22 before the body_shells fix of 2026-10-10)"
     },
     {
      "id": "mt_numeric",
@@ -2127,6 +2213,25 @@
        5
       ]
      }
+    },
+    {
+     "id": "mt_cloth_nochange",
+     "kind": "cloth_nochange",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "comparable": [
+       "==",
+       1
+      ],
+      "changed_vertices": [
+       "==",
+       0
+      ]
+     },
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
     }
    ]
   },
@@ -2198,20 +2303,11 @@
      "on": "mt_rig",
      "thresholds": {
       "outside": [
-       "<=",
-       2
+       "==",
+       0
       ]
      },
-     "target": {
-      "thresholds": {
-       "outside": [
-        "==",
-        0
-       ]
-      },
-      "reason": "2 joints still outside the voxel solid (was 16 of 22 before the body_shells fix of 2026-10-10)",
-      "owner": "V3 triage · rig quality"
-     }
+     "note": "2026-10-11 XPASS -> PASS (bone_check tolerance + pull-in, mt-deploy26): was: 2 joints still outside the voxel solid (was 16 of 22 before the body_shells fix of 2026-10-10)"
     }
    ]
   },
@@ -4180,6 +4276,44 @@
        15
       ]
      }
+    },
+    {
+     "id": "mt_bleed",
+     "kind": "weight_bleed",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "present": [
+       "==",
+       1
+      ],
+      "disagree_pct": [
+       "<=",
+       3.0
+      ]
+     },
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+    },
+    {
+     "id": "mt_cloth_nochange",
+     "kind": "cloth_nochange",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "comparable": [
+       "==",
+       1
+      ],
+      "changed_vertices": [
+       "==",
+       0
+      ]
+     },
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
     }
    ]
   },
@@ -5138,11 +5272,348 @@
    ]
   },
   {
+   "id": "jacket_hands_on_thighs",
+   "task": "25d6d398-10d3-449f-a1cd-139af01e54bb",
+   "cost": 4,
+   "tier": "extended",
+   "defect": "owner 2026-10-11 («руки прилипли к ногам»): hands resting against the thighs were taken as a sibling root fusion by branch_blend (the leg zone is the whole thigh), hand and thigh faded into the Hips together: 15 588 edges over 4x in the rig check. Fix: tools/patch_fastrig_sib_kind.py (siblings must be limbs of one kind) + tools/patch_fastrig_proxy_normals.py (the dense-mesh proxy never welds two facing surfaces): 2 124.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "25d6d398.model.glb",
+     "params": {
+      "words": "male character black jacket"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       3000
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       15000
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     },
+     "note": "before the fix 15 588 / 32 757; after 2 124 / 12 607 (1.08 M vertices on a 205 k proxy)"
+    },
+    {
+     "id": "mt_bleed",
+     "kind": "weight_bleed",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "present": [
+       "==",
+       1
+      ],
+      "disagree_pct": [
+       "<=",
+       3.0
+      ]
+     },
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+    },
+    {
+     "id": "mt_cloth",
+     "kind": "cloth_report",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "present": [
+       "==",
+       1
+      ]
+     },
+     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)"
+    }
+   ]
+  },
+  {
+   "id": "cat_quadruped_orient",
+   "task": "b94999ad-d50e-4b52-8f42-659493e15cbf",
+   "cost": 2,
+   "defect": "owner 2026-10-11 («кошка должна трансформ по другому нежели человек»): the cat stood between two axes (26 deg); the up rule was the biped one (longest axis = height, it said +x) and the quadruped rig was built across its body (Hips -> Tail_End under the floor). Fix: orient.estimate_up by body plan (paws / feet on a voxel slice), orient.estimate_quadruped (long axis of the footprint, head end higher) -> proj/yaw.json -> fastrig rigs at that yaw",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "b94999ad.model.glb",
+     "params": {
+      "words": "stylized cat quadruped",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       5
+      ],
+      "rig_check_4x": [
+       "<=",
+       5
+      ]
+     }
+    },
+    {
+     "id": "mt_orient",
+     "kind": "posed_prop_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "front": "+x"
+     },
+     "thresholds": {
+      "front_ok": [
+       "==",
+       1
+      ],
+      "fit_ok": [
+       "==",
+       1
+      ]
+     },
+     "xfail": {
+      "reason": "needs the quadruped up rule of mt/orient.py, not on prod yet (plain prod tree: fit_ok 0); blocked other MT deploys 11:22 UTC; flip on XPASS",
+      "owner": "Rig path · V3 (orient)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "serpent_lamprey",
+   "task": "3a099711-1fd4-4563-aa6e-40a148e26cd0",
+   "cost": 1,
+   "defect": "owner 2026-10-11 («почему не пошёл по ветке змей-червяков»): rig v3.2026-10-11.4 gave 1 Root bone. The coarse mesh broke the 64 thin geodesic rings into arcs (50 % 'split' = limbs); rings are now at least 2.5 edges wide. Then the open maw: throat lining snapped onto the neck (46 arc-jump edges, Head Turn 24x / 0.68 % edges > 4x); the head bulb now takes its arc from the head axis",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3a099711.model.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "bones": [
+       ">=",
+       17
+      ],
+      "clips": [
+       ">=",
+       5
+      ],
+      "rig_check_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_serpent",
+     "kind": "serpent_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "head_near": null
+     },
+     "thresholds": {
+      "gate_passed": [
+       "==",
+       true
+      ],
+      "arc_jump_edges": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "stretch_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "status": [
+       "==",
+       "numeric_deformation_passed"
+      ],
+      "clips_passed": [
+       ">=",
+       6
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "deer_chibi_quadruped",
+   "task": "4c555032-766c-420f-bf74-b87698bd7fca",
+   "cost": 3,
+   "defect": "chibi deer (Skinning Fable 2026-10-11): short legs under the 0.1-0.3 H leg band, the back Leg fitted at 0.43 H, the tail to the hooves, Hips at the chest; yaw is fixed by orient.estimate_quadruped (paws), the leg fit is not",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "4c555032.model.glb",
+     "params": {
+      "words": "chibi deer quadruped"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       200
+      ]
+     },
+     "xfail": {
+      "reason": "fit_quadruped legs/tail on a chibi with 12 % H legs (a belly-merge leg top made the cat and the bull worse, not shipped)",
+      "owner": "Rig tools · V3 (Skinning Fable)"
+     }
+    }
+   ]
+  },
+  {
    "id": "demon_four_arms_wings",
    "task": "0d39aaba-f657-4130-8982-5880ea1c82ad",
    "cost": 4,
    "defect": "owner 2026-10-11 («нужно отправлять какого нибудь умника на новую ветку, 4 руки и крылья»; «универсально для произвольного числа рук, а крыльев пусть хотя бы 2»): the biped fit knows one arm pair; the second arm pair, the wings and the tail were weighted to the nearest primary arm / leg bones and swung with them. Multi-limb rig · V3 (mt/multilimb.py): every limb traced on the voxel solid (tips by geodesic distance, mirror pairs judged together, wing = sheet by planarity / depth / back root, crest = horn), the primary pair pinned for fastrig, extra arm pairs as {Side}Shoulder{k}..Hand{k}, wings as {Side}Wing..Wing3, Tail..Tail3; weights per chain along the chain, root blended into the trunk weights, chain seams split (weld_split); extra arms follow the primary (offset), wings flap / idle, tail wags (options)",
    "checks": [
+    {
+     "id": "mt_rig_control",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "66ba97ba.upload.glb",
+     "params": {
+      "words": "Female warrior with sword and armor"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_multilimb_control",
+     "kind": "multilimb_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "role": "control",
+     "thresholds": {
+      "extra_chains": [
+       "==",
+       0
+      ],
+      "extra_bones": [
+       "==",
+       0
+      ],
+      "wings": [
+       "==",
+       0
+      ],
+      "use": [
+       "==",
+       0
+      ]
+     },
+     "xfail": {
+      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Multi-limb rig · V3"
+     }
+    },
     {
      "id": "mt_rig",
      "kind": "mt_rig_first",
@@ -5151,7 +5622,7 @@
      ],
      "input": "0d39aaba.upload.glb",
      "params": {
-      "words": "red demon with four arms and wings",
+      "words": "red armored bat-dragon demon with four arms and wings",
       "forward_axis": "+z",
       "v3_bound": true
      },
@@ -5268,198 +5739,9 @@
       "reason": "the big primary arms are welded onto the wing edges and their label runs along the wing's leading edge: the seam split leaves torn edges under the library clips (Walking: tear > 30, share > 0.006); Idle passes. Local 2026-10-11: 1 of 8 clips pass",
       "owner": "Multi-limb rig · V3"
      }
-    },
-    {
-     "id": "mt_rig_control",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "66ba97ba.upload.glb",
-     "params": {
-      "words": "Female warrior with sword and armor"
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       60
-      ],
-      "bones": [
-       ">=",
-       20
-      ]
-     }
-    },
-    {
-     "id": "mt_multilimb_control",
-     "kind": "multilimb_rig",
-     "paths": [
-      "mt"
-     ],
-     "on": "mt_rig",
-     "role": "control",
-     "thresholds": {
-      "extra_chains": [
-       "==",
-       0
-      ],
-      "extra_bones": [
-       "==",
-       0
-      ],
-      "wings": [
-       "==",
-       0
-      ]
-     },
-     "xfail": {
-      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Multi-limb rig · V3"
-     }
     }
    ],
-   "note": "v3_bound: the orientation refiner reads this model as upside down (\"two feet at the high end\": the wing tips) and would turn it; the conveyor's hash-bound V3 source is left alone, so is the case (a case for the orientator: see lying_upright). The control: a plain biped (the warrior) gets no extra chain. Known gaps: fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."
-  },
-  {
-   "id": "jacket_hands_on_thighs",
-   "task": "25d6d398-10d3-449f-a1cd-139af01e54bb",
-   "cost": 4,
-   "tier": "extended",
-   "defect": "owner 2026-10-11 («руки прилипли к ногам»): hands resting against the thighs were taken as a sibling root fusion by branch_blend (the leg zone is the whole thigh), hand and thigh faded into the Hips together: 15 588 edges over 4x in the rig check. Fix: tools/patch_fastrig_sib_kind.py (siblings must be limbs of one kind) + tools/patch_fastrig_proxy_normals.py (the dense-mesh proxy never welds two facing surfaces): 2 124.",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "25d6d398.model.glb",
-     "params": {
-      "words": "male character black jacket"
-     },
-     "thresholds": {
-      "bones": [
-       ">=",
-       20
-      ],
-      "clips": [
-       ">=",
-       8
-      ]
-     }
-    },
-    {
-     "id": "mt_stretch",
-     "kind": "rig_stretch",
-     "paths": [
-      "mt"
-     ],
-     "on": "mt_rig",
-     "thresholds": {
-      "sum_edges_over_4x": [
-       "<=",
-       3000
-      ],
-      "sum_edges_over_2x": [
-       "<=",
-       15000
-      ],
-      "empty_limb_bones": [
-       "==",
-       0
-      ]
-     },
-     "note": "before the fix 15 588 / 32 757; after 2 124 / 12 607 (1.08 M vertices on a 205 k proxy)"
-    }
-   ]
-  },
-  {
-   "id": "serpent_lamprey",
-   "task": "3a099711-1fd4-4563-aa6e-40a148e26cd0",
-   "cost": 1,
-   "defect": "owner 2026-10-11 («почему не пошёл по ветке змей-червяков»): rig v3.2026-10-11.4 gave 1 Root bone. The coarse mesh broke the 64 thin geodesic rings into arcs (50 % 'split' = limbs); rings are now at least 2.5 edges wide. Then the open maw: throat lining snapped onto the neck (46 arc-jump edges, Head Turn 24x / 0.68 % edges > 4x); the head bulb now takes its arc from the head axis",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "3a099711.model.glb",
-     "params": {
-      "words": ""
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       60
-      ],
-      "body_plan": [
-       "==",
-       "serpent"
-      ],
-      "bones": [
-       ">=",
-       17
-      ],
-      "clips": [
-       ">=",
-       5
-      ],
-      "rig_check_4x": [
-       "==",
-       0
-      ]
-     }
-    },
-    {
-     "id": "mt_serpent",
-     "kind": "serpent_rig",
-     "paths": [
-      "mt"
-     ],
-     "on": "mt_rig",
-     "params": {
-      "head_near": null
-     },
-     "thresholds": {
-      "gate_passed": [
-       "==",
-       true
-      ],
-      "arc_jump_edges": [
-       "==",
-       0
-      ],
-      "unweighted": [
-       "==",
-       0
-      ],
-      "stretch_4x": [
-       "==",
-       0
-      ]
-     }
-    },
-    {
-     "id": "mt_numeric",
-     "kind": "mt_numeric_qa",
-     "paths": [
-      "mt"
-     ],
-     "on": "mt_rig",
-     "thresholds": {
-      "status": [
-       "==",
-       "numeric_deformation_passed"
-      ],
-      "clips_passed": [
-       ">=",
-       6
-      ]
-     }
-    }
-   ]
+   "note": "v3_bound: the orientation refiner reads this model as upside down (\"two feet at the high end\": the wing tips) and would turn it; the conveyor's hash-bound V3 source is left alone, so is the case (a case for the orientator: see lying_upright). The control runs FIRST (checks share one run dir): a plain biped (the warrior) gets no extra chain. Extra chains need a second opinion (words / Vision) past the geometry: require=confirmed. Known gaps: fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."
   }
  ]
 }
