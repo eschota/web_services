@@ -605,6 +605,13 @@
    "what": "Deku Zeta anime, 51 shells, V3 rig stabilized from its own skeleton",
    "sha256": "ea74563cdf066081084a7c148ff4e44bba86ca8694ec4332321758a8681bd3f4",
    "bytes": 32687208
+  },
+  "594dd2a5.mt-rig.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/93bbe648739d5d7154df/rig/rigged.glb",
+   "task": "594dd2a5",
+   "what": "yellow blob character: fat stubby legs (shin radius 9.3 % H, knee to ankle 8 % H), V3 rig 2026-10-11",
+   "sha256": "22fe52ecfe52e6c982d0b417ae91a6285bc7d4994b8e6ceb782fbc60a3fc6a8a",
+   "bytes": 7874340
   }
  },
  "profiles": {
@@ -6586,6 +6593,40 @@
      },
      "xfail": {
       "reason": "splayed bent legs and a head below the spine are not fitted by fit_quadruped (straight chains, rising neck)",
+      "owner": "Rig path · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "blob_stubby_legs",
+   "task": "594dd2a5",
+   "cost": 1,
+   "owner": "Rig path · V3",
+   "defect": "first new task after the 2026-10-11 20:17 engine deploys, triage rig_stretch: a yellow blob character with fat stubby legs (shin radius 9.3 % H, hips 26 % H, knee placed by proportions). Full-amplitude library clips bend such legs 90+ degrees: rig_check 1952 edges over 2x / 425 over 4x on Leg|Foot seams, numeric visible/2 fails Jump, Waving1, Hip Hop, Look Around (tear 30-45x). Skin re-blend (blend_width knee/ankle 1.5 + 6 smooth steps) only halves the clip tears (clip 4x 522 -> 371) while test-pose 4x grows (925 -> 1091): the fix is clip amplitude / leg fit for stubby legs, not weights.",
+   "checks": [
+    {
+     "id": "numeric_now",
+     "kind": "numeric_qa_file",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "594dd2a5.mt-rig.glb",
+     "thresholds": {
+      "passed": [
+       "==",
+       false
+      ]
+     },
+     "target": {
+      "thresholds": {
+       "passed": [
+        "==",
+        true
+       ]
+      },
+      "reason": "stubby fat legs tear at knee/ankle under full-amplitude library clips",
       "owner": "Rig path · V3"
      }
     }
