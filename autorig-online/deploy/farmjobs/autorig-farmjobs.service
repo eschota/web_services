@@ -1,0 +1,28 @@
+# AutoRig farm jobs queue (owner order 2026-10-11: heavy background work on the farm, customer tasks first).
+# Standalone, outside the release tree (/srv/autorig/farmjobs): restarting it never touches autorig-storage.
+# nginx: location ^~ /api/farmjobs/ -> 127.0.0.1:8262 (nginx-farmjobs.conf).
+[Unit]
+Description=AutoRig farm jobs queue (/api/farmjobs)
+After=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/farmjobs
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/farmjobs/farmjobs.py serve
+Restart=always
+RestartSec=3
+Nice=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/data/farmjobs
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

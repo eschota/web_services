@@ -752,6 +752,14 @@ def _lora_report(name: str) -> Dict[str, Any]:
     return report if isinstance(report, dict) else {}
 
 
+def _farm_jobs_status() -> Dict[str, Any]:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8262/api/farmjobs/status", timeout=3) as r:
+            return json.loads(r.read().decode())
+    except Exception:                                                  # noqa: BLE001
+        return {}
+
+
 def _v3_target() -> Dict[str, Any]:
     data = _read_json(os.path.join(STATE_DIR, "v3_target.json"), {})
     return data if isinstance(data, dict) else {}
@@ -1298,6 +1306,16 @@ def compose(col: Collector) -> Dict[str, Any]:
             "services_object": services,
         })
 
+    # farm jobs runner (deploy/farmjobs): background compute pulled by the boxes, yielding to their own work
+    farm_jobs = _farm_jobs_status()
+    for b in boxes_out:
+        fr = next((x for x in farm_jobs.get("boxes") or [] if x.get("box") == b["id"]), None)
+        if fr:
+            b.setdefault("services_object", {})["farm_runner"] = {
+                "seen_age_seconds": fr.get("seen_age_seconds"), "yielding_to": fr.get("busy") or "",
+                "running": fr.get("running") or [], "done": fr.get("done"), "failed": fr.get("failed"),
+                "state": ("working" if fr.get("running") else ("yielding" if fr.get("busy") else "waiting"))
+                if (fr.get("seen_age_seconds") or 9999) < 120 else "offline"}
     in_fleet = [b for b in boxes_out if b["in_fleet_bool"]]
     converters = [b for b in in_fleet if "converter" in (b.get("services_object") or {})]
     healthy_full = [b["id"] for b in converters
@@ -1385,6 +1403,7 @@ def compose(col: Collector) -> Dict[str, Any]:
         "queues_object": queues,
         "vps_object": vps_out,
         "boxes_array": boxes_out,
+        "farm_jobs_object": {"counts": farm_jobs.get("counts") or {}, "queued_by_kind": farm_jobs.get("queued_by_kind") or {}},
         "sources_object": sources,
         "rules_array": [
             "This is the one call for fleet state; do not probe boxes one by one over SSH.",
@@ -1429,6 +1448,9 @@ def render_text(snapshot: Dict[str, Any]) -> str:
                          if d.get("temp_c") is not None)
         if temps:
             disks = (disks + "  disktemp=" + temps).strip()
+        fr = (box.get("services_object") or {}).get("farm_runner")
+        if fr:
+            disks += f"  farmjobs={fr.get('state')}" + (f"({fr.get('yielding_to')})" if fr.get("yielding_to") else "")
         busy = "; ".join(
             f"{b.get('service')}:{b.get('what')}" + (f"[{b.get('stage')}]" if b.get("stage") else "")
             for b in box.get("busy_with_array") or [])

@@ -34,6 +34,7 @@ import subprocess
 import sys
 import time
 import traceback
+sys.path.insert(0, "/srv/autorig/farmjobs")                     # the farm jobs queue library (VPS side only)
 from urllib.parse import unquote, urlparse
 
 MT_ROOT = pathlib.Path(os.environ.get("MT_ROOT", "/srv/autorig/data/motion_transfer"))
@@ -48,6 +49,7 @@ GLB_CACHE = pathlib.Path("/srv/autorig/data/static/glb_cache")
 TASK_CACHE = pathlib.Path("/srv/autorig/data/static/tasks")
 DISPATCH = MT_ROOT / "v3-dispatch" / "dispatch.sqlite3"
 PY = sys.executable
+PFLAG = ["-P"] if sys.version_info >= (3, 11) else []              # -P (no cwd on sys.path) exists from 3.11
 MIN_DISK_GB = float(os.environ.get("CENSUS_MIN_DISK_GB", "40"))
 CHILD_TIMEOUT = float(os.environ.get("CENSUS_CHILD_TIMEOUT", "900"))
 LIMB_MAX_VERTS = int(os.environ.get("CENSUS_LIMB_MAX_VERTS", "400000"))
@@ -334,11 +336,14 @@ def constitution(doc: dict, P) -> dict:
                          "shoulders_H": round(shoulders, 3), "height_units": round(H, 4)}}
 
 
-def one(sha: str) -> dict:
+def one(sha: str, row=None, ov=None) -> dict:
+    """One model. `row` (rid, path, fmt, origin, words) and `ov` (the Vision override) come from the job on a farm box;
+    on the VPS they are read from census.sqlite3."""
     t0 = time.time()
-    con = db()
-    row = con.execute("SELECT rid, path, fmt, origin, words FROM models WHERE sha=?", (sha,)).fetchone()
-    con.close()
+    if row is None:
+        con = db()
+        row = con.execute("SELECT rid, path, fmt, origin, words FROM models WHERE sha=?", (sha,)).fetchone()
+        con.close()
     if not row:
         raise SystemExit(f"unknown sha {sha}")
     rid, path, fmt, origin, words = row
@@ -376,7 +381,7 @@ def one(sha: str) -> dict:
         out["plan_source"] = "geometry"
         # the conveyor rebuilds the rig when Vision names another body plan; offline the census uses a Vision answer
         # of its own sample (overrides) or, for a geometry-only 'root', the task's words
-        ov = override(sha)
+        ov = ov if ov is not None else override(sha)
         want = ov.get("plan") or (words_plan(words) if doc.get("body_plan") == "root" else "")
         if want and want != doc.get("body_plan"):
             doc = R.build(rd, "", plan=None if want == "hands" else want, timings=rt)
@@ -407,13 +412,13 @@ def one(sha: str) -> dict:
             t = time.time()
             env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
             env.update(PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="2", OPENBLAS_NUM_THREADS="2")
-            p = subprocess.run([PY, "-P", "-m", "mt.arm_clearance", "--dir", str(rd), "--check"], cwd=str(MT_ROOT),
+            p = subprocess.run([PY, *PFLAG, "-m", "mt.arm_clearance", "--dir", str(rd), "--check"], cwd=str(MT_ROOT),
                                env=env, capture_output=True, text=True, timeout=600)
             T["arm_clearance"] = round(time.time() - t, 2)
             if p.returncode:
                 out["arm_clearance_error"] = (p.stderr or p.stdout)[-300:]
             if not (rd / "analysis" / "limb_collision.json").is_file():
-                subprocess.run([PY, "-P", "-m", "mt.limb_collision", "--dir", str(rd), "--source", "v3", "--no-emit"],
+                subprocess.run([PY, *PFLAG, "-m", "mt.limb_collision", "--dir", str(rd), "--source", "v3", "--no-emit"],
                                cwd=str(MT_ROOT), env=env, capture_output=True, text=True, timeout=600)
         # the triage's verdict on the census run (its rules, its classes)
         from mt import triage as TR
@@ -750,6 +755,120 @@ def sheet(path: str, top: int = 8, per: int = 6):
     print(path)
 
 
+# ---------------------------------------------------------------------------------------------- the farm
+# Owner order 2026-10-11 (distribute everything to the farm): the VPS hands out work items through the farm jobs queue
+# (deploy/farmjobs); a box fetches the source, runs `farm-one` here (rig_first / fast analysis / triage) and posts
+# runs/<rid> back; `farm-ingest` records it. The VPS side is only the queue, the files and census.sqlite3.
+FARM_KEEP_MAX = 6 * 2 ** 20                                    # a file bigger than this stays on the box
+
+
+def farm_enqueue(limit=20, only_class="", stale=False, shas=None, order="popular", depth=40):
+    from farmjobs import Queue
+    q, con, rev = Queue(), db(), tools_rev()
+    con.execute("CREATE TABLE IF NOT EXISTS farm_jobs(sha TEXT PRIMARY KEY, job TEXT, at REAL, ingested REAL)")
+    waiting = con.execute("SELECT COUNT(*) FROM farm_jobs WHERE ingested IS NULL").fetchone()[0]
+    qq = ("SELECT m.sha, m.rid, m.path, m.fmt, m.origin, m.words FROM models m LEFT JOIN census c ON c.sha = m.sha "
+          "LEFT JOIN farm_jobs f ON f.sha = m.sha WHERE f.sha IS NULL")
+    args = []
+    if shas:
+        qq += f" AND m.sha IN ({','.join('?' * len(shas))})"
+        args += shas
+    elif stale:
+        qq += " AND (c.sha IS NULL OR c.tools_rev != ?)"
+        args.append(rev)
+    else:
+        qq += " AND c.sha IS NULL"
+    qq += " ORDER BY m.n_tasks DESC, m.bytes ASC" if order == "popular" else " ORDER BY m.bytes ASC"
+    n = 0
+    for sha, rid, path, fmt, origin, words in con.execute(qq, args).fetchall():
+        if n >= limit or waiting + n >= depth:
+            break
+        ov = override(sha)
+        meta = {"sha": sha, "rid": rid, "fmt": fmt, "origin": origin, "words": words, "ov": ov,
+                "name": os.path.basename(path)}
+        mp = CENSUS / "farm_in" / f"{sha[:20]}.meta.json"
+        mp.parent.mkdir(parents=True, exist_ok=True)
+        mp.write_text(json.dumps(meta))
+        bundles = ["mt", "census"] + (["backend_min"] if fmt in ("fbx", "obj") else [])
+        jid = q.enqueue({"kind": "census_one", "priority": 0, "bundles": bundles, "timeout": CHILD_TIMEOUT,
+                         "inputs": {"source": path, "meta.json": str(mp)}, "max_attempts": 2,
+                         "cmd": ["{python}", "{bundle_census}/census.py", "farm-one", "{in}", "{out}"]})
+        record(con, {"sha": sha, "rid": rid, "status": "started"}, rev)
+        con.execute("INSERT OR REPLACE INTO farm_jobs VALUES(?,?,?,NULL)", (sha, jid, time.time()))
+        con.commit()
+        n += 1
+    print(f"farm-enqueue: {n} queued ({waiting} already waiting)")
+    return n
+
+
+def farm_one(inp: str, out: str):
+    """On the box: {in}/meta.json + {in}/source -> {out}/runs/<rid>/ (census.json and the small files)."""
+    global MT_ROOT, CENSUS, RUNS, BACKEND
+    inp, out = pathlib.Path(inp), pathlib.Path(out)
+    meta = json.loads((inp / "meta.json").read_text())
+    parts = [pathlib.Path(x) for x in os.environ["PYTHONPATH"].split(os.pathsep) if x]
+    MT_ROOT = next(x for x in parts if (x / "mt").is_dir())      # the bundle that holds the mt package
+    BACKEND = next((x for x in parts if (x / "fbx_ascii.py").is_file()), MT_ROOT)
+    CENSUS = out
+    RUNS = out / "runs"
+    RUNS.mkdir(parents=True, exist_ok=True)
+    res = one(meta["sha"], row=(meta["rid"], str(inp / "source"), meta["fmt"], meta["origin"], meta["words"]),
+              ov=meta.get("ov") or {})
+    rd = RUNS / meta["rid"]
+    for f in list(rd.rglob("*")):                                  # big binaries stay on the box
+        if f.is_file() and f.stat().st_size > FARM_KEEP_MAX:
+            f.unlink()
+    print(json.dumps({k: res.get(k) for k in ("status", "verdict", "body_plan", "category", "seconds", "error")}))
+    return res
+
+
+def farm_ingest():
+    import zipfile
+    from farmjobs import Queue
+    q, con, rev = Queue(), db(), tools_rev()
+    con.execute("CREATE TABLE IF NOT EXISTS farm_jobs(sha TEXT PRIMARY KEY, job TEXT, at REAL, ingested REAL)")
+    n = 0
+    for sha, jid in con.execute("SELECT sha, job FROM farm_jobs WHERE ingested IS NULL").fetchall():
+        row = q.get(jid)
+        if not row or row["state"] not in ("done", "error", "cancelled"):
+            continue
+        rid = sha[:20]
+        out = None
+        zp = q.result_path(jid)
+        if zp.is_file():
+            tmp = RUNS / f".{rid}.farm"
+            shutil.rmtree(tmp, ignore_errors=True)
+            with zipfile.ZipFile(zp) as z:
+                z.extractall(tmp)
+            src = tmp / "runs" / rid
+            if (src / "census.json").is_file():
+                dst = RUNS / rid
+                shutil.rmtree(dst, ignore_errors=True)
+                shutil.move(str(src), str(dst))
+                out = json.loads((dst / "census.json").read_text())
+            shutil.rmtree(tmp, ignore_errors=True)
+        if out is None:
+            out = {"sha": sha, "rid": rid, "status": "error", "error": f"farm job {row['state']}: {row.get('error')}"}
+        out["farm_box"] = row.get("box")
+        record(con, out, rev)
+        con.execute("UPDATE farm_jobs SET ingested=? WHERE sha=?", (time.time(), sha))
+        con.commit()
+        n += 1
+    print(f"farm-ingest: {n} recorded")
+    return n
+
+
+def farm_pump(**kw):
+    """Keep a small queue full and ingest results (one light unit; it does no model work itself)."""
+    while True:
+        farm_ingest()
+        queued = farm_enqueue(limit=10, **kw)
+        if queued == 0 and not db().execute("SELECT 1 FROM farm_jobs WHERE ingested IS NULL").fetchone():
+            break
+        time.sleep(30)
+
+
+
 def main():
     a = sys.argv[1:]
     cmd = a[0] if a else "report"
@@ -757,6 +876,17 @@ def main():
         inventory()
     elif cmd == "one":
         print(json.dumps(one(a[1]), ensure_ascii=False, default=str)[:4000])
+    elif cmd == "farm-one":
+        farm_one(a[1], a[2])
+    elif cmd == "farm-enqueue":
+        def fopt(name, default=""):
+            return a[a.index(name) + 1] if name in a else default
+        farm_enqueue(limit=int(fopt("--limit", "20")), only_class=fopt("--class"), stale="--stale" in a,
+                     shas=[fopt("--sha")] if "--sha" in a else None, order=fopt("--order", "popular"))
+    elif cmd == "farm-ingest":
+        farm_ingest()
+    elif cmd == "farm-pump":
+        farm_pump(stale="--stale" in a)
     elif cmd == "pass1":
         def opt(name, default=""):
             return a[a.index(name) + 1] if name in a else default
