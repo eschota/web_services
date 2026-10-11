@@ -1067,6 +1067,17 @@ def posed_prop_fit(ctx, front=""):
             "prop_grip_pct_H": round(min(grip), 2) if grip else 99.0}
 
 
+def front_guess(input_name):
+    """The geometry front guess alone (mt.parts_cluster.guess_forward), seconds even on a dense mesh."""
+    p, wall = _child([PY, "-P", "-c", "import json,sys; from mt import fastrig as F, parts_cluster as PC; "
+                      "print(json.dumps(PC.guess_forward(F.Source(open(sys.argv[1], 'rb').read()))))",
+                      str(_input(input_name))], timeout=300)
+    if p.returncode != 0:
+        raise RuntimeError(f"guess_forward exit {p.returncode}: {(p.stderr or p.stdout)[-400:]}")
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    return {"forward_axis": out.get("forward_axis"), "source": out.get("source"), "seconds": wall}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1156,6 +1167,10 @@ def run_check(check: dict, ctx: dict) -> dict:
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
+    if k == "front_guess":                                         # Rig path V3 orient (restored 2026-10-11 11:40)
+        out = front_guess(inp)
+        out["front_ok"] = int(out["forward_axis"] == a.get("front"))
+        return out
     raise ValueError(f"unknown check kind {k}")
 
 

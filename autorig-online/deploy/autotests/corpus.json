@@ -488,6 +488,13 @@
    "what": "KJ Carter (Meshy, 1.08 M vertices): black jacket, hands hanging against the thighs; the fast rig faded hand | thigh contact edges into the hips (branch_blend sibling fade), the jacket tore from the hands to the knees",
    "sha256": "9ced76a419c301636e6b00db1271c8256336b9c6e56b2543075290f6fbb7e3ba",
    "bytes": 65082916
+  },
+  "3a099711.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a315580101635000b6b6/proj/model.glb",
+   "task": "3a099711-1fd4-4563-aa6e-40a148e26cd0",
+   "what": "low-poly lamprey worm with an open maw of tooth rings (V3 verified GLB, 9.8k vertices)",
+   "sha256": "86e4e5e17aa3a4df31b0202593275cd8c2ed759e776121e90e5f05750bf7541f",
+   "bytes": 3495724
   }
  },
  "profiles": {
@@ -5363,6 +5370,94 @@
       ]
      },
      "note": "before the fix 15 588 / 32 757; after 2 124 / 12 607 (1.08 M vertices on a 205 k proxy)"
+    }
+   ]
+  },
+  {
+   "id": "serpent_lamprey",
+   "task": "3a099711-1fd4-4563-aa6e-40a148e26cd0",
+   "cost": 1,
+   "defect": "owner 2026-10-11 («почему не пошёл по ветке змей-червяков»): rig v3.2026-10-11.4 gave 1 Root bone. The coarse mesh broke the 64 thin geodesic rings into arcs (50 % 'split' = limbs); rings are now at least 2.5 edges wide. Then the open maw: throat lining snapped onto the neck (46 arc-jump edges, Head Turn 24x / 0.68 % edges > 4x); the head bulb now takes its arc from the head axis",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3a099711.model.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "bones": [
+       ">=",
+       17
+      ],
+      "clips": [
+       ">=",
+       5
+      ],
+      "rig_check_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_serpent",
+     "kind": "serpent_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "head_near": null
+     },
+     "thresholds": {
+      "gate_passed": [
+       "==",
+       true
+      ],
+      "arc_jump_edges": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "stretch_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "status": [
+       "==",
+       "numeric_deformation_passed"
+      ],
+      "clips_passed": [
+       ">=",
+       6
+      ]
+     }
     }
    ]
   }
