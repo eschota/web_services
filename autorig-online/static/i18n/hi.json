@@ -1005,5 +1005,16 @@
   "v3_seconds": "{n} से",
   "error_unsupported_format": "यह फ़ाइल फ़ॉर्मेट समर्थित नहीं है। GLB, FBX, OBJ, glTF या मॉडल वाला ZIP अपलोड करें।",
   "error_zip_without_model": "ZIP में कोई 3D मॉडल (GLB, glTF, FBX या OBJ) नहीं है।",
-  "error_invalid_model": "मॉडल फ़ाइल क्षतिग्रस्त या अधूरी है। कृपया उसे फिर से एक्सपोर्ट करें।"
+  "error_invalid_model": "मॉडल फ़ाइल क्षतिग्रस्त या अधूरी है। कृपया उसे फिर से एक्सपोर्ट करें।",
+  "email_ready_subject": "🎉 आपका 3D मॉडल तैयार है! - AutoRig.online",
+  "email_ready_title": "🎉 आपका 3D मॉडल तैयार है!",
+  "email_ready_body": "बढ़िया खबर! ऑटो-रिगिंग पूरी हो गई है। आपके किरदार में अब पूरा कंकाल और एनिमेशन हैं।",
+  "email_ready_cta": "देखें और डाउनलोड करें",
+  "email_ready_formats": "Unity और Unreal Engine के लिए FBX, Blender के लिए .blend, GLB या सभी एनिमेशन वाला ZIP डाउनलोड करें।",
+  "email_dashboard": "डैशबोर्ड",
+  "email_settings": "सूचना सेटिंग्स",
+  "email_unsubscribe": "एक क्लिक में सदस्यता रद्द करें",
+  "email_visit": "वेबसाइट पर जाएँ",
+  "email_footer": "स्वचालित 3D कैरेक्टर रिगिंग",
+  "email_preview_alt": "3D मॉडल पूर्वावलोकन"
 }

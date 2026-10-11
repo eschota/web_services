@@ -1210,5 +1210,16 @@
   "v3_seconds": "{n} s",
   "error_unsupported_format": "This file format is not supported. Upload GLB, FBX, OBJ, glTF or a ZIP with the model.",
   "error_zip_without_model": "The ZIP has no 3D model inside (GLB, glTF, FBX or OBJ).",
-  "error_invalid_model": "The model file is damaged or incomplete. Please export it again."
+  "error_invalid_model": "The model file is damaged or incomplete. Please export it again.",
+  "email_ready_subject": "🎉 Your 3D Model is Ready! - AutoRig.online",
+  "email_ready_title": "🎉 Your 3D Model is Ready!",
+  "email_ready_body": "Great news! Your auto-rigging task has been completed successfully. Your character is now ready with a full skeleton and animations.",
+  "email_ready_cta": "View & Download Results",
+  "email_ready_formats": "Download it as FBX for Unity and Unreal Engine, .blend for Blender, GLB, or a ZIP with every animation.",
+  "email_dashboard": "Dashboard",
+  "email_settings": "notification settings",
+  "email_unsubscribe": "One-click unsubscribe",
+  "email_visit": "Visit Website",
+  "email_footer": "Automatic 3D Character Rigging",
+  "email_preview_alt": "3D Model Preview"
 }

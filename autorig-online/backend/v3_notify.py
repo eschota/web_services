@@ -181,6 +181,70 @@ async def notify_terminal(task_id: str, state: str) -> None:
         await reserve_and_broadcast_task_done(task_id, extra_html=extra, video_wait_seconds=0)
     except Exception as exc:                              # noqa: BLE001
         print(f"[V3 notify] done notification for {task_id} failed: {type(exc).__name__}: {exc}")
+    await completion_email(task_id)
+
+
+# ---------------------------------------------------------------- completion email
+POSTER_WAIT_SECONDS = float(os.getenv("AUTORIG_V3_EMAIL_POSTER_WAIT", "150"))
+V3_POSTER_DIR = Path(os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3"))
+
+
+def owner_ui_language(user: Any) -> str:
+    """The owner's interface language for the email: their recorded choice, else their browser languages."""
+    from user_language import normalize_language, parse_language_list, ui_language_for
+
+    codes = []
+    pref = normalize_language(getattr(user, "preferred_language", None)) if user is not None else None
+    if pref:
+        codes.append(pref)
+    codes += parse_language_list(getattr(user, "detected_language", None) or "") if user is not None else []
+    return ui_language_for(codes)
+
+
+async def wait_poster(task_id: str, seconds: float = POSTER_WAIT_SECONDS) -> bool:
+    """The V3 viewer capture (posters-v3/<id>.jpg, served by /api/thumb) is made shortly after the rig; wait for it
+    a bounded time so the email carries the real picture."""
+    path = V3_POSTER_DIR / f"{task_id}.jpg"
+    waited = 0.0
+    while waited < seconds:
+        try:
+            if path.stat().st_size > 8000:
+                return True
+        except OSError:
+            pass
+        await asyncio.sleep(5)
+        waited += 5
+    return False
+
+
+async def completion_email(task_id: str, *, poster_wait: Optional[float] = None) -> str:
+    """The classic «Your 3D model is ready» email for a V3 task (done or needs_review): signed-in owners only, the
+    same guards as the classic path (bounced address, opt-out) and the same one-email-per-task reservation in
+    email_service. -> what happened (sent / skipped_* / failed)."""
+    try:
+        from sqlalchemy import select
+
+        from database import AsyncSessionLocal, Task, User
+        from email_service import send_task_completed_email
+
+        async with AsyncSessionLocal() as db:
+            task = await db.get(Task, task_id)
+            if task is None or task.owner_type != "user" or not task.owner_id:
+                return "skipped_not_signed_in"
+            owner = (await db.execute(select(User).where(User.email == task.owner_id))).scalar_one_or_none()
+        if owner is not None and getattr(owner, "email_invalid_at", None):
+            print(f"[V3 notify] completion email for {task_id} skipped: address bounced or complained")
+            return "skipped_invalid"
+        if owner is not None and not getattr(owner, "email_task_completed", True):
+            print(f"[V3 notify] completion email for {task_id} skipped: owner opted out")
+            return "skipped_opt_out"
+        await wait_poster(task_id, POSTER_WAIT_SECONDS if poster_wait is None else poster_wait)
+        sent = await send_task_completed_email(to_email=task.owner_id, task_id=task_id, guid="", worker_base="",
+                                               lang=owner_ui_language(owner))
+        return "sent" if sent else "not_sent"
+    except Exception as exc:                              # noqa: BLE001 - an email never stops the runtime
+        print(f"[V3 notify] completion email for {task_id} failed: {type(exc).__name__}: {exc}")
+        return "failed"
 
 
 def schedule_terminal(task_id: str, state: str) -> None:

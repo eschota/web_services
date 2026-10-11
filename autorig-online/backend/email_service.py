@@ -126,13 +126,45 @@ async def download_image(image_url: str) -> Optional[bytes]:
     return None
 
 
+EMAIL_EN = {
+    "email_ready_subject": "🎉 Your 3D Model is Ready! - AutoRig.online",
+    "email_ready_title": "🎉 Your 3D Model is Ready!",
+    "email_ready_body": "Great news! Your auto-rigging task has been completed successfully. Your character is now ready with a full skeleton and animations.",
+    "email_ready_cta": "View & Download Results",
+    "email_ready_formats": "Download it as FBX for Unity and Unreal Engine, .blend for Blender, GLB, or a ZIP with every animation.",
+    "email_dashboard": "Dashboard",
+    "email_settings": "notification settings",
+    "email_unsubscribe": "One-click unsubscribe",
+    "email_visit": "Visit Website",
+    "email_footer": "Automatic 3D Character Rigging",
+    "email_preview_alt": "3D Model Preview",
+}
+
+
+def email_text(key: str, lang: Optional[str] = None) -> str:
+    """An email string in the owner's interface language (static/i18n), English when it has no translation."""
+    if lang and lang != "en":
+        try:
+            from user_language import translations
+
+            value = translations(lang, fallback=False).get(key)
+            if value:
+                return value
+        except Exception:                                     # noqa: BLE001 - English is always there
+            pass
+    return EMAIL_EN.get(key, key)
+
+
 def get_email_html(
     task_id: str,
     has_image: bool = True,
     unsubscribe_url: Optional[str] = None,
     dashboard_url: Optional[str] = None,
+    lang: Optional[str] = None,
 ) -> str:
-    """Generate HTML email template"""
+    """Generate HTML email template (``lang``: the owner's interface language; fa is right to left)."""
+    T = lambda key: escape(email_text(key, lang))  # noqa: E731
+    direction = "rtl" if lang == "fa" else "ltr"
     base = APP_URL.rstrip("/")
     task_url = f"{base}/task?id={task_id}"
     dash = dashboard_url or f"{base}/dashboard"
@@ -140,12 +172,11 @@ def get_email_html(
     if unsubscribe_url:
         unsub_block = f"""
                             <p style="color: #d0d4e0; font-size: 12px; text-align: center; margin: 20px 0 0 0; line-height: 1.5;">
-                                <a href="{dash}" style="color: #a5b4fc; text-decoration: underline;">Dashboard</a>
-                                <span style="color: #e8eaf0;"> — notification settings / отписка от уведомлений</span>
+                                <a href="{dash}" style="color: #a5b4fc; text-decoration: underline;">{T("email_dashboard")}</a>
+                                <span style="color: #e8eaf0;"> — {T("email_settings")}</span>
                             </p>
                             <p style="color: #d0d4e0; font-size: 12px; text-align: center; margin: 10px 0 0 0;">
-                                <a href="{unsubscribe_url}" style="color: #a5b4fc; text-decoration: underline;">One-click unsubscribe</a>
-                                <span style="color: #e8eaf0;"> · Мгновенная отписка по ссылке</span>
+                                <a href="{unsubscribe_url}" style="color: #a5b4fc; text-decoration: underline;">{T("email_unsubscribe")}</a>
                             </p>
         """
     
@@ -154,14 +185,14 @@ def get_email_html(
         image_section = f"""
         <div style="text-align: center; margin: 30px 0;">
             <a href="{task_url}" style="display: inline-block; text-decoration: none; border-radius: 12px;">
-                <img src="cid:preview_image" alt="3D Model Preview" border="0" style="display: block; max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+                <img src="cid:preview_image" alt="{T("email_preview_alt")}" border="0" style="display: block; max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
             </a>
         </div>
         """
     
     return f"""
 <!DOCTYPE html>
-<html>
+<html lang="{escape(lang or 'en')}" dir="{direction}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -182,24 +213,23 @@ def get_email_html(
                     <tr>
                         <td style="padding: 40px 30px;">
                             <h2 style="color: #f0f0f5; margin: 0 0 20px 0; font-size: 24px; text-align: center;">
-                                🎉 Your 3D Model is Ready!
+                                {T("email_ready_title")}
                             </h2>
                             
                             <p style="color: #a0a0b0; font-size: 16px; line-height: 1.6; text-align: center; margin: 0 0 20px 0;">
-                                Great news! Your auto-rigging task has been completed successfully. 
-                                Your character is now ready with a full skeleton and animations.
+                                {T("email_ready_body")}
                             </p>
                             
                             {image_section}
                             
                             <div style="text-align: center; margin: 30px 0;">
                                 <a href="{task_url}" style="display: inline-block; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);">
-                                    View &amp; Download Results
+                                    {T("email_ready_cta")}
                                 </a>
                             </div>
                             
                             <p style="color: #d0d4e0; font-size: 14px; text-align: center; margin: 30px 0 0 0; line-height: 1.5;">
-                                Your files are available in multiple formats: 3ds Max, Maya, Cinema 4D, Unity, Unreal Engine, and more.
+                                {T("email_ready_formats")}
                             </p>
                             {unsub_block}
                         </td>
@@ -209,10 +239,10 @@ def get_email_html(
                     <tr>
                         <td style="background-color: #12121a; padding: 20px 30px; text-align: center;">
                             <p style="color: #c8ccd8; font-size: 12px; margin: 0; line-height: 1.5;">
-                                © 2026 AutoRig.online — Automatic 3D Character Rigging
+                                © 2026 AutoRig.online — {T("email_footer")}
                             </p>
                             <p style="color: #c8ccd8; font-size: 12px; margin: 10px 0 0 0;">
-                                <a href="{base}" style="color: #a5b4fc; text-decoration: none; font-weight: 600;">Visit Website</a>
+                                <a href="{base}" style="color: #a5b4fc; text-decoration: none; font-weight: 600;">{T("email_visit")}</a>
                             </p>
                         </td>
                     </tr>
@@ -229,7 +259,8 @@ async def send_task_completed_email(
     to_email: str,
     task_id: str,
     guid: str,
-    worker_base: str
+    worker_base: str,
+    lang: Optional[str] = None,
 ) -> bool:
     """
     Send task completion email with preview image.
@@ -262,6 +293,8 @@ async def send_task_completed_email(
         image_data = await download_image(thumb_url)
         if image_data:
             print(f"[Email] Using video poster, size: {len(image_data)} bytes")
+        elif not guid or not worker_base:                    # a V3 task: no converter preview to fall back to
+            print("[Email] No preview image available")
         else:
             # Fallback: worker render preview (e.g. thumb not ready yet when mail is sent)
             image_url = (
@@ -280,14 +313,14 @@ async def send_task_completed_email(
         unsubscribe_url = f"{base}/unsubscribe?token={quote(tok, safe='')}"
         dashboard_url = f"{base}/dashboard"
         html_content = get_email_html(
-            task_id, has_image, unsubscribe_url, dashboard_url=dashboard_url
+            task_id, has_image, unsubscribe_url, dashboard_url=dashboard_url, lang=lang
         )
         
         # Prepare email params
         email_params: resend.Emails.SendParams = {
             "from": f"AutoRig.online <{EMAIL_FROM}>",
             "to": [to_email],
-            "subject": "🎉 Your 3D Model is Ready! - AutoRig.online",
+            "subject": email_text("email_ready_subject", lang),
             "html": html_content,
         }
         

@@ -1015,5 +1015,16 @@
   "v3_seconds": "{n} ث",
   "error_unsupported_format": "این قالب فایل پشتیبانی نمی‌شود. GLB، FBX، OBJ، glTF یا ZIP شامل مدل را بارگذاری کنید.",
   "error_zip_without_model": "در ZIP هیچ مدل سه‌بعدی (GLB، glTF، FBX یا OBJ) نیست.",
-  "error_invalid_model": "فایل مدل آسیب‌دیده یا ناقص است. لطفاً دوباره آن را خروجی بگیرید."
+  "error_invalid_model": "فایل مدل آسیب‌دیده یا ناقص است. لطفاً دوباره آن را خروجی بگیرید.",
+  "email_ready_subject": "🎉 مدل سه‌بعدی شما آماده است! - AutoRig.online",
+  "email_ready_title": "🎉 مدل سه‌بعدی شما آماده است!",
+  "email_ready_body": "خبر خوب! ریگ خودکار آماده شد: شخصیت شما اکنون اسکلت کامل و انیمیشن دارد.",
+  "email_ready_cta": "مشاهده و دانلود",
+  "email_ready_formats": "FBX برای Unity و Unreal Engine، ‎.blend برای Blender، GLB یا ZIP با همهٔ انیمیشن‌ها را دانلود کنید.",
+  "email_dashboard": "داشبورد",
+  "email_settings": "تنظیمات اعلان‌ها",
+  "email_unsubscribe": "لغو اشتراک با یک کلیک",
+  "email_visit": "رفتن به وب‌سایت",
+  "email_footer": "ریگ خودکار شخصیت‌های سه‌بعدی",
+  "email_preview_alt": "پیش‌نمایش مدل سه‌بعدی"
 }

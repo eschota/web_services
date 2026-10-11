@@ -1005,5 +1005,16 @@
   "v3_seconds": "{n} 秒",
   "error_unsupported_format": "不支持此文件格式。请上传 GLB、FBX、OBJ、glTF 或包含模型的 ZIP。",
   "error_zip_without_model": "ZIP 中没有 3D 模型（GLB、glTF、FBX 或 OBJ）。",
-  "error_invalid_model": "模型文件已损坏或不完整，请重新导出。"
+  "error_invalid_model": "模型文件已损坏或不完整，请重新导出。",
+  "email_ready_subject": "🎉 您的 3D 模型已就绪！- AutoRig.online",
+  "email_ready_title": "🎉 您的 3D 模型已就绪！",
+  "email_ready_body": "好消息！自动绑定已完成，您的角色现已拥有完整的骨骼和动画。",
+  "email_ready_cta": "查看并下载结果",
+  "email_ready_formats": "可下载适用于 Unity 和 Unreal Engine 的 FBX、适用于 Blender 的 .blend、GLB，或包含全部动画的 ZIP。",
+  "email_dashboard": "控制台",
+  "email_settings": "通知设置",
+  "email_unsubscribe": "一键退订",
+  "email_visit": "访问网站",
+  "email_footer": "自动 3D 角色绑定",
+  "email_preview_alt": "3D 模型预览"
 }

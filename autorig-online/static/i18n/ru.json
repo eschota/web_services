@@ -1222,5 +1222,16 @@
   "v3_seconds": "{n} с",
   "error_unsupported_format": "Этот формат не поддерживается. Загрузите GLB, FBX, OBJ, glTF или ZIP с моделью.",
   "error_zip_without_model": "В ZIP нет 3D-модели (GLB, glTF, FBX или OBJ).",
-  "error_invalid_model": "Файл модели повреждён или неполон. Экспортируйте его заново."
+  "error_invalid_model": "Файл модели повреждён или неполон. Экспортируйте его заново.",
+  "email_ready_subject": "🎉 Ваша 3D-модель готова! — AutoRig.online",
+  "email_ready_title": "🎉 Ваша 3D-модель готова!",
+  "email_ready_body": "Отличные новости! Автоматический риг готов: у вашего персонажа есть полный скелет и анимации.",
+  "email_ready_cta": "Открыть и скачать",
+  "email_ready_formats": "Скачайте FBX для Unity и Unreal Engine, .blend для Blender, GLB или ZIP со всеми анимациями.",
+  "email_dashboard": "Личный кабинет",
+  "email_settings": "настройки уведомлений",
+  "email_unsubscribe": "Отписаться в один клик",
+  "email_visit": "Перейти на сайт",
+  "email_footer": "Автоматический риг 3D-персонажей",
+  "email_preview_alt": "Превью 3D-модели"
 }

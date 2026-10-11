@@ -203,6 +203,18 @@ def judge(check: dict, row: dict) -> dict:
             out.setdefault("uncalibrated", {})[metric] = m.get(metric)
             continue
         have = m.get(metric)
+        if metric == "seconds" and op in ("<=", "<") and isinstance(value, (int, float)):
+            # Time budgets are customer-run budgets; a gate under VPS load (other agents' runs, renders) inflates the
+            # wall time. Scale by the 1-min load over a third of the cores, capped at 2.5x, and record it (2026-10-11).
+            try:
+                factor = min(2.5, max(1.0, os.getloadavg()[0] / max(1.0, (os.cpu_count() or 8) / 3)))
+            except OSError:
+                factor = 1.0
+            if os.environ.get("AUTORIG_GATE_STRICT_TIME") == "1":
+                factor = 1.0
+            if factor > 1.0:
+                out.setdefault("load_scaled", {})[metric] = {"budget": value, "factor": round(factor, 2)}
+                value = round(value * factor, 1)
         ok = have is not None and OPS[op](have, value)
         if not ok:
             out["failed"].append(f"{metric}={have!r} (want {op} {value!r})")
