@@ -5477,8 +5477,8 @@
       ]
      },
      "xfail": {
-      "reason": "needs the quadruped up rule of mt/orient.py, not on prod yet (plain prod tree: fit_ok 0); blocked other MT deploys 11:22 UTC; flip on XPASS",
-      "owner": "Rig path · V3 (orient)"
+      "reason": "fails on the production tree as well (baseline 2026-10-11 12:40 UTC: body_plan biped, fit_ok 0); the orient.estimate_quadruped fix is not installed yet; not from the deploy under test",
+      "owner": "Limb stabilization · V3 (orient)"
      }
     }
    ]
@@ -5598,8 +5598,8 @@
       ]
      },
      "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "V3 rig path (orient/quadruped)"
+      "reason": "the test run has no Vision classify, so the plan falls to proportions (root); the fit of the chibi legs/tail is not solved (Rig tools)",
+      "owner": "Rig tools · V3"
      }
     },
     {
@@ -5614,10 +5614,6 @@
        "<=",
        200
       ]
-     },
-     "xfail": {
-      "reason": "fit_quadruped legs/tail on a chibi with 12 % H legs (a belly-merge leg top made the cat and the bull worse, not shipped)",
-      "owner": "Rig tools · V3 (Skinning Fable)"
      }
     }
    ]
