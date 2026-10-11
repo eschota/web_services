@@ -77,6 +77,16 @@ def _stage_title(stage: str) -> str:
     return " · ".join(part for part in (title, sub_title, rest.strip()) if part)
 
 
+def _stage_parts(stage: str) -> dict:
+    """"analysis:vision 42s" -> {stage_key: analysis, sub_key: vision, stage_seconds: 42}: keys the page and other
+    clients translate themselves (i18n ``v3_stage_<key>`` / ``v3_sub_<key>``); never raw server text."""
+    base, _, sub = str(stage or "").partition(":")
+    word, _, rest = sub.strip().partition(" ")
+    rest = rest.strip()
+    seconds = int(rest[:-1]) if rest.endswith("s") and rest[:-1].isdigit() else None
+    return {"stage_key": base or None, "sub_key": word or None, "stage_seconds": seconds}
+
+
 def _token() -> str:
     value = os.getenv("AUTORIG_V3_DISPATCH_TOKEN", "").strip()
     if value:
@@ -324,7 +334,7 @@ def _shell(task) -> dict:
         message = "V3: " + _stage_title(stage) + (f" — {v3.get('detail')}" if v3.get("detail") else "")
         progress = max(progress, ACTIVE_FLOOR)
     return {"schema": "autorig.task-v3-shell/1", "task_id": task.id, "status": status,
-            "stage": _stage_title(stage), "stage_id": stage,
+            "stage": _stage_title(stage), "stage_id": stage, **_stage_parts(stage),
             "progress": 1.0 if status in {"done", "needs_review"} else round(min(.99, max(0.0, progress)), 3),
             "viewer_url": viewer, "viewer_state": viewer_state, "message": message,
             "events_url": (session.get("files_base") or "") + "v3/events.jsonl" if session.get("mt_run_id") else None}

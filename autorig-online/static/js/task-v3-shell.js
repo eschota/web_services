@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261010.14';
+const BUILD = 'tv3-20261011.1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -217,7 +217,7 @@ function render(state) {
   });
 
   // V3 tasks name their stage (Intake's titles); classic tasks show the queue and a percent.
-  const stageTitle = state.pipeline === 'v3' && state.stage_title ? `V3 · ${state.stage_title}`
+  const stageTitle = state.pipeline === 'v3' ? v3StageTitle(state)
     : (state.live_stage ? tr(`live_stage_${state.live_stage}`) : '');
   let line = '';
   let waiting = false;
@@ -239,7 +239,7 @@ function render(state) {
     line = tr('taskv3_ready');
   }
   els.line.textContent = line;
-  els.card.title = (v3 && v3.message) || '';
+  els.card.title = line;   // never the server's own (Russian) message
   setProgress(finished ? 1 : progress, waiting);
 
   // The viewer owns the screen as soon as any model exists; progress moves to a chip.
@@ -253,12 +253,39 @@ function render(state) {
   else if (hasViewer && !rigged && !finished && state.model && state.model.state === 'warming') chip = tr('taskv3_rigging');
   els.chip.hidden = !chip;
   els.chip.textContent = chip;
-  els.chip.title = (v3 && v3.message) || '';
+  els.chip.title = chip;
   // Session agent V3: the agent tells the stage and shows the progress; no separate pill while it does
   if (hasViewer && agentStatus(state, status, finished, stageTitle)) els.chip.hidden = true;
 
   if ((finished && rigged) || status === 'error') return 30000;
   return status === 'created' ? 4000 : 2500;
+}
+
+// The V3 stage comes as keys (stage_key, sub_key, stage_seconds) and is translated here (i18n v3_stage_* /
+// v3_sub_*), English when a key has no translation yet. The server's Russian stage_title is never shown.
+const V3_EN = {
+  intake: 'Intake', normalization: 'Normalizing', dispatch: 'Queuing in V3', pending_register: 'Registering the source',
+  pending_submit: 'Queuing in V3', queued: 'In the V3 queue', starting: 'Starting', source: 'Source', analysis: 'Analysis',
+  rig: 'Rig', retarget: 'Retarget', qa: 'Quality check', publish: 'Publishing', complete: 'Done', qa_review: 'Needs review',
+  generation: 'Generating the model', running: 'Processing', resuming: 'Resuming', retrying: 'Retrying after a failure',
+  source_registered: 'Source accepted', model_validation: 'Checking the model', failed: 'Failed',
+};
+const V3_SUB_EN = {
+  projections: 'projections', vision: 'Vision analysis', bones_and_weights: 'bones and weights', library_clips: 'animations',
+  numeric: 'numeric check', scale: 'scale', detect: 'reading the picture', waiting_3d_worker: 'waiting for a 3D worker',
+  hunyuan: 'Hunyuan 3D', turntable: 'turntable', ready: 'model ready', killed_retry: 'retry after a failure',
+};
+function keyText(prefix, key, en) {
+  const k = `${prefix}${key}`;
+  const t = tr(k);
+  return t !== k ? t : (en[key] || String(key).replace(/_/g, ' '));
+}
+function v3StageTitle(state) {
+  if (!state.stage_key) return '';
+  const parts = [keyText('v3_stage_', state.stage_key, V3_EN)];
+  if (state.sub_key) parts.push(keyText('v3_sub_', state.sub_key, V3_SUB_EN));
+  if (Number.isFinite(state.stage_seconds)) parts.push(tr('v3_seconds', { n: state.stage_seconds }).replace('v3_seconds', `${state.stage_seconds} s`));
+  return `V3 · ${parts.join(' · ')}`;
 }
 
 function showMissing() {

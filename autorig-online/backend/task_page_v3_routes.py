@@ -324,7 +324,8 @@ def _v3_state(task: Any, *, is_admin: bool) -> dict[str, Any]:
     viewer = v3_viewer(task, shell)
     return {
         "stage": str(shell.get("stage_id") or shell.get("stage") or status)[:80],
-        "stage_title": str(shell.get("stage") or "")[:120] or None,
+        "stage_title": str(shell.get("stage") or "")[:120] or None,       # legacy (Russian); use the keys below
+        "stage_key": shell.get("stage_key"), "sub_key": shell.get("sub_key"), "stage_seconds": shell.get("stage_seconds"),
         "status": status,
         "progress": progress,
         "queue": None,
@@ -423,6 +424,9 @@ async def build_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path,
         "status": part["status"],
         "stage": part["stage"],
         "stage_title": part["stage_title"],
+        "stage_key": part.get("stage_key"),
+        "sub_key": part.get("sub_key"),
+        "stage_seconds": part.get("stage_seconds"),
         "progress": round(1.0 if part["status"] == "done" else part["progress"], 4),
         "eta_s": part.get("eta_s"),
         "progress_basis": part.get("progress_basis"),
