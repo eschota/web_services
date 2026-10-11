@@ -132,6 +132,12 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   ключицы 80 %), в Idle 35 697 рёбер >4x при rig_check 311 → класс Rig path (как limb_in_body.left); 189af0b3 —
   китбаш-броня (7 613 вершин вне ядер), rig_check 58x RightArm|RightUpLeg — евклид-фолбэк на отдельных оболочках;
   геодезия там нейтральна. Класс остаётся открытым: нужен фит руки для сросшихся/позированных мешей (Limb Fable).
+- **Шея/голова (7552bcff, ferret)**: черновик `tools/patch_fastrig_neck.py` (Neck/Head по узкой полосе сечений) на
+  7552bcff давал 4x 70→24, но гейт 15:13 отклонил: boy 4x 8→30, knight 2x 121, chibi `neck_head_share` 0.13 (полоса
+  уходит в круглую голову) — **не установлен**, кейс `neck_trapezius` в корпусе (mt_stretch XFAIL, owner Skinning).
+  Хорёк 414→66 уже починен `on_centre` Rig path. Следующий шаг: ограничить полосу расширением черепа + guard по
+  пропорциям (Neck ≥ shoulder_top + 0.02 H, Head ≤ Neck + 0.12 H). Новые задачи на движке: skin-регрессий 0/7,
+  квадрупед-фит ×6 → orientation-агент.
 - **Блокер гейта**: `demon_four_arms_wings` (Multilimb) — XFAIL до деплоя `mt/multilimb.py`.
 
 ## Autotests · V3 — регрессионные автотесты и гейт релизов (2026-10-10 16:40 UTC, на проде)

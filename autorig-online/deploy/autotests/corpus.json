@@ -6121,10 +6121,6 @@
        "<=",
        2
       ]
-     },
-     "xfail": {
-      "reason": "until the hash-bound upright lands (case ahead of code)",
-      "owner": "Rig path · V3"
      }
     }
    ]
@@ -6153,10 +6149,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "neck-from-sections not installed yet; flips in the Skinning deploy",
-      "owner": "Skinning · V3"
      }
     },
     {
@@ -6181,7 +6173,7 @@
       ]
      },
      "xfail": {
-      "reason": "neck-from-sections not installed yet; flips in the Skinning deploy",
+      "reason": "the neck-from-sections fit (tools/patch_fastrig_neck.py, draft) regressed boy/knight/chibi in the gate and is not installed; the Neck sits in the trapezius, Look Around tears Head | Neck",
       "owner": "Skinning · V3"
      }
     },
@@ -6201,10 +6193,6 @@
        ">=",
        60
       ]
-     },
-     "xfail": {
-      "reason": "kind rig_stretch_file lands with the Skinning deploy",
-      "owner": "Skinning · V3"
      }
     }
    ]
