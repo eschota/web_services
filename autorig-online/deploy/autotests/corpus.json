@@ -5397,7 +5397,8 @@
        ">=",
        8
       ]
-     }
+     },
+     "tier": "extended"
     },
     {
      "id": "mt_stretch",
@@ -5420,7 +5421,8 @@
        0
       ]
      },
-     "note": "before the fix 15 588 / 32 757; after 2 124 / 12 607 (1.08 M vertices on a 205 k proxy)"
+     "note": "before the fix 15 588 / 32 757; after 2 124 / 12 607 (1.08 M vertices on a 205 k proxy)",
+     "tier": "extended"
     },
     {
      "id": "mt_bleed",
@@ -5439,7 +5441,8 @@
        3.0
       ]
      },
-     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
+     "tier": "extended"
     },
     {
      "id": "mt_cloth",
@@ -5454,7 +5457,8 @@
        1
       ]
      },
-     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)"
+     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)",
+     "tier": "extended"
     }
    ]
   },
