@@ -5833,10 +5833,6 @@
        ">=",
        5
       ]
-     },
-     "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "Animal clips · V3"
      }
     }
    ]
@@ -6002,10 +5998,6 @@
        ">=",
        5
       ]
-     },
-     "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "Animal clips · V3"
      }
     }
    ]
@@ -6043,10 +6035,6 @@
        ">=",
        5
       ]
-     },
-     "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "Animal clips · V3"
      }
     }
    ]
