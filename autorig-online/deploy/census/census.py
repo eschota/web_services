@@ -483,6 +483,17 @@ def record(con, out: dict, rev: str):
     con.commit()
 
 
+CHILD_MEM_GB = float(os.environ.get("CENSUS_CHILD_MEM_GB", "6"))
+
+
+def _child_limits():
+    """The child dies alone (MemoryError / signal) instead of the unit's OOM killer taking the parent too."""
+    import resource
+    lim = int(CHILD_MEM_GB * 2 ** 30)
+    resource.setrlimit(resource.RLIMIT_AS, (lim, lim))
+    os.nice(5)
+
+
 def pass1(limit=0, only_class="", stale=False, shas=None, order="popular"):
     con = db()
     rev = tools_rev()
@@ -513,15 +524,17 @@ def pass1(limit=0, only_class="", stale=False, shas=None, order="popular"):
             print(f"stop: {free:.0f} GB free < {MIN_DISK_GB}", flush=True)
             break
         t = time.time()
+        # recorded before the child runs: a model that takes the whole unit down is not retried in a loop
+        record(con, {"sha": sha, "rid": sha[:20], "status": "started"}, rev)
         try:
             p = subprocess.run([PY, "-P", __file__, "one", sha], capture_output=True, text=True,
-                               timeout=CHILD_TIMEOUT, cwd=str(MT_ROOT),
+                               timeout=CHILD_TIMEOUT, cwd=str(MT_ROOT), preexec_fn=_child_limits,
                                env={**os.environ, "PYTHONPATH": str(MT_ROOT), "OMP_NUM_THREADS": "2",
                                     "OPENBLAS_NUM_THREADS": "2", "MKL_NUM_THREADS": "2"})
             rid = sha[:20]
             try:
                 out = json.loads((RUNS / rid / "census.json").read_text())
-                if p.returncode and out.get("status") == "ok":
+                if out.get("status") == "started" or (p.returncode and out.get("status") == "ok"):
                     out.update(status="error", error=f"exit {p.returncode}: {(p.stderr or '')[-200:]}")
             except (OSError, ValueError):
                 out = {"sha": sha, "rid": rid, "status": "error",
@@ -631,7 +644,7 @@ def report(as_json=False, min_n=1):
     con = db()
     n_models = con.execute("SELECT COUNT(*) FROM models").fetchone()[0]
     rows = con.execute("SELECT c.sha, c.status, c.category, c.constitution, c.subject, c.verdict, c.worst, c.defects, "
-                       "c.rig_s, m.n_tasks, c.body_plan FROM census c JOIN models m ON m.sha = c.sha").fetchall()
+                       "c.rig_s, m.n_tasks, c.body_plan FROM census c JOIN models m ON m.sha = c.sha WHERE c.status != 'started'").fetchall()
     classes = {}
     tot = {"models": 0, "tasks": 0, "pass": 0, "error": 0}
     for sha, st, cat, cons, subj, verdict, worst, defects, rig_s, nt, plan in rows:
