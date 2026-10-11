@@ -544,6 +544,25 @@
    "what": "ferret, 13k, long body, low posture, head turned",
    "sha256": "66ae8dc4ffff8b3cec48585e9d27d7fdab76f57aef79d587553b185d5dc9c519",
    "bytes": 8283304
+  },
+  "7552bcff.model.glb": {
+   "source": "/srv/autorig/audits/neck-20261011/7552bcff.model.glb",
+   "task": "7552bcff",
+   "what": "muscular man (model.fbx, 156k): the Neck sat in the trapezius (83 % H), Head at the throat; Look Around tore Head | Neck 33x",
+   "sha256": "32b3a8107b0c138b25d4be6cbfd5bd773df29233cef7034dddb2ff5c2dbcbdbd",
+   "bytes": 11240476
+  },
+  "7552bcff.mt-before.glb": {
+   "source": "/srv/autorig/audits/neck-20261011/7552bcff.mt-before.glb",
+   "what": "the recorded rig before the neck-from-sections fit",
+   "sha256": "2123e7c83f51bc6b7120670b729ece1af35a4350bdbff0f1a4e765723d548d85",
+   "bytes": 14588596
+  },
+  "7552bcff.mt-before.rig.json": {
+   "source": "/srv/autorig/audits/neck-20261011/7552bcff.mt-before.rig.json",
+   "what": "its rig.json",
+   "sha256": "99021ef53c2fa17525cae84217589a6d273cff7c2c0408326c565b8e27b124af",
+   "bytes": 13859
   }
  },
  "profiles": {
@@ -934,16 +953,12 @@
        "==",
        0
       ],
-      "applied": [
-       "==",
-       0
-      ],
       "fit_ok": [
        "==",
        1
       ]
      },
-     "note": "2026-10-11 Rig path: Tripo template skeleton is 13 % H off the mesh -> rejected as a pose source (by design)"
+     "note": "2026-10-11 Rig path: Tripo template skeleton is 13 % H off the mesh -> rejected as a pose source (by design) | 2026-10-11 16:30 Limb stabilization V3: the control is that the Tripo template skin is NOT the pose source (source_skin 0); the mesh-only path (pose_trace) may turn the traced bent arms (owner order: V3 rigs posed bare meshes), so applied is no longer pinned to 0"
     },
     {
      "id": "mt_stretch",
@@ -6007,6 +6022,75 @@
       "outside": [
        "<=",
        5
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "neck_trapezius",
+   "cost": 3,
+   "defect": "Skinning V3 2026-10-11 (task 7552bcff): the biped Neck joint inside the trapezius mass and the Head at the throat; a head turn tears Head | Neck. Fix (installed 16:30 UTC): neck and head pivot from the narrow band of the body sections for oversized heads (tools/patch_fastrig_neck.py): rig_check 4x 70 -> 24.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "7552bcff.model.glb",
+     "params": {
+      "words": "muscular man"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       40
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       1500
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     },
+     "note": "2x 1386 before and after (dense 156k man: 2x edges sit in the feet / shins); the defect is the 4x neck tear: 70 -> 24"
+    },
+    {
+     "id": "before_neck_detector",
+     "kind": "rig_stretch_file",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "7552bcff.mt-before.glb",
+     "params": {
+      "rig_json": "7552bcff.mt-before.rig.json"
+     },
+     "thresholds": {
+      "sum_edges_over_4x": [
+       ">=",
+       60
       ]
      }
     }
