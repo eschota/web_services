@@ -2296,3 +2296,12 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `/srv/autorig/audits/serpent-20261011/stage/{serpent.py,rig_version.py}`; после зелёного гейта —
   `tools/rerig_version.py a315580101635000b6b6`. cat_quadruped_orient/mt_orient на проде → XFAIL (код orient не установлен).
 - **12:23 UTC: установлено** (`mt-deploy` PASS, `mt/serpent.py` 10f3fca5fe1e, RIG_VERSION v3.2026-10-11.5). 3a099711 перериган (ран a3155801…, версия v2): serpent, 19 костей + Jaw, 6 клипов, numeric QA 7/7, DEV 6694. `serpent_lamprey` снова PASS на проде и в Git (9c2fd8fd).
+
+## MT event loop hang — причина и фикс (2026-10-11 14:00 UTC, агент «Animation picker · V3»)
+
+- Цикл MT висел внутри `asyncio.create_subprocess_exec` (fork/exec Popen идёт в потоке цикла; при нехватке памяти cgroup и numpy в
+  to_thread дочерний процесс до exec стоял, весь API молчал). Фикс: `mt/spawn.py` — Popen в одном отдельном потоке, ожидание
+  ограничено `MT_SPAWN_TIMEOUT_S` (30 с → OSError, цикл живёт), reaper-потоки для «запустил и забыл»; все 21 вызов в 8 модулях
+  (v3_conveyor, kit, agent, classic_mirror, live_classic, joint_judge_service, admin_bot, admin_workspace_tools) переведены на
+  `_spawn.exec(...)`. Gate PASS, рестарт 14:01:32 UTC, API отвечает за мс. Новые запуски процессов — только через `mt.spawn.exec`.
+- После рестарта подхватились лёгкий/сжатый GLB вьювера (`view=2`): солдат 1,56 → 0,77 МБ по сети, декод в странице 4 мс (r8).
