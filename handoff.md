@@ -2508,3 +2508,20 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 - **Дальше**: запись сохранения проверена на копии рана и dry-раном с ключом (из браузера — только отказ посетителю);
   перескин после сдвига не делается; re-rig on open при новой RIG_VERSION сбросит ручные правки — переносить
   `rig.json.blueprint`; смещения для четвероногих; в сплите левая панель перекрывает край вида «спереди».
+
+### Ручные правки переживают re-rig, перескин, сплит (2026-10-11 23:00Z, MT `d671d55`, `unity/test` → `blueprint-r4-20261012`)
+
+- Версия из Blueprint помечена `manual` (строка в `rig/skin/index.json` и `rig.json.blueprint.manual`); история хранит
+  цели суставов (абсолютные головы в glTF-кадре модели) и смещения. `GET /api/mt/runs/{run}/blueprint` — состояние
+  (manual, history, `delta`, reskin_hint).
+- **Re-rig on open** (`mt/rerig_open.py`, mt-deploy PASS 22:55Z, `autorig-rerig-open` перезапущен): перед установкой читает
+  `rig.json.blueprint`; после re-rig (и arm_clearance) вызывает `rig_blueprint.reapply` — правки ложатся на новый скелет
+  новой версией `manual` (активной), версия re-rig остаётся в `rig/skin`. В запросе — поле `manual` (version / lost /
+  skipped / failed). Проверено на копии d2503457: save v9 → симуляция re-rig v10 → reapply v11 (суставы на целях, смещения
+  те же) → reskin v12 (9 с, 21 019 вершин).
+- **Перескин**: `POST /api/mt/runs/{run}/blueprint/reskin` (владелец/админ) — fastrig с закреплёнными суставами (движок
+  rebuild из skin_tools) поверх АКТИВНОЙ версии, клипы сохраняются, новая версия manual. Подсказка, если сустав сдвинут
+  > 3 % роста (`RESKIN_HINT_H`): кнопка с оранжевой точкой в левой панели чертежа + текст в тосте после сохранения.
+  Важно: `skin_tools op_reskin` берёт `base`, а не `active` — для правок Blueprint он не годится, поэтому свой вызов.
+- **Сплит**: три вида начинаются правее колонки инструментов (64 px, полоса под ней — тёмно-синяя), панель больше не
+  закрывает вид «спереди».
