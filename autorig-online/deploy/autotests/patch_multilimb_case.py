@@ -101,8 +101,13 @@ if not any(c["id"] == "demon_four_arms_wings" for c in doc["cases"]):
                   "along the chain, root blended into the trunk weights, chain seams split (weld_split); extra arms follow the "
                   "primary (offset), wings flap / idle, tail wags (options)",
         "checks": [
+            {"id": "mt_rig_control", "kind": "mt_rig_first", "paths": ["mt"], "input": "66ba97ba.upload.glb",
+             "params": {"words": "Female warrior with sword and armor"},
+             "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20]}},
+            {"id": "mt_multilimb_control", "kind": "multilimb_rig", "paths": ["mt"], "on": "mt_rig", "role": "control",
+             "thresholds": {"extra_chains": ["==", 0], "extra_bones": ["==", 0], "wings": ["==", 0], "use": ["==", 0]}},
             {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "0d39aaba.upload.glb",
-             "params": {"words": "red demon with four arms and wings", "forward_axis": "+z", "v3_bound": True},
+             "params": {"words": "red armored bat-dragon demon with four arms and wings", "forward_axis": "+z", "v3_bound": True},
              "thresholds": {"seconds": ["<=", 60], "bones": [">=", 40], "clips": [">=", 8], "body_plan": ["==", "biped"]}},
             {"id": "mt_multilimb", "kind": "multilimb_rig", "paths": ["mt"], "on": "mt_rig",
              "thresholds": {"use": ["==", 1], "arms": ["==", 4], "arm_pairs": ["==", 2], "wings": ["==", 2],
@@ -117,15 +122,11 @@ if not any(c["id"] == "demon_four_arms_wings" for c in doc["cases"]):
                                  "leading edge: the seam split leaves torn edges under the library clips (Walking: tear > 30, "
                                  "share > 0.006); Idle passes. Local 2026-10-11: 1 of 8 clips pass",
                        "owner": "Multi-limb rig · V3"}},
-            {"id": "mt_rig_control", "kind": "mt_rig_first", "paths": ["mt"], "input": "66ba97ba.upload.glb",
-             "params": {"words": "Female warrior with sword and armor"},
-             "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20]}},
-            {"id": "mt_multilimb_control", "kind": "multilimb_rig", "paths": ["mt"], "on": "mt_rig", "role": "control",
-             "thresholds": {"extra_chains": ["==", 0], "extra_bones": ["==", 0], "wings": ["==", 0]}},
         ],
         "note": "v3_bound: the orientation refiner reads this model as upside down (\"two feet at the high end\": the wing "
                 "tips) and would turn it; the conveyor's hash-bound V3 source is left alone, so is the case (a case for the "
-                "orientator: see lying_upright). The control: a plain biped (the warrior) gets no extra chain. Known gaps: "
+                "orientator: see lying_upright). The control runs FIRST (checks share one run dir): a plain biped (the warrior) "
+                "gets no extra chain. Extra chains need a second opinion (words / Vision) past the geometry: require=confirmed. Known gaps: "
                 "fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."})
     changed = True
 # warrior_sword_posed/mt_pose_fit: asserts Limb stabilization's stage_traced, which is NOT installed on production

@@ -260,9 +260,14 @@ def cmd_clip(args) -> int:
         if len(mesh.faces) < 20:
             raise RuntimeError("no geometry")
         yaw, _fwd = facing_yaw(R, mesh)
+        # heavy models: fewer, smaller frames, so the clip fits CLIP_TIMEOUT_S; the clip stays 4 s long
+        n_faces = len(mesh.faces)
+        n_frames, size = ((24, 448) if n_faces > 250_000 else (36, 512) if n_faces > 80_000
+                          else (CLIP_FRAMES, CLIP_RENDER))
+        fps = max(6, round(n_frames / 4))
         frames = []
-        for i in range(CLIP_FRAMES):
-            cam = R.persp_camera(mesh.positions, size=CLIP_RENDER, yaw=yaw, azimuth=-40.0 + 360.0 * i / CLIP_FRAMES,
+        for i in range(n_frames):
+            cam = R.persp_camera(mesh.positions, size=size, yaw=yaw, azimuth=-40.0 + 360.0 * i / n_frames,
                                  name="persp")
             view = R.render_view(mesh, cam)
             lit = np.asarray(R.lit_png(view), dtype=np.uint8)[..., :3]
@@ -284,7 +289,7 @@ def cmd_clip(args) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(f".{out.stem}.{os.getpid()}.mp4")
         cmd = ["nice", "-n", "19", "ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-               "-s", f"{W}x{H}", "-r", str(CLIP_FPS), "-i", "-", "-vf", "scale=540:960:flags=area",
+               "-s", f"{W}x{H}", "-r", str(fps), "-i", "-", "-vf", "scale=540:960:flags=area",
                "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-pix_fmt", "yuv420p", "-profile:v", "high",
                "-threads", "1", "-movflags", "+faststart", "-an", "-f", "mp4", str(tmp)]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -301,7 +306,7 @@ def cmd_clip(args) -> int:
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"state": "failed", "reason": f"{type(exc).__name__}: {exc}"[:300], "task": args.task}))
         return 3
-    print(json.dumps({"state": "ok", "task": args.task, "env": env, "bytes": out.stat().st_size,
+    print(json.dumps({"state": "ok", "task": args.task, "env": env, "bytes": out.stat().st_size, "frames": n_frames,
                       "seconds": round(time.time() - t0, 2)}))
     return 0
 
