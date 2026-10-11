@@ -23,7 +23,7 @@
   "tab_upload": "آپلود فایل",
   "tab_link": "چسباندن لینک",
   "upload_title": "مدل سه‌بعدی خود را اینجا رها کنید",
-  "upload_subtitle": "یا برای انتخاب فایل کلیک کنید (GLB، FBX، OBJ تا ۱۰۰ مگابایت)",
+  "upload_subtitle": "یا برای انتخاب کلیک کنید: GLB، FBX، OBJ همراه MTL و بافت‌ها، glTF، ZIP · تا ۱۰۰ مگابایت",
   "upload_selected": "فایل انتخاب‌شده",
   "upload_progress_uploading": "در حال آپلود مدل…",
   "upload_progress_creating_task": "در حال ساخت تسک…",
@@ -734,7 +734,7 @@
   "error_task_create_duplicate_recent": "لطفاً کمی صبر کنید و بعد دوباره همین تسک را بسازید.",
   "error_generation_start": "ساخت شروع نشد. لطفاً دوباره تلاش کنید.",
   "error_one_model_per_task": "هر تسک ریگ فقط یک مدل دارد — از فایل اول شروع می‌کنیم. برای ساخت چند تسک با هم، تصویر رها کنید.",
-  "error_select_model_file": "لطفاً یک مدل GLB، FBX یا OBJ انتخاب کنید — یا یک تصویر PNG/JPG/WEBP رها کنید تا از روی آن کاراکتر ساخته شود.",
+  "error_select_model_file": "یک مدل سه‌بعدی انتخاب کنید: GLB، FBX، OBJ (همراه MTL و بافت‌ها)، glTF یا ZIP شامل مدل و بافت‌ها. یک تصویر تنها، ساخت شخصیت از تصویر را آغاز می‌کند.",
   "error_network": "مشکل در اتصال. اینترنت خود را بررسی کنید و دوباره تلاش کنید.",
   "image_gen_status_uploading": "در حال آپلود و تشخیص کاراکتر...",
   "image_gen_status_signing_in": "در حال ورود...",
@@ -1012,5 +1012,8 @@
   "v3_sub_turntable": "چرخش مدل",
   "v3_sub_ready": "مدل آماده است",
   "v3_sub_killed_retry": "تلاش دوباره پس از خطا",
-  "v3_seconds": "{n} ث"
+  "v3_seconds": "{n} ث",
+  "error_unsupported_format": "این قالب فایل پشتیبانی نمی‌شود. GLB، FBX، OBJ، glTF یا ZIP شامل مدل را بارگذاری کنید.",
+  "error_zip_without_model": "در ZIP هیچ مدل سه‌بعدی (GLB، glTF، FBX یا OBJ) نیست.",
+  "error_invalid_model": "فایل مدل آسیب‌دیده یا ناقص است. لطفاً دوباره آن را خروجی بگیرید."
 }

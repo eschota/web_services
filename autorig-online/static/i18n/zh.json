@@ -23,7 +23,7 @@
   "tab_upload": "上传文件",
   "tab_link": "粘贴链接",
   "upload_title": "将3D模型拖拽到此处",
-  "upload_subtitle": "GLB、FBX、OBJ最高100MB",
+  "upload_subtitle": "或点击选择：GLB、FBX、带 MTL 和贴图的 OBJ、glTF、ZIP · 最大 100 MB",
   "upload_selected": "已选择文件",
   "upload_progress_uploading": "正在上传模型…",
   "upload_progress_creating_task": "正在创建任务…",
@@ -550,7 +550,7 @@
   "error_task_create_duplicate_recent": "请稍候再重复创建相同的任务。",
   "error_generation_start": "无法开始生成，请重试。",
   "error_one_model_per_task": "每个绑定任务只能处理一个模型——将从第一个文件开始。拖入图片可一次创建多个任务。",
-  "error_select_model_file": "请选择 GLB、FBX 或 OBJ 模型——或拖入 PNG/JPG/WEBP 图片，由它生成角色。",
+  "error_select_model_file": "请选择 3D 模型：GLB、FBX、OBJ（含 MTL 和贴图）、glTF，或包含模型和贴图的 ZIP。只拖入图片则会根据图片生成角色。",
   "error_network": "网络连接出现问题。请检查网络后重试。",
   "image_gen_status_uploading": "正在上传并识别角色...",
   "image_gen_status_signing_in": "正在登录...",
@@ -1002,5 +1002,8 @@
   "v3_sub_turntable": "转台展示",
   "v3_sub_ready": "模型就绪",
   "v3_sub_killed_retry": "失败后重试",
-  "v3_seconds": "{n} 秒"
+  "v3_seconds": "{n} 秒",
+  "error_unsupported_format": "不支持此文件格式。请上传 GLB、FBX、OBJ、glTF 或包含模型的 ZIP。",
+  "error_zip_without_model": "ZIP 中没有 3D 模型（GLB、glTF、FBX 或 OBJ）。",
+  "error_invalid_model": "模型文件已损坏或不完整，请重新导出。"
 }

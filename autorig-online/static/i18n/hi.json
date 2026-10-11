@@ -23,7 +23,7 @@
   "tab_upload": "फाइल अपलोड करें",
   "tab_link": "लिंक पेस्ट करें",
   "upload_title": "3D मॉडल को यहां खींचें",
-  "upload_subtitle": "GLB, FBX, OBJ अधिकतम 100MB",
+  "upload_subtitle": "या चुनने के लिए क्लिक करें: GLB, FBX, MTL और टेक्सचर के साथ OBJ, glTF, ZIP · 100 MB तक",
   "upload_selected": "चयनित फाइल",
   "upload_progress_uploading": "मॉडल अपलोड हो रहा है…",
   "upload_progress_creating_task": "कार्य बनाया जा रहा है…",
@@ -550,7 +550,7 @@
   "error_task_create_duplicate_recent": "कृपया वही टास्क दोबारा बनाने से पहले थोड़ा रुकें।",
   "error_generation_start": "जनरेशन शुरू नहीं हो सका। कृपया फिर कोशिश करें।",
   "error_one_model_per_task": "हर रिग टास्क में एक मॉडल — पहली फ़ाइल से शुरू कर रहे हैं। एक साथ कई टास्क बनाने के लिए इमेज छोड़ें।",
-  "error_select_model_file": "कृपया GLB, FBX या OBJ मॉडल चुनें — या उससे कैरेक्टर बनाने के लिए PNG/JPG/WEBP चित्र छोड़ें।",
+  "error_select_model_file": "एक 3D मॉडल चुनें: GLB, FBX, OBJ (उसके MTL और टेक्सचर के साथ), glTF या मॉडल और टेक्सचर वाला ZIP। केवल एक चित्र देने पर उससे किरदार बनता है।",
   "error_network": "कनेक्शन में समस्या है। अपना इंटरनेट जाँचें और फिर कोशिश करें।",
   "image_gen_status_uploading": "अपलोड करके कैरेक्टर पहचाना जा रहा है...",
   "image_gen_status_signing_in": "साइन इन हो रहा है...",
@@ -1002,5 +1002,8 @@
   "v3_sub_turntable": "घूमता दृश्य",
   "v3_sub_ready": "मॉडल तैयार",
   "v3_sub_killed_retry": "विफलता के बाद पुनः प्रयास",
-  "v3_seconds": "{n} से"
+  "v3_seconds": "{n} से",
+  "error_unsupported_format": "यह फ़ाइल फ़ॉर्मेट समर्थित नहीं है। GLB, FBX, OBJ, glTF या मॉडल वाला ZIP अपलोड करें।",
+  "error_zip_without_model": "ZIP में कोई 3D मॉडल (GLB, glTF, FBX या OBJ) नहीं है।",
+  "error_invalid_model": "मॉडल फ़ाइल क्षतिग्रस्त या अधूरी है। कृपया उसे फिर से एक्सपोर्ट करें।"
 }

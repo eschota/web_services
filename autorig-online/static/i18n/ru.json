@@ -23,7 +23,7 @@
   "tab_upload": "Загрузить файл",
   "tab_link": "Вставить ссылку",
   "upload_title": "Перетащите 3D модель сюда",
-  "upload_subtitle": "или нажмите для выбора (GLB, FBX, OBJ до 100МБ)",
+  "upload_subtitle": "или нажмите для выбора: GLB, FBX, OBJ с MTL и текстурами, glTF, ZIP · до 100 МБ",
   "upload_selected": "Выбранный файл",
   "upload_progress_uploading": "Загрузка модели…",
   "upload_progress_creating_task": "Создаём задачу…",
@@ -734,7 +734,7 @@
   "error_task_create_duplicate_recent": "Подождите немного, прежде чем создавать ту же задачу снова.",
   "error_generation_start": "Не удалось запустить генерацию. Попробуйте ещё раз.",
   "error_one_model_per_task": "Одна модель — одна задача риггинга: начинаем с первого файла. Чтобы создать несколько задач сразу, перетащите изображения.",
-  "error_select_model_file": "Выберите модель GLB, FBX или OBJ — или перетащите картинку PNG/JPG/WEBP, чтобы сгенерировать по ней персонажа.",
+  "error_select_model_file": "Выберите 3D-модель: GLB, FBX, OBJ (с MTL и текстурами), glTF или ZIP с моделью и текстурами. Одна картинка запускает создание персонажа по изображению.",
   "error_network": "Проблема с соединением. Проверьте интернет и попробуйте снова.",
   "image_gen_status_uploading": "Загружаем и распознаём персонажа...",
   "image_gen_status_signing_in": "Выполняем вход...",
@@ -1219,5 +1219,8 @@
   "v3_sub_turntable": "оборот модели",
   "v3_sub_ready": "модель готова",
   "v3_sub_killed_retry": "повтор после сбоя",
-  "v3_seconds": "{n} с"
+  "v3_seconds": "{n} с",
+  "error_unsupported_format": "Этот формат не поддерживается. Загрузите GLB, FBX, OBJ, glTF или ZIP с моделью.",
+  "error_zip_without_model": "В ZIP нет 3D-модели (GLB, glTF, FBX или OBJ).",
+  "error_invalid_model": "Файл модели повреждён или неполон. Экспортируйте его заново."
 }

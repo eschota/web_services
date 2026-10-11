@@ -23,7 +23,7 @@
   "tab_upload": "Upload File",
   "tab_link": "Paste Link",
   "upload_title": "Drop your 3D model here",
-  "upload_subtitle": "or click to browse (GLB, FBX, OBJ up to 100MB)",
+  "upload_subtitle": "or click to browse: GLB, FBX, OBJ with MTL and textures, glTF, ZIP · up to 100 MB",
   "upload_selected": "Selected file",
   "upload_progress_uploading": "Uploading your model…",
   "upload_progress_creating_task": "Creating your task…",
@@ -734,7 +734,7 @@
   "error_task_create_duplicate_recent": "Please wait before creating the same task again.",
   "error_generation_start": "Generation could not start. Please try again.",
   "error_one_model_per_task": "One model per rig task — starting with the first file. Drop images to create several tasks at once.",
-  "error_select_model_file": "Please select a GLB, FBX or OBJ model — or drop a PNG/JPG/WEBP picture to generate a character from it.",
+  "error_select_model_file": "Choose a 3D model: GLB, FBX, OBJ (with its MTL and textures), glTF or a ZIP with the model and its textures. A picture alone starts a character from an image.",
   "error_network": "Connection problem. Check your internet connection and try again.",
   "image_gen_status_uploading": "Uploading and detecting the character...",
   "image_gen_status_signing_in": "Signing you in...",
@@ -1207,5 +1207,8 @@
   "v3_sub_turntable": "turntable",
   "v3_sub_ready": "model ready",
   "v3_sub_killed_retry": "retry after a failure",
-  "v3_seconds": "{n} s"
+  "v3_seconds": "{n} s",
+  "error_unsupported_format": "This file format is not supported. Upload GLB, FBX, OBJ, glTF or a ZIP with the model.",
+  "error_zip_without_model": "The ZIP has no 3D model inside (GLB, glTF, FBX or OBJ).",
+  "error_invalid_model": "The model file is damaged or incomplete. Please export it again."
 }

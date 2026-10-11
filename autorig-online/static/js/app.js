@@ -316,6 +316,13 @@ const App = {
             login_required: 'error_login_required',
             payment_required: 'error_payment_required',
             upload_too_large: 'error_upload_too_large',
+            // V3 intake (v3_intake.V3IntakeError codes)
+            unsupported_format: 'error_unsupported_format',
+            v3_upload_required: 'error_select_model_file',
+            invalid_zip: 'error_zip_without_model',
+            zip_without_model: 'error_zip_without_model',
+            invalid_glb: 'error_invalid_model',
+            fbx_unreadable: 'error_fbx_unreadable',
         };
         if (code && CODE_KEYS[code]) {
             return translatedOr(CODE_KEYS[code], generic());
@@ -1480,18 +1487,54 @@ const App = {
     handleFilesSelected(fileList) {
         const files = Array.from(fileList || []);
         if (!files.length) return;
-        const isImage = (f) => ['.png', '.jpg', '.jpeg', '.webp']
-            .includes('.' + String(f.name).split('.').pop().toLowerCase());
-        const images = files.filter(isImage);
-        const models = files.filter((f) => !isImage(f));
-        if (images.length) {
-            this.routeImageToGeneration(images);
+        const ext = (f) => '.' + String(f.name).split('.').pop().toLowerCase();
+        const models = files.filter((f) => this.V3_MODEL_EXTS.includes(ext(f)));
+        // Upload V3: pictures alone are the image -> character flow; pictures dropped together with a model are its
+        // textures and travel with it.
+        if (!models.length) {
+            const images = files.filter((f) => ['.png', '.jpg', '.jpeg', '.webp'].includes(ext(f)));
+            if (images.length === files.length) {
+                this.routeImageToGeneration(images);
+                return;
+            }
+            alert(t('error_select_model_file'));
             return;
         }
         if (models.length > 1) {
             alert(t('error_one_model_per_task'));
+            return;
+        }
+        const companions = files.filter((f) => f !== models[0] && this.V3_COMPANION_EXTS.includes(ext(f)));
+        if (companions.length || ext(models[0]) === '.gltf') {
+            this.packModelWithCompanions(models[0], companions)
+                .then((zip) => this.handleFileSelect(zip))
+                .catch((err) => { console.error('ZIP packing failed:', err); alert(t('error_generic')); });
+            return;
         }
         this.handleFileSelect(models[0]);
+    },
+
+    // Every mesh format the V3 intake accepts (v3_intake.sniff_format: GLB, FBX binary/ASCII, OBJ, ZIP with a model
+    // and its textures; a .gltf travels in a ZIP with its .bin and images).
+    V3_MODEL_EXTS: ['.glb', '.gltf', '.fbx', '.obj', '.zip'],
+    V3_COMPANION_EXTS: ['.mtl', '.bin', '.png', '.jpg', '.jpeg', '.webp', '.tga', '.bmp', '.tif', '.tiff', '.dds', '.exr', '.hdr', '.ktx2'],
+
+    async packModelWithCompanions(model, companions) {
+        if (!window.JSZip) {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+        const zip = new window.JSZip();
+        zip.file(model.name, model);
+        companions.forEach((f) => zip.file(f.name, f));
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 4 } });
+        const stem = String(model.name).replace(/\.[^.]+$/, '') || 'model';
+        return new File([blob], `${stem}.zip`, { type: 'application/zip' });
     },
 
     async startBatchGeneration(files, say, sayCreated) {
@@ -1545,7 +1588,7 @@ const App = {
         if (this.state.taskSubmitInProgress) {
             return;
         }
-        const allowedExtensions = ['.glb', '.fbx', '.obj'];
+        const allowedExtensions = this.V3_MODEL_EXTS;
         const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
         const ext = '.' + file.name.split('.').pop().toLowerCase();
 
@@ -1656,23 +1699,13 @@ const App = {
         const isUpload = busyMode === 'upload';
         this.setConvertFormBusy(true, busyMode);
 
+        // Upload V3 (owner 2026-10-11): no rig-type window. The file goes straight to a V3 task; the session agent
+        // chooses the body plan (biped, quadruped, serpent, multi-limb, prop …) by itself.
         const overlay = document.getElementById('convert-form-busy');
         const rigLayout = document.getElementById('rig-detect-layout');
-        const viewerHost = document.getElementById('rig-detect-viewer-host');
         const rigCloud = document.getElementById('rig-detect-cloud');
         const rigReview = document.getElementById('rig-detect-review');
-
-        overlay?.classList.add('form-busy--rig-detect');
-        document.body.classList.add('rig-detect-modal-open');
-        const rigScrimEl = document.getElementById('rig-detect-scrim');
-        rigScrimEl?.classList.remove('hidden');
-        rigScrimEl?.setAttribute('aria-hidden', 'false');
-        rigLayout?.classList.remove('hidden');
-        rigCloud?.classList.add('hidden');
-        rigReview?.classList.add('hidden');
-        overlay?.classList.remove('rig-detect--review-phase');
-        this.refreshRigDetectViewerTitle('analyze');
-        this.bindRigDetectModalWidthSync();
+        rigLayout?.classList.add('hidden');
 
         // Disable button (visible on link tab)
         if (startBtn) {
@@ -1682,41 +1715,8 @@ const App = {
 
         let detectionDispose = () => {};
         try {
-            this.setConvertFormBusyMessage('upload_rig_detect_analyzing');
-            this.setConvertFormUploadProgress(null);
-            const sourceInfo = isUpload
-                ? {
-                    file: this.state.selectedFile,
-                    ext: '.' + String(this.state.selectedFile?.name || '').split('.').pop().toLowerCase()
-                }
-                : {
-                    url: linkVal,
-                    ext: '.' + String(linkVal || '').split('?')[0].split('#')[0].split('.').pop().toLowerCase()
-                };
-            const { detection, dispose: dDispose } = await this.runHiddenAnimalDetection(sourceInfo, { viewerHost: viewerHost || null });
-            detectionDispose = dDispose;
-
-            let selectedRigKey = this.rigDetectReviewInitialKey(detection);
-            if (detection) {
-                selectedRigKey = await this.waitRigDetectReview(detection, selectedRigKey);
-            }
-            detectionDispose();
-            detectionDispose = () => {};
-
-            rigLayout?.classList.add('hidden');
-            overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
-            document.body.classList.remove('rig-detect-modal-open');
-            const rigScrimDone = document.getElementById('rig-detect-scrim');
-            rigScrimDone?.classList.add('hidden');
-            rigScrimDone?.setAttribute('aria-hidden', 'true');
-            rigReview?.classList.add('hidden');
-            rigCloud?.classList.add('hidden');
-
-            if (detection) {
-                this.applyRigSelectionToFormData(formData, detection, selectedRigKey);
-            }
-
-            const rigProfileKey = this.getTaskCreateRigProfileKey(selectedRigKey);
+            formData.append('pipeline', 'v3');
+            const rigProfileKey = 'v3';
             const inputFp = this.getTaskCreateInputFingerprint(isUpload, this.state.selectedFile, linkVal);
             const dedupeKey = `${busyMode}|${inputFp}|${rigProfileKey}`;
             if (this.isTaskCreateDeduped(dedupeKey)) {
