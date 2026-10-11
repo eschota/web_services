@@ -1,0 +1,40 @@
+{
+  "schema": "autorig.hair-dataset-plan/1",
+  "status": "planned-not-a-generated-dataset",
+  "created_local_date": "2026-10-12",
+  "training_started": false,
+  "target_pairs": 72,
+  "construction": "12 hairstyle families x 3 independent authored heads x 2 material variants",
+  "families": [
+    "short_side_part", "curtains", "asymmetric_fringe", "bob",
+    "long_straight", "wavy_layers", "curly_volume", "single_ponytail",
+    "twin_tails", "braids", "buzzcut_spikes", "bun"
+  ],
+  "head_variants": ["adult_oval", "adult_broad", "stylized_long"],
+  "material_variants": ["dark_warm", "light_cool"],
+  "negative_controls": ["bald", "hat_no_visible_hair"],
+  "stress_cases": [
+    "fused_hair_and_face", "separate_alpha_cards", "ear_occlusion",
+    "headphones", "hair_clips", "hood", "nonhuman_ears",
+    "shoulder_contact", "transparent_light_tips"
+  ],
+  "rights_policy": {
+    "initial_sources": ["original_authored", "explicit_commercial_training_permission"],
+    "customer_uploads": "regression-only unless explicit training consent is recorded",
+    "provided_game_screenshots": "art-direction references, not extracted training assets"
+  },
+  "split_group_key": ["original_character_id", "original_hairstyle_id"],
+  "never_split_only_by": ["view", "seed", "color_variant"],
+  "required_outputs_per_accepted_case": [
+    "source_head", "hair_mesh", "bald_head", "scalp_mask", "root_map",
+    "exclusion_masks", "guide_curves", "registered_cameras",
+    "lit", "albedo", "normal", "metric_depth", "coverage",
+    "triangle_id", "object_id", "material_id", "part_id",
+    "uv_atlas", "lods", "rig", "dynamics_manifest", "qa_report",
+    "source_sha256", "artifact_sha256", "prompt_seed_provider_versions", "rights_receipt"
+  ],
+  "reference_camera": {"projection":"perspective", "focal_length_mm":50, "view":"above-side-three-quarter"},
+  "reconstruction_cameras": {"projection":"orthographic", "views":["front","back","left","right","top","bottom-oblique-if-needed"], "resolution_choices":[256,512]},
+  "quality_gate": "see static/docs/hair-lab/research.md; generated images are not coherent 3D ground truth",
+  "concept_requests": ["concepts/short-part.request.json", "concepts/long-layers.request.json"]
+}

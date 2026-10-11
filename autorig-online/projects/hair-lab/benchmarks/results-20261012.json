@@ -1,0 +1,46 @@
+{
+  "scope": "Synthetic Hair Lab geometry kernels only; not end-to-end hair reconstruction or a quality result.",
+  "observed_utc": "2026-10-11T22:48:17Z",
+  "seed": 20261012,
+  "repeats_per_case": 25,
+  "runtime": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "driver": "610.88",
+    "pytorch": "2.11.0+cu130",
+    "cuda": "13.0",
+    "python": "3.13.12",
+    "cpu": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
+    "logical_cpu_count": 32,
+    "torch_cpu_threads": 16,
+    "gpu_free_mib_before": 6214,
+    "gpu_utilization_percent_before": 19,
+    "cuda_peak_allocated_bytes": 168169984,
+    "cuda_peak_reserved_bytes": 255852544
+  },
+  "source": {
+    "branch": "codex/repair-rig-transport-20261006",
+    "commit_at_run": "6c49af7492c0dfb32232c2f928bee8f8ab85d084",
+    "benchmark_sha256": "3cb2279c6292a3f82f5ad44892d2b9793dba82ab07cff24d94fbd60862b7365f",
+    "raw_result_sha256": "6f5b1dfc67f8a772c7a2e84bbca53bbf5849078954fc0ce2de353a47d9db7018"
+  },
+  "validation": {
+    "passed": true,
+    "visual_hull_equal_cpu_cuda": true,
+    "surface_equal_cpu_cuda": true,
+    "ribbon_vertices_allclose": true,
+    "ribbon_vertex_max_abs_error": 5.960464477539063e-8,
+    "triangle_indices_equal": true,
+    "vertices_finite": true,
+    "triangle_indices_in_range": true
+  },
+  "visual_hull": [
+    {"resolution": 128, "voxels": 2097152, "working_output_bytes": 4194304, "occupied": 507374, "surface": 29330, "cpu_p50_ms": 1.5643, "cpu_p90_ms": 1.7493, "cuda_p50_ms": 0.2718, "cuda_p90_ms": 0.49244},
+    {"resolution": 192, "voxels": 7077888, "working_output_bytes": 14155776, "occupied": 1724872, "surface": 66540, "cpu_p50_ms": 4.6851, "cpu_p90_ms": 5.0116, "cuda_p50_ms": 0.2753, "cuda_p90_ms": 0.53324},
+    {"resolution": 256, "voxels": 16777216, "working_output_bytes": 33554432, "occupied": 4104686, "surface": 118698, "cpu_p50_ms": 11.7886, "cpu_p90_ms": 12.41102, "cuda_p50_ms": 0.4218, "cuda_p90_ms": 0.64348}
+  ],
+  "guide_ribbons": [
+    {"guides": 100, "samples_per_guide": 16, "segments_per_guide": 15, "vertices": 3200, "triangles": 3000, "output_bytes": 110400, "cpu_p50_ms": 0.4737, "cpu_p90_ms": 0.4953, "cuda_p50_ms": 1.2488, "cuda_p90_ms": 1.63234},
+    {"guides": 500, "samples_per_guide": 16, "segments_per_guide": 15, "vertices": 16000, "triangles": 15000, "output_bytes": 552000, "cpu_p50_ms": 1.4623, "cpu_p90_ms": 1.6371, "cuda_p50_ms": 1.0686, "cuda_p90_ms": 1.48862},
+    {"guides": 2000, "samples_per_guide": 16, "segments_per_guide": 15, "vertices": 64000, "triangles": 60000, "output_bytes": 2208000, "cpu_p50_ms": 3.0976, "cpu_p90_ms": 3.667, "cuda_p50_ms": 1.1537, "cuda_p90_ms": 1.53868}
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "autorig.hair-concepts/1",
+  "status": "images_generated_visual_direction_not_3d_ground_truth",
+  "review": "Both images inspected. Hair silhouettes readable, but shading and strand detail are smoother than the requested coarse 2000s cards. Owner acceptance pending.",
+  "generation_method": "existing farm Qwen image generate API, no paid provider",
+  "entries": [
+    {
+      "id": "short_part_01",
+      "request": "short-part.request.json",
+      "seed": 121001,
+      "checkpoint": "qwen_image_2.1_int8_convrot.safetensors",
+      "render_job_id": "de508978-2d7b-4d12-b019-7f17db26abf9",
+      "worker": "f12",
+      "status": "completed",
+      "render_seconds": 12.7,
+      "queue_seconds": 20.108,
+      "url": "https://autorig.online/renderfin/render/default_user/de508978-2d7b-4d12-b019-7f17db26abf9.png",
+      "sha256": "ff8457ff6f6fa37e02d8c7da8e56f3afc9283f50fb258dd0f7be92e1025aa73f"
+    },
+    {
+      "id": "long_layers_01",
+      "request": "long-layers.request.json",
+      "seed": 121002,
+      "checkpoint": "qwen_image_2.1_int8_convrot.safetensors",
+      "render_job_id": "bf6fddaa-af19-4634-af98-413159f81afe",
+      "worker": "worker-4090",
+      "status": "completed",
+      "render_seconds": 6.2,
+      "queue_seconds": 6.733,
+      "server_prompt_suffix": "She wears a teasing smirk.",
+      "url": "https://autorig.online/renderfin/render/default_user/bf6fddaa-af19-4634-af98-413159f81afe.png",
+      "sha256": "e489af6f3eb20c33e5c11c3b42257eb62487820ab172177eee62030f7ba94195"
+    }
+  ]
+}

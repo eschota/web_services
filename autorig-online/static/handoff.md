@@ -1,13 +1,13 @@
 # AutoRig V3 — live development handoff
 
-Updated: **2026-10-12 05:40 Asia/Novosibirsk**<br>
-Production snapshot: **2026-10-11 22:40 UTC**
+Updated: **2026-10-12 06:05 Asia/Novosibirsk**<br>
+Fleet snapshot: **2026-10-11 22:40 UTC** (point-in-time, recheck before operating)
 
 This is the public coordination checkpoint for AutoRig development. It contains current production facts, active work and the next tasks. It deliberately contains no credentials, private customer data, internal network addresses or licensed assets.
 
 ## Product direction
 
-AutoRig is moving to one V3 task flow. One task owns one viewer and one session agent. The input can be a 3D mesh, image, video or text. The session agent selects tools for analysis, generation, rigging, skinning, retargeting, QA, scene presentation and export. Astra coordinates service-wide work; the session agent stays responsible for one task.
+AutoRig is moving to one V3 task flow. One task owns one viewer and one session agent. The input can be a 3D mesh, image, video or text. The session agent selects tools for analysis, generation, rigging, skinning, retargeting, QA, scene presentation and export. Astra is the planned service coordinator, but **its runner/gateway/admin bot are stopped by the owner's cost-control order**. Do not restart or route work to Astra until that order changes. The session agent stays responsible for one task.
 
 The task must become interactive quickly. The target from worker pickup to an animated rig in the viewer is **60 seconds**. Heavy QA, exports, preview videos and other optional results continue in the background and report progress to the same task.
 
@@ -17,7 +17,7 @@ The task must become interactive quickly. The target from worker pickup to an an
 |---|---|---|
 | Task page | **Live on V3 for all web task opens** | `/api/task-page/live` reports `mode=all`. Telegram WebApp routing is still disabled in that live switch. |
 | Intake | **V3-only direction is active** | New rig work is routed to V3; old completed tasks remain accessible. Format coverage and retry paths still require regression checks. |
-| Viewer | **Live, actively developed** | Current viewer shows the mesh, rig, clips, processing stages, scenes and the session-agent UI. Blueprint bone editing and clean capture mode remain in progress. |
+| Viewer | **Live, actively developed** | Current viewer shows the mesh, rig, clips, processing stages, scenes and the session-agent UI. The Blueprint owner reports bone editing/save and capture mode live in the 22:45 UTC checkpoint; their continued QA remains separate from this documentation release. |
 | Rig and skin | **Working, quality work continues** | Humanoid, multi-limb and serpent paths exist. Geodesic skinning, leg fitting, joint judging and numeric QA are installed, but clothing, hair, posed inputs and unusual proportions still produce open regressions. |
 | Live progress | **Working** | The viewer receives source, analysis, voxel, skeleton, weight, retarget, QA and publication events when a stage produces them. |
 | Fleet | **Degraded at this snapshot** | Public fleet status reported new tasks paused, no converter immediately able to accept work, 1 Renderfin job pending, 3 rendering and 5 converter jobs queued. Several V3-capable nodes were online, but converter admission was blocked. Recheck the live API before acting. |
@@ -31,7 +31,7 @@ Live machine-readable status:
 
 ## Work in progress
 
-- **Blueprint viewer:** manual joint editing, saved rig versions, retarget offsets, compact UI and clean preview capture from the real V3 viewer.
+- **Blueprint viewer:** manual joint editing/save and capture mode reported live; continue regression QA of retarget offsets, saved rig versions and clean preview capture.
 - **Rig quality:** fix open regression classes for shoulders, elbows, feet, short/stubby legs, posed characters, props, clothing layers and asymmetric meshes. Every bad model becomes a repeatable corpus case.
 - **Skinning:** keep weights constrained by mesh topology, improve contact boundaries, and give clothing and hair explicit layers, bones and QA instead of treating them as body vertices.
 - **Vision QA:** validate body class, limb count, feet/heels, hands/fingers, clothing/submeshes and joint placement from source-bound projections. Image suggestions do not become authoritative geometry until tied to the exact source and verified numerically.
@@ -54,7 +54,11 @@ The research target is game-ready early-2000s style hair with a small polygon bu
 
 Quality comes before client-side execution. The fastest method that preserves silhouette, parting, bangs, ponytails and texture direction wins per hairstyle class. Full 3D generation remains a fallback for complex styles and dataset production, not the default for every task.
 
-The detailed technology review, benchmark protocol and dataset plan will be published at [Hair Lab research](/static/docs/hair-lab/research.md). **The linked research document is still a TODO as of this checkpoint.**
+The [Hair Lab research](/static/docs/hair-lab/research.md) is now public, with sources, five generation strategies, graph/tool contracts, QA thresholds and a dataset plan. [Local RTX 4090 microbenchmark](/static/docs/hair-lab/benchmark.md): 25 repeats per case; synthetic 256³ hull p50 0.422 ms CUDA versus 11.789 ms CPU; 100-guide ribbon construction is faster on CPU. These are isolated kernels, not arbitrary-hair reconstruction timings.
+
+Two original farm-rendered head concepts are complete and visually inspected; they are 2D art direction, not 3D ground truth. A procedural five-style prototype exists, but full task integration and physically validated dynamics are not complete.
+
+**Latest owner steering:** immediately test on recent real V3 models instead of abstract examples, and also generate original game characters. Local workstation research is explicitly authorized. The next acceptance evidence must use real source-bound task/head geometry; synthetic figures remain technical references only. New Hair Lab features must stay asynchronous after the base analysis and rig.
 
 Hair Lab acceptance criteria:
 
@@ -74,8 +78,8 @@ Hair Lab acceptance criteria:
 - Recheck the live fleet and remove the current admission blockers without losing queued work.
 - Keep the animated-rig milestone within 60 seconds; move optional analysis and deliverables behind it.
 - Close the highest-frequency rig regressions with production corpus cases and before/after metrics.
-- Finish Blueprint joint editing and save a new, reversible rig version with retargeted clips.
-- Publish the Hair Lab research, choose a measurable baseline, then implement one fast end-to-end preset before expanding to five.
+- Validate the deployed Blueprint joint editing and reversible save with retargeted clips.
+- Hair Lab: collect recent real V3 head/hair cases, measure the actual extraction and generation path, and close visible geometry defects before advertising quality or latency. Connect the accepted baseline to the task graph and head tool.
 
 ### P1 — complete V3 behavior
 

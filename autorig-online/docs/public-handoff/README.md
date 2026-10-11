@@ -16,8 +16,9 @@ It is a public, sanitized coordination view. The root repository `handoff.md` re
 6. Edit locally with `apply_patch`, then publish the one file atomically:
 
    ```bash
-   scp autorig-online/static/handoff.md autorig-vps:/tmp/autorig-public-handoff.md
-   ssh autorig-vps 'sudo python3 /srv/autorig/tools/live_static.py put handoff.md /tmp/autorig-public-handoff.md'
+   # Use the project's staging area; ensure it is writable for the SSH user.
+   scp autorig-online/static/handoff.md autorig-vps:/srv/autorig/audits/hair-lab-20261012/public-handoff.md
+   ssh autorig-vps 'sudo python3 /srv/autorig/tools/live_static.py put handoff.md /srv/autorig/audits/hair-lab-20261012/public-handoff.md'
    ```
 
 7. Verify the canonical URL and bytes:
