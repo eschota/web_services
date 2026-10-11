@@ -2059,9 +2059,33 @@ V3_POSTER_DIR_TG = os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/
 
 def _tg_preview_wait_seconds() -> int:
     try:
-        return max(0, min(600, int(os.getenv("AUTORIG_TG_DONE_PREVIEW_WAIT_SEC", "120"))))
+        return max(0, min(600, int(os.getenv("AUTORIG_TG_DONE_PREVIEW_WAIT_SEC", "90"))))
     except ValueError:
-        return 120
+        return 90
+
+
+GALLERY_POSTER_SCRIPT = os.getenv("AUTORIG_GALLERY_POSTER_SCRIPT", "/srv/autorig/gallery-poster/gallery_poster.py")
+
+
+async def _render_v3_preview_now(task_id: str) -> None:
+    """Event-driven poster + clip for one finished task (owner, 2026-10-11: «уникальные результаты рига, а не
+    заглушка»): the poster service's own `once --task`, at normal priority for this one job, so the poster lands
+    in ~10-30 s and the clip right after. Fire and forget; the crash guard and the light view GLB of
+    gallery_poster.py apply."""
+    import sys as _sys
+
+    if not os.path.isfile(GALLERY_POSTER_SCRIPT):
+        return
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "timeout", "600", _sys.executable, "-P", GALLERY_POSTER_SCRIPT, "once", "--task", task_id,
+            "--pause", "0", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            env=dict(os.environ, GP_NICE="0", GP_CLIP_NICE="5"))
+        out, _ = await proc.communicate()
+        tail = (out or b"").decode("utf-8", "replace").strip().splitlines()[-1:]
+        print(f"[Telegram] V3 preview render for {task_id}: rc={proc.returncode} {tail}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Telegram] V3 preview render failed to start for {task_id}: {exc}")
 
 
 def _v3_preview_files(task_id: str) -> tuple:
@@ -2077,9 +2101,34 @@ async def _wait_v3_preview(task_id: str, wait_seconds: int) -> tuple:
     deadline = asyncio.get_running_loop().time() + max(0, wait_seconds)
     while True:
         video, poster = _v3_preview_files(task_id)
-        if video or asyncio.get_running_loop().time() >= deadline:
+        if video or poster or asyncio.get_running_loop().time() >= deadline:
             return video, poster
-        await asyncio.sleep(5)
+        await asyncio.sleep(2)
+
+
+async def _late_v3_media(bot, chat_id: int, reply_to: int, task_id: str, caption: str, markup,
+                         wait_seconds: int = 900) -> None:
+    """The notice went out as text (no poster in time): the task's own poster follows as a reply when it lands,
+    and becomes the clip afterwards."""
+    from telegram.constants import ParseMode
+
+    deadline = asyncio.get_running_loop().time() + wait_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        _video, poster = _v3_preview_files(task_id)
+        if poster:
+            try:
+                with open(poster, "rb") as fh:
+                    sent = await bot.send_photo(chat_id=chat_id, photo=fh, caption=caption[:1024] if len(caption) <= 1024 else None,
+                                                parse_mode=ParseMode.HTML, reply_markup=markup,
+                                                reply_to_message_id=reply_to, allow_sending_without_reply=True,
+                                                disable_notification=True)
+                print(f"[Telegram] V3 poster sent late for chat={chat_id}, task={task_id}")
+                if len(caption) <= 1024:
+                    await _upgrade_to_v3_clip(bot, chat_id, sent.message_id, task_id, caption, markup)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Telegram] late V3 poster failed for chat={chat_id}, task={task_id}: {exc}")
+            return
+        await asyncio.sleep(10)
 
 
 async def _upgrade_to_v3_clip(bot, chat_id: int, message_id: int, task_id: str, caption: str, markup,
@@ -2203,6 +2252,7 @@ async def broadcast_task_done(
 
     v3_photo = None
     if not video_path:
+        asyncio.create_task(_render_v3_preview_now(task_id))
         v3_video, v3_photo = await _wait_v3_preview(task_id, _tg_preview_wait_seconds())
         if v3_video:
             video_path, last_video_status = v3_video, "v3_preview"
@@ -2260,15 +2310,20 @@ async def broadcast_task_done(
                                                             generate_markup))
                     return sent
                 print(f"[Telegram] V3 poster send failed for chat={chat_id}, task={task_id}; text fallback")
-            return await _send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(
+            # Never the site card: no link preview; the task's own poster follows as a reply when it lands.
+            sent_text = await _send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(
                 chat_id=cid,
                 text=text,
                 parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
                 reply_markup=generate_markup,
                 reply_to_message_id=rt,
                 allow_sending_without_reply=True,
             ), retry_network=False)
+            if sent_text is not None and not v3_photo:
+                asyncio.create_task(_late_v3_media(bot, chat_id, sent_text.message_id, task_id, text,
+                                                   generate_markup))
+            return sent_text
 
         results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
         sent_count = sum(1 for r in results if r is not None)

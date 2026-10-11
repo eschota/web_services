@@ -329,7 +329,7 @@ def make_clip(tid: str, glb: Path, env: str, backfill: bool, con=None) -> str:
     key, csig = f"clip:{tid}", f"{glb.name}:{int(poster.stat().st_mtime)}"
     if con is not None and attempt(con, key, csig) > MAX_ATTEMPTS:
         return "crashed_twice"
-    cmd = ["nice", "-n", "19", sys.executable, "-P", str(Path(__file__).resolve()), "clip", "--task", tid,
+    cmd = ["nice", "-n", os.getenv("GP_CLIP_NICE", "19"), sys.executable, "-P", str(Path(__file__).resolve()), "clip", "--task", tid,
            "--glb", str(glb), "--out", str(clip), "--env", env or ""]
     env_vars = dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
     try:
@@ -439,7 +439,8 @@ def process(con, row) -> str:
     if attempt(con, f"poster:{tid}", sig) > MAX_ATTEMPTS:
         record(con, tid, "failed", "crashed_twice", glb.name, sig, kind=row["pipeline_kind"] or "")
         return "skip"
-    cmd = ["nice", "-n", "15", sys.executable, "-P", str(Path(__file__).resolve()), "render", "--task", tid,
+    # GP_NICE: 15 for the background loop; the backend's event-driven trigger for a just-finished task sets 0
+    cmd = ["nice", "-n", os.getenv("GP_NICE", "15"), sys.executable, "-P", str(Path(__file__).resolve()), "render", "--task", tid,
            "--glb", str(glb), "--out", str(poster_path(tid))]
     env = dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="2", OPENBLAS_NUM_THREADS="2")
     try:
