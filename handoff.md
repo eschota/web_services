@@ -2072,3 +2072,19 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `LS.stage(glb=traced rigged.glb)` рвёт торс: веса fastrig текут в туловище). Кейс `warrior_sword_posed/mt_pose_fit` — XFAIL.
 - autorig-mt не перезапущен (`autorig-mt-restart` отказал: живые V3-раны): конвейер в процессе сервиса берёт новый
   rig_first после следующего рестарта; classic mirror, rerig_open (перезапущен) и гейт уже на новом коде.
+
+## Limb stabilization · V3 — mesh-only путь (66ba97ba, 2026-10-11 ~03:00 UTC; MT в Git, на прод НЕ установлено — гейт заблокирован чужим кейсом)
+
+- `limb_stabilize.TracedRig` + `stage_traced`: когда скелета нет, цепи рук берутся из `mt/pose_skeleton` (rig/pose_joints.json),
+  веса геометрические (трубка сегмента, бленды локоть/запястье, спад у плеча 2.2 r, отдельные шеллы целиком, отрезанный проп
+  жёстко в кисти), руки поворачиваются в T прямо на меше (`stab/model_canonical.glb`), повёрнутые суставы пинятся
+  (`stab/joints.json`), fastrig пересобирает. В `rig_first` — после трассы; **гейт по результату**: если rig_check >4x на
+  повёрнутом меше выросло (×1.1+2) — `undo_stage` и пересборка на исходном. `pose_trace` по умолчанию `auto`
+  (`patch_limb_stabilize.py`, ханки rig_first/pose_skeleton).
+- Числа (гейт round 16/17): 66ba97ba.upload rig_check >4x 168 → 9, prepared (bfbd3248) → 8, prop rigid 1.0, numeric 10/10
+  (порог кейса kitbash был `== 9` → `>= 9`, Source pose — 10-й клип), `warrior_sword_posed/mt_pose_fit` XPASS → PASS
+  (arm_proportions 0, захват меча 3.3 % H). A-поза для мечей хуже T (167 vs 9) — не используется. DEV 6662.
+- **Не установлено**: гейт `mt-deploy` FAIL у всех с ~02:36 UTC из-за чужих кейсов `samurai_front`/`samurai_front_guess`
+  (6e356067, 64 МБ: front_ok 0, 227 с > 60) и `knight_sword` 67–75 с под той же нагрузкой (у меня локально 6.4 с, этап не
+  срабатывает). Стейдж готов: `/srv/autorig/audits/limb-stab-20261010/stage16/mt` (limb_stabilize, rig_first, pose_skeleton);
+  после XFAIL samurai — `mt-deploy` + `autorig-mt-restart --wait 600`, затем перериг 66ba97ba/bfbd3248 (`tools/rerig_version.py`).

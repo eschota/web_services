@@ -446,6 +446,20 @@
    "what": "the paint record of t2 (forward, view_px, description)",
    "sha256": "7c8fabbc5aa39d33165db9a04abfb5fcf7effb790af6acd142357f7577537a76",
    "bytes": 1929
+  },
+  "6e356067.upload.glb": {
+   "source": "/srv/autorig/data/var/uploads/da51f40d-2137-48ce-b115-0fef4686ea35/Meshy_AI_Crait_moi_un_avatar_a_1008222844_texture.glb",
+   "task": "6e356067-59f7-461c-b8a5-5997b3e2d0b0",
+   "what": "armoured samurai, gold lion helmet (Meshy upload, 1M vertices, one shell, no skeleton)",
+   "sha256": "e449c94115796cf3e25c2efa1d8763a0526d82bcf39cdb92e588e8598ca5a047",
+   "bytes": 63760680
+  },
+  "synthetic.lying_warrior.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/lying_warrior.glb",
+   "task": null,
+   "what": "66ba97ba upload with a root node turning +Y to +Z: lying on its back (Z-up export, the owner 1814 case)",
+   "sha256": "d0ea5df87679b0ee44a61d3ea5d153fc65356deb0091cdb75a2e2c078973e0e7",
+   "bytes": 5288716
   }
  },
  "profiles": {
@@ -3273,7 +3287,7 @@
        true
       ],
       "clips_passed": [
-       "==",
+       ">=",
        9
       ]
      },
@@ -4595,9 +4609,10 @@
        8
       ]
      },
+     "note": "2026-10-11: PASS since Limb stabilization turns the traced bent arms to T on the mesh (stage_traced)",
      "xfail": {
-      "reason": "the bent arms fall back to proportions (hand 27 % H off the sword); mt/pose_skeleton traces them (option pose_trace) but the library clips then stretch the bent rest elbow (numeric QA 1/9 on 66ba97ba.prepared): needs a mesh-only straightening to T/A",
-      "owner": "Rig path · V3 + Limb stabilization · V3"
+      "reason": "Limb stabilization flipped this to pass before its stage_traced reached production; flip it in that deploy",
+      "owner": "Limb stabilization · V3"
      }
     },
     {
@@ -4625,6 +4640,64 @@
    ]
   },
   {
+   "id": "samurai_front",
+   "task": "6e356067-59f7-461c-b8a5-5997b3e2d0b0",
+   "cost": 3,
+   "defect": "owner 2026-10-11 («рыцарю плохо хотя руки ноги видать нормально»): the dense armour mesh (1M vertices) fooled the mirror test (z 0.41 > x 0.35), the front was guessed -x (true +z), the whole skeleton lay sideways. Fix: guess_forward takes the wider axis as left-right when it is 1.5x the depth",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6e356067.upload.glb",
+     "params": {
+      "words": "armoured samurai gold lion helmet"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_front",
+     "kind": "posed_prop_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "front": "+z"
+     },
+     "thresholds": {
+      "front_ok": [
+       "==",
+       1
+      ],
+      "fit_ok": [
+       "==",
+       1
+      ]
+     },
+     "tier": "extended"
+    }
+   ],
+   "tier": "extended",
+   "note": "1M vertices: 25 s alone, 120-260 s under the parallel base suite, so the full rig runs nightly; the base suite checks the front (samurai_front_guess)"
+  },
+  {
    "id": "gallery_smoke",
    "task": null,
    "cost": 1,
@@ -4650,6 +4723,110 @@
       "ran": [
        ">=",
        15
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "samurai_front_guess",
+   "task": "6e356067-59f7-461c-b8a5-5997b3e2d0b0",
+   "cost": 1,
+   "defect": "the front of the dense armour samurai: -x from the mirror test, true +z (wider axis = left-right)",
+   "checks": [
+    {
+     "id": "front",
+     "kind": "front_guess",
+     "paths": [
+      "mt"
+     ],
+     "input": "6e356067.upload.glb",
+     "params": {
+      "front": "+z"
+     },
+     "thresholds": {
+      "front_ok": [
+       "==",
+       1
+      ],
+      "seconds": [
+       "<=",
+       60
+      ]
+     }
+    },
+    {
+     "id": "front_warrior",
+     "kind": "front_guess",
+     "paths": [
+      "mt"
+     ],
+     "input": "66ba97ba.upload.glb",
+     "params": {
+      "front": "+x"
+     },
+     "thresholds": {
+      "front_ok": [
+       "==",
+       1
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "lying_upright",
+   "task": null,
+   "cost": 2,
+   "defect": "owner 2026-10-11 (task 1814 «T Pose» arrives lying on its back): the rig assumed +Y up. Fix: mt/orient.estimate_up (mirror axis, the longer of the two others, two feet at the low end) turns it upright before the rig",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.lying_warrior.glb",
+     "params": {
+      "words": "Female warrior with sword and armor"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "prop_bones_held": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_front",
+     "kind": "posed_prop_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "front": "+x"
+     },
+     "thresholds": {
+      "front_ok": [
+       "==",
+       1
+      ],
+      "fit_ok": [
+       "==",
+       1
       ]
      }
     }
