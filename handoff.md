@@ -2016,3 +2016,26 @@ This scoped development checkpoint does not overwrite the unrelated historical
   не включать без декодера в сборке.
 
 - converter deploy: **Fleet · V3 f5 2026-10-11 ~01:30Z** — f5 enrolled: converter `d94286b` (= 5650feb + F5 in `farm_deploy`/`install_farm_agent`), full artifact, V3 canary 7/7 (`audits/converter-v3-canary-20261010/f5-d94286b/`), registry row `f5` (enabled=false), `worker_endpoints` id 13 (enabled=0), `AUTORIG_WORKER_TRANSPORTS` has f5 (needs an autorig-storage restart before enabling), VPS tunnel `f5rig 15488->f5:7000` in render-hunyuan-tunnels.conf, tunnel key permitopen now also 127.0.0.1:7000, Blender 5.1 profile (ARP) copied from f13, V3 export worker + fleet agent installed. **Dispatch OFF**: only_rig canary fails at the Unity stage, f5's Unity license expired (token not in cache): the owner must sign in to Unity Hub on f5. Then: `rig_canary.py f5 15488 --corpus`, restart autorig-storage, `fleet_drain.py restore f5`. Fleet now counts a node's own canaried record in v3_target.json as its V3 acceptance (f1/f13 are ready again).
+
+## Texturing · V3 — у каждой модели текстуры (2026-10-11, на проде, агент «Texturing · V3»)
+
+- **Бэкенд** (релиз `…-autotex`, коммит web `b7726f1d`): `backend/v3_textures.py` — OBJ+MTL (map_Kd/Bump/Ke, Kd/d/Ns) и текстуры
+  рядом встраиваются в GLB, FBX/glTF через assimp + внешние картинки из папки загрузки, ZIP (безопасная распаковка),
+  битые нормали (Roblox: все vn = 0 1 0) пересчитываются. `GET /api/task/{id}/v3-textures`, `POST /api/task/{id}/v3-source-files`
+  (владелец/админ: недостающие файлы или ZIP в ту же задачу → новый attempt с новым источником). Аудит в
+  `viewer_settings.v3.intake.textures` {status, missing, referenced, embedded, normals}.
+- **Страница задачи**: `js/task-v3-textures.js` (иконка текстур в панели: жёлтая — не хватает файлов + кнопка
+  «добавить файлы/ZIP»; зелёная — автотекстуры), ключи `tex_*`, `error_source_files_*` во всех 5 языках.
+- **MT** (`mt/autotex.py`, MT `0c16fcc`+): статус текстур рана `analysis/textures.json` (`source_ok | missing_files | none | lost`,
+  flat, uv, normals, autotex); метод владельца — T-поза, орто фронт/зад, гайды depth/matID/objID/нормали/мягкий AO/clay →
+  Qwen-edit (ферма) рисует albedo, roughness, metallic (если Vision видит металл), detail normal, emissive (если светится) →
+  планарный bake на родные UV, а если они непригодны — новый атлас из планарных чартов фронт/зад; новая версия рига
+  (rig/skin Store, `texture/index.json`, undo, `reapply` после пере-рига — цикл сам перепекает). Фоновый цикл в autorig-mt
+  (`MT_AUTOTEX=off`), «текстуры до валидации рига» в `v3_conveyor._texture_first` (`MT_TEXTURE_FIRST=off`, таймаут
+  `conveyor_timeout_minutes` 12 → `texture_pending`). Инструменты агента `texture_model`, `texture_model_get`, `texture_model_undo`.
+- **Корпус**: кейс `untextured_obj` (583622f3: refs + bake без фермы). Кейса «textures lost» нет: в переписи 53 V3-ранов
+  все исходные картинки доходят до рига.
+- **Model census · V3**: записывайте статус текстур каждой модели из `runs/<run>/analysis/textures.json` (поле `status`,
+  `normals`, `uv`, `autotex`) или `GET /api/mt/runs/<run>/textures`.
+- **Не сделано**: Hunyuan3D paint по готовому мешу — у фермы только image→3D (`/api-converter-glb/generate-3d`), нужен
+  paint-only роут в конвертере и раскатка по узлам.
