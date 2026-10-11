@@ -2039,3 +2039,22 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `normals`, `uv`, `autotex`) или `GET /api/mt/runs/<run>/textures`.
 - **Не сделано**: Hunyuan3D paint по готовому мешу — у фермы только image→3D (`/api-converter-glb/generate-3d`), нужен
   paint-only роут в конвертере и раскатка по узлам.
+
+## Re-rig on open — только риги текущей версии (2026-10-11, на проде; MT `aa36be8`..`d0e290e`, web `08b61ccf`)
+
+- **Версия**: `mt/rig_version.py` `RIG_VERSION = "v3.2026-10-11.1"` (+ `rig_path_sha`), штампуется в каждый
+  rig.json fastrig (`tools/patch_fastrig_rig_version.py`). **Бампать при изменении рига, который видит клиент.**
+  `GET /api/mt/rig-version` (после ближайшего рестарта MT), `GET /api/task/{id}/rig-version`, поле `rig_version`
+  в `/api/task/{id}/v3-view`.
+- **Триггер**: только когда человек открывает страницу задачи (её `/v3-view`), `backend/rerig_on_open.py`:
+  версия рига задачи ≠ текущей → один запрос `MT_ROOT/rerig_requests/<task>__<version>.json` (O_EXCL = замок).
+  Не для ботов (`seo_social.is_crawler` + свой список), не для задач в работе, не для скрытых site_mode,
+  лимиты 6/час на IP, 60/час всего, очередь ≤ 25. `AUTORIG_RERIG_ON_OPEN=off` выключает.
+- **Воркер** `autorig-rerig-open` (`mt/rerig_open.py`, nice 10, 6G без свопа): ждёт живые раны до QA; V3 — ран
+  последней попытки, классика — зеркальный ран (`ensure_mirror`, модель = загрузка или prepared GLB); пере-риг в
+  scratch со стадиями в live-лог рана → новая версия Store (v0 цела) → постер `gallery_poster.py once --task` →
+  затем arm_clearance (сам ставит только «лучше»). Классическая страница показывает риг зеркала текущей версии
+  поверх рига конвертера (`task_page_v3_routes.current_fast_rig`, заголовок `X-AutoRig-Task-Viewer: fast-v3-current`).
+- **Владелец**: фонового перерига НЕТ никогда — бэкфилл только проверяет и сортирует (`MT_BACKFILL_REPAIR` off).
+- **Постер/OG**: `/thumb/<task>` → `/srv/autorig/data/static/posters-v3/<task>.jpg` (seo_social уже читает его и
+  `poster_signature` по mtime; менять там нечего).
