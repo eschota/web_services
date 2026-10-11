@@ -451,6 +451,17 @@ def cmd_mt_deploy(args) -> int:
     overlay = parse_overlay(args.mt_file)
     if not overlay:
         raise SystemExit("nothing to deploy: --mt-file mt/<rel>=<file>")
+    # Stale candidates (2026-10-11): a deploy whose fastrig.py was staged before another agent's install replaced it
+    # wholesale and silently rolled the geodesic skin engine back. A candidate older than the production file it
+    # replaces was not built on that production copy: refuse it (AUTORIG_ALLOW_STALE=1 overrides, owner only).
+    if os.environ.get("AUTORIG_ALLOW_STALE") != "1":
+        stale = [rel for rel, src in overlay.items()
+                 if (MT_PROD / rel).is_file() and os.path.getmtime(MT_PROD / rel) > os.path.getmtime(src)]
+        if stale:
+            for rel in stale:
+                print(f"NOT INSTALLED: production {rel} is newer than your candidate; re-read production, "
+                      f"re-apply your patch on it, and run again")
+            return 1
     label = f"{now()}-mtdeploy"
     rep = run_suite("mt", args.tier, overlay=overlay, jobs=args.jobs, label=label)
     print_report(rep)
