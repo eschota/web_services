@@ -425,6 +425,17 @@ def process(con, row) -> str:
             record(con, tid, "no_source", "no viewer GLB on disk", kind=row["pipeline_kind"] or "")
         return "no_source"
     st = glb.stat()
+    if st.st_size > MAX_GLB_BYTES and not glb.name.endswith(".view.glb"):
+        # no light copy yet: make the viewer's one now (mt.view_glb --ensure -> <stem>.view.glb), then render it
+        light = glb.with_name(glb.stem + ".view.glb")
+        try:
+            subprocess.run(["nice", "-n", os.getenv("GP_NICE", "15"), "timeout", "300", sys.executable, "-m",
+                            "mt.view_glb", str(glb), "--ensure"], capture_output=True, timeout=320,
+                           env=dict(os.environ, PYTHONPATH=str(MT_ROOT), MT_VIEW_MESHOPT="off"))
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        if light.is_file() and light.stat().st_size > 2000:
+            glb, st = light, light.stat()
     sig = f"{glb.name}:{st.st_size}:{int(st.st_mtime)}"
     if st.st_size > MAX_GLB_BYTES:
         if prev is None or prev["sig"] != sig or prev["reason"] != "too_big":
