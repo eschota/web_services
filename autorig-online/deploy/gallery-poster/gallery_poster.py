@@ -63,6 +63,11 @@ CLIP_FPS = 15
 CLIP_RENDER = int(os.getenv("GP_CLIP_RENDER", "640"))
 CLIP_TIMEOUT_S = int(os.getenv("GP_CLIP_TIMEOUT_S", "420"))
 CLIP_MAX_LOAD = float(os.getenv("GP_CLIP_MAX_LOAD", "18"))
+# Crash guard (2026-10-11, an OOM-kill restart loop on a 80 MB GLB): every render/clip first writes an attempt
+# marker; a source that took the service down twice is skipped (state failed, reason crashed_twice). GLBs over
+# GP_MAX_GLB_MB are not rendered at all (too_big), so a heavy upload never reaches the rasterizer.
+MAX_GLB_BYTES = int(float(os.getenv("GP_MAX_GLB_MB", "40")) * 1024 * 1024)
+MAX_ATTEMPTS = 2
 
 
 # ====================================================================================================== the render
@@ -305,7 +310,7 @@ def clip_path(task_id: str) -> Path:
     return CLIP_DIR / f"{task_id}.mp4"
 
 
-def make_clip(tid: str, glb: Path, env: str, backfill: bool) -> str:
+def make_clip(tid: str, glb: Path, env: str, backfill: bool, con=None) -> str:
     """The clip for a task whose poster is current; skipped while busy when it is only a backfill."""
     poster, clip = poster_path(tid), clip_path(tid)
     if not poster.is_file():
@@ -314,6 +319,11 @@ def make_clip(tid: str, glb: Path, env: str, backfill: bool) -> str:
         return "skip"
     if backfill and os.getloadavg()[0] > CLIP_MAX_LOAD:
         return "busy"
+    if glb.stat().st_size > MAX_GLB_BYTES:
+        return "too_big"
+    key, csig = f"clip:{tid}", f"{glb.name}:{int(poster.stat().st_mtime)}"
+    if con is not None and attempt(con, key, csig) > MAX_ATTEMPTS:
+        return "crashed_twice"
     cmd = ["nice", "-n", "19", sys.executable, "-P", str(Path(__file__).resolve()), "clip", "--task", tid,
            "--glb", str(glb), "--out", str(clip), "--env", env or ""]
     env_vars = dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
@@ -323,6 +333,8 @@ def make_clip(tid: str, glb: Path, env: str, backfill: bool) -> str:
         res = json.loads(lines[-1]) if lines else {"state": "failed"}
     except (subprocess.TimeoutExpired, ValueError, OSError):
         res = {"state": "failed"}
+    if con is not None and res.get("state") == "ok":
+        attempt_done(con, key)
     return "clip_ok" if res.get("state") == "ok" else "clip_failed"
 
 
@@ -374,6 +386,21 @@ def poster_path(task_id: str) -> Path:
     return OUT_DIR / f"{task_id}.jpg"
 
 
+def attempt(con, key: str, sig: str) -> int:
+    """Count one more try of key@sig, committed before the work starts (survives an OOM kill)."""
+    con.execute("CREATE TABLE IF NOT EXISTS attempts (key TEXT PRIMARY KEY, sig TEXT, n INTEGER, ts REAL)")
+    row = con.execute("SELECT sig, n FROM attempts WHERE key=?", (key,)).fetchone()
+    n = (row["n"] + 1) if row is not None and row["sig"] == sig else 1
+    con.execute("INSERT OR REPLACE INTO attempts(key, sig, n, ts) VALUES (?,?,?,?)", (key, sig, n, time.time()))
+    con.commit()
+    return n
+
+
+def attempt_done(con, key: str) -> None:
+    con.execute("DELETE FROM attempts WHERE key=?", (key,))
+    con.commit()
+
+
 def record(con, task_id, state, reason="", source="", sig="", env="", kind=""):
     con.execute("INSERT OR REPLACE INTO posters(task_id, state, reason, source, sig, version, env, ts, kind) "
                 "VALUES (?,?,?,?,?,?,?,?,?)", (task_id, state, reason[:300], source, sig, VERSION, env, time.time(), kind))
@@ -390,12 +417,19 @@ def process(con, row) -> str:
         return "no_source"
     st = glb.stat()
     sig = f"{glb.name}:{st.st_size}:{int(st.st_mtime)}"
+    if st.st_size > MAX_GLB_BYTES:
+        if prev is None or prev["sig"] != sig or prev["reason"] != "too_big":
+            record(con, tid, "failed", "too_big", glb.name, sig, kind=row["pipeline_kind"] or "")
+        return "skip"
     if prev is not None and prev["version"] == VERSION and prev["sig"] == sig:
         if prev["state"] == "ok" and poster_path(tid).is_file():
-            clip = make_clip(tid, glb, prev["env"] or "", backfill=True)
+            clip = make_clip(tid, glb, prev["env"] or "", backfill=True, con=con)
             return "clip" if clip == "clip_ok" else "skip"
         if prev["state"] == "failed" and time.time() - float(prev["ts"]) < RETRY_FAILED_S:
             return "skip"
+    if attempt(con, f"poster:{tid}", sig) > MAX_ATTEMPTS:
+        record(con, tid, "failed", "crashed_twice", glb.name, sig, kind=row["pipeline_kind"] or "")
+        return "skip"
     cmd = ["nice", "-n", "15", sys.executable, "-P", str(Path(__file__).resolve()), "render", "--task", tid,
            "--glb", str(glb), "--out", str(poster_path(tid))]
     env = dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="2", OPENBLAS_NUM_THREADS="2")
@@ -408,13 +442,14 @@ def process(con, row) -> str:
     except (ValueError, OSError) as exc:
         res = {"state": "failed", "reason": f"{type(exc).__name__}: {exc}"}
     state = "ok" if res.get("state") == "ok" else "failed"
+    attempt_done(con, f"poster:{tid}")
     record(con, tid, state, str(res.get("reason") or ""), glb.name, sig, str(res.get("env") or ""),
            row["pipeline_kind"] or "")
     if state == "failed" and poster_path(tid).is_file():
         with contextlib.suppress(OSError):
             poster_path(tid).unlink()                    # an older capture of a model that now fails: do not keep it
     if state == "ok":
-        make_clip(tid, glb, str(res.get("env") or ""), backfill=False)   # a new poster: its clip right away
+        make_clip(tid, glb, str(res.get("env") or ""), backfill=False, con=con)   # a new poster: its clip now
     return state
 
 
