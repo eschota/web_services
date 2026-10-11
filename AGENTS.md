@@ -475,6 +475,27 @@ Owner rule, 2026-10-10:
 * **Example, task 583622f3** (the «potato»): only `dpgoe.obj` was uploaded.
   It has UVs and `usemtl Apotat0o1Mtl`, but no .mtl and no images.
 
+## Customer Tasks First (owner order, 2026-10-11)
+
+> давай ка приоритет на авториг задачи сделаем … чо там всё висит то, компов же
+> много которые это делают почти мгновенно
+
+* Customer AutoRig tasks (intake → V3 rig → viewer) have absolute priority
+  on the VPS.
+* **Heavy background work runs on the farm boxes, not on the VPS.** That
+  covers the census, the extended autotests, gallery clips, autotex, bulk
+  Vision and backfill.
+* On the VPS such work runs only while the load is low, at nice 19, and it
+  stops at once when customer tasks wait.
+* **The incident behind this rule (2026-10-11 02:34 UTC).**
+  * The load was ~50: the census, the nightly extended autotests, several
+    mt-deploy gates, the poster clips and autotex all ran together.
+  * autorig-mt was OOM-killed by a 259 MB rig. On restart it hung, so all
+    intake stood at «registering the source» for 25 min.
+  * Hotfix: the drop-in `autorig-mt.service.d/zz-priority.conf`
+    (MT_V3_CONCURRENCY=2, MT_CLASSIC_MIRROR=off, MT_AUTOTEX=off), and the
+    census stopped.
+
 ## Only Current-Version Rigs Are Shown (owner order, 2026-10-11)
 
 > сделай чтобы все задачи если их кто то открывает, а версия сервера не
