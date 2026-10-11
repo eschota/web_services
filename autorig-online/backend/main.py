@@ -16588,6 +16588,14 @@ def _inject_static_layout(html_content: str, canonical_path: Optional[str] = Non
     except Exception as exc:
         print(f"[i18n] localize_page: {type(exc).__name__}: {exc}")
 
+    # SEO · social (2026-10-11): fill the Open Graph / Twitter tags a page left out (seo_social.py).
+    try:
+        import seo_social
+
+        html_content = seo_social.complete_social_head(html_content)
+    except Exception as exc:
+        print(f"[seo] complete_social_head: {type(exc).__name__}: {exc}")
+
     return html_content
 
 
@@ -17310,49 +17318,14 @@ async def task_page(
     base_url = (APP_URL or "https://autorig.online").rstrip("/")
     task_url = f"{base_url}/task?id={task_id}"
     
-    # Try to get task info for better OG tags
-    task_title = "Rigged 3D Model"
-    task_description = "View this rigged 3D character with 50+ animations"
-    has_video = False
-    has_thumb = False
+    # SEO · social (2026-10-11): one head builder for the task page (seo_social.task_head).
+    # Indexable only when done, public, not adult on this host and titled; failed, unfinished and untitled
+    # tasks are noindex and never carry a status emoji; og:image is a 1200x630 card of the V3 capture.
     task = None
-    task_keywords: List[str] = []
-    
     try:
         from database import Task
         result = await db.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
-        
-        if task:
-            if task.status == "done":
-                task_title = "✅ Rigged 3D Model Ready"
-                task_description = "3D character rigged with skeleton and 50+ animations. Download in GLB, FBX, OBJ formats."
-                try:
-                    from seo_gallery import enrich_seo_metadata
-
-                    seo_title, seo_desc, seo_keywords, _seo_semantic = enrich_seo_metadata(task)
-                    if seo_title:
-                        task_title = seo_title
-                    if seo_desc:
-                        task_description = seo_desc[:500]
-                    task_keywords = seo_keywords
-                except Exception as seo_error:
-                    print(f"[Task Page] Error enriching SEO metadata: {seo_error}")
-            elif task.status == "processing":
-                task_title = "⏳ Rigging in Progress..."
-                task_description = "3D model is being rigged with AI. View live progress."
-            elif task.status == "error":
-                task_title = "❌ Rigging Failed"
-                task_description = "There was an error processing this model."
-            
-            # Check if video exists. Prefer DB truth; filesystem check is a legacy fallback.
-            video_path = f"/var/autorig/videos/{task_id}.mp4"
-            has_video = bool(getattr(task, "video_ready", False)) or (
-                os.path.exists(video_path) and os.path.getsize(video_path) > 0
-            )
-            
-            # Assume thumb exists if task has ready_urls
-            has_thumb = bool(task.ready_urls)
     except Exception as e:
         print(f"[Task Page] Error getting task info: {e}")
 
@@ -17361,121 +17334,55 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{base_url}/task">',
         )
-        return HTMLResponse(content=task_page_live.render_task_html(html_content))
+        # An unknown id is a real 404 (old ids from the previous server were soft 404s for crawlers).
+        return HTMLResponse(
+            content=task_page_live.render_task_html(html_content),
+            status_code=404,
+            headers={"X-Robots-Tag": "noindex, nofollow", "Cache-Control": "no-store, max-age=0"},
+        )
 
-    title_suffix = f" | AutoRig task {task_id[:8]}"
-    compact_task_title = re.sub(r"\s+", " ", task_title).strip() or "Rigged 3D model"
-    max_task_title_len = max(24, 70 - len(title_suffix))
-    if len(compact_task_title) > max_task_title_len:
-        compact_task_title = compact_task_title[: max_task_title_len - 3].rstrip() + "..."
-    task_page_title = f"{compact_task_title}{title_suffix}"
-    safe_task_page_title = html.escape(task_page_title, quote=True)
-    safe_task_heading = html.escape(compact_task_title)
-    task_meta_description = re.sub(r"\s+", " ", task_description).strip()
-    if len(task_meta_description) > 170:
-        task_meta_description = task_meta_description[:167].rsplit(" ", 1)[0].rstrip(".,;:-") + "..."
-    safe_task_meta_description = html.escape(task_meta_description, quote=True)
-    keywords_meta = ""
-    if task_keywords:
-        safe_keywords = html.escape(", ".join(task_keywords[:24]), quote=True)
-        keywords_meta = f'\n    <meta name="keywords" content="{safe_keywords}">'
-    json_ld = ""
-    if task.status == "done":
-        creative_work = {
-            "@context": "https://schema.org",
-            "@type": "CreativeWork",
-            "name": task_page_title[:200],
-            "description": task_description[:2000],
-            "url": task_url,
-            "image": f"{base_url}/api/thumb/{task_id}",
-            "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
-            "mainEntityOfPage": task_url,
-            "creator": {"@type": "Organization", "name": "AutoRig.online"},
-            "isFamilyFriendly": True,
-        }
-        if task.created_at:
-            creative_work["dateCreated"] = task.created_at.isoformat()
-        if task.updated_at:
-            creative_work["dateModified"] = task.updated_at.isoformat()
-        if task_keywords:
-            creative_work["keywords"] = ", ".join(task_keywords[:24])
-        if has_video:
-            creative_work["associatedMedia"] = {
-                "@type": "VideoObject",
-                "name": task_page_title[:200],
-                "description": task_description[:2000],
-                "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
-                "contentUrl": f"{base_url}/api/video/{task_id}",
-                "uploadDate": (task.updated_at or task.created_at or datetime.utcnow()).isoformat(),
-            }
-        json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
-    standard_seo_tags = f'<meta name="description" content="{safe_task_meta_description}">{keywords_meta}{json_ld}'
+    import seo_social
+    import site_mode as _seo_site_mode
 
-    # Build OG meta tags
-    og_tags = f'''
-    <!-- Open Graph / Telegram / Social -->
-    <meta property="og:type" content="{'video.other' if has_video else 'website'}">
-    <meta property="og:url" content="{task_url}">
-    <meta property="og:title" content="{safe_task_page_title}">
-    <meta property="og:description" content="{safe_task_meta_description}">
-    <meta property="og:site_name" content="AutoRig.online">'''
-    
-    # Add image/video tags
-    if has_thumb:
-        og_tags += f'''
-    <meta property="og:image" content="{base_url}/api/thumb/{task_id}">
-    <meta property="og:image:width" content="640">
-    <meta property="og:image:height" content="360">'''
-    
-    if has_video:
-        og_tags += f'''
-    <meta property="og:video" content="{base_url}/api/video/{task_id}">
-    <meta property="og:video:secure_url" content="{base_url}/api/video/{task_id}">
-    <meta property="og:video:type" content="video/mp4">
-    <meta property="og:video:width" content="640">
-    <meta property="og:video:height" content="360">'''
-    
-    # Twitter Card tags
-    if has_video:
-        og_tags += f'''
-    <meta name="twitter:card" content="player">
-    <meta name="twitter:player" content="{base_url}/api/video/{task_id}">
-    <meta name="twitter:player:width" content="640">
-    <meta name="twitter:player:height" content="360">'''
-    elif has_thumb:
-        og_tags += f'''
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="{base_url}/api/thumb/{task_id}">'''
-    else:
-        og_tags += '''
-    <meta name="twitter:card" content="summary">'''
-    
-    og_tags += f'''
-    <meta name="twitter:title" content="{safe_task_page_title}">
-    <meta name="twitter:description" content="{safe_task_meta_description}">
-    '''
-    
-    # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
+    hidden = _seo_site_mode.hides(request, task)
+    video_path = Path(f"/var/autorig/videos/{task_id}.mp4")
+    has_video = bool(getattr(task, "video_ready", False)) or (video_path.exists() and video_path.stat().st_size > 0)
+    has_poster = bool(task.ready_urls) or seo_social.poster_signature(task_id) is not None
+    video_dims = None
+    if has_video and not hidden and task.status == "done":
+        try:
+            dims_source = video_path if video_path.exists() else None
+            if dims_source is None:
+                source_video_url = await _resolve_task_video_source_url(task)
+                durable_video = lookup_cached_artifact(task_id, source_url=source_video_url) if source_video_url else None
+                dims_source = Path(durable_video["path"]) if durable_video and durable_video.get("path") else None
+            video_dims = seo_social.video_dimensions_cached(task_id, dims_source)
+        except Exception as exc:
+            print(f"[seo] video dimensions for {task_id}: {type(exc).__name__}: {exc}")
+    seo_head = seo_social.task_head(
+        task, hidden=hidden, has_video=has_video, has_poster=has_poster,
+        poster_sig=seo_social.poster_signature(task_id), video_dims=video_dims, base_url=base_url,
+    )
     html_content = html_content.replace(
         '<meta name="robots" content="noindex, nofollow">',
-        '<meta name="robots" content="index, follow, max-image-preview:large, max-video-preview:-1">',
+        f'<meta name="robots" content="{seo_head["robots"]}">',
     )
-    html_content = html_content.replace(
-        "<!-- TASK_SEO_PLACEHOLDER -->",
-        f'{standard_seo_tags}\n    <link rel="canonical" href="{task_url}">\n    {og_tags}',
-    )
-    
-    # Update <title> tag to be dynamic
+    html_content = html_content.replace("<!-- TASK_SEO_PLACEHOLDER -->", seo_head["head_html"])
     html_content = html_content.replace(
         '<title>Task Progress | AutoRig.online</title>',
-        f'<title>{safe_task_page_title}</title>'
+        f'<title>{html.escape(seo_head["title"])}</title>'
     )
     html_content = html_content.replace(
         '<h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>',
-        f'<h1 class="task-status-header-title" id="task-seo-heading">{safe_task_heading}</h1>',
+        f'<h1 class="task-status-header-title" id="task-seo-heading">{html.escape(seo_head["h1"])}</h1>',
     )
-    
+
     return _task_html_response(html_content, request)
+
+
+import seo_social as _seo_social  # noqa: E402  SEO · social cards: /og/site.jpg, /og/task/<id>.jpg
+
+_seo_social.install(app, get_db=get_db, resolve_poster_url_for_task=resolve_poster_url_for_task, static_dir=STATIC_DIR)
 
 
 @app.post("/api/task/{task_id}/purchase-intent")
@@ -17565,9 +17472,33 @@ async def admin_workers_page(user: Optional[User] = Depends(get_current_user)):
 
 
 @app.get("/gallery")
-async def gallery_page():
+async def gallery_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Serve Gallery page"""
-    return _static_html_response("gallery.html")
+    response = _static_html_response("gallery.html")
+    # SEO (2026-10-11): the first page of cards is in the server HTML, so crawlers reach the task pages
+    # without JS. The same /api/gallery query (site_mode filters included); the page's JS replaces it.
+    try:
+        import seo_social
+        from database import Task as _SeoTask
+
+        rig = (request.query_params.get("rig_type") or "all").strip().lower()
+        page = await api_get_gallery(request=request, page=1, per_page=24, sort="date", rig_type=rig,
+                                     author=None, user=None, db=db)
+        ids = [it.task_id for it in page.items]
+        titles = {}
+        if ids:
+            rows = await db.execute(select(_SeoTask.id, _SeoTask.poster_llm_title).where(_SeoTask.id.in_(ids)))
+            titles = {tid: (title or "").strip() for tid, title in rows.all() if (title or "").strip()}
+        cards = seo_social.gallery_cards_html(page.items, titles)
+        body = response.body.decode("utf-8")
+        new_body, n = re.subn(
+            r'(<div id="gallery-grid"[^>]*>)\s*<div class="card"[^>]*>[^<]*</div>',
+            lambda m: m.group(1) + "\n" + cards, body, count=1)
+        if n and cards:
+            response = HTMLResponse(content=new_body)
+    except Exception as exc:
+        print(f"[seo] gallery cards: {type(exc).__name__}: {exc}")
+    return response
 
 
 @app.get("/dashboard")
@@ -17995,10 +17926,14 @@ async def sitemap_index(db: AsyncSession = Depends(get_db)):
 @app.get("/sitemap/pages.xml")
 async def sitemap_pages():
     """Marketing / guide urlset (was static/sitemap.xml)."""
-    path = STATIC_DIR / "sitemap-pages.xml"
+    # SEO (2026-10-11): read the live release like _static_html_response, so a live_static put of the
+    # sitemap is served at once (STATIC_DIR is pinned to the release the process started in).
+    live_static = Path("/srv/autorig/current/autorig-online/static")
+    root = live_static if (live_static / "sitemap-pages.xml").is_file() else STATIC_DIR
+    path = root / "sitemap-pages.xml"
     if not path.is_file():
         return FileResponse(
-            str(STATIC_DIR / "sitemap.xml"),
+            str(root / "sitemap.xml"),
             media_type="application/xml",
         )
     return FileResponse(str(path), media_type="application/xml")
