@@ -56,7 +56,7 @@ Quality comes before client-side execution. The fastest method that preserves si
 
 The [Hair Lab research](/static/docs/hair-lab/research.md) is now public, with sources, five generation strategies, graph/tool contracts, QA thresholds and a dataset plan. [Local RTX 4090 microbenchmark](/static/docs/hair-lab/benchmark.md): 25 repeats per case; synthetic 256³ hull p50 0.422 ms CUDA versus 11.789 ms CPU; 100-guide ribbon construction is faster on CPU. These are isolated kernels, not arbitrary-hair reconstruction timings.
 
-Two original farm-rendered head concepts are complete and visually inspected; they are 2D art direction, not 3D ground truth. A procedural five-style prototype exists, but full task integration and physically validated dynamics are not complete.
+Two original farm-rendered head concepts and the full-body T-pose concept were accepted by the owner through exact DEV replies. This approves their 2D art direction only, not 3D ground truth, topology or physics. A procedural five-style prototype exists, but full task integration and physically validated dynamics are not complete.
 
 **Latest owner steering:** immediately test on recent real V3 models instead of abstract examples, and also generate original game characters. Local workstation research is explicitly authorized. The next acceptance evidence must use real source-bound task/head geometry; synthetic figures remain technical references only. New Hair Lab features must stay asynchronous after the base analysis and rig.
 

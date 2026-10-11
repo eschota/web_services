@@ -1,7 +1,7 @@
 {
   "schema": "autorig.hair-concepts/1",
   "status": "images_generated_visual_direction_not_3d_ground_truth",
-  "review": "Both images inspected. Hair silhouettes readable, but shading and strand detail are smoother than the requested coarse 2000s cards. Owner acceptance pending.",
+  "review": "Both images inspected and accepted by owner through DEV (inbox 2283/2284, exact media 9d25d89c1329/95b805d330ce). Acceptance is for 2D visual direction only, not generated 3D, hair topology or physics.",
   "generation_method": "existing farm Qwen image generate API, no paid provider",
   "entries": [
     {

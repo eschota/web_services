@@ -21,7 +21,8 @@
     "url": "https://autorig.online/renderfin/render/default_user/ea5ead04-022e-49ed-abbc-fbcfb45d6e31.png",
     "artifact_path": ".work/hair-lab-20261012/original-character/fullbody-r2.png",
     "sha256": "74d4bc6ec689a30454ae79a30cd237764ab288d6969d00351066771cc07ef957",
-    "visual_review": "pass: full silhouette, both complete hands, hair and shoes visible; clean T-pose; identity and hairstyle preserved"
+    "visual_review": "pass: full silhouette, both complete hands, hair and shoes visible; clean T-pose; identity and hairstyle preserved",
+    "owner_acceptance": {"inbox_id":2285,"about_uid":"393fc73903ab","verdict":"accept","scope":"this 2D full-body T-pose r2 concept only; not 3D completion"}
   },
   "discarded_concept": {
     "qwen_task_id": "5feabcae-06b1-4cf5-ae2a-b7336cdcd2fb",
