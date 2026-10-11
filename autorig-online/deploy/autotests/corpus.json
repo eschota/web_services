@@ -834,7 +834,7 @@
      "thresholds": {
       "source_skin": [
        "==",
-       1
+       0
       ],
       "applied": [
        "==",
@@ -844,7 +844,8 @@
        "==",
        1
       ]
-     }
+     },
+     "note": "2026-10-11 Rig path: Tripo template skeleton is 13 % H off the mesh -> rejected as a pose source (by design)"
     },
     {
      "id": "mt_stretch",
@@ -4513,6 +4514,111 @@
       "seconds": [
        "<=",
        120
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "warrior_sword_posed",
+   "task": "66ba97ba-30ad-4284-bb63-ed56860d09f6",
+   "cost": 3,
+   "defect": "owner 2026-10-11 («женщина с мечем очень плохо, меч должен ... отделяться до ригов всех»): the walking warrior with a curved sword. Tripo's template skeleton (T-pose, turned 90 degrees, hands 13 % H off the mesh) set the front to +z (true +x) and fed limb_stabilize; fastrig's arm fit fell back to proportions (arm chain in the skirt). Fix: guess_forward and limb_stabilize reject a skeleton off the mesh, parts_cluster runs before every rig, mt/pose_skeleton traces the bent arms on the voxel solid",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "66ba97ba.upload.glb",
+     "params": {
+      "words": "Female warrior with sword and armor"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "prop_bones_held": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_pose_front",
+     "kind": "posed_prop_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "front": "+x"
+     },
+     "thresholds": {
+      "front_ok": [
+       "==",
+       1
+      ],
+      "fit_ok": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_pose_fit",
+     "kind": "posed_prop_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "front": "+x"
+     },
+     "thresholds": {
+      "arm_proportions": [
+       "==",
+       0
+      ],
+      "prop_grip_pct_H": [
+       "<=",
+       8
+      ]
+     },
+     "xfail": {
+      "reason": "the bent arms fall back to proportions (hand 27 % H off the sword); mt/pose_skeleton traces them (option pose_trace) but the library clips then stretch the bent rest elbow (numeric QA 1/9 on 66ba97ba.prepared): needs a mesh-only straightening to T/A",
+      "owner": "Rig path · V3 + Limb stabilization · V3"
+     }
+    },
+    {
+     "id": "mt_prop_rigid",
+     "kind": "prop_rigidity",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "props_found": [
+       ">=",
+       1
+      ],
+      "one_bone_fraction": [
+       ">=",
+       0.99
+      ],
+      "rigid_fraction": [
+       ">=",
+       0.99
       ]
      }
     }

@@ -977,6 +977,34 @@ def rig_budget_live(hours=24, since="2026-10-10 15:50:00"):
             "without_fast_rig": len(missing), "without_fast_rig_tasks": missing[:8]}
 
 
+def posed_prop_fit(ctx, front=""):
+    """A posed character holding a prop (66ba97ba, owner 2026-10-11 «женщина с мечем очень плохо»): the front from
+    the geometry when the source skeleton is a template beside the mesh, the arms traced (no proportions guess), the
+    prop a rigid child of the hand that holds it, the fit check passing."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    bones = {b["name"]: b for b in rig.get("bones") or []}
+    H = float(rig.get("model_height_units") or 1.0)
+    grip = []
+    for b in bones.values():
+        if str(b["name"]).startswith("Prop") and str(b.get("parent") or "").endswith("Hand"):
+            hand = bones.get(b["parent"])
+            if hand:
+                grip.append(float(np.linalg.norm(np.asarray(b["head"]) - np.asarray(hand["tail"]))) / H * 100)
+    pose = {}
+    try:
+        pose = json.loads((run / "rig" / "pose_joints.json").read_text())
+    except (OSError, ValueError):
+        pass
+    return {"forward_axis": rig.get("forward_axis"), "front_ok": int(not front or rig.get("forward_axis") == front),
+            "fit_ok": int(bool((rig.get("fit_check") or {}).get("ok"))),
+            "fit_reasons": (rig.get("fit_check") or {}).get("reasons"),
+            "arm_proportions": sum(1 for s_ in ("Left", "Right") for n in ("Arm", "ForeArm", "Hand")
+                                   if (bones.get(f"{s_}{n}") or {}).get("source") == "proportions"),
+            "pose_traced": int(bool(pose.get("use"))),
+            "prop_grip_pct_H": round(min(grip), 2) if grip else 99.0}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1058,6 +1086,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return rig_joints(ctx)
     if k == "pending_detector":
         return {"pending": True}
+    if k == "posed_prop_fit":
+        return posed_prop_fit(ctx, a.get("front", ""))
     raise ValueError(f"unknown check kind {k}")
 
 
