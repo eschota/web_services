@@ -9,7 +9,8 @@ you name (by id), keeps a timestamped backup, and refuses to drop cases.
   sudo corpus_edit.py input <inputs.json>         # add or replace corpus inputs ({name: {source, task, ...}})
   sudo corpus_edit.py xfail <case_id> <check_id> --reason R --owner O
   sudo corpus_edit.py unxfail <case_id> <check_id>
-  sudo corpus_edit.py set <case_id> <check_id> <threshold_key> '<json value>'
+  sudo corpus_edit.py set <case_id> <check_id> <threshold_key> '<json value>'   # inside "thresholds"
+  sudo corpus_edit.py field <case_id> <check_id> <key> '<json value>'           # a check-level field (tier, params, note...)
   corpus_edit.py history                           # backups, newest first
 """
 import argparse
@@ -53,6 +54,7 @@ def main():
     x.add_argument("--reason", required=True); x.add_argument("--owner", required=True)
     ux = sub.add_parser("unxfail"); ux.add_argument("case"); ux.add_argument("check")
     s = sub.add_parser("set"); s.add_argument("case"); s.add_argument("check"); s.add_argument("key"); s.add_argument("value")
+    f = sub.add_parser("field"); f.add_argument("case"); f.add_argument("check"); f.add_argument("key"); f.add_argument("value")
     sub.add_parser("history")
     a = ap.parse_args()
     if a.cmd == "history":
@@ -78,6 +80,10 @@ def main():
             check_of(find(cs, a.case), a.check)["xfail"] = {"reason": a.reason, "owner": a.owner}
         elif a.cmd == "unxfail":
             check_of(find(cs, a.case), a.check).pop("xfail", None)
+        elif a.cmd == "field":
+            if a.key in ("id", "kind", "xfail"):
+                raise SystemExit("use upsert / xfail / unxfail for id, kind and xfail")
+            check_of(find(cs, a.case), a.check)[a.key] = json.loads(a.value)
         elif a.cmd == "set":
             check_of(find(cs, a.case), a.check).setdefault("thresholds", {})[a.key] = json.loads(a.value)
         if not before <= {c.get("id") for c in cs}:
