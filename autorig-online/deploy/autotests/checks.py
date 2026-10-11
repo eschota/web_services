@@ -554,6 +554,15 @@ def leg_joints(path, rig_json=None):
     return out
 
 
+def rig_stretch_file(rig_json):
+    """A recorded rig.json's rig_check stretch (detector role: the known-bad rig as it was)."""
+    c = json.loads(pathlib.Path(rig_json).read_text()).get("checks") or {}
+    st = {k: v for k, v in (c.get("rig_check_stretch") or {}).items() if isinstance(v, dict)}
+    return {"sum_edges_over_2x": sum(int(v.get("edges_over_2x") or 0) for v in st.values()),
+            "sum_edges_over_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
+            "worst_pairs": (c.get("rig_check_stretch") or {}).get("worst")}
+
+
 def rig_stretch(ctx):
     """«Skinning · V3» (2026-10-11): does the fast rig tear its own mesh?  rig.json's rig_check stretch (fastrig's
     looping test clip at three frames: edges over 2x / 4x their rest length that also grew), the per-bone weight
@@ -1276,6 +1285,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return quadruped_legs(target, rig_json)
     if k == "rig_stretch":
         return rig_stretch(ctx)
+    if k == "rig_stretch_file":
+        return rig_stretch_file(_input(a["rig_json"]))
     if k == "cloth_report":
         return cloth_report(ctx["run"] / "rig" / "rig.json")
     if k == "cloth_nochange":

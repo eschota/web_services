@@ -544,6 +544,39 @@
    "what": "armored duck soldier",
    "sha256": "bdf3051539e6995ec71418f6929f8db4f9759e20ce37a96ff6135daa0fced6e0",
    "bytes": 84330156
+  },
+  "1e079e65.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dbd5a11ffd7f78f9c63f/proj/model.glb",
+   "task": "1e079e65",
+   "what": "ferret, 13k, long body, low posture, head turned",
+   "sha256": "66ae8dc4ffff8b3cec48585e9d27d7fdab76f57aef79d587553b185d5dc9c519",
+   "bytes": 8283304
+  },
+  "a26f4f9a.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/949b7c96e17ec2938f8f/proj/model.glb",
+   "task": "a26f4f9a-3697-4cc2-917a-a64bb3c7ada9",
+   "what": "army girl, Z-up FBX lying flat (V3 hash-bound source, extents 99 x 32 x 197)",
+   "sha256": "bde13e255638528df2672d408cc3fc47f810e9aa08e749055fa94cf1ab5b57c4",
+   "bytes": 511312
+  },
+  "7552bcff.model.glb": {
+   "source": "/srv/autorig/audits/neck-20261011/7552bcff.model.glb",
+   "task": "7552bcff-0000-0000-0000-000000000000",
+   "what": "muscular man (model.fbx, 156k): the Neck sat in the trapezius (83 % H), Head at the throat; Look Around tore Head | Neck 33x",
+   "sha256": "32b3a8107b0c138b25d4be6cbfd5bd773df29233cef7034dddb2ff5c2dbcbdbd",
+   "bytes": 11240476
+  },
+  "7552bcff.mt-before.glb": {
+   "source": "/srv/autorig/audits/neck-20261011/7552bcff.mt-before.glb",
+   "what": "the recorded rig before the neck-from-sections fit",
+   "sha256": "2123e7c83f51bc6b7120670b729ece1af35a4350bdbff0f1a4e765723d548d85",
+   "bytes": 14588596
+  },
+  "7552bcff.mt-before.rig.json": {
+   "source": "/srv/autorig/audits/neck-20261011/7552bcff.mt-before.rig.json",
+   "what": "its rig.json",
+   "sha256": "99021ef53c2fa17525cae84217589a6d273cff7c2c0408326c565b8e27b124af",
+   "bytes": 13859
   }
  },
  "profiles": {
@@ -6014,6 +6047,176 @@
      "xfail": {
       "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
       "owner": "Animal clips · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ferret_long_neck",
+   "task": "1e079e65",
+   "cost": 1,
+   "defect": "ferret (2026-10-11): the Neck / Head joints on the straight Spine2 -> nose line cut through the air of the curved neck (Head|Neck and Neck|Neck tears, rig_check 4x 414). Fix: fit_quadruped puts them on the body cross-section centre when that line is in the air",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "1e079e65.model.glb",
+     "params": {
+      "words": "ferret quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       5
+      ],
+      "rig_check_4x": [
+       "<=",
+       120
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "zup_lying_conveyor",
+   "task": "a26f4f9a-3697-4cc2-917a-a64bb3c7ada9",
+   "cost": 1,
+   "defect": "Limb Fable 2026-10-11: a Z-up FBX lying flat on the V3 conveyor; orient found +z at 0.9 but rig_first refused to turn a hash-bound source (15 limb joints outside the mesh). Fix: the upright root node is applied on hash-bound sources too, the customer bytes stay in proj/model_source.glb",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "a26f4f9a.model.glb",
+     "params": {
+      "words": "army girl",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       7
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "centring",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "outside": [
+       "<=",
+       2
+      ]
+     },
+     "xfail": {
+      "reason": "until the hash-bound upright lands (case ahead of code)",
+      "owner": "Rig path · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "neck_trapezius",
+   "cost": 3,
+   "defect": "Skinning V3 2026-10-11 (task 7552bcff): the biped Neck joint inside the trapezius mass and the Head at the throat; a head turn tears Head | Neck. Fix: neck and head pivot from the narrow band of the body sections (tools/patch_fastrig_neck.py): rig_check 4x 70 -> 24, Head|Neck gone from the worst pairs.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "7552bcff.model.glb",
+     "params": {
+      "words": "muscular man"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "xfail": {
+      "reason": "neck-from-sections not installed yet; flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       40
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       400
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     },
+     "xfail": {
+      "reason": "neck-from-sections not installed yet; flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
+    },
+    {
+     "id": "before_neck_detector",
+     "kind": "rig_stretch_file",
+     "role": "detector",
+     "paths": [
+      "mt"
+     ],
+     "input": "7552bcff.mt-before.glb",
+     "params": {
+      "rig_json": "7552bcff.mt-before.rig.json"
+     },
+     "thresholds": {
+      "sum_edges_over_4x": [
+       ">=",
+       60
+      ]
+     },
+     "xfail": {
+      "reason": "kind rig_stretch_file lands with the Skinning deploy",
+      "owner": "Skinning · V3"
      }
     }
    ]
