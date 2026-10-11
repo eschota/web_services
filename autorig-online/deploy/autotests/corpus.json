@@ -404,6 +404,48 @@
    "what": "chibi anime girl, T-pose (a big head on a small body: the control)",
    "sha256": "f2a2be0e7122489eda9ae210fb1f21dd42d6c356eb12d2256c30a94963f10dd1",
    "bytes": 102908
+  },
+  "583622f3.upload.obj": {
+   "source": "/var/autorig/uploads/29fc0ea8-016e-4018-9c45-1bdff61fa28a/dpgoe.obj",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "what": "Roblox OBJ «potato» alone: mtllib dpgoe.mtl not uploaded, no images; vn all (0,1,0); per-face UV dots (area 0.0025)",
+   "sha256": "1baec27af62500635ace6fbc03a3ccb60be5188fc0c5dac48a6424cb20544e43",
+   "bytes": 1048515
+  },
+  "583622f3.rig.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dfb099ac26c8f16ab46b/rig/skin/v0/rigged.glb",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "what": "the V3 fast rig v0 of the potato: one flat grey material, broken normals",
+   "sha256": "6320c52b65c5935436fbba0ceba7cb7a20bf9a6b8a218e1694c387aca74c0d3a",
+   "bytes": 538624
+  },
+  "583622f3.paint_albedo.png": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dfb099ac26c8f16ab46b/texture/t2/paint_albedo.png",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "what": "Qwen-edit albedo of the front | back clay guides (texture t2)",
+   "sha256": "7027a1b67519c18a8680b74b31b4ddd9364f5658efe0c45fbf7a1116d6c07f4f",
+   "bytes": 1013374
+  },
+  "583622f3.paint_roughness.png": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dfb099ac26c8f16ab46b/texture/t2/paint_roughness.png",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "what": "Qwen-edit roughness (t2)",
+   "sha256": "08a415fac00d1017ed00aeb66765d845d0a9d7a7141db629f74431f9ff967ff4",
+   "bytes": 1190750
+  },
+  "583622f3.paint_normal.png": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dfb099ac26c8f16ab46b/texture/t2/paint_normal.png",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "what": "Qwen-edit detail normal (t2)",
+   "sha256": "90cbb6b4683c5735569d9211a179aa77d08f4ad49105fed3c74d631dae346431",
+   "bytes": 1380996
+  },
+  "583622f3.paint.json": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dfb099ac26c8f16ab46b/texture/t2/paint.json",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "what": "the paint record of t2 (forward, view_px, description)",
+   "sha256": "7c8fabbc5aa39d33165db9a04abfb5fcf7effb790af6acd142357f7577537a76",
+   "bytes": 1929
   }
  },
  "profiles": {
@@ -4384,6 +4426,93 @@
       "arm_joints_from_constitution": [
        "==",
        0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "untextured_obj",
+   "task": "583622f3-bdc3-48e7-981e-87120f5b12df",
+   "cost": 1,
+   "defect": "no PBR materials (owner 2026-10-11: «почему до сих пор картошка без материалов PBR?»): an OBJ uploaded without its .mtl and images, broken normals (all +Y), unusable per-face UV dots; the viewer showed it flat white. mt/autotex: the missing library is named for the user; the Qwen paints are baked onto a new UV atlas with rebuilt normals (v0: 0 textured materials, after: 1)",
+   "checks": [
+    {
+     "id": "refs",
+     "kind": "autotex_upload_refs",
+     "paths": [
+      "mt"
+     ],
+     "input": "583622f3.upload.obj",
+     "params": {
+      "name": "dpgoe.obj"
+     },
+     "thresholds": {
+      "referenced": [
+       ">=",
+       1
+      ],
+      "missing": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "bake",
+     "kind": "autotex_bake",
+     "paths": [
+      "mt"
+     ],
+     "input": "583622f3.rig.glb",
+     "params": {
+      "paints": {
+       "paint_albedo.png": "583622f3.paint_albedo.png",
+       "paint_roughness.png": "583622f3.paint_roughness.png",
+       "paint_normal.png": "583622f3.paint_normal.png",
+       "paint.json": "583622f3.paint.json"
+      }
+     },
+     "thresholds": {
+      "textured_before": [
+       "==",
+       0
+      ],
+      "textured_after": [
+       ">=",
+       1
+      ],
+      "images_after": [
+       ">=",
+       2
+      ],
+      "normals_before_broken": [
+       "==",
+       1
+      ],
+      "normals_fixed": [
+       ">=",
+       9640
+      ],
+      "uv_area": [
+       ">=",
+       0.3
+      ],
+      "direct_share": [
+       ">=",
+       0.25
+      ],
+      "align_iou_min": [
+       ">=",
+       0.9
+      ],
+      "colour_std_gain": [
+       ">=",
+       0.01
+      ],
+      "seconds": [
+       "<=",
+       120
       ]
      }
     }
