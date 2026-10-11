@@ -161,12 +161,13 @@ def get_email_html(
     unsubscribe_url: Optional[str] = None,
     dashboard_url: Optional[str] = None,
     lang: Optional[str] = None,
+    task_url: Optional[str] = None,
 ) -> str:
     """Generate HTML email template (``lang``: the owner's interface language; fa is right to left)."""
     T = lambda key: escape(email_text(key, lang))  # noqa: E731
     direction = "rtl" if lang == "fa" else "ltr"
     base = APP_URL.rstrip("/")
-    task_url = f"{base}/task?id={task_id}"
+    task_url = task_url or f"{base}/task?id={task_id}"
     dash = dashboard_url or f"{base}/dashboard"
     unsub_block = ""
     if unsubscribe_url:
@@ -261,6 +262,7 @@ async def send_task_completed_email(
     guid: str,
     worker_base: str,
     lang: Optional[str] = None,
+    campaign: str = "task_ready",
 ) -> bool:
     """
     Send task completion email with preview image.
@@ -313,7 +315,8 @@ async def send_task_completed_email(
         unsubscribe_url = f"{base}/unsubscribe?token={quote(tok, safe='')}"
         dashboard_url = f"{base}/dashboard"
         html_content = get_email_html(
-            task_id, has_image, unsubscribe_url, dashboard_url=dashboard_url, lang=lang
+            task_id, has_image, unsubscribe_url, dashboard_url=dashboard_url, lang=lang,
+            task_url=tracked_task_url(task_id, to_email, campaign),
         )
         
         # Prepare email params
@@ -356,6 +359,84 @@ async def send_task_completed_email(
         await _finish_task_completion_email(task_id, sent=False, error=str(e))
         print(f"[Email] Failed to send email to {to_email}: {e}")
         return False
+
+
+def tracked_task_url(task_id: str, to_email: str, campaign: str) -> str:
+    """The task link through our click redirect (/email/click records the click in email_campaign_clicks), which
+    lands on /task?id=… with utm_source=email&utm_medium=task_ready|backfill&utm_campaign=<campaign>."""
+    try:
+        return _marketing_click_url(campaign, to_email, f"task:{task_id}")
+    except Exception:                                           # noqa: BLE001 - a plain link is still a link
+        return f"{APP_URL.rstrip('/')}/task?id={task_id}&utm_source=email&utm_medium=task_ready&utm_campaign={campaign}"
+
+
+async def send_task_digest_email(to_email: str, tasks: list, lang: Optional[str] = None,
+                                 campaign: str = "backfill_20261012", poster_dir: str = "") -> dict:
+    """One email listing several finished tasks of one owner (the backfill of the V3 switch). Each task is reserved
+    in task_completion_emails first, so a task never gets this and a normal completion email both.
+    tasks: [(task_id, title or None)]. -> {"sent": bool, "tasks": [ids included], "error": str|None}"""
+    import os as _os
+
+    if not RESEND_API_KEY or not to_email:
+        return {"sent": False, "tasks": [], "error": "not configured"}
+    included = []
+    for task_id, title in tasks:
+        if await _reserve_task_completion_email(task_id, to_email):
+            included.append((task_id, title))
+    if not included:
+        return {"sent": False, "tasks": [], "error": "already sent"}
+    T = lambda key: escape(email_text(key, lang))  # noqa: E731
+    base = APP_URL.rstrip("/")
+    attachments, rows = [], []
+    for i, (task_id, title) in enumerate(included):
+        url = tracked_task_url(task_id, to_email, campaign)
+        img = ""
+        path = _os.path.join(poster_dir, f"{task_id}.jpg") if poster_dir else ""
+        if path and i < 8 and _os.path.isfile(path) and _os.path.getsize(path) > 8000:
+            cid = f"poster{i}"
+            with open(path, "rb") as fh:
+                attachments.append({"filename": f"{task_id[:8]}.jpg", "content": base64.b64encode(fh.read()).decode(),
+                                    "content_id": cid})
+            img = (f'<a href="{url}"><img src="cid:{cid}" alt="" width="260" style="display:block;width:260px;'
+                   f'max-width:100%;border-radius:10px;margin:0 auto 8px"></a>')
+        name = escape((title or "").strip()[:80] or f"AutoRig · {task_id[:8]}")
+        rows.append(f'<td style="padding:10px;text-align:center;vertical-align:top;width:50%">{img}'
+                    f'<a href="{url}" style="color:#a5b4fc;font-size:14px;text-decoration:none">{name}</a></td>')
+    grid = "".join("<tr>" + "".join(rows[i:i + 2]) + "</tr>" for i in range(0, len(rows), 2))
+    tok = build_unsubscribe_token(to_email)
+    unsubscribe_url = f"{base}/unsubscribe?token={quote(tok, safe='')}"
+    direction = "rtl" if lang == "fa" else "ltr"
+    html_content = f"""<!DOCTYPE html><html lang="{escape(lang or 'en')}" dir="{direction}"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#0a0a0f;font-family:'Segoe UI',Tahoma,Verdana,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0f;padding:32px 16px"><tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#1a1a24;border-radius:16px;overflow:hidden">
+<tr><td style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);padding:26px;text-align:center">
+<h1 style="color:#fff;margin:0;font-size:26px">AutoRig.online</h1></td></tr>
+<tr><td style="padding:30px 24px">
+<h2 style="color:#f0f0f5;margin:0 0 14px;font-size:22px;text-align:center">{T("email_digest_title")}</h2>
+<p style="color:#a0a0b0;font-size:15px;line-height:1.6;text-align:center;margin:0 0 18px">{T("email_digest_body")}</p>
+<table width="100%" cellpadding="0" cellspacing="0">{grid}</table>
+<p style="color:#d0d4e0;font-size:13px;text-align:center;margin:22px 0 0">{T("email_ready_formats")}</p>
+<p style="color:#d0d4e0;font-size:12px;text-align:center;margin:18px 0 0">
+<a href="{base}/dashboard" style="color:#a5b4fc">{T("email_dashboard")}</a> — {T("email_settings")} ·
+<a href="{unsubscribe_url}" style="color:#a5b4fc">{T("email_unsubscribe")}</a></p>
+</td></tr></table></td></tr></table></body></html>"""
+    params = {"from": f"AutoRig.online <{EMAIL_FROM}>", "to": [to_email],
+              "subject": email_text("email_digest_subject", lang), "html": html_content}
+    if attachments:
+        params["attachments"] = attachments
+    try:
+        response = resend.Emails.send(params, {"idempotency_key": f"{campaign}/{_completion_email_recipient_hash(to_email)}"})
+        message_id = response.get("id") if isinstance(response, dict) else getattr(response, "id", None)
+        for task_id, _ in included:
+            await _finish_task_completion_email(task_id, sent=True, provider_message_id=str(message_id or "") or None)
+        print(f"[Email] Digest sent ({len(included)} tasks), id={message_id}")
+        return {"sent": True, "tasks": [t for t, _ in included], "error": None, "id": message_id}
+    except Exception as e:
+        for task_id, _ in included:
+            await _finish_task_completion_email(task_id, sent=False, error=str(e))
+        print(f"[Email] Digest failed: {e}")
+        return {"sent": False, "tasks": [t for t, _ in included], "error": str(e)[:200]}
 
 
 async def send_test_email(to_email: str) -> bool:

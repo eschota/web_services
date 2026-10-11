@@ -1696,6 +1696,7 @@ const App = {
         }
 
         const busyMode = formData.get('source') === 'upload' ? 'upload' : 'link';
+        try { window.autorigFunnel && window.autorigFunnel.track('upload_start', { props: { via: busyMode } }); } catch (e) { /* ignore */ }
         const isUpload = busyMode === 'upload';
         this.setConvertFormBusy(true, busyMode);
 
@@ -1753,6 +1754,7 @@ const App = {
             }
 
             if (ok) {
+                try { window.autorigFunnel && window.autorigFunnel.track('task_created', { task_id: data.task_id, props: { via: busyMode } }); } catch (e) { /* ignore */ }
                 window.location.href = `/task?id=${data.task_id}`;
             } else {
                 if (status === 401) {

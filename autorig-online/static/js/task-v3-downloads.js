@@ -393,6 +393,7 @@ function render() {
 
 function paywall(access, plan, req) {
   remember(req);
+  try { window.autorigFunnel && window.autorigFunnel.track('paywall_view', { task_id: taskId, once: access.reason || 'paywall', props: { reason: access.reason || '' } }); } catch (e) { /* ignore */ }
   const box = el('div', { class: 'dl3-pay' });
   box.appendChild(el('div', { class: 'dl3-pay-lock' }, icon('lock')));
   if (access.reason === 'not_owner') {
@@ -406,14 +407,15 @@ function paywall(access, plan, req) {
       el('li', { title: tr('dlv3_pay_unlimited') }, icon('infinite'), el('span', { text: tr('dlv3_pay_unlimited') }))));
     box.appendChild(el('p', { class: 'dl3-pay-price', text: priceText(plan) }));
     if (!access.signed_in) {
-      box.appendChild(el('a', { class: 'dl3-cta', id: 'dl3-signin', href: plan.login_url, title: tr('dlv3_pay_signin_first') },
+      box.appendChild(el('a', { class: 'dl3-cta', id: 'dl3-signin', href: plan.login_url, title: tr('dlv3_pay_signin_first'),
+        onclick: () => { try { window.autorigFunnel && window.autorigFunnel.track('sign_up_prompt', { task_id: taskId }); } catch (e) { /* ignore */ } } },
         icon('google'), el('span', { text: tr('dlv3_pay_signin') })));
       box.appendChild(el('p', { class: 'dl3-pay-hint', text: tr('dlv3_pay_signin_first') }));
     } else {
       const wait = el('p', { class: 'dl3-pay-hint', id: 'dl3-wait', hidden: true, text: tr('dlv3_pay_waiting') });
       box.appendChild(el('a', {
         class: 'dl3-cta', id: 'dl3-subscribe', href: plan.checkout_url, target: '_blank', rel: 'noopener', title: priceText(plan),
-        onclick: () => { wait.hidden = false; watchPayment(req); },
+        onclick: () => { wait.hidden = false; try { window.autorigFunnel && window.autorigFunnel.track('checkout_start', { task_id: taskId, props: { plan: 'unlimited_monthly' } }); } catch (e) { /* ignore */ } watchPayment(req); },
       }, icon('infinite'), el('span', { text: tr('dlv3_pay_subscribe') })));
       box.appendChild(wait);
     }
@@ -431,6 +433,7 @@ function watchPayment(req) {
   const check = async () => {
     const r = await api(`/api/task/${encodeURIComponent(taskId)}/downloads-v3`);
     if (r.ok && r.body && r.body.access && r.body.access.allowed) {
+      try { window.autorigFunnel && window.autorigFunnel.track('purchase', { task_id: taskId, value: Number(r.body.plan && r.body.plan.price_usd) || 20, currency: 'USD', props: { plan: 'unlimited_monthly' } }); } catch (e) { /* ignore */ }
       clearInterval(payWatch);
       payWatch = 0;
       manifest = r.body;
@@ -480,10 +483,12 @@ async function choose(req) {
   const key = requestKey(req);
   if (busy && busy.key === key && busy.view && busy.view.state !== 'failed') return;
   if (manifest.access && !manifest.access.allowed) {
+    try { window.autorigFunnel && window.autorigFunnel.track('download_click', { task_id: taskId, props: { target: (req.custom && req.custom.target) || req.fmt || '', locked: true } }); } catch (e) { /* ignore */ }
     paywall(manifest.access, manifest.plan, req);
     return;
   }
   if (busy) clearTimeout(busy.timer);
+  try { window.autorigFunnel && window.autorigFunnel.track('download_click', { task_id: taskId, props: { target: (req.custom && req.custom.target) || req.fmt || '' } }); } catch (e) { /* ignore */ }
   busy = { key, req, timer: 0, view: { state: 'queued', progress: 0.02 } };
   progress(busy.view);
   const base = `/api/task/${encodeURIComponent(taskId)}`;

@@ -1016,5 +1016,8 @@
   "email_unsubscribe": "一键退订",
   "email_visit": "访问网站",
   "email_footer": "自动 3D 角色绑定",
-  "email_preview_alt": "3D 模型预览"
+  "email_preview_alt": "3D 模型预览",
+  "email_digest_subject": "🎉 您的绑定 3D 模型已就绪 - AutoRig.online",
+  "email_digest_title": "🎉 您的模型已就绪",
+  "email_digest_body": "我们切换到了新的绑定流程，没来得及通知您：这些模型已完成绑定和动画，正在查看器中等您。"
 }

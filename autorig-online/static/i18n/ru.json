@@ -1233,5 +1233,8 @@
   "email_unsubscribe": "Отписаться в один клик",
   "email_visit": "Перейти на сайт",
   "email_footer": "Автоматический риг 3D-персонажей",
-  "email_preview_alt": "Превью 3D-модели"
+  "email_preview_alt": "Превью 3D-модели",
+  "email_digest_subject": "🎉 Ваши 3D-модели с ригом готовы — AutoRig.online",
+  "email_digest_title": "🎉 Ваши модели готовы",
+  "email_digest_body": "Мы перешли на новый конвейер рига и не успели вам сообщить: эти модели уже с ригом и анимациями и ждут во вьювере."
 }

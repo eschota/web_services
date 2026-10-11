@@ -3376,6 +3376,12 @@ def _campaign_click_destination(campaign_key: str, link_key: str) -> Optional[st
         return f"{base}/?{utm}"
     if link_key == "youtube_short":
         return f"https://www.youtube.com/shorts/vEn7laZijOI?{utm}"
+    # Downloads · V3 (2026-10-12): task links of the completion email and the backfill digest
+    task_link = re.fullmatch(r"task:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", link_key or "")
+    if task_link:
+        medium = "backfill" if campaign.startswith("backfill") else "task_ready"
+        task_utm = urlencode({"utm_source": "email", "utm_medium": medium, "utm_campaign": campaign})
+        return f"{base}/task?id={task_link.group(1)}&{task_utm}"
     return None
 
 
@@ -17200,6 +17206,11 @@ app.include_router(
 # Downloads · V3 (2026-10-10): the task page's download mode. V3 files only, exported on request
 # (FBX by the Blender export workers), every download and export behind the unlimited subscription.
 from task_downloads_v3 import build_task_downloads_v3_router
+
+# Conversion funnel (2026-10-12): page events and the per-day funnel report for admins.
+from funnel import build_funnel_router
+
+app.include_router(build_funnel_router(get_db=get_db, get_current_user=get_current_user, is_admin_email=is_admin_email))
 
 app.include_router(
     build_task_downloads_v3_router(

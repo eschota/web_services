@@ -70,7 +70,7 @@ class CompletionEmailTests(unittest.TestCase):
         results, sent = self.run_case()
         self.assertEqual(len(sent), 1)
         self.assertEqual(results[0], "sent")
-        self.assertIn("/task?id=11111111-2222-4333-8444-555555555555", sent[0]["html"])
+        self.assertIn("/email/click?token=", sent[0]["html"])      # the tracked task link (utm + click log)
 
     def test_anonymous_owner_gets_no_email(self):
         results, sent = self.run_case(owner_type="anon", calls=1)

@@ -1221,5 +1221,8 @@
   "email_unsubscribe": "One-click unsubscribe",
   "email_visit": "Visit Website",
   "email_footer": "Automatic 3D Character Rigging",
-  "email_preview_alt": "3D Model Preview"
+  "email_preview_alt": "3D Model Preview",
+  "email_digest_subject": "🎉 Your rigged 3D models are ready - AutoRig.online",
+  "email_digest_title": "🎉 Your models are ready",
+  "email_digest_body": "We moved to our new rigging pipeline and missed telling you: these models are rigged, animated and waiting in the viewer."
 }
