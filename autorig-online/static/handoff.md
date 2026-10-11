@@ -1,6 +1,6 @@
 # AutoRig V3 — live development handoff
 
-Updated: **2026-10-12 06:05 Asia/Novosibirsk**<br>
+Updated: **2026-10-12 06:39 Asia/Novosibirsk**<br>
 Fleet snapshot: **2026-10-11 22:40 UTC** (point-in-time, recheck before operating)
 
 This is the public coordination checkpoint for AutoRig development. It contains current production facts, active work and the next tasks. It deliberately contains no credentials, private customer data, internal network addresses or licensed assets.
@@ -46,11 +46,11 @@ Planned graph inputs are source-bound head projections and analyzer passes: colo
 
 The research target is game-ready early-2000s style hair with a small polygon budget, textured strands/cards, a clean scalp boundary and lightweight secondary motion. Candidate implementations will compare:
 
-1. fitted low-poly cap with layered texture cards;
-2. GPU guide curves converted to clustered cards;
-3. voxel or signed-distance hair volume reduced to shells/cards;
-4. point-cloud or splat guides reduced to polygon strips;
-5. farm-generated hairstyle mesh followed by fast retopology and fitting.
+1. an owned guide library fitted to the actual scalp, then textured cards;
+2. the existing hair mesh plus a flow field converted to cards;
+3. registered multi-view voxel/point orientation fields converted to guides/cards;
+4. an existing strand groom converted to optimized cards;
+5. a farm-generated hairstyle proposal followed by retopology, guides and cards.
 
 Quality comes before client-side execution. The fastest method that preserves silhouette, parting, bangs, ponytails and texture direction wins per hairstyle class. Full 3D generation remains a fallback for complex styles and dataset production, not the default for every task.
 
@@ -59,6 +59,12 @@ The [Hair Lab research](/static/docs/hair-lab/research.md) is now public, with s
 Two original farm-rendered head concepts are complete and visually inspected; they are 2D art direction, not 3D ground truth. A procedural five-style prototype exists, but full task integration and physically validated dynamics are not complete.
 
 **Latest owner steering:** immediately test on recent real V3 models instead of abstract examples, and also generate original game characters. Local workstation research is explicitly authorized. The next acceptance evidence must use real source-bound task/head geometry; synthetic figures remain technical references only. New Hair Lab features must stay asynchronous after the base analysis and rig.
+
+Five recent real public SFW V3 cases are now loaded with exact hashes: spikes, buns, bob and dreadlocks, including a 2.01-million-triangle rig. Their current conveyor outcomes are `needs_review`. Head-weight extraction and six-view geometry benchmarks ran on all five; this is not semantic hair segmentation. One source has an exact `Hair` material partition and experimental card candidates; their visual quality is still below acceptance. A stored hair-colour/front-back discrepancy was independently confirmed by Vision. [Real-case report](/static/docs/hair-lab/real-cases.md).
+
+An independently reviewed CUDA raster benchmark now covers all five actual Head-weight ROIs. On the heaviest ROI, six-view CUDA p50 is 0.880 ms; cold Blender extraction still takes 14.618 s. This does not establish end-to-end hair speed or quality. The first real-head hairstyle candidate was visually rejected as below the desired strand-design quality; Apply remains disabled. DEV evidence was delivered (6748/6749), not accepted.
+
+One original full-body T-pose concept is ready. Its single current free farm-only Hunyuan job is [`e7f282cf39704243ae7197014bd5d478`](/api/gen3d/jobs/e7f282cf39704243ae7197014bd5d478), queued awaiting eligible capacity. The earlier queue entry was cancelled before dispatch while testing a local lane; local Hunyuan refused its RAM admission floor, so the free farm request was restored once. No 3D completion or reliable ETA is claimed. The customer base rig and original assets remain unchanged by this research.
 
 Hair Lab acceptance criteria:
 

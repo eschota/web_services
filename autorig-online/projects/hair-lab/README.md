@@ -33,3 +33,14 @@ No shared Unity/viewer/backend file is owned by this initial prototype. Coordina
 Every claimed result carries exact inputs, source hashes, revisions, hardware, stage scope, measurement count and known limitations. Do not treat the historical 0/5 layer-rig checkpoint as a fresh acceptance audit.
 
 The owner explicitly authorized this local computer for research on 2026-10-12. This permits local experiments for Hair Lab; it does not require interruption of unrelated accepted work.
+
+## Verified checkpoint, 2026-10-12 06:39 Asia/Novosibirsk
+
+- H0 source review and public docs complete. Public real-case results: `/static/docs/hair-lab/real-cases.md`.
+- Five real public SFW V3 cases collected, exact source/rig hashes and current `needs_review` status retained in `.work/hair-lab-real-20261012/cases.json`. No model binaries in Git or training claim.
+- Blender current Head-weight extraction and six-view baselines complete on all five. Corrected custom CUDA raster independently reviewed as a diagnostic benchmark; exact report/JSON public, not production hair replacement.
+- Raw v1 CUDA benchmark rejected; retained v2 SHA `b7fb77ce8e4c69185f8589946fdfa59899b6bdba4eb6d68fe96987a857fe386e`. Its historical cold-named field is a component sum, not contiguous end-to-end time.
+- Exact Hair primitive isolated on real case `cd073629c54afde29b03`; generated candidates below artistic acceptance. Local QA harness in `static/hair-lab/` is source-only and not deployed. Original task/source unchanged, Apply disabled. Source Hair/Face/Mask/Eyes extracted only into `.work`; do not publish its payload as a generic asset.
+- Real pair/inspection media delivered to DEV, messages 6748/6749. Original concepts delivered in 6741–6743. No owner approval recorded.
+- Original full-body concept complete; ONE current free farm job `e7f282cf39704243ae7197014bd5d478` pending. Old `a923…` cancelled before dispatch; local RAM gate refused before any local submit. Follow the current job rather than creating another.
+- Next: improve guides/atlas art quality on actual heads, source-bound segmentation for fused hair, eliminate cold Blender overhead with verified direct GLB extraction or a warm worker, then skin/dynamics and actual task-tool/graph registration.

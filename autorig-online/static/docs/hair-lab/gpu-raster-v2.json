@@ -1,0 +1,244 @@
+{
+  "scope": "real current-rig head-weight ROI CUDA raster; diagnostic IDs only",
+  "repeats": 25,
+  "manifest_sha256": "de8c35cf8501861b17350467e6f9eff1ca420f98e39c68366efcce4677038314",
+  "source_sha256": "3a03c9b3b66c0596ea0c93a7b28d8d3e1bbaff784f3af8d5723180f1ca0dd63d",
+  "runtime": {
+    "cupy": "13.6.0",
+    "cuda_runtime": 12090,
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "module_compile_ms": 185.2895
+  },
+  "correctness_tests": [
+    {
+      "packed_bit_equal": true,
+      "mask_equal": true,
+      "triangle_id_equal": true,
+      "depth_max_abs_error": 0.0,
+      "passed": true,
+      "name": "full_frame_quad",
+      "covered_pixels": 2048
+    },
+    {
+      "packed_bit_equal": false,
+      "mask_equal": true,
+      "triangle_id_equal": true,
+      "depth_max_abs_error": 5.960464477539063e-08,
+      "passed": true,
+      "name": "overlap_reverse_winding",
+      "covered_pixels": 676
+    },
+    {
+      "packed_bit_equal": false,
+      "mask_equal": true,
+      "triangle_id_equal": true,
+      "depth_max_abs_error": 1.1920928955078125e-07,
+      "passed": true,
+      "name": "exact_depth_tie_higher_id",
+      "covered_pixels": 484
+    },
+    {
+      "packed_bit_equal": false,
+      "mask_equal": true,
+      "triangle_id_equal": true,
+      "depth_max_abs_error": 5.960464477539063e-08,
+      "passed": true,
+      "name": "partly_offscreen_and_degenerate",
+      "covered_pixels": 420
+    }
+  ],
+  "depth_tie_rule": "packed atomic max: greater float32 depth wins; exact depth tie chooses greater diagnostic triangle ID",
+  "camera_bases": "front(+X,+Y,+Zdepth), back(-X,+Y,-Z), left(-Z,+Y,+X), right(+Z,+Y,-X), top(+X,-Z,+Y), bottom(+X,+Z,-Y)",
+  "cases": [
+    {
+      "case_id": "a97ba8826602619b0d49",
+      "triangles": 1994,
+      "vertices": 1335,
+      "resolution": 256,
+      "cpu_opencv_core_six_views_ms": 33.5298,
+      "h2d_ms": 0.1728,
+      "allocation_ms": 0.8491,
+      "first_raster_ms": 0.991,
+      "warm_six_views": {
+        "n": 25,
+        "p50_ms": 0.9518,
+        "p90_ms": 1.5382600000000002,
+        "min_ms": 0.9465,
+        "max_ms": 1.681
+      },
+      "d2h_ms": 0.4407,
+      "cold_same_work_excluding_module_compile_and_file_io_ms": 2.4536000000000002,
+      "silhouette_iou_per_view": [
+        0.978532413092264,
+        0.9790316431566908,
+        0.9756419017865859,
+        0.9755466614603671,
+        0.9706322297566813,
+        0.9706806282722513
+      ],
+      "silhouette_iou_mean": 0.9750109129208067,
+      "actual_subset_scalar_validation": {
+        "packed_bit_equal": false,
+        "mask_equal": true,
+        "triangle_id_equal": true,
+        "depth_max_abs_error": 1.1920928955078125e-07,
+        "passed": true,
+        "triangles": 128,
+        "resolution": 64
+      },
+      "semantic_limit": "Head-bone weight ROI, not hair; CUDA interpolated z-buffer compared with same-process OpenCV integer-fill silhouette baseline."
+    },
+    {
+      "case_id": "4fc873310d1c4a6ca22b",
+      "triangles": 7412,
+      "vertices": 10015,
+      "resolution": 256,
+      "cpu_opencv_core_six_views_ms": 116.7513,
+      "h2d_ms": 0.3002,
+      "allocation_ms": 0.9376,
+      "first_raster_ms": 2.3556,
+      "warm_six_views": {
+        "n": 25,
+        "p50_ms": 2.0278,
+        "p90_ms": 2.52178,
+        "min_ms": 1.6459,
+        "max_ms": 2.615
+      },
+      "d2h_ms": 0.4627,
+      "cold_same_work_excluding_module_compile_and_file_io_ms": 4.0561,
+      "silhouette_iou_per_view": [
+        0.9713360465625137,
+        0.9717600700525394,
+        0.9740437973626112,
+        0.9741600525153667,
+        0.977342612073151,
+        0.977342612073151
+      ],
+      "silhouette_iou_mean": 0.9743308651065554,
+      "actual_subset_scalar_validation": {
+        "packed_bit_equal": false,
+        "mask_equal": true,
+        "triangle_id_equal": true,
+        "depth_max_abs_error": 1.1920928955078125e-07,
+        "passed": true,
+        "triangles": 128,
+        "resolution": 64
+      },
+      "semantic_limit": "Head-bone weight ROI, not hair; CUDA interpolated z-buffer compared with same-process OpenCV integer-fill silhouette baseline."
+    },
+    {
+      "case_id": "cd073629c54afde29b03",
+      "triangles": 6501,
+      "vertices": 19503,
+      "resolution": 256,
+      "cpu_opencv_core_six_views_ms": 103.8147,
+      "h2d_ms": 0.3114,
+      "allocation_ms": 0.9425,
+      "first_raster_ms": 1.0717,
+      "warm_six_views": {
+        "n": 25,
+        "p50_ms": 1.0261,
+        "p90_ms": 1.89322,
+        "min_ms": 1.0197,
+        "max_ms": 2.1228
+      },
+      "d2h_ms": 0.4614,
+      "cold_same_work_excluding_module_compile_and_file_io_ms": 2.787,
+      "silhouette_iou_per_view": [
+        0.9768223568497166,
+        0.9767041901188243,
+        0.9752943606692832,
+        0.9754535311376503,
+        0.976052768390954,
+        0.9759576334513792
+      ],
+      "silhouette_iou_mean": 0.9760474734363013,
+      "actual_subset_scalar_validation": {
+        "packed_bit_equal": false,
+        "mask_equal": true,
+        "triangle_id_equal": true,
+        "depth_max_abs_error": 1.1920928955078125e-07,
+        "passed": true,
+        "triangles": 128,
+        "resolution": 64
+      },
+      "semantic_limit": "Head-bone weight ROI, not hair; CUDA interpolated z-buffer compared with same-process OpenCV integer-fill silhouette baseline."
+    },
+    {
+      "case_id": "f141874551bdea41cb90",
+      "triangles": 1228,
+      "vertices": 1740,
+      "resolution": 256,
+      "cpu_opencv_core_six_views_ms": 20.6836,
+      "h2d_ms": 0.1826,
+      "allocation_ms": 0.1231,
+      "first_raster_ms": 0.9878,
+      "warm_six_views": {
+        "n": 25,
+        "p50_ms": 0.9592,
+        "p90_ms": 1.49836,
+        "min_ms": 0.9557,
+        "max_ms": 1.5308
+      },
+      "d2h_ms": 0.4459,
+      "cold_same_work_excluding_module_compile_and_file_io_ms": 1.7394,
+      "silhouette_iou_per_view": [
+        0.9895345503201759,
+        0.9898183556405353,
+        0.9887931902891105,
+        0.9886686979074862,
+        0.9907130572827093,
+        0.9907392707837223
+      ],
+      "silhouette_iou_mean": 0.9897111870372899,
+      "actual_subset_scalar_validation": {
+        "packed_bit_equal": false,
+        "mask_equal": true,
+        "triangle_id_equal": true,
+        "depth_max_abs_error": 1.1920928955078125e-07,
+        "passed": true,
+        "triangles": 128,
+        "resolution": 64
+      },
+      "semantic_limit": "Head-bone weight ROI, not hair; CUDA interpolated z-buffer compared with same-process OpenCV integer-fill silhouette baseline."
+    },
+    {
+      "case_id": "ad037dcd4e6df731bf07",
+      "triangles": 785121,
+      "vertices": 439792,
+      "resolution": 256,
+      "cpu_opencv_core_six_views_ms": 12348.9672,
+      "h2d_ms": 6.4785,
+      "allocation_ms": 0.8468,
+      "first_raster_ms": 1.3151,
+      "warm_six_views": {
+        "n": 25,
+        "p50_ms": 0.8804,
+        "p90_ms": 2.87798,
+        "min_ms": 0.8422,
+        "max_ms": 3.3684
+      },
+      "d2h_ms": 0.6792,
+      "cold_same_work_excluding_module_compile_and_file_io_ms": 9.3196,
+      "silhouette_iou_per_view": [
+        0.982532880153687,
+        0.9823877068557919,
+        0.9829519415844307,
+        0.9826822638282277,
+        0.976587589350461,
+        0.976587589350461
+      ],
+      "silhouette_iou_mean": 0.9806216618538431,
+      "actual_subset_scalar_validation": {
+        "packed_bit_equal": false,
+        "mask_equal": true,
+        "triangle_id_equal": true,
+        "depth_max_abs_error": 5.960464477539063e-08,
+        "passed": true,
+        "triangles": 128,
+        "resolution": 64
+      },
+      "semantic_limit": "Head-bone weight ROI, not hair; CUDA interpolated z-buffer compared with same-process OpenCV integer-fill silhouette baseline."
+    }
+  ]
+}

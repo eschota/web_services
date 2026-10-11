@@ -1,0 +1,82 @@
+{
+  "schema": "autorig.hair-lab-original-character/1",
+  "created_utc": "2026-10-11T23:03:17Z",
+  "character": {
+    "original": true,
+    "adult_age": 27,
+    "style": "early-2000s survival-horror low-poly",
+    "pose": "front strict T-pose",
+    "clothing": "teal short-sleeve T-shirt, dark straight-leg jeans, low sneakers",
+    "hair": "dark brown layered shoulder-length hair with side-swept fringe"
+  },
+  "source": {
+    "url": "https://autorig.online/renderfin/render/default_user/bf6fddaa-af19-4634-af98-413159f81afe.png",
+    "sha256": "e489af6f3eb20c33e5c11c3b42257eb62487820ab172177eee62030f7ba94195"
+  },
+  "concept": {
+    "qwen_task_id": "ea5ead04-022e-49ed-abbc-fbcfb45d6e31",
+    "seed": 27102001,
+    "width": 1024,
+    "height": 1024,
+    "url": "https://autorig.online/renderfin/render/default_user/ea5ead04-022e-49ed-abbc-fbcfb45d6e31.png",
+    "artifact_path": ".work/hair-lab-20261012/original-character/fullbody-r2.png",
+    "sha256": "74d4bc6ec689a30454ae79a30cd237764ab288d6969d00351066771cc07ef957",
+    "visual_review": "pass: full silhouette, both complete hands, hair and shoes visible; clean T-pose; identity and hairstyle preserved"
+  },
+  "discarded_concept": {
+    "qwen_task_id": "5feabcae-06b1-4cf5-ae2a-b7336cdcd2fb",
+    "seed": 27102000,
+    "sha256": "ff7b1a275b5d26b6504fa050845149a2568a513d5ffa3591d616b35ac5280fd9",
+    "reason": "both hands were cropped at the image edges"
+  },
+  "gen3d": {
+    "job_id": "a923c333556b41d084a050bd59e67909",
+    "status_url": "https://autorig.online/api/gen3d/jobs/a923c333556b41d084a050bd59e67909",
+    "backend": "farm",
+    "purpose": "concept",
+    "quality": "draft",
+    "farm_quality": "draft",
+    "urgency": "background",
+    "credits": 0,
+    "submitted_utc": "2026-10-11T23:03:12Z",
+    "status_at_receipt": "cancelled",
+    "stage_at_receipt": "waiting for a free farm box",
+    "attempts_at_receipt": 0,
+    "cancelled_before_dispatch": true,
+    "cancel_reason": "replace the unassigned farm queue entry with one owner-authorized local worker-4090 execution lane",
+    "cancel_receipt": ".work/hair-lab-20261012/original-character/gen3d-cancel-confirm.json"
+  },
+  "local_gen3d": {
+    "node": "worker-4090",
+    "adapter": "existing Hunyuan3D-2.1 adapter on 127.0.0.1:18777",
+    "source_url": "https://autorig.online/renderfin/render/default_user/ea5ead04-022e-49ed-abbc-fbcfb45d6e31.png",
+    "seed": 27102001,
+    "requested_quality": "draft",
+    "effective_profile_if_submitted": "standard",
+    "status": "blocked_before_submit",
+    "submitted": false,
+    "reason": "the active MiniMax H3 graph completed and idle Comfy caches were released through the established gate, but three bounded adapter preflights still returned HTTP 503 because sampled available RAM remained below the 24 GiB cold-start floor",
+    "last_preflight": {
+      "comfy_running": 0,
+      "comfy_pending": 0,
+      "hunyuan_jobs_active": 0,
+      "hunyuan_loaded": false,
+      "cache_free_called": true
+    },
+    "safety": "no memory gate bypass, no service start, no duplicate local job"
+  },
+  "replacement_gen3d": {
+    "replaces_cancelled_job_id": "a923c333556b41d084a050bd59e67909",
+    "job_id": "e7f282cf39704243ae7197014bd5d478",
+    "status_url": "https://autorig.online/api/gen3d/jobs/e7f282cf39704243ae7197014bd5d478",
+    "backend": "farm",
+    "urgency": "background",
+    "quality": "draft",
+    "farm_quality": "draft",
+    "credits": 0,
+    "status_at_receipt": "queued",
+    "attempts_at_receipt": 0,
+    "initial_wait_estimate_seconds": 1958,
+    "label": "hair-lab original r2 replacement-of-a923c333556b41d084a050bd59e67909"
+  }
+}

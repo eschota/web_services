@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AutoRig Hair Lab — procedural cards prototype</title>
+  <link rel="stylesheet" href="./hair-lab.css">
+</head>
+<body>
+  <main>
+    <section class="viewport" aria-label="3D preview">
+      <canvas id="view"></canvas>
+      <div class="badge">ИССЛЕДОВАТЕЛЬСКИЙ ПРОТОТИП · SYNTHETIC PROXY</div>
+      <div class="hint">ЛКМ: вращение · колесо: масштаб · Shift+ЛКМ: сдвиг</div>
+      <div id="metrics" class="metrics"></div>
+    </section>
+    <aside>
+      <header>
+        <p class="eyebrow">AutoRig V3 · Hair Lab</p>
+        <h1>Процедурные low-poly волосы</h1>
+        <p>Нейтральный синтетический манекен вместо реконструкции лица. Прототип проверяет силуэт, скорость hair cards, alpha-atlas и guide-chain движение.</p>
+      </header>
+
+      <label>Стиль
+        <select id="style">
+          <option value="short">01 · Короткий side part</option>
+          <option value="bob">02 · Асимметричный bob</option>
+          <option value="layers">03 · Длинные слои</option>
+          <option value="pony">04 · Ponytail</option>
+          <option value="twins">05 · Twin tails / curls</option>
+        </select>
+      </label>
+      <div class="seed-row">
+        <label>Тестовый бюст
+          <select id="seed"></select>
+        </label>
+        <button id="next" type="button">Следующий</button>
+      </div>
+      <label>Плотность <output id="densityOut"></output>
+        <input id="density" type="range" min="40" max="420" value="220" step="10">
+      </label>
+      <label>Ширина карты <output id="widthOut"></output>
+        <input id="width" type="range" min="0.018" max="0.13" value="0.072" step="0.002">
+      </label>
+      <label>Жёсткость движения <output id="stiffnessOut"></output>
+        <input id="stiffness" type="range" min="0" max="1" value="0.62" step="0.01">
+      </label>
+      <div class="buttons">
+        <button id="motion" type="button" aria-pressed="true">Движение: вкл.</button>
+        <button id="guides" type="button" aria-pressed="false">Guide chains: выкл.</button>
+        <button id="download" type="button" hidden>Внутренний QA: скачать GLB</button>
+      </div>
+      <div id="realControls" class="real-controls" hidden>
+        <strong id="realCaseLabel">Реальный QA-кейс</strong>
+        <p>Исходная геометрия сохраняется. Generated cards — отдельный overlay.</p>
+        <div class="buttons">
+          <button id="originalHair" type="button" aria-pressed="true">Original hair</button>
+          <button id="generatedHair" type="button" aria-pressed="false">Generated overlay</button>
+        </div>
+      </div>
+
+      <section class="notes">
+        <h2>Что проверяет прототип</h2>
+        <ul>
+          <li>5 силуэтов, 10 детерминированных seed-бюстов.</li>
+          <li>Карты — кривые полосы; атлас прядей рисуется процедурно.</li>
+          <li>Движение — визуальный guide-chain прототип, не XPBD и не финальная физика.</li>
+          <li>Нормали пока статичны при sway; продуктовая i18n и V3-интеграция отсутствуют.</li>
+          <li>GLB writer оставлен только для внутренней QA; публичного экспорта здесь нет.</li>
+        </ul>
+      </section>
+      <p id="status" role="status"></p>
+    </aside>
+  </main>
+  <script type="module" src="./hair-lab.js"></script>
+</body>
+</html>
