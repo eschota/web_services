@@ -207,6 +207,32 @@ def v3_clip_url(task_id: str, base_url: str = "") -> Optional[str]:
     return f"{base_url}/og/task/{task_id}.mp4?v={sig}" if sig else None
 
 
+_POSTER_IDS: Dict[str, Any] = {"at": -1.0, "ids": frozenset()}
+
+
+def v3_poster_ids(ttl: float = 60.0) -> frozenset:
+    """Task ids that have a V3 capture (posters-v3/<id>.jpg > 8 KB), cached ttl seconds. The gallery lists a V3
+    task only once its poster exists, so a card is never blank."""
+    now = time.monotonic()
+    if _POSTER_IDS["at"] >= 0 and now - _POSTER_IDS["at"] < ttl:
+        return _POSTER_IDS["ids"]
+    ids = set()
+    try:
+        with os.scandir(V3_POSTER_DIR) as it:
+            for entry in it:
+                name = entry.name
+                if name.endswith(".jpg") and is_task_id(name[:-4]):
+                    try:
+                        if entry.stat().st_size > 8000:
+                            ids.add(name[:-4])
+                    except OSError:
+                        continue
+    except OSError:
+        pass
+    _POSTER_IDS.update(at=now, ids=frozenset(ids))
+    return _POSTER_IDS["ids"]
+
+
 def task_card_url(task_id: str, signature: Optional[str]) -> str:
     return f"{BASE_URL}/og/task/{task_id}.jpg?v={signature or 'c'}.{TASK_CARD_VERSION}"
 

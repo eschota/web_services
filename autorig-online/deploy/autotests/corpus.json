@@ -4623,6 +4623,37 @@
      }
     }
    ]
+  },
+  {
+   "id": "gallery_smoke",
+   "task": null,
+   "cost": 1,
+   "defect": "SEO · gallery: /api/gallery must answer with items (a NameError in the handler took the gallery down for 3 min on 2026-10-11); V3 first, a V3 task only once its poster exists",
+   "checks": [
+    {
+     "id": "unittests",
+     "kind": "backend_unittests",
+     "paths": [
+      "backend"
+     ],
+     "params": {
+      "modules": [
+       "tests.test_gallery_smoke",
+       "tests.test_seo_social"
+      ]
+     },
+     "thresholds": {
+      "exit": [
+       "==",
+       0
+      ],
+      "ran": [
+       ">=",
+       15
+      ]
+     }
+    }
+   ]
   }
  ]
 }

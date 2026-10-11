@@ -8790,7 +8790,8 @@ async def api_get_gallery(
     base_conditions = [
         or_(
             and_(Task.status == "done", Task.video_ready == True, _gallery_task_has_poster_sql()),
-            and_(Task.pipeline_kind == "v3", Task.status.in_(("done", "needs_review")), Task.is_public.is_(True)),
+            and_(Task.pipeline_kind == "v3", Task.status.in_(("done", "needs_review")), Task.is_public.is_(True),
+                 Task.id.in_(_seo_social.v3_poster_ids())),          # only once its V3 poster exists
         ),
     ]
     _v3_first = desc(Task.pipeline_kind == "v3")
