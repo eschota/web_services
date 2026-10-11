@@ -360,6 +360,10 @@ def glb_from_url(url: str):
     if not m or ".." in m.group(2):
         return None
     path = MT_ROOT / "runs" / m.group(1) / m.group(2)
+    # the viewer agent's light copy (rigged.view.glb, <= 400k verts) renders the same model within the memory cap
+    light = path.with_name(path.stem + ".view.glb")
+    if light.is_file() and light.stat().st_size > 2000:
+        return light
     return path if path.is_file() else None
 
 

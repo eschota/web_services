@@ -642,7 +642,7 @@ def mt_arm_clearance(ctx):
     return out
 
 
-def mt_rig_first(ctx, input_name, words="", forward_axis=""):
+def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
     (proj/forward.json), for a model whose symmetry alone cannot tell it (the potato 583622f3: guess 0.32)."""
@@ -652,6 +652,9 @@ def mt_rig_first(ctx, input_name, words="", forward_axis=""):
     if forward_axis:                                     # as the conveyor's projections record it (rig_first then
         (run / "proj").mkdir(parents=True, exist_ok=True)   # skips its own guess)
         (run / "proj" / "manifest.json").write_text(json.dumps({"forward_axis": forward_axis, "source": "autotests"}))
+    if v3_bound:                                         # Multi-limb rig · V3: like a hash-bound V3 source, the up
+        (run / "v3").mkdir(parents=True, exist_ok=True)     # stage of rig_first leaves the model as uploaded
+        (run / "v3" / "source.json").write_text(json.dumps({"schema": "autorig.v3.session-source/1", "source": "autotests"}))
     p, wall = _child([PY, "-P", "-m", "mt.rig_first", "--dir", str(run), "--glb", str(_input(input_name)),
                       "--words", words], timeout=300)
     if p.returncode != 0:
@@ -1040,6 +1043,43 @@ def front_guess(input_name):
     return {"forward_axis": out.get("forward_axis"), "source": out.get("source"), "seconds": wall}
 
 
+def multilimb_rig(ctx):
+    """«Multi-limb rig · V3» (mt/multilimb.py, 2026-10-11, task 0d39aaba: four arms and wings): the limbs the trace
+    found on this case's MT run (arms, arm pairs, wings, tail), the extra chains fastrig added, their vertices, the
+    cross-chain weight (0 by construction outside the seams), the library clips' channels on the extra bones and the
+    rig_check stretch. On a plain biped (the control) every extra count is 0."""
+    from mt import fastrig as F
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    ml = rig.get("multilimb") or {}
+    counts = ml.get("counts") or {}
+    mls = (rig.get("checks") or {}).get("multilimb") or {}
+    chains = mls.get("chains") or []
+    st = {k: v for k, v in ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items() if isinstance(v, dict)}
+    names = {b["name"] for b in rig.get("bones") or []}
+    extra = sorted(n for n in names if re.fullmatch(r"(Left|Right)(Shoulder|Arm|ForeArm|Hand)\d+|(Left|Right)Wing[A-Z]?\d*|Tail\d*", n))
+    js, _ = F.read_glb((run / "rig" / "rigged.glb").read_bytes())
+    node = {i: n.get("name") for i, n in enumerate(js.get("nodes") or [])}
+    clip_extra = 0
+    for a in js.get("animations") or []:
+        if a.get("name") == "rig_check":
+            continue
+        clip_extra += sum(1 for c in a.get("channels") or [] if node.get(c["target"]["node"]) in extra)
+    return {"arms": counts.get("arms", 0), "arm_pairs": counts.get("arm_pairs", 0), "wings": counts.get("wings", 0),
+            "wing_pairs": counts.get("wing_pairs", 0), "tails": counts.get("tails", 0), "crests": counts.get("crests", 0),
+            "use": int(bool(ml.get("use"))), "extra_chains": len(chains), "extra_bones": len(extra),
+            "chains_without_vertices": sum(1 for c in chains if not c.get("vertices")),
+            "chain_vertices": int(mls.get("vertices") or 0),
+            "cross_chain_weight_after": float(mls.get("cross_chain_weight_after") or 0.0),
+            "seam_edges": int(mls.get("seam_edges") or 0), "seam_split_faces": int(mls.get("seam_split_faces") or 0),
+            "clip_channels_extra": clip_extra, "clips": len(rig.get("clips") or []),
+            "unweighted": (rig.get("checks") or {}).get("unweighted_vertices"),
+            "joints_outside": len((rig.get("checks") or {}).get("joints_outside_mesh") or []),
+            "stretch_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
+            "stretch_2x": sum(int(v.get("edges_over_2x") or 0) for v in st.values()),
+            "detect_s": ml.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1054,11 +1094,13 @@ def run_check(check: dict, ctx: dict) -> dict:
     elif inp:
         target = _input(inp)
     if k == "mt_rig_first":
-        return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""))
+        return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx)
     if k == "hand_rig":
         return hand_rig(ctx)
+    if k == "multilimb_rig":
+        return multilimb_rig(ctx)
     if k == "hand_detect":
         return hand_detect(ctx, inp, a.get("words", ""))
     if k == "serpent_rig":                                         # Serpent rig · V3
