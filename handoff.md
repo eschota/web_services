@@ -1978,3 +1978,39 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Автотесты**: кейс `numeric_visible` (detector: лошадь v0, kitbash v0 = вход `bfbd3248.mt-v0.glb`, чиби =
   `dd498832.mt-untess.glb`; контроль: `mt_numeric` на boy_tshirt и warrior_kitbash = 9/9), kind `numeric_qa_file`;
   maniac_neck XPASS → порог. Гейт mt/base PASS (104 PASS, 10 XFAIL). autorig `54975c5b`. DEV 6629.
+
+## Animation picker · V3 + Viewer load order · V3 (2026-10-11 ~01:40 UTC, на проде, агент «Animation picker · V3»)
+
+- **Вьювер `unity/test` → `v3-all-r4-20261011`** (откат — `unity/.test-history.log`, прошлый `v3-all-r3`). Шаблон в Git = живая
+  страница (MT `9a20f76`, `7352e53`), включая живые ханки «чат создателя». Следующая сборка — из HEAD шаблона.
+- **Библиотека** (`mt/animpick.py`, MT `f9fb7f9`+): по категории рига — humanoid: 63 клипа `animlib` (ретаргет ~30 мс), quadruped:
+  10 процедурных (шаг/рысь/галоп/пастись/на дыбы…), hands: 7 handrig + 8 жестов, other: 8 root-движений. Миниатюры — анимированный
+  SVG-скелет на скелете ЭТОГО рана. Кэш `runs/<run>/rig/animpick/<rig key>/<clip>.json|svg` (ключ = кости rig.json + rest TRS GLB +
+  sha retarget.py). API: `GET /api/mt/runs/{run}/animpick?q&tag&lang&offset&limit`, `…/animpick/{clip}/thumb.svg|preview.json?k=<key>`
+  (immutable), `GET|POST /api/mt/runs/{run}/clips`, `GET /api/mt/animpick/options`. Лимиты: 24 добавленных, 48 всего, 12 за раз;
+  сборки превью 90/10 мин аноним, 300 вошедший; правки 20/ч аноним-владелец, 60/ч вошедший.
+- **Кто меняет**: владелец задачи (аккаунт или anon_id) и админ — MT спрашивает блок `access` у `GET /api/task/{id}/downloads-v3`
+  (кэш 60 с); Bearer owner/codex. Остальные смотрят превью.
+- **Версия**: набор клипов = ОДИН слот-версия `rig/skin` (engine `animpick`) = база (версия, активная при первом выборе) + выбранные клипы
+  − убранные дефолтные; v0 не трогается; undo = история набора. Перезаписал риг другой инструмент (joint judge, re-rig) — `GET …/clips`
+  сам возвращает выбранные клипы на новую базу (`missing` → sync).
+- **Контракт для Downloads**: клипы лежат в самом `rig/rigged.glb` (новая версия) — «Скачать риг» видит их без изменений (проверено:
+  лошадь `downloads-v3` → `rig.clips = [Gallop, Walk, Graze]`, version v3→v5). Происхождение — `rig/clipset.json`
+  `{schema autorig.mt.clipset/1, base, slot, custom:[{id,name,options,loop,tags,at,by}], removed:[…], history}` или
+  `GET /api/mt/runs/{run}/clips` → `clips:[{name, source: default|picked|internal|source_pose, downloadable, id?, options?}]`.
+  `rig_check` = internal, не отдавать. rig.json `clips` / `clip_set` обновляются.
+- **Инструменты агента** (в `/dev/tools`): `clips_list` (публичный), `clips_add(ids, options)`, `clips_remove(names)`, `clips_undo`;
+  опции speed 0.25–4, in_place, mirror, trim_start/end, fps 10–60, amplitude 0.2–2, reference_policy, name.
+- **Unity**: `PreviewClip({path, name})` / `EndPreview` — клип собирается из JSON как legacy AnimationClip на загруженном риге,
+  без перезагрузки GLB (солдат: 29/29 костей, 1,75 с холодный при загрузке VPS 70). Страница: `anim-picker.js` (иконка в конце полосы клипов).
+- **Порядок загрузки (приказ владельца)**: ран открывается на чёрном (`Viewer.EnterBlack`), этапы live.js играются на чёрном;
+  `live.js` публикует `presented`; `scene-gate.js` берёт `GET /api/mt/runs/{run}/scene-pick` (своя сцена человека > дефолт админа >
+  автовыбор рана, записан в `scene/pick.json`) и вызывает `EnvironmentGo({own})` — грузится только эта сцена; своя земля рана
+  (recipe/texlib) — только если выбрана `own`. Солдат ecb405ef: 29,9 МБ (12,9 МБ сцен+texlib) → 19,4 МБ (0,56 МБ — только сцена).
+- **Настройки по людям** (`mt/viewer_prefs.py`): `/api/mt/viewer/settings` теперь свои у каждого (аккаунт / anon_id; разница с
+  дефолтом в `viewer_prefs/people/`), `GET|POST /api/mt/viewer/prefs` (scene, weather), `POST /api/mt/viewer/settings/defaults` —
+  только админ (`/auth/me is_admin` или ключ), версии `viewer_prefs/defaults/v<N>.json`; кнопка «Сохранить для всех» в шапке
+  панели настроек видна только админу. Клик по сцене на плашке сохраняется как выбор человека.
+- **Не сделано / дальше**: автовыбор сцены по словам карточки грубый (сейчас почти всем «Лесной горизонт»); миниатюры не
+  перерисовываются при mirror/speed; meshopt-GLB (`gltf-transform meshopt`) в r4 НЕ грузится (вьювер висит на загрузке модели) —
+  не включать без декодера в сборке.
