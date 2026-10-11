@@ -5458,6 +5458,10 @@
        "==",
        0
       ]
+     },
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "Serpent rig · V3"
      }
     },
     {
@@ -5487,6 +5491,10 @@
        "==",
        0
       ]
+     },
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "Serpent rig · V3"
      }
     },
     {
@@ -5505,6 +5513,10 @@
        ">=",
        6
       ]
+     },
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "Serpent rig · V3"
      }
     }
    ]
