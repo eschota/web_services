@@ -602,6 +602,17 @@ def main() -> int:
                 print("gate: another gate/mt-deploy is running; waiting for it (one at a time)", flush=True)
                 fcntl.flock(lock, fcntl.LOCK_EX)
             args._gate_lock = lock
+            # the previous gate's case children (rig_first, numeric QA...) can outlive it after a timeout; wait for
+            # them, or their load makes this gate's 60 s timing cases fail (2026-10-11)
+            import subprocess, time as _t
+            for _ in range(60):
+                busy = subprocess.run(["pgrep", "-f", "/srv/autorig/data/autotests/work/"],
+                                      capture_output=True, text=True).stdout.split()
+                if not busy:
+                    break
+                if _ == 0:
+                    print(f"gate: waiting for {len(busy)} leftover case processes of the previous gate", flush=True)
+                _t.sleep(10)
     return {"sync": cmd_sync, "gate": cmd_gate, "mt-deploy": cmd_mt_deploy, "artifact": cmd_artifact,
             "card": cmd_card}[args.cmd](args)
 
