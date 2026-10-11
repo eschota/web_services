@@ -68,7 +68,16 @@ CLIP_MAX_LOAD = float(os.getenv("GP_CLIP_MAX_LOAD", "18"))
 # GP_MAX_GLB_MB are not rendered at all (too_big), so a heavy upload never reaches the rasterizer.
 MAX_GLB_BYTES = int(float(os.getenv("GP_MAX_GLB_MB", "40")) * 1024 * 1024)
 MAX_ATTEMPTS = 2
-CLIP_KIND_SINCE = 1791713367.0   # deploy time: running clips replace the turntables; older clips are redone
+# Farm viewer previews (owner 2026-10-12: «записывать видео пролёт вокруг бегущей модели в 30 фпс … на ферме …
+# браузер вместе с текущим вьювером … вертикальным под shorts … балансируй качество»): farm job kind viewer_preview,
+# bundle "preview" (viewer_capture.py), 1080x1920 30 fps H.264 ~7 s <= 8 MB + a poster frame. GP_FARM_PREVIEW=0 turns
+# it off (then the VPS clip renderer runs as before).
+FARM_PREVIEW = os.getenv("GP_FARM_PREVIEW", "1") != "0"
+FARMJOBS_DIR = os.getenv("GP_FARMJOBS_DIR", "/srv/autorig/farmjobs")
+FARM_BOXES = [b for b in os.getenv("GP_FARM_BOXES", "f7,f1,f2,f13,f15,f12").split(",") if b]   # f5: out of the fleet
+VIEWER_PAGE = os.getenv("GP_VIEWER_PAGE", "https://autorig.online/api/mt/unity/test/index.html")
+FARM_WAIT_S = int(os.getenv("GP_FARM_WAIT_S", "480"))
+CLIP_KIND_SINCE = 1791755632.0   # farm viewer previews (2026-10-12) replace every earlier VPS clip, lazily
 
 
 # ====================================================================================================== the render
@@ -362,6 +371,88 @@ def clip_path(task_id: str) -> Path:
     return CLIP_DIR / f"{task_id}.mp4"
 
 
+def _farm_queue():
+    sys.path.insert(0, FARMJOBS_DIR)
+    import farmjobs  # noqa: E402  (the VPS side of /api/farmjobs, same host)
+    return farmjobs
+
+
+def farm_run_id(viewer_url: str):
+    m = re.search(r"/api/mt/files/([0-9a-f]{20})/", str(viewer_url or ""))
+    return m.group(1) if m else None
+
+
+def farm_enqueue(con, tid: str, run: str, priority: int) -> str:
+    """One viewer_preview job per task and poster version; returns the job id (existing one when already queued)."""
+    con.execute("CREATE TABLE IF NOT EXISTS farm (task_id TEXT PRIMARY KEY, job TEXT, state TEXT, ts REAL, sig TEXT)")
+    row = con.execute("SELECT job, state, sig FROM farm WHERE task_id=?", (tid,)).fetchone()
+    sig = run
+    if row is not None and row["sig"] == sig and row["state"] in ("queued", "done"):
+        return row["job"]
+    fj = _farm_queue()
+    url = f"{VIEWER_PAGE}?run={run}&ui=0&capture=1&envgate=1"
+    jid = fj.Queue().enqueue({"kind": "viewer_preview", "priority": priority, "bundle": "preview", "boxes": FARM_BOXES,
+                              "timeout": 900, "max_attempts": 2,
+                              "cmd": ["{python}", "{bundle}/viewer_capture.py", "--url", url, "--settle", "10"]})
+    con.execute("INSERT OR REPLACE INTO farm(task_id, job, state, ts, sig) VALUES (?,?,?,?,?)",
+                (tid, jid, "queued", time.time(), sig))
+    con.commit()
+    return jid
+
+
+def farm_collect(con, tid: str, jid: str) -> str:
+    """Install a finished job's preview.mp4 + poster.jpg (poster first, so the clip is never older than it)."""
+    import zipfile
+    fj = _farm_queue()
+    q = fj.Queue()
+    row = q.get(jid)
+    if row is None or row["state"] in ("queued", "leased", "running"):
+        return "pending"
+    if row["state"] != "done" or not q.result_path(jid).is_file():
+        con.execute("UPDATE farm SET state='failed', ts=? WHERE task_id=?", (time.time(), tid))
+        con.commit()
+        return "failed"
+    with zipfile.ZipFile(q.result_path(jid)) as z:
+        names = z.namelist()
+        if "preview.mp4" not in names or "poster.jpg" not in names:
+            con.execute("UPDATE farm SET state='failed', ts=? WHERE task_id=?", (time.time(), tid))
+            con.commit()
+            return "failed"
+        mp4, jpg = z.read("preview.mp4"), z.read("poster.jpg")
+    if len(mp4) < 100_000 or len(jpg) < 20_000:
+        con.execute("UPDATE farm SET state='failed', ts=? WHERE task_id=?", (time.time(), tid))
+        con.commit()
+        return "failed"
+    for data, dst in ((jpg, poster_path(tid)), (mp4, clip_path(tid))):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(f".{dst.name}.{os.getpid()}.farm")
+        tmp.write_bytes(data)
+        os.replace(tmp, dst)
+    con.execute("UPDATE farm SET state='done', ts=? WHERE task_id=?", (time.time(), tid))
+    con.commit()
+    return "installed"
+
+
+def farm_preview(con, tid: str, viewer_url: str, wait: bool, priority: int = 1) -> str:
+    run = farm_run_id(viewer_url)
+    if not (FARM_PREVIEW and run):
+        return "no_farm"
+    try:
+        jid = farm_enqueue(con, tid, run, priority)
+        if not wait:
+            return farm_collect(con, tid, jid)
+        end = time.time() + FARM_WAIT_S
+        while time.time() < end:
+            res = farm_collect(con, tid, jid)
+            if res != "pending":
+                return res
+            time.sleep(5)
+        return "timeout"
+    except Exception as exc:  # noqa: BLE001 - the VPS clip is the fallback
+        print(f"farm preview {tid}: {type(exc).__name__}: {exc}", flush=True)
+        return "error"
+
+
 def make_clip(tid: str, glb: Path, env: str, backfill: bool, con=None) -> str:
     """The clip for a task whose poster is current; skipped while busy when it is only a backfill."""
     poster, clip = poster_path(tid), clip_path(tid)
@@ -369,6 +460,15 @@ def make_clip(tid: str, glb: Path, env: str, backfill: bool, con=None) -> str:
         return "no_poster"
     if clip.is_file() and clip.stat().st_mtime >= max(poster.stat().st_mtime, CLIP_KIND_SINCE):
         return "skip"
+    if con is not None and FARM_PREVIEW and _VIEWER_URLS.get(tid):
+        farm = con.execute("SELECT state FROM farm WHERE task_id=?", (tid,)).fetchone() \
+            if con.execute("SELECT name FROM sqlite_master WHERE name='farm'").fetchone() else None
+        if farm is None or farm["state"] != "failed":
+            res = farm_preview(con, tid, _VIEWER_URLS[tid], wait=not backfill, priority=0 if backfill else 1)
+            if res in ("installed", "pending"):
+                return "farm_" + res
+            if res not in ("failed", "timeout", "error", "no_farm"):
+                return "farm_" + res
     if backfill and os.getloadavg()[0] > CLIP_MAX_LOAD:
         return "busy"
     if glb.stat().st_size > MAX_GLB_BYTES:
@@ -463,8 +563,12 @@ def record(con, task_id, state, reason="", source="", sig="", env="", kind=""):
     con.commit()
 
 
+_VIEWER_URLS: dict = {}
+
+
 def process(con, row) -> str:
     tid = row["id"]
+    _VIEWER_URLS[tid] = row["viewer_prepared_glb_url"] or ""
     glb = source_glb(tid, row["viewer_prepared_glb_url"] or "")
     prev = con.execute("SELECT * FROM posters WHERE task_id=?", (tid,)).fetchone()
     if glb is None:

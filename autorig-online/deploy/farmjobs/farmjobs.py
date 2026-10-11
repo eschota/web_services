@@ -45,6 +45,7 @@ BUNDLES = {                      # name -> (root, [sub paths], suffixes shipped)
     "mt": ("/srv/autorig/data/motion_transfer", ["mt"], (".py", ".json", ".txt")),
     "census": ("/srv/autorig/census", ["census.py"], (".py",)),
     "backend_min": ("/srv/autorig/current/autorig-online/backend", ["fbx_ascii.py", "v3_intake.py"], (".py",)),
+    "preview": ("/srv/autorig/gallery-poster", ["viewer_capture.py"], (".py",)),   # viewer_preview (SEO, 2026-10-12)
 }
 ALLOWED_INPUT_ROOTS = ("/srv/autorig/data/",)
 DENY_INPUT_PARTS = ("/secrets", "/db/", ".sqlite")

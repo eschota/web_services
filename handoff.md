@@ -2451,3 +2451,22 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Сборка Unity (B)**: только одна за раз; перед сборкой проверить процессы Unity и этот раздел. Сборка из рабочего
   дерева MT (как r8: включает незакоммиченный WIP Codex RadialPulse), выкладка в отдельную папку, тест по прямому URL,
   потом `test`.
+
+## Viewer preview · farm capture — запрос capture-режима у вьювера (2026-10-12, агент «SEO»)
+
+Превью задач (Telegram «Task completed», og:video, hover в галерее) теперь пишутся на ферме из НАСТОЯЩЕГО V3-вьювера:
+farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.py`), скрипт
+`/srv/autorig/gallery-poster/viewer_capture.py` (git: `autorig-online/deploy/gallery-poster/`): headless Chrome
+(Playwright, Chrome бокса, GPU), страница `/api/mt/unity/test/index.html?run=<run>&ui=0&capture=1&envgate=1`, ждёт
+`window.autorigEnv.t.unblack` (scene-gate), `PlayClip(Running…)`, орбита `SetCamera({yaw,pitch,dist,seconds})`,
+запись canvas.captureStream(30) → 1080×1920 H.264 ~7 с ≤ 8 МБ + poster.jpg. Результат ставит `gallery_poster.py`
+(`farm_preview`) в `previews-v3/<id>.mp4` и `posters-v3/<id>.jpg`; VPS-рендер — только запасной путь.
+
+**Нужно от владельца вьювера (Animation picker / Blueprint): режим `capture=1`.** Сейчас `PlayClip` переводит вьювер в
+слой `rig`, а он рисует кости и раскраску весов поверх модели; слой `model` останавливает анимацию. Для `capture=1`:
+1. текстурированная модель играет клип без костей/весов/оверлеев и без UI;
+2. полный набор эффектов сцены (как у посетителя), сцена — по scene-pick;
+3. событие готовности (например `autorigUnity.onEvent("capture_ready")`), когда меш, сцена и эффекты загружены;
+4. желательно команда орбиты (`CaptureOrbit({seconds, sweep, pitch})`) с плавной камерой вокруг бегущей модели.
+Скрипт уже передаёт `capture=1` в URL; как только режим появится, превью станут чистыми без правок на нашей стороне
+(если появится `capture_ready`/`CaptureOrbit`, переключу ожидание и орбиту на них).
