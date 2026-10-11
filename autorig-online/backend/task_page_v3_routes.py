@@ -108,6 +108,20 @@ def fast_rig(task_id: str) -> Optional[tuple[Path, os.stat_result, dict]]:
         return None
 
 
+def current_fast_rig(task_id: str) -> Optional[tuple[Path, os.stat_result, dict]]:
+    """Only current-version rigs (2026-10-11): the mirror run's rig once it carries the server's rig version (a re-rig
+    on open, mt/rerig_open.py) wins over the classic converter's cached rig."""
+    fast = fast_rig(task_id)
+    if fast is None:
+        return None
+    try:
+        import rerig_on_open
+        cur = rerig_on_open.current_version()
+    except Exception:  # noqa: BLE001
+        return None
+    return fast if cur and fast[2].get("rig_version") == cur else None
+
+
 def _accel(cache_dir: Path, path: Path, filename: str) -> Response:
     relative = path.resolve(strict=True).relative_to(cache_dir.resolve())
     uri = "/_autorig_glb_cache/" + "/".join(quote(part, safe="") for part in relative.parts)
@@ -372,8 +386,9 @@ async def _classic_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path
         model_state = "unavailable"
     else:
         model_state = "pending"
-    if rigged is None and status != "error":
-        fast = fast_rig(task_id)
+    current = current_fast_rig(task_id)
+    if current is not None or (rigged is None and status != "error"):
+        fast = current or fast_rig(task_id)
         if fast is not None:
             viewer = {"kind": "legacy", "page": UNITY_PAGE,
                       "api_path": f"/api/task-viewer/{task_id}",
@@ -448,7 +463,19 @@ def build_task_page_v3_router(*, get_db: Callable[..., Any], get_current_user: C
                            db: Any = Depends(get_db)):
         task = await authorized(task_id, request, user, db)
         state = await build_state(task, db, task_model=task_model, cache_dir=cache_dir, is_admin=admin(user))
+        try:                                     # Only current-version rigs (2026-10-11): the open re-rigs an old rig
+            import rerig_on_open
+            state["rig_version"] = rerig_on_open.state(task, request)
+        except Exception as exc:  # noqa: BLE001 - never costs the page
+            log.warning("rig version state failed for %s: %s", task_id, exc)
         return JSONResponse(state, headers=_NO_STORE)
+
+    @router.get("/api/task/{task_id}/rig-version")
+    async def task_rig_version(task_id: str, request: Request, user: Any = Depends(get_current_user),
+                               db: Any = Depends(get_db)):
+        task = await authorized(task_id, request, user, db)
+        import rerig_on_open
+        return JSONResponse(rerig_on_open.state(task, request, trigger=False), headers=_NO_STORE)
 
     @router.get("/api/task-page/live")
     async def task_page_live_state():
@@ -463,7 +490,7 @@ def build_task_page_v3_router(*, get_db: Callable[..., Any], get_current_user: C
         head = request.method == "HEAD"
         if rel == "rig/rig.json":
             rigged = cached_glb(cache_dir, task_id, RIGGED_KINDS)
-            fast = fast_rig(task_id) if rigged is None else None
+            fast = current_fast_rig(task_id) or (fast_rig(task_id) if rigged is None else None)
             if fast is not None:
                 return JSONResponse({**fast[2], "task_id": task_id, "built_at": _iso(fast[1].st_mtime)},
                                     headers={"Cache-Control": "no-cache"})
@@ -477,6 +504,10 @@ def build_task_page_v3_router(*, get_db: Callable[..., Any], get_current_user: C
             }, headers={"Cache-Control": "no-cache"})
         if rel in ("rig/rigged.glb", "proj/model.glb"):
             rig = rel == "rig/rigged.glb"
+            current = current_fast_rig(task_id) if rig else None
+            if current is not None:                     # a re-rig of the current version wins over the classic rig
+                return FileResponse(current[0], media_type="model/gltf-binary", headers={
+                    "Cache-Control": "no-cache", "X-AutoRig-Task-Viewer": "fast-v3-current"})
             hit = cached_glb(cache_dir, task_id, RIGGED_KINDS if rig else STATIC_KINDS)
             if hit is not None:
                 return _accel(cache_dir, hit[0], f"{task_id}_{'animations' if rig else 'prepared'}.glb")
