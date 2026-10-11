@@ -4,7 +4,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ## Координация агентов V3 (2026-10-10)
 
-- unity build: **Blueprint** 2026-10-12 ~05:10 MSK+4 (22:10Z 11.10) — сборка `Builds/WebGL-blueprint-r1` (Blueprint B/C, RadialPulse WIP Codex на время сборки снят из рабочего дерева и возвращён). Вторую сборку параллельно не запускать.
+- unity build: свободно (Blueprint r3 собран и выложен 22:45Z 11.10; следующая сборка — из HEAD MT main; RadialPulse WIP Codex в рабочем дереве на время сборки снимать или включать осознанно).
 
 - rig: **Serpent rig · V3** — 03:45Z: `mt/serpent.py` на проде (worm aaac7892 → 19 костей, 6 клипов); ханки в rig_first/fastrig рядом с Hands и Multi-limb; см. раздел «Serpent rig · V3» внизу.
 - restarts: **Renderfin resume · V3** — 19:35Z: рестарт autorig-storage/renderfin больше не теряет рендеры (resume под тем же id), ждать простоя НЕ нужно; см. раздел «Renderfin resume · V3» внизу.
@@ -2470,3 +2470,41 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 4. желательно команда орбиты (`CaptureOrbit({seconds, sweep, pitch})`) с плавной камерой вокруг бегущей модели.
 Скрипт уже передаёт `capture=1` в URL; как только режим появится, превью станут чистыми без правок на нашей стороне
 (если появится `capture_ready`/`CaptureOrbit`, переключу ожидание и орбиту на них).
+
+### B + C — на проде (2026-10-11 22:45Z, `unity/test` → `blueprint-r3-20261012`, MT `05eacd9`)
+
+- **Вход**: Tab (страница ловит клавишу, если есть риг), первый клик по видимому суставу/кости (живые кости или F8; без
+  видимых костей клик ничего не открывает) или бейдж судьи. Esc — выход. В чертеже `body.bp` прячет всё, кроме канваса и
+  интерфейса правки костей.
+- **Unity** (`Scripts/Runtime/BlueprintMode.cs`, `BlueprintOffsets.cs`, `Resources/AutoRigBlueprint.shader`): орто-камеры
+  на синем градиенте с сеткой 10 см / 1 м, модель в альбедо; виды спереди/сзади/слева/справа/сверху/снизу/свободный
+  (правый drag), сплит front | left | top (по `rig.json forward_axis`), зум колесом к курсору, пан средней / Shift+правой.
+  Выбор: клик, Shift+клик, рамка, все/ничего; hover → `bp_hover`. Гизмо: 3 стрелки, 3 плоскости, центр; привязка 1/5 см;
+  симметрия L/R; «в центр сечения»; undo/redo/сброс. Правка в T-позе: остальные суставы стоят, кости с новым концом
+  поворачиваются к нему, bindposes пересчитаны (меш в покое не двигается), клипы сразу играют на новом скелете
+  (направления костей сохранены — как серверный ретаргет), ключ трансляции бёдер сдвигается. Режим анимации (T): стрелки
+  на плече/локте/бедре + слайдеры `arm_*` (Arm-Space), `elbow_*` (локоть вниз вокруг оси плечо–запястье, кисть держит
+  поворот), `leg_*` (стойка). Сообщения `Bp*` (Enter/Exit/Toggle/View/Split/Frame/Select/SelectAll/Clear/Snap/Symmetry/
+  Problems/Marks/Undo/Redo/Reset/Offsets/Centre/Mode/Export/Feed/State); события `blueprint`, `bp_hover`, `bp_patch`,
+  `joints2d`.
+- **Фантомные кости (владелец)**: лист/_End длиннее родительской кости или кость > 3× медианы — короткая тусклая
+  заглушка во всех трёх рендерерах; связка root/armature → Hips не рисуется; живые суставы-не-skin-кости привязаны к своим
+  узлам (раньше стояли в покое → длинная кость при анимации). Список `long_bones`, на слое оценок — оранжевый «!».
+- **Слой оценок** (`blueprint.js`): бейдж на сустав (норма — точка, иначе цвет + %), виден с костями, своя иконка в левой
+  панели (`autorig.viewer.scores.v1`). Клик → камера ровно в кадр Vision (`report.json joints.<j>.view_before` —
+  добавлено в `mt/joint_judge.py`, mt-deploy PASS 22:20Z; у старых отчётов — фронт на сустав), карточка с листом Vision,
+  «Vision N % · вердикт · причина», карандаш → правка сустава.
+- **Сохранение** `mt/rig_blueprint.py`: `POST /api/mt/runs/{run}/blueprint {joints:{имя:[x,y,z] glTF}, offsets, dry}`,
+  `GET /api/mt/blueprint/spec` (mt-deploy PASS 22:38Z). Только владелец задачи / админ, 40 версий/ч. Новая версия
+  `rig/skin/vN` (engine `blueprint`, v0 цел), rig.json bones + `blueprint.history`, копия rig.json у версии. Суставы:
+  трансляции узлов, IBM' = W'⁻¹·W·IBM, во всех анимациях q_b' = D_parent·q_b·D_b⁻¹, ключи трансляции + дельта; на копии
+  d2503457: меш в покое 2e-8 H, направления костей 0.00°. Смещения — во все клипы, кроме rig_check / Source pose.
+- **Capture** (`capture.js`, для «SEO/previews»): `?capture=1[&scene=forest-horizon][&clip=Running][&secs=7][&turns=1]
+  [&yaw=25][&pitch=8][&quality=ultra]` — без UI и повтора обработки, сцена через scene-gate, ultra/cinematic, DoF off,
+  Running, орбита; `window.autorigCaptureReady` + событие `autorig-capture-ready`; `autorigCapture.restart()`.
+  Проверено 540×960: готово ~30 с.
+- **DEV**: 6727 (D), 6734 (GIF), 6735 (лист).
+- **Для Task page · V3**: иконка «скачать» в шапке страницы задачи дублирует «Скачать риг» — решить им.
+- **Дальше**: запись сохранения проверена на копии рана и dry-раном с ключом (из браузера — только отказ посетителю);
+  перескин после сдвига не делается; re-rig on open при новой RIG_VERSION сбросит ручные правки — переносить
+  `rig.json.blueprint`; смещения для четвероногих; в сплите левая панель перекрывает край вида «спереди».
