@@ -606,12 +606,26 @@
    "sha256": "ea74563cdf066081084a7c148ff4e44bba86ca8694ec4332321758a8681bd3f4",
    "bytes": 32687208
   },
+  "9a4b53a8.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/d25034572b4410e99232/proj/model.glb",
+   "task": "9a4b53a8",
+   "what": "blocky avatar (box limbs glued to a box torso, 89k vertices, 331 shells)",
+   "sha256": "406a5b5ce66b50bec9cebf2860199bee6466c6335cd6d860f10f41aaa8069761",
+   "bytes": 3206936
+  },
   "594dd2a5.mt-rig.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/93bbe648739d5d7154df/rig/rigged.glb",
    "task": "594dd2a5",
    "what": "yellow blob character: fat stubby legs (shin radius 9.3 % H, knee to ankle 8 % H), V3 rig 2026-10-11",
    "sha256": "22fe52ecfe52e6c982d0b417ae91a6285bc7d4994b8e6ceb782fbc60a3fc6a8a",
    "bytes": 7874340
+  },
+  "594dd2a5.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/93bbe648739d5d7154df/proj/model.glb",
+   "task": "594dd2a5",
+   "what": "yellow blob character with fat stubby legs (shin radius 9.3 % H, leg 15 % H), upright T-pose, as uploaded",
+   "sha256": "1e944fb0eb0a824bf9c7856b331679a30a348bacb913e75bc7ea44e6b74c86e9",
+   "bytes": 8482088
   }
  },
  "profiles": {
@@ -6313,6 +6327,21 @@
        0
       ]
      }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       1200
+      ]
+     }
     }
    ]
   },
@@ -6599,11 +6628,58 @@
    ]
   },
   {
+   "id": "box_avatar_arms",
+   "task": "9a4b53a8",
+   "cost": 2,
+   "defect": "blocky avatars 9a4b53a8 / 820c1280: the geometric fit put both arms inside the torso box (shoulders at the neck, the chain diagonal across the torso). Fix: pose_skeleton.box_arms (arm columns beside the trunk, shoulder at the box inner edge) pinned when the fitted shoulders sit inside, kept when the fit check and the stretch are no worse",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "9a4b53a8.model.glb",
+     "params": {
+      "words": "blocky avatar"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_arms_out",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "min_arm_off_axis_pct_H": [
+       ">=",
+       12
+      ]
+     }
+    }
+   ]
+  },
+  {
    "id": "blob_stubby_legs",
    "task": "594dd2a5",
    "cost": 1,
    "owner": "Rig path · V3",
-   "defect": "first new task after the 2026-10-11 20:17 engine deploys, triage rig_stretch: a yellow blob character with fat stubby legs (shin radius 9.3 % H, hips 26 % H, knee placed by proportions). Full-amplitude library clips bend such legs 90+ degrees: rig_check 1952 edges over 2x / 425 over 4x on Leg|Foot seams, numeric visible/2 fails Jump, Waving1, Hip Hop, Look Around (tear 30-45x). Skin re-blend (blend_width knee/ankle 1.5 + 6 smooth steps) only halves the clip tears (clip 4x 522 -> 371) while test-pose 4x grows (925 -> 1091): the fix is clip amplitude / leg fit for stubby legs, not weights.",
+   "defect": "first new task after the 2026-10-11 20:17 engine deploys, triage rig_stretch: a yellow blob character with fat stubby legs (shin radius 9.3 % H, hips 26 % H, knee placed by proportions). Full-amplitude library clips bend such legs 90+ degrees: rig_check 1952 edges over 2x / 425 over 4x on Leg|Foot seams, numeric visible/2 fails Jump, Waving1, Hip Hop, Look Around (tear 30-45x). Skin re-blend (blend_width knee/ankle 1.5 + 6 smooth steps) only halves the clip tears (clip 4x 522 -> 371) while test-pose 4x grows (925 -> 1091): the fix is clip amplitude / leg fit for stubby legs, not weights. Engine fix 2026-10-12 (Rig path): limb amplitude per chain by thickness/length (rig.json limb_amplitude; retarget turns those bones only that share of the way from bind; the blob's legs 0.35, arms 0.87) and the thick-leg knee in the middle of the free leg tube (leg_fit sections_thick). mt_rig / mt_numeric re-rig the source with today's engine; numeric_now stays the detector of the old file.",
    "checks": [
     {
      "id": "numeric_now",
@@ -6628,6 +6704,49 @@
       },
       "reason": "stubby fat legs tear at knee/ankle under full-amplitude library clips",
       "owner": "Rig path · V3"
+     }
+    },
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "594dd2a5.model.glb",
+     "params": {
+      "words": "yellow blob character"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "complete": [
+       "==",
+       true
+      ],
+      "clips_passed": [
+       ">=",
+       9
+      ]
      }
     }
    ]
