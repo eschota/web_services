@@ -584,6 +584,13 @@
    "what": "«Пиксельный Чибик»: a 580-triangle chibi, edges up to 31 % of the height (median 8.5 %); huge triangles span the shoulders and hips and crumple in the clips (owner 2026-10-11)",
    "sha256": "0de1c656e99b318d80cb2d876b80d1a65d82ee64ed148965c42ad53b4d798376",
    "bytes": 76080
+  },
+  "f619f807.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0592be1381e01aa13b13/proj/model.glb",
+   "task": "f619f807",
+   "what": "Hollow Crawler, alien skeletal quadruped (OBJ 138k): splayed bent legs, head below the spine, hanging tendrils",
+   "sha256": "e93a11036cc3ea7b220f43364166c6a60d7d75c0034f435cb8c9f63ae3e74fd3",
+   "bytes": 8454768
   }
  },
  "profiles": {
@@ -6242,10 +6249,6 @@
        "==",
        0
       ]
-     },
-     "xfail": {
-      "reason": "restored after a corpus overwrite; the arm-fit code (Limb stage41+) is not installed yet",
-      "owner": "Limb stabilization · V3"
      }
     }
    ]
@@ -6387,10 +6390,6 @@
        "==",
        0
       ]
-     },
-     "xfail": {
-      "reason": "restored after a corpus overwrite; the arm-fit code (Limb stage41+) is not installed yet",
-      "owner": "Limb stabilization · V3"
      }
     }
    ]
@@ -6428,7 +6427,7 @@
     },
     {
      "id": "mt_tess",
-     "kind": "pending_detector",
+     "kind": "tessellation",
      "paths": [
       "mt"
      ],
@@ -6462,9 +6461,7 @@
        "==",
        1
       ]
-     },
-     "pending_kind": "tessellation",
-     "note": "the tessellation check kind is not in checks.py yet; restore kind=tessellation when it lands (main session 2026-10-11)"
+     }
     },
     {
      "id": "mt_stretch",
@@ -6486,6 +6483,54 @@
        "==",
        0
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "crawler_splayed_quadruped",
+   "task": "f619f807",
+   "cost": 2,
+   "defect": "Hollow Crawler: the front legs splay out and bend, the head hangs below the spine; fit_quadruped draws straight leg chains from the shoulders to the paws and a rising neck (10 joints outside the mesh, Head|Spine 58 edges over 4x). Needs traced legs (voxel skeleton) and a neck that may go down",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "f619f807.model.glb",
+     "params": {
+      "words": "alien skeletal quadruped crawler",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       60
+      ]
+     },
+     "xfail": {
+      "reason": "splayed bent legs and a head below the spine are not fitted by fit_quadruped (straight chains, rising neck)",
+      "owner": "Rig path · V3"
      }
     }
    ]
