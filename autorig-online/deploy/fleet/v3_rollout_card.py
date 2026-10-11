@@ -33,7 +33,7 @@ def main() -> None:
     boxes = {b["id"]: b for b in fleet.get("boxes_array") or []}
     commit = str(target.get("commit") or "")
     rows = []
-    for bid in ("f1", "f2", "f7", "f11", "f13"):
+    for bid in ("f1", "f2", "f5", "f7", "f11", "f13"):
         box = boxes.get(bid) or {}
         v3 = box.get("v3_object") or {}
         rec = nodes.get(bid) or {}
