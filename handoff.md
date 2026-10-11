@@ -4,6 +4,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ## Координация агентов V3 (2026-10-10)
 
+- rig: **Serpent rig · V3** — 03:45Z: `mt/serpent.py` на проде (worm aaac7892 → 19 костей, 6 клипов); ханки в rig_first/fastrig рядом с Hands и Multi-limb; см. раздел «Serpent rig · V3» внизу.
 - restarts: **Renderfin resume · V3** — 19:35Z: рестарт autorig-storage/renderfin больше не теряет рендеры (resume под тем же id), ждать простоя НЕ нужно; см. раздел «Renderfin resume · V3» внизу.
 
 - converter deploy: Skinning → converter f13 2026-10-10T16:00Z — done 16:45Z (8133a2d, f13 restored; other nodes NOT rolled: owner cancelled the classic pipeline)
@@ -2102,3 +2103,39 @@ This scoped development checkpoint does not overwrite the unrelated historical
   `live_busy`, поэтому rerig_open не берёт очередь.
 
 - **Farm jobs · Fleet V3 (2026-10-11 ~03:30Z, «распределяй всё на ферму»)**: `deploy/farmjobs` — VPS queue service `autorig-farmjobs` (127.0.0.1:8262, nginx `/api/farmjobs/`, box keys in `/srv/autorig/secrets/farmjobs.json`, queue `/srv/autorig/data/farmjobs`) + `farm_runner.py` on f1/f2/f5/f7/f13 (task «AutoRig Farm Runner», pull model, idle priority, yields to the converter/ComfyUI/CPU; shown in `/api/fleet` `services_object.farm_runner`). **Census** runs on it (`census.py farm-enqueue|farm-one|farm-ingest|farm-pump`, unit `autorig-census-farm` = the light pump); 1 model tested: ok. **Autotex**: guides + bake tested on f5/f1 (`mt/autotex_farm.py`); the switch in `mt/autotex.py` (MT_AUTOTEX_FARM) is committed in the MT repo and staged at VPS `/tmp/autotex.py.new` but NOT installed: `autotests.py mt-deploy` FAILS on production itself (warrior_sword_posed/mt_pose_fit arm_proportions=4, prop_grip 20.7 — not from this change). After the gate is green: `mt-deploy --mt-file mt/autotex.py=… --mt-file mt/autotex_farm.py=…`, drop `MT_AUTOTEX=off` from `zz-priority.conf`, `sudo autorig-mt-restart`. Nightly autotests: nice 19, 2 CPUs, 2 jobs, wait for load < 8 (`autorig-autotests-nightly.service.d/zz-customer-first.conf`). Seen: `autorig-gallery-poster` OOM-kill loop (MemoryMax 1500M, restart counter 62).
+
+## Serpent rig · V3 — черви, змеи, угри, щупальца (2026-10-11 03:45 UTC, на проде, агент «Serpent rig»)
+
+- **Задача aaac7892** (одноглазый червь с зубастой пастью): был риг 1 кость Root без клипов (Vision сказал
+  «multi-legged»). Теперь `body_plan: serpent`, 19 костей, 6 клипов, numeric QA visible/1 7/7, версия v1 в Store
+  (v0 цела, `tools/rerig_version.py`). DEV 6668 (видео) / 6669 (веса).
+- **Код** `mt/serpent.py` (на проде через `mt-deploy`, гейт PASS 03:43Z): detect = геодезический двойной проход →
+  концы a/b, кольца равной дистанции (одно кольцо на уровень = нет конечностей; «третий конец» = конечность),
+  удлинение = дуга / диаметр кольца (≥ 7, со словами worm/snake/… ≥ 4.2); голова = толще / шеллы (глаза) рядом /
+  поднятый конец / голос Vision. Кости: Root в середине, Spine1..n → Head (+Jaw), Tail1..n → TailTip; веса по длине
+  дуги, привязанные к ближайшей точке осевой только в окне ±2.5 r дуги (касающиеся кольца не делят веса,
+  `arc_jump_edges`=0). Клипы Slither / Crawl / Idle / Strike / Head Turn / Jaw Open — процедурные, в rigged.glb.
+  Гейт самопересечения: поза осевой линии, куски далеко по дуге ближе 0.7·(r1+r2) = насквозь; клип сначала
+  укорачивает волну, потом амплитуду, иначе выкидывается (`clip_scale`, `clip_wavelength`, `clips_dropped`).
+  Опции (`python -m mt.serpent --options`): bones, head_share, root_at, blend, jaw, jaw_depth, head_end,
+  min_elongation, slither_amp/wavelength/speed, crawl_amp, sway_amp, strike_deg, head_turn_deg, contact_limit.
+- **Голос Vision** — не в риге (бюджет 60 с): `python -m mt.serpent --dir <run> --vote [--scratch]` →
+  `analysis/serpent_vote.json` (3 вида: limbless? mouth?; верхний вид с красной/синей точкой на концах: где голова).
+  Риг читает его, если есть (челюсть, голова). `--scratch` отдаёт картинки через /dev/api/scratch: в 03:20Z
+  `/api/mt/files` не отвечал (autorig-mt висел под нагрузкой). Встроить vote в фазу analysis конвейера — следующий шаг.
+- **Ханки в общих файлах**: `rig_first.build` — ветка serpent после hands (detect при plan None/serpent/root;
+  если up-стадия ориентатора положила червя на бок (`orient.json applied`), возвращает `model_source.glb`:
+  «two feet at the low end» у лежащего червя — ложное срабатывание `mt/orient.py`, для агента ориентатора),
+  `animate` — клипы serpent; `fastrig.body_plan` — слова worm/snake/serpent/eel/tentacle/larva → serpent,
+  `fastrig.build` делегирует plan serpent (чтобы judge/reskin не пересобрали Root). RIG_VERSION → .4
+  (Multi-limb уже поднял до .5 в Git), `serpent.py` в RIG_PATH. `GET /api/mt/gif`-аналога нет: превью —
+  `python -m mt.serpent --dir <run> --gif out.gif --clip Slither`.
+- **Git**: мои файлы ушли в чужие коммиты MT (`2952d14` serpent.py, `b283653` ханки) — индекс общий; содержимое
+  = прод (sha serpent.py f49f3301e1d3). autorig `33107ccc`: кейсы `serpent_worm`, `serpent_worm_noword`,
+  `serpent_coiled` (синтетика `make_serpent_corpus.py`, две касающиеся спирали), check kind `serpent_rig`.
+- **Чужой кейс**: `warrior_sword_posed/mt_pose_fit` на проде стоял PASS без кода Limb stabilization и блокировал
+  все mt-deploy с 03:05Z — на проде вернул XFAIL (в Git он уже был XFAIL). Limb stabilization: снимите при XPASS.
+- **Не сделано**: autorig-mt не перезапущен (`autorig-mt-restart --wait 600` отказал: идут V3-раны; в памяти
+  сервиса rig v3.2026-10-11.2) — конвейер возьмёт serpent после ближайшего рестарта; classic mirror / rerig_open /
+  гейт уже на новом коде. `_rig_disagrees` (v3_conveyor) видит Vision «multi-legged» → root ≠ serpent и перерисовывает
+  риг ещё раз (тот же serpent, ~3 с) — можно учесть там.
