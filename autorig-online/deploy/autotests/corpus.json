@@ -563,6 +563,27 @@
    "what": "its rig.json",
    "sha256": "99021ef53c2fa17525cae84217589a6d273cff7c2c0408326c565b8e27b124af",
    "bytes": 13859
+  },
+  "432f7bf3.upload.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1fa6c2006b1daf2bf962/proj/model.glb",
+   "task": "432f7bf3-d372-4e92-9a26-782028557132",
+   "what": "«Сигниферида-7»: a woman with arms hanging at her sides and a frilly skirt whose flaps stick out sideways at hip height; 603 935 vertices, no skeleton (owner 2026-10-11: the arm chains were fitted to the skirt flaps, the real arms got no bones)",
+   "sha256": "23a5eb2b9cedfe983b9d16ca3498d33ef2e2806d60b91b0914fe328bad5eb6d5",
+   "bytes": 24022024
+  },
+  "eaec2b0b.upload.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/eaec2b0b638e840bfb1f/proj/model.glb",
+   "task": "bdc37cc9-23df-4d48-81f4-af62a669b421",
+   "what": "Cyborg (triage limb_in_body.left): a posed bare mesh whose LeftArm was fitted at hip height (y 0.17 H, x -0.03) with 89 757 dominant vertices while the RightArm was right",
+   "sha256": "54a8bffbcee26c5b4c45eec412edd825e671f5c0b8ef86b935b810561b3a1467",
+   "bytes": 4701848
+  },
+  "dd498832.upload.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/2fd6423ac6aa115b0e97/proj/model.glb",
+   "task": "dd498832-09d2-48ca-b7ca-ab546fb02c83",
+   "what": "«Пиксельный Чибик»: a 580-triangle chibi, edges up to 31 % of the height (median 8.5 %); huge triangles span the shoulders and hips and crumple in the clips (owner 2026-10-11)",
+   "sha256": "0de1c656e99b318d80cb2d876b80d1a65d82ee64ed148965c42ad53b4d798376",
+   "bytes": 76080
   }
  },
  "profiles": {
@@ -6340,6 +6361,99 @@
      "xfail": {
       "reason": "restored after a corpus overwrite; the arm-fit code (Limb stage41+) is not installed yet",
       "owner": "Limb stabilization · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lowpoly_chibi",
+   "task": "dd498832-09d2-48ca-b7ca-ab546fb02c83",
+   "cost": 1,
+   "defect": "low-poly needs tessellation (owner 2026-10-11): 580 triangles, edges up to 31 % of the height; the huge triangles at the shoulders and hips take one weight per corner and crumple / tear in the clips. Pre-rig tessellation (mt/tessellate.py) splits the long triangles near the joints (580 -> ~1700 faces, UVs kept), the rig runs on that mesh; v0: 5 collapsed faces and 20 edges over 4x on rig_check, after: 1 / 0",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "dd498832.upload.glb",
+     "params": {
+      "words": "pixel chibi"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_tess",
+     "kind": "tessellation",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "applied": [
+       "==",
+       1
+      ],
+      "factor": [
+       "<=",
+       4.0
+      ],
+      "edge_max_pct_H_after": [
+       "<=",
+       20
+      ],
+      "clip_collapsed_max": [
+       "<=",
+       2
+      ],
+      "clip_edges_4x_max": [
+       "<=",
+       2
+      ],
+      "clip_edges_2x_max": [
+       "<=",
+       60
+      ],
+      "original_topology": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       3
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       60
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
      }
     }
    ]
