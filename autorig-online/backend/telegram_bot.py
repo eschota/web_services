@@ -2049,6 +2049,38 @@ async def broadcast_task_error(
         await mark_task_done_notification_sent(task_id)
 
 
+# V3 preview in «Task completed» (owner, 2026-10-11: «таск комплитед должен приходить уже с превью видео V3»).
+# The message carries the task's own V3 media instead of a link preview that may still show the site card:
+# a V3 preview clip (previews-v3/<id>.mp4, when the gallery service has made one) via sendVideo, else the V3
+# viewer capture (posters-v3/<id>.jpg) via sendPhoto. Bounded wait: AUTORIG_TG_DONE_PREVIEW_WAIT_SEC (120).
+V3_PREVIEW_VIDEO_DIR = os.getenv("AUTORIG_V3_PREVIEW_VIDEO_DIR", "/srv/autorig/data/static/previews-v3")
+V3_POSTER_DIR_TG = os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3")
+
+
+def _tg_preview_wait_seconds() -> int:
+    try:
+        return max(0, min(600, int(os.getenv("AUTORIG_TG_DONE_PREVIEW_WAIT_SEC", "120"))))
+    except ValueError:
+        return 120
+
+
+def _v3_preview_files(task_id: str) -> tuple:
+    video = os.path.join(V3_PREVIEW_VIDEO_DIR, f"{task_id}.mp4")
+    poster = os.path.join(V3_POSTER_DIR_TG, f"{task_id}.jpg")
+    ok = lambda p, n: os.path.isfile(p) and n < os.path.getsize(p) < 48 * 1024 * 1024
+    return (video if ok(video, 20000) else None), (poster if ok(poster, 8000) else None)
+
+
+async def _wait_v3_preview(task_id: str, wait_seconds: int) -> tuple:
+    """(video, poster) of the task's V3 preview; waits up to wait_seconds for at least the poster."""
+    deadline = asyncio.get_running_loop().time() + max(0, wait_seconds)
+    while True:
+        video, poster = _v3_preview_files(task_id)
+        if video or poster or asyncio.get_running_loop().time() >= deadline:
+            return video, poster
+        await asyncio.sleep(5)
+
+
 async def broadcast_task_done(
     task_id: str,
     *,
@@ -2144,6 +2176,13 @@ async def broadcast_task_done(
         video_path, video_wait_seconds, last_video_status = await _download_video_from_worker(
             task_id, wait_timeout_seconds=video_wait_seconds)
 
+    v3_photo = None
+    if not video_path:
+        v3_video, v3_photo = await _wait_v3_preview(task_id, _tg_preview_wait_seconds())
+        if v3_video:
+            video_path, last_video_status = v3_video, "v3_preview"
+        print(f"[Telegram] V3 preview for {task_id}: video={bool(v3_video)} poster={bool(v3_photo)}")
+
     chat_ids = await get_broadcast_chat_ids()
     # a model submitted from the generation flow belongs to that private chat
     for private_id in await private_chats_awaiting_task(task_id):
@@ -2182,6 +2221,18 @@ async def broadcast_task_done(
             if not reserved:
                 print(f"[Telegram] Skip duplicate done notification for chat={chat_id}, task={task_id}")
                 return None
+            if v3_photo and len(text) <= 1024:
+                async def _photo(cid=chat_id, rt=reply_to):
+                    with open(v3_photo, "rb") as fh:
+                        return await bot.send_photo(
+                            chat_id=cid, photo=fh, caption=text, parse_mode=ParseMode.HTML,
+                            reply_markup=generate_markup, reply_to_message_id=rt,
+                            allow_sending_without_reply=True,
+                        )
+                sent = await _send_with_retry(_photo, retry_network=False)
+                if sent is not None:
+                    return sent
+                print(f"[Telegram] V3 poster send failed for chat={chat_id}, task={task_id}; text fallback")
             return await _send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(
                 chat_id=cid,
                 text=text,
