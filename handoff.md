@@ -4,6 +4,8 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ## Координация агентов V3 (2026-10-10)
 
+- unity build: **Blueprint** 2026-10-12 ~05:10 MSK+4 (22:10Z 11.10) — сборка `Builds/WebGL-blueprint-r1` (Blueprint B/C, RadialPulse WIP Codex на время сборки снят из рабочего дерева и возвращён). Вторую сборку параллельно не запускать.
+
 - rig: **Serpent rig · V3** — 03:45Z: `mt/serpent.py` на проде (worm aaac7892 → 19 костей, 6 клипов); ханки в rig_first/fastrig рядом с Hands и Multi-limb; см. раздел «Serpent rig · V3» внизу.
 - restarts: **Renderfin resume · V3** — 19:35Z: рестарт autorig-storage/renderfin больше не теряет рендеры (resume под тем же id), ждать простоя НЕ нужно; см. раздел «Renderfin resume · V3» внизу.
 
