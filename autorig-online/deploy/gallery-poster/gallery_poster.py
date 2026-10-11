@@ -68,6 +68,7 @@ CLIP_MAX_LOAD = float(os.getenv("GP_CLIP_MAX_LOAD", "18"))
 # GP_MAX_GLB_MB are not rendered at all (too_big), so a heavy upload never reaches the rasterizer.
 MAX_GLB_BYTES = int(float(os.getenv("GP_MAX_GLB_MB", "40")) * 1024 * 1024)
 MAX_ATTEMPTS = 2
+CLIP_KIND_SINCE = 1791713367.0   # deploy time: running clips replace the turntables; older clips are redone
 
 
 # ====================================================================================================== the render
@@ -154,17 +155,20 @@ def luminance(rgb):
     return float((0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]).mean() / 255.0)
 
 
-def compose(rgba, env: str, seed: int, fixed_scale=None):
+def compose(rgba, env: str, seed: int, fixed_scale=None, fixed_box=None):
     """Stand the model on the environment: tight crop of its alpha, one framing rule for every model, a contact
     shadow, a faint tint from the environment. Returns (BGR image, info)."""
     import cv2
     import numpy as np
 
     alpha = rgba[..., 3]
-    ys, xs = np.nonzero(alpha > 40)
-    if len(xs) < 400:
-        raise RuntimeError("empty silhouette")
-    x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
+    if fixed_box is not None:                    # an animation: one crop for every frame, the model moves in it
+        x0, x1, y0, y1 = fixed_box
+    else:
+        ys, xs = np.nonzero(alpha > 40)
+        if len(xs) < 400:
+            raise RuntimeError("empty silhouette")
+        x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
     crop = rgba[y0:y1, x0:x1].copy()
     ch, cw = crop.shape[:2]
     if not (0.2 < ch / cw < 7.0):
@@ -247,42 +251,84 @@ def cmd_render(args) -> int:
     return 0
 
 
+CLIP_ORDER = ("running", "run", "walking", "walk")
+LOCOMOTION = re.compile(r"gallop|trot|canter|slither|crawl|fly|flying|swim|hop|run|walk", re.I)
+
+
+def pick_clip(names) -> str | None:
+    """Running -> Walking -> the model's own locomotion (Gallop, Slither, …) -> the first real clip -> rig_check."""
+    names = list(names)
+    low = {n.lower(): n for n in names}
+    for want in CLIP_ORDER:
+        if want in low:
+            return low[want]
+    for n in names:
+        if LOCOMOTION.search(n) and n.lower() != "rig_check":
+            return n
+    real = [n for n in names if n.lower() != "rig_check"]
+    return (real or names or [None])[0]
+
+
 def cmd_clip(args) -> int:
-    """Turntable clip of one model: CLIP_FRAMES views around it, one framing scale for all, piped into ffmpeg."""
+    """The rigged model playing its running clip (fallbacks: pick_clip) from a steady 3/4 camera, ~4 s looped."""
     import numpy as np
     from mt import render as R
+    from mt import limb_collision as LC
     from mt.glb import load_glb
 
     t0 = time.time()
+    clip_name = None
     try:
         with open(args.glb, "rb") as handle:
-            mesh = load_glb(handle.read())
+            data = handle.read()
+        mesh = load_glb(data)
         if len(mesh.faces) < 20:
             raise RuntimeError("no geometry")
         yaw, _fwd = facing_yaw(R, mesh)
-        # heavy models: fewer, smaller frames, so the clip fits CLIP_TIMEOUT_S; the clip stays 4 s long
         n_faces = len(mesh.faces)
-        n_frames, size = ((24, 448) if n_faces > 250_000 else (36, 512) if n_faces > 80_000
-                          else (CLIP_FRAMES, CLIP_RENDER))
-        fps = max(6, round(n_frames / 4))
+        fps, size = ((6, 448) if n_faces > 250_000 else (9, 512) if n_faces > 80_000 else (CLIP_FPS, CLIP_RENDER))
+        n_frames = fps * 4
+        rest = np.asarray(mesh.positions, dtype=np.float64)
+        frames_pos = [rest] * n_frames
+        try:
+            rig = LC.Rig(data)
+            clip_name = pick_clip(rig.anims)
+        except Exception:  # noqa: BLE001 - no skin or no clips: a still model, never a turntable
+            rig = None
+        if rig is not None and clip_name and len(rig.rest) == len(rest):
+            keys = rig.anims[clip_name][1]
+            a0, a1 = float(keys[0]), float(keys[-1])
+            length = max(1e-3, a1 - a0)
+            base = rig.posed(rig.W0)
+            c0 = base[:, [0, 2]].mean(0)
+            frames_pos = []
+            for i in range(n_frames):
+                t = a0 + ((i / fps) % length)
+                posed = rig.posed(rig.worlds(clip_name, t))
+                posed[:, [0, 2]] -= posed[:, [0, 2]].mean(0) - c0      # in place: no root drift out of frame
+                frames_pos.append(rest + (posed - base))
+        every = max(1, n_frames // 8)
+        sample = np.concatenate([fp[:: max(1, len(fp) // 4000)] for fp in frames_pos[::every]])
         frames = []
-        for i in range(n_frames):
-            cam = R.persp_camera(mesh.positions, size=size, yaw=yaw, azimuth=-40.0 + 360.0 * i / n_frames,
-                                 name="persp")
+        for i, fp in enumerate(frames_pos):
+            mesh.positions = fp.astype(np.float32)
+            azim = -40.0 + 16.0 * (i / max(1, n_frames - 1) - 0.5)        # steady 3/4 view, a slow 16° drift
+            cam = R.persp_camera(sample, size=size, yaw=yaw, azimuth=azim, name="persp")
             view = R.render_view(mesh, cam)
             lit = np.asarray(R.lit_png(view), dtype=np.uint8)[..., :3]
             mask = np.asarray(R.mask_png(view), dtype=np.uint8)
             frames.append(np.dstack([lit, mask[..., 0] if mask.ndim == 3 else mask]))
-        scale = None
-        for rgba in frames:                              # one scale for every frame: no breathing zoom
+        box = None
+        for rgba in frames:                              # one crop for all frames: the motion stays visible
             ys, xs = np.nonzero(rgba[..., 3] > 40)
             if len(xs) < 50:
                 continue
-            ch, cw = ys.max() - ys.min() + 1, xs.max() - xs.min() + 1
-            s_ = min(0.64 * H / ch, 0.90 * W / cw)
-            scale = s_ if scale is None else min(scale, s_)
-        if scale is None:
+            b = (int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1)
+            box = b if box is None else (min(box[0], b[0]), max(box[1], b[1]), min(box[2], b[2]), max(box[3], b[3]))
+        if box is None:
             raise RuntimeError("empty silhouette")
+        ch, cw = box[3] - box[2], box[1] - box[0]
+        scale = min(0.64 * H / ch, 0.90 * W / cw)
         seed = int(hashlib.sha256(args.task.encode()).hexdigest()[:8], 16)
         env = args.env if args.env in ENVS else ENVS[seed % len(ENVS)]
         out = Path(args.out)
@@ -294,7 +340,7 @@ def cmd_clip(args) -> int:
                "-threads", "1", "-movflags", "+faststart", "-an", "-f", "mp4", str(tmp)]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         for rgba in frames:
-            img, _meta = compose(rgba, env, seed, fixed_scale=scale)
+            img, _meta = compose(rgba, env, seed, fixed_scale=scale, fixed_box=box)
             proc.stdin.write(np.ascontiguousarray(img).tobytes())
         proc.stdin.close()
         err = proc.stderr.read().decode("utf-8", "replace")
@@ -307,6 +353,7 @@ def cmd_clip(args) -> int:
         print(json.dumps({"state": "failed", "reason": f"{type(exc).__name__}: {exc}"[:300], "task": args.task}))
         return 3
     print(json.dumps({"state": "ok", "task": args.task, "env": env, "bytes": out.stat().st_size, "frames": n_frames,
+                      "clip": clip_name,
                       "seconds": round(time.time() - t0, 2)}))
     return 0
 
@@ -320,7 +367,7 @@ def make_clip(tid: str, glb: Path, env: str, backfill: bool, con=None) -> str:
     poster, clip = poster_path(tid), clip_path(tid)
     if not poster.is_file():
         return "no_poster"
-    if clip.is_file() and clip.stat().st_mtime >= poster.stat().st_mtime:
+    if clip.is_file() and clip.stat().st_mtime >= max(poster.stat().st_mtime, CLIP_KIND_SINCE):
         return "skip"
     if backfill and os.getloadavg()[0] > CLIP_MAX_LOAD:
         return "busy"
