@@ -6679,7 +6679,7 @@
    "task": "594dd2a5",
    "cost": 1,
    "owner": "Rig path · V3",
-   "defect": "first new task after the 2026-10-11 20:17 engine deploys, triage rig_stretch: a yellow blob character with fat stubby legs (shin radius 9.3 % H, hips 26 % H, knee placed by proportions). Full-amplitude library clips bend such legs 90+ degrees: rig_check 1952 edges over 2x / 425 over 4x on Leg|Foot seams, numeric visible/2 fails Jump, Waving1, Hip Hop, Look Around (tear 30-45x). Skin re-blend (blend_width knee/ankle 1.5 + 6 smooth steps) only halves the clip tears (clip 4x 522 -> 371) while test-pose 4x grows (925 -> 1091): the fix is clip amplitude / leg fit for stubby legs, not weights. Engine fix 2026-10-12 (Rig path): limb amplitude per chain by thickness/length (rig.json limb_amplitude; retarget turns those bones only that share of the way from bind; the blob's legs 0.35, arms 0.87) and the thick-leg knee in the middle of the free leg tube (leg_fit sections_thick). mt_rig / mt_numeric re-rig the source with today's engine; numeric_now stays the detector of the old file.",
+   "defect": "first new task after the 2026-10-11 20:17 engine deploys, triage rig_stretch: a yellow blob character with fat stubby legs (shin radius 9.3 % H, hips 26 % H, knee placed by proportions). Full-amplitude library clips bend such legs 90+ degrees: rig_check 1952 edges over 2x / 425 over 4x on Leg|Foot seams, numeric visible/2 fails Jump, Waving1, Hip Hop, Look Around (tear 30-45x). Skin re-blend (blend_width knee/ankle 1.5 + 6 smooth steps) only halves the clip tears (clip 4x 522 -> 371) while test-pose 4x grows (925 -> 1091): the fix is clip amplitude / leg fit for stubby legs, not weights. Engine fix 2026-10-12 (Rig path): limb amplitude per chain by thickness/length (rig.json limb_amplitude; retarget turns those bones only that share of the way from bind; the blob's legs 0.35, arms 0.87) and the thick-leg knee in the middle of the free leg tube (leg_fit sections_thick). mt_rig / mt_numeric re-rig the source with today's engine; numeric_now stays the detector of the old file. Then limb_in_body (triage 2026-10-12): the hanging clips put the hands 7 % H into the belly; arm_clearance now arms an analytic abduction (torso width at the hand height from sections, clearance 3 % H) and keeps the iterative turn for what is left.",
    "checks": [
     {
      "id": "numeric_now",
@@ -6748,6 +6748,29 @@
        9
       ]
      }
+    },
+    {
+     "id": "mt_cleared",
+     "kind": "mt_arm_clearance",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "severity_rank": [
+       "<=",
+       0
+      ],
+      "min_arm_vertices": [
+       ">=",
+       1
+      ],
+      "clearance_seconds": [
+       "<=",
+       240
+      ]
+     },
+     "note": "2026-10-12 Rig path: arm abduction by the torso width at the hand height (limb_amplitude.abduction, armed by arm_clearance when limb collision flags a side): high 0.71 -> none, 716 s -> ~25-75 s"
     }
    ]
   }
