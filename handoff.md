@@ -2139,3 +2139,27 @@ This scoped development checkpoint does not overwrite the unrelated historical
   сервиса rig v3.2026-10-11.2) — конвейер возьмёт serpent после ближайшего рестарта; classic mirror / rerig_open /
   гейт уже на новом коде. `_rig_disagrees` (v3_conveyor) видит Vision «multi-legged» → root ≠ serpent и перерисовывает
   риг ещё раз (тот же serpent, ~3 с) — можно учесть там.
+
+## Viewer hang / OOM / сжатие · V3 (2026-10-11 ~04:10 UTC, агент «Animation picker · V3»)
+
+- **Причина «висит воксельная сцена» и OOM:** MT душился лимитом памяти cgroup: проекции (`mt.project`, 7 форкнутых воркеров по
+  1–2 ГБ) двух больших ранов (e48d74e4 5,4 млн вершин, ad037dcd 1,1 млн) заняли 14 ГБ при MemoryHigh 10 ГБ → сервер отвечал
+  минутами, вьювер ждал GLB. Сделано: `mt/project.py` — воркеры ≤ `MT_PROJECT_WORKERS` (4) и ≤ бюджета `MT_PROJECT_MEM_MB` (4000,
+  ~120 Б/вершину) (gate PASS); drop-in `/etc/systemd/system/autorig-mt.service.d/zz-memory-high.conf` MemoryHigh=13G.
+- **Лёгкий GLB вьювера** (`mt/view_glb.py`, gate PASS): выше `MT_VIEW_MAX_VERTS` (400k) копия сваривается и упрощается
+  (`tools/gltf_meshopt.mjs`, meshoptimizer simplifier), внешние URI текстур заменяются 1 px; e48: 259 МБ → 22,8 МБ (376k вершин),
+  с meshopt 10,7 МБ. Фиксированный путь для постеров/клипов: **`runs/<run>/rig/rigged.view.glb`** (CLI
+  `python -m mt.view_glb --ensure runs/<run>/rig/rigged.glb`), сделан для 7c1b6748 0d39aaba 1e8ec239 f555aedb 66d83b2e e48d74e4.
+- **Отдача больших файлов через nginx:** `mt/service.py` → `X-Accel-Redirect: /_autorig_mt_runs/…` (internal location в
+  `autorig.online-storage`, gzip для GLB; бэкап конфига в `/srv/autorig/data/var/`).
+- **Сжатие (meshopt):** glTFast на WebGL портит meshopt-потоки (NaN; проверено с com.unity.meshopt.decompress 0.2 и 0.3), поэтому
+  страница сама декодирует `?view=2` WASM-декодером meshoptimizer (`meshopt-fetch.js`) и отдаёт Unity обычный GLB; при ошибке — `view=1`.
+  Lossless meshopt: 1,57 → 0,77 МБ; 74 → 49 МБ.
+- **Вьювер `v3-all-r8-20261011`:** WebGL max memory 4096 МБ, `?view=2`, вместо `alert()` при крэше — сообщение с «Перезапустить»,
+  полоска прогресса со стадией/% и «не загрузилось + Повторить» при остановке >60 с, камера на модель после каждой загрузки,
+  презентация не дольше 40 с, язык UI = `agent_lang`/`ui_lang` страницы (`ui-i18n.js`, браузер не решает).
+- **Старт MT:** `mt/v3_dispatch.py` возобновляет очередь через `MT_V3_RESUME_DELAY` (20 с) после старта (gate PASS).
+- **Не загружено в работающий MT:** новый `view_glb`/`v3_dispatch` подхватятся только после рестарта, а `autorig-mt-restart`
+  отказывает, пока висят `source_registered` раны (v3run-493ecdf8…, 22412253…, 3f88ad4e…). До рестарта `view=2` даёт битую копию →
+  страница уходит на `view=1`.
+- **Не сделано:** риг гигантских моделей на прокси при интейке и корпусный кейс; проекции e48 и dc7e4afa остановлены (переделаются).
