@@ -364,7 +364,8 @@ def source_glb(task_id: str, viewer_url: str):
 def candidates(con_site, limit: int):
     rows = con_site.execute(
         "SELECT id, pipeline_kind, viewer_prepared_glb_url, content_rating, created_at FROM tasks "
-        "WHERE status='done' AND is_public=1 AND (content_rating IS NULL OR content_rating != 'adult') "
+        "WHERE (status='done' OR (status='needs_review' AND pipeline_kind='v3')) AND is_public=1 "
+        "AND (content_rating IS NULL OR content_rating != 'adult') "
         "ORDER BY (pipeline_kind='v3') DESC, created_at DESC LIMIT ?", (limit,)).fetchall()
     return rows
 

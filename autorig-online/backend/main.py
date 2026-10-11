@@ -8777,18 +8777,23 @@ async def api_get_gallery(
     db: AsyncSession = Depends(get_db)
 ):
     """Get public gallery of completed tasks with videos"""
-    from sqlalchemy import func, desc, distinct
+    from sqlalchemy import func, desc, distinct, and_
     from database import Task, TaskFilePurchase
 
     # Get current user email for liked_by_me check
     user_email = user.email if user else None
 
     # Build base conditions (must have poster URLs in DB or /api/thumb 404s in the grid)
+    # Gallery · V3 only (owner, 2026-10-11): a V3 task is listed by its V3 capture and turntable (made by
+    # autorig-gallery-poster for done and needs_review tasks), no classic video needed; V3 tasks come first.
+    # V2-only tasks stay until they are re-rigged on open.
     base_conditions = [
-        Task.status == "done",
-        Task.video_ready == True,
-        _gallery_task_has_poster_sql(),
+        or_(
+            and_(Task.status == "done", Task.video_ready == True, _gallery_task_has_poster_sql()),
+            and_(Task.pipeline_kind == "v3", Task.status.in_(("done", "needs_review")), Task.is_public.is_(True)),
+        ),
     ]
+    _v3_first = desc(Task.pipeline_kind == "v3")
     # site_mode (NSFW split, 2026-10-11): adult tasks are listed only on the adult domain.
     import site_mode as _site_mode
     base_conditions.extend(_site_mode.listing_conditions(request, Task))
@@ -8825,7 +8830,7 @@ async def api_get_gallery(
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
-            .order_by(desc('like_count'), desc(Task.created_at))
+            .order_by(_v3_first, desc('like_count'), desc(Task.created_at))
         )
     elif sort == "sales":
         # Sort by sales count (descending), then by date
@@ -8839,7 +8844,7 @@ async def api_get_gallery(
             .outerjoin(TaskFilePurchase, Task.id == TaskFilePurchase.task_id)
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
-            .order_by(desc('sales_count'), desc(Task.created_at))
+            .order_by(_v3_first, desc('sales_count'), desc(Task.created_at))
         )
     else:
         # Sort by date (newest first) - default
@@ -8851,7 +8856,7 @@ async def api_get_gallery(
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
-            .order_by(desc(Task.created_at))
+            .order_by(_v3_first, desc(Task.created_at))
         )
 
     if page_offset:
