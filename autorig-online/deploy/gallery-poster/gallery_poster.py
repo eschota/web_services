@@ -53,6 +53,16 @@ RENDER_TIMEOUT_S = 150
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 RETRY_FAILED_S = 6 * 3600
 VERSION = 3        # bump when the look changes: every poster is rebuilt
+# V3 preview clip (SEO · 2026-10-11): a turntable of the same model on the same environment as the poster, made
+# right after it: 4 s, 15 fps, 540x960 H.264 (+faststart), ~0.3-1.5 MB. One file serves the Telegram «Task
+# completed» video, og:video and the gallery hover preview. Low priority: nice 19, one ffmpeg thread, and the
+# backfill of older posters waits while the box is busy (load average above GP_CLIP_MAX_LOAD).
+CLIP_DIR = Path(os.getenv("GP_CLIP_OUT", "/srv/autorig/data/static/previews-v3"))
+CLIP_FRAMES = int(os.getenv("GP_CLIP_FRAMES", "60"))
+CLIP_FPS = 15
+CLIP_RENDER = int(os.getenv("GP_CLIP_RENDER", "640"))
+CLIP_TIMEOUT_S = int(os.getenv("GP_CLIP_TIMEOUT_S", "420"))
+CLIP_MAX_LOAD = float(os.getenv("GP_CLIP_MAX_LOAD", "18"))
 
 
 # ====================================================================================================== the render
@@ -139,7 +149,7 @@ def luminance(rgb):
     return float((0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]).mean() / 255.0)
 
 
-def compose(rgba, env: str, seed: int):
+def compose(rgba, env: str, seed: int, fixed_scale=None):
     """Stand the model on the environment: tight crop of its alpha, one framing rule for every model, a contact
     shadow, a faint tint from the environment. Returns (BGR image, info)."""
     import cv2
@@ -163,7 +173,7 @@ def compose(rgba, env: str, seed: int):
     vig = 1.0 - 0.22 * np.clip(((xx - W / 2) / (W * 0.75)) ** 2 + ((yy - H * 0.5) / (H * 0.75)) ** 2, 0, 1)
     canvas *= vig[..., None]
     # framing: the same for every model (a standing figure fills ~64 % of the height, a wide one is limited by width)
-    scale = min(0.64 * H / ch, 0.90 * W / cw)
+    scale = fixed_scale or min(0.64 * H / ch, 0.90 * W / cw)
     nw, nh = max(2, int(round(cw * scale))), max(2, int(round(ch * scale)))
     small = cv2.resize(crop, (nw, nh), interpolation=cv2.INTER_AREA)
     feet_y = int(H * 0.835)
@@ -232,6 +242,90 @@ def cmd_render(args) -> int:
     return 0
 
 
+def cmd_clip(args) -> int:
+    """Turntable clip of one model: CLIP_FRAMES views around it, one framing scale for all, piped into ffmpeg."""
+    import numpy as np
+    from mt import render as R
+    from mt.glb import load_glb
+
+    t0 = time.time()
+    try:
+        with open(args.glb, "rb") as handle:
+            mesh = load_glb(handle.read())
+        if len(mesh.faces) < 20:
+            raise RuntimeError("no geometry")
+        yaw, _fwd = facing_yaw(R, mesh)
+        frames = []
+        for i in range(CLIP_FRAMES):
+            cam = R.persp_camera(mesh.positions, size=CLIP_RENDER, yaw=yaw, azimuth=-40.0 + 360.0 * i / CLIP_FRAMES,
+                                 name="persp")
+            view = R.render_view(mesh, cam)
+            lit = np.asarray(R.lit_png(view), dtype=np.uint8)[..., :3]
+            mask = np.asarray(R.mask_png(view), dtype=np.uint8)
+            frames.append(np.dstack([lit, mask[..., 0] if mask.ndim == 3 else mask]))
+        scale = None
+        for rgba in frames:                              # one scale for every frame: no breathing zoom
+            ys, xs = np.nonzero(rgba[..., 3] > 40)
+            if len(xs) < 50:
+                continue
+            ch, cw = ys.max() - ys.min() + 1, xs.max() - xs.min() + 1
+            s_ = min(0.64 * H / ch, 0.90 * W / cw)
+            scale = s_ if scale is None else min(scale, s_)
+        if scale is None:
+            raise RuntimeError("empty silhouette")
+        seed = int(hashlib.sha256(args.task.encode()).hexdigest()[:8], 16)
+        env = args.env if args.env in ENVS else ENVS[seed % len(ENVS)]
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f".{out.stem}.{os.getpid()}.mp4")
+        cmd = ["nice", "-n", "19", "ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
+               "-s", f"{W}x{H}", "-r", str(CLIP_FPS), "-i", "-", "-vf", "scale=540:960:flags=area",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-pix_fmt", "yuv420p", "-profile:v", "high",
+               "-threads", "1", "-movflags", "+faststart", "-an", "-f", "mp4", str(tmp)]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        for rgba in frames:
+            img, _meta = compose(rgba, env, seed, fixed_scale=scale)
+            proc.stdin.write(np.ascontiguousarray(img).tobytes())
+        proc.stdin.close()
+        err = proc.stderr.read().decode("utf-8", "replace")
+        if proc.wait() != 0 or not tmp.is_file() or tmp.stat().st_size < 20000:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            raise RuntimeError(f"ffmpeg: {err[-200:]}")
+        os.replace(tmp, out)
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({"state": "failed", "reason": f"{type(exc).__name__}: {exc}"[:300], "task": args.task}))
+        return 3
+    print(json.dumps({"state": "ok", "task": args.task, "env": env, "bytes": out.stat().st_size,
+                      "seconds": round(time.time() - t0, 2)}))
+    return 0
+
+
+def clip_path(task_id: str) -> Path:
+    return CLIP_DIR / f"{task_id}.mp4"
+
+
+def make_clip(tid: str, glb: Path, env: str, backfill: bool) -> str:
+    """The clip for a task whose poster is current; skipped while busy when it is only a backfill."""
+    poster, clip = poster_path(tid), clip_path(tid)
+    if not poster.is_file():
+        return "no_poster"
+    if clip.is_file() and clip.stat().st_mtime >= poster.stat().st_mtime:
+        return "skip"
+    if backfill and os.getloadavg()[0] > CLIP_MAX_LOAD:
+        return "busy"
+    cmd = ["nice", "-n", "19", sys.executable, "-P", str(Path(__file__).resolve()), "clip", "--task", tid,
+           "--glb", str(glb), "--out", str(clip), "--env", env or ""]
+    env_vars = dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=CLIP_TIMEOUT_S, env=env_vars)
+        lines = proc.stdout.strip().splitlines()
+        res = json.loads(lines[-1]) if lines else {"state": "failed"}
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        res = {"state": "failed"}
+    return "clip_ok" if res.get("state") == "ok" else "clip_failed"
+
+
 # ================================================================================================== the orchestrator
 def db() -> sqlite3.Connection:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -297,7 +391,8 @@ def process(con, row) -> str:
     sig = f"{glb.name}:{st.st_size}:{int(st.st_mtime)}"
     if prev is not None and prev["version"] == VERSION and prev["sig"] == sig:
         if prev["state"] == "ok" and poster_path(tid).is_file():
-            return "skip"
+            clip = make_clip(tid, glb, prev["env"] or "", backfill=True)
+            return "clip" if clip == "clip_ok" else "skip"
         if prev["state"] == "failed" and time.time() - float(prev["ts"]) < RETRY_FAILED_S:
             return "skip"
     cmd = ["nice", "-n", "15", sys.executable, "-P", str(Path(__file__).resolve()), "render", "--task", tid,
@@ -317,6 +412,8 @@ def process(con, row) -> str:
     if state == "failed" and poster_path(tid).is_file():
         with contextlib.suppress(OSError):
             poster_path(tid).unlink()                    # an older capture of a model that now fails: do not keep it
+    if state == "ok":
+        make_clip(tid, glb, str(res.get("env") or ""), backfill=False)   # a new poster: its clip right away
     return state
 
 
@@ -369,9 +466,15 @@ def main() -> int:
     lo.add_argument("--limit", type=int, default=3000)
     lo.add_argument("--pause", type=float, default=1.0)
     lo.add_argument("--interval", type=float, default=90.0)
+    c = sub.add_parser("clip")
+    c.add_argument("--task", required=True)
+    c.add_argument("--glb", required=True)
+    c.add_argument("--out", required=True)
+    c.add_argument("--env", default="")
     sub.add_parser("status")
     args = ap.parse_args()
-    return {"render": cmd_render, "once": cmd_once, "loop": cmd_loop, "status": cmd_status}[args.cmd](args)
+    return {"render": cmd_render, "once": cmd_once, "loop": cmd_loop, "status": cmd_status,
+            "clip": cmd_clip}[args.cmd](args)
 
 
 if __name__ == "__main__":

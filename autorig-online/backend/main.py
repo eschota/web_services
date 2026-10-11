@@ -8915,7 +8915,8 @@ async def api_get_gallery(
         like_count = row[1] if len(row) > 1 else 0
         items.append(GalleryItem(
             task_id=t.id,
-            video_url=f"/api/video/{t.id}",
+            # V3 preview clip first (seo_social: the same turntable as og:video and the Telegram notice).
+            video_url=_seo_social.v3_clip_url(t.id) or f"/api/video/{t.id}",
             thumbnail_url=thumb_url_for(t.id),
             created_at=t.created_at,
             time_ago=format_time_ago(t.created_at),

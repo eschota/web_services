@@ -2072,13 +2072,38 @@ def _v3_preview_files(task_id: str) -> tuple:
 
 
 async def _wait_v3_preview(task_id: str, wait_seconds: int) -> tuple:
-    """(video, poster) of the task's V3 preview; waits up to wait_seconds for at least the poster."""
+    """(video, poster) of the task's V3 preview: waits up to wait_seconds for the clip (made right after the
+    poster); at the deadline the poster alone is enough, and _upgrade_to_v3_clip swaps the clip in later."""
     deadline = asyncio.get_running_loop().time() + max(0, wait_seconds)
     while True:
         video, poster = _v3_preview_files(task_id)
-        if video or poster or asyncio.get_running_loop().time() >= deadline:
+        if video or asyncio.get_running_loop().time() >= deadline:
             return video, poster
         await asyncio.sleep(5)
+
+
+async def _upgrade_to_v3_clip(bot, chat_id: int, message_id: int, task_id: str, caption: str, markup,
+                              wait_seconds: int = 900) -> None:
+    """A «Task completed» sent with the poster becomes the V3 clip once it exists (editMessageMedia)."""
+    from telegram import InputMediaVideo
+    from telegram.constants import ParseMode
+
+    deadline = asyncio.get_running_loop().time() + wait_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        video, _poster = _v3_preview_files(task_id)
+        if video:
+            try:
+                with open(video, "rb") as fh:
+                    await bot.edit_message_media(
+                        chat_id=chat_id, message_id=message_id, reply_markup=markup,
+                        media=InputMediaVideo(media=fh, caption=caption, parse_mode=ParseMode.HTML,
+                                              supports_streaming=True, width=540, height=960),
+                    )
+                print(f"[Telegram] V3 clip swapped in for chat={chat_id}, task={task_id}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Telegram] V3 clip edit failed for chat={chat_id}, task={task_id}: {exc}")
+            return
+        await asyncio.sleep(15)
 
 
 async def broadcast_task_done(
@@ -2231,6 +2256,8 @@ async def broadcast_task_done(
                         )
                 sent = await _send_with_retry(_photo, retry_network=False)
                 if sent is not None:
+                    asyncio.create_task(_upgrade_to_v3_clip(bot, chat_id, sent.message_id, task_id, text,
+                                                            generate_markup))
                     return sent
                 print(f"[Telegram] V3 poster send failed for chat={chat_id}, task={task_id}; text fallback")
             return await _send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(

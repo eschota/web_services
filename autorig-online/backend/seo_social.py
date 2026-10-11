@@ -43,6 +43,10 @@ OG_W, OG_H = 1200, 630
 OG_CARD_DIR = Path(os.getenv("AUTORIG_OG_CARD_DIR", "/srv/autorig/data/static/og-cards"))
 V3_POSTER_DIR = Path(os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3"))
 SITE_CARD_PATH = "/og/site.jpg"
+# V3 preview clip (gallery_poster.py `clip`): 4 s turntable, 540x960 H.264, served at /og/task/<id>.mp4 through
+# the nginx internal location /_autorig_previews_v3/ (range requests for players and crawlers).
+V3_CLIP_DIR = Path(os.getenv("AUTORIG_V3_PREVIEW_VIDEO_DIR", "/srv/autorig/data/static/previews-v3"))
+V3_CLIP_SIZE = (540, 960)
 SITE_CARD_TTL_SEC = 6 * 3600
 SITE_CARD_ALT = "Rigged 3D models made on AutoRig.online"
 SITE_CARD_SUBJECTS = re.compile(
@@ -188,6 +192,21 @@ def task_label(task: Any) -> Optional[str]:
     return CATEGORY_NAMES.get(category) or (category.replace("_", " ").capitalize() if category and category != "other" else None)
 
 
+def v3_clip_signature(task_id: str) -> Optional[str]:
+    if not is_task_id(task_id):
+        return None
+    try:
+        st = (V3_CLIP_DIR / f"{task_id}.mp4").stat()
+    except OSError:
+        return None
+    return f"{int(st.st_mtime):x}" if st.st_size > 20000 else None
+
+
+def v3_clip_url(task_id: str, base_url: str = "") -> Optional[str]:
+    sig = v3_clip_signature(task_id)
+    return f"{base_url}/og/task/{task_id}.mp4?v={sig}" if sig else None
+
+
 def task_card_url(task_id: str, signature: Optional[str]) -> str:
     return f"{BASE_URL}/og/task/{task_id}.jpg?v={signature or 'c'}.{TASK_CARD_VERSION}"
 
@@ -248,6 +267,9 @@ def task_head(task: Any, *, hidden: bool, has_video: bool, has_poster: bool,
         image, image_w, image_h, image_alt = site_card_url(), OG_W, OG_H, SITE_CARD_ALT
     thumb = f"{base_url}/thumb/{task_id}" + (f"?v={poster_sig}" if poster_sig else "")
     video = f"{base_url}/api/video/{task_id}" if (show_media and has_video and status == "done") else None
+    clip = v3_clip_url(task_id, base_url) if show_media else None
+    if clip:                       # the V3 turntable is the task's preview video (and replaces the V2 clip)
+        video, video_dims = clip, V3_CLIP_SIZE
 
     lines: List[str] = [f'<meta name="description" content="{esc(meta_description)}">']
     if keywords and indexable:
@@ -815,6 +837,23 @@ def install(app: Any, *, get_db: Callable, resolve_poster_url_for_task: Callable
         if path is None:
             return Response(status_code=404)
         return _jpeg(path, 3600)
+
+    @app.get("/og/task/{task_id}.mp4", include_in_schema=False)
+    @app.head("/og/task/{task_id}.mp4", include_in_schema=False)
+    async def og_task_clip(task_id: str, request: Request, db=Depends(get_db)):
+        if not is_task_id(task_id) or v3_clip_signature(task_id) is None:
+            return Response(status_code=404)
+        from tasks import get_task_by_id
+        import site_mode
+
+        task = await get_task_by_id(db, task_id)
+        if (task is None or getattr(task, "is_public", True) is False or site_mode.hides(request, task)
+                or str(getattr(task, "content_rating", "") or "").lower() == "adult"):
+            return Response(status_code=404)
+        return Response(status_code=200, media_type="video/mp4", headers={
+            "X-Accel-Redirect": f"/_autorig_previews_v3/{task_id}.mp4",
+            "Cache-Control": "public, max-age=604800" if request.query_params.get("v") else "public, max-age=600",
+            "Access-Control-Allow-Origin": "*"})
 
     @app.get("/og/task/{task_id}.jpg", include_in_schema=False)
     @app.head("/og/task/{task_id}.jpg", include_in_schema=False)

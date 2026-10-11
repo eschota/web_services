@@ -165,6 +165,21 @@ class CompleteSocialHeadTest(unittest.TestCase):
         self.assertEqual(ss.complete_social_head(once), once)
 
 
+class ClipTest(unittest.TestCase):
+    def test_v3_clip_becomes_og_video(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old, ss.V3_CLIP_DIR = ss.V3_CLIP_DIR, Path(tmp)
+            try:
+                (Path(tmp) / f"{TID}.mp4").write_bytes(b"x" * 30000)
+                out = ss.task_head(task(video_ready=False), hidden=False, has_video=False, has_poster=True)
+                hidden = ss.task_head(task(), hidden=True, has_video=False, has_poster=True)
+            finally:
+                ss.V3_CLIP_DIR = old
+        self.assertTrue(meta(out["head_html"], "og:video").startswith(f"https://autorig.online/og/task/{TID}.mp4?v="))
+        self.assertEqual(meta(out["head_html"], "og:video:width"), "540")
+        self.assertIsNone(meta(hidden["head_html"], "og:video"))
+
+
 class CrawlerAndArticleTest(unittest.TestCase):
     def test_crawlers_are_recognised(self):
         for ua in ("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
