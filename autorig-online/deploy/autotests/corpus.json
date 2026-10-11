@@ -460,6 +460,20 @@
    "what": "66ba97ba upload with a root node turning +Y to +Z: lying on its back (Z-up export, the owner 1814 case)",
    "sha256": "d0ea5df87679b0ee44a61d3ea5d153fc65356deb0091cdb75a2e2c078973e0e7",
    "bytes": 5288716
+  },
+  "aaac7892.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/d454a73fb19fb8cecca4/proj/model.glb",
+   "task": "aaac7892-3844-4912-9d25-870f9d9d244a",
+   "what": "one-eyed fleshy worm with a toothed mouth (V3 verified GLB, 10.5k vertices, one shell, lying in an S, head raised)",
+   "sha256": "3995890f3ec9f8d15d6af3548b8d49547328870feca97cbac5ef3ef6411dfa1d",
+   "bytes": 2824756
+  },
+  "synthetic.snake_coiled.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/snake_coiled.glb",
+   "task": null,
+   "what": "synthetic snake in a flat spiral of two touching coils (gap 4 % of the radius), raised head (deploy/autotests/make_serpent_corpus.py)",
+   "sha256": "e768e774b91a313b34f8c417d4539e128322dc3ce0d28b50e6ec77331c000639",
+   "bytes": 423248
   }
  },
  "profiles": {
@@ -4827,6 +4841,278 @@
       "fit_ok": [
        "==",
        1
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "serpent_worm",
+   "task": "aaac7892-3844-4912-9d25-870f9d9d244a",
+   "cost": 1,
+   "defect": "owner 2026-10-11 («червей-змей»): the one-eyed worm went through the conveyor as a 1-bone Root rig with no clips (Vision said multi-legged). Serpent rig · V3 (mt/serpent.py): the medial curve from geodesic rings, a Spine/Tail chain with Head (+Jaw when Vision sees a mouth), arc-length weights, procedural Slither / Crawl / Idle / Strike / Head Turn clips, a self-intersection gate",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "aaac7892.model.glb",
+     "params": {
+      "words": "One-eyed fleshy worm creature"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "bones": [
+       ">=",
+       17
+      ],
+      "clips": [
+       ">=",
+       5
+      ],
+      "rig_check_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_serpent",
+     "kind": "serpent_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "head_near": [
+       2.1658,
+       1.0014,
+       1.6572
+      ]
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "gate_passed": [
+       "==",
+       true
+      ],
+      "arc_jump_edges": [
+       "==",
+       0
+      ],
+      "bones_outside": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "stretch_4x": [
+       "==",
+       0
+      ],
+      "head_dist": [
+       "<=",
+       0.1
+      ],
+      "spine_bones": [
+       ">=",
+       16
+      ]
+     }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "status": [
+       "==",
+       "numeric_deformation_passed"
+      ],
+      "clips_passed": [
+       ">=",
+       6
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "serpent_worm_noword",
+   "task": "aaac7892-3844-4912-9d25-870f9d9d244a",
+   "cost": 1,
+   "defect": "the worm without any words: the geometry alone (elongation 8.3, one ring per level) must find the serpent and its head end (the thicker, raised end)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "aaac7892.model.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "bones": [
+       ">=",
+       17
+      ],
+      "clips": [
+       ">=",
+       5
+      ],
+      "rig_check_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_serpent",
+     "kind": "serpent_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "head_near": [
+       2.1658,
+       1.0014,
+       1.6572
+      ]
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "gate_passed": [
+       "==",
+       true
+      ],
+      "arc_jump_edges": [
+       "==",
+       0
+      ],
+      "bones_outside": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "stretch_4x": [
+       "==",
+       0
+      ],
+      "head_dist": [
+       "<=",
+       0.1
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "serpent_coiled",
+   "task": null,
+   "cost": 1,
+   "defect": "touching coils must never share weights (arc-length, not Euclidean); a long slither wave on a coiled body swings whole coils through each other - the gate shortens / lowers it or drops the clip",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.snake_coiled.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "bones": [
+       ">=",
+       30
+      ],
+      "clips": [
+       ">=",
+       4
+      ],
+      "rig_check_4x": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_serpent",
+     "kind": "serpent_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "head_near": null
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "gate_passed": [
+       "==",
+       true
+      ],
+      "arc_jump_edges": [
+       "==",
+       0
+      ],
+      "bones_outside": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "stretch_4x": [
+       "==",
+       0
       ]
      }
     }

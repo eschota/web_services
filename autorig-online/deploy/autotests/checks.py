@@ -705,6 +705,30 @@ def hand_rig(ctx):
             "clips": len(rig.get("clips") or []), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
 
 
+def serpent_rig(ctx, head_near=None):
+    """Serpent rig · V3 (2026-10-11, the worm aaac7892): the serpent branch of rig_first on this case's MT run:
+    body plan, bones, the head end against a known point (distance / arc length), weights jumping between coils,
+    bones outside the mesh, the self-intersection gate (rig.json of mt/serpent.py)."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    sp = rig.get("serpent") or {}
+    ch = rig.get("checks") or {}
+    bones = {b["name"]: b for b in rig.get("bones") or []}
+    head_dist = None
+    if head_near is not None and "Head" in bones and sp.get("arc"):
+        import math
+        tip = bones["Head"]["tail"]
+        head_dist = round(math.dist(tip, head_near) / float(sp["arc"]), 4)
+    st = {k: v for k, v in (ch.get("rig_check_stretch") or {}).items() if isinstance(v, dict)}
+    return {"body_plan": rig.get("body_plan"), "bones": len(bones), "spine_bones": sp.get("spine_bones"),
+            "jaw": bool(sp.get("jaw")), "head_dist": head_dist, "elongation": sp.get("elongation"),
+            "gate_passed": bool(ch.get("gate_passed")), "clips_dropped": len(ch.get("clips_dropped") or []),
+            "arc_jump_edges": ch.get("arc_jump_edges"), "bones_outside": len(ch.get("bones_outside_mesh") or []),
+            "unweighted": ch.get("unweighted_vertices"),
+            "stretch_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
+            "clips": len(rig.get("clips") or []), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
+
+
 def hand_detect(ctx, input_name, words=""):
     """The hands detector alone (mt.handrig --detect) on a corpus input: a control on bodies (hands must be false)
     and a detector case on hands-only models."""
@@ -1037,6 +1061,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return hand_rig(ctx)
     if k == "hand_detect":
         return hand_detect(ctx, inp, a.get("words", ""))
+    if k == "serpent_rig":                                         # Serpent rig · V3
+        return serpent_rig(ctx, a.get("head_near"))
     if k == "mt_arm_clearance":
         return mt_arm_clearance(ctx)
     if k == "numeric_qa_file":                                     # QA calibration V3
