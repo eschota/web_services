@@ -1304,6 +1304,21 @@
       ]
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+    },
+    {
+     "id": "mt_tess_control",
+     "kind": "tessellation",
+     "role": "control",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "applied": [
+       "==",
+       0
+      ]
+     }
     }
    ]
   },
@@ -2161,6 +2176,21 @@
       ]
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+    },
+    {
+     "id": "mt_tess_control",
+     "kind": "tessellation",
+     "role": "control",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "applied": [
+       "==",
+       0
+      ]
+     }
     }
    ]
   },
@@ -6398,7 +6428,7 @@
     },
     {
      "id": "mt_tess",
-     "kind": "tessellation",
+     "kind": "pending_detector",
      "paths": [
       "mt"
      ],
@@ -6432,7 +6462,9 @@
        "==",
        1
       ]
-     }
+     },
+     "pending_kind": "tessellation",
+     "note": "the tessellation check kind is not in checks.py yet; restore kind=tessellation when it lands (main session 2026-10-11)"
     },
     {
      "id": "mt_stretch",

@@ -752,6 +752,51 @@ def arm_fit(ctx):
     return out
 
 
+def tessellation(ctx):
+    """Pre-rig tessellation (mt/tessellate.py, 2026-10-11): the stage's record from rig.json and the crumpling of the
+    rig on its own rig_check clip: faces whose area collapses (< 20 %) or explodes (> 5x) against the rest, edges
+    over 2x / 4x, the worst of 8 frames (dd498832: 580-triangle chibi, edges up to 31 % of the height)."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    t = rig.get("tessellation") or {}
+    out = {"applied": int(bool(t.get("applied"))), "why": t.get("why"), "faces_before": t.get("faces"),
+           "faces_after": t.get("faces_after"), "factor": t.get("factor"),
+           "edge_median_pct_H": (t.get("edge_pct_H") or {}).get("median"),
+           "edge_max_pct_H_after": (t.get("edge_pct_H_after") or {}).get("max"),
+           "original_topology": int((run / "rig" / "rigged_original.glb").is_file())}
+    try:
+        from mt import fastrig as F, limb_stabilize as LS
+        data = (run / "rig" / "rigged.glb").read_bytes()
+        js, b = F.read_glb(data)
+        src = F.Source(data)
+        r = LS.SourceRig(src, js, b)
+        P0, faces = src.positions, src.faces
+        H = float(np.ptp(P0[:, 1])) or 1.0
+        n0 = np.cross(P0[faces[:, 1]] - P0[faces[:, 0]], P0[faces[:, 2]] - P0[faces[:, 0]])
+        a0 = np.linalg.norm(n0, axis=1)
+        big = a0 > 1e-6 * H * H
+        e = np.unique(np.sort(np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]]), 1), axis=0)
+        L0 = np.linalg.norm(P0[e[:, 0]] - P0[e[:, 1]], axis=1)
+        ok = L0 > 1e-3 * H
+        anim = next((a for a in js.get("animations", []) if a.get("name") == "rig_check"), None)
+        worst = {"collapsed": 0, "edges_2x": 0, "edges_4x": 0}
+        if anim is not None:
+            tmax = max(float((js["accessors"][s["input"]].get("max") or [0])[0]) for s in anim["samplers"])
+            for tt in np.linspace(0.05, 0.95, 8) * tmax:
+                P = r.deform_to(r.frame_world(anim, float(tt)))
+                a1 = np.linalg.norm(np.cross(P[faces[:, 1]] - P[faces[:, 0]], P[faces[:, 2]] - P[faces[:, 0]]), axis=1)
+                worst["collapsed"] = max(worst["collapsed"], int((((a1 < 0.2 * a0) | (a1 > 5 * a0)) & big).sum()))
+                L1 = np.linalg.norm(P[e[:, 0]] - P[e[:, 1]], axis=1)[ok]
+                ratio, grow = L1 / L0[ok], L1 - L0[ok]
+                worst["edges_2x"] = max(worst["edges_2x"], int(((ratio > 2) & (grow > 0.002 * H)).sum()))
+                worst["edges_4x"] = max(worst["edges_4x"], int(((ratio > 4) & (grow > 0.005 * H)).sum()))
+        out.update({f"clip_{k}_max": v for k, v in worst.items()})
+        out["faces"] = int(len(faces))
+    except Exception as exc:                                   # noqa: BLE001
+        out["clip_error"] = f"{type(exc).__name__}: {exc}"[:160]
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
 def mt_arm_clearance(ctx):
     """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
@@ -1308,6 +1353,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return autotex_upload_refs(ctx, inp, a["name"])
     if k == "arm_fit":
         return arm_fit(ctx)
+    if k == "tessellation":
+        return tessellation(ctx)
     if k == "pending_detector":
         return {"pending": True}
     if k == "posed_prop_fit":
