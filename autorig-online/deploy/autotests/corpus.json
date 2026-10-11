@@ -509,6 +509,41 @@
    "what": "chibi deer, legs 12 % H, ~27 deg off the axis",
    "sha256": "0818492b113c32278cf3b5cee977d077adf7c808e4e8610ca3c5b9f806fa2d79",
    "bytes": 3670312
+  },
+  "9fa50167.model.glb": {
+   "source": "/srv/autorig/audits/neck-20261011/9fa50167.model.glb",
+   "task": "9fa50167",
+   "what": "cute cartoon rabbit (gip.fbx, 42k welded): head + ears are 58 % of the body vertices, HeadTop at 99 % H; a control that the sections neck never lands in the ears (round 2 put Neck/Head at 80/84 % H)",
+   "sha256": "feda81bf86d8ac2d4d3bcf56a22e6ab2bdf26ef54d15d3165682f6f648860d6b",
+   "bytes": 8997748
+  },
+  "3ad6feae.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e993c693f4a5ed9955a8/proj/model.glb",
+   "task": "3ad6feae",
+   "what": "chibi in a T-pose, 102 x 100 x 19, upright as uploaded",
+   "sha256": "9faf61b89ac5eabd737b28c72e6de6756178339a26f2af8ff10fdec677c6c1cc",
+   "bytes": 18639676
+  },
+  "a26f4f9a.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/949b7c96e17ec2938f8f/proj/model.glb",
+   "task": "a26f4f9a-3697-4cc2-917a-a64bb3c7ada9",
+   "what": "army girl, Z-up FBX lying flat (V3 hash-bound source, extents 99 x 32 x 197)",
+   "sha256": "bde13e255638528df2672d408cc3fc47f810e9aa08e749055fa94cf1ab5b57c4",
+   "bytes": 511312
+  },
+  "cff978e0.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3f2c6ded712a62474021/proj/model.glb",
+   "task": "cff978e0",
+   "what": "figurine on a rocky base with MUTANO lettering (545k vertices, one shell with the feet)",
+   "sha256": "e187091e3f48d30e7f6c1a83565aaaf5e340f2abd84ac96eec3175a5a3fb708f",
+   "bytes": 40148740
+  },
+  "1e079e65.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dbd5a11ffd7f78f9c63f/proj/model.glb",
+   "task": "1e079e65",
+   "what": "ferret, 13k, long body, low posture, head turned",
+   "sha256": "66ae8dc4ffff8b3cec48585e9d27d7fdab76f57aef79d587553b185d5dc9c519",
+   "bytes": 8283304
   }
  },
  "profiles": {
@@ -5405,10 +5440,6 @@
        "==",
        1
       ]
-     },
-     "xfail": {
-      "reason": "needs the quadruped up rule of mt/orient.py, not on prod yet (plain prod tree: fit_ok 0); blocked other MT deploys 11:22 UTC; flip on XPASS",
-      "owner": "Rig path · V3 (orient)"
      }
     }
    ]
@@ -5526,6 +5557,10 @@
        ">=",
        5
       ]
+     },
+     "xfail": {
+      "reason": "chibi-quadruped leg/tail fit not solved yet (bones=1 without Vision in the gate)",
+      "owner": "V3 rig path (orient/quadruped)"
      }
     },
     {
@@ -5543,7 +5578,7 @@
      },
      "xfail": {
       "reason": "fit_quadruped legs/tail on a chibi with 12 % H legs (a belly-merge leg top made the cat and the bull worse, not shipped)",
-      "owner": "Rig tools · V3 (Skinning Fable)"
+      "owner": "V3 rig path (orient/quadruped)"
      }
     }
    ]
@@ -5722,6 +5757,260 @@
     }
    ],
    "note": "v3_bound: the orientation refiner reads this model as upside down (\"two feet at the high end\": the wing tips) and would turn it; the conveyor's hash-bound V3 source is left alone, so is the case (a case for the orientator: see lying_upright). The control runs FIRST (checks share one run dir): a plain biped (the warrior) gets no extra chain. Extra chains need a second opinion (words / Vision) past the geometry: require=confirmed. Known gaps: fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."
+  },
+  {
+   "id": "rabbit_ears_control",
+   "cost": 2,
+   "defect": "control (Skinning V3 2026-10-11): an oversized head made of ears must keep the throat neck fit (Neck 47.7 / Head 50.4 % H) and its leg fit; the sections neck is bounded to 0.3 H above the shoulders and must start within 0.15 H of them",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "9fa50167.model.glb",
+     "params": {
+      "words": "cute cartoon rabbit"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "role": "control",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       60
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     },
+     "note": "51 edges over 4x before and after the neck fit; the ears-neck of round 2 gave 343"
+    },
+    {
+     "id": "mt_legs",
+     "kind": "leg_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "ankle_diff_pct_H": [
+       "<=",
+       1
+      ],
+      "knee_offset_max": [
+       "<=",
+       0.6
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "ferret_long_neck",
+   "task": "1e079e65",
+   "cost": 1,
+   "defect": "ferret (2026-10-11): the Neck / Head joints on the straight Spine2 -> nose line cut through the air of the curved neck (Head|Neck and Neck|Neck tears, rig_check 4x 414). Fix: fit_quadruped puts them on the body cross-section centre when that line is in the air",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "1e079e65.model.glb",
+     "params": {
+      "words": "ferret quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       5
+      ],
+      "rig_check_4x": [
+       "<=",
+       120
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "zup_lying_conveyor",
+   "task": "a26f4f9a-3697-4cc2-917a-a64bb3c7ada9",
+   "cost": 1,
+   "defect": "Limb Fable 2026-10-11: a Z-up FBX lying flat on the V3 conveyor; orient found +z at 0.9 but rig_first refused to turn a hash-bound source (15 limb joints outside the mesh). Fix: the upright root node is applied on hash-bound sources too, the customer bytes stay in proj/model_source.glb",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "a26f4f9a.model.glb",
+     "params": {
+      "words": "army girl",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       7
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "centring",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "outside": [
+       "<=",
+       2
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "pedestal_base",
+   "task": "cff978e0",
+   "cost": 4,
+   "tier": "extended",
+   "defect": "a display base (rock with lettering) fused with the feet went into the body: the legs were pulled through it and H inflated 1.90 vs 1.58. Fix: parts_cluster.find_base cuts a wide bottom slab that collapses to the feet (words or its own shell) as a prop on its own root bone, out of the body and H",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "cff978e0.model.glb",
+     "params": {
+      "words": "Green-skinned mutant, rocky base with MUTANO text"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "props": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_base_rigid",
+     "kind": "prop_rigidity",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "thresholds": {
+      "props_found": [
+       ">=",
+       1
+      ],
+      "rigid_fraction": [
+       ">=",
+       0.99
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "tpose_chibi_upright",
+   "task": "3ad6feae",
+   "cost": 1,
+   "defect": "regression 2026-10-11 15:24 (Rig path orient): a T-pose seen from the -z end read as 4 paws (two hands + two feet), up -z quadruped 0.9, the hash-bound source was laid on its side (outside 0 -> 176). Fix: a quadruped up is never a slab (height >= 25 % of the long side); a file already standing on two feet is turned only by the words",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3ad6feae.model.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       7
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "centring",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "outside": [
+       "<=",
+       5
+      ]
+     }
+    }
+   ]
   }
  ]
 }
