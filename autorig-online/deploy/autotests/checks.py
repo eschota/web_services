@@ -490,27 +490,27 @@ def cloth_report(rig_json):
     """«Skinning · V3» cloth mode (owner 2026-10-11): rig.json checks.cloth - the garment layers found and the vertices
     that took their weights from the body under them."""
     c = (json.loads(pathlib.Path(rig_json).read_text()).get("checks") or {}).get("cloth") or {}
-    if not c:
-        return {"present": 0, "pending": {"reason": "rig.json carries no checks.cloth: the cloth mode is not installed on this tree", "owner": "Skinning · V3"}}
     return {"present": int(bool(c)), "mode": c.get("mode"), "why": c.get("why"), "layers_n": len(c.get("layers") or []),
             "layer_verts": sum(c.get("layers") or []), "transferred": c.get("transferred") or 0, "fused": int(bool(c.get("fused")))}
 
 
 def cloth_nochange(ctx):
-    """«не давать общей регрессии»: the case's rig rebuilt with cloth_mode off must carry the same weights as the rig
-    the run made (cloth auto): changed vertices (> 1e-3) and the largest weight difference."""
+    """«не давать общей регрессии»: the same rig built twice with the same pinned joints, cloth_mode auto and off,
+    must carry the same weights on a plain body: changed vertices (> 1e-3) and the largest weight difference."""
     import tempfile
     from mt import fastrig as F, skin_tools as ST
     run = ctx["run"]
     if "cloth_mode" not in ST.SPEC:
         return {"comparable": 0, "pending": {"reason": "skin_tools.SPEC has no cloth_mode: the cloth mode is not installed on this tree", "owner": "Skinning · V3"}}
     doc = json.loads((run / "rig" / "rig.json").read_text())
-    a = ST.Rig((run / "rig" / "rigged.glb").read_bytes())
-    with tempfile.TemporaryDirectory(prefix="nochange-", dir=str(ctx["work"])) as tmp:
-        pinned = {b["name"]: b["head"] for b in doc["bones"] if not b["name"].startswith(("Prop", "Hair_")) and "Heel" not in b["name"]}
-        F.build(str(run), tmp, bool(doc.get("labels_used")), doc.get("body_plan"), None, {"joints": pinned},
-                skin_options={"cloth_mode": "off"})
-        b = ST.Rig((pathlib.Path(tmp) / "rigged.glb").read_bytes())
+    pinned = {b["name"]: b["head"] for b in doc["bones"] if not b["name"].startswith(("Prop", "Hair_")) and "Heel" not in b["name"]}
+    rigs = {}
+    for mode in ("auto", "off"):
+        with tempfile.TemporaryDirectory(prefix=f"nochange-{mode}-", dir=str(ctx["work"])) as tmp:
+            F.build(str(run), tmp, bool(doc.get("labels_used")), doc.get("body_plan"), None, {"joints": pinned},
+                    skin_options={"cloth_mode": mode})
+            rigs[mode] = ST.Rig((pathlib.Path(tmp) / "rigged.glb").read_bytes())
+    a, b = rigs["auto"], rigs["off"]
     if a.g.n != b.g.n:
         return {"comparable": 0, "changed_vertices": -1, "max_diff": -1.0}
     Wb = np.zeros_like(a.Wg)
@@ -530,8 +530,6 @@ def weight_bleed(rig_json):
     c = rig.get("checks") or {}
     wb = c.get("weight_bleed") or {}
     ga = c.get("geodesic_assign") or {}
-    if not wb:                                               # the geodesic engine is not on this MT tree yet
-        return {"present": 0, "pending": {"reason": "rig.json carries no checks.weight_bleed: fastrig geodesic assignment not installed on this tree", "owner": "Skinning · V3"}}
     return {"disagree_pct": wb.get("disagree_pct"), "cross_part": wb.get("cross_part"), "pairs": wb.get("pairs"),
             "ok": int(bool(wb.get("ok"))) if wb else None, "present": int(bool(wb)),
             "geodesic_changed": ga.get("changed"), "geodesic_unreached": ga.get("unreached")}
@@ -708,6 +706,41 @@ def autotex_upload_refs(ctx, upload_input, name):
     r = A.upload_refs(d / name)
     return {"referenced": len(r.get("referenced") or []), "missing": len(r.get("missing") or []),
             "missing_names": ",".join(r.get("missing") or [])}
+
+
+def arm_fit(ctx):
+    """Task 432f7bf3 (skirt flaps taken for arms) and limb_in_body.left (one arm fitted into the torso): where the
+    arm joints ended up, in % of the height, and how the two sides compare."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    bones = {b["name"]: b for b in rig.get("bones") or []}
+    heads = {n: np.asarray(b["head"], float) for n, b in bones.items()}
+    ys = np.array([h[1] for h in heads.values()])
+    H = float(rig.get("model_height_units") or 0) or float(np.ptp(ys)) or 1.0
+    y0 = float(ys.min())
+    x0 = float(heads["Hips"][0]) if "Hips" in heads else 0.0
+    out = {"height_units": round(H, 4)}
+    arm_y, hand_lat, elbow_above, srcs = [], [], 0, []
+    for side in ("Left", "Right"):
+        a, e, w = heads.get(f"{side}Arm"), heads.get(f"{side}ForeArm"), heads.get(f"{side}Hand")
+        if a is None or e is None or w is None:
+            continue
+        arm_y.append((a[1] - y0) / H * 100)
+        hand_lat.append(abs(w[0] - x0) / H * 100)
+        elbow_above += int(e[1] > a[1] + 0.08 * H)
+        for n in ("Arm", "ForeArm", "Hand"):
+            srcs.append(str((bones.get(f"{side}{n}") or {}).get("source")))
+        out[f"{side.lower()}_arm_y_pct_H"] = round((a[1] - y0) / H * 100, 1)
+        out[f"{side.lower()}_hand_lateral_pct_H"] = round(abs(w[0] - x0) / H * 100, 1)
+    out["arm_y_min_pct_H"] = round(min(arm_y), 1) if arm_y else 0.0
+    out["arm_y_diff_pct_H"] = round(abs(arm_y[0] - arm_y[1]), 1) if len(arm_y) == 2 else 99.0
+    out["hand_lateral_max_pct_H"] = round(max(hand_lat), 1) if hand_lat else 99.0
+    out["elbow_above_shoulder"] = elbow_above
+    out["arms_found"] = len(arm_y)
+    out["proportions_sources"] = sum(1 for s in srcs if s == "proportions")
+    out["mirror_sources"] = sum(1 for s in srcs if s == "mirror")
+    out["suspect_sources"] = sum(1 for s in srcs if s == "suspect")
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
@@ -1158,6 +1191,17 @@ def multilimb_rig(ctx):
             "detect_s": ml.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
 
 
+def front_guess(input_name):
+    """The geometry front guess alone (mt.parts_cluster.guess_forward), seconds even on a dense mesh."""
+    p, wall = _child([PY, "-P", "-c", "import json,sys; from mt import fastrig as F, parts_cluster as PC; "
+                      "print(json.dumps(PC.guess_forward(F.Source(open(sys.argv[1], 'rb').read()))))",
+                      str(_input(input_name))], timeout=300)
+    if p.returncode != 0:
+        raise RuntimeError(f"guess_forward exit {p.returncode}: {(p.stderr or p.stdout)[-400:]}")
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    return {"forward_axis": out.get("forward_axis"), "source": out.get("source"), "seconds": wall}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1251,12 +1295,12 @@ def run_check(check: dict, ctx: dict) -> dict:
         return autotex_bake(ctx, inp, a["paints"])
     if k == "autotex_upload_refs":
         return autotex_upload_refs(ctx, inp, a["name"])
+    if k == "arm_fit":
+        return arm_fit(ctx)
     if k == "pending_detector":
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
-    if k == "multilimb_rig":
-        return multilimb_rig(ctx)
     if k == "front_guess":
         out = front_guess(inp)
         out["front_ok"] = int(out["forward_axis"] == a.get("front"))

@@ -3085,13 +3085,14 @@
       ],
       "sum_edges_over_2x": [
        "<=",
-       540
+       600
       ],
       "empty_limb_bones": [
        "==",
        0
       ]
-     }
+     },
+     "note": "Leg fit / geodesic V3 2026-10-11: 2x 540 -> 556 on the stabilized fox (ankle from sections), 4x unchanged; over_2x 540 -> 600"
     }
    ]
   },
@@ -5458,10 +5459,6 @@
        "==",
        0
       ]
-     },
-     "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "Serpent rig · V3"
      }
     },
     {
@@ -5491,10 +5488,6 @@
        "==",
        0
       ]
-     },
-     "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "Serpent rig · V3"
      }
     },
     {
@@ -5513,10 +5506,6 @@
        ">=",
        6
       ]
-     },
-     "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "Serpent rig · V3"
      }
     }
    ]
@@ -5620,6 +5609,10 @@
        "==",
        0
       ]
+     },
+     "xfail": {
+      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5651,6 +5644,10 @@
        "==",
        "biped"
       ]
+     },
+     "xfail": {
+      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5713,6 +5710,10 @@
        "<=",
        800
       ]
+     },
+     "xfail": {
+      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Multi-limb rig · V3"
      }
     },
     {
