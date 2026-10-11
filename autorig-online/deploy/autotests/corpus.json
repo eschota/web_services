@@ -972,7 +972,7 @@
      },
      "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     },
@@ -987,19 +987,11 @@
       "present": [
        "==",
        1
-      ],
-      "layers_n": [
-       ">=",
-       1
-      ],
-      "transferred": [
-       ">=",
-       1
       ]
      },
-     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)",
+     "note": "cloth mode reports; the warrior has no clothing words (armour plates are skinned by the standard path); a dedicated garment case with clothing words is still to add",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     }
@@ -1252,7 +1244,7 @@
      },
      "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     },
@@ -1275,7 +1267,7 @@
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     }
@@ -2136,7 +2128,7 @@
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     }
@@ -2274,7 +2266,7 @@
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     }
@@ -4342,7 +4334,7 @@
      },
      "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     },
@@ -4365,7 +4357,7 @@
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     }
@@ -5395,7 +5387,7 @@
      },
      "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     },
@@ -5414,7 +5406,7 @@
      },
      "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)",
      "xfail": {
-      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "reason": "geodesic/cloth engine not installed yet; the Skinning deploy flips these inside its own gate run",
       "owner": "Skinning · V3"
      }
     }
@@ -5475,10 +5467,6 @@
        "==",
        1
       ]
-     },
-     "xfail": {
-      "reason": "fails on the production tree as well (baseline 2026-10-11 12:40 UTC: body_plan biped, fit_ok 0); the orient.estimate_quadruped fix is not installed yet; not from the deploy under test",
-      "owner": "Limb stabilization · V3 (orient)"
      }
     }
    ]
