@@ -530,6 +530,20 @@
    "what": "Cyborg (triage limb_in_body.left): a posed bare mesh whose LeftArm was fitted at hip height (y 0.17 H, x -0.03) with 89 757 dominant vertices while the RightArm was right",
    "sha256": "54a8bffbcee26c5b4c45eec412edd825e671f5c0b8ef86b935b810561b3a1467",
    "bytes": 4701848
+  },
+  "96b0566c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5d48e771c22ca877735d/proj/model.glb",
+   "task": "96b0566c-77b3-4fb7-9037-3895014bd813",
+   "what": "kangaroo",
+   "sha256": "c7b5a7705d6016beb4b6fdad245438c2bf548fc30dbd1510de61f9ff7cd8336f",
+   "bytes": 5587520
+  },
+  "64a7907d.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b7516a2f0eb1846286b2/proj/model.glb",
+   "task": "64a7907d",
+   "what": "armored duck soldier",
+   "sha256": "bdf3051539e6995ec71418f6929f8db4f9759e20ce37a96ff6135daa0fced6e0",
+   "bytes": 84330156
   }
  },
  "profiles": {
@@ -5918,6 +5932,88 @@
        "==",
        0
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "kangaroo_upright",
+   "task": "96b0566c-77b3-4fb7-9037-3895014bd813",
+   "cost": 1,
+   "defect": "Limb audit 2026-10-11: the upright kangaroo got the quadruped plan and its front paws were fitted on the floor; mt/creature.py upright plan: two legs, arms, head, tail",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "96b0566c.model.glb",
+     "params": {
+      "words": "kangaroo"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "upright"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     },
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "Animal clips · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "goose_bird_soldier",
+   "task": "64a7907d",
+   "cost": 1,
+   "defect": "Limb audit 2026-10-11: Vision read the armored duck soldier as a humanoid and it never reached the bird template; the bird words win, folded wings take the upright roles",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "64a7907d.model.glb",
+     "params": {
+      "words": "armored duck soldier"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     },
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "Animal clips · V3"
      }
     }
    ]
