@@ -71,9 +71,24 @@ INIT = r"""
 """
 
 RECORD = r"""
-async ({seconds, fps, clip, yaw0, sweep, pitch}) => {
+async ({seconds, fps, clip, yaw0, sweep, pitch, capture}) => {
   const api = window.autorigUnity;
   const canvas = document.getElementById('unity-canvas') || document.querySelector('canvas');
+  if (capture) {                         // the viewer's capture mode drives clip, scene, quality and the orbit itself
+    const stream = canvas.captureStream(fps);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const rec = new MediaRecorder(stream, {mimeType: mime, videoBitsPerSecond: 24000000});
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.start(250);
+    await new Promise(r => setTimeout(r, seconds * 1000));
+    rec.stop();
+    await new Promise(r => { rec.onstop = r; });
+    const buf = new Uint8Array(await new Blob(chunks, {type: mime}).arrayBuffer());
+    let s = ''; const step = 0x8000;
+    for (let i = 0; i < buf.length; i += step) s += String.fromCharCode.apply(null, buf.subarray(i, i + step));
+    return {b64: btoa(s), w: canvas.width, h: canvas.height, mime, capture: true, clip_now: (api.state || {}).clip};
+  }
   try { api.SetAutoCamera(0); } catch (e) {}
   if (clip) { try { api.PlayClip(clip); } catch (e) {} }
   await new Promise(r => setTimeout(r, 800));
@@ -167,8 +182,15 @@ def main():
         loaded = False
         # scene-gate.js (viewer load order V3): black until the presentation (voxels, erosion, bones) ends, then the
         # session's scene; window.autorigEnv.t marks presented / scene_go / unblack.
+        capture = False
         while time.time() - t0 < a.load_timeout:
+            if page.evaluate("() => !!window.autorigCaptureReady"):     # the viewer's capture=1 mode (blueprint-r3)
+                loaded = capture = True
+                break
             env_t = page.evaluate("() => (window.autorigEnv && window.autorigEnv.t) || {}")
+            if "capture=1" in a.url and time.time() - t0 < a.load_timeout * 0.8:
+                time.sleep(1.0)
+                continue
             if env_t.get("unblack") is not None or (env_t.get("scene_go") is not None
                                                     and time.time() - t0 > (env_t["scene_go"] / 1000.0) + 20):
                 loaded = True
@@ -179,16 +201,18 @@ def main():
         meta["scene"] = page.evaluate("() => (window.autorigEnv && window.autorigEnv.scene) || null")
         if not loaded:
             raise SystemExit("viewer did not reach its scene: " + json.dumps(meta)[:500])
-        try:
-            page.wait_for_load_state("networkidle", timeout=int(a.settle * 4000))
-        except Exception:  # noqa: BLE001
-            pass
-        time.sleep(a.settle)
+        if not capture:
+            try:
+                page.wait_for_load_state("networkidle", timeout=int(a.settle * 4000))
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(a.settle)
+        meta["capture_mode"] = capture
         st = page.evaluate("() => (window.autorigUnity && window.autorigUnity.state) || {}")
         clip = pick_clip(st.get("clips") or [])
         meta.update(clip=clip, clips=[c if isinstance(c, str) else c.get("name") for c in (st.get("clips") or [])][:30])
         res = page.evaluate(RECORD, {"seconds": a.seconds + 0.6, "fps": a.fps, "clip": clip, "yaw0": -40.0,
-                                     "sweep": 300.0, "pitch": 12.0})
+                                     "sweep": 300.0, "pitch": 12.0, "capture": capture})
         meta.update(canvas=[res["w"], res["h"]], mime=res["mime"], camera=res.get("cam"), layer=res.get("layer"),
                     clip_now=res.get("clip_now"))
         with open("raw.webm", "wb") as f:

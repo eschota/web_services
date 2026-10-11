@@ -77,7 +77,7 @@ FARMJOBS_DIR = os.getenv("GP_FARMJOBS_DIR", "/srv/autorig/farmjobs")
 FARM_BOXES = [b for b in os.getenv("GP_FARM_BOXES", "f7,f1,f2,f13,f15,f12").split(",") if b]   # f5: out of the fleet
 VIEWER_PAGE = os.getenv("GP_VIEWER_PAGE", "https://autorig.online/api/mt/unity/test/index.html")
 FARM_WAIT_S = int(os.getenv("GP_FARM_WAIT_S", "480"))
-CLIP_KIND_SINCE = 1791755632.0   # farm viewer previews (2026-10-12) replace every earlier VPS clip, lazily
+CLIP_KIND_SINCE = 1791758539.0   # viewer capture mode (blueprint-r3, 2026-10-12): every earlier clip is redone, lazily
 
 
 # ====================================================================================================== the render
@@ -390,7 +390,7 @@ def farm_enqueue(con, tid: str, run: str, priority: int) -> str:
     if row is not None and row["sig"] == sig and row["state"] in ("queued", "done"):
         return row["job"]
     fj = _farm_queue()
-    url = f"{VIEWER_PAGE}?run={run}&ui=0&capture=1&envgate=1"
+    url = f"{VIEWER_PAGE}?run={run}&ui=0&capture=1&secs=7&envgate=1"
     jid = fj.Queue().enqueue({"kind": "viewer_preview", "priority": priority, "bundle": "preview", "boxes": FARM_BOXES,
                               "timeout": 900, "max_attempts": 2,
                               "cmd": ["{python}", "{bundle}/viewer_capture.py", "--url", url, "--settle", "10"]})
