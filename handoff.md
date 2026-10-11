@@ -138,6 +138,14 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   Хорёк 414→66 уже починен `on_centre` Rig path. Следующий шаг: ограничить полосу расширением черепа + guard по
   пропорциям (Neck ≥ shoulder_top + 0.02 H, Head ≤ Neck + 0.12 H). Новые задачи на движке: skin-регрессий 0/7,
   квадрупед-фит ×6 → orientation-агент.
+- **Шея round 2** (`tools/patch_fastrig_neck.py`, в гейте): только большие головы (≥ 40 % вершин тела выше плеч,
+  опция `neck_head_share_min`), Neck ≥ shoulder_top + 0.02 H, Head ≤ Neck + 0.12 H, квадрупед-ханк выключен
+  (хорька чинит `on_centre` Rig path). Обычные головы (anime, warrior, dress) — 0.00 % H изменений; 7552bcff 4x 70→24.
+  Корпус: `neck_trapezius` (4x ≤ 40, 2x ≤ 1500 с пояснением). Гейт 16:12 блокировали чужие правки корпуса (deer
+  mt_rig без XFAIL, warrior mt_cloth ужесточён обратно) — координатор вернул XFAIL, перезапуск ~16:40.
+- **Новые задачи (классификация)**: b5787da2 goalkeeper — A-поза рук без скелета → Limb/стабилизация; 9fa50167
+  кролик — чиби (голова+уши 58 % вершин, Head 50 % H), ноги: лодыжка 0.43 стопы при стопе 18 % H → у меня
+  (ограничение лодыжки для стоп > 15 % H), фронт orient 0.28 review → orientation.
 - **Блокер гейта**: `demon_four_arms_wings` (Multilimb) — XFAIL до деплоя `mt/multilimb.py`.
 
 ## Autotests · V3 — регрессионные автотесты и гейт релизов (2026-10-10 16:40 UTC, на проде)
