@@ -2141,6 +2141,36 @@ This scoped development checkpoint does not overwrite the unrelated historical
   9 клипов + Source pose. Рестарт `autorig-mt-restart --wait 600` отказывал (busy: 3 run + 7 v3run подряд) — новый код
   в сервисе только после удачного рестарта (см. ActiveEnterTimestamp > 04:32 UTC); перериги шли in-process по новому коду.
 
+## Rig tools · V3 — триаж bone_outside / numeric / flips, квадрупедные клипы, руки по юбке (2026-10-11 10:00–12:30 UTC)
+
+- **Установлено (mt-deploy26, GATE PASS 141/0, 11:20 UTC; сервис перезапущен 11:59):** `bone_check.py` (допуск 1 % H:
+  касание поверхности ≠ выход; сустав вне меша втягивается к родителю — носок за блоком стопы, HeadTop_End между ушей,
+  хвост; радиус поиска растёт; кость, которой стало хуже, откатывается), `fastrig.py` (носок низкополигональной стопы
+  остаётся в блоке стопы, не 12 % H воздуха), `skin_postvalidate.py` (morph targets/weights игнорируются, не отказ),
+  `triage.py` (свежий numeric-qa.json по текущему GLB главнее backfill; калибровка 1.25 = stale, не дефект; flips
+  перепроверяются текущим anim_qa, кэш `analysis/anim_qa_recheck.json`), `animpick.quadruped_clips` + `rig_first.animate`
+  + `v3_conveyor._retarget`: квадрупед получает Idle/Walk/Trot/Gallop/Look Around/Tail Wag/Jump (до этого 15 из 15
+  квадрупедов недели — только `rig_check`), `fast_analysis.categorize`: протухшая категория `hands` перечитывается
+  (Dewback). Git MT `3af3ab2`; скрипты `tools/patch_rig_tools_triage.py`, `tools/patch_quadruped_clips.py`,
+  `tools/rerig_triage.py`.
+- **Вердикты по классам (шаг 1):** bone_outside 17 → 8 моделей (манекен ×8 пробников: noise + носок; Kirry: HeadTop_End
+  между ушей; кенгуру: передние лапы на полу — поза «стоя», план quadruped ставит лапы на землю, не чинил; Dewback: хвост и
+  задние ноги вне, категория `hands` ошибочна; rising.obj Hips 1.4 % H). qa.numeric_deformation: 4 из 9 — калибровка 1.25
+  (всё валилось), 2 — backfill старше numeric-qa, 2 — morph targets «unsupported»; остальные = реальный stretch (Skinning).
+  qa.animation_flips_spikes 3/3 — старый anim_qa (одни и те же кадры Waving1 LeftHand 26–29 на всех моделях = библиотечный
+  клип; текущий check чист). Гусь 64a7907d: Vision «armored duck soldier» → humanoid; птичьего плана у fastrig нет.
+- **Корпус:** XPASS → PASS: anime_heel/mt_bones, anime_heel/mt_fast, mannequin_tiny и mannequin_rigpath/mt_centring.
+  Перериг (`tools/rerig_triage.py`, ставится только при улучшении): манекен ×8 → 62/82 выходов → 0 (v2…v7), кенгуру v2.
+- **Руки по юбке (владелец, 432f7bf3 «Сигниферида-7») и limb_in_body.left (20 задач):** `tools/patch_arm_sheets.py` —
+  fastrig: лист (обе стороны ближе 2 % H, `surface_thickness`, выборка 80k на плотном меше) не рука, висящая рука без
+  лейблов = боковая трубка у торса (2..6 % H); проверка симметрии рук (вырожденная сторона — S ниже 0.55 H, локоть выше
+  плеча, длина < 0.6 другой — зеркалится с хорошей, источник `mirror`; обе плохие → `suspect`), rig_first трассирует
+  (pose_skeleton) также при `mirror`/`suspect`; pose_skeleton: цепь, выходящая из туловища ниже 0.6 H, не рука. Стейдж
+  28: Сигниферида — руки вдоль торса (Arm 80 % H, кисти у бёдер), киборг bdc37cc9 — симметрия, 4x 4104 → 2196, 3ad6feae
+  limb L high → none. 18526c63 — план `hands`, limb_in_body на нём шум. Кейсы `skirt_flaps_arms`, `cyborg_one_arm`
+  (extended, kind `arm_fit`, `deploy/autotests/patch_arm_fit_case.py`). Деплой: mt-deploy29 (см. лог
+  `/srv/autorig/audits/limb-stab-20261010/mt-deploy29.log`). DEV 6691–6693.
+
 ## Rig path · V3 — ориентатор (2026-10-11 03:05 UTC, MT `7c41b50`/`40b49a7`)
 
 - `mt/orient.py`: ось высоты (ось зеркала, длиннее из двух других, две стопы внизу; ~1 с на 1M вершин) и фронт
@@ -2229,3 +2259,4 @@ This scoped development checkpoint does not overwrite the unrelated historical
   (checks.py на проде перезаписан в 11:36 без них; `front_guess` я вернул). Стейдж:
   `/srv/autorig/audits/serpent-20261011/stage/{serpent.py,rig_version.py}`; после зелёного гейта —
   `tools/rerig_version.py a315580101635000b6b6`. cat_quadruped_orient/mt_orient на проде → XFAIL (код orient не установлен).
+- **12:23 UTC: установлено** (`mt-deploy` PASS, `mt/serpent.py` 10f3fca5fe1e, RIG_VERSION v3.2026-10-11.5). 3a099711 перериган (ран a3155801…, версия v2): serpent, 19 костей + Jaw, 6 клипов, numeric QA 7/7, DEV 6694. `serpent_lamprey` снова PASS на проде и в Git (9c2fd8fd).
