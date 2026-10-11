@@ -1474,6 +1474,14 @@ This scoped development checkpoint does not overwrite the unrelated historical
   Перезапущены autorig-storage и autorig-storage-telegram. Три теста (`test_v3_intake_runtime`,
   `test_v3_task_creation`, `test_telegram_generate_button`) читали живой `v3-routes.json` прода и падали после
   V3-only — изолированы (`isolate_live_routes`).
+- **Конверсия и письма (2026-10-12, Downloads · V3)**: письма «модель готова» для V3 (`v3_notify.completion_email`,
+  только вошедшие владельцы, отписка/битые адреса, одна резервация на задачу, язык владельца, снимок posters-v3);
+  ссылки писем идут через `/email/click` (лог `email_campaign_clicks`) на `/task?...utm_source=email&utm_medium=
+  task_ready|backfill`. Бэкфил 10.10 15:00–11.10: один дайджест на владельца, 24/24 отправлено (31 задача), лог
+  `/srv/autorig/data/var/funnel/backfill-20261012.jsonl`. Воронка: `static/js/funnel.js` (GA4 gtag + наш лог) —
+  landing, upload_start, task_created, download_click, paywall_view, sign_up_prompt, checkout_start, purchase;
+  `GET /api/admin/funnel?days=7` (админ). Не работает: серверные GA4 MP-события (нет `GA_API_SECRET` в env),
+  вебхук Resend (0 событий доставки за 30 дней — в кабинете Resend не подключён `/api/webhooks/resend`).
 - **«Download Rig» и опции скачивания (2026-10-11, приказ владельца; релиз `dlv3-options-20261011`, статика live)**:
   когда у V3-задачи есть риг (манифест `available`), в полосе задачи появляется большая зелёная кнопка
   `#dl3-hero` «Скачать риг» (пульс 2.6 с + блик 3.7 с + стрелка 1.9 с + рывок через случайные 2.2–7.8 с;
