@@ -509,6 +509,27 @@
    "what": "chibi deer, legs 12 % H, ~27 deg off the axis",
    "sha256": "0818492b113c32278cf3b5cee977d077adf7c808e4e8610ca3c5b9f806fa2d79",
    "bytes": 3670312
+  },
+  "ddc0b9ba.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/79327a5ed70b22087a4d/proj/model.glb",
+   "task": "ddc0b9ba-9357-4951-8390-5dd094261767",
+   "what": "flying duck (bird body plan)",
+   "sha256": "8075c7966f2aba7fc00099a90b5824b17acafd8277ecaa5db33789b3beb27d41",
+   "bytes": 695288
+  },
+  "432f7bf3.upload.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/1fa6c2006b1daf2bf962/proj/model.glb",
+   "task": "432f7bf3-d372-4e92-9a26-782028557132",
+   "what": "«Сигниферида-7»: a woman with arms hanging at her sides and a frilly skirt whose flaps stick out sideways at hip height; 603 935 vertices, no skeleton (owner 2026-10-11: the arm chains were fitted to the skirt flaps, the real arms got no bones)",
+   "sha256": "23a5eb2b9cedfe983b9d16ca3498d33ef2e2806d60b91b0914fe328bad5eb6d5",
+   "bytes": 24022024
+  },
+  "eaec2b0b.upload.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/eaec2b0b638e840bfb1f/proj/model.glb",
+   "task": "bdc37cc9-23df-4d48-81f4-af62a669b421",
+   "what": "Cyborg (triage limb_in_body.left): a posed bare mesh whose LeftArm was fitted at hip height (y 0.17 H, x -0.03) with 89 757 dominant vertices while the RightArm was right",
+   "sha256": "54a8bffbcee26c5b4c45eec412edd825e671f5c0b8ef86b935b810561b3a1467",
+   "bytes": 4701848
   }
  },
  "profiles": {
@@ -949,7 +970,11 @@
        3.0
       ]
      },
-     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     },
     {
      "id": "mt_cloth",
@@ -972,7 +997,11 @@
        1
       ]
      },
-     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)"
+     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     }
    ]
   },
@@ -1221,7 +1250,11 @@
        3.0
       ]
      },
-     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     },
     {
      "id": "mt_cloth_nochange",
@@ -1240,7 +1273,11 @@
        0
       ]
      },
-     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     }
    ]
   },
@@ -2097,7 +2134,11 @@
        0
       ]
      },
-     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     }
    ]
   },
@@ -2231,7 +2272,11 @@
        0
       ]
      },
-     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     }
    ]
   },
@@ -4295,7 +4340,11 @@
        3.0
       ]
      },
-     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     },
     {
      "id": "mt_cloth_nochange",
@@ -4314,7 +4363,11 @@
        0
       ]
      },
-     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+     "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     }
    ]
   },
@@ -5340,7 +5393,11 @@
        3.0
       ]
      },
-     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release"
+     "note": "Skinning V3 2026-10-11: geodesic assignment is the default; a cross-part weight leak above 3 % of the vertices blocks the release",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     },
     {
      "id": "mt_cloth",
@@ -5355,7 +5412,11 @@
        1
       ]
      },
-     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)"
+     "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)",
+     "xfail": {
+      "reason": "geodesic/cloth engine not installed yet (case ahead of code); flips in the Skinning deploy",
+      "owner": "Skinning · V3"
+     }
     }
    ]
   },
@@ -5535,6 +5596,10 @@
        ">=",
        5
       ]
+     },
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "V3 rig path (orient/quadruped)"
      }
     },
     {
@@ -5743,6 +5808,175 @@
     }
    ],
    "note": "v3_bound: the orientation refiner reads this model as upside down (\"two feet at the high end\": the wing tips) and would turn it; the conveyor's hash-bound V3 source is left alone, so is the case (a case for the orientator: see lying_upright). The control runs FIRST (checks share one run dir): a plain biped (the warrior) gets no extra chain. Extra chains need a second opinion (words / Vision) past the geometry: require=confirmed. Known gaps: fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."
+  },
+  {
+   "id": "bird_duck",
+   "task": "ddc0b9ba-9357-4951-8390-5dd094261767",
+   "cost": 1,
+   "defect": "owner 2026-10-11 («птица, надо с ней тоже разбираться»): a flying duck got one Root bone (body plan root) and only root moves; mt/creature.py gives birds a skeleton (neck, head, tail, wings, legs) and the bird clip set",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "ddc0b9ba.model.glb",
+     "params": {
+      "words": "bird flying duck"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "bird"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     },
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "Animal clips · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "skirt_flaps_arms",
+   "task": "432f7bf3-d372-4e92-9a26-782028557132",
+   "tier": "extended",
+   "cost": 8,
+   "defect": "owner 2026-10-11 «руки неверно вообще подобрались по какой то причине, хотя они очевидны»: the arm reach took the skirt flaps (a sheet sticking out sideways at hip height) for arms; pose_skeleton traced the flap chains off the hips as bent arms and stage_traced turned them to T",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "432f7bf3.upload.glb",
+     "params": {
+      "words": "woman standing arms at her sides frilly skirt"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       240
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_arms",
+     "kind": "arm_fit",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "thresholds": {
+      "arms_found": [
+       "==",
+       2
+      ],
+      "arm_y_min_pct_H": [
+       ">=",
+       60
+      ],
+      "arm_y_diff_pct_H": [
+       "<=",
+       8
+      ],
+      "hand_lateral_max_pct_H": [
+       "<=",
+       22
+      ],
+      "elbow_above_shoulder": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "cyborg_one_arm",
+   "task": "bdc37cc9-23df-4d48-81f4-af62a669b421",
+   "tier": "extended",
+   "cost": 5,
+   "defect": "triage limb_in_body.left (17 tasks, 2026-10-11): on a posed bare mesh fastrig fitted ONE arm into the torso (LeftArm at hip height) while the other arm was right; the degenerate side is now mirrored from the good one and the limbs are traced on the voxel solid",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "eaec2b0b.upload.glb",
+     "params": {
+      "words": "cyborg character"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       300
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_arms",
+     "kind": "arm_fit",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "thresholds": {
+      "arms_found": [
+       "==",
+       2
+      ],
+      "arm_y_min_pct_H": [
+       ">=",
+       55
+      ],
+      "arm_y_diff_pct_H": [
+       "<=",
+       10
+      ],
+      "elbow_above_shoulder": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
   }
  ]
 }
