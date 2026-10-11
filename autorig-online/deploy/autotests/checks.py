@@ -621,6 +621,44 @@ def rig_joints(ctx):
     return out
 
 
+def autotex_bake(ctx, rig_input, paints):
+    """Texturing · V3 (2026-10-11): the recorded Qwen paints baked onto the untextured rig without the farm."""
+    from mt import autotex as A
+    w = pathlib.Path(ctx["work"]) / "autotex"
+    w.mkdir(parents=True, exist_ok=True)
+    for dst, name in paints.items():
+        shutil.copyfile(_input(name), w / dst)
+    pj = json.loads((w / "paint.json").read_text())
+    data = _input(rig_input).read_bytes()
+    opts = A.check_options({"view_px": pj["view_px"]})
+    t = time.time()
+    new, rep = A.bake_glb(data, w, opts, pj["forward"], "autotest")
+    took = round(time.time() - t, 1)
+    fa, fb = A.glb_texture_facts(new), A.glb_texture_facts(data)
+    before, after = A.renders(data, pj["forward"], 256), A.renders(new, pj["forward"], 256)
+    bm = np.abs(before.astype(np.int16) - 235).max(-1) > 4
+    am = np.abs(after.astype(np.int16) - 235).max(-1) > 4
+    mats = rep.get("materials") or [{}]
+    return {"textured_before": fb["textured_materials"], "textured_after": fa["textured_materials"],
+            "images_after": fa["images"], "normals_before_broken": int(rep["normals"]["before"] == "broken"),
+            "normals_fixed": rep["normals"]["fixed_vertices"], "uv_area": (rep.get("auto_uv") or {}).get("uv_area", 0),
+            "direct_share": mats[0].get("direct_share", 0), "align_iou_min": min(v["after"] for v in
+                                                                                rep["align_iou"].values()),
+            "colour_std_gain": round(A._rel_lum_std(after / 255.0, am) - A._rel_lum_std(before / 255.0, bm), 4),
+            "seconds": took}
+
+
+def autotex_upload_refs(ctx, upload_input, name):
+    """An upload alone in its folder (as the visitor sent it): the files it names that are missing."""
+    from mt import autotex as A
+    d = pathlib.Path(ctx["work"]) / "upload_alone"
+    d.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_input(upload_input), d / name)
+    r = A.upload_refs(d / name)
+    return {"referenced": len(r.get("referenced") or []), "missing": len(r.get("missing") or []),
+            "missing_names": ",".join(r.get("missing") or [])}
+
+
 # ------------------------------------------------------------------------------------------------ MT pipeline steps
 def mt_arm_clearance(ctx):
     """«V3 triage · rig quality» (mt/arm_clearance.py, 2026-10-10): what the V3 conveyor does after the retarget - the
@@ -642,7 +680,7 @@ def mt_arm_clearance(ctx):
     return out
 
 
-def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False):
+def mt_rig_first(ctx, input_name, words="", forward_axis=""):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
     (proj/forward.json), for a model whose symmetry alone cannot tell it (the potato 583622f3: guess 0.32)."""
@@ -652,9 +690,6 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False):
     if forward_axis:                                     # as the conveyor's projections record it (rig_first then
         (run / "proj").mkdir(parents=True, exist_ok=True)   # skips its own guess)
         (run / "proj" / "manifest.json").write_text(json.dumps({"forward_axis": forward_axis, "source": "autotests"}))
-    if v3_bound:                                         # Multi-limb rig · V3: like a hash-bound V3 source, the up
-        (run / "v3").mkdir(parents=True, exist_ok=True)     # stage of rig_first leaves the model as uploaded
-        (run / "v3" / "source.json").write_text(json.dumps({"schema": "autorig.v3.session-source/1", "source": "autotests"}))
     p, wall = _child([PY, "-P", "-m", "mt.rig_first", "--dir", str(run), "--glb", str(_input(input_name)),
                       "--words", words], timeout=300)
     if p.returncode != 0:
@@ -1032,54 +1067,6 @@ def posed_prop_fit(ctx, front=""):
             "prop_grip_pct_H": round(min(grip), 2) if grip else 99.0}
 
 
-def front_guess(input_name):
-    """The geometry front guess alone (mt.parts_cluster.guess_forward), seconds even on a dense mesh."""
-    p, wall = _child([PY, "-P", "-c", "import json,sys; from mt import fastrig as F, parts_cluster as PC; "
-                      "print(json.dumps(PC.guess_forward(F.Source(open(sys.argv[1], 'rb').read()))))",
-                      str(_input(input_name))], timeout=300)
-    if p.returncode != 0:
-        raise RuntimeError(f"guess_forward exit {p.returncode}: {(p.stderr or p.stdout)[-400:]}")
-    out = json.loads(p.stdout.strip().splitlines()[-1])
-    return {"forward_axis": out.get("forward_axis"), "source": out.get("source"), "seconds": wall}
-
-
-def multilimb_rig(ctx):
-    """«Multi-limb rig · V3» (mt/multilimb.py, 2026-10-11, task 0d39aaba: four arms and wings): the limbs the trace
-    found on this case's MT run (arms, arm pairs, wings, tail), the extra chains fastrig added, their vertices, the
-    cross-chain weight (0 by construction outside the seams), the library clips' channels on the extra bones and the
-    rig_check stretch. On a plain biped (the control) every extra count is 0."""
-    from mt import fastrig as F
-    run = ctx["run"]
-    rig = json.loads((run / "rig" / "rig.json").read_text())
-    ml = rig.get("multilimb") or {}
-    counts = ml.get("counts") or {}
-    mls = (rig.get("checks") or {}).get("multilimb") or {}
-    chains = mls.get("chains") or []
-    st = {k: v for k, v in ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items() if isinstance(v, dict)}
-    names = {b["name"] for b in rig.get("bones") or []}
-    extra = sorted(n for n in names if re.fullmatch(r"(Left|Right)(Shoulder|Arm|ForeArm|Hand)\d+|(Left|Right)Wing[A-Z]?\d*|Tail\d*", n))
-    js, _ = F.read_glb((run / "rig" / "rigged.glb").read_bytes())
-    node = {i: n.get("name") for i, n in enumerate(js.get("nodes") or [])}
-    clip_extra = 0
-    for a in js.get("animations") or []:
-        if a.get("name") == "rig_check":
-            continue
-        clip_extra += sum(1 for c in a.get("channels") or [] if node.get(c["target"]["node"]) in extra)
-    return {"arms": counts.get("arms", 0), "arm_pairs": counts.get("arm_pairs", 0), "wings": counts.get("wings", 0),
-            "wing_pairs": counts.get("wing_pairs", 0), "tails": counts.get("tails", 0), "crests": counts.get("crests", 0),
-            "use": int(bool(ml.get("use"))), "extra_chains": len(chains), "extra_bones": len(extra),
-            "chains_without_vertices": sum(1 for c in chains if not c.get("vertices")),
-            "chain_vertices": int(mls.get("vertices") or 0),
-            "cross_chain_weight_after": float(mls.get("cross_chain_weight_after") or 0.0),
-            "seam_edges": int(mls.get("seam_edges") or 0), "seam_split_faces": int(mls.get("seam_split_faces") or 0),
-            "clip_channels_extra": clip_extra, "clips": len(rig.get("clips") or []),
-            "unweighted": (rig.get("checks") or {}).get("unweighted_vertices"),
-            "joints_outside": len((rig.get("checks") or {}).get("joints_outside_mesh") or []),
-            "stretch_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
-            "stretch_2x": sum(int(v.get("edges_over_2x") or 0) for v in st.values()),
-            "detect_s": ml.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
-
-
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1094,13 +1081,11 @@ def run_check(check: dict, ctx: dict) -> dict:
     elif inp:
         target = _input(inp)
     if k == "mt_rig_first":
-        return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False))
+        return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx)
     if k == "hand_rig":
         return hand_rig(ctx)
-    if k == "multilimb_rig":
-        return multilimb_rig(ctx)
     if k == "hand_detect":
         return hand_detect(ctx, inp, a.get("words", ""))
     if k == "serpent_rig":                                         # Serpent rig · V3
@@ -1163,14 +1148,14 @@ def run_check(check: dict, ctx: dict) -> dict:
         return constitution(ctx)
     if k == "rig_joints":
         return rig_joints(ctx)
+    if k == "autotex_bake":
+        return autotex_bake(ctx, inp, a["paints"])
+    if k == "autotex_upload_refs":
+        return autotex_upload_refs(ctx, inp, a["name"])
     if k == "pending_detector":
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
-    if k == "front_guess":
-        out = front_guess(inp)
-        out["front_ok"] = int(out["forward_axis"] == a.get("front"))
-        return out
     raise ValueError(f"unknown check kind {k}")
 
 

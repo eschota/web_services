@@ -481,6 +481,13 @@
    "what": "red demon: four arms (two big clawed, two small), membrane wings, an abdomen tail, antennae (upload)",
    "sha256": "62b2e93bcee05c9f3a961136de970be4c4746f4d505f235da35ca0a115c8db55",
    "bytes": 98110664
+  },
+  "25d6d398.model.glb": {
+   "source": "/srv/autorig/audits/skin-contact-20261011/25d6d398.model.glb",
+   "task": "25d6d398-10d3-449f-a1cd-139af01e54bb",
+   "what": "KJ Carter (Meshy, 1.08 M vertices): black jacket, hands hanging against the thighs; the fast rig faded hand | thigh contact edges into the hips (branch_blend sibling fade), the jacket tore from the hands to the knees",
+   "sha256": "9ced76a419c301636e6b00db1271c8256336b9c6e56b2543075290f6fbb7e3ba",
+   "bytes": 65082916
   }
  },
  "profiles": {
@@ -5305,6 +5312,59 @@
     }
    ],
    "note": "v3_bound: the orientation refiner reads this model as upside down (\"two feet at the high end\": the wing tips) and would turn it; the conveyor's hash-bound V3 source is left alone, so is the case (a case for the orientator: see lying_upright). The control: a plain biped (the warrior) gets no extra chain. Known gaps: fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."
+  },
+  {
+   "id": "jacket_hands_on_thighs",
+   "task": "25d6d398-10d3-449f-a1cd-139af01e54bb",
+   "cost": 4,
+   "tier": "extended",
+   "defect": "owner 2026-10-11 («руки прилипли к ногам»): hands resting against the thighs were taken as a sibling root fusion by branch_blend (the leg zone is the whole thigh), hand and thigh faded into the Hips together: 15 588 edges over 4x in the rig check. Fix: tools/patch_fastrig_sib_kind.py (siblings must be limbs of one kind) + tools/patch_fastrig_proxy_normals.py (the dense-mesh proxy never welds two facing surfaces): 2 124.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "25d6d398.model.glb",
+     "params": {
+      "words": "male character black jacket"
+     },
+     "thresholds": {
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       3000
+      ],
+      "sum_edges_over_2x": [
+       "<=",
+       15000
+      ],
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     },
+     "note": "before the fix 15 588 / 32 757; after 2 124 / 12 607 (1.08 M vertices on a 205 k proxy)"
+    }
+   ]
   }
  ]
 }
