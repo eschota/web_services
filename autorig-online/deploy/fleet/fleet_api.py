@@ -1005,6 +1005,8 @@ def compose(col: Collector) -> Dict[str, Any]:
                 "deployed_at": node_record.get("deployed_at"),
                 "deploy_protocol": (build or {}).get("deploy_protocol"),
             }
+            v3["v3_only_bool"] = bool(node_record.get("v3_only"))
+            v3["unity_export_bool"] = bool(node_record.get("unity", True))
             prep = _v3_prep(bid)
             if prep:
                 v3["prep"] = prep
@@ -1026,6 +1028,9 @@ def compose(col: Collector) -> Dict[str, Any]:
             if v3["artifact_matches_rollout"] is False:
                 reasons.append("deployed artifact differs from this node's rollout report")
             v3["blocked_by"] = reasons
+            v3["dispatchable_for_v3_bool"] = bool(v3["ready"])
+            if v3["v3_only_bool"]:
+                v3["note"] = "V3 only: normalize / rig / export; never legacy only_rig or Unity package export"
         else:
             v3 = {"target_bool": False, "ready": None,
                   "note": "not a converter target of the V3 cutover (render/LLM box)"}
