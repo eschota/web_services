@@ -458,10 +458,24 @@ def tools_rev() -> str:
     return backfill.tools_rev(backfill.REPAIR_TOOLS)
 
 
+def gate_running() -> bool:
+    """A release gate / autotests run (mt-deploy, gate, nightly): the census never competes with it."""
+    for d in pathlib.Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            cmd = (d / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if b"/autotests/" in cmd and (b"checks.py" in cmd or b"autotests.py" in cmd or b"gate" in cmd):
+            return True
+    return False
+
+
 def busy() -> list:
     sys.path.insert(0, str(MT_ROOT))
     from mt import backfill
-    return backfill.live_busy()
+    return backfill.live_busy() or (["autotests"] if gate_running() else [])
 
 
 def mem_ok() -> bool:
