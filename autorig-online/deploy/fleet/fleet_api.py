@@ -114,8 +114,8 @@ BOXES: List[Dict[str, Any]] = [
     {"id": "worker-4090", "hosts": ["win-giv14mf4pfc"], "render": "worker-4090", "ai": "worker-4090-ai",
      "lora": "worker-4090", "gpu_hint": "RTX 4090", "work_drives": ["C:", "R:"],
      "note": "the owner's own PC: his GPU first; never start, stop or reboot without his go-ahead"},
-    {"id": "f5", "hosts": ["f5-pc"], "render": "f5", "lora": "f5", "gpu_hint": "RTX 3070 Ti",
-     "work_drives": ["C:", "D:"],
+    {"id": "f5", "hosts": ["f5-pc"], "render": "f5", "lora": "f5", "converter": "f5", "endpoint": "converter-f5.",
+     "gpu_hint": "RTX 3070 Ti", "v3_target": True, "work_drives": ["C:", "D:"],
      "note": "back in the fleet by the owner's order 2026-10-11 («на нём мы разрабатывали V3, так что просто верни "
              "его во флот … все возможности флота»); out of it 2026-10-08 → 2026-10-11"},
 ]
@@ -972,6 +972,12 @@ def compose(col: Collector) -> Dict[str, Any]:
             deploy_commit = str((build or {}).get("deploy_commit") or "").lower()
             boot_build = str((status or {}).get("boot_build_id") or "").lower()
             commit_ok = bool(target_commit and deploy_commit == target_commit and boot_build == target_commit)
+            # A node may run a newer commit than the accepted one (a superset, rolled out and canaried by its
+            # own agent): its rollout record in v3_target.json, with a canary result, is its acceptance.
+            record_commit = str(node_record.get("commit") or "").lower()
+            if (not commit_ok and record_commit and node_record.get("canary")
+                    and deploy_commit == record_commit and boot_build == record_commit):
+                commit_ok = True
             v3 = {
                 "target_bool": True,
                 "target_commit": target_commit,
