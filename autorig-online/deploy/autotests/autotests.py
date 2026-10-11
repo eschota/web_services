@@ -579,6 +579,18 @@ def main() -> int:
     c.add_argument("--post-dev", action="store_true")
     c.add_argument("--caption")
     args = ap.parse_args()
+    if args.cmd in ("gate", "mt-deploy"):
+        # Customer Tasks First (2026-10-11): parallel gates from several agents drove the VPS load to ~47 and starved
+        # customer runs. One gate at a time; the others wait here (AUTORIG_GATE_PARALLEL=1 skips the lock).
+        if os.environ.get("AUTORIG_GATE_PARALLEL") != "1":
+            import fcntl
+            lock = open("/run/lock/autorig-gate.lock", "w")
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print("gate: another gate/mt-deploy is running; waiting for it (one at a time)", flush=True)
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            args._gate_lock = lock
     return {"sync": cmd_sync, "gate": cmd_gate, "mt-deploy": cmd_mt_deploy, "artifact": cmd_artifact,
             "card": cmd_card}[args.cmd](args)
 
