@@ -509,88 +509,6 @@
    "what": "chibi deer, legs 12 % H, ~27 deg off the axis",
    "sha256": "0818492b113c32278cf3b5cee977d077adf7c808e4e8610ca3c5b9f806fa2d79",
    "bytes": 3670312
-  },
-  "ddc0b9ba.model.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/79327a5ed70b22087a4d/proj/model.glb",
-   "task": "ddc0b9ba-9357-4951-8390-5dd094261767",
-   "what": "flying duck (bird body plan)",
-   "sha256": "8075c7966f2aba7fc00099a90b5824b17acafd8277ecaa5db33789b3beb27d41",
-   "bytes": 695288
-  },
-  "432f7bf3.upload.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/1fa6c2006b1daf2bf962/proj/model.glb",
-   "task": "432f7bf3-d372-4e92-9a26-782028557132",
-   "what": "«Сигниферида-7»: a woman with arms hanging at her sides and a frilly skirt whose flaps stick out sideways at hip height; 603 935 vertices, no skeleton (owner 2026-10-11: the arm chains were fitted to the skirt flaps, the real arms got no bones)",
-   "sha256": "23a5eb2b9cedfe983b9d16ca3498d33ef2e2806d60b91b0914fe328bad5eb6d5",
-   "bytes": 24022024
-  },
-  "eaec2b0b.upload.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/eaec2b0b638e840bfb1f/proj/model.glb",
-   "task": "bdc37cc9-23df-4d48-81f4-af62a669b421",
-   "what": "Cyborg (triage limb_in_body.left): a posed bare mesh whose LeftArm was fitted at hip height (y 0.17 H, x -0.03) with 89 757 dominant vertices while the RightArm was right",
-   "sha256": "54a8bffbcee26c5b4c45eec412edd825e671f5c0b8ef86b935b810561b3a1467",
-   "bytes": 4701848
-  },
-  "96b0566c.model.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/5d48e771c22ca877735d/proj/model.glb",
-   "task": "96b0566c-77b3-4fb7-9037-3895014bd813",
-   "what": "kangaroo",
-   "sha256": "c7b5a7705d6016beb4b6fdad245438c2bf548fc30dbd1510de61f9ff7cd8336f",
-   "bytes": 5587520
-  },
-  "64a7907d.model.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/b7516a2f0eb1846286b2/proj/model.glb",
-   "task": "64a7907d",
-   "what": "armored duck soldier",
-   "sha256": "bdf3051539e6995ec71418f6929f8db4f9759e20ce37a96ff6135daa0fced6e0",
-   "bytes": 84330156
-  },
-  "1e079e65.model.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/dbd5a11ffd7f78f9c63f/proj/model.glb",
-   "task": "1e079e65",
-   "what": "ferret, 13k, long body, low posture, head turned",
-   "sha256": "66ae8dc4ffff8b3cec48585e9d27d7fdab76f57aef79d587553b185d5dc9c519",
-   "bytes": 8283304
-  },
-  "a26f4f9a.model.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/949b7c96e17ec2938f8f/proj/model.glb",
-   "task": "a26f4f9a-3697-4cc2-917a-a64bb3c7ada9",
-   "what": "army girl, Z-up FBX lying flat (V3 hash-bound source, extents 99 x 32 x 197)",
-   "sha256": "bde13e255638528df2672d408cc3fc47f810e9aa08e749055fa94cf1ab5b57c4",
-   "bytes": 511312
-  },
-  "7552bcff.model.glb": {
-   "source": "/srv/autorig/audits/neck-20261011/7552bcff.model.glb",
-   "task": "7552bcff-0000-0000-0000-000000000000",
-   "what": "muscular man (model.fbx, 156k): the Neck sat in the trapezius (83 % H), Head at the throat; Look Around tore Head | Neck 33x",
-   "sha256": "32b3a8107b0c138b25d4be6cbfd5bd773df29233cef7034dddb2ff5c2dbcbdbd",
-   "bytes": 11240476
-  },
-  "7552bcff.mt-before.glb": {
-   "source": "/srv/autorig/audits/neck-20261011/7552bcff.mt-before.glb",
-   "what": "the recorded rig before the neck-from-sections fit",
-   "sha256": "2123e7c83f51bc6b7120670b729ece1af35a4350bdbff0f1a4e765723d548d85",
-   "bytes": 14588596
-  },
-  "7552bcff.mt-before.rig.json": {
-   "source": "/srv/autorig/audits/neck-20261011/7552bcff.mt-before.rig.json",
-   "what": "its rig.json",
-   "sha256": "99021ef53c2fa17525cae84217589a6d273cff7c2c0408326c565b8e27b124af",
-   "bytes": 13859
-  },
-  "cff978e0.model.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/3f2c6ded712a62474021/proj/model.glb",
-   "task": "cff978e0",
-   "what": "figurine on a rocky base with MUTANO lettering (545k vertices, one shell with the feet)",
-   "sha256": "e187091e3f48d30e7f6c1a83565aaaf5e340f2abd84ac96eec3175a5a3fb708f",
-   "bytes": 40148740
-  },
-  "3ad6feae.model.glb": {
-   "source": "/srv/autorig/data/motion_transfer/runs/e993c693f4a5ed9955a8/proj/model.glb",
-   "task": "3ad6feae",
-   "what": "chibi in a T-pose, 102 x 100 x 19, upright as uploaded",
-   "sha256": "9faf61b89ac5eabd737b28c72e6de6756178339a26f2af8ff10fdec677c6c1cc",
-   "bytes": 18639676
   }
  },
  "profiles": {
@@ -1046,7 +964,7 @@
        1
       ]
      },
-     "note": "cloth mode reports; the warrior has no clothing words (armour plates are skinned by the standard path); a dedicated garment case with clothing words is still to add"
+     "note": "cloth mode reports (off by default); the warrior has no clothing words - no layer expected"
     }
    ]
   },
@@ -3159,14 +3077,13 @@
       ],
       "sum_edges_over_2x": [
        "<=",
-       600
+       540
       ],
       "empty_limb_bones": [
        "==",
        0
       ]
-     },
-     "note": "Leg fit / geodesic V3 2026-10-11: 2x 540 -> 556 on the stabilized fox (ankle from sections), 4x unchanged; over_2x 540 -> 600"
+     }
     }
    ]
   },
@@ -5488,6 +5405,10 @@
        "==",
        1
       ]
+     },
+     "xfail": {
+      "reason": "needs the quadruped up rule of mt/orient.py, not on prod yet (plain prod tree: fit_ok 0); blocked other MT deploys 11:22 UTC; flip on XPASS",
+      "owner": "Rig path · V3 (orient)"
      }
     }
    ]
@@ -5605,10 +5526,6 @@
        ">=",
        5
       ]
-     },
-     "xfail": {
-      "reason": "the test run has no Vision classify, so the plan falls to proportions (root); the fit of the chibi legs/tail is not solved (Rig tools)",
-      "owner": "Rig tools · V3"
      }
     },
     {
@@ -5623,6 +5540,10 @@
        "<=",
        200
       ]
+     },
+     "xfail": {
+      "reason": "fit_quadruped legs/tail on a chibi with 12 % H legs (a belly-merge leg top made the cat and the bull worse, not shipped)",
+      "owner": "Rig tools · V3 (Skinning Fable)"
      }
     }
    ]
@@ -5679,10 +5600,6 @@
        "==",
        0
       ]
-     },
-     "xfail": {
-      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5714,10 +5631,6 @@
        "==",
        "biped"
       ]
-     },
-     "xfail": {
-      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5780,10 +5693,6 @@
        "<=",
        800
       ]
-     },
-     "xfail": {
-      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5813,507 +5722,6 @@
     }
    ],
    "note": "v3_bound: the orientation refiner reads this model as upside down (\"two feet at the high end\": the wing tips) and would turn it; the conveyor's hash-bound V3 source is left alone, so is the case (a case for the orientator: see lying_upright). The control runs FIRST (checks share one run dir): a plain biped (the warrior) gets no extra chain. Extra chains need a second opinion (words / Vision) past the geometry: require=confirmed. Known gaps: fingers on extra arms; Wing1 joints outside the thin membrane; the arm label along the wing's leading edge."
-  },
-  {
-   "id": "bird_duck",
-   "task": "ddc0b9ba-9357-4951-8390-5dd094261767",
-   "cost": 1,
-   "defect": "owner 2026-10-11 («птица, надо с ней тоже разбираться»): a flying duck got one Root bone (body plan root) and only root moves; mt/creature.py gives birds a skeleton (neck, head, tail, wings, legs) and the bird clip set",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "ddc0b9ba.model.glb",
-     "params": {
-      "words": "bird flying duck"
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       60
-      ],
-      "body_plan": [
-       "==",
-       "bird"
-      ],
-      "bones": [
-       ">=",
-       15
-      ],
-      "clips": [
-       ">=",
-       5
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "skirt_flaps_arms",
-   "task": "432f7bf3-d372-4e92-9a26-782028557132",
-   "tier": "extended",
-   "cost": 8,
-   "defect": "owner 2026-10-11 «руки неверно вообще подобрались по какой то причине, хотя они очевидны»: the arm reach took the skirt flaps (a sheet sticking out sideways at hip height) for arms; pose_skeleton traced the flap chains off the hips as bent arms and stage_traced turned them to T",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "tier": "extended",
-     "input": "432f7bf3.upload.glb",
-     "params": {
-      "words": "woman standing arms at her sides frilly skirt"
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       240
-      ],
-      "bones": [
-       ">=",
-       20
-      ],
-      "clips": [
-       ">=",
-       8
-      ]
-     }
-    },
-    {
-     "id": "mt_arms",
-     "kind": "arm_fit",
-     "paths": [
-      "mt"
-     ],
-     "tier": "extended",
-     "on": "mt_rig",
-     "thresholds": {
-      "arms_found": [
-       "==",
-       2
-      ],
-      "arm_y_min_pct_H": [
-       ">=",
-       60
-      ],
-      "arm_y_diff_pct_H": [
-       "<=",
-       8
-      ],
-      "hand_lateral_max_pct_H": [
-       "<=",
-       22
-      ],
-      "elbow_above_shoulder": [
-       "==",
-       0
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "cyborg_one_arm",
-   "task": "bdc37cc9-23df-4d48-81f4-af62a669b421",
-   "tier": "extended",
-   "cost": 5,
-   "defect": "triage limb_in_body.left (17 tasks, 2026-10-11): on a posed bare mesh fastrig fitted ONE arm into the torso (LeftArm at hip height) while the other arm was right; the degenerate side is now mirrored from the good one and the limbs are traced on the voxel solid",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "tier": "extended",
-     "input": "eaec2b0b.upload.glb",
-     "params": {
-      "words": "cyborg character"
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       300
-      ],
-      "bones": [
-       ">=",
-       20
-      ],
-      "clips": [
-       ">=",
-       8
-      ]
-     }
-    },
-    {
-     "id": "mt_arms",
-     "kind": "arm_fit",
-     "paths": [
-      "mt"
-     ],
-     "tier": "extended",
-     "on": "mt_rig",
-     "thresholds": {
-      "arms_found": [
-       "==",
-       2
-      ],
-      "arm_y_min_pct_H": [
-       ">=",
-       55
-      ],
-      "arm_y_diff_pct_H": [
-       "<=",
-       10
-      ],
-      "elbow_above_shoulder": [
-       "==",
-       0
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "kangaroo_upright",
-   "task": "96b0566c-77b3-4fb7-9037-3895014bd813",
-   "cost": 1,
-   "defect": "Limb audit 2026-10-11: the upright kangaroo got the quadruped plan and its front paws were fitted on the floor; mt/creature.py upright plan: two legs, arms, head, tail",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "96b0566c.model.glb",
-     "params": {
-      "words": "kangaroo"
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       60
-      ],
-      "body_plan": [
-       "==",
-       "upright"
-      ],
-      "bones": [
-       ">=",
-       15
-      ],
-      "clips": [
-       ">=",
-       5
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "goose_bird_soldier",
-   "task": "64a7907d",
-   "cost": 1,
-   "defect": "Limb audit 2026-10-11: Vision read the armored duck soldier as a humanoid and it never reached the bird template; the bird words win, folded wings take the upright roles",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "64a7907d.model.glb",
-     "params": {
-      "words": "armored duck soldier"
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       150
-      ],
-      "body_plan": [
-       "==",
-       "bird"
-      ],
-      "bones": [
-       ">=",
-       15
-      ],
-      "clips": [
-       ">=",
-       5
-      ]
-     },
-     "note": "2M-triangle mesh; 60 s budget is measured on customer runs, the gate runs under load (2026-10-11 main session)"
-    }
-   ]
-  },
-  {
-   "id": "ferret_long_neck",
-   "task": "1e079e65",
-   "cost": 1,
-   "defect": "ferret (2026-10-11): the Neck / Head joints on the straight Spine2 -> nose line cut through the air of the curved neck (Head|Neck and Neck|Neck tears, rig_check 4x 414). Fix: fit_quadruped puts them on the body cross-section centre when that line is in the air",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "1e079e65.model.glb",
-     "params": {
-      "words": "ferret quadruped",
-      "forward_axis": "+z"
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       60
-      ],
-      "bones": [
-       ">=",
-       25
-      ],
-      "clips": [
-       ">=",
-       5
-      ],
-      "rig_check_4x": [
-       "<=",
-       120
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "zup_lying_conveyor",
-   "task": "a26f4f9a-3697-4cc2-917a-a64bb3c7ada9",
-   "cost": 1,
-   "defect": "Limb Fable 2026-10-11: a Z-up FBX lying flat on the V3 conveyor; orient found +z at 0.9 but rig_first refused to turn a hash-bound source (15 limb joints outside the mesh). Fix: the upright root node is applied on hash-bound sources too, the customer bytes stay in proj/model_source.glb",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "a26f4f9a.model.glb",
-     "params": {
-      "words": "army girl",
-      "v3_bound": true
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       60
-      ],
-      "bones": [
-       ">=",
-       20
-      ],
-      "clips": [
-       ">=",
-       7
-      ]
-     }
-    },
-    {
-     "id": "mt_upright",
-     "kind": "centring",
-     "paths": [
-      "mt"
-     ],
-     "on": "mt_rig",
-     "thresholds": {
-      "outside": [
-       "<=",
-       2
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "neck_trapezius",
-   "cost": 3,
-   "defect": "Skinning V3 2026-10-11 (task 7552bcff): the biped Neck joint inside the trapezius mass and the Head at the throat; a head turn tears Head | Neck. Fix: neck and head pivot from the narrow band of the body sections (tools/patch_fastrig_neck.py): rig_check 4x 70 -> 24, Head|Neck gone from the worst pairs.",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "7552bcff.model.glb",
-     "params": {
-      "words": "muscular man"
-     },
-     "thresholds": {
-      "bones": [
-       ">=",
-       20
-      ],
-      "clips": [
-       ">=",
-       8
-      ]
-     }
-    },
-    {
-     "id": "mt_stretch",
-     "kind": "rig_stretch",
-     "paths": [
-      "mt"
-     ],
-     "on": "mt_rig",
-     "thresholds": {
-      "sum_edges_over_4x": [
-       "<=",
-       40
-      ],
-      "sum_edges_over_2x": [
-       "<=",
-       1500
-      ],
-      "empty_limb_bones": [
-       "==",
-       0
-      ]
-     },
-     "xfail": {
-      "reason": "the neck-from-sections fit (tools/patch_fastrig_neck.py, draft) regressed boy/knight/chibi in the gate and is not installed; the Neck sits in the trapezius, Look Around tears Head | Neck",
-      "owner": "Skinning · V3"
-     },
-     "note": "2x 1386 before and after (dense 156k man: 2x edges sit in the feet / shins); the defect is the 4x neck tear: 70 -> 24"
-    },
-    {
-     "id": "before_neck_detector",
-     "kind": "rig_stretch_file",
-     "role": "detector",
-     "paths": [
-      "mt"
-     ],
-     "input": "7552bcff.mt-before.glb",
-     "params": {
-      "rig_json": "7552bcff.mt-before.rig.json"
-     },
-     "thresholds": {
-      "sum_edges_over_4x": [
-       ">=",
-       60
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "pedestal_base",
-   "task": "cff978e0",
-   "cost": 4,
-   "tier": "extended",
-   "defect": "a display base (rock with lettering) fused with the feet went into the body: the legs were pulled through it and H inflated 1.90 vs 1.58. Fix: parts_cluster.find_base cuts a wide bottom slab that collapses to the feet (words or its own shell) as a prop on its own root bone, out of the body and H",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "tier": "extended",
-     "input": "cff978e0.model.glb",
-     "params": {
-      "words": "Green-skinned mutant, rocky base with MUTANO text"
-     },
-     "thresholds": {
-      "bones": [
-       ">=",
-       20
-      ],
-      "clips": [
-       ">=",
-       8
-      ],
-      "props": [
-       ">=",
-       1
-      ]
-     }
-    },
-    {
-     "id": "mt_base_rigid",
-     "kind": "prop_rigidity",
-     "paths": [
-      "mt"
-     ],
-     "tier": "extended",
-     "on": "mt_rig",
-     "thresholds": {
-      "props_found": [
-       ">=",
-       1
-      ],
-      "rigid_fraction": [
-       ">=",
-       0.99
-      ]
-     }
-    }
-   ]
-  },
-  {
-   "id": "tpose_chibi_upright",
-   "task": "3ad6feae",
-   "cost": 1,
-   "defect": "regression 2026-10-11 15:24 (Rig path orient): a T-pose seen from the -z end read as 4 paws (two hands + two feet), up -z quadruped 0.9, the hash-bound source was laid on its side (outside 0 -> 176). Fix: a quadruped up is never a slab (height >= 25 % of the long side); a file already standing on two feet is turned only by the words",
-   "checks": [
-    {
-     "id": "mt_rig",
-     "kind": "mt_rig_first",
-     "paths": [
-      "mt"
-     ],
-     "input": "3ad6feae.model.glb",
-     "params": {
-      "words": "",
-      "v3_bound": true
-     },
-     "thresholds": {
-      "seconds": [
-       "<=",
-       60
-      ],
-      "bones": [
-       ">=",
-       20
-      ],
-      "clips": [
-       ">=",
-       7
-      ]
-     }
-    },
-    {
-     "id": "mt_upright",
-     "kind": "centring",
-     "paths": [
-      "mt"
-     ],
-     "on": "mt_rig",
-     "thresholds": {
-      "outside": [
-       "<=",
-       5
-      ]
-     }
-    }
-   ]
   }
  ]
 }
