@@ -649,9 +649,9 @@ def mt_rig_first(ctx, input_name, words="", forward_axis=""):
     run = pathlib.Path(ctx["work"]) / "run"
     shutil.rmtree(run, ignore_errors=True)
     run.mkdir(parents=True)
-    if forward_axis:
-        (run / "proj").mkdir(parents=True, exist_ok=True)
-        (run / "proj" / "forward.json").write_text(json.dumps({"forward_axis": forward_axis, "source": "autotests"}))
+    if forward_axis:                                     # as the conveyor's projections record it (rig_first then
+        (run / "proj").mkdir(parents=True, exist_ok=True)   # skips its own guess)
+        (run / "proj" / "manifest.json").write_text(json.dumps({"forward_axis": forward_axis, "source": "autotests"}))
     p, wall = _child([PY, "-P", "-m", "mt.rig_first", "--dir", str(run), "--glb", str(_input(input_name)),
                       "--words", words], timeout=300)
     if p.returncode != 0:
