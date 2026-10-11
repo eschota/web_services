@@ -6,6 +6,7 @@ XFAILs. This tool is the only way to change it: under one lock it reads the CURR
 you name (by id), keeps a timestamped backup, and refuses to drop cases.
 
   sudo corpus_edit.py upsert <case.json>          # add or replace one whole case (its "id")
+  sudo corpus_edit.py input <inputs.json>         # add or replace corpus inputs ({name: {source, task, ...}})
   sudo corpus_edit.py xfail <case_id> <check_id> --reason R --owner O
   sudo corpus_edit.py unxfail <case_id> <check_id>
   sudo corpus_edit.py set <case_id> <check_id> <threshold_key> '<json value>'
@@ -47,6 +48,7 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     u = sub.add_parser("upsert"); u.add_argument("file")
+    inp = sub.add_parser("input"); inp.add_argument("file")
     x = sub.add_parser("xfail"); x.add_argument("case"); x.add_argument("check")
     x.add_argument("--reason", required=True); x.add_argument("--owner", required=True)
     ux = sub.add_parser("unxfail"); ux.add_argument("case"); ux.add_argument("check")
@@ -62,6 +64,7 @@ def main():
         d = json.loads(CORPUS.read_text())
         cs = cases_of(d)
         before = {c.get("id") for c in cs}
+        inputs_before = set((d.get("inputs") or {}) if isinstance(d, dict) else ())
         if a.cmd == "upsert":
             new = json.loads(pathlib.Path(a.file).read_text())
             idx = next((i for i, c in enumerate(cs) if c.get("id") == new.get("id")), None)
@@ -69,6 +72,8 @@ def main():
                 cs.append(new)
             else:
                 cs[idx] = new
+        elif a.cmd == "input":
+            d.setdefault("inputs", {}).update(json.loads(pathlib.Path(a.file).read_text()))
         elif a.cmd == "xfail":
             check_of(find(cs, a.case), a.check)["xfail"] = {"reason": a.reason, "owner": a.owner}
         elif a.cmd == "unxfail":
@@ -77,12 +82,15 @@ def main():
             check_of(find(cs, a.case), a.check).setdefault("thresholds", {})[a.key] = json.loads(a.value)
         if not before <= {c.get("id") for c in cs}:
             raise SystemExit("refused: cases would be dropped")
+        if isinstance(d, dict) and not inputs_before <= set(d.get("inputs") or {}):
+            raise SystemExit("refused: inputs would be dropped")
         HIST.mkdir(exist_ok=True)
         shutil.copy2(CORPUS, HIST / f"corpus.{dt.datetime.utcnow():%Y%m%dT%H%M%S}.json")
         tmp = CORPUS.with_suffix(".tmp")
         tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1))
         os.replace(tmp, CORPUS)
-        print(f"ok: {a.cmd} {getattr(a, 'case', '')} ({len(cs)} cases)")
+        print(f"ok: {a.cmd} {getattr(a, 'case', '')} ({len(cs)} cases)"
+              + (" - run `autotests.py sync --write-manifest` for new inputs" if a.cmd == "input" else ""))
 
 
 if __name__ == "__main__":
