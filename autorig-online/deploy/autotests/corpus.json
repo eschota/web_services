@@ -5608,10 +5608,6 @@
        "==",
        0
       ]
-     },
-     "xfail": {
-      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5643,10 +5639,6 @@
        "==",
        "biped"
       ]
-     },
-     "xfail": {
-      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Multi-limb rig · V3"
      }
     },
     {
@@ -5709,10 +5701,6 @@
        "<=",
        800
       ]
-     },
-     "xfail": {
-      "reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Multi-limb rig · V3"
      }
     },
     {

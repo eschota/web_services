@@ -131,20 +131,19 @@ _old = next((c for c in doc["cases"] if c["id"] == "demon_four_arms_wings"), Non
 if _old != _new_case:                                            # upsert: the case as this script defines it
     doc["cases"] = [c for c in doc["cases"] if c["id"] != "demon_four_arms_wings"] + [_new_case]
     changed = True
-# warrior_sword_posed/mt_pose_fit: asserts Limb stabilization's stage_traced, which is NOT installed on production
-# (its own handoff: the gate was blocked by other cases). AGENTS.md: an unfixed defect enters as XFAIL, never as a
-# blocking FAIL. Flip it back to pass when that stage lands (XPASS shows it).
-for c in doc["cases"]:
-    if c["id"] == "warrior_sword_posed":
-        for ch in c["checks"]:
-            if ch["id"] == "mt_pose_fit" and "xfail" not in ch:
-                ch["xfail"] = {"reason": "Limb stabilization's stage_traced (mesh-only arm turn) is in Git but not installed "
-                                         "on production MT: arm_proportions 4, prop grip 20.7 % H on the live code "
-                                         "(gate 20261011T032201Z). Flip to pass when it lands (XPASS)",
-                               "owner": "Limb stabilization · V3"}
-                changed = True
+# XFAIL mode (argv[2] == "xfail"): the case is installed before its code (mt/multilimb.py not yet deployed), so its
+# checks are marked XFAIL; the deploy that installs the code re-runs this script without the flag (the rule: a case
+# never enters as a blocking FAIL before its code).
+if len(sys.argv) > 2 and sys.argv[2] == "xfail":
+    for c in doc["cases"]:
+        if c["id"] == "demon_four_arms_wings":
+            for ch in c["checks"]:
+                if ch["id"] in ("mt_rig", "mt_multilimb", "mt_multilimb_control"):
+                    ch["xfail"] = {"reason": "mt/multilimb.py is not deployed yet (its gate run is pending); flips to pass "
+                                             "in the deploy that installs it", "owner": "Multi-limb rig · V3"}
+    changed = True
 if changed:
     p.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
-    print("corpus.json: updated (demon case, warrior mt_pose_fit xfail)")
+    print("corpus.json: updated (demon case)")
 else:
     print("corpus.json: nothing to change")
