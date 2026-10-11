@@ -43,7 +43,7 @@ class TaskHeadTest(unittest.TestCase):
         self.assertNotIn("AutoRig task 7833", out["title"])
         self.assertLessEqual(len(out["title"]), ss.TITLE_MAX)
         head = out["head_html"]
-        self.assertEqual(meta(head, "og:image"), f"https://autorig.online/og/task/{TID}.jpg?v=6ac985cd.2")
+        self.assertEqual(meta(head, "og:image"), f"https://autorig.online/og/task/{TID}.jpg?v=6ac985cd.3")
         self.assertEqual(meta(head, "og:image:width"), "1200")
         self.assertEqual(meta(head, "og:image:height"), "630")
         self.assertEqual(meta(head, "twitter:card"), "summary_large_image")
@@ -66,6 +66,24 @@ class TaskHeadTest(unittest.TestCase):
         self.assertNotIn("❌", out["title"] + out["head_html"])
         self.assertEqual(meta(out["head_html"], "og:image"), "https://autorig.online/og/site.jpg")
         self.assertNotIn("ld+json", out["head_html"])
+
+    def test_untitled_v3_task_gets_its_own_card_and_vision_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "d3ef5ccb8a344ef81a14" / "analysis"
+            run.mkdir(parents=True)
+            (run / "category.json").write_text(json.dumps({"category": "hands", "what": "low-poly human hand"}))
+            old, ss.MT_RUNS_DIR = ss.MT_RUNS_DIR, Path(tmp)
+            try:
+                t = task(status="needs_review", poster_llm_title=None, poster_llm_description=None,
+                         poster_llm_keywords=None, video_ready=False,
+                         ready_urls=["https://autorig.online/api/mt/files/d3ef5ccb8a344ef81a14/rig/rigged.glb"])
+                out = ss.task_head(t, hidden=False, has_video=False, has_poster=True, poster_sig="abc")
+            finally:
+                ss.MT_RUNS_DIR = old
+        self.assertFalse(out["indexable"])
+        self.assertEqual(meta(out["head_html"], "og:title"), "Low-poly human hand")
+        self.assertIn(f"/og/task/{TID}.jpg?v=abc", meta(out["head_html"], "og:image"))
+        self.assertNotIn("3D model task", out["title"])
 
     def test_processing_and_needs_review_are_noindex(self):
         for status in ("processing", "created", "needs_review"):

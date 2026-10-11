@@ -148,6 +148,46 @@ def poster_signature(task_id: str) -> Optional[str]:
     return f"{int(st.st_mtime):x}" if st.st_size > 8000 else None
 
 
+MT_RUNS_DIR = Path(os.getenv("AUTORIG_MT_RUNS_DIR", "/srv/autorig/data/motion_transfer/runs"))
+_MT_RUN_RE = re.compile(r"/api/mt/files/([0-9a-f]{12,40})/")
+CATEGORY_NAMES = {"hands": "Hand", "adult_human": "Human character", "humanoid": "Humanoid character",
+                  "quadruped": "Four-legged animal", "bird": "Bird", "fish": "Fish", "insect": "Insect",
+                  "snake": "Snake", "vehicle": "Vehicle", "weapon": "Weapon", "prop": "Prop"}
+
+
+def _v3_run_id(task: Any) -> Optional[str]:
+    urls = [str(getattr(task, "viewer_prepared_glb_url", None) or "")]
+    for attr in ("ready_urls", "output_urls"):
+        try:
+            urls += [str(u) for u in (getattr(task, attr, None) or [])]
+        except TypeError:
+            pass
+    for url in urls:
+        m = _MT_RUN_RE.search(url)
+        if m:
+            return m.group(1)
+    return None
+
+
+def task_label(task: Any) -> Optional[str]:
+    """A human name for the task: LLM title, else the V3 run's Vision label, else its category."""
+    title = _strip_status_marks(str(getattr(task, "poster_llm_title", None) or "").strip())
+    if len(title) > 2:
+        return title
+    run = _v3_run_id(task)
+    if not run:
+        return None
+    try:
+        doc = json.loads((MT_RUNS_DIR / run / "analysis" / "category.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    what = re.sub(r"\s+", " ", str(doc.get("what") or "")).strip(" .")
+    if 2 < len(what) <= 80 and re.fullmatch(r"[A-Za-z0-9 ,'()/&+-]+", what):
+        return what[0].upper() + what[1:]
+    category = str(doc.get("category") or "").strip().lower()
+    return CATEGORY_NAMES.get(category) or (category.replace("_", " ").capitalize() if category and category != "other" else None)
+
+
 def task_card_url(task_id: str, signature: Optional[str]) -> str:
     return f"{BASE_URL}/og/task/{task_id}.jpg?v={signature or 'c'}.{TASK_CARD_VERSION}"
 
@@ -166,30 +206,27 @@ def task_head(task: Any, *, hidden: bool, has_video: bool, has_poster: bool,
     status = str(getattr(task, "status", "") or "")
     keywords: List[str] = []
     long_desc = ""
+    label = None if hidden else task_label(task)
     if hidden:
         name = "AutoRig task"
         description = GENERIC_DESCRIPTION
-    elif status == "done":
-        name = "Rigged 3D model"
-        description = "3D model rigged with a skeleton and animations on AutoRig. Download GLB, FBX and engine packages."
-        try:
-            from seo_gallery import enrich_seo_metadata
+    else:
+        # Every public task has its own name: the LLM title, else the V3 Vision label («Low-poly human
+        # hand»), else the category. The generic wording is only for a task nothing is known about.
+        name = label or ("Rigging a 3D model" if status in ("created", "processing", "queued") else "Rigged 3D model")
+        description = (f"{label} — rigged on AutoRig: skeleton, skinning and animations, open it in the 3D viewer."
+                       if label else GENERIC_DESCRIPTION)
+        if status == "done":
+            try:
+                from seo_gallery import enrich_seo_metadata
 
-            seo_title, seo_desc, seo_keywords, _semantic = enrich_seo_metadata(task)
-            if (getattr(task, "poster_llm_title", None) or "").strip():
-                name = _strip_status_marks(seo_title) or name
-            if (getattr(task, "poster_llm_description", None) or "").strip():
-                long_desc = seo_desc
-                description = seo_desc
-            keywords = list(seo_keywords or [])
-        except Exception as exc:  # noqa: BLE001
-            print(f"[seo] enrich_seo_metadata failed for {task_id}: {type(exc).__name__}: {exc}")
-    elif status in ("created", "processing", "queued"):
-        name = "Rigging a 3D model"
-        description = GENERIC_DESCRIPTION
-    else:  # error, needs_review, cancelled, …: a neutral page, never «Rigging Failed»
-        name = "3D model task"
-        description = GENERIC_DESCRIPTION
+                _t, seo_desc, seo_keywords, _semantic = enrich_seo_metadata(task)
+                if (getattr(task, "poster_llm_description", None) or "").strip():
+                    long_desc = seo_desc
+                    description = seo_desc
+                keywords = list(seo_keywords or [])
+            except Exception as exc:  # noqa: BLE001
+                print(f"[seo] enrich_seo_metadata failed for {task_id}: {type(exc).__name__}: {exc}")
 
     meta_description = _clip_words(description, 170)
     if indexable:
@@ -202,13 +239,15 @@ def task_head(task: Any, *, hidden: bool, has_video: bool, has_poster: bool,
         robots = HIDDEN_ROBOTS if hidden else NOINDEX_ROBOTS
     og_title = _clip_words(name, 90)
 
-    show_media = not hidden and status == "done" and getattr(task, "is_public", True) is not False
+    # The preview picture is independent of indexing: every public SFW task shows its own V3 render,
+    # whatever its status (done, re-rigging, needs_review). Only a hidden (18+) or private task does not.
+    show_media = not hidden and getattr(task, "is_public", True) is not False
     if show_media and (has_poster or poster_sig):
         image, image_w, image_h, image_alt = task_card_url(task_id, poster_sig), OG_W, OG_H, f"{og_title} — rigged 3D model"
     else:
         image, image_w, image_h, image_alt = site_card_url(), OG_W, OG_H, SITE_CARD_ALT
     thumb = f"{base_url}/thumb/{task_id}" + (f"?v={poster_sig}" if poster_sig else "")
-    video = f"{base_url}/api/video/{task_id}" if (show_media and has_video) else None
+    video = f"{base_url}/api/video/{task_id}" if (show_media and has_video and status == "done") else None
 
     lines: List[str] = [f'<meta name="description" content="{esc(meta_description)}">']
     if keywords and indexable:
@@ -567,7 +606,7 @@ def _wrap_lines(draw, text: str, font, width: int, max_lines: int) -> List[str]:
     return lines[:max_lines]
 
 
-TASK_CARD_VERSION = "2"  # part of the cached card's file name: bump when the layout changes
+TASK_CARD_VERSION = "3"  # part of the cached card's file name: bump when the layout changes
 
 
 def compose_task_card(source: bytes, logo_path: Optional[Path] = None, title: Optional[str] = None) -> bytes:
@@ -800,8 +839,7 @@ def install(app: Any, *, get_db: Callable, resolve_poster_url_for_task: Callable
                 site = await _site_card_file(db)
                 return _jpeg(site, 600) if site else Response(status_code=404)
             try:
-                data = await asyncio.to_thread(compose_task_card, source, logo_path,
-                                               getattr(task, "poster_llm_title", None))
+                data = await asyncio.to_thread(compose_task_card, source, logo_path, task_label(task))
             except Exception as exc:  # noqa: BLE001 - a broken poster falls back to the site card
                 print(f"[seo] task card failed for {task_id}: {type(exc).__name__}: {exc}")
                 site = await _site_card_file(db)
