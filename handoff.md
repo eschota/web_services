@@ -151,6 +151,16 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
   `rabbit_ears_control` PASS). Кейс `neck_trapezius` кто-то стёр перезаписью корпуса между 16:19 и 16:35 —
   добавлен заново без XFAIL (движок стоит). **Корпус переписывают целиком несколько агентов** — любые правки только
   якорно/по id, иначе кейсы и пороги пропадают (см. также warrior mt_cloth).
+- **Колено/лодыжка — дефолт движка** (`tools/patch_skin_knee_default.py`: `influence` knee/ankle 1.3; измерено:
+  naruko rig_check 4x 488→12, boy 2x 436→304, knight 109→73, Алина без изменений) + класс триажа `knee_blend`
+  (`tools/patch_triage_knee_blend.py`: ≥ 1/3 худших рёбер rig_check на швах Leg|Leg/Leg|UpLeg/Foot|Leg при 4x ≥ 50;
+  ремонт `reskin refine {blend_width: {knee: 1.5, ankle: 1.0}, influence: {knee: 0.8}}`). Ремонты поставлены:
+  0da4bb16 v2 (clip_4x 446→112), кролик 9fa50167 v3 (128→84). Гейт 19:03 заблокирован чужим кейсом
+  `lowpoly_chibi/mt_tess` (kind `tessellation` не в checks.py → ERROR, XFAIL не спасает) — ждёт владельца.
+- **IronMan 59e51a5a** (248 оболочек): рвётся только шов наплечник|шлем (589 рёбер >4x, `Arm 1.00 | Neck/Head`),
+  `contact_split` не режет limb|head — следующий ханк у меня; «суставы вне меша» — артефакт открытых оболочек; QA
+  валит клипы по «одно ребро > 30x» — для китбаша слишком строго (QA-калибровка).
+- **Правило корпуса**: только `sudo /srv/autorig/autotests/corpus_edit.py upsert|xfail|unxfail|set|history`.
 - **Блокер гейта**: `demon_four_arms_wings` (Multilimb) — XFAIL до деплоя `mt/multilimb.py`.
 
 ## Autotests · V3 — регрессионные автотесты и гейт релизов (2026-10-10 16:40 UTC, на проде)
