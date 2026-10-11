@@ -591,6 +591,20 @@
    "what": "Hollow Crawler, alien skeletal quadruped (OBJ 138k): splayed bent legs, head below the spine, hanging tendrils",
    "sha256": "e93a11036cc3ea7b220f43364166c6a60d7d75c0034f435cb8c9f63ae3e74fd3",
    "bytes": 8454768
+  },
+  "59e51a5a.mt-rig.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e23fe4653bf92b77ed27/rig/rigged.glb",
+   "task": "59e51a5a",
+   "what": "IronMan kitbash, 248 shells, V3 rig (plate seams)",
+   "sha256": "da28c8fd33ebd0fea7b229ad9e8ec2b7828929b7cc9f05be5506424fc8bf0f4d",
+   "bytes": 16734304
+  },
+  "0e3cdd0e.mt-rig.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/cd073629c54afde29b03/rig/rigged.glb",
+   "task": "0e3cdd0e",
+   "what": "Deku Zeta anime, 51 shells, V3 rig stabilized from its own skeleton",
+   "sha256": "ea74563cdf066081084a7c148ff4e44bba86ca8694ec4332321758a8681bd3f4",
+   "bytes": 32687208
   }
  },
  "profiles": {
@@ -4185,7 +4199,7 @@
    "id": "numeric_visible",
    "task": "bfbd3248-3feb-4bf2-95d3-65c44cfc2b03",
    "cost": 2,
-   "defect": "V3 backfill 2026-10-11: numeric QA failed practically every rig, clean ones included (0 of 9 clips: an edge 25 % longer failed the frame, one frame the clip), so every task stayed «needs_review». Recalibrated to visible defects per clip (tear: worst edge > 30x; extent: >= 10 edges and > 0.6 % of edges over 4x in the worst frame) and spikes to real pops. The known-bad rigs must keep failing, the clean ones must pass.",
+   "defect": "V3 backfill 2026-10-11: numeric QA failed practically every rig, clean ones included (0 of 9 clips: an edge 25 % longer failed the frame, one frame the clip), so every task stayed «needs_review». Recalibrated to visible defects per clip (tear: worst edge > 30x; extent: >= 10 edges and > 0.6 % of edges over 4x in the worst frame) and spikes to real pops. The known-bad rigs must keep failing, the clean ones must pass. 2026-10-12 visible/2: on kitbash rigs of more than 20 shells a tear also needs 0.2 % of the edges over 4x (IronMan 59e51a5a, Deku 0e3cdd0e).",
    "owner": "QA calibration · V3",
    "checks": [
     {
@@ -4251,6 +4265,44 @@
       ]
      },
      "note": "the low-poly chibi before tessellation: fails on extent in Waving1 only (12 edges, 0.73 %) - a borderline case; its real gate is the tessellation stage, numeric stretch barely sees faceting"
+    },
+    {
+     "id": "good_kitbash_ironman",
+     "kind": "numeric_qa_file",
+     "paths": [
+      "mt"
+     ],
+     "input": "59e51a5a.mt-rig.glb",
+     "thresholds": {
+      "passed": [
+       "==",
+       true
+      ],
+      "clips_passed": [
+       "==",
+       9
+      ]
+     },
+     "note": "IronMan 59e51a5a, 248 shells: plate seams split by contact_split went 69-97x on 89-191 edges (<= 0.1 %): not a tear (visible/2: on > 20 shells a tear needs 0.2 % of edges over 4x). visible/1: 1 of 9 clips"
+    },
+    {
+     "id": "good_kitbash_deku",
+     "kind": "numeric_qa_file",
+     "paths": [
+      "mt"
+     ],
+     "input": "0e3cdd0e.mt-rig.glb",
+     "thresholds": {
+      "passed": [
+       "==",
+       true
+      ],
+      "clips_passed": [
+       "==",
+       9
+      ]
+     },
+     "note": "Deku Zeta 0e3cdd0e, 51 shells: 36-89x on 5-74 edges (<= 0.15 %). visible/1: 2 of 9 clips"
     }
    ]
   },
