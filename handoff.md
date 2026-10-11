@@ -2058,3 +2058,17 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - **Владелец**: фонового перерига НЕТ никогда — бэкфилл только проверяет и сортирует (`MT_BACKFILL_REPAIR` off).
 - **Постер/OG**: `/thumb/<task>` → `/srv/autorig/data/static/posters-v3/<task>.jpg` (seo_social уже читает его и
   `poster_signature` по mtime; менять там нечего).
+
+## Rig path · V3 — меч до рига, фронт по геометрии (2026-10-11 02:30 UTC, MT `59431d1`, autotests `d50a12ab`)
+
+- 66ba97ba: шаблонный скелет Tripo (T-поза, повёрнут на 90°, кисти в 13 % H от меша) задавал фронт +z (верно +x) и
+  кормил limb_stabilize. Теперь `parts_cluster.guess_forward` и `limb_stabilize.analyse` отбрасывают скелет вне меша.
+- Пропы режутся ДО любого рига: `rig_first.build` (pre-pass по словам/геометрии, затем на меше `fastrig.model_glb`
+  с костями первой подгонки), `full.py` rig_phase. Остальные пересборки (judge, reskin, apply_fixes) берут тот же
+  `objects.npz`. RIG_VERSION → `v3.2026-10-11.2` (re-rig on open). Перериг 66ba97ba стоит в очереди rerig_open.
+- `mt/pose_skeleton.py`: согнутые руки по воксельному телу (`rig/pose_joints.json`, опция `pose_trace` off|auto|on,
+  по умолчанию off): скелет верный, но библиотечные клипы растягивают согнутый локоть (numeric QA 1/9 на
+  66ba97ba.prepared). Нужна mesh-only стабилизация в T/A — для Limb stabilization · V3 (попытка через
+  `LS.stage(glb=traced rigged.glb)` рвёт торс: веса fastrig текут в туловище). Кейс `warrior_sword_posed/mt_pose_fit` — XFAIL.
+- autorig-mt не перезапущен (`autorig-mt-restart` отказал: живые V3-раны): конвейер в процессе сервиса берёт новый
+  rig_first после следующего рестарта; classic mirror, rerig_open (перезапущен) и гейт уже на новом коде.
