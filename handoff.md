@@ -2204,8 +2204,15 @@ This scoped development checkpoint does not overwrite the unrelated historical
   (pose_skeleton) также при `mirror`/`suspect`; pose_skeleton: цепь, выходящая из туловища ниже 0.6 H, не рука. Стейдж
   28: Сигниферида — руки вдоль торса (Arm 80 % H, кисти у бёдер), киборг bdc37cc9 — симметрия, 4x 4104 → 2196, 3ad6feae
   limb L high → none. 18526c63 — план `hands`, limb_in_body на нём шум. Кейсы `skirt_flaps_arms`, `cyborg_one_arm`
-  (extended, kind `arm_fit`, `deploy/autotests/patch_arm_fit_case.py`). Деплой: mt-deploy29 (см. лог
-  `/srv/autorig/audits/limb-stab-20261010/mt-deploy29.log`). DEV 6691–6693.
+  (extended, kind `arm_fit`, `deploy/autotests/patch_arm_fit_case.py`). DEV 6691–6693.
+- **Установлено 14:09 UTC (mt-deploy35, GATE PASS 157/0; сервис перезапущен 14:10):** fastrig fe3fa61bbbd5, rig_first
+  7a04aa73b24b, pose_skeleton 17b4daf9db49, bone_check d2136e1dc1df, limb_stabilize a213f427a0d3; MT Git — см. HANDOFF.md
+  MT («Rig tools · V3 — triage classes…»). По дороге (раунды 30–34 валили warrior_kitbash / warrior_sword_posed /
+  potato_blob): «юбка» только когда 200 самых боковых точек ≥ 90 % лист И ниже 0.45 H; зеркалирование не трогает
+  запиненные / constitution / labels руки; pose_skeleton отбрасывает цепь по глубине вокселей (< 1 клетки) или плечу
+  ниже 0.45 H; rig_first откатывает поворот, если суставы вне меша (fit_check), и после отката не пинит согнутые (> 25°)
+  трассированные локти; stage_traced не применяет поворот с суставом вне меша (189af0b3); bone_check двигает Hips поперёк
+  (10a6f04a). Проверка на новых задачах после 14:10 — см. отчёт.
 
 ## Rig path · V3 — ориентатор (2026-10-11 03:05 UTC, MT `7c41b50`/`40b49a7`)
 
