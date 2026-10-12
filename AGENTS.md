@@ -632,20 +632,38 @@ Owner rule, 2026-10-10:
 * `/nsfw` on autorig.online is the owner's Telegram validator; do not reuse it.
 * The geo list and the gate are measures, not a claim of legal compliance.
 
-## Astra Is Stopped (owner order, 2026-10-11)
+## Astra Runs On Claude Opus 5.5 (owner order, 2026-10-12)
 
-> останови Астра бота, он все токены сожрал, полностью, уже платить начали,
-> это не приемлемо. Останови, я пока разбираюсь как решать эту проблему
+> нужно чтобы ты оживил астру, на опус 5.5 medium … агентов сессий тоже
+> пересади на него. Проверь как будет всё работать и желательно вести учет
+> расхода токенов … лимиты 200 на одном ключе и 200 на другом
 
-* `astra-runner`, `astra-gateway` and `autorig-admin-bot` are stopped and
-  disabled. Only `astra-web` (the /dev/tools catalogue) runs.
-* **Nobody starts, enables or restarts them,** and nobody routes work to
-  Astra (`ask_astra`, triage escalations, `site_as_owner`), until the owner
-  decides how to fix the cost.
-* **The measured cause:** 27 Codex sessions on 10–11.10 took 56.1 M input
-  tokens (53.1 M cached) and 0.4 M output. Each 5-minute watch wake resumed
-  long Codex threads, so their whole context was re-read every time. The site's
-  session agents took 3.1 M input tokens on 10.10.
+It replaces the stop of 2026-10-11 («останови Астра бота, он все токены
+сожрал»). `astra-gateway`, `astra-runner` and `autorig-admin-bot` run again.
+
+* **One egress, one ledger.** Every Claude call goes through `astra-gateway`
+  (`127.0.0.1:8266/anthropic`).
+  * It alone holds the two keys (`/srv/autorig/secrets/anthropic.env`, drop-in
+    `astra-gateway.service.d/claude.conf`). Astra's shell and MT only hold
+    gateway tokens (`/etc/astra/gateway-tokens.json`, profiles `agent` and `mt`).
+  * Every model but Haiku is pinned to `claude-opus-5-5`, effort `medium`.
+  * Each answer is one line in `/var/lib/astra-gateway/claude-usage.jsonl`
+    (tokens, cache, USD, key). `curl -s 127.0.0.1:8266/claude/usage` gives
+    today, 7 days and each key's month.
+* **Budgets:** $200 per key per calendar month; the second key takes over when
+  the first is spent or refuses. Daily caps: Astra $10
+  (`ASTRA_GW_CLAUDE_AGENT_DAY_USD`), session agents $3
+  (`ASTRA_GW_CLAUDE_MT_DAY_USD`). A spent cap answers 429; Astra then falls back
+  to the farm, the session agents to the free router.
+* **Astra** runs Claude Code CLI (`/opt/astra/claude`, `ASTRA_ENGINE=claude`),
+  one resumed session per chat. Watch wakes run fresh read-only sessions every
+  120 minutes (`config.json watch_minutes`). The 2026-10-11 burn came from
+  5-minute wakes resuming long Codex threads (56 M input tokens in two days);
+  never shorten the watch interval without the owner.
+* **Session agents** (`mt/claude_llm.py`, drop-in `autorig-mt.service.d/
+  zzz-claude.conf` with the `mt` token): `mt.llm.step` tries Claude first.
+  `mt.llm.see` (the rig pipeline's Vision) stays on the free router and the farm.
+  `MT_CLAUDE=off` switches it off.
 
 ## Paid LLM APIs Are Off (owner order, 2026-10-11)
 
