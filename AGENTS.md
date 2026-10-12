@@ -686,6 +686,12 @@ It replaces the stop of 2026-10-11 («останови Астра бота, он
   (`gen3d-routing.json`, `cloud.enabled=false`), Astra (stopped), and the other projects on the same
   VPS that hold their own OpenAI keys (qwertystock bots, m_plus_trends, analytics-core).
 * **Tests:** `backend/tests/test_farm_llm_api.py`.
+* **Owner exception, 2026-10-12: the Director's chat uses the Claude API.** The owner gave the Director
+  (`/srv/autorig/data/red_film/director_chat.py`, unit `autorig-director-chat`, his own session in `/nsfw`) his
+  Claude API key (`/srv/autorig/secrets/director-claude.env`, root:autorig 640) as its default brain. The
+  brain is switchable in the bot («режиссёр мозг»: Claude Opus 5.5 / Sonnet 5.5 / Qwen 27B / Qwen 9B) and
+  in `red_film/chat/settings.json`. Token use is logged in `red_film/chat/usage.jsonl`. No other service uses
+  this key.
 
 ## V3 Concept: Astra and Session Agents
 
