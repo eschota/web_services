@@ -759,6 +759,11 @@
    "what": "a low-poly Call of Duty soldier (2 614 vertices, 4.4 units tall) with the arms pressed against the jacket: on the 1.25 % H voxel grid the arms merge with the torso and pose_skeleton found no arm (2026-10-13)",
    "sha256": "40348a140f6d1fede794547a97cf390400f36426c41291636408863f915451f0",
    "bytes": 366176
+  },
+  "9a465c98.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5be7df890c72466ab26b/proj/model.glb",
+   "task": "9a465c98",
+   "what": "low-poly alien creature: a hunched crouching alien, thick bent legs (knee 83-94 deg), long arms to the ground (the V3 run's model.glb)"
   }
  },
  "profiles": {
@@ -8067,6 +8072,125 @@
      }
     }
    ]
+  },
+  {
+   "id": "monster_alien_crouched",
+   "task": "9a465c98",
+   "cost": 3,
+   "defect": "Rig classes agent 2026-10-13 (bone_outside): a hunched crouching alien with bent knees; the hands fully outside, LeftLeg 7 % H deep, LeftShoulder / RightShoulder crossed (pinned by the joint judge); numeric QA worst stretch 160-225. The monster branch (mt/monster.py) types the legs crouched / digitigrade, pins the traced arms and legs as the rest pose and keeps the crouch under the clips (bind_relative): fit ok, rig_check 4x 44, but the library clips still tear the chest / shoulders (numeric QA 0-1 of 8, worst 40-70): the arms root deep at the spine of a hunched trunk and the Shoulder bones lever the chest; a monster gait of its own is the way out",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "9a465c98.model.glb",
+     "params": {
+      "words": "low-poly alien creature",
+      "body": "biped",
+      "forward_axis": "+z",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ]
+     }
+    },
+    {
+     "id": "mt_monster",
+     "kind": "monster_rig",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "thresholds": {
+      "use": [
+       "==",
+       1
+      ],
+      "leg_type": [
+       "==",
+       "digitigrade"
+      ],
+      "policy": [
+       "==",
+       "bind_relative"
+      ],
+      "pinned": [
+       ">=",
+       10
+      ],
+      "arms_traced": [
+       "==",
+       2
+      ],
+      "knee_bend_min": [
+       ">=",
+       60
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "fit_ok": [
+       "==",
+       1
+      ],
+      "joints_outside": [
+       "<=",
+       1
+      ],
+      "stretch_4x": [
+       "<=",
+       200
+      ]
+     }
+    },
+    {
+     "id": "mt_qa",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "mt_rig",
+     "params": {
+      "clips": [
+       "Idle",
+       "Walking"
+      ],
+      "cap": 2000
+     },
+     "thresholds": {
+      "clips_passed": [
+       ">=",
+       2
+      ]
+     },
+     "xfail": {
+      "reason": "the library clips tear the chest / shoulders of the hunched alien (worst stretch 40-70, local 2026-10-13: 0-1 of 8 clips); the arm chains root at the spine of a tilted trunk; needs a monster gait of its own or shoulder joints off the spine",
+      "owner": "Fable · monsters/animals"
+     }
+    }
+   ],
+   "note": "extended tier (34 MB model). leg_type digitigrade: the right leg's hock sits 22.7 % H above the toe (the left reads crouched); the aggregate prefers digitigrade."
   }
  ]
 }
