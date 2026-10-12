@@ -745,6 +745,20 @@
    "what": "stylized low-poly ram, mirror-symmetric (V3 run ead7192c)",
    "sha256": "483342a017c657249cfbbd1b2f3f7377da810a27e00ee6334329ab6f632a8ae6",
    "bytes": 40416
+  },
+  "f51f9463.source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5e1037b3732723fc12a5/proj/model_source.glb",
+   "task": "f51f9463-edf4-4b96-8aed-f3a7b55dc9c2",
+   "what": "low-poly human arm(s) in a black sleeve, no body (V3 run 5e1037b3, as uploaded)",
+   "sha256": "d36d1c799a849edc4e5e95e45e5fcc449fb22580a3cda745f9cc8bceac703e55",
+   "bytes": 65600
+  },
+  "87f13fa7.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0a27d3435c53e83cf05d/proj/model.glb",
+   "task": "87f13fa7",
+   "what": "a low-poly Call of Duty soldier (2 614 vertices, 4.4 units tall) with the arms pressed against the jacket: on the 1.25 % H voxel grid the arms merge with the torso and pose_skeleton found no arm (2026-10-13)",
+   "sha256": "40348a140f6d1fede794547a97cf390400f36426c41291636408863f915451f0",
+   "bytes": 366176
   }
  },
  "profiles": {
@@ -8008,6 +8022,49 @@
       ]
      },
      "note": "rig_first path 2026-10-13: hind legs 32 -> 26 samples outside (mirror_repair v2); the hock is still not a joint"
+    }
+   ]
+  },
+  {
+   "id": "limb_only_arm_sleeve",
+   "task": "f51f9463-edf4-4b96-8aed-f3a7b55dc9c2",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, arms_unbound.right on f51f9463): a model of an arm in a sleeve (Vision «Human arm in black sleeve», body «biped (limb only)») went to the full biped fit: every arm joint by proportions, the right forearm / hand unbound. The finger detector sees no finger fan on the low-poly hand. Fix: handrig.LIMB_WORDS + one elongated tube per shell group (LIMB_MIN_SLIM) route to the hands / limb branch; fastrig.body_plan reads «limb only» / «arm only» / «single arm»; Vision's «biped (limb only)» no longer overrules it",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "f51f9463.source.glb",
+     "params": {
+      "words": "Human arm in black sleeve",
+      "body": "biped (limb only)"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "hands"
+      ],
+      "bones": [
+       ">=",
+       17
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     },
+     "note": "2026-10-13 candidate: hands, 37 bones, 7 clips, rig 0.7 s (biped before)",
+     "xfail": {
+      "reason": "the limb-only routing (handrig.LIMB_WORDS) is in the Rig classes mt-deploy, not installed yet",
+      "owner": "Rig classes · V3"
+     }
     }
    ]
   }
