@@ -46,6 +46,13 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 - Агенту Animal clips (не Rig path): птицы `ddc0b9ba` (утка, bone_outside), `67fc45ef` (скелет летучей мыши,
   bone_outside + разрыв Head|RightWingLow); стоящий монстр `48db2b25` без слов Vision ригается бипедом
   (orient «две ноги»), с quadruped от Vision хвост чинится — нужен план тела для стоящих четвероногих.
+- 2026-10-12 08:20 UTC, баг владельца f7e2a3f1 «лицом в пол»: загрузка уже с ригом, читатели брали положение
+  меш-ноды вместо скиннутой позы покоя. `mt/skin_bake.py` (запекание перед up-стадией) + face-down guard в
+  `orient.estimate_up`, MT `46eddab`, RIG_VERSION v3.2026-10-12.2, кейс `bear_face_down` (вид проверки
+  `rig_upright` в checks.py). Задача перериговна как v1 (вертикальный бипед); запись analysis_db рана
+  c9c8a303 помечена disputed_self. Остаток: Neck-вес на подоле рубашки рвёт Jump/Look Around (тот же класс,
+  что Hips|Neck у bf61cf57) — следующий в цикле.
+- В работе: интерполяция весов плотных мешей с прокси (`/tmp/pc/proxy_weights.py`, песочница `/tmp/pc/census_pw`).
 - Дальше по очереди координатора: разрыв плечо|рука у плотных бипедов (b5787da2, 59e51a5a, bf61cf57), колени
   (dd756b89, f5b046ee), rig_stretch тяжести 3, bone_outside.
 

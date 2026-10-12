@@ -640,6 +640,13 @@
    "what": "cartoon monster on all fours, a spiked tail standing up behind",
    "sha256": "c9da47548af4a5960c8cfa4afaae2b23b9f2065d16ce720039ae6b791a361462",
    "bytes": 935388
+  },
+  "f7e2a3f1.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c9c8a303d63cded67ab6/proj/model.glb",
+   "task": "f7e2a3f1",
+   "what": "smish_bear_rigged.glb: an already-rigged Sketchfab bear (armature -90 deg X, scale 0.01), T-pose",
+   "sha256": "77a46257fee38787bac4cf2d954b9e3f93890dff8bbceda27c9a05b45ec16bf6",
+   "bytes": 10045196
   }
  },
  "profiles": {
@@ -6880,6 +6887,62 @@
      "xfail": {
       "reason": "without Vision words the standing monster rigs as a biped (orient: two feet); with Vision quadruped the tail trace takes rig_check 4x 501 -> 68 (census 2026-10-12)",
       "owner": "Rig path · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bear_face_down",
+   "task": "f7e2a3f1",
+   "cost": 1,
+   "defect": "owner bug 2026-10-12 «лицом в пол лежит»: an already-rigged upload is drawn by every viewer in its skinned rest pose (joint world x inverse bind; the mesh node transform is ignored, glTF 3.7.3). Our readers placed the vertices by the mesh node: a 1.1 cm copy lying face down; the up stage found no feet (ears at the head end) and kept it, Vision on those projections said quadruped, the rig and the viewer kept it lying. Fix: mt/skin_bake.py bakes the skinned rest pose before the up stage (the customer's bytes stay in model_source.glb); orient.estimate_up face-down guard (lying flat, two equal feet at one end of the long axis).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "f7e2a3f1.model.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       7
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "head_above_hips_pct_H": [
+       ">=",
+       20
+      ],
+      "hips_above_feet_pct_H": [
+       ">=",
+       15
+      ],
+      "skin_baked": [
+       "==",
+       1
+      ]
      }
     }
    ]

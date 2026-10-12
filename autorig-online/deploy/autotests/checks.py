@@ -1245,6 +1245,24 @@ def multilimb_rig(ctx):
             "detect_s": ml.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
 
 
+def rig_upright(ctx):
+    """Rig path V3 (owner bug f7e2a3f1, a pre-rigged bear lying face down): the rig stands up. Head above the hips,
+    the feet below them (by at least 20 % of the height for a biped), and the rig's height is the drawn model's height
+    (a skinned upload is drawn in its skinned rest pose, not by the mesh node)."""
+    rig = json.loads((ctx["run"] / "rig" / "rig.json").read_text())
+    H = float(rig.get("model_height_units") or 0) or 1e-9
+    heads = {b["name"]: b["head"] for b in rig.get("bones") or []}
+    out = {"body_plan": rig.get("body_plan"), "height_units": round(H, 5)}
+    if "Hips" in heads and "Head" in heads:
+        out["head_above_hips_pct_H"] = round((heads["Head"][1] - heads["Hips"][1]) / H * 100, 1)
+    feet = [heads[n][1] for n in ("LeftFoot", "RightFoot") if n in heads]
+    if feet and "Hips" in heads:
+        out["hips_above_feet_pct_H"] = round((heads["Hips"][1] - max(feet)) / H * 100, 1)
+    bake = ctx["run"] / "proj" / "skin_bake.json"
+    out["skin_baked"] = int(bool(json.loads(bake.read_text()).get("applied"))) if bake.is_file() else 0
+    return out
+
+
 def front_guess(input_name):
     """The geometry front guess alone (mt.parts_cluster.guess_forward), seconds even on a dense mesh."""
     p, wall = _child([PY, "-P", "-c", "import json,sys; from mt import fastrig as F, parts_cluster as PC; "
@@ -1359,6 +1377,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
+    if k == "rig_upright":
+        return rig_upright(ctx)
     if k == "front_guess":
         out = front_guess(inp)
         out["front_ok"] = int(out["forward_axis"] == a.get("front"))
