@@ -2753,3 +2753,26 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 - Раунд 3 деплоя (monster.py зеркало/опции + retarget `bind_relative_pose`) идёт; гейт — сам. Правило для себя: `touch`
   кандидата обходит mtime-проверку «кандидат старше прод-файла» — перед каждым деплоем diff прод-файла против базы (сделано
   для retarget.py: расхождение только мой ханк).
+
+## Monster clips: свой набор + цветной видео-MT (2026-10-12 23:35 UTC, на проде, агент «Fable · monsters/animals»)
+
+- Владелец: «монстрам свой набор клипов, два пути, выбрать по цифрам, видео предпочтительнее». Оба сделаны и поставлены:
+  * **(a) процедурный набор** `mt/monster.py` `clips()`: Monster Idle (дыхание), Prowl, crouched Walk, Attack (выпад, one-shot) —
+    дельты на запиненной позе покоя (присед остаётся, плечи Mixamo не трогают); опции `CLIP_SPEC` (`clip_set own|mixamo|both`,
+    периоды, амплитуды; per-run `monster_options.json.clip_options`, env `MONSTER_*`). `rig_first.animate`: на монстре набор
+    вместо библиотеки Mixamo (default `own`).
+  * **(b) видео-MT по цветам** `mt/colour_track.py`: боковой вид модели раскрашен по конечностям из весов рига (ближняя сторона:
+    бедро/голень/стопа/плечо/предплечье/кисть + туловище + голова, дальняя серая) → H3 держит цвета → сегментация по оттенку
+    в каждом кадре, направление = главная ось сегмента (круглый сегмент без направления пропускается, `min_elongation`),
+    дальше цикл/библиотека/apply из animal_video; запись biped-существа ключуется по рану (`creature.<run8>`), не по слову
+    вида (столкновение «creature» двух задач). Гейт качества тот же (suspect не вешается).
+- **Цифры** (numeric QA на проде): 35356012 скин v9 — 5/5 (Idle 0, Prowl 4.1, Walk 0, Attack 7.0, Video Walk 4.7; Mixamo было
+  5/8); 9a465c98 скин v5 — 5/5 (Walk 4.5, Attack 24.3, Video Walk 13.3; Mixamo было 0/8). Video Prowl у SCP — suspect (туловище 32°),
+  не привязан. Решение: (a) базовый набор всегда, (b) Video Walk добавляется, когда запись «ok»; видео путь даёт настоящую
+  походку существа и дальше должен заменять процедурные клипы по мере добавления ракурсов (3/4 вид) и клипов (prowl, attack).
+  DEV 7009 (цветное видео), 7010, 7011 (35356012 итог), 7012 (9a465c98 итог).
+- Деплои: mt-deploy PASS 20261012T224953Z (monster round 2 + retarget `bind_relative_pose`), 230610Z (набор клипов + хук),
+  232123Z (colour_track, animal_video run-key, rig_first run.name); RIG_VERSION `v3.2026-10-12.15`; MT перезапущен 23:34 UTC.
+  Кейсы: `monster_crouched_scp` и `monster_alien_crouched` — mt_qa на 4 клипах своего набора (`clips_passed >= 4`), XFAIL снят.
+- Git: MT `b9979e3`, `f9c9365`, `8dc70dd`, `e7cc220`; web `aa4dd063`. Не сделано: 3/4-вид для видео-MT, видео prowl/attack
+  (suspect / не снято), правая рука SCP (слита с коленом), грива лошади.
