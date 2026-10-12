@@ -763,7 +763,9 @@
   "9a465c98.model.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/5be7df890c72466ab26b/proj/model.glb",
    "task": "9a465c98",
-   "what": "low-poly alien creature: a hunched crouching alien, thick bent legs (knee 83-94 deg), long arms to the ground (the V3 run's model.glb)"
+   "what": "low-poly alien creature: a hunched crouching alien, thick bent legs (knee 83-94 deg), long arms to the ground (the V3 run's model.glb)",
+   "sha256": "79947d49f972f045d5c9859df30610284419b1fb3dbfc1e5c25f57b424d05cfd",
+   "bytes": 34877008
   }
  },
  "profiles": {
@@ -8065,11 +8067,7 @@
        1
       ]
      },
-     "note": "2026-10-13 candidate: hands, 37 bones, 7 clips, rig 0.7 s (biped before)",
-     "xfail": {
-      "reason": "the limb-only routing (handrig.LIMB_WORDS) is in the Rig classes mt-deploy, not installed yet",
-      "owner": "Rig classes · V3"
-     }
+     "note": "2026-10-13 candidate: hands, 37 bones, 7 clips, rig 0.7 s (biped before)"
     }
    ]
   },
