@@ -464,7 +464,7 @@ def make_clip(tid: str, glb: Path, env: str, backfill: bool, con=None) -> str:
         farm = con.execute("SELECT state FROM farm WHERE task_id=?", (tid,)).fetchone() \
             if con.execute("SELECT name FROM sqlite_master WHERE name='farm'").fetchone() else None
         if farm is None or farm["state"] != "failed":
-            res = farm_preview(con, tid, _VIEWER_URLS[tid], wait=not backfill, priority=0 if backfill else 1)
+            res = farm_preview(con, tid, _VIEWER_URLS[tid], wait=not backfill, priority=0 if backfill else 10)
             if res in ("installed", "pending"):
                 return "farm_" + res
             if res not in ("failed", "timeout", "error", "no_farm"):

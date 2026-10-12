@@ -2058,10 +2058,12 @@ V3_POSTER_DIR_TG = os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/
 
 
 def _tg_preview_wait_seconds() -> int:
+    """How long «Task completed» waits for the farm viewer video (owner 2026-10-12: «откладывай уведомление в
+    телеграм пока не готов рендер полноценный»); after it, the poster goes out and the video is edited in later."""
     try:
-        return max(0, min(600, int(os.getenv("AUTORIG_TG_DONE_PREVIEW_WAIT_SEC", "90"))))
+        return max(0, min(1800, int(os.getenv("AUTORIG_TG_DONE_PREVIEW_WAIT_SEC", "600"))))
     except ValueError:
-        return 90
+        return 600
 
 
 GALLERY_POSTER_SCRIPT = os.getenv("AUTORIG_GALLERY_POSTER_SCRIPT", "/srv/autorig/gallery-poster/gallery_poster.py")
@@ -2092,7 +2094,10 @@ def _v3_preview_files(task_id: str) -> tuple:
     video = os.path.join(V3_PREVIEW_VIDEO_DIR, f"{task_id}.mp4")
     poster = os.path.join(V3_POSTER_DIR_TG, f"{task_id}.jpg")
     ok = lambda p, n: os.path.isfile(p) and n < os.path.getsize(p) < 48 * 1024 * 1024
-    return (video if ok(video, 20000) else None), (poster if ok(poster, 8000) else None)
+    video_ok, poster_ok = ok(video, 20000), ok(poster, 8000)
+    if video_ok and poster_ok and os.path.getmtime(video) < os.path.getmtime(poster) - 1:
+        video_ok = False                     # a clip older than the current capture belongs to an older rig
+    return (video if video_ok else None), (poster if poster_ok else None)
 
 
 async def _wait_v3_preview(task_id: str, wait_seconds: int) -> tuple:
@@ -2101,9 +2106,12 @@ async def _wait_v3_preview(task_id: str, wait_seconds: int) -> tuple:
     deadline = asyncio.get_running_loop().time() + max(0, wait_seconds)
     while True:
         video, poster = _v3_preview_files(task_id)
-        if video or poster or asyncio.get_running_loop().time() >= deadline:
+        if video or asyncio.get_running_loop().time() >= deadline:
+            if not video:
+                print(f"[Telegram] V3 video not ready in {wait_seconds}s for {task_id}: poster={bool(poster)}, "
+                      "sending the poster and editing the video in later")
             return video, poster
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
 
 async def _late_v3_media(bot, chat_id: int, reply_to: int, task_id: str, caption: str, markup,
