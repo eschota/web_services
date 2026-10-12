@@ -480,7 +480,8 @@ def make_clip(tid: str, glb: Path, env: str, backfill: bool, con=None) -> str:
            "--glb", str(glb), "--out", str(clip), "--env", env or ""]
     env_vars = dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=CLIP_TIMEOUT_S, env=env_vars)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=CLIP_TIMEOUT_S, env=env_vars,
+                              preexec_fn=_child_limits)
         lines = proc.stdout.strip().splitlines()
         res = json.loads(lines[-1]) if lines else {"state": "failed"}
     except (subprocess.TimeoutExpired, ValueError, OSError):
@@ -542,6 +543,16 @@ def poster_path(task_id: str) -> Path:
     return OUT_DIR / f"{task_id}.jpg"
 
 
+CHILD_MAX_BYTES = int(float(os.getenv("GP_CHILD_MAX_MB", "1400")) * 1024 * 1024)
+
+
+def _child_limits():
+    """Children (render, clip, view copy) get an address-space cap below the unit's MemoryMax, so a heavy model ends
+    in a MemoryError of that child, never in an OOM kill of the service."""
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (CHILD_MAX_BYTES, CHILD_MAX_BYTES))
+
+
 def attempt(con, key: str, sig: str) -> int:
     """Count one more try of key@sig, committed before the work starts (survives an OOM kill)."""
     con.execute("CREATE TABLE IF NOT EXISTS attempts (key TEXT PRIMARY KEY, sig TEXT, n INTEGER, ts REAL)")
@@ -576,13 +587,17 @@ def process(con, row) -> str:
             record(con, tid, "no_source", "no viewer GLB on disk", kind=row["pipeline_kind"] or "")
         return "no_source"
     st = glb.stat()
-    if st.st_size > MAX_GLB_BYTES and not glb.name.endswith(".view.glb"):
-        # no light copy yet: make the viewer's one now (mt.view_glb --ensure -> <stem>.view.glb), then render it
+    in_run = str(glb).startswith(str(MT_ROOT / "runs") + "/")
+    if (st.st_size > MAX_GLB_BYTES and not glb.name.endswith(".view.glb") and in_run
+            and attempt(con, f"view:{tid}", f"{glb.name}:{st.st_size}") <= MAX_ATTEMPTS):
+        # no light copy yet (V3 runs only; a classic glb_cache file is just too big): make the viewer's one now
+        # (mt.view_glb --ensure -> <stem>.view.glb) under the child memory cap, then render it
         light = glb.with_name(glb.stem + ".view.glb")
         try:
             subprocess.run(["nice", "-n", os.getenv("GP_NICE", "15"), "timeout", "300", sys.executable, "-m",
                             "mt.view_glb", str(glb), "--ensure"], capture_output=True, timeout=320,
-                           env=dict(os.environ, PYTHONPATH=str(MT_ROOT), MT_VIEW_MESHOPT="off"))
+                           env=dict(os.environ, PYTHONPATH=str(MT_ROOT), MT_VIEW_MESHOPT="off"),
+                           preexec_fn=_child_limits)
         except (subprocess.TimeoutExpired, OSError):
             pass
         if light.is_file() and light.stat().st_size > 2000:
@@ -606,7 +621,8 @@ def process(con, row) -> str:
            "--glb", str(glb), "--out", str(poster_path(tid))]
     env = dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="2", OPENBLAS_NUM_THREADS="2")
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=RENDER_TIMEOUT_S, env=env)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=RENDER_TIMEOUT_S, env=env,
+                              preexec_fn=_child_limits)
         lines = proc.stdout.strip().splitlines()
         res = json.loads(lines[-1]) if lines else {"state": "failed", "reason": proc.stderr[-200:] or "no output"}
     except subprocess.TimeoutExpired:
