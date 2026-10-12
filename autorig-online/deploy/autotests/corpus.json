@@ -682,6 +682,13 @@
    "what": "cartoon cat creature standing on big flat feet joined into one slab, two pointed ears (Tripo, as uploaded)",
    "sha256": "cf5e9bb16c78df7380cbc7a713f7866a1b5596203c9affa806ab021dfc8fca8a",
    "bytes": 9907472
+  },
+  "a2ec968b.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/7935a33a09e560a7778d/proj/model.glb",
+   "task": "a2ec968b",
+   "what": "wind-up toy robot head on a round flat base, file lying on its side (base along +z)",
+   "sha256": "c3c2d0cde3d4cf366d3be5fe1f622fefad4525abe7f41f19451b88198e138d0d",
+   "bytes": 1300536
   }
  },
  "profiles": {
@@ -5763,10 +5770,6 @@
        ">=",
        5
       ]
-     },
-     "xfail": {
-      "reason": "chibi-quadruped leg/tail fit not solved yet (bones=1 without Vision in the gate)",
-      "owner": "V3 rig path (orient/quadruped)"
      }
     },
     {
@@ -7049,11 +7052,7 @@
        5
       ]
      },
-     "note": "800k vertices: fastrig quadruped took 129 s at load 23 (weights 57 s, fit 30 s, preview 19 s, weld 17 s) - the 60 s budget is open for Rig tools",
-     "xfail": {
-      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
-      "owner": "Animal clips · V3"
-     }
+     "note": "800k vertices: fastrig quadruped took 129 s at load 23 (weights 57 s, fit 30 s, preview 19 s, weld 17 s) - the 60 s budget is open for Rig tools"
     },
     {
      "id": "mt_stretch",
@@ -7203,10 +7202,46 @@
        ">=",
        15
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "robot_head_on_base",
+   "task": "a2ec968b",
+   "cost": 1,
+   "defect": "owner report 2026-10-12 (#1912): a wind-up robot head lay on its side in the preview; no body plan, «bird: 2 foot blobs» (the key rings) kept the file's +y. Fix: orient.base_guard: with no plan (or a bird the words do not name) the model stands on its biggest flat base when it is clearly the biggest (+z 0.68 of the section vs 0.07).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "a2ec968b.model.glb",
+     "params": {
+      "words": "Brown mesh robot head",
+      "v3_bound": true
      },
-     "xfail": {
-      "reason": "orient mass rule not installed yet",
-      "owner": "Rig path · V3"
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+z"
+      ]
      }
     }
    ]

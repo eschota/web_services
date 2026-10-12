@@ -1258,6 +1258,8 @@ def rig_upright(ctx):
     feet = [heads[n][1] for n in ("LeftFoot", "RightFoot") if n in heads]
     if feet and "Hips" in heads:
         out["hips_above_feet_pct_H"] = round((heads["Hips"][1] - max(feet)) / H * 100, 1)
+    oj = ctx["run"] / "proj" / "orient.json"
+    out["up"] = json.loads(oj.read_text()).get("up") if oj.is_file() else None
     bake = ctx["run"] / "proj" / "skin_bake.json"
     out["skin_baked"] = int(bool(json.loads(bake.read_text()).get("applied"))) if bake.is_file() else 0
     return out
