@@ -735,9 +735,7 @@
   "35356012.model.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/b3423278918e78d9aebd/proj/model.glb",
    "task": "35356012",
-   "what": "SCP-178-1: a crouched elongated humanoid creature, long arms to the knees, two long ear tentacles (the V3 run's model.glb, OBJ upload normalized)",
-   "sha256": "56c764108ab56393a48b6d8cfbfa3b3c6c7306c7af43107b50298747fd6ce204",
-   "bytes": 1255708
+   "what": "SCP-178-1: a crouched elongated humanoid creature, long arms to the knees, two long ear tentacles (the V3 run's model.glb, OBJ upload normalized)"
   }
  },
  "profiles": {
@@ -7843,10 +7841,6 @@
        "==",
        "aligned_reference"
       ]
-     },
-     "xfail": {
-      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Fable · monsters/animals"
      }
     },
     {
@@ -7878,10 +7872,6 @@
        "==",
        "biped"
       ]
-     },
-     "xfail": {
-      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Fable · monsters/animals"
      }
     },
     {
@@ -7932,10 +7922,6 @@
        "<=",
        900
       ]
-     },
-     "xfail": {
-      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Fable · monsters/animals"
      }
     },
     {
@@ -7957,10 +7943,6 @@
        ">=",
        2
       ]
-     },
-     "xfail": {
-      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
-      "owner": "Fable · monsters/animals"
      }
     }
    ],
