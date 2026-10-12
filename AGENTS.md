@@ -496,6 +496,28 @@ Owner rule, 2026-10-10:
     (MT_V3_CONCURRENCY=2, MT_CLASSIC_MIRROR=off, MT_AUTOTEX=off), and the
     census stopped.
 
+## Disk Retention On The VPS (owner order, 2026-10-12)
+
+> выходы рендерфин должны чиститься каждые 24 часа … медиа ботов … так же
+> должны чиститься; на сервере не должно быть копий и релизов
+
+* **Renderfin outputs and bot media live at most 24 hours.** Bot media means
+  devbot, sura_session, nsfwbot, shorts, red_film and red_autopost. An hourly
+  timer deletes media files older than 24 h.
+  * It never deletes databases, state, configs, models/LoRA, datasets or
+    secrets.
+  * This is an explicit owner exception to «customer outputs are never
+    deleted». Customer sources and rig outputs under motion_transfer, uploads
+    and the downloads are still kept.
+* **Releases and copies.** Keep only the active release and one previous one
+  for rollback; `release_sweep.py` runs on every promote and on the timer.
+  Identical GLB copies inside a run are hardlinked.
+* **Alerts:**
+  * a DEV alert when free space drops below the reserve + 20 GB;
+  * a DEV alert when new tasks are paused;
+  * a CRITICAL DEV alert when no task has been created for 3 hours or
+    `/api/task/create` fails 5 times in 10 minutes.
+
 ## Only Current-Version Rigs Are Shown (owner order, 2026-10-11)
 
 > сделай чтобы все задачи если их кто то открывает, а версия сервера не
