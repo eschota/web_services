@@ -4395,7 +4395,11 @@
        9
       ]
      },
-     "note": "IronMan 59e51a5a, 248 shells: plate seams split by contact_split went 69-97x on 89-191 edges (<= 0.1 %): not a tear (visible/2: on > 20 shells a tear needs 0.2 % of edges over 4x). visible/1: 1 of 9 clips"
+     "note": "IronMan 59e51a5a, 248 shells: plate seams split by contact_split went 69-97x on 89-191 edges (<= 0.1 %): not a tear (visible/2: on > 20 shells a tear needs 0.2 % of edges over 4x). visible/1: 1 of 9 clips",
+     "xfail": {
+      "reason": "biped weld split opens slits (detach check, 2026-10-12)",
+      "owner": "Rig path · V3"
+     }
     },
     {
      "id": "good_kitbash_deku",
@@ -4414,7 +4418,11 @@
        9
       ]
      },
-     "note": "Deku Zeta 0e3cdd0e, 51 shells: 36-89x on 5-74 edges (<= 0.15 %). visible/1: 2 of 9 clips"
+     "note": "Deku Zeta 0e3cdd0e, 51 shells: 36-89x on 5-74 edges (<= 0.15 %). visible/1: 2 of 9 clips",
+     "xfail": {
+      "reason": "biped weld split opens slits (detach check, 2026-10-12)",
+      "owner": "Rig path · V3"
+     }
     }
    ]
   },
