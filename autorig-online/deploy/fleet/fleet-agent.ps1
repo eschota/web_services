@@ -1,0 +1,393 @@
+# AutoRig fleet agent: reports this box's disks, GPU, AutoRig scheduled tasks,
+# listening ports and quarantine sizes to https://autorig.online/api/fleet/report
+# so GET https://autorig.online/api/fleet shows every box in one call
+# (owner rule 2026-10-10: fleet status is one ordinary API request).
+#
+# Read-only on the box: it deletes nothing, starts and stops nothing.
+# Key: <home>\agent.key, else the LoRA sync key of the same box.
+# Install (as an administrator):  fleet-agent.ps1 -Install -Box f1
+#   registers the scheduled task "AutoRig Fleet Agent" (SYSTEM, every 2 minutes).
+# worker-4090 (no elevation): fleet-agent.ps1 -Install -Box worker-4090 -UserTask -HomeDir <dir>
+param([switch]$Install, [switch]$UserTask, [string]$Box = '', [string]$HomeDir = '')
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$AgentVersion = 'fleet-agent/2026-10-13a'
+$Api = 'https://autorig.online/api/fleet'
+$Home_ = if ($HomeDir) { $HomeDir } else { 'C:\ProgramData\AutoRig\fleet-agent' }
+$LogFile = Join-Path $Home_ 'agent.log'
+$StateFile = Join-Path $Home_ 'state.json'
+$TaskName = 'AutoRig Fleet Agent'
+
+function Log($m) {
+    $line = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m
+    try {
+        if ((Test-Path $LogFile) -and ((Get-Item $LogFile).Length -gt 1MB)) { Move-Item -Force $LogFile ($LogFile + '.1') }
+        Add-Content -Path $LogFile -Value $line -Encoding utf8
+    } catch {}
+    Write-Output $line
+}
+
+New-Item -ItemType Directory -Force $Home_ | Out-Null
+
+if ($Install) {
+    $self = Join-Path $Home_ 'fleet-agent.ps1'
+    if ($MyInvocation.MyCommand.Path -and ($MyInvocation.MyCommand.Path -ne $self)) {
+        Copy-Item -Force $MyInvocation.MyCommand.Path $self
+    }
+    if ($Box) { Set-Content -Path (Join-Path $Home_ 'box.txt') -Value $Box -Encoding ascii }
+    $key = Join-Path $Home_ 'agent.key'
+    if ($UserTask) {
+        if (Test-Path $key) { icacls $key /inheritance:r /grant:r ($env:USERNAME + ':F') | Out-Null }
+        $vbs = Join-Path $Home_ 'fleet-agent-hidden.vbs'
+        $cmd = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""' + $self + '"" -HomeDir ""' + $Home_ + '""'
+        Set-Content -Path $vbs -Encoding ascii -Value ('CreateObject("WScript.Shell").Run "' + $cmd + '", 0, True')
+        schtasks /create /tn $TaskName /tr ('wscript.exe "' + $vbs + '"') /sc minute /mo 2 /f | Out-Null
+    } else {
+        if (Test-Path $key) { icacls $key /inheritance:r /grant:r 'SYSTEM:F' '*S-1-5-32-544:F' | Out-Null }
+        $tr = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $self + '"'
+        schtasks /create /tn $TaskName /tr $tr /sc minute /mo 2 /ru SYSTEM /rl HIGHEST /f | Out-Null
+    }
+    Log ('installed scheduled task ' + $TaskName)
+    schtasks /run /tn $TaskName | Out-Null
+    exit 0
+}
+
+try { $mutex = New-Object System.Threading.Mutex($false, 'Global\AutoRigFleetAgent') }
+catch { $mutex = New-Object System.Threading.Mutex($false, 'Local\AutoRigFleetAgent') }
+$owned = $false
+try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { Write-Output 'another run is active'; exit 0 }
+
+function FirstLine($paths) {
+    foreach ($p in $paths) {
+        if ($p -and (Test-Path -LiteralPath $p)) {
+            $v = (Get-Content -LiteralPath $p -TotalCount 1).Trim()
+            if ($v) { return $v }
+        }
+    }
+    return ''
+}
+
+try {
+    $loraHomes = @('C:\ProgramData\AutoRig\lora-sync')
+    if ($env:LOCALAPPDATA) { $loraHomes += (Join-Path $env:LOCALAPPDATA 'AutoRig\lora-sync') }
+    if (-not $Box) {
+        $Box = FirstLine (@((Join-Path $Home_ 'box.txt')) + ($loraHomes | ForEach-Object { Join-Path $_ 'box.txt' }))
+    }
+    if (-not $Box) { Log 'no box name (box.txt)'; exit 1 }
+    $Key = FirstLine (@((Join-Path $Home_ 'agent.key')) + ($loraHomes | ForEach-Object { Join-Path $_ 'sync.key' }))
+    if (-not $Key) { Log 'no agent.key'; exit 1 }
+
+    # Self-update: the next run uses the agent the site serves.
+    try {
+        $self = Join-Path $Home_ 'fleet-agent.ps1'
+        $fresh = (Invoke-WebRequest -UseBasicParsing -Uri ($Api + '/agent.ps1') -TimeoutSec 20).Content
+        if ($fresh -is [byte[]]) { $fresh = [Text.Encoding]::UTF8.GetString($fresh) }
+        if ($fresh -and $fresh.Contains('# AutoRig fleet agent') -and (Test-Path $self)) {
+            $current = [IO.File]::ReadAllText($self)
+            if ($current -ne $fresh) {
+                $tmp = $self + '.new'
+                [IO.File]::WriteAllText($tmp, $fresh, (New-Object Text.UTF8Encoding($false)))
+                Move-Item -Force $tmp $self
+                Log 'agent updated for the next run'
+            }
+        }
+    } catch { Log ('agent update check failed: ' + $_.Exception.Message) }
+
+    $state = @{}
+    if (Test-Path $StateFile) {
+        try { (Get-Content $StateFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $state[$_.Name] = $_.Value } } catch {}
+    }
+
+    $report = [ordered]@{ agent_version = $AgentVersion; host = $env:COMPUTERNAME }
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        $report.boot_utc = $os.LastBootUpTime.ToUniversalTime().ToString('s') + 'Z'
+        $report.ram_total_gb = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+        $report.ram_free_gb = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
+    } catch {}
+
+    $drives = @()
+    foreach ($d in (Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3')) {
+        if (-not $d.Size) { continue }
+        $drives += [ordered]@{ drive = $d.DeviceID; label = [string]$d.VolumeName
+            size_gb = [math]::Round($d.Size / 1GB, 1); free_gb = [math]::Round($d.FreeSpace / 1GB, 1)
+            used_percent = [math]::Round(100 * (1 - $d.FreeSpace / $d.Size), 1) }
+    }
+    $report.drives = $drives
+
+    # Physical disk temperature and health (read-only). The NVMe/SATA temperature comes from
+    # IOCTL_STORAGE_QUERY_PROPERTY (StorageDeviceTemperatureProperty), which needs no admin rights.
+    # Added after worker-4090 crashed from an overheating SSD on 2026-10-10.
+    try {
+        if (-not ('AutoRigDiskTemp' -as [type])) {
+            Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;
+public static class AutoRigDiskTemp {
+  [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern SafeFileHandle CreateFile(string n, uint a, uint s, IntPtr sa, uint cd, uint fl, IntPtr t);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool DeviceIoControl(SafeFileHandle h, uint code, byte[] inb, int inl, byte[] outb, int outl, out int ret, IntPtr ov);
+  public static int[] Query(int n) {
+    var h = CreateFile("\\\\.\\PhysicalDrive" + n, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+    if (h.IsInvalid) return null;
+    using (h) {
+      byte[] q = new byte[12]; BitConverter.GetBytes(52).CopyTo(q, 0);
+      byte[] o = new byte[512]; int r;
+      if (!DeviceIoControl(h, 0x2D1400, q, q.Length, o, o.Length, out r, IntPtr.Zero)) return null;
+      int cnt = BitConverter.ToUInt16(o, 12);
+      if (cnt < 1) return null;
+      return new int[] { BitConverter.ToInt16(o, 26), BitConverter.ToInt16(o, 10), BitConverter.ToInt16(o, 8) };
+    }
+  }
+}
+"@
+        }
+        $letters = @{}
+        foreach ($pt in (Get-Partition -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter })) {
+            $k = [string]$pt.DiskNumber
+            if (-not $letters.ContainsKey($k)) { $letters[$k] = @() }
+            $letters[$k] += ([string]$pt.DriveLetter + ':')
+        }
+        $dt = @()
+        foreach ($pd in (Get-PhysicalDisk -ErrorAction SilentlyContinue)) {
+            $num = [int]$pd.DeviceId
+            $t = $null; try { $t = [AutoRigDiskTemp]::Query($num) } catch {}
+            $dt += [ordered]@{ number = $num; name = [string]$pd.FriendlyName; media = [string]$pd.MediaType
+                health = [string]$pd.HealthStatus; operational = [string]$pd.OperationalStatus
+                temp_c = $(if ($t) { $t[0] } else { $null }); warn_c = $(if ($t) { $t[1] } else { $null })
+                critical_c = $(if ($t) { $t[2] } else { $null })
+                drives = @($letters[[string]$num]) }
+        }
+        $report.disk_health = $dt
+    } catch { Log ('disk health failed: ' + $_.Exception.Message) }
+
+    $smi = $null
+    foreach ($c in @("$env:SystemRoot\System32\nvidia-smi.exe", 'C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe')) {
+        if (Test-Path -LiteralPath $c) { $smi = $c; break }
+    }
+    if ($smi) {
+        $ErrorActionPreference = 'Continue'
+        $out = & $smi '--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu,driver_version' '--format=csv,noheader,nounits' 2>&1
+        $rc = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        $first = (@($out) | Select-Object -First 1) -as [string]
+        if ($rc -eq 0 -and $first -and $first.Contains(',')) {
+            $p = $first.Split(',') | ForEach-Object { $_.Trim() }
+            $report.gpu = [ordered]@{ name = $p[0]; vram_total_mb = [double]$p[1]; vram_used_mb = [double]$p[2]
+                vram_free_mb = [double]$p[3]; util_percent = $(try { [double]$p[4] } catch { $null })
+                temp_c = $(try { [double]$p[5] } catch { $null }); driver = $p[6]; error = '' }
+        } else {
+            $report.gpu = [ordered]@{ name = ''; error = ('nvidia_smi_exit_' + $rc) }
+        }
+    } else {
+        $report.gpu = [ordered]@{ name = ''; error = 'nvidia_smi_missing' }
+    }
+
+    $tasks = @()
+    try {
+        foreach ($t in (Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+                    $_.TaskName -match 'AutoRig|Renderfin|renderfin|ComfyUI|Comfy|LoRA|LoraTrain|SECS|Tunnel|GLB Converter' })) {
+            $i = $null
+            try { $i = Get-ScheduledTaskInfo -TaskName $t.TaskName -TaskPath $t.TaskPath -ErrorAction SilentlyContinue } catch {}
+            $tasks += [ordered]@{ name = $t.TaskName; state = [string]$t.State
+                last_run = $(if ($i -and $i.LastRunTime) { $i.LastRunTime.ToUniversalTime().ToString('s') + 'Z' } else { '' })
+                last_result = $(if ($i) { [int64]$i.LastTaskResult } else { $null }) }
+        }
+    } catch {}
+    $report.tasks = $tasks
+
+    $interesting = @(5131, 5132, 5198, 5199, 5267, 5279, 5480, 5533, 5541, 7000, 8092, 8093, 8188, 8288, 8289, 8488, 8588, 8988, 18777)
+    try {
+        $ports = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort -Unique
+        $report.listeners = @($ports | Where-Object { $interesting -contains $_ } | Sort-Object)
+    } catch { $report.listeners = @() }
+
+    $procs = [ordered]@{ blender = 0; unity = 0; llama = 0; python = 0; trainer = 0 }
+    try {
+        foreach ($p in (Get-CimInstance Win32_Process -Filter "Name='blender.exe' OR Name='Unity.exe' OR Name='llama-server.exe' OR Name='python.exe' OR Name='pythonw.exe'")) {
+            switch -Regex ($p.Name) {
+                '^blender' { $procs.blender++ }
+                '^Unity' { $procs.unity++ }
+                '^llama' { $procs.llama++ }
+                '^python' {
+                    $procs.python++
+                    $cl = [string]$p.CommandLine
+                    if ($cl -match 'train_network|sdxl_train|flux_train|train_lora|ai-toolkit|musubi|run\.py .*train|lora_train|kohya') { $procs.trainer++ }
+                }
+            }
+        }
+    } catch {}
+    $report.processes = $procs
+
+    # Blender installs (read-only). AUTORIG_BLENDER_EXE (machine env) plus the usual install roots.
+    # `blender.exe -b --version` runs only when a file's path, size or mtime changed, never on every report.
+    try {
+        $envExe = [Environment]::GetEnvironmentVariable('AUTORIG_BLENDER_EXE', 'Machine')
+        $cand = New-Object System.Collections.Generic.List[string]
+        if ($envExe) { $cand.Add($envExe) }
+        foreach ($g in @('C:\Program Files\Blender Foundation\Blender *\blender.exe', 'C:\ProgramData\AutoRig\blender-*\blender.exe')) {
+            foreach ($f in (Get-ChildItem -Path $g -ErrorAction SilentlyContinue)) { $cand.Add($f.FullName) }
+        }
+        $seen = @{}
+        $sig = @()
+        $files = @()
+        foreach ($c in $cand) {
+            $k = $c.ToLowerInvariant()
+            if ($seen.ContainsKey($k) -or -not (Test-Path -LiteralPath $c -PathType Leaf)) { continue }
+            $seen[$k] = 1
+            $fi = Get-Item -LiteralPath $c
+            $files += $fi
+            $sig += ($fi.FullName + '|' + $fi.Length + '|' + $fi.LastWriteTimeUtc.Ticks)
+        }
+        $sigText = ($sig -join ';')
+        $installs = $null
+        if ($state.ContainsKey('blender_sig') -and $state['blender_sig'] -eq $sigText -and $state.ContainsKey('blender_installs')) {
+            $installs = @($state['blender_installs'])
+        } else {
+            $installs = @()
+            foreach ($fi in $files) {
+                $ver = ''; $hash = ''
+                try {
+                    $psi = New-Object Diagnostics.ProcessStartInfo
+                    $psi.FileName = $fi.FullName; $psi.Arguments = '-b --version'
+                    $psi.RedirectStandardOutput = $true; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+                    $proc = [Diagnostics.Process]::Start($psi)
+                    $out = $proc.StandardOutput.ReadToEnd()
+                    if (-not $proc.WaitForExit(30000)) { try { $proc.Kill() } catch {} }
+                    if ($out -match 'Blender\s+(\d+\.\d+\.\d+)') { $ver = $Matches[1] }
+                    if ($out -match 'build hash:\s*(\w+)') { $hash = $Matches[1] }
+                } catch {}
+                $installs += [ordered]@{ path = $fi.FullName; version = $ver; build_hash = $hash }
+            }
+            $state['blender_sig'] = $sigText
+            $state['blender_installs'] = $installs
+        }
+        $report.blender = [ordered]@{ env_exe = [string]$envExe; installs = @($installs) }
+    } catch {}
+
+    # Quarantine folders at drive roots (_retired_*): sized at most every 6 hours.
+    $q = @()
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $lastQ = 0
+    if ($state.ContainsKey('quarantine_at')) { $lastQ = [int64]$state['quarantine_at'] }
+    if (($now - $lastQ) -gt 21600 -or -not $state.ContainsKey('quarantine')) {
+        foreach ($d in $drives) {
+            foreach ($dir in (Get-ChildItem -LiteralPath ($d.drive + '\') -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '_retired_*' })) {
+                $sum = 0
+                Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object { $sum += $_.Length }
+                $q += [ordered]@{ path = $dir.FullName; gb = [math]::Round($sum / 1GB, 2); measured_at = (Get-Date).ToUniversalTime().ToString('s') + 'Z' }
+            }
+        }
+        $state['quarantine'] = $q
+        $state['quarantine_at'] = $now
+    } else {
+        $q = @($state['quarantine'])
+    }
+    $report.quarantine = @($q | Where-Object { $_ })
+
+    try { $state | ConvertTo-Json -Depth 5 -Compress | Set-Content -Path $StateFile -Encoding utf8 } catch {}
+
+    # Farm runner sync (2026-10-13): the runner file follows /api/fleet/farm_runner.py - sha256-checked, swapped atomically,
+    # the runner restarted only between jobs (no job process under it). worker-4090 (the owner's PC) is left alone.
+    $fr = [ordered]@{ log_tail = ''; path = ''; sha256 = ''; version = ''; found_via = ''; action = ''; error = ''; pending = $false; task_state = '' }
+    if ($Box -ne 'worker-4090') {
+        try {
+            $proc = Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -and $_.CommandLine -match 'farm_runner\.py' } | Select-Object -First 1
+            $rpath = $null
+            if ($proc) {
+                $m = [regex]::Match($proc.CommandLine, '([A-Za-z]:\[^"]*?farm_runner\.py)')
+                if ($m.Success) { $rpath = $m.Groups[1].Value; $fr.found_via = 'process' }
+            }
+            $rtask = Get-ScheduledTask -TaskName 'AutoRig Farm Runner' -ErrorAction SilentlyContinue
+            if ($rtask) { $fr.task_state = [string]$rtask.State }
+            if (-not $rpath -and $rtask) {
+                foreach ($a in $rtask.Actions) {
+                    $m = [regex]::Match(([string]$a.Arguments + ' ' + [string]$a.Execute), '([A-Za-z]:\[^"]*?farm_runner\.py)')
+                    if ($m.Success) { $rpath = $m.Groups[1].Value; $fr.found_via = 'task'; break }
+                }
+            }
+            if (-not $rpath) {                                  # a relative script name, or the standard homes
+                try {
+                $cands = @()
+                if ($rtask) {
+                    foreach ($a in $rtask.Actions) {
+                        $mm = [regex]::Match([string]$a.Arguments, '([^"\s]*farm_runner\.py)')
+                        if ($mm.Success) {
+                            $p0 = $mm.Groups[1].Value
+                            if ([IO.Path]::IsPathRooted($p0)) { $cands += $p0 }
+                            else {
+                                if ($a.WorkingDirectory) { $cands += (Join-Path $a.WorkingDirectory $p0) }
+                                if ($a.Execute) { $cands += (Join-Path (Split-Path -Parent ([string]$a.Execute).Trim('"')) $p0) }
+                            }
+                        }
+                    }
+                }
+                $cands += @((Join-Path $env:LOCALAPPDATA 'AutoRigarm-runnerarm_runner.py'), 'C:\ProgramData\AutoRigarm-runnerarm_runner.py',
+                            'C:\AutoRigarm-runnerarm_runner.py', 'C:\AutoRigarm_runner.py')
+                foreach ($c in $cands) { if ($c -and (Test-Path -LiteralPath $c)) { $rpath = $c; $fr.found_via = 'path'; break } }
+                } catch { $fr.error = 'runner discovery: ' + [string]$_.Exception.Message }
+                if (-not $rpath) {
+                    $det = @()
+                    if ($rtask) { foreach ($a in $rtask.Actions) { $det += ('task: ' + $a.Execute + ' ' + $a.Arguments + ' wd=' + $a.WorkingDirectory) } }
+                    if ($proc) { $det += ('proc: ' + $proc.CommandLine) }
+                    $fr.error = ('runner file not found; ' + ($det -join ' | '))
+                }
+            }
+            if ($rpath -and (Test-Path -LiteralPath $rpath)) {
+                $fr.path = $rpath
+                $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $rpath).Hash.ToLower()
+                $fr.sha256 = $sha
+                $mv = Select-String -LiteralPath $rpath -Pattern '^VERSION = "(.+)"' | Select-Object -First 1
+                if ($mv) { $fr.version = $mv.Matches[0].Groups[1].Value }
+                $want = ([string](Invoke-WebRequest -UseBasicParsing -Uri ($Api + '/farm_runner.py.sha256') -TimeoutSec 20).Content).Trim().ToLower()
+                if ($want -match '^[0-9a-f]{64}$' -and $want -ne $sha) {
+                    $inJob = $false
+                    if ($proc) { $inJob = [bool](Get-CimInstance Win32_Process -Filter ('ParentProcessId=' + $proc.ProcessId) -ErrorAction SilentlyContinue) }
+                    if ($inJob) { $fr.pending = $true; $fr.action = 'waiting for the running job' }
+                    else {
+                        $tmpR = $rpath + '.new'
+                        Invoke-WebRequest -UseBasicParsing -Uri ($Api + '/farm_runner.py') -OutFile $tmpR -TimeoutSec 60
+                        $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmpR).Hash.ToLower()
+                        if ($got -eq $want) {
+                            Copy-Item -Force -LiteralPath $rpath -Destination ($rpath + '.prev')
+                            Move-Item -Force -LiteralPath $tmpR -Destination $rpath
+                            if ($proc) { Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2 }
+                            if ($rtask) { Start-ScheduledTask -TaskName 'AutoRig Farm Runner' -ErrorAction SilentlyContinue }
+                            $fr.action = 'updated'; $fr.sha256 = $got
+                            $mv2 = Select-String -LiteralPath $rpath -Pattern '^VERSION = "(.+)"' | Select-Object -First 1
+                            if ($mv2) { $fr.version = $mv2.Matches[0].Groups[1].Value }
+                            Log ('farm runner updated to ' + $fr.version)
+                        } else {
+                            Remove-Item -Force -LiteralPath $tmpR -ErrorAction SilentlyContinue
+                            $fr.error = 'sha256 mismatch'
+                        }
+                    }
+                }
+            }
+        } catch {
+            $em = [string]$_.Exception.Message
+            $fr.error = $em.Substring(0, [Math]::Min(240, $em.Length))
+        }
+    }
+    try {
+        if ($fr.path) {
+            $lg = Join-Path (Split-Path -Parent $fr.path) 'runner.log'
+            if (Test-Path -LiteralPath $lg) { $fr.log_tail = ((Get-Content -LiteralPath $lg -Tail 3 -ErrorAction SilentlyContinue) -join ' | ') }
+        }
+    } catch {}
+    $report.farm_runner = $fr
+
+    $body = $report | ConvertTo-Json -Depth 6 -Compress
+    $bytes = [Text.Encoding]::UTF8.GetBytes($body)
+    $headers = @{ 'Authorization' = ('Bearer ' + $Key); 'X-AutoRig-Box' = $Box }
+    try {
+        Invoke-RestMethod -Uri ($Api + '/report') -Method Post -Headers $headers -Body $bytes `
+            -ContentType 'application/json; charset=utf-8' -TimeoutSec 30 | Out-Null
+    } catch { Log ('report failed: ' + $_.Exception.Message); exit 1 }
+} catch {
+    Log ('run failed: ' + $_.Exception.Message)
+    exit 1
+} finally {
+    $mutex.ReleaseMutex()
+}
