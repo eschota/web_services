@@ -33,3 +33,5 @@ output { float:right; color:#77e4ff; font-variant-numeric:tabular-nums; }
 .notes ul { margin:0; padding-left:18px; color:#9da7bb; font-size:12px; line-height:1.55; }
 #status { min-height:18px; color:#83e6a9; font-size:12px; }
 @media(max-width:800px){ main{grid-template-columns:1fr}.viewport{height:62vh;min-height:62vh}aside{min-height:auto;border-left:0;border-top:1px solid #ffffff17}.metrics{top:62px}.hint{display:none} }
+body.mask-mode main { grid-template-columns:1fr; }
+body.mask-mode aside, body.mask-mode .badge, body.mask-mode .hint, body.mask-mode .metrics { display:none; }

@@ -1,7 +1,7 @@
 # AutoRig V3 — live development handoff
 
-Updated: **2026-10-12 07:19 Asia/Novosibirsk**<br>
-Fleet snapshot: **2026-10-11 22:40 UTC** (point-in-time, recheck before operating)
+Updated: **2026-10-12 08:03 Asia/Novosibirsk**<br>
+Fleet snapshot: **2026-10-12 00:56 UTC** (point-in-time, recheck before operating)
 
 This is the public coordination checkpoint for AutoRig development. It contains current production facts, active work and the next tasks. It deliberately contains no credentials, private customer data, internal network addresses or licensed assets.
 
@@ -20,7 +20,7 @@ The task must become interactive quickly. The target from worker pickup to an an
 | Viewer | **Live, actively developed** | Current viewer shows the mesh, rig, clips, processing stages, scenes and the session-agent UI. The Blueprint owner reports bone editing/save and capture mode live in the 22:45 UTC checkpoint; their continued QA remains separate from this documentation release. |
 | Rig and skin | **Working, quality work continues** | Humanoid, multi-limb and serpent paths exist. Geodesic skinning, leg fitting, joint judging and numeric QA are installed, but clothing, hair, posed inputs and unusual proportions still produce open regressions. |
 | Live progress | **Working** | The viewer receives source, analysis, voxel, skeleton, weight, retarget, QA and publication events when a stage produces them. |
-| Fleet | **Degraded at this snapshot** | Public fleet status reported new tasks paused, no converter immediately able to accept work, 1 Renderfin job pending, 3 rendering and 5 converter jobs queued. Several V3-capable nodes were online, but converter admission was blocked. Recheck the live API before acting. |
+| Fleet | **Degraded at this snapshot** | Public fleet status reported new tasks paused; f1 listed capable, f2/f13 admission blocked; 1 Renderfin pending,4 rendering and6 converter jobs queued. Recheck the live API before acting. No fleet/service changes in this Hair Lab slice. |
 | Tool catalogue | **Public contract** | Session tools belong in [the tool catalogue](/dev/tools). A tool is not complete until its options, authority, outputs and undo/validation behavior are listed there. |
 
 Live machine-readable status:
@@ -67,6 +67,8 @@ An independently reviewed CUDA raster benchmark now covers all five actual Head-
 One original full-body T-pose concept is ready. Its single current free farm-only Hunyuan job is [`e7f282cf39704243ae7197014bd5d478`](/api/gen3d/jobs/e7f282cf39704243ae7197014bd5d478), queued awaiting eligible capacity. The earlier queue entry was cancelled before dispatch while testing a local lane; local Hunyuan refused its RAM admission floor, so the free farm request was restored once. No 3D completion or reliable ETA is claimed. The customer base rig and original assets remain unchanged by this research.
 
 Hair Lab acceptance criteria:
+
+**Actual-model continuation:** a Unity/URP Mono diagnostic on the same real head caught178.77% segment stretching missed by small tests; the corrected180-frame run measures0.004725% maximum stretch and zero root drift.80 guides: solver p50/p90 3.138/3.510ms, cardbuild/upload0.623/1.312ms. This is mechanics only, no final hair shell or real-head collision. The improved source-shell+cards hybrid is4420triangles versus5680 and still WIP. Automatic replacement remains0/5, with four fused/unknown cases. DEV6759/6760 delivered comparison and actual motion video, not approval. [Exact new real-model evidence and TODO](/static/docs/hair-lab/real-motion.md).
 
 - five visibly different presets derived from the analyzed hairstyle;
 - stable front, side, back and top silhouette without scalp leaks;

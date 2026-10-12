@@ -26,6 +26,12 @@ Previous goal turn: **progress** — public handoff/research deployed, five real
 
 ## Current bounded work
 
+**2026-10-12 latest completed continuation:** source-bound five-case hair admission audited; automatic apply0/5. Actual cd073 guide export r1 failed80 collapsed tips+1hairpin; frozen r2 passes. Source-guided radial art rejected; hybrid2500tri shell+160cards totals4420 vs5680, silhouette IoU .963/.955/.966, still WIP. Corrected QEM uses one source coordinate frame and3 axis-pairs, not6 independent semantic cameras.
+
+RealHair Unity Mono diagnostic built and ran80guides/560points/180frames from frozen external actual-head JSON. It found178.77% stretch; corrected output0.004725%, rooterror0. Solver p50/p90 3.138/3.510ms, cardbuild/upload .623/1.312ms (n180). Core25 small tests supplement the real regression, not replace it. First build41.541s, warm final7.395s engine-step, player158,025,431bytes. No head collision/final shell/material or hairstyle approval. Details: `RealHair/validation/unity/README.md` and public `real-motion.md`.
+
+DEV6759 (`b8dd27ab36f6`) hybrid comparison and6760 (`159e7ab122bb`) actual3-second/180-frame physics clip delivered. Cursor still2285, no new direct replies at00:56UTC. Stable named workers completed these bounded steps; reuse them for follow-ups. Own-character job still queued by eligible-capacity policy, no duplicate.
+
 - `hair_gpu_benchmark`: direct GLB Head-weight extraction on the same five real current rigs, preserving source primitive/triangle identity and comparing to the Blender reference. Goal: remove cold Blender overhead; do not substitute new synthetic inputs or fabricate parity.
 - `real_hair_core`: RealHair Runtime/Core and tools/core-tests only. Deterministic guide-to-card data/builder with finite/range/topology/UV/winding tests. No Unity launches, materials, shared manifests or Portal actions.
 - Root: RealHair product setup/reuse ledger, cross-repository contracts, handoffs, integration and evidence. Reuse named agents for follow-ups rather than duplicating ownership.
