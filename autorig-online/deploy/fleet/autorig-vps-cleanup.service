@@ -1,0 +1,8 @@
+[Unit]
+Description=AutoRig VPS regenerable-data cleanup (hardlink dedupe, old work dirs, scratch)
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 /srv/autorig/fleet/vps_pressure_cleanup.py
+TimeoutStartSec=3000

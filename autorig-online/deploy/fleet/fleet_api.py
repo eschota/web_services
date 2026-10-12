@@ -601,6 +601,33 @@ class Collector:
                     messages.append(f"Диск: {box['id']} {disk.get('drive')} снова {free:.0f} ГБ свободно")
                     state[key] = {"active": False, "recovered_at": now, "free_gb": free}
                     changed = True
+        # VPS disk (owner 2026-10-12: the backend paused all new tasks for 10 h at free < reserve): warn at
+        # reserve + 20 GB, again when the pause starts, and when it ends.
+        vps = snapshot.get("vps_object") or {}
+        vfree = (vps.get("disk_object") or {}).get("free_gb")
+        reserve = float(vps.get("artifact_cache_reserve_gb_float") or ARTIFACT_CACHE_RESERVE_GB)
+        if vfree is not None:
+            vfree = float(vfree)
+            rec = state.get("vps:disk") or {}
+            paused = bool(vps.get("new_tasks_paused_bool"))
+            near = vfree < reserve + 20
+            if paused and not rec.get("paused"):
+                messages.append(f"VPS: НОВЫЕ ЗАДАЧИ НА ПАУЗЕ, диск {vfree:.1f} ГБ свободно (резерв {reserve:.0f} ГБ) "
+                                "https://autorig.online/api/fleet")
+                changed = True
+            elif not paused and rec.get("paused"):
+                messages.append(f"VPS: пауза новых задач снята, диск {vfree:.1f} ГБ свободно")
+                changed = True
+            if near and (not rec.get("near") or now - float(rec.get("alerted_at") or 0) > 3 * 3600) and not paused:
+                messages.append(f"VPS: диск {vfree:.1f} ГБ свободно, до паузы новых задач {max(vfree - reserve, 0):.0f} ГБ "
+                                f"(резерв {reserve:.0f} ГБ) https://autorig.online/api/fleet")
+                rec["alerted_at"] = now
+                changed = True
+            elif not near and rec.get("near"):
+                messages.append(f"VPS: диск снова {vfree:.0f} ГБ свободно")
+                changed = True
+            rec.update(near=near, paused=paused, free_gb=vfree)
+            state["vps:disk"] = rec
         if changed:
             try:
                 _write_json_atomic(path, state)

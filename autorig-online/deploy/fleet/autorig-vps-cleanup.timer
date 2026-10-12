@@ -1,0 +1,8 @@
+[Unit]
+Description=AutoRig VPS regenerable-data cleanup every 30 minutes
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
+[Install]
+WantedBy=timers.target
