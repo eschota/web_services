@@ -79,16 +79,17 @@
     "attempts_at_receipt": 0,
     "initial_wait_estimate_seconds": 1958,
     "label": "hair-lab original r2 replacement-of-a923c333556b41d084a050bd59e67909",
-    "last_observed_utc": "2026-10-12T00:27:34Z",
+    "last_observed_utc": "2026-10-12T02:55:47Z",
     "last_observed_status": "queued",
     "last_observed_stage": "waiting for a free farm box",
     "last_observed_attempts": 0,
     "capacity_evidence": {
       "farm_queued_jobs": 1,
       "farm_running_jobs": 0,
-      "f13": "capable but busy with customer converter vision; background generation yields",
-      "f7": "Hunyuan-ready but busy with AI Vision and not accepting Hunyuan",
-      "worker_4090": "busy with AI Vision and a Renderfin control-map render",
+      "converter_queue_total": 12,
+      "f13": "capable with 10.58 GiB VRAM free but actively running converter Vision; not accepting Hunyuan",
+      "f7": "the only Hunyuan-ready box, busy with AI Vision and not accepting Hunyuan",
+      "worker_4090": "busy with AI Vision, 6.44 GiB VRAM free, and not available to the Gen3D dispatcher",
       "policy": "background jobs require an idle box; shared converter boxes require an empty AutoRig queue"
     }
   }

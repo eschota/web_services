@@ -1,60 +1,68 @@
-# Hair Lab / Real Hair — full session handoff
+# Hair Lab / Real Hair — public development handoff
 
-Updated: 2026-10-12, Asia/Novosibirsk.
+Updated: **2026-10-12 09:55 Asia/Novosibirsk**
 
-## Goal and completion boundary
+Hair Lab is an optional AutoRig V3 tool for analyzing existing hair and creating game-ready low-poly hairstyles after the base model analysis and rig are available. Real Hair is the reusable Unity/URP technology developed from the same guide, card and dynamics work. Neither is a completed customer feature or released product yet.
 
-The active user goal includes BOTH the working AutoRig hairstyle/hair generator AND the standalone Real Hair Asset Store product with useful reusable technology, validation through DEV, maintained handoffs and an actual verified submission. Do not mark the goal complete after research, a folder, a prototype, a benchmark or a source commit.
+This page is the public-safe feature checkpoint. It contains measured progress, current limits and TODOs. Internal operations, private assets and customer source identities are intentionally excluded.
 
-Previous goal turn: **progress** — public handoff/research deployed, five real V3 cases tested, corrected CUDA raster independently reviewed, exact real-head Hair primitive candidates rendered and explicitly rejected for art quality, accepted original concept references saved. Own-character generation remains a verified queued job, not completed output.
+## Current stage
 
-## Current projects and canonical ownership
+| Area | State | Evidence and limit |
+|---|---|---|
+| Research and design | **Complete for the first implementation plan** | Five candidate methods, source review, graph/tool contract, quality gates and dataset boundaries are documented in [research](research.md) and [integration](integration.md). |
+| Real-model admission | **Measured, not accepted for automatic replacement** | Five recent V3 models were inspected. Four have fused or unresolved hair; one has a separate hair partition suitable for diagnostics. Automatic Apply remains **0/5**. See [real cases](real-cases.md). |
+| GPU projection | **Diagnostic kernel verified** | Six-view CUDA raster on the heaviest tested Head-weight ROI measured p50 0.880 ms. Cold source extraction measured 14.618 s. These are separate stages, not end-to-end hairstyle generation latency. See [real benchmark](real-benchmark.md). |
+| Hair geometry | **WIP** | The best current hybrid keeps a 2,500-triangle source shell and adds 160 cards, 4,420 triangles total versus 5,680 in the source hair. Fixed-camera silhouette IoU is 0.963 front, 0.955 side and 0.966 back. Visible tips, normals, atlas and art direction still need work. |
+| Dynamics | **r6 verified as a bounded shell test** | Full-shell native CPU Burst deformation, copies and mesh upload measured p50/p90 **1.9485/2.0051 ms** over 180 frames. Guide simulation is a separate **3.1263 ms** stage. Core/Burst parity reached 2.18e-7 m position and 0.00399° normal direction; 28 core tests passed. See [real motion](real-motion.md). |
+| Head collision | **Open** | No accepted true-head collider exists. The tested closed proxy overfills concavities and is not accepted as production collision geometry. |
+| Materials | **Technical intake checked; art not accepted** | Original atlas and Full/Light pair passed 56 importer checks and actual Unity usage/stand captures. Sparse test ribbons are not a hairstyle. The material remains unadmitted and unexportable pending art and real-head validation. |
+| Task integration | **Source-only** | MT operation source commit `71fac68` exists, but it is not mounted in the task/API and has not changed customer tasks. Parser hardening and Vision scheduling remain in progress. |
+| Real Hair product | **Pre-release development** | Portable guide/card and dynamics technology is being validated for Unity/URP. No finished package, store submission or release is claimed. |
 
-- AutoRig: `R:/autorig/autorig-online/projects/hair-lab/`. Service scheduling, Vision, source-bound segmentation, task graph/API and Python/CUDA preprocessing live here or in their existing MT owners.
-- Asset: `R:/AssetStore/ASStore26/RealHair/`. New canonical C#/Unity guide/card and secondary-motion implementation, offline-capable authoring, presets, studio, documentation and package. Product handoff and SKILL are there.
-- Materials: `R:/AssetStore/ASStore26/RealMaterials/`. Required atlas/material intake with exact keys, maps, URP variants and evidence. No new material is admitted yet.
-- Public current progress: https://www.autorig.online/handoff.md. Research and real tests: `/static/docs/hair-lab/research.md` and `/static/docs/hair-lab/real-cases.md`.
+## Latest evidence
 
-## Verified carry-forward facts
+The first real dynamics run exposed 178.77% segment stretching that smaller numerical cases missed. The corrected run measured 0.004725% maximum segment stretch with zero root drift over 180 frames. This validates the corrected mechanics for that frozen input; it does not validate finished hair art, collision or five hairstyle presets.
 
-- Five real public SFW V3 sources/current rigs in `.work/hair-lab-real-20261012/cases.json`. They are regression inputs only; do not put them in the sellable asset or claim training permission.
-- Current accepted CUDA diagnostic raster raw v2 hash: `b7fb77ce8e4c69185f8589946fdfa59899b6bdba4eb6d68fe96987a857fe386e`. Warm six-view core p50 .880 ms on the heavy Head ROI; cold Blender extraction14.618s. These are stage measurements, not whole hair performance.
-- Exact Hair primitive4 of `cd073629c54afde29b03` isolated; first card candidates are below art acceptance. Original model unchanged and Apply disabled. Source-only harness: `autorig-online/static/hair-lab/`.
-- DEV accepted short/long/full-body 2D concepts: replies2283–2285, media `9d25d89c1329`, `95b805d330ce`, `393fc73903ab`. They do not approve 3D topology/skin/dynamics. Real candidate/benchmark media6748/6749 are not accepted.
-- One current free-farm 3D job: `e7f282cf39704243ae7197014bd5d478`; poll its exact status before any action. Old `a923…` was cancelled before dispatch; no local Hunyuan job was accepted. Local RAM admission must remain enforced.
-- Own DEV cursor2285 and exact receipts: `.work/hair-lab-20261012/validation-state.json`. Read direct replies only; persist new receipt/cursor before ack. Historical viewer verdicts are kept there separately.
+The r6 full-shell comparison confirms that the native Burst path matches the reference implementation over all 180 frames. The shell timing excludes guide simulation, capture, rendering, atlas work and network/task overhead.
 
-## Current bounded work
+Normal validation reports eight disagreements in the source shell and nine after deformation, leaving one new dynamic release blocker. A follow-up normal fix now exists in source only. It is **pending temporal-continuity review and a Unity rerun**: a lower mismatch count cannot justify visible shading pops. R6 remains the latest verified result and the new fix is not promoted to verified status here.
 
-**2026-10-12 latest completed continuation:** source-bound five-case hair admission audited; automatic apply0/5. Actual cd073 guide export r1 failed80 collapsed tips+1hairpin; frozen r2 passes. Source-guided radial art rejected; hybrid2500tri shell+160cards totals4420 vs5680, silhouette IoU .963/.955/.966, still WIP. Corrected QEM uses one source coordinate frame and3 axis-pairs, not6 independent semantic cameras.
+A second registered packet for a fused bob contains source-bound geometry and aligned ID, depth, normal and color crops. It is an input packet for a future segmentation pass, **not a hair mask or completed segmentation**.
 
-RealHair Unity Mono diagnostic built and ran80guides/560points/180frames from frozen external actual-head JSON. It found178.77% stretch; corrected output0.004725%, rooterror0. Solver p50/p90 3.138/3.510ms, cardbuild/upload .623/1.312ms (n180). Core25 small tests supplement the real regression, not replace it. First build41.541s, warm final7.395s engine-step, player158,025,431bytes. No head collision/final shell/material or hairstyle approval. Details: `RealHair/validation/unity/README.md` and public `real-motion.md`.
+DEV6767 contains the r6 motion evidence. It was delivered for review; delivery is not approval.
 
-DEV6759 (`b8dd27ab36f6`) hybrid comparison and6760 (`159e7ab122bb`) actual3-second/180-frame physics clip delivered. Cursor still2285, no new direct replies at00:56UTC. Stable named workers completed these bounded steps; reuse them for follow-ups. Own-character job still queued by eligible-capacity policy, no duplicate.
+## Quality boundary
 
-Publication checkpoint: AutoRig source `5818ef7f`; RealHair local `62e3cee40`, published via clean sparse worktree as `8821bd909`, then official inventory refresh `02b61a6fe`. Do not push divergent local AssetStore main. Public Markdown live readback returned200/no-cache and identical hashes; no service restart. This goal turn is **progress**, not completion: actual AutoRig tool/UI, accepted styles/materials/collisions and verified Store submission all remain open.
+Hair Lab is not ready to advertise automatic hairstyle replacement. Current evidence proves individual geometry, projection and dynamics stages. It does not yet prove:
 
-- `hair_gpu_benchmark`: direct GLB Head-weight extraction on the same five real current rigs, preserving source primitive/triangle identity and comparing to the Blender reference. Goal: remove cold Blender overhead; do not substitute new synthetic inputs or fabricate parity.
-- `real_hair_core`: RealHair Runtime/Core and tools/core-tests only. Deterministic guide-to-card data/builder with finite/range/topology/UV/winding tests. No Unity launches, materials, shared manifests or Portal actions.
-- Root: RealHair product setup/reuse ledger, cross-repository contracts, handoffs, integration and evidence. Reuse named agents for follow-ups rather than duplicating ownership.
+- reliable hair separation on fused meshes;
+- five accepted hairstyle presets on varied real heads;
+- a true head, ears, face and shoulder collision solution;
+- final atlas and material quality;
+- stable attachment under the complete animation library;
+- end-to-end task latency, cancellation, resume, Apply and undo;
+- finished exports or a releasable Real Hair package.
 
-### Completed in this continuation
+Customer uploads are regression inputs only and do not automatically become training data or redistributable product assets.
 
-- Created canonical `RealHair` pre-portal product, SKILL, handoff, reuse-manifest, Unity target project shell, API/agent documentation and honest listing draft. Added discovery/development ledger records without inventing a Portal ID or refreshing historical portal counts.
-- RealHair portable builder:11/11 numerical tests and C#9/netstandard2.1 compilation,0 errors/warnings, independently rerun by root. Fixed tangent basis, overflow guards, collapsed-tip/hairpin handling and shared obj cache. No Unity or visual acceptance claimed.
-- Direct GLB Head-weight reader and11 focused format tests pass. On five real current rigs, fresh processes took .139–1.703 s (OS disk cache uncontrolled); heavy in-process p50 .357 s versus retained cold Blender14.618s. Four geometry matches; fifth retains97 duplicate source triangles that Blender removed, so overall parity remains false. Exact report: `.work/hair-lab-real-20261012/direct-reader/REPORT.md`.
-- These are bounded completed source slices, not an active daemon. The full AutoRig tool, hair art quality, dynamics, Unity runtime and Store release requirements remain active TODO.
-- AssetStore Git history differs materially between the user's current local main and origin/main (observed301/347 before this publication). Do not merge/reset the broad dirty checkout. Own RealHair commits were replayed in a sparse publication worktree on current origin/main, preserving the remote canonical inventory pointer and regenerating its official inventory from all63 tracked product manifests. Published remote commit `80fef64e3` includes the product and its registration. Local original commits remain preserved; only the new product/ledger work was published.
-- DEV foundation status delivered as message6753 (`0c358682e297`). It records numerical-core evidence and pending Unity/visual gates, not approval. Current implementation workers finished their bounded slices; reuse their context for the next stage. Source publication worktree is `R:/AssetStore/ASStore26/.work/real-hair-publish` and was clean at publication; it is not a second canonical Unity project or a running build.
+## Prioritized TODO
 
-## Complete TODO
+1. Independently review the source-only normal fix and repeat the same 180-frame Unity validation before changing the verified baseline.
+2. Produce source-bound hair segmentation for the four fused/unresolved real cases; keep hierarchy/material names as evidence, not geometric truth.
+3. Build and validate a true-head collider with explicit face, ears, scalp and shoulder exclusions.
+4. Finish the atlas, alpha, tangent and normal pipeline; compare it in fixed cameras and motion.
+5. Improve the accepted guide/card basis on real heads, then create five distinct presets plus **Keep current hair**.
+6. Mount the restricted Hair Lab MT operation behind the task tool only after parser, authority, provenance, progress, cancel/resume and undo checks pass.
+7. Run full motion QA and publish per-stage timings: extraction, segmentation, guides, cards, atlas, bind, simulation, validation and viewer publication.
+8. Complete Real Hair Unity/URP import, presets, studio, documentation, package validation and visual approval before any release claim.
 
-H0 research: done. H1/H2 geometry authoring and actual-head admission: incomplete. H3 shape-preserving skin/dynamics: incomplete. H4 AutoRig `/nodes` template, canonical task tool, world head icon, five choices+keep, progress/cancel/resume/apply/undo: incomplete. H5 quality corpus and additional strategies: incomplete. H6 own licensed dataset and any learned fitting: incomplete.
+## Public references
 
-Real Hair must additionally finish: portable core, Unity/URP adapter, good authored presets, RealMaterials intake, runtime/editor UI, studio and continuous-motion evidence, metadata/agent guide, clean import, exact exported-package validation, independence, truthful listing/AI disclosure, YouTube/posters/Short, web demo, launch discount, Gumroad mirror, Portal upload/submission and post-release lifecycle cleanup. All are tracked in its handoff; none is waived by a green core test.
-
-## Resumption and verification
-
-Read current AGENTS in both repositories and the owning product SKILL. Inspect Git and actual processes before launch: a stale lock alone does not prove a running job. Local workstation research is explicitly authorized. Keep all temporary files in the respective project. Respect Unity slot ownership and preserve WIP/customer sources. No paid API calls, no Astra restart, no service restart for documentation.
-
-Mirror public-safe status to the website and the session checkpoint to the server audit folder after material progress. Use SHA readback, do not publish raw private checkpoint content. Keep the active goal open until the full feature AND verified asset submission requirements are proven.
+- [Research and architecture](research.md)
+- [Reconstruction sources](reconstruction-sources.md)
+- [Task and graph integration](integration.md)
+- [Five real-model cases](real-cases.md)
+- [Real-model benchmark](real-benchmark.md)
+- [Dynamics and r6 shell evidence](real-motion.md)
+- [Public AutoRig handoff](/handoff.md)
