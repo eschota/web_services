@@ -334,14 +334,68 @@ def status() -> dict:
     boxes = []
     for r in con.execute("SELECT * FROM boxes ORDER BY box"):
         boxes.append({"box": r["box"], "seen_age_seconds": round(_now() - r["seen"], 1), "busy": r["busy"],
-                      "running": json.loads(r["running"] or "[]"), "done": r["done"], "failed": r["failed"]})
+                      "running": json.loads(r["running"] or "[]"), "done": r["done"], "failed": r["failed"],
+                      "bw": bw_of(con, r["box"])})
     kinds = {r["kind"]: r["n"] for r in con.execute(
         "SELECT kind, COUNT(*) n FROM jobs WHERE state='queued' GROUP BY kind")}
     return {"counts": counts, "queued_by_kind": kinds, "boxes": boxes, "generated": _now()}
 
 
+# ------------------------------------------------------------------ measured bandwidth of every box
+BW_EVERY = 1800
+PROBE_MB = 16
+
+
+def bw_of(con, box):
+    row = con.execute("SELECT down, up, at FROM bw WHERE box=?", (box,)).fetchone() if _has_bw(con) else None
+    return {"down_mbps": row["down"], "up_mbps": row["up"], "age_seconds": round(_now() - row["at"])} if row else None
+
+
+def _has_bw(con):
+    con.execute("CREATE TABLE IF NOT EXISTS bw(box TEXT PRIMARY KEY, down REAL, up REAL, at REAL)")
+    return True
+
+
+def _prober():
+    """Every BW_EVERY seconds each live box gets a probe job (16 MB in, 16 MB out); the box's own timing and the time
+    the result landed give its down and up MB/s, kept in the `bw` table (/api/fleet shows them, mt/farm_steps.py
+    prefers fast-uplink boxes for big results)."""
+    probe = HOME / "probe16.bin"
+    if not probe.is_file():
+        probe.write_bytes(os.urandom(PROBE_MB * 1024 * 1024))
+    q = Queue()
+    while True:
+        try:
+            con = _db()
+            _has_bw(con)
+            for r in con.execute("SELECT * FROM jobs WHERE kind='bw_probe' AND state='done' AND "
+                                 "(note IS NULL OR note!='bw')").fetchall():
+                dur = float(r["seconds"] or 0)
+                up_s = float(r["finished"] or 0) - float(r["leased_at"] or 0) - dur
+                con.execute("INSERT OR REPLACE INTO bw VALUES(?,?,?,?)",
+                            (r["box"], round(PROBE_MB / max(dur - 0.8, 0.3), 2), round(PROBE_MB / max(up_s, 0.3), 2),
+                             r["finished"]))
+                con.execute("UPDATE jobs SET note='bw' WHERE id=?", (r["id"],))
+            con.execute("UPDATE jobs SET state='cancelled', finished=? WHERE kind='bw_probe' AND state='queued' "
+                        "AND created<?", (_now(), _now() - 900))
+            have = {r["box"]: r["at"] for r in con.execute("SELECT box, at FROM bw")}
+            pend = set()
+            for r in con.execute("SELECT spec FROM jobs WHERE kind='bw_probe' AND state IN ('queued','leased')"):
+                pend.update(json.loads(r["spec"]).get("boxes") or [])
+            for b in con.execute("SELECT box, seen FROM boxes").fetchall():
+                if _now() - b["seen"] < 180 and b["box"] not in pend and _now() - have.get(b["box"], 0) > BW_EVERY:
+                    q.enqueue({"kind": "bw_probe", "v3": True, "boxes": [b["box"]], "priority": 1, "timeout": 300,
+                               "max_attempts": 1, "inputs": {"probe.bin": str(probe)},
+                               "cmd": ["{python}", "-c", "import os;open(r'{out}/o.bin','wb').write(os.urandom(%d))"
+                                       % (PROBE_MB * 1024 * 1024)]})
+        except Exception as exc:                                       # noqa: BLE001 - a probe never stops the queue
+            print("bw probe:", repr(exc)[:200], flush=True)
+        time.sleep(60)
+
+
 def serve(port: int = 8262):
     _db()
+    threading.Thread(target=_prober, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 

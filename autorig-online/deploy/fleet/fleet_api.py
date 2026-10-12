@@ -1374,6 +1374,9 @@ def compose(col: Collector) -> Dict[str, Any]:
             b.setdefault("services_object", {})["farm_runner"] = {
                 "seen_age_seconds": fr.get("seen_age_seconds"), "yielding_to": fr.get("busy") or "",
                 "running": fr.get("running") or [], "done": fr.get("done"), "failed": fr.get("failed"),
+                "down_mbps_float": (fr.get("bw") or {}).get("down_mbps"),
+                "up_mbps_float": (fr.get("bw") or {}).get("up_mbps"),
+                "bandwidth_age_seconds_int": (fr.get("bw") or {}).get("age_seconds"),
                 "state": ("working" if fr.get("running") else ("yielding" if fr.get("busy") else "waiting"))
                 if (fr.get("seen_age_seconds") or 9999) < 120 else "offline"}
     # the farm runner file each box runs (box agent: sha256-checked self-update between jobs, 2026-10-13)
