@@ -7,3 +7,4 @@ IOSchedulingClass=idle
 ExecStart=/usr/bin/python3 /srv/autorig/fleet/vps_pressure_cleanup.py
 TimeoutStartSec=3000
 ExecStartPost=/usr/bin/python3 /srv/autorig/fleet/release_sweep.py all
+ExecStartPost=/usr/bin/python3 /srv/autorig/fleet/media_retention.py
