@@ -77,6 +77,16 @@ Hair Lab acceptance criteria:
 - benchmark on varied short, long, tied, layered and textured-card hairstyles;
 - background execution with progress, cancellation, undo and comparison in the task.
 
+## Real Hair — separate Asset Store product
+
+The owner also commissioned **Real Hair**, a standalone reusable Unity product derived from Hair Lab. It is registered locally as a pre-portal development product: no uploaded package, Portal record or submission is claimed. Its intended useful parts are offline guide/card authoring, scalp/root attachments, texture controls, lightweight dynamics, presets and a studio. Target: Unity6000.3.21f1 / URP. Customer AutoRig models and private service infrastructure do not ship.
+
+Implemented first slice: a portable C# guide-to-card builder with explicit input/options, deterministic mesh output, UV/tangent/topology checks and atomic rejection. Numerical checks11/11 PASS; C#9/netstandard2.1 build0 errors/warnings. Unity import, URP visuals, material intake, authored style quality and physics are still pending. RealMaterials is the canonical material owner.
+
+Also measured a direct GLB Head-weight reader on the five real V3 rigs. Heavy-file extraction fell from the retained Blender14.618s to a fresh Python process1.703s (OS cache uncontrolled), or .357s repeated in-process. One case intentionally retains97 duplicate source faces that Blender discarded; overall structural parity is not declared. This is not yet the live task implementation.
+
+The [full session handoff](/static/docs/hair-lab/handoff.md) now tracks both products through feature completion and actual verified Store submission. Remaining release work includes Unity/player QA, original styles, canonical material intake, exact-package gates, AI Ready documentation/listing, release videos/posters/Short, web demo, eligible launch discount, Gumroad mirror and submission/lifecycle evidence. The active goal is not complete.
+
 ## Prioritized TODO
 
 ### P0 — service and correctness
