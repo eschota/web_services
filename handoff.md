@@ -2683,3 +2683,46 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 - **Осталось**: реальное «Сохранить» из браузера под владельцем не выполнялось (проверено на копиях ранов и dry-раном с
   ключом); у лошади в GLB только rig_check — смещения на клипах видны, только когда animpick добавит клипы; синтетический
   «быстрый» drag без hover в автотестах браузера попадает в рамку вместо стрелки (живой мышью работает).
+
+## Monster rig · V3 + horse gaits from video (2026-10-12 22:03 UTC, на проде, агент «Fable · monsters/animals»)
+
+- Владелец (#1966, задача 35356012, Vision «elongated humanoid creature», ран b3423278918e78d9aebd): «такие ноги типовые
+  для монстров». Было: biped-фит ставил прямоногие суставы на присевшие ноги, длинные согнутые руки падали в пропорции
+  (предплечье без вершин, кисть в 19 % H), Mixamo-клипы распрямляли колени; numeric QA не пройден, триаж arms_unbound.right.
+- **Категория `monster`** — MT `mt/monster.py` (прод; Git MT `1e40fe7`, `c8e9423`): `detect` трассирует конечности на
+  воксельном теле (`multilimb.trace_all` с `path_thin_cost`: путь кисти не идёт через колено), стопы = два нижних кончика,
+  руки = висящие от груди ветви (рука, чей путь встретил висящее ухо, повышается из «sub»), ноги типизируются по сгибам:
+  `crouched` (колено ≥ `knee_bend_min` 25°), `digitigrade` (второй обратный сгиб = скакательный сустав выше
+  `hock_height_pct_H` 16 % над носком), `stumpy` (< 30 % H), `long_thin` (> 56 % H), `plantigrade`; наклон туловища,
+  отношение рука/нога. Вердикт: слова (`WORDS`: monster|creature|alien|zombie|demon|scp|… минус HUMAN_WORDS) или
+  геометрия двумя сильными признаками (колено+наклон+длинные руки | hock | stumpy+длинные руки); один признак — нет
+  (на гейте box_avatar_arms «наклонённый кубик» читался монстром). `stage` в rig_first до первого fastrig: пиннит
+  трассированные руки/ноги как ПОЗУ ПОКОЯ (`rig/pose_joints.json`, без T-разворота; ml_pinned-логика), клипы получают
+  `retarget_reference_policy = bind_relative` (присед остаётся под движением, колено сгибается дальше и не щёлкает в
+  прямое). Запись `rig.json.monster` (leg_type, gait, policy, pinned, legs/arms). 15 опций (`options_get`,
+  `monster_options.json`, env `MONSTER_*`).
+- **Придатки головы** (`mt/multilimb.py`): уши/рога/щупальца/пряди (crest/hair-ветви ≥ 20 % H) — свои цепи
+  `{Side}Crest, Crest1..` (2–5 костей по длине), корень на поверхности тела (`appendage_surface_depth`), parent Head,
+  веса вдоль цепи, корень вливается в веса Head; включает только monster-ветка (или `appendages=on`);
+  `merge_children` — слияние меток дочерних веток по виду (длинная дочерняя ветка уха остаётся своей = рука);
+  непарное «крыло» с корнем выше `wing_join_max` 0.45 позвоночника = придаток. rig_check и клипы: лёгкое покачивание.
+- **35356012**: скин v6 (v0–v5 целы), RIG_VERSION `v3.2026-10-12.11`, 35 костей (+10 Crest), ноги crouched 54/59°,
+  левая рука по трассе (правая слита с коленом в вокселях — фит fastrig), policy bind_relative; numeric QA (локально
+  p6-дерево) 5/8 (Idle, Walking, Waving1, Hip Hop, Punching; Running/Jump/Look Around — «extent» на шве Head|Spine2
+  присевшего туловища), было 4/8. limb_collision high (кисти у колен). DEV 6999 (до) / 7000 (после).
+- **Гейт**: kind `monster_rig` (checks.py, якорно), кейс `monster_crouched_scp` (контроль-воин первым, вход
+  `35356012.model.glb` = proj/model.glb рана), ставился XFAIL → unxfail тем же деплоем (`corpus_edit.py`), mt-deploy PASS
+  20261012T215115Z (213 PASS). Правило «кандидат старше прод-файла»: `vps_deploy_monster.sh` копирует живой прод
+  перед гейтом и повторяет при отказе; свои ssh-сессии не убивать pkill'ом по подстроке команды (убивал сам себя
+  дважды) — `relaunch.sh` на VPS.
+- **Лошадь 31cc3ff3** (ран 028d1acdb7187c532921, quadruped 32 костей, клипов не было): аллюры из сгенерированного видео
+  (`mt.animal_video`, H3 на ферме, первый кадр = боковой вид модели, трекинг суставов → цикл → `animal_motion_lib/horse/
+  {walk,trot,gallop,idle}.json`), перериг v2: клипы Idle, Walk, Trot, Gallop (видео) + Look Around, Tail Wag, Jump
+  (процедурные), хвост на своих Tail-костях (tail_trace). DEV 6997 (гифка аллюров), 6998 (исходное видео галопа).
+- **В работе (не на проде)**: `patch_animal_video.py` — любой план тела (biped/monster: KEY_BONES, library_clips «Video
+  <Clip>», `plan` в записи библиотеки), клипы canter/rear/run/prowl/attack, one-shot без петли (`loop`), animpick:
+  Canter/Rear для четвероногих; `patch_video_mt.py` — rig_first.animate добавляет видео-клипы вида для biped/monster.
+  Генерация на ферме идёт (`/home/debian/monster/video_gen.sh`: лошадь canter/rear, монстр walk/prowl/idle).
+- Не сделано: правая рука монстра (слита с коленом; зеркало выключено `mirror_arm=off` — зеркальная рука ушла вне
+  меша); Head/Neck наклонённого туловища (шов Head|Spine2); своя походка монстра (присед едет на Mixamo bind-relative;
+  видео-клипы — следующий шаг); limb_collision для кистей у колен; грива лошади отдельным слоем (хвост есть).
