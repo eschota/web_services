@@ -13376,6 +13376,59 @@ async def ensure_disk_headroom_for_new_task(
     return summary
 
 
+# Downloads · V3 (owner bug 2026-10-12: from 19:24 to 05:55 UTC every upload got 503 and nobody knew): one DEV
+# alert when the disk guard starts refusing new work, one when it lets work in again. The episode lives in a file so
+# a restart neither repeats nor loses it.
+NEW_WORK_PAUSE_STATE = Path(os.getenv("AUTORIG_NEW_WORK_PAUSE_STATE", "/srv/autorig/data/var/funnel/new-work-pause.json"))
+
+
+def _dev_alert_text(text: str) -> None:
+    import urllib.request
+
+    boundary = "pause" + os.urandom(8).hex()
+    parts = []
+    for name, value in (("agent", "Downloads · V3"), ("project", "AutoRig V3"), ("kind", "text"), ("caption", text)):
+        parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n"
+                      f"Content-Type: text/plain; charset=utf-8\r\n\r\n").encode("utf-8") + value.encode("utf-8") + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    req = urllib.request.Request(os.getenv("AUTORIG_DEV_SEND", "https://autorig.online/dev/api/send"),
+                                 data=b"".join(parts), method="POST",
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                                          "User-Agent": "autorig-storage/1"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            print(f"[Request Disk] DEV alert sent ({resp.status})")
+    except Exception as exc:
+        print(f"[Request Disk] DEV alert failed: {exc}")
+
+
+def _new_work_pause_event(paused: bool, reason: str = "") -> None:
+    """Called on every guarded request: alerts only when the paused/open state changes."""
+    try:
+        exists = NEW_WORK_PAUSE_STATE.is_file()
+        if paused and not exists:
+            NEW_WORK_PAUSE_STATE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = NEW_WORK_PAUSE_STATE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"since": datetime.utcnow().isoformat() + "Z", "reason": reason[:300]}))
+            os.replace(tmp, NEW_WORK_PAUSE_STATE)
+            text = (f"🛑 AutoRig: new tasks are PAUSED by the disk guard — every upload gets 503 until it clears. "
+                    f"{reason[:240]}")
+        elif not paused and exists:
+            try:
+                since = json.loads(NEW_WORK_PAUSE_STATE.read_text()).get("since", "?")
+            except (OSError, ValueError):
+                since = "?"
+            NEW_WORK_PAUSE_STATE.unlink(missing_ok=True)
+            text = f"✅ AutoRig: new tasks accepted again (paused since {since})."
+        else:
+            return
+        import threading
+
+        threading.Thread(target=_dev_alert_text, args=(text,), daemon=True).start()
+    except Exception as exc:  # an alert never breaks the request path
+        print(f"[Request Disk] pause alert bookkeeping failed: {exc}")
+
+
 async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dict[str, Any]:
     """
     Request-path disk guard. It may remove regenerable bundle ZIPs, stale terminal
@@ -13389,6 +13442,7 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
         # The storage numbers are for the log; the visitor gets a sentence in their language
         # (Localization V3: a Persian customer once saw this raw string in an alert).
         print(f"[Request Disk] new work paused before {context}: {cache_block}")
+        _new_work_pause_event(True, f"artifact cache: {cache_block}")
         from user_language import user_error_detail
 
         raise HTTPException(
@@ -13415,6 +13469,7 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
             f"[Request Disk] new work paused before {context}: {free_gb:.2f}GB free, "
             f"target is {NEW_TASK_MIN_FREE_GB:.2f}GB"
         )
+        _new_work_pause_event(True, f"free {free_gb:.1f} GB < {NEW_TASK_MIN_FREE_GB:.0f} GB")
         from user_language import user_error_detail
 
         raise HTTPException(
@@ -13422,6 +13477,7 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
             detail=user_error_detail("storage_paused", retry_after_seconds=600),
             headers={"Retry-After": "600"},
         )
+    _new_work_pause_event(False)
     return result
 
 

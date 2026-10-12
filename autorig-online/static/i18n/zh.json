@@ -1019,5 +1019,8 @@
   "email_preview_alt": "3D 模型预览",
   "email_digest_subject": "🎉 您的绑定 3D 模型已就绪 - AutoRig.online",
   "email_digest_title": "🎉 您的模型已就绪",
-  "email_digest_body": "我们切换到了新的绑定流程，没来得及通知您：这些模型已完成绑定和动画，正在查看器中等您。"
+  "email_digest_body": "我们切换到了新的绑定流程，没来得及通知您：这些模型已完成绑定和动画，正在查看器中等您。",
+  "upload_retrying": "服务器繁忙。文件已保留在此页面，{seconds} 秒后重试…",
+  "upload_retry_now": "正在重试…",
+  "upload_retry_gave_up": "服务器仍然繁忙。文件仍在此页面：请几分钟后再次拖入。"
 }

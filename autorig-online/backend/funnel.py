@@ -25,8 +25,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 FUNNEL_DIR = Path(os.getenv("AUTORIG_FUNNEL_DIR", "/srv/autorig/data/var/funnel"))
-EVENTS = ("landing", "upload_start", "task_created", "download_click", "paywall_view", "checkout_start",
-          "purchase", "sign_up_prompt")
+EVENTS = ("landing", "upload_start", "task_created", "task_create_failed", "download_click", "paywall_view",
+          "checkout_start", "purchase", "sign_up_prompt")
 _SRC = re.compile(r"[^a-z0-9._-]+")
 _MAX_PER_MINUTE = 120
 _RATE: dict[str, list[float]] = {}

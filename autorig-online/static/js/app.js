@@ -1720,7 +1720,7 @@ const App = {
             const rigProfileKey = 'v3';
             const inputFp = this.getTaskCreateInputFingerprint(isUpload, this.state.selectedFile, linkVal);
             const dedupeKey = `${busyMode}|${inputFp}|${rigProfileKey}`;
-            if (this.isTaskCreateDeduped(dedupeKey)) {
+            if (!this.state.taskCreateRetrying && this.isTaskCreateDeduped(dedupeKey)) {
                 alert(typeof t === 'function' ? t('error_task_create_duplicate_recent') : 'Please wait before creating the same task again.');
                 return;
             }
@@ -1754,6 +1754,7 @@ const App = {
             }
 
             if (ok) {
+                this.clearTaskCreateRetry();
                 try { window.autorigFunnel && window.autorigFunnel.track('task_created', { task_id: data.task_id, props: { via: busyMode } }); } catch (e) { /* ignore */ }
                 window.location.href = `/task?id=${data.task_id}`;
             } else {
@@ -1763,12 +1764,12 @@ const App = {
                 } else if (status === 402) {
                     window.location.href = '/buy-credits';
                 } else {
-                    alert(this.taskCreateErrorMessage(status, data, responseText));
+                    this.taskCreateFailed(status, data, responseText, isUpload);
                 }
             }
         } catch (error) {
             console.error('Submit error:', error);
-            alert(t('error_generic'));
+            this.taskCreateFailed(0, null, '', isUpload);
         } finally {
             try {
                 detectionDispose();
@@ -1793,6 +1794,80 @@ const App = {
         }
     },
     
+    // ---------------------------------------------------------------- task create failures (Upload V3)
+    TASK_CREATE_RETRYABLE: [0, 429, 500, 502, 503, 504],
+    TASK_CREATE_MAX_RETRIES: 40,
+
+    uploadStatusEl() {
+        let box = document.getElementById('upload-status');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'upload-status';
+            box.className = 'upload-status';
+            box.setAttribute('role', 'status');
+            box.setAttribute('aria-live', 'polite');
+            const panel = document.getElementById('upload-panel') || document.getElementById('convert-form');
+            panel?.appendChild(box);
+        }
+        return box;
+    },
+
+    showUploadStatus(text, kind) {
+        const box = this.uploadStatusEl();
+        if (!box) return;
+        box.textContent = text || '';
+        box.dataset.kind = kind || 'info';
+        box.hidden = !text;
+        const err = kind === 'error';
+        box.style.cssText = 'margin:12px 0 0;padding:10px 14px;border-radius:10px;font-size:14px;line-height:1.45;'
+            + (err ? 'background:rgba(255,122,138,.12);border:1px solid rgba(255,122,138,.45);color:#ffb3bd'
+                : 'background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.45);color:#d6d8ff');
+    },
+
+    clearTaskCreateRetry() {
+        clearTimeout(this.state.taskCreateRetryTimer);
+        clearInterval(this.state.taskCreateCountdown);
+        this.state.taskCreateRetrying = false;
+        this.state.taskCreateAttempts = 0;
+        this.showUploadStatus('', 'info');
+    },
+
+    taskCreateFailed(status, data, text, isUpload) {
+        const tf = (key, fallback, rep) => {
+            const v = typeof t === 'function' ? t(key, rep) : '';
+            return v && v !== key ? v : fallback;
+        };
+        try { window.autorigFunnel && window.autorigFunnel.track('task_create_failed', { props: { status: Number(status) || 0, attempt: (this.state.taskCreateAttempts || 0) + 1 } }); } catch (e) { /* ignore */ }
+        const retryable = this.TASK_CREATE_RETRYABLE.includes(Number(status) || 0);
+        if (!retryable || !isUpload || !this.state.selectedFile) {
+            this.clearTaskCreateRetry();
+            this.showUploadStatus(this.taskCreateErrorMessage(status, data, text), 'error');
+            return;
+        }
+        const attempt = (this.state.taskCreateAttempts || 0) + 1;
+        this.state.taskCreateAttempts = attempt;
+        if (attempt > this.TASK_CREATE_MAX_RETRIES) {
+            this.state.taskCreateRetrying = false;
+            this.showUploadStatus(tf('upload_retry_gave_up', 'The server is still busy. Your file is kept on this page: drop it again in a few minutes.'), 'error');
+            return;
+        }
+        // 5, 10, 20, 40 s, then every 60 s: a short pause is retried quickly, a long one does not hammer the server
+        let wait = Math.min(60, 5 * Math.pow(2, attempt - 1));
+        this.state.taskCreateRetrying = true;
+        const tick = () => {
+            this.showUploadStatus(tf('upload_retrying', `The server is busy. Your file is safe on this page; retrying in ${wait} s…`, { seconds: wait }), 'wait');
+        };
+        tick();
+        clearInterval(this.state.taskCreateCountdown);
+        this.state.taskCreateCountdown = setInterval(() => { wait = Math.max(0, wait - 1); tick(); }, 1000);
+        clearTimeout(this.state.taskCreateRetryTimer);
+        this.state.taskCreateRetryTimer = setTimeout(() => {
+            clearInterval(this.state.taskCreateCountdown);
+            this.showUploadStatus(tf('upload_retry_now', 'Retrying…'), 'wait');
+            this.submitTask();
+        }, wait * 1000);
+    },
+
     /**
      * Load task history
      */

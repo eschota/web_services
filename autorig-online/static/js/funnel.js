@@ -4,7 +4,7 @@
 // ar_src: utm_source, else the referrer's host, else "direct".
 (function () {
   if (window.autorigFunnel) return;
-  const EVENTS = ['landing', 'upload_start', 'task_created', 'download_click', 'paywall_view', 'checkout_start', 'purchase', 'sign_up_prompt'];
+  const EVENTS = ['landing', 'upload_start', 'task_created', 'task_create_failed', 'download_click', 'paywall_view', 'checkout_start', 'purchase', 'sign_up_prompt'];
   function readCookie(name) {
     const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : '';
