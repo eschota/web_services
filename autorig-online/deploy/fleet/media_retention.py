@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 
 DATA = "/srv/autorig/data"
 ROOTS = [f"{DATA}/var/renderfin/{d}" for d in ("render", "tmp", "music-mux", "rejected")] + \
@@ -28,6 +29,8 @@ HELD = {".glb", ".fbx", ".obj", ".zip", ".blend", ".gltf"}                      
 PROTECT = re.compile(r"(^|/)(refs?|reffilm|references?|concepts?|characters?|datasets?|dataset[^/]*|lora[^/]*|loras|"
                      r"models?|music|deploy|secrets?|db|locks|servers[^/]*|workflow-backups|cutover-backups|"
                      r"quarantine|__pycache__|\.git|assets|backdrops?)(/|$)", re.I)
+RF = f"{DATA}/var/renderfin/"
+RF_DELETE_3D = {".glb", ".gltf"}               # owner 2026-10-12 «да удаляй»: renderfin 3D outputs go too, unless a task uses them
 MAXAGE = 24 * 3600
 DRY = "--dry-run" in sys.argv
 LOG = "/var/log/autorig-media-retention.log"
@@ -43,8 +46,27 @@ def log(msg):
         pass
 
 
+def referenced() -> set:
+    """renderfin/render/<dir>/<file> paths that any task row points at (source, outputs, viewer GLBs ...): kept."""
+    import sqlite3
+    refs = set()
+    rx = re.compile(r"renderfin/render/([^\"'\s,}\]?#]+)")
+    con = sqlite3.connect("file:/srv/autorig/data/db/autorig.db?mode=ro", uri=True, timeout=20)
+    cols = ("input_url", "output_urls", "ready_urls", "viewer_settings", "viewer_prepared_glb_url",
+            "viewer_animations_glb_url", "video_url", "fbx_glb_output_url", "progress_page")
+    for row in con.execute("SELECT " + ",".join(cols) + " FROM tasks WHERE " +
+                           " OR ".join(f"{c} LIKE '%renderfin/render%'" for c in cols)):
+        for v in row:
+            for m in rx.finditer(str(v or "")):
+                refs.add(urllib.parse.unquote(m.group(1)))
+    con.close()
+    return refs
+
+
 def main():
     now = time.time()
+    refs = referenced()
+    log(f"{len(refs)} renderfin files are referenced by tasks and kept")
     per = {}
     held = 0
     for root in ROOTS:
@@ -61,6 +83,20 @@ def main():
                     continue
                 if now - st.st_mtime < MAXAGE or os.path.islink(p):
                     continue
+                if p.startswith(RF):
+                    rel_rf = os.path.relpath(p, RF + "render") if p.startswith(RF + "render/") else ""
+                    if rel_rf and rel_rf.replace(os.sep, "/") in refs:
+                        held += st.st_size
+                        continue
+                    if ext in RF_DELETE_3D:
+                        freed += st.st_size
+                        files += 1
+                        if not DRY:
+                            try:
+                                os.unlink(p)
+                            except OSError:
+                                pass
+                        continue
                 if ext in HELD:
                     held += st.st_size
                     continue
