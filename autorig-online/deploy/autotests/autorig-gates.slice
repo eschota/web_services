@@ -1,0 +1,7 @@
+[Unit]
+Description=AutoRig release gates (all autotests cases together, 2026-10-13 OOM fix)
+[Slice]
+MemoryHigh=9G
+MemoryMax=10G
+MemorySwapMax=0
+CPUWeight=20

@@ -243,7 +243,7 @@ def run_case(case: dict, tree: pathlib.Path, release: pathlib.Path, work: pathli
         # one case may never take the box down: a memory-capped scope, the OOM kill stays inside it (2026-10-13)
         mem = os.environ.get("AUTORIG_GATE_CASE_MEM", "8G")
         if mem and pathlib.Path("/usr/bin/systemd-run").exists():
-            cmd = ["/usr/bin/systemd-run", "--scope", "--quiet", "--collect", "-p", f"MemoryMax={mem}",
+            cmd = ["/usr/bin/systemd-run", "--scope", "--quiet", "--collect", "--slice=autorig-gates.slice", "-p", f"MemoryMax={mem}",
                    "-p", "MemorySwapMax=0", *cmd]
     else:
         cmd = ["env", *env, *cmd]

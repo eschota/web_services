@@ -495,6 +495,29 @@ Owner rule, 2026-10-10:
   * Hotfix: the drop-in `autorig-mt.service.d/zz-priority.conf`
     (MT_V3_CONCURRENCY=2, MT_CLASSIC_MIRROR=off, MT_AUTOTEX=off), and the
     census stopped.
+* **The 30-minute outage of 2026-10-12, 17:10-17:40 UTC** (owner: «выясни
+  что нагрузило сервер … это надо исключить»).
+  * What happened:
+    * The autorig-mt API process grew to 5-7 GB and was OOM-killed at 15:45,
+      16:46, 16:54 and 17:01. It runs a big customer mesh's heavy steps in its
+      own threads; this time the mesh was task 22adb32f, a 28 MB quadruped.
+      After every kill the run resumed and grew again.
+    * Four release gates ran in parallel (rig_first on corpus meshes, up to 7 GB
+      each). rig-judge took 6.4 GB, postgres 5.5 GB.
+    * Agents also restarted MT three times for deploys.
+    * The box has no swap. It thrashed (load 335), so sshd and nginx stopped
+      answering.
+  * Guards now in place:
+    * A gate waits while the load is above the core count.
+    * Every gate case runs in a scope with `MemoryMax=8G`, inside
+      `autorig-gates.slice` (10G for all gates together). Gates run one at a
+      time, with at most `--jobs 2`.
+    * rig-judge is capped at 5G and v3-backfill at 7G, with low CPU weight.
+    * `MemoryLow` protects nginx, ssh, autorig-storage, autorig-mt,
+      renderfin and astra-gateway from reclaim.
+    * Pending in the engine: MT runs heavy mesh steps in memory-capped child
+      processes. A step that was OOM-killed retries once on a decimated
+      proxy, then fails with a notice. It never loops.
 
 ## Disk Retention On The VPS (owner order, 2026-10-12)
 
