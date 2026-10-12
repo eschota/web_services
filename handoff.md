@@ -33,6 +33,22 @@
 
 Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persistent checkpoint.
 
+## Rig path · V3 — песочница «последние 60» и цикл до 90 % (2026-10-12)
+
+- Метод: `/tmp/pc/census.py <out> 60` на VPS (sudo -u autorig, nice 19, ждёт клиентские прогоны):
+  `backfill.rerig_candidate` в песочнице → limb_collision → numeric QA → `triage.triage_task`. Клиентские прогоны
+  только читаются. `CENSUS_TREE=<копия mt>` меряет кандидата, `CENSUS_ONLY=id8,...` — подмножество.
+  Итоги: `/tmp/pc/census*/results.jsonl`, свод `python3 /tmp/pc/census_sum.py <results.jsonl>`.
+- Итерация 0 (движок 2026-10-12 03:30 UTC): 27/60 = 45 % (biped 14/33, quadruped 9/20, bird 0/2, serpent 2/2).
+  Топ: qa.numeric_deformation 19, rig_stretch 16, bone_outside 13.
+- Итерация 1: хвост четвероногих по сетке (`mt/tail_trace.py`, MT `45a5e57`) + слова плана тела сильнее «пальцев»
+  в `handrig.detect`; кейсы `quad_tail_armoured`, `quad_tail_monster` (XFAIL mt_stretch).
+- Агенту Animal clips (не Rig path): птицы `ddc0b9ba` (утка, bone_outside), `67fc45ef` (скелет летучей мыши,
+  bone_outside + разрыв Head|RightWingLow); стоящий монстр `48db2b25` без слов Vision ригается бипедом
+  (orient «две ноги»), с quadruped от Vision хвост чинится — нужен план тела для стоящих четвероногих.
+- Дальше по очереди координатора: разрыв плечо|рука у плотных бипедов (b5787da2, 59e51a5a, bf61cf57), колени
+  (dd756b89, f5b046ee), rig_stretch тяжести 3, bone_outside.
+
 ## Координация агентов V3 (2026-10-10)
 
 - unity build: свободно (00:15Z 12.10: первый `tools/viewer_release.ps1` — `unity/test` → `v3-20261012-0636-c18878a` = MT `c18878a` (Blueprint r4 + viewer_saver), откат в `unity/.test-history.log`). Все следующие сборки вьювера — `tools/viewer_release.ps1 -Flip` (WebGL + exe + раскатка на ферму); RadialPulse WIP скрипт снимает сам (`-ExcludeWip`).
@@ -2602,3 +2618,8 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   Известное: на сцене neon-rooftop облёт иногда проходит сквозь декор (66bc778f).
 
 - **Releases and copies · Fleet V3 (2026-10-12)**: `deploy/fleet/release_sweep.py` keeps only the active release + ONE rollback (and anything a running process uses): /srv/autorig/releases (542 -> 4 dirs), unity builds (test target + its previous), mt.prev (last 2 per file), audits/*/stage* (>24 h). Hooked into `live_static.py promote` and the 30-min `autorig-vps-cleanup.timer`; log `/var/log/autorig-release-sweep.log`. Backend release flow: run `python3 /srv/autorig/fleet/release_sweep.py releases` after repointing `current`. **CRITICAL DEV alert** `task_flow_alert.py` (timer every 5 min): no new task for 3 h (hourly repeat, probable cause attached) and >= 5 5xx on /api/task/create in 10 min.
+- **Интро T-позы (owner 12.10: «видео должно начинаться с Т-позы 3 сек, потом анимация уже и 60 фпс»), релиз
+  `v3-20261012-1357-25220fc`:** saver по умолчанию 60 fps, `--secs 9` (всё видео), `--tpose 3`, `--fade 0.8`; облёт в
+  T-позе на 35 % скорости. Во вьювере `ClipFromRest {"clip","hold","fade"}` (RigPlayer.PlayFromRest), `?capture=1&tpose=3`
+  делает то же; Chrome-запасной `viewer_capture.py` по умолчанию 9 с / 60 fps и перезапускает интро в начале записи.
+  Ферма: конь f12 7,3 МБ (запись 540 кадров 19 с), 66bc778f f15 7,7 МБ.

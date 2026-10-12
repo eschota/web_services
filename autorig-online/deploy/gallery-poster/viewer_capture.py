@@ -82,6 +82,7 @@ async ({seconds, fps, clip, yaw0, sweep, pitch, capture}) => {
     const rec = new MediaRecorder(stream, {mimeType: mime, videoBitsPerSecond: 24000000});
     const chunks = [];
     rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    try { if (window.autorigCapture) window.autorigCapture.restart(); } catch (e) {}   // T-pose intro from 0
     rec.start(250);
     await new Promise(r => setTimeout(r, seconds * 1000));
     rec.stop();
@@ -160,8 +161,8 @@ def encode(src, out_mp4, poster, seconds, fps, max_mb):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
-    ap.add_argument("--seconds", type=float, default=7.0)
-    ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--seconds", type=float, default=9.0)   # 3 s T-pose + the clip (owner 2026-10-12)
+    ap.add_argument("--fps", type=int, default=60)
     ap.add_argument("--max-mb", type=float, default=8.0)
     ap.add_argument("--load-timeout", type=float, default=180.0)
     ap.add_argument("--settle", type=float, default=8.0, help="seconds after the model loads, for scene and effects")
