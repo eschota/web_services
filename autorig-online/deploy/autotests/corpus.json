@@ -647,6 +647,41 @@
    "what": "smish_bear_rigged.glb: an already-rigged Sketchfab bear (armature -90 deg X, scale 0.01), T-pose",
    "sha256": "77a46257fee38787bac4cf2d954b9e3f93890dff8bbceda27c9a05b45ec16bf6",
    "bytes": 10045196
+  },
+  "6d2e65f4.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c54882e82f05b29df294/proj/model.glb",
+   "task": "6d2e65f4-719a-448f-bd7c-d4e7f702ec0d",
+   "what": "cute hedgehog with spines (quadruped)",
+   "sha256": "f79ea13a5bffd3266f298afddd31adc56113dbdead06462004b4e79ff77600f6",
+   "bytes": 43702016
+  },
+  "63c98d8c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/2a7874d8074d4f68f806/proj/model.glb",
+   "task": "63c98d8c-927b-4d98-89bc-b5609da02c46",
+   "what": "Rusty mechanical crab (multi-legged)",
+   "sha256": "a3dff9c57051bc1df90073ae2d4362d15080d7f1ce61166eaeb896d2d2812688",
+   "bytes": 11781352
+  },
+  "6e98b6df.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/d678ff6ca3b2eb9e9d6d/proj/model.glb",
+   "task": "6e98b6df",
+   "what": "a brown hen, standing (Vision body: quadruped)",
+   "sha256": "1d4e264db2b52bf0449aef762bca5d84104ab2238599fe7362c8570783dd9ef0",
+   "bytes": 17587796
+  },
+  "e6fba067.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b5a4d055523540cd6600/proj/model.glb",
+   "task": "e6fba067",
+   "what": "one-eyed green monster walking with a stack of books in each hand, 857k vertices",
+   "sha256": "ffdee442ad56b45bded194698b88d439c15f9b3e3f246b2c35a8568aab342c09",
+   "bytes": 86307220
+  },
+  "c11ff853.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/17dc48ec99310031eac7/proj/model_source.glb",
+   "task": "c11ff853",
+   "what": "cartoon cat creature standing on big flat feet joined into one slab, two pointed ears (Tripo, as uploaded)",
+   "sha256": "cf5e9bb16c78df7380cbc7a713f7866a1b5596203c9affa806ab021dfc8fca8a",
+   "bytes": 9907472
   }
  },
  "profiles": {
@@ -6943,6 +6978,235 @@
        "==",
        1
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "crab_multileg",
+   "task": "63c98d8c-927b-4d98-89bc-b5609da02c46",
+   "cost": 1,
+   "defect": "a multi-legged mechanical crab must reach the creature multileg template (legs, claws, a body) with its clip set, never a 1-bone root (owner bug 6d2e65f4, which turned out to be a hedgehog: see hedgehog_spiky). The rig_check stretch of this crab is still high (3322 edges over 4x on 2026-10-12)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "63c98d8c.model.glb",
+     "params": {
+      "words": "multi-legged Rusty mechanical crab"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hedgehog_spiky",
+   "task": "6d2e65f4-719a-448f-bd7c-d4e7f702ec0d",
+   "cost": 2,
+   "defect": "owner 2026-10-12 «тут вообще нет рига и анимаций?»: the hedgehog was published done with a 1-bone root rig and no clips (the analysis cache gave a foreign «Rusty mechanical crab»; the classifier words never reached fastrig, and proportions read the low wide body as root). Spines must follow the back, never be fitted as limbs. Animal clips V3: creature.plan_for maps four-legged species words to quadruped; QA gate plan_matches_category + triage plan_mismatch guard the 1-bone root",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6d2e65f4.model.glb",
+     "params": {
+      "words": "cute hedgehog quadruped"
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     },
+     "note": "800k vertices: fastrig quadruped took 129 s at load 23 (weights 57 s, fit 30 s, preview 19 s, weld 17 s) - the 60 s budget is open for Rig tools",
+     "xfail": {
+      "reason": "code not installed yet (case added ahead of its engine change); flips to pass in the deploy that installs it",
+      "owner": "Animal clips · V3"
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       400
+      ]
+     },
+     "xfail": {
+      "reason": "fit_quadruped on a low spiky body: the back chain rides in the spines, the tail zig-zags through the rump (3782 edges over 4x, 2026-10-12)",
+      "owner": "Rig tools · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hen_bird_plan",
+   "task": "6e98b6df",
+   "cost": 1,
+   "defect": "triage 2026-10-12: a brown hen rigged as a biped (limb_in_body): the words name a bird (creature.plan_for -> bird) but multilimb traced wings + legs as 2 arm pairs and overrode the plan to «winged biped». Fix: a bird named by the words stays a bird unless the trace finds legs >= 2 and a wing pair.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6e98b6df.model.glb",
+     "params": {
+      "words": "brown hen"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       10
+      ]
+     }
+    },
+    {
+     "id": "mt_plan",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "bird"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "monster_books_not_hands",
+   "task": "e6fba067",
+   "cost": 2,
+   "defect": "census 2026-10-12: a one-eyed monster «with a stack of books in each hand» (Vision body: biped) was rigged as HANDS: the prop words counted as hand words and a weak finger reading won. Fix: words of a prop held in a hand are not hand words; a Vision body overrules a weak / medium reading.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "e6fba067.model.glb",
+     "params": {
+      "words": "one-eyed green monster blue baseball cap, stack of books in each hand"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "tier": "extended"
+    },
+    {
+     "id": "mt_plan",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ]
+     },
+     "tier": "extended"
+    }
+   ]
+  },
+  {
+   "id": "cat_upside_down",
+   "task": "c11ff853",
+   "cost": 1,
+   "defect": "owner bug 2026-10-12 (#1905, upside down in the preview): the file stands upright on big flat feet that merge into one slab with the tail at its low end, so +y found no «two feet»; the two pointed ears at the top read as 3 comparable foot blobs, so estimate_up chose -y biped 0.9 and the up stage turned the model 180 degrees. Fix: a -y flip needs more «foot» mass at the new low end than the file's own low end has (feet carry the body; ears do not).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "c11ff853.model.glb",
+     "params": {
+      "words": "cartoon cat creature",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       15
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "head_above_hips_pct_H": [
+       ">=",
+       15
+      ]
+     },
+     "xfail": {
+      "reason": "orient mass rule not installed yet",
+      "owner": "Rig path · V3"
      }
     }
    ]
