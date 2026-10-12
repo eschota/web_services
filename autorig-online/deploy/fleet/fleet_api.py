@@ -60,7 +60,18 @@ LORA_KEYS = os.getenv("FLEET_LORA_KEYS", "/srv/autorig/secrets/lora-sync-keys.js
 RENDERFIN = os.getenv("FLEET_RENDERFIN", "http://127.0.0.1:8210/renderfin").rstrip("/")
 MT_BASE = os.getenv("FLEET_MT", "http://127.0.0.1:8251").rstrip("/")
 ARTIFACT_CACHE_ROOT = os.getenv("FLEET_ARTIFACT_CACHE_ROOT", "/srv/autorig/data/artifact-cache")
-ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("FLEET_ARTIFACT_CACHE_RESERVE_GB", "50"))
+def _reserve_gb() -> float:
+    """The live pause threshold: ARTIFACT_CACHE_RESERVE_GB of the backend's own env file (the backend pauses on it)."""
+    try:
+        for line in open(os.getenv("FLEET_BACKEND_ENV", "/srv/autorig/secrets/backend.env"), encoding="utf-8"):
+            if line.startswith("ARTIFACT_CACHE_RESERVE_GB="):
+                return float(line.split("=", 1)[1].strip().strip("'\""))
+    except (OSError, ValueError):
+        pass
+    return float(os.getenv("FLEET_ARTIFACT_CACHE_RESERVE_GB", "50"))
+
+
+ARTIFACT_CACHE_RESERVE_GB = _reserve_gb()
 AGENT_SCRIPT = os.getenv(
     "FLEET_AGENT_SCRIPT", "/srv/autorig/fleet/fleet-agent.ps1")
 CURRENT_LINK = "/srv/autorig/current"
