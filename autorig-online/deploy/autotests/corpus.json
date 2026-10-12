@@ -735,7 +735,16 @@
   "35356012.model.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/b3423278918e78d9aebd/proj/model.glb",
    "task": "35356012",
-   "what": "SCP-178-1: a crouched elongated humanoid creature, long arms to the knees, two long ear tentacles (the V3 run's model.glb, OBJ upload normalized)"
+   "what": "SCP-178-1: a crouched elongated humanoid creature, long arms to the knees, two long ear tentacles (the V3 run's model.glb, OBJ upload normalized)",
+   "sha256": "56c764108ab56393a48b6d8cfbfa3b3c6c7306c7af43107b50298747fd6ce204",
+   "bytes": 1255708
+  },
+  "ca5ddc8f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ead7192c2b41587a621f/proj/model.glb",
+   "task": "ca5ddc8f-2fb0-4432-b481-db21f40e1d48",
+   "what": "stylized low-poly ram, mirror-symmetric (V3 run ead7192c)",
+   "sha256": "483342a017c657249cfbbd1b2f3f7377da810a27e00ee6334329ab6f632a8ae6",
+   "bytes": 40416
   }
  },
  "profiles": {
@@ -7947,6 +7956,60 @@
     }
    ],
    "note": "control first (checks share one run dir). Local 2026-10-13 (p6 tree): 35 bones, numeric QA 5/8 (Idle, Walking, Waving1, Hip Hop, Punching pass; Running / Jump / Look Around 'extent' on the head|spine seam: the Head joint of a crouched trunk), limb_collision high (the hands beside the knees). Known gaps: the right arm fused with its knee in the voxel solid (fastrig's fit stands); the Head / Neck joints of a tilted trunk; a monster gait of its own (the crouch rides the Mixamo clips bind-relative)."
+  },
+  {
+   "id": "ram_hind_mirror",
+   "task": "ca5ddc8f-2fb0-4432-b481-db21f40e1d48",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, bone_outside on the rams ca5ddc8f / 43dde6df): on a mesh that mirrors at 0.99 fit_quadruped put LeftHindUpLeg 27 % H in front of the right one; symmetrize only averages close pairs, so the left shank crossed the belly (19 samples outside, 10.6 % H deep). Fix: fastrig.mirror_repair (options mirror_repair, mirror_repair_min_err, mirror_repair_min_share, mirror_repair_gain). The hock is still not a joint: knee -> fetlock leaves the leg at the hock (both sides)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "ca5ddc8f.model.glb",
+     "params": {
+      "words": "stylized ram",
+      "body": "quadruped",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "leg_outside_samples": [
+       "<=",
+       27
+      ]
+     },
+     "note": "rig_first path 2026-10-13: hind legs 32 -> 26 samples outside (mirror_repair v2); the hock is still not a joint"
+    }
+   ]
   }
  ]
 }

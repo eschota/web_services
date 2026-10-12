@@ -304,6 +304,8 @@ def bone_outside(path, rig_json):
     ends = {str(b["parent"]) for b in doc.get("bones") or [] if str(b.get("name", "")).endswith("_End") and b.get("parent")}
     return {"samples": rep["samples"], "outside_samples": rep["outside_samples"],
             "head_outside_samples": int(rep["bones"].get("Head", {}).get("outside") or 0),
+            "leg_outside_samples": int(sum(v["outside"] for b, v in rep["bones"].items()
+                                           if re.search(r"(UpLeg|Leg|Foot|Toe)", b))),
             "end_outside_samples": int(sum(v["outside"] for b, v in rep["bones"].items() if b in ends)),
             "outside_fraction": rep["outside_fraction"],
             "bones_outside": rep["bones_outside"][:16], "foot_outside_samples": int(sum(foot.values())),
