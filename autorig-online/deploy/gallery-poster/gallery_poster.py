@@ -543,14 +543,17 @@ def poster_path(task_id: str) -> Path:
     return OUT_DIR / f"{task_id}.jpg"
 
 
-CHILD_MAX_BYTES = int(float(os.getenv("GP_CHILD_MAX_MB", "1400")) * 1024 * 1024)
+CHILD_MAX_BYTES = int(float(os.getenv("GP_CHILD_MAX_MB", "0")) * 1024 * 1024)
 
 
 def _child_limits():
     """Children (render, clip, view copy) get an address-space cap below the unit's MemoryMax, so a heavy model ends
     in a MemoryError of that child, never in an OOM kill of the service."""
-    import resource
-    resource.setrlimit(resource.RLIMIT_AS, (CHILD_MAX_BYTES, CHILD_MAX_BYTES))
+    # RLIMIT_AS broke every render (numpy reserves address space: MemoryError on 7 MB arrays, 2026-10-12); it is
+    # off by default (GP_CHILD_MAX_MB=0). The unit's OOMPolicy=continue + the crash-twice marker keep the loop safe.
+    if CHILD_MAX_BYTES > 0:
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (CHILD_MAX_BYTES, CHILD_MAX_BYTES))
 
 
 def attempt(con, key: str, sig: str) -> int:

@@ -2114,6 +2114,42 @@ async def _wait_v3_preview(task_id: str, wait_seconds: int) -> tuple:
         await asyncio.sleep(3)
 
 
+async def _fallback_v3_photo(task_id: str):
+    """No V3 capture and no video: any real picture of this model, never the site card. The classic /thumb poster,
+    else an image of the V3 run (weights preview, projection sheet, QA renders). Written to a temp file."""
+    import glob
+    import tempfile
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(f"http://127.0.0.1:8200/thumb/{task_id}", follow_redirects=True)
+        if r.status_code == 200 and len(r.content) > 8000 and r.headers.get("content-type", "").startswith("image/"):
+            fd, p = tempfile.mkstemp(suffix=".jpg", prefix="tg-fallback-")
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(r.content)
+            return p
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Telegram] fallback thumb failed for {task_id}: {exc}")
+    try:
+        async with AsyncSessionLocal() as db:
+            task = await db.scalar(select(Task).where(Task.id == task_id))
+        url = str(getattr(task, "viewer_prepared_glb_url", "") or "")
+        import re as _re
+        m = _re.search(r"/api/mt/files/([0-9a-f]{20})/", url)
+        if m:
+            run = f"/srv/autorig/data/motion_transfer/runs/{m.group(1)}"
+            for pattern in ("rig/weights_preview.png", "proj*/*.png", "proj*/*.jpg", "analysis/*.png", "card/*.png",
+                            "card/*.jpg", "*/*.png"):
+                for cand in sorted(glob.glob(f"{run}/{pattern}")):
+                    if 20000 < os.path.getsize(cand) < 9 * 1024 * 1024:
+                        return cand
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Telegram] fallback run image failed for {task_id}: {exc}")
+    return None
+
+
 async def _late_v3_media(bot, chat_id: int, reply_to: int, task_id: str, caption: str, markup,
                          wait_seconds: int = 900) -> None:
     """The notice went out as text (no poster in time): the task's own poster follows as a reply when it lands,
@@ -2264,6 +2300,9 @@ async def broadcast_task_done(
         v3_video, v3_photo = await _wait_v3_preview(task_id, _tg_preview_wait_seconds())
         if v3_video:
             video_path, last_video_status = v3_video, "v3_preview"
+        elif not v3_photo:                     # never a completion without media
+            v3_photo = await _fallback_v3_photo(task_id)
+            print(f"[Telegram] fallback picture for {task_id}: {v3_photo}")
         print(f"[Telegram] V3 preview for {task_id}: video={bool(v3_video)} poster={bool(v3_photo)}")
 
     chat_ids = await get_broadcast_chat_ids()
