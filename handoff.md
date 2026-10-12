@@ -1964,8 +1964,14 @@ This scoped development checkpoint does not overwrite the unrelated historical
   пробы, линия деревьев, пена; направление течения в цвете вершин BA — квантованные UV слишком грубы), `COL_NTL_*`
   (носители текстур). Подключение — одна строка в `ScenePackage.cs` после `Dress(model)`. Каталог отдаёт сцену только при
   `caps=…,nature` (scene-plate.js, SaverMode, viewer_prefs).
-- **Дефолт**: `mt/viewer_prefs.py` — river-glade вместо forest-horizon (слова, четвероногие, лёгкий дефолт; старые
-  автопики forest-horizon переезжают); SaverMode/capture.js — фолбэк river-glade. Сейвер: DoF на модели по умолчанию
+- **Дефолт**: автоматический пик forest-horizon (слова «animal…», четвероногие, лёгкий дефолт) рисуется на river-glade —
+  в `scene-gate.js` и SaverMode (личный выбор и админ-дефолт не трогаются); capture.js/фолбэк сейвера — river-glade.
+  Правка самого `mt/viewer_prefs.py` (caps nature + river-glade в списках) **не установлена**: mt-deploy gate 11:34Z упал на
+  чужих рига-кейсах (worm_capsule_words, hedgehog_spiky timeout, cat_upside_down 151.7 s, box_avatar_arms), патч —
+  `R:d_video_motion_transfer\.work\presentation-sceneiewer_prefs_river_glade.patch`; поставить, когда база зелёная.
+- **Замеры**: сцена 5,9 МБ (GLB meshopt+quantize, из них текстуры 2,4 МБ), в браузере 1,5 с; превью на ферме f7 (GTX 1080 Ti)
+  1080×1920 60 fps: сцена 5–6,4 с с сети (в exe потом из дискового кэша ~2 с), запись 540 кадров 11,9–14,7 с (37–45 к/с
+  вместе с чтением кадра и ffmpeg), джоба 28 с. Релизы `v3-20261012-1818-4083546` → `…1845-fe40b1f` → `…1853-7dd137f` (test). Сейвер: DoF на модели по умолчанию
   (`--dof 0|1|<сила>`, по умолчанию 3 = `PostFx.dofStrength`), bloom 0.42, виньетка 0.3; пакет с пресетом night/dusk
   ставит своё время суток, `presets.default.look` (ambient) и exposure. GLB сцены в exe кэшируется на диске (URL+ETag).
 - **Релизы**: `v3-20261012-1818-4083546` (flip, откат — строка в `unity/.test-history.log`); viewer_release.ps1 теперь
