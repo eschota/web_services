@@ -1950,6 +1950,32 @@ This scoped development checkpoint does not overwrite the unrelated historical
 - 503 на `.data.unityweb` был не от `limit_req` (у него статус 429, в error.log «limiting requests» = 0).
 - Шаблон в рабочем дереве несёт чужой WIP (horizon / scene_template, HDR Codex) — в r2 страница взята с прода r1, их правки не выкатывал.
 
+## Presentation scene · V3: «Поляна у ручья» (river-glade) — сцена по умолчанию + неоновая крыша v2 (2026-10-12)
+
+- **Владелец 12.10**: «эта сцена хоть и быстрая не должна быть уродская, в ней должен быть доф, речка … ультра качественной
+  презентацией». Концепты A/B/C (Krea 2) — DEV 6842; итог до/после + превью лисы 6307840d и человека e993c693 — DEV 6858–6860.
+- **Пакет** `scenes/river-glade` (scene.glb 5,9 МБ meshopt+quantize, scene.json): поляна-терраса, ручей в русле на 0,5 м ниже,
+  камни, тростник, папоротники, кусты, 52 бука/ели вокруг (не ближе 13 м — орбита камеры чистая), 170 дальних деревьев,
+  слитых в 4+4 меша, холмы в дымке. Сборка: `R:d_video_motion_transfer	ools\scene_kit\glade\` — `glade_tex.py`
+  (текстуры фермы + texlib gen_*) и `build_glade.py` (Blender CLI, seed), публикация = gltf_meshopt.mjs --quantize на VPS.
+- **Вьювер: модуль `modules.nature`** (`Assets/Nature/NatureFx.cs` + шейдеры `AutoRigNature{Terrain,Foliage,Water}`):
+  имена в GLB `NT_TERRAIN` (3 слоя texlib по цвету вершин), `NT_FOL_*` (карточки: ветер, просвет, дизер у камеры и между
+  камерой и моделью), `NT_FOL_GRASS_*_d<k>` (плотность по уровню качества), `WATER_*` (преломление, каустика, отражение
+  пробы, линия деревьев, пена; направление течения в цвете вершин BA — квантованные UV слишком грубы), `COL_NTL_*`
+  (носители текстур). Подключение — одна строка в `ScenePackage.cs` после `Dress(model)`. Каталог отдаёт сцену только при
+  `caps=…,nature` (scene-plate.js, SaverMode, viewer_prefs).
+- **Дефолт**: `mt/viewer_prefs.py` — river-glade вместо forest-horizon (слова, четвероногие, лёгкий дефолт; старые
+  автопики forest-horizon переезжают); SaverMode/capture.js — фолбэк river-glade. Сейвер: DoF на модели по умолчанию
+  (`--dof 0|1|<сила>`, по умолчанию 3 = `PostFx.dofStrength`), bloom 0.42, виньетка 0.3; пакет с пресетом night/dusk
+  ставит своё время суток, `presets.default.look` (ambient) и exposure. GLB сцены в exe кэшируется на диске (URL+ETag).
+- **Релизы**: `v3-20261012-1818-4083546` (flip, откат — строка в `unity/.test-history.log`); viewer_release.ps1 теперь
+  без BOM в ssh-скриптах и блокируется только редактором на AutoRigViewer.
+- **Неоновая крыша v2** (`2eb85454-neon-rooftop`, бэкап v1 в `/srv/autorig/data/motion_transfer/scene-backups/`):
+  бар/табуреты/диваны за орбитой (≥6.8 м), мраморный подиум r 3.2 м с LED-кольцом, лаунж (диваны, столики, торшеры,
+  растения на NatureFoliage), 8 практических источников, 36 объектов вместо 454. Скрипт `tools/scene_kit/neon/build_neon.py`.
+- **Открыто**: глобальные дефолты вьювера (владелец, v1) — dof 0, quality low, exposure −0.4: в WebGL сцена без DoF, пока
+  владелец не сохранит дефолт; неону — ещё бар в кадре и отражения пола.
+
 ## Scenes · V3: «Лесной горизонт» и модуль horizon (2026-10-11 22:30 UTC, на проде)
 
 - `unity/test` -> `horizon-r2-20261011` (= v3-all-r2 wasm/страница + модуль; откат в `unity/.test-history.log`).
