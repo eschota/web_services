@@ -696,6 +696,13 @@
    "what": "segmented capsule worm: 8 separate shells (capsule body, head ball, two eye balls), Vision «abstract capsule creature», category other",
    "sha256": "552f41232ad0db952473c197cb3d61be1820b6bf2c9f076f13ceb7c89148b9f7",
    "bytes": 367616
+  },
+  "b97ed1bb.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/227902903ec8197c22e2/proj/model_source.glb",
+   "task": "b97ed1bb",
+   "what": "brown hare, leaping (no paw on the floor), upright +y, front +z, as uploaded",
+   "sha256": "a18b40be3d59f63c85d91ee14cdc5fad50b7ff9e69eafae8da1020630507963b",
+   "bytes": 7668024
   }
  },
  "profiles": {
@@ -6996,7 +7003,7 @@
    "id": "crab_multileg",
    "task": "63c98d8c-927b-4d98-89bc-b5609da02c46",
    "cost": 1,
-   "defect": "a multi-legged mechanical crab must reach the creature multileg template (legs, claws, a body) with its clip set, never a 1-bone root (owner bug 6d2e65f4, which turned out to be a hedgehog: see hedgehog_spiky). The rig_check stretch of this crab is still high (3322 edges over 4x on 2026-10-12)",
+   "defect": "TRUTH CORRECTED 2026-10-12 (orient-by-parts agent, textured views; confirmed by Rig path renders): 63c98d8c is NOT a crab: it is a Z-up humanoid farmer (hat, overalls) standing along +Z. Lying in the file it read as 4 paws (-y quadruped 0.6) and Vision named the lying projections a «multi-legged mechanical crab». Fix: orient.base_guard breaks a close plan tie (< 0.9) by the flat soles (+z 0.148 vs 0.043). Earlier text: a multi-legged mechanical crab must reach the creature multileg template (legs, claws, a body) with its clip set, never a 1-bone root (owner bug 6d2e65f4, which turned out to be a hedgehog: see hedgehog_spiky). The rig_check stretch of this crab is still high (3322 edges over 4x on 2026-10-12)",
    "checks": [
     {
      "id": "mt_rig",
@@ -7006,25 +7013,44 @@
      ],
      "input": "63c98d8c.model.glb",
      "params": {
-      "words": "multi-legged Rusty mechanical crab"
+      "words": "",
+      "v3_bound": true
      },
      "thresholds": {
       "seconds": [
        "<=",
        60
       ],
-      "body_plan": [
-       "==",
-       "multileg"
-      ],
       "bones": [
        ">=",
        20
       ],
-      "clips": [
-       ">=",
-       5
+      "body_plan": [
+       "==",
+       "biped"
       ]
+     },
+     "xfail": {
+      "reason": "sole tie-break not installed yet",
+      "owner": "Rig path · V3"
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+z"
+      ]
+     },
+     "xfail": {
+      "reason": "sole tie-break not installed yet",
+      "owner": "Rig path · V3"
      }
     }
    ]
@@ -7334,6 +7360,87 @@
        "numeric_deformation_passed"
       ],
       "clips_passed": [
+       ">=",
+       5
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hare_leaping_upright",
+   "task": "b97ed1bb",
+   "cost": 1,
+   "defect": "owner bug 2026-10-12 (#1915, the hare hangs upside down): a leaping hare has no paw on the floor; the 2026-10-12 face-down guard saw «lying flat, two equal feet at one end of the long axis» (the hind feet) and stood it on its tail (-z); the second rig pass then read the head and ears as 3 feet. Fix: the face-down guard is off (the bear it was made for is fixed by the skin bake); «hare» is an animal word.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "b97ed1bb.model.glb",
+     "params": {
+      "words": "brown hare",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ]
+     },
+     "xfail": {
+      "reason": "face-down guard still on in production",
+      "owner": "Rig path · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "crab_multileg_words",
+   "task": "63c98d8c-927b-4d98-89bc-b5609da02c46",
+   "cost": 1,
+   "defect": "Animal clips V3 (owner bug 6d2e65f4, 2026-10-12): Vision words naming a multi-legged crab must reach the creature multileg template with its clip set, never a 1-bone root. crab_multileg is now the Rig path no-words orientation case on the same input.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "63c98d8c.model.glb",
+     "params": {
+      "words": "multi-legged Rusty mechanical crab"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "multileg"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
        ">=",
        5
       ]
