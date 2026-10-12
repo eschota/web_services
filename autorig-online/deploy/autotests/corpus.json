@@ -689,6 +689,13 @@
    "what": "wind-up toy robot head on a round flat base, file lying on its side (base along +z)",
    "sha256": "c3c2d0cde3d4cf366d3be5fe1f622fefad4525abe7f41f19451b88198e138d0d",
    "bytes": 1300536
+  },
+  "068f4412.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b1a922fd959a89335813/proj/model.glb",
+   "task": "068f4412",
+   "what": "segmented capsule worm: 8 separate shells (capsule body, head ball, two eye balls), Vision «abstract capsule creature», category other",
+   "sha256": "552f41232ad0db952473c197cb3d61be1820b6bf2c9f076f13ceb7c89148b9f7",
+   "bytes": 367616
   }
  },
  "profiles": {
@@ -7241,6 +7248,94 @@
       "up": [
        "==",
        "+z"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "worm_capsule_words",
+   "task": "068f4412",
+   "cost": 1,
+   "defect": "owner 2026-10-12: a worm built of 8 separate shells (largest 21 %) with Vision words «abstract capsule creature» / category other was rigged as root, 1 bone, no clips. Serpent rig V3: touching shells bridged, cross-section pieces merged when they overlap, short protrusions (eyes) are not limbs, a zig-zag centre line smoothed, generic words never veto (only object names), compact shells move whole, head bulb arc auto",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "068f4412.model.glb",
+     "params": {
+      "words": "abstract capsule creature"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "bones": [
+       ">=",
+       17
+      ],
+      "clips": [
+       ">=",
+       4
+      ]
+     }
+    },
+    {
+     "id": "mt_serpent",
+     "kind": "serpent_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "head_near": [
+       -25.2,
+       17.7,
+       36.9
+      ]
+     },
+     "thresholds": {
+      "gate_passed": [
+       "==",
+       true
+      ],
+      "arc_jump_edges": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "head_dist": [
+       "<=",
+       0.15
+      ]
+     }
+    },
+    {
+     "id": "mt_numeric",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "status": [
+       "==",
+       "numeric_deformation_passed"
+      ],
+      "clips_passed": [
+       ">=",
+       5
       ]
      }
     }
