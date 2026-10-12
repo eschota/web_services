@@ -2726,3 +2726,30 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 - Не сделано: правая рука монстра (слита с коленом; зеркало выключено `mirror_arm=off` — зеркальная рука ушла вне
   меша); Head/Neck наклонённого туловища (шов Head|Spine2); своя походка монстра (присед едет на Mixamo bind-relative;
   видео-клипы — следующий шаг); limb_collision для кистей у колен; грива лошади отдельным слоем (хвост есть).
+
+## Video-MT на проде, пришелец 9a465c98, итоги раунда (2026-10-12 22:45 UTC, агент «Fable · monsters/animals»)
+
+- **Video motion transfer поставлен** (mt-deploy PASS 20261012T221416Z и 222552Z, RIG_VERSION `v3.2026-10-12.13`; MT Git `8d27d85`,
+  `744279c`): `mt/animal_video.py` работает на biped/monster (KEY_BONES, min period 0.9 с для biped, запись библиотеки с `plan`),
+  клипы canter/rear (лошадь) и run/prowl/attack (biped), one-shot без петли (`loop=off`: rear, attack), **гейт качества**
+  трекинга (`trunk_max_deg` 25, `limb_max_deg` 90, период на нижней границе → `quality: suspect`, такая запись хранится, но
+  никогда не вешается на риг клиента); `library_clips` «Video <Clip>» для biped — `rig_first.animate` добавляет их; animpick:
+  Canter/Rear, только quadruped и не-suspect записи. Лошадь 31cc3ff3 → скин v4: 9 клипов (Walk/Trot/Canter/Gallop/Rear/Idle
+  из видео + Look Around/Tail Wag/Jump), DEV 7004. Монстр 35356012: три видео (walk/prowl/idle, H3) сгенерированы хорошо, но
+  LK-трекер скользит между перекрывающимися присевшими ногами (Hips качает 66°, период на полу) — записи `creature.suspect`,
+  к задаче не привязаны; для присевших двуногих нужен другой трекер (сегментация ног / 2D-поза), это следующий шаг видео-MT.
+- **Пришелец 9a465c98** (ран 5be7df890c72466ab26b, «hunched crouching alien»; от агента Rig classes: bone_outside, кисти вне
+  меша, плечи перекрещены): monster-ветка по словам, ноги crouched 94° / digitigrade 83° (hock 22.7 % H), обе руки по трассе,
+  посадка ok, rig_check 4x 47→44, снаружи только RightShoulder; перериг v2 на проде: numeric QA 0/8, но worst stretch 41–72
+  (было 160–225 при policy None). Причина: руки коренятся у позвоночника наклонённого туловища, Shoulder-кости рычагом рвут
+  грудь при любом повороте плеча; пробовал: пин Shoulder (хуже), сустав на выходе из тела (`exit_depth`, выключен — на
+  толстых конечностях «выход» уезжает на середину руки), policy `bind_relative_pose` (дельты от первого кадра Idle вместо
+  T-покоя: Idle 1/8 проходит, остальное хуже; на SCP хуже 3/8 vs 5/8 → по умолчанию остаётся `bind_relative`). Кейс
+  `monster_alien_crouched` (extended, вход `9a465c98.model.glb`, mt_qa XFAIL). DEV 7006. Вывод: присевшим монстрам нужна
+  своя походка (видео-MT после починки трекера или процедурный crouch-gait), а не Mixamo.
+- **35356012 arms_unbound (Rig classes)**: это и был v4/v5 до monster-ветки; в v6 левая рука по трассе; правая слита с
+  коленом в вокселях — зеркало левой (с привязкой к телу, `mirror_arm`, `mirror_snap_pct_H` 6) отвергается (локоть 9.3 % H
+  от тела), с лимитом 10 % — QA 1/8: правую руку оставляет fastrig. Открыто.
+- Раунд 3 деплоя (monster.py зеркало/опции + retarget `bind_relative_pose`) идёт; гейт — сам. Правило для себя: `touch`
+  кандидата обходит mtime-проверку «кандидат старше прод-файла» — перед каждым деплоем diff прод-файла против базы (сделано
+  для retarget.py: расхождение только мой ханк).
