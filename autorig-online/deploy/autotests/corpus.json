@@ -703,6 +703,13 @@
    "what": "brown hare, leaping (no paw on the floor), upright +y, front +z, as uploaded",
    "sha256": "a18b40be3d59f63c85d91ee14cdc5fad50b7ff9e69eafae8da1020630507963b",
    "bytes": 7668024
+  },
+  "fec0161f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5b49fa4f622634597cbb/proj/model.glb",
+   "task": "fec0161f",
+   "what": "stylized boar, a triangle soup (16446 verts -> 5222 welded, 3247 raw islands)",
+   "sha256": "3d102fb7ea3083b61aede3734ccedb7943042237cf98543ccfe07a7e1b598fa9",
+   "bytes": 665340
   }
  },
  "profiles": {
@@ -5644,7 +5651,7 @@
       ],
       "rig_check_4x": [
        "<=",
-       5
+       180
       ]
      }
     },
@@ -5667,6 +5674,24 @@
        "==",
        1
       ]
+     }
+    },
+    {
+     "id": "mt_stretch_strict",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       5
+      ]
+     },
+     "xfail": {
+      "reason": "fused legs stretch, no-gap (2026-10-12: no weld splits for non-bipeds; the old split hid the stretch behind gaps)",
+      "owner": "Rig path · V3"
      }
     }
    ]
@@ -6079,8 +6104,26 @@
       ],
       "rig_check_4x": [
        "<=",
+       270
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch_strict",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
        120
       ]
+     },
+     "xfail": {
+      "reason": "fused legs stretch, no-gap (2026-10-12: no weld splits for non-bipeds; the old split hid the stretch behind gaps)",
+      "owner": "Rig path · V3"
      }
     }
    ]
@@ -6889,8 +6932,26 @@
      "thresholds": {
       "sum_edges_over_4x": [
        "<=",
+       920
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch_strict",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
        100
       ]
+     },
+     "xfail": {
+      "reason": "fused legs stretch, no-gap (2026-10-12: no weld splits for non-bipeds; the old split hid the stretch behind gaps)",
+      "owner": "Rig path · V3"
      }
     }
    ]
@@ -7029,10 +7090,6 @@
        "==",
        "biped"
       ]
-     },
-     "xfail": {
-      "reason": "sole tie-break not installed yet",
-      "owner": "Rig path · V3"
      }
     },
     {
@@ -7047,10 +7104,6 @@
        "==",
        "+z"
       ]
-     },
-     "xfail": {
-      "reason": "sole tie-break not installed yet",
-      "owner": "Rig path · V3"
      }
     }
    ]
@@ -7403,10 +7456,6 @@
        "==",
        "+y"
       ]
-     },
-     "xfail": {
-      "reason": "face-down guard still on in production",
-      "owner": "Rig path · V3"
      }
     }
    ]
@@ -7443,6 +7492,54 @@
       "clips": [
        ">=",
        5
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "boar_unwelded_gaps",
+   "task": "fec0161f",
+   "cost": 1,
+   "defect": "owner bug 2026-10-12 (#1935, the boar falls apart in the clips): the skin is computed on the welded mesh, but the weld splits (limb contact, hair | limb) gave copies of one position different weights; on an animal they ran along legs | neck / spine / tail, and the clips pulled the copies up to 28 % H apart (1659 vertices). Fix: the weld splits only on bipeds (limb_split=all brings them back for any plan).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "fec0161f.model.glb",
+     "params": {
+      "words": "stylized boar, a quadruped animal",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       25
+      ]
+     }
+    },
+    {
+     "id": "mt_gaps",
+     "kind": "dup_gaps",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "diverging_dups": [
+       "<=",
+       0
+      ],
+      "gap_max_pct_H": [
+       "<=",
+       0.5
       ]
      }
     }
