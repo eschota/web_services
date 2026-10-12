@@ -21,7 +21,7 @@ Updated: 2026-10-10 17:15 Asia/Novosibirsk (10:15 UTC). Owner-required persisten
 
 ## Координация агентов V3 (2026-10-10)
 
-- unity build: свободно (Blueprint r3 собран и выложен 22:45Z 11.10; следующая сборка — из HEAD MT main; RadialPulse WIP Codex в рабочем дереве на время сборки снимать или включать осознанно).
+- unity build: свободно (00:15Z 12.10: первый `tools/viewer_release.ps1` — `unity/test` → `v3-20261012-0636-c18878a` = MT `c18878a` (Blueprint r4 + viewer_saver), откат в `unity/.test-history.log`). Все следующие сборки вьювера — `tools/viewer_release.ps1 -Flip` (WebGL + exe + раскатка на ферму); RadialPulse WIP скрипт снимает сам (`-ExcludeWip`).
 
 - rig: **Serpent rig · V3** — 03:45Z: `mt/serpent.py` на проде (worm aaac7892 → 19 костей, 6 клипов); ханки в rig_first/fastrig рядом с Hands и Multi-limb; см. раздел «Serpent rig · V3» внизу.
 - restarts: **Renderfin resume · V3** — 19:35Z: рестарт autorig-storage/renderfin больше не теряет рендеры (resume под тем же id), ждать простоя НЕ нужно; см. раздел «Renderfin resume · V3» внизу.
@@ -2551,5 +2551,38 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 - **Сплит**: три вида начинаются правее колонки инструментов (64 px, полоса под ней — тёмно-синяя), панель больше не
   закрывает вид «спереди».
 
-- **Unity build lock (2026-10-12, Animation picker � V3):** building viewer_saver.exe (Windows player of the viewer) from the MT working tree; lock .autorig-build.lock held for this build only.
 
+
+### viewer_saver.exe и автоматический релиз вьювера (2026-10-12, Animation picker · V3)
+
+- **Почему у быка 1f769e08 не было текстур:** в исходном FBX только ссылки на JPEG с диска заказчика
+  (`E:unny farm game\…basecolor.JPEG`), сами картинки не загружены. `mt/autotex.glb_texture_facts` теперь считает
+  материал текстурированным, только если картинка реально в файле (bufferView / data:), — бык уходит в
+  `missing_files` / автотекстуринг. Вьювер и превью тут ни при чём.
+- **Один релиз — одна команда** (MT `tools/viewer_release.ps1 [-Flip] [-Note ..] [-NoWait]`, только под
+  `.autorig-build.lock`): WebGL (`ScenesV3Build.BuildPlayer`) и `viewer_saver.exe` (`SaverBuild.Build`) из одного
+  коммита; RadialPulse WIP (`-ExcludeWip`) на время сборки заменяется версией из HEAD и возвращается байт-в-байт.
+  Публикация: `unity/<tag>/` + `unity/<tag>/saver.json`; zip + sha256 в `/srv/autorig/data/viewer-saver/<tag>/`
+  (`/api/mt/saver/<tag>/viewer_saver-<tag>.zip`, `manifest.json`, общий `/api/mt/saver/manifest.json`); smoke,
+  `-Flip` → `unity/test` (откат — строка в `unity/.test-history.log`); `saver_prefetch` по джобе на каждый бокс; ждёт
+  раскатку и печатает тайминги JSON. Тег `v3-<yyyyMMdd-HHmm>-<sha>[w]` (`w` — правки в отслеживаемых файлах Unity).
+- **Бокс** (`gallery-poster/viewer_saver_box.py`, бандл farmjobs `preview`): `%LOCALAPPDATA%\AutoRigiewer-saver\<tag>`,
+  проверка sha256, распаковка во временную папку и rename, `current.txt` атомарно, держит текущую + 2 старые.
+- **Контракт `viewer_preview` (для SEO/previews):** джоба и команда прежние (`viewer_capture.py --url …/unity/test/…`).
+  `viewer_capture.py` сначала берёт `unity/<build>/saver.json` той сборки, что в URL: есть — ставит этот сейвер и
+  пишет `preview.mp4` + `poster.jpg` им (`meta.json`: `engine: viewer_saver`, `saver_tag`, `saver.{mesh_s,scene_s,
+  ready_s,record_s,encode_s}`); нет saver.json (сборка не через релиз-скрипт) или ошибка → прежний Chrome
+  (`meta.saver_fallback`). `AUTORIG_PREVIEW_ENGINE=chrome` в env джобы — только Chrome.
+- **exe:** `viewer_saver.exe -batchmode -logFile x.log --run <run> --out x.mp4 [--poster x.jpg] [--status s.json]
+  [--glb file|URL] [--clip Running] [--secs 7] [--fps 30] [--size 1080x1920] [--maxmb 8] [--scene auto|<id>|own]
+  [--quality ultra] [--timeout 240] [--ffmpeg path]`; коды 0 ok, 2 нет модели, 3 кодирование, 4 таймаут, 5 аргументы.
+  Offscreen: в -batchmode камера рендерится вручную в RenderTexture (`cam.Render`), окна нет.
+- **Версия на боксах:** `/srv/autorig/data/viewer-saver/boxes.json` (таймер `autorig-viewer-saver-collect.timer`,
+  2 мин) → `/api/fleet`: `boxes_array[].viewer_saver_object` (`current_string`, `versions_array`, `matches_live_bool`),
+  в текстовом виде `saver=<tag>`.
+- Исправлено попутно: nginx gzip на HEAD убирал Content-Length → `Net.Head` = 0 → «модели нет» (вьювер и сейвер);
+  MT отвечает на HEAD без X-Accel, `Net.Head` считает ответ без длины существующим.
+- **Первый релиз (00:15Z 12.10, `v3-20261012-0636-c18878a`):** WebGL 3:47, exe 42 с, zip 50 МБ, публикация 14 с;
+  боксы f12 10 с, f7 13 с, f1 15 с, f15 19 с, f2/f13 — когда освободится конвертер (раннер уступает ему). Превью exe:
+  бык f12 17,6 с, конь f1 25 с, 66bc778f f7 17,4 с (готово 6–10 с, запись 6–14 с, кодирование ≤ 1,7 с), джоба 23–31 с.
+  Известное: на сцене neon-rooftop облёт иногда проходит сквозь декор (66bc778f).

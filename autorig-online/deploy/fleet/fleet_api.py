@@ -1321,6 +1321,18 @@ def compose(col: Collector) -> Dict[str, Any]:
                 "running": fr.get("running") or [], "done": fr.get("done"), "failed": fr.get("failed"),
                 "state": ("working" if fr.get("running") else ("yielding" if fr.get("busy") else "waiting"))
                 if (fr.get("seen_age_seconds") or 9999) < 120 else "offline"}
+    # viewer_saver.exe on the box (2026-10-12): the version it runs, from gallery-poster/viewer_saver_box.py --collect
+    try:
+        saver = json.loads(open("/srv/autorig/data/viewer-saver/boxes.json", encoding="utf-8").read())
+    except (OSError, ValueError):
+        saver = {}
+    for b in boxes_out:
+        sv = (saver.get("boxes") or {}).get(b["id"])
+        if sv:
+            b["viewer_saver_object"] = dict(sv, latest_tag_string=saver.get("latest_tag") or "",
+                                            live_viewer_saver_tag_string=saver.get("live_viewer_saver_tag") or "",
+                                            matches_live_bool=bool(sv.get("current_string"))
+                                            and sv.get("current_string") == saver.get("live_viewer_saver_tag"))
     in_fleet = [b for b in boxes_out if b["in_fleet_bool"]]
     converters = [b for b in in_fleet if "converter" in (b.get("services_object") or {})]
     healthy_full = [b["id"] for b in converters
@@ -1456,6 +1468,8 @@ def render_text(snapshot: Dict[str, Any]) -> str:
         fr = (box.get("services_object") or {}).get("farm_runner")
         if fr:
             disks += f"  farmjobs={fr.get('state')}" + (f"({fr.get('yielding_to')})" if fr.get("yielding_to") else "")
+        if box.get("viewer_saver_object"):
+            disks += f"  saver={box['viewer_saver_object'].get('current_string') or '-'}"
         busy = "; ".join(
             f"{b.get('service')}:{b.get('what')}" + (f"[{b.get('stage')}]" if b.get("stage") else "")
             for b in box.get("busy_with_array") or [])

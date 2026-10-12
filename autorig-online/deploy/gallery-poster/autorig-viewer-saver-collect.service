@@ -1,0 +1,10 @@
+[Unit]
+Description=AutoRig viewer_saver per-box versions -> /srv/autorig/data/viewer-saver/boxes.json (read by /api/fleet)
+
+[Service]
+Type=oneshot
+User=autorig
+Group=autorig
+Nice=19
+ExecStart=/usr/bin/python3 /srv/autorig/gallery-poster/viewer_saver_box.py --collect
+StandardOutput=null

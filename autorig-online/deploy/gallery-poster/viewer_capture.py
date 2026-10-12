@@ -10,6 +10,8 @@ MediaRecorder), then encodes 1080x1920 H.264 (+faststart, size-capped for Telegr
 
     python viewer_capture.py --url <viewer url> [--seconds 7] [--fps 30] [--max-mb 8]
 Writes preview.mp4, poster.jpg, meta.json. Standard library + Playwright (installed on first use with pip --user).
+2026-10-12: viewer_saver.exe (viewer_saver_box.py, same bundle) renders first when the viewer build has a saver;
+this Chrome path is the fallback (meta.json "engine": "viewer_saver" or "saver_fallback").
 """
 import argparse
 import base64
@@ -165,6 +167,25 @@ def main():
     ap.add_argument("--settle", type=float, default=8.0, help="seconds after the model loads, for scene and effects")
     a = ap.parse_args()
     meta = {"url": a.url, "started": time.time()}
+    # viewer_saver.exe first (owner 2026-10-12: full graphics, the Windows build released with this WebGL viewer,
+    # offscreen); Chrome below is the fallback. AUTORIG_PREVIEW_ENGINE=chrome skips the saver.
+    if os.environ.get("AUTORIG_PREVIEW_ENGINE", "").lower() != "chrome":
+        try:
+            import viewer_saver_box
+            sm = viewer_saver_box.capture(a.url, a.seconds, a.fps, a.max_mb)
+        except Exception as exc:  # noqa: BLE001 - the browser capture still runs
+            sm = {"saver_error": f"{type(exc).__name__}: {exc}"[:300]}
+        if sm and sm.get("ok"):
+            sm.update(started=meta["started"], bytes=os.path.getsize("preview.mp4"),
+                      seconds_total=round(time.time() - meta["started"], 1))
+            with open("meta.json", "w") as f:
+                json.dump(sm, f, indent=1)
+            print(json.dumps(sm)[:800])
+            return
+        meta["saver_fallback"] = sm
+        for f in ("preview.mp4", "poster.jpg"):
+            if os.path.exists(f):
+                os.remove(f)
     ensure_playwright()
     from playwright.sync_api import sync_playwright
 
