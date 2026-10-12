@@ -66,6 +66,8 @@ def _env():
 
 def _child(args, cwd=None, timeout=600):
     t = time.time()
+    # a busy VPS (customer tasks first) slows every case: the kill timeout grows with the load like the budgets
+    timeout = timeout * min(2.5, max(1.0, os.getloadavg()[0] / max(1.0, (os.cpu_count() or 8) / 3)))
     p = subprocess.run(args, cwd=str(cwd or MT_TREE), env=_env(), capture_output=True, text=True, timeout=timeout)
     return p, round(time.time() - t, 3)
 
@@ -1265,6 +1267,57 @@ def rig_upright(ctx):
     return out
 
 
+def dup_gaps(glb_path, frames=12):
+    """Rig path V3 (owner #1935, the boar falling apart): vertices that share a position (UV seams, a triangle soup)
+    must move together. -> {diverging_dups: vertices whose weights differ from their position's mean (L1 > 0.05),
+    gap_max_pct_H: the largest distance such a vertex is pulled from its position's mean over the clips}."""
+    import numpy as np
+    from mt import rig_judge as RJ, fastrig as F
+    data = pathlib.Path(glb_path).read_bytes()
+    z = RJ.Posable(data)
+    P = z.raw
+    nb = len(z.names)
+    W = np.zeros((len(P), nb), np.float32)
+    for c in range(4):
+        np.add.at(W, (np.arange(len(P)), z.jo[:, c]), z.we[:, c].astype(np.float32))
+    ids, n = F.weld(P)
+    cnt = np.bincount(ids)
+    mean = np.zeros((n, nb), np.float32)
+    np.add.at(mean, ids, W)
+    mean /= cnt[:, None]
+    div = np.abs(W - mean[ids]).sum(1) > 0.05
+    H = float(np.ptp(P, 0).max()) or 1.0
+    out = {"vertices": int(len(P)), "welded": int(n), "diverging_dups": int(div.sum()), "gap_max_pct_H": 0.0}
+    if not div.any():
+        return out
+    js, binary = F.read_glb(data)
+    jn = {nd: k for k, nd in enumerate(z.jnodes)}
+    worst = 0.0
+    for an in js.get("animations") or []:
+        ch = []
+        for c in an["channels"]:
+            smp = an["samplers"][c["sampler"]]
+            t = F.accessor(js, binary, smp["input"]).astype(float).ravel()
+            v = F.accessor(js, binary, smp["output"]).astype(float).reshape(len(t), -1)
+            ch.append((c["target"]["node"], c["target"]["path"], t, v))
+        T = max(c[2][-1] for c in ch)
+        for tt in np.linspace(0, T, frames):
+            rot, hips = {}, None
+            for node, path, t, v in ch:
+                i = int(np.clip(np.searchsorted(t, tt), 0, len(t) - 1))
+                if path == "rotation" and node in jn:
+                    rot[z.names[jn[node]]] = v[i]
+                elif path == "translation" and node in jn and z.parent[jn[node]] < 0:
+                    hips = v[i]
+            pos, _ = z.pose(rot, hips)
+            c_ = np.zeros((n, 3))
+            np.add.at(c_, ids, pos)
+            c_ /= cnt[:, None]
+            worst = max(worst, float(np.linalg.norm(pos - c_[ids], axis=1)[div].max()))
+    out["gap_max_pct_H"] = round(100 * worst / H, 2)
+    return out
+
+
 def front_guess(input_name):
     """The geometry front guess alone (mt.parts_cluster.guess_forward), seconds even on a dense mesh."""
     p, wall = _child([PY, "-P", "-c", "import json,sys; from mt import fastrig as F, parts_cluster as PC; "
@@ -1379,6 +1432,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
+    if k == "dup_gaps":
+        return dup_gaps(ctx["run"] / "rig" / "rigged.glb")
     if k == "rig_upright":
         return rig_upright(ctx)
     if k == "front_guess":

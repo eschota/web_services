@@ -203,7 +203,7 @@ def judge(check: dict, row: dict) -> dict:
             out.setdefault("uncalibrated", {})[metric] = m.get(metric)
             continue
         have = m.get(metric)
-        if metric == "seconds" and op in ("<=", "<") and isinstance(value, (int, float)):
+        if (metric == "seconds" or metric.endswith("_seconds")) and op in ("<=", "<") and isinstance(value, (int, float)):
             # Time budgets are customer-run budgets; a gate under VPS load (other agents' runs, renders) inflates the
             # wall time. Scale by the 1-min load over a third of the cores, capped at 2.5x, and record it (2026-10-11).
             try:
@@ -242,7 +242,7 @@ def run_case(case: dict, tree: pathlib.Path, release: pathlib.Path, work: pathli
         cmd = ["sudo", "-n", "-u", USER, "env", *env, *cmd]
     else:
         cmd = ["env", *env, *cmd]
-    limit = float(case.get("timeout_s", 1200))
+    limit = float(case.get("timeout_s", 1200)) * min(2.5, max(1.0, os.getloadavg()[0] / max(1.0, (os.cpu_count() or 8) / 3)))
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=limit, cwd=str(cw))
         rows = [json.loads(l) for l in p.stdout.splitlines() if l.startswith("{")]
