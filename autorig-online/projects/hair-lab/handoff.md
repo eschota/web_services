@@ -32,6 +32,8 @@ RealHair Unity Mono diagnostic built and ran80guides/560points/180frames from fr
 
 DEV6759 (`b8dd27ab36f6`) hybrid comparison and6760 (`159e7ab122bb`) actual3-second/180-frame physics clip delivered. Cursor still2285, no new direct replies at00:56UTC. Stable named workers completed these bounded steps; reuse them for follow-ups. Own-character job still queued by eligible-capacity policy, no duplicate.
 
+Publication checkpoint: AutoRig source `5818ef7f`; RealHair local `62e3cee40`, published via clean sparse worktree as `8821bd909`, then official inventory refresh `02b61a6fe`. Do not push divergent local AssetStore main. Public Markdown live readback returned200/no-cache and identical hashes; no service restart. This goal turn is **progress**, not completion: actual AutoRig tool/UI, accepted styles/materials/collisions and verified Store submission all remain open.
+
 - `hair_gpu_benchmark`: direct GLB Head-weight extraction on the same five real current rigs, preserving source primitive/triangle identity and comparing to the Blender reference. Goal: remove cold Blender overhead; do not substitute new synthetic inputs or fabricate parity.
 - `real_hair_core`: RealHair Runtime/Core and tools/core-tests only. Deterministic guide-to-card data/builder with finite/range/topology/UV/winding tests. No Unity launches, materials, shared manifests or Portal actions.
 - Root: RealHair product setup/reuse ledger, cross-repository contracts, handoffs, integration and evidence. Reuse named agents for follow-ups rather than duplicating ownership.
