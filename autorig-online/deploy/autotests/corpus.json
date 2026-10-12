@@ -626,6 +626,20 @@
    "what": "yellow blob character with fat stubby legs (shin radius 9.3 % H, leg 15 % H), upright T-pose, as uploaded",
    "sha256": "1e944fb0eb0a824bf9c7856b331679a30a348bacb913e75bc7ea44e6b74c86e9",
    "bytes": 8482088
+  },
+  "a982eb2f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/3b08433d38fc4bdb49c3/proj/model.glb",
+   "task": "a982eb2f",
+   "what": "green armoured quadruped (a dinosaur-like lizard) with a long tail lying back",
+   "sha256": "55e7bd2b6d06c97347f85a636ee10792d522cfae58c2a2b4b1cb57bc81f90482",
+   "bytes": 4701776
+  },
+  "48db2b25.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ead200604d8c21d1d3c1/proj/model.glb",
+   "task": "48db2b25",
+   "what": "cartoon monster on all fours, a spiked tail standing up behind",
+   "sha256": "c9da47548af4a5960c8cfa4afaae2b23b9f2065d16ce720039ae6b791a361462",
+   "bytes": 935388
   }
  },
  "profiles": {
@@ -6771,6 +6785,102 @@
       ]
      },
      "note": "2026-10-12 Rig path: arm abduction by the torso width at the hand height (limb_amplitude.abduction, armed by arm_clearance when limb collision flags a side): high 0.71 -> none, 716 s -> ~25-75 s"
+    }
+   ]
+  },
+  {
+   "id": "quad_tail_armoured",
+   "task": "a982eb2f",
+   "cost": 1,
+   "defect": "night census 2026-10-12 (the last 60 V3 tasks on today's engine): the top open class on quadrupeds was the tail. fit_quadruped put Tail..Tail_End on Euclidean distance shells over everything behind the hips (rump, hind thighs): chains of 85-141 % H that zig-zag 60-136 degrees; the tail bones tore the rump in the clips (qa.numeric_deformation + rig_stretch). Fix: mt/tail_trace.py follows the tail along the mesh (geodesic rings from the tip, centres = axis, ends where a ring widens into the body). a982eb2f/ccffe753: rig_check 4x 157 -> 0, numeric QA failed -> passed.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "a982eb2f.model.glb",
+     "params": {
+      "words": "green armored quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       5
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       100
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "quad_tail_monster",
+   "task": "48db2b25",
+   "cost": 1,
+   "defect": "night census 2026-10-12 (the last 60 V3 tasks on today's engine): the top open class on quadrupeds was the tail. fit_quadruped put Tail..Tail_End on Euclidean distance shells over everything behind the hips (rump, hind thighs): chains of 85-141 % H that zig-zag 60-136 degrees; the tail bones tore the rump in the clips (qa.numeric_deformation + rig_stretch). Fix: mt/tail_trace.py follows the tail along the mesh (geodesic rings from the tip, centres = axis, ends where a ring widens into the body). 48db2b25: rig_check 4x 501 -> 68.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "48db2b25.model.glb",
+     "params": {
+      "words": "cartoon monster quadruped",
+      "forward_axis": "-z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       25
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       150
+      ]
+     },
+     "xfail": {
+      "reason": "without Vision words the standing monster rigs as a biped (orient: two feet); with Vision quadruped the tail trace takes rig_check 4x 501 -> 68 (census 2026-10-12)",
+      "owner": "Rig path · V3"
+     }
     }
    ]
   }
