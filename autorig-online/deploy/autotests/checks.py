@@ -300,7 +300,12 @@ def bone_outside(path, rig_json):
     m = JV.Model(pathlib.Path(path), doc)
     rep = BC.check(m)
     foot = {b: v["outside"] for b, v in rep["bones"].items() if re.search(r"(Foot|Toe|Heel)", b) and v["outside"]}
+    # Rig classes · V3: the end bones (Head -> HeadTop_End, Toe, Tail tips) the fit pulls into the mesh
+    ends = {str(b["parent"]) for b in doc.get("bones") or [] if str(b.get("name", "")).endswith("_End") and b.get("parent")}
     return {"samples": rep["samples"], "outside_samples": rep["outside_samples"],
+            "head_outside_samples": int(rep["bones"].get("Head", {}).get("outside") or 0),
+            "end_outside_samples": int(sum(v["outside"] for b, v in rep["bones"].items() if b in ends)),
+            "outside_fraction": rep["outside_fraction"],
             "bones_outside": rep["bones_outside"][:16], "foot_outside_samples": int(sum(foot.values())),
             "foot_bones_outside": sorted(foot), "seconds": rep.get("seconds")}
 
@@ -820,7 +825,7 @@ def mt_arm_clearance(ctx):
     return out
 
 
-def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False):
+def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body=""):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
     (proj/forward.json), for a model whose symmetry alone cannot tell it (the potato 583622f3: guess 0.32)."""
@@ -830,6 +835,9 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False):
     if forward_axis:                                     # as the conveyor's projections record it (rig_first then
         (run / "proj").mkdir(parents=True, exist_ok=True)   # skips its own guess)
         (run / "proj" / "manifest.json").write_text(json.dumps({"forward_axis": forward_axis, "source": "autotests"}))
+    if body:                                             # Rig classes · V3: Vision's body field, as the conveyor's
+        (run / "phases.json").write_text(json.dumps({"phases": [{"id": "classify", "result": {   # classify phase
+            "what": words, "body": body, "props": ""}}]}))                                     # records it
     if v3_bound:                                         # Multi-limb rig · V3: like a hash-bound V3 source, the up
         (run / "v3").mkdir(parents=True, exist_ok=True)     # stage of rig_first leaves the model as uploaded
         (run / "v3" / "source.json").write_text(json.dumps({"schema": "autorig.v3.session-source/1", "source": "autotests"}))
@@ -1360,6 +1368,32 @@ def helper_geometry(ctx, inputs=None):
             "kept": kept}
 
 
+def monster_rig(ctx):
+    """«Monster rig · V3» (mt/monster.py, 2026-10-13, task 35356012 «elongated humanoid creature»): the monster verdict of
+    this case's MT run, the leg type (crouched / digitigrade / stumpy / long_thin / plantigrade), the pinned joints,
+    the clip policy, the head-appendage chains (mt/multilimb.py) and the rig_check stretch."""
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    mn = rig.get("monster") or {}
+    ml = rig.get("multilimb") or {}
+    st = {k: v for k, v in ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items() if isinstance(v, dict)}
+    legs = mn.get("legs") or []
+    names = {b["name"] for b in rig.get("bones") or []}
+    return {"use": int(bool(mn.get("use"))), "why": mn.get("why"), "leg_type": mn.get("leg_type") or "none",
+            "gait": mn.get("gait"), "policy": rig.get("retarget_reference_policy") or "aligned_reference",
+            "pinned": len(mn.get("pinned") or []), "arms_traced": sum(1 for a in mn.get("arms") or [] if a.get("source") == "trace"),
+            "knee_bend_min": min([float(l.get("knee_bend_deg") or 0) for l in legs] or [0.0]),
+            "trunk_tilt_deg": mn.get("trunk_tilt_deg"),
+            "appendage_chains": sum(1 for c in ml.get("chains") or [] if c.get("appendage")),
+            "crest_bones": sum(1 for n in names if re.fullmatch(r"(Left|Right)Crest\d*", n)),
+            "bones": len(names), "clips": len(rig.get("clips") or []),
+            "unweighted": (rig.get("checks") or {}).get("unweighted_vertices"),
+            "joints_outside": len((rig.get("checks") or {}).get("joints_outside_mesh") or []),
+            "fit_ok": int(bool((rig.get("fit_check") or {}).get("ok"))),
+            "stretch_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
+            "detect_s": mn.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1374,11 +1408,14 @@ def run_check(check: dict, ctx: dict) -> dict:
     elif inp:
         target = _input(inp)
     if k == "mt_rig_first":
-        return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False))
+        return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False),
+                            a.get("body", ""))
     if k == "mt_fast_analysis":
         return mt_fast_analysis(ctx)
     if k == "hand_rig":
         return hand_rig(ctx)
+    if k == "monster_rig":
+        return monster_rig(ctx)
     if k == "multilimb_rig":
         return multilimb_rig(ctx)
     if k == "hand_detect":

@@ -717,6 +717,27 @@
    "what": "horse (Tripo, 22 893 verts) inside a stray Blender default Icosphere (240 verts, DefaultMaterial) that encloses it: Horse.fbx -> assimp GLB, owner bug #1953",
    "sha256": "91d6f62fd71829a70253965f3d9b3461ce0bffc50e8fb6efdafaf4ae20dd0e96",
    "bytes": 972092
+  },
+  "23f225fb.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/21cf3386197b7238b223/proj/model.glb",
+   "task": "23f225fb-8483-48a1-99fb-a97cf8663596",
+   "what": "stylized furry monster, T-pose, Vision body biped (V3 run 21cf3386)",
+   "sha256": "7e1bb4528e1dff7bdef5bd91497b8422936fde3e55bf52cbd4d82a7f91feaacf",
+   "bytes": 3720568
+  },
+  "6db418b9.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/6c3ab65c04e5a4410e0d/proj/model.glb",
+   "task": "6db418b9-efd3-449a-8691-3c50daf1e07e",
+   "what": "chibi rabbit with tall ears and a huge head (V3 run 6c3ab65c)",
+   "sha256": "8b8e01402b739ed291b897565c25057009b79c2585c843d93fbd22ab3f4cd775",
+   "bytes": 96712
+  },
+  "35356012.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b3423278918e78d9aebd/proj/model.glb",
+   "task": "35356012",
+   "what": "SCP-178-1: a crouched elongated humanoid creature, long arms to the knees, two long ear tentacles (the V3 run's model.glb, OBJ upload normalized)",
+   "sha256": "56c764108ab56393a48b6d8cfbfa3b3c6c7306c7af43107b50298747fd6ce204",
+   "bytes": 1255708
   }
  },
  "profiles": {
@@ -7643,6 +7664,307 @@
      }
     }
    ]
+  },
+  {
+   "id": "serpent_misplan_monster",
+   "task": "23f225fb-8483-48a1-99fb-a97cf8663596",
+   "cost": 2,
+   "defect": "Rig classes V3 (2026-10-12, bone_outside on 23f225fb / 12fd0fe4 / 6747d947 / e6b41b9b): a T-posed furry monster that Vision called a biped read as one tube to the serpent detector (hand-to-hand elongation 6.5, stubby legs 5.7 ring radii off the curve); it got an 18-bone serpent chain along its arms, 85 bone samples outside. Fix: serpent.detect takes the classifier's body field (phases.json classify / analysis/category.json) like body words",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "23f225fb.model.glb",
+     "params": {
+      "words": "stylized furry monster",
+      "body": "biped"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "outside_samples": [
+       "<=",
+       12
+      ]
+     },
+     "note": "farm 2026-10-12: serpent rig 85 samples outside -> biped 1"
+    }
+   ]
+  },
+  {
+   "id": "head_end_ears",
+   "task": "6db418b9-efd3-449a-8691-3c50daf1e07e",
+   "cost": 2,
+   "defect": "Rig classes V3 (2026-10-12, bone_outside: the Head bone left the mesh on 29 of 44 measured tasks): HeadTop_End sat at the bounding-box top, between the rabbit's ears (13 Head samples outside); and the arm clearance of the first rig was lost when the joint judge reinstalled the rig (limb_in_body high/high, 100 % of the arm in the head while waving). Fix: fastrig.pull_in_ends (options end_pull_in / end_margin_pct_H / end_min_share), arm_clearance.schedule after every rebuild",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6db418b9.model.glb",
+     "params": {
+      "words": "stylized rabbit character",
+      "body": "biped"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "head_outside_samples": [
+       "==",
+       0
+      ],
+      "end_outside_samples": [
+       "<=",
+       2
+      ]
+     },
+     "note": "farm 2026-10-12: Head 13 samples outside -> 0 (HeadTop_End pulled in 22 % H)"
+    },
+    {
+     "id": "mt_cleared",
+     "kind": "mt_arm_clearance",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "thresholds": {
+      "severity_rank": [
+       "<=",
+       1
+      ],
+      "min_arm_vertices": [
+       ">=",
+       1
+      ]
+     },
+     "note": "farm 2026-10-12 on the live rig: high/high (100 %, 13.9 % H) -> none/none"
+    }
+   ]
+  },
+  {
+   "id": "monster_crouched_scp",
+   "task": "35356012",
+   "cost": 2,
+   "defect": "owner 2026-10-13 («такие ноги типовые для монстров»): task 35356012 (Vision «elongated humanoid creature») failed numeric QA and triaged arms_unbound.right: the biped fit put straight-leg joints on crouched legs, the long bent arms fell back to proportions (one forearm without vertices, a hand 19 % H off) and the library clips straightened the knees. Monster rig · V3 (mt/monster.py): the limbs traced on the voxel solid with thick-cell paths, legs typed by their bends (crouched: knee 54-59 deg), the traced arm and leg chains pinned as the rest pose (no T-turn), the clips bind-relative (the crouch stays under the motion), the ear tentacles as head-appendage chains ({Side}Crest..Crest4, mt/multilimb.py)",
+   "checks": [
+    {
+     "id": "mt_rig_control",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "66ba97ba.upload.glb",
+     "params": {
+      "words": "Female warrior with sword and armor"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_monster_control",
+     "kind": "monster_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "role": "control",
+     "thresholds": {
+      "use": [
+       "==",
+       0
+      ],
+      "crest_bones": [
+       "==",
+       0
+      ],
+      "policy": [
+       "==",
+       "aligned_reference"
+      ]
+     },
+     "xfail": {
+      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Fable · monsters/animals"
+     }
+    },
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "35356012.model.glb",
+     "params": {
+      "words": "elongated humanoid creature",
+      "forward_axis": "+z",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       30
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ]
+     },
+     "xfail": {
+      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Fable · monsters/animals"
+     }
+    },
+    {
+     "id": "mt_monster",
+     "kind": "monster_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "use": [
+       "==",
+       1
+      ],
+      "leg_type": [
+       "==",
+       "crouched"
+      ],
+      "policy": [
+       "==",
+       "bind_relative"
+      ],
+      "pinned": [
+       ">=",
+       8
+      ],
+      "arms_traced": [
+       ">=",
+       1
+      ],
+      "knee_bend_min": [
+       ">=",
+       25
+      ],
+      "appendage_chains": [
+       ">=",
+       2
+      ],
+      "crest_bones": [
+       ">=",
+       8
+      ],
+      "unweighted": [
+       "==",
+       0
+      ],
+      "stretch_4x": [
+       "<=",
+       900
+      ]
+     },
+     "xfail": {
+      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Fable · monsters/animals"
+     }
+    },
+    {
+     "id": "mt_qa",
+     "kind": "mt_numeric_qa",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "clips": [
+       "Idle",
+       "Walking"
+      ],
+      "cap": 2000
+     },
+     "thresholds": {
+      "clips_passed": [
+       ">=",
+       2
+      ]
+     },
+     "xfail": {
+      "reason": "mt/monster.py is not deployed yet (its gate run is pending); flips to pass in the deploy that installs it",
+      "owner": "Fable · monsters/animals"
+     }
+    }
+   ],
+   "note": "control first (checks share one run dir). Local 2026-10-13 (p6 tree): 35 bones, numeric QA 5/8 (Idle, Walking, Waving1, Hip Hop, Punching pass; Running / Jump / Look Around 'extent' on the head|spine seam: the Head joint of a crouched trunk), limb_collision high (the hands beside the knees). Known gaps: the right arm fused with its knee in the voxel solid (fastrig's fit stands); the Head / Neck joints of a tilted trunk; a monster gait of its own (the crouch rides the Mixamo clips bind-relative)."
   }
  ]
 }
