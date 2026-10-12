@@ -240,6 +240,11 @@ def run_case(case: dict, tree: pathlib.Path, release: pathlib.Path, work: pathli
     cmd = ["nice", "-n", "10", PY, "-P", str(HERE / "checks.py"), "--case", json.dumps(doc), "--work", str(cw)]
     if os.geteuid() == 0:
         cmd = ["sudo", "-n", "-u", USER, "env", *env, *cmd]
+        # one case may never take the box down: a memory-capped scope, the OOM kill stays inside it (2026-10-13)
+        mem = os.environ.get("AUTORIG_GATE_CASE_MEM", "8G")
+        if mem and pathlib.Path("/usr/bin/systemd-run").exists():
+            cmd = ["/usr/bin/systemd-run", "--scope", "--quiet", "--collect", "-p", f"MemoryMax={mem}",
+                   "-p", "MemorySwapMax=0", *cmd]
     else:
         cmd = ["env", *env, *cmd]
     limit = float(case.get("timeout_s", 1200)) * min(2.5, max(1.0, os.getloadavg()[0] / max(1.0, (os.cpu_count() or 8) / 3)))
@@ -625,6 +630,15 @@ def main() -> int:
                 if _ == 0:
                     print(f"gate: waiting for {len(busy)} leftover case processes of the previous gate", flush=True)
                 _t.sleep(10)
+            # customer tasks first (owner 2026-10-11): a gate starts only when the VPS is not overloaded; on
+            # 2026-10-12 17:10 four gates plus customer runs drove the load to 335 and OOM took the site down
+            cap = float(os.environ.get("AUTORIG_GATE_MAX_LOAD", str(os.cpu_count() or 8)))
+            for _ in range(180):
+                if os.getloadavg()[0] <= cap:
+                    break
+                if _ == 0:
+                    print(f"gate: VPS load {os.getloadavg()[0]:.0f} > {cap:.0f}; waiting (customer tasks first)", flush=True)
+                _t.sleep(20)
     return {"sync": cmd_sync, "gate": cmd_gate, "mt-deploy": cmd_mt_deploy, "artifact": cmd_artifact,
             "card": cmd_card}[args.cmd](args)
 
