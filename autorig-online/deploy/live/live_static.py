@@ -183,6 +183,11 @@ def promote(name: str | None = None) -> dict:
             repoint(staged)
             journal("promote", release=staged.name, previous=previous.name, files=promoted)
             removed = gc()
+            try:        # owner 2026-10-12: keep only the active release + one rollback (never fails the promote)
+                subprocess.run(["python3", "/srv/autorig/fleet/release_sweep.py", "releases"], timeout=300, env={**os.environ, "SWEEP_KEEP": previous.name},
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:                                                  # noqa: BLE001
+                pass
             return {"promoted": promoted, "release": str(staged), "previous": str(previous), "overlay_cleared": removed}
         die("current kept moving; overlay left in place, run promote again")
     return {}

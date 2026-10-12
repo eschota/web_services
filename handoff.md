@@ -2600,3 +2600,5 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   боксы f12 10 с, f7 13 с, f1 15 с, f15 19 с, f2/f13 — когда освободится конвертер (раннер уступает ему). Превью exe:
   бык f12 17,6 с, конь f1 25 с, 66bc778f f7 17,4 с (готово 6–10 с, запись 6–14 с, кодирование ≤ 1,7 с), джоба 23–31 с.
   Известное: на сцене neon-rooftop облёт иногда проходит сквозь декор (66bc778f).
+
+- **Releases and copies · Fleet V3 (2026-10-12)**: `deploy/fleet/release_sweep.py` keeps only the active release + ONE rollback (and anything a running process uses): /srv/autorig/releases (542 -> 4 dirs), unity builds (test target + its previous), mt.prev (last 2 per file), audits/*/stage* (>24 h). Hooked into `live_static.py promote` and the 30-min `autorig-vps-cleanup.timer`; log `/var/log/autorig-release-sweep.log`. Backend release flow: run `python3 /srv/autorig/fleet/release_sweep.py releases` after repointing `current`. **CRITICAL DEV alert** `task_flow_alert.py` (timer every 5 min): no new task for 3 h (hourly repeat, probable cause attached) and >= 5 5xx on /api/task/create in 10 min.

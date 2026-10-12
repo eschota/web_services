@@ -1,0 +1,6 @@
+[Unit]
+Description=AutoRig task-flow CRITICAL alerts (no new task for 3 h, /api/task/create 5xx)
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/bin/python3 /srv/autorig/fleet/task_flow_alert.py
