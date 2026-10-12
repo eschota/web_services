@@ -710,6 +710,13 @@
    "what": "stylized boar, a triangle soup (16446 verts -> 5222 welded, 3247 raw islands)",
    "sha256": "3d102fb7ea3083b61aede3734ccedb7943042237cf98543ccfe07a7e1b598fa9",
    "bytes": 665340
+  },
+  "31cc3ff3.upload.glb": {
+   "source": "/srv/autorig/data/var/uploads/380d739d-6790-4bb3-9408-4f1756b04f66/Horse.v3.glb",
+   "task": "31cc3ff3-1526-41e2-bcf4-aaac56c38015",
+   "what": "horse (Tripo, 22 893 verts) inside a stray Blender default Icosphere (240 verts, DefaultMaterial) that encloses it: Horse.fbx -> assimp GLB, owner bug #1953",
+   "sha256": "91d6f62fd71829a70253965f3d9b3461ce0bffc50e8fb6efdafaf4ae20dd0e96",
+   "bytes": 972092
   }
  },
  "profiles": {
@@ -7540,6 +7547,90 @@
       "gap_max_pct_H": [
        "<=",
        0.5
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "horse_helper_icosphere",
+   "task": "31cc3ff3-1526-41e2-bcf4-aaac56c38015",
+   "cost": 1,
+   "defect": "owner bug #1953 (task 31cc3ff3, run 2a45ac312582fda91e35): Horse.fbx carries a stray Blender default Icosphere (240 verts, DefaultMaterial) that encloses the 22 893-vertex horse; Vision saw only the sphere ('abstract geometric sphere: object'), the rig got 1 root bone and 0 clips, autotex painted the sphere. mt/helper_geometry.py leaves such helper meshes out of the working model before projections, Vision, rig and autotex; the customer's source keeps them",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_quadruped_rig",
+     "paths": [
+      "mt"
+     ],
+     "input": "31cc3ff3.upload.glb",
+     "params": {
+      "what": "white horse",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "forward_axis_along_body": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "helper_excluded",
+     "kind": "helper_geometry",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "helpers_excluded": [
+       "==",
+       1
+      ],
+      "meshes_rigged": [
+       "==",
+       1
+      ],
+      "source_kept": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "props_not_helpers",
+     "kind": "helper_geometry",
+     "paths": [
+      "mt"
+     ],
+     "params": {
+      "inputs": [
+       "66ba97ba.upload.glb",
+       "9fb7d4d9.model.glb",
+       "9a34e8c0.upload.glb",
+       "d1522b45.upload.glb",
+       "cff978e0.model.glb",
+       "a2ec968b.model.glb",
+       "a742491a.upload.glb"
+      ]
+     },
+     "thresholds": {
+      "helpers_found": [
+       "==",
+       0
       ]
      }
     }

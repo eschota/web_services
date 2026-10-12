@@ -1329,6 +1329,37 @@ def front_guess(input_name):
     return {"forward_axis": out.get("forward_axis"), "source": out.get("source"), "seconds": wall}
 
 
+def helper_geometry(ctx, inputs=None):
+    """Helper geometry · V3 (owner bug #1953, task 31cc3ff3, a stray Icosphere around the horse): with `inputs`, the
+    detector (mt.helper_geometry.detect) on each corpus file (props, bases: none must be found); without, what the
+    case's mt_rig step left out of its working model (proj/helpers.json) and the meshes the rig was built on."""
+    if not (MT_TREE / "mt" / "helper_geometry.py").is_file():
+        return {"pending": True, "why": "mt/helper_geometry.py is not in the tree under test"}
+    if inputs:
+        code = ("import json, sys; from mt import helper_geometry as H; "
+                "print(json.dumps({n: [h['name'] for h in H.detect(open(f, 'rb').read())['helpers']] "
+                "for n, f in zip(sys.argv[1::2], sys.argv[2::2])}))")
+        args = [x for n in inputs for x in (n, str(_input(n)))]
+        p, wall = _child([PY, "-P", "-c", code, *args], timeout=300)
+        if p.returncode != 0:
+            raise RuntimeError(f"helper_geometry exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+        found = json.loads(p.stdout.strip().splitlines()[-1])
+        return {"inputs": len(inputs), "helpers_found": sum(len(v) for v in found.values()),
+                "found": {k: v for k, v in found.items() if v}, "seconds": wall}
+    run = ctx.get("run")
+    if run is None:
+        raise RuntimeError("needs the mt_rig step of this case")
+    rec = json.loads((run / "proj" / "helpers.json").read_text()) if (run / "proj" / "helpers.json").is_file() else {}
+    from mt import fastrig as F
+    src = F.Source((run / "proj" / "model.glb").read_bytes())
+    kept = [str(src.js["nodes"][i["node"]].get("name") or "") for i in src.instances]
+    helpers = rec.get("helpers") or []
+    return {"helpers_found": len(helpers), "helpers_excluded": len(helpers) if rec.get("applied") else 0,
+            "names": [h.get("name") for h in helpers], "kinds": [h.get("kind") for h in helpers],
+            "source_kept": int((run / "proj" / "model_source.glb").is_file()), "meshes_rigged": len(kept),
+            "kept": kept}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1396,6 +1427,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return pose_stabilization(ctx)
     if k == "mt_quadruped_rig":
         return mt_quadruped_rig(ctx, inp, a.get("what", ""), a.get("forward_axis", "+z"))
+    if k == "helper_geometry":
+        return helper_geometry(ctx, a.get("inputs"))
     if k == "viewer_opens":
         return viewer_opens(target)
     if k == "quadruped_legs":
