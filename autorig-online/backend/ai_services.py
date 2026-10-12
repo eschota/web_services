@@ -135,6 +135,18 @@ SERVICES: List[Dict[str, object]] = [
         "outputs": [{"type": IMAGE, "field": "image_url_string", "title": "Character keyframe"}],
     },
     {
+        "id": "avatar_from_image", "title": "Create Avatar from image", "path": "/avatars",
+        "api": "/api/ai/avatar-from-image", "status": "live", "slow": True,
+        "summary": "Analyze an owner-owned image and save a reusable private Avatar profile.",
+        "inputs": [
+            {"type": IMAGE, "field": "image", "required": True,
+             "title": "Imported character image"},
+        ],
+        "outputs": [
+            {"type": AVATAR, "field": "avatar_string", "title": "Saved Avatar"},
+        ],
+    },
+    {
         # One picture or one video in, a saved Avatar v2 out, with every view
         # it made on its own socket so each can be wired on (ai_avatar_build).
         "id": "avatar_build", "title": "Avatar builder", "path": "/avatars",
@@ -195,10 +207,14 @@ SERVICES: List[Dict[str, object]] = [
             # substitutes for it — the service turns the clip into a picture
             # first — so it is offered as the alternative, not as a second
             # thing the node also needs.
+            # One socket for the thing to look at. A clip wired here is sent
+            # as the clip it is; the service turns it into a picture itself.
             {"type": IMAGE, "field": "image", "required": True,
-             "title": "Image to look at"},
+             "title": "Photo or video", "also_accepts": [VIDEO]},
+            # The separate video socket it replaces. Kept so saved graphs that
+            # wire it by name keep working, and hidden until one does.
             {"type": VIDEO, "field": "video_url", "required": False,
-             "title": "Video to watch instead"},
+             "title": "Video (older graphs)", "hide_when_empty": True},
             # Not required as a wire: the question is usually a fixed sentence,
             # and needing a whole node to hold it was the commonest way to end
             # up submitting a request with no prompt at all.
@@ -241,7 +257,10 @@ SERVICES: List[Dict[str, object]] = [
         "summary": "Generate a picture from a prompt, optionally guided by a reference image.",
         "status": "live",
         "inputs": [
-            {"type": TEXT, "field": "prompt", "required": True,
+            # Not required as a wire: the prompt can be typed on the node, the
+            # same way vision and text take theirs. Required here meant a node
+            # given only a reference picture could not run at all.
+            {"type": TEXT, "field": "prompt", "required": False,
              "title": "What to draw"},
             {"type": IMAGE, "field": "image", "required": False,
              "title": "Reference image", "ref_index": 1, "also_accepts": [VIDEO]},
@@ -493,6 +512,10 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          ],
          "help": "The wider region is slower and rewrites more of the picture"},
     ],
+    "avatar_from_image": [
+        {"name": "display_name", "title": "Name (optional)", "type": "text",
+         "default": "", "help": "Leave blank for a neutral descriptive name from Vision"},
+    ],
     "avatar_build": [
         {"name": "outfit", "title": "Outfit", "type": "text", "default": "",
          "help": "Blank keeps what the source wears"},
@@ -586,6 +609,9 @@ PARAMS: Dict[str, List[Dict[str, object]]] = {
          "help": "0 picks a budget to suit the model"},
     ],
     "image": [
+        # Typed on the node when nothing is wired in; a wired prompt wins.
+        {"name": "prompt", "title": "What to draw", "type": "textarea",
+         "default": "", "help": "Leave empty if a prompt is wired in"},
         {"name": "control_strength", "title": "Control strength", "type": "range", "min": 0, "max": 2, "step": 0.05, "default": 0.8},
         {"name": "control_start", "title": "Control start", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 0.0},
         {"name": "control_end", "title": "Control end", "type": "range", "min": 0, "max": 1, "step": 0.05, "default": 1.0},

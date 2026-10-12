@@ -9,6 +9,8 @@ install -m 0644 "$incoming/server.py" "$code/server.py"
 install -m 0644 "$incoming/schema.json" "$code/schema.json"
 install -m 0644 "$incoming/graphics-schema.json" "$code/graphics-schema.json"
 install -m 0644 "$incoming/test_store.py" "$code/test_store.py"
+# Optional developer publish token for official level documents (see README, "Shared level documents").
+if [ -f "$incoming/level-write-token" ]; then install -m 0600 -o www-data -g www-data "$incoming/level-write-token" "$base/data/level-write-token"; rm -f "$incoming/level-write-token"; fi
 python3 "$code/test_store.py"
 install -m 0644 "$incoming/gravityhouse-settings.service" /etc/systemd/system/gravityhouse-settings.service
 systemctl daemon-reload

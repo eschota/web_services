@@ -58,8 +58,6 @@ from config import (
     GUMROAD_PRODUCT_CREDITS,
     BLENDER_PLUGIN_AB_VARIANTS,
     AUTORIG_DONATION_PRODUCT_KEYS,
-    AUTORIG_SUBSCRIPTION_PRODUCT_KEYS,
-    AUTORIG_SUBSCRIPTION_PRICE_USD,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
     AUTORIG_CRYPTO_TIERS,
@@ -230,7 +228,6 @@ import httpx
 
 from ai_fleet import router as ai_fleet_router
 from ai_graph import router as ai_graph_router
-from ai_video_tools import router as ai_video_tools_router
 from ai_controlnet_api import router as ai_controlnet_router
 from ai_model_catalogue import router as ai_model_catalogue_router
 from ai_services import router as ai_services_router
@@ -650,7 +647,6 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
-                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -736,7 +732,6 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
-                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -933,8 +928,6 @@ async def background_task_updater():
                 # a generation task has no worker progress to go stale on;
                 # its own pump owns the lifecycle until the mesh exists
                 Task.pipeline_kind != "generate",
-                # V3 rows belong to the durable V3 runtime (v3_runtime_mount)
-                Task.pipeline_kind != "v3",
             )
         )
         processing_tasks = result.scalars().all()
@@ -1198,43 +1191,6 @@ async def lifespan(app: FastAPI):
     global background_task_running
     
     # Startup
-    # Owner rule 2026-10-11 (replaces the 2026-09-27 wipe): a site restart
-    # never loses render work. Renderfin keeps its queue; the start only asks
-    # it to bring back what an older wipe cancelled moments ago.
-    # AUTORIG_RESTART_POLICY=wipe brings the old wipe back.
-    if os.getenv("AUTORIG_RESTART_POLICY", "resume").strip().lower() != "wipe":
-        async def _resume_render_queue_on_start():
-            try:
-                import ai_vision_api
-                async with worker_http_client() as client:
-                    response = await client.post(
-                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/resume", timeout=60.0)
-                data = response.json()
-                print(f"[Startup] render queue kept (restart resume): revived "
-                      f"{data.get('revived_int')} job(s) a restart had cancelled")
-            except Exception as exc:
-                print(f"[Startup] render queue resume skipped: {exc}")
-        asyncio.create_task(_resume_render_queue_on_start())
-    elif os.getenv("AUTORIG_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", ""):
-        async def _wipe_render_queue_on_start():
-            try:
-                import ai_vision_api
-                async with worker_http_client() as client:
-                    response = await client.post(
-                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/reset",
-                        params={"spare_non_graph": 1, "reason": "cancelled: server restarted — press Render again"}, timeout=120.0)
-                data = response.json()
-                print(f"[Startup] render queue wiped: {data.get('cancelled_queued_int')} queued, "
-                      f"{data.get('cancelled_running_int')} running; boxes {data.get('boxes_object')}")
-            except Exception as exc:
-                print(f"[Startup] render queue wipe skipped: {exc}")
-        asyncio.create_task(_wipe_render_queue_on_start())
-    # Deferred Civitai posting (2026-09-30): the queue drains with no tab open.
-    try:
-        import ai_civitai_post
-        ai_civitai_post.start_schedule_loop()
-    except Exception as exc:
-        print(f"[Startup] civitai schedule loop not started: {exc}")
     if AUTORIG_MIGRATION_READ_ONLY:
         # The staging database is migrated once offline before this mode is
         # enabled. Runtime startup performs no schema or filesystem writes.
@@ -1281,15 +1237,6 @@ async def lifespan(app: FastAPI):
         _artifact_cache_retention_loop(),
         name="artifact-cache-retention",
     )
-    # V3 task runtime (2026-10-10): durable outbox -> Motion Transfer /api/mt/v3.
-    # Restart-safe: unsettled bindings are re-enqueued, lost projections replayed.
-    app.state.v3_runtime = None
-    try:
-        from v3_runtime_mount import start_v3_runtime
-
-        app.state.v3_runtime = await start_v3_runtime(AsyncSessionLocal)
-    except Exception as exc:
-        print(f"[V3] runtime not started: {type(exc).__name__}: {exc}")
     
     # Send Telegram startup notification (fire-and-forget)
     try:
@@ -1315,12 +1262,6 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     background_task_running = False
-    try:
-        from v3_runtime_mount import stop_v3_runtime
-
-        await stop_v3_runtime(getattr(app.state, "v3_runtime", None))
-    except Exception as exc:
-        print(f"[V3] runtime stop: {type(exc).__name__}: {exc}")
     background_worker = getattr(app.state, "background_worker", None)
     youtube_worker = getattr(app.state, "youtube_retry_worker", None)
     startup_disk_maintenance = getattr(app.state, "startup_disk_maintenance", None)
@@ -1373,26 +1314,16 @@ app = FastAPI(
 
 # Add GZip compression for responses > 500 bytes.
 # GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
-from task_owner import TaskOwnerMiddleware
-
-# Inside GZip, so it reads plain JSON: records who submitted each render task.
-app.add_middleware(TaskOwnerMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 # Civitai pages and CDN previews as media inputs (civitai_media.py).
 from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
 app.add_middleware(CivitaiMediaMiddleware)
 app.include_router(civitai_media_router)
-# Search node: popular / random Civitai media (ai_civitai_search.py, 2026-09-28).
-from ai_civitai_search import router as civitai_search_router
-app.include_router(civitai_search_router)
 
 app.state.limiter = limiter
 
 app.include_router(ai_fleet_router)
 app.include_router(ai_graph_router)
-app.include_router(ai_video_tools_router)
-from ai_wan_image import router as ai_wan_image_router
-app.include_router(ai_wan_image_router)
 app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
@@ -1616,6 +1547,7 @@ from ai_avatar_assets import build_avatar_asset_router
 from ai_avatar_render import build_avatar_render_router
 from ai_avatar_video import build_avatar_video_router
 from ai_avatar_build import build_avatar_build_router
+from ai_avatar_from_image import build_avatar_from_image_router
 from ai_video_reference import router as ai_video_reference_router
 from ai_graph_edits import router as ai_graph_edits_router
 from ai_pipelines_api import router as ai_pipelines_router
@@ -1625,8 +1557,7 @@ app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))
 app.include_router(build_avatar_build_router(get_avatar_owner))
-from ai_avatar_ready import build_avatar_ready_router
-app.include_router(build_avatar_ready_router(get_avatar_owner))
+app.include_router(build_avatar_from_image_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
 app.include_router(ai_graph_edits_router)
 app.include_router(ai_pipelines_router)
@@ -1659,30 +1590,6 @@ from ai_lora_manager import build_lora_admin_router, router as ai_lora_router
 
 app.include_router(ai_lora_router)
 app.include_router(build_lora_admin_router(require_admin))
-
-from ai_character_swap import build_character_swap_router
-
-# Subgraph · Character swap (2026-10-02): admins and scripts on this server start jobs.
-app.include_router(build_character_swap_router(get_current_user, is_admin_email))
-
-from ai_civitai_post import build_civitai_post_router
-
-app.include_router(build_civitai_post_router(require_admin))
-# /queue - the phone's gallery of finished renders (owner 2026-09-30).
-from ai_queue_page import router as queue_page_router
-
-app.include_router(queue_page_router)
-# /system_prompts - the live prompt library (owner 2026-09-30).
-from ai_prompts_page import build_prompts_router
-
-app.include_router(build_prompts_router(require_admin))
-# Join texts - many small text nodes into one prompt, no model (owner 2026-09-30).
-from ai_text_join import router as text_join_router
-
-app.include_router(text_join_router)
-from ai_fleet_models import build_admin_router as build_fleet_models_admin_router, router as ai_fleet_models_router
-app.include_router(ai_fleet_models_router)
-app.include_router(build_fleet_models_admin_router(require_admin))
 
 
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
@@ -1837,8 +1744,6 @@ def _safe_checkout_task_id(value: Any) -> Optional[str]:
 
 def _checkout_pack_price_label(product_key: str) -> str:
     key = _normalize_gumroad_product_key(product_key)
-    if key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
-        return f"{_format_usd_price(AUTORIG_SUBSCRIPTION_PRICE_USD)}/month"
     for tier_key, _credits, usd in AUTORIG_CRYPTO_TIERS:
         if _normalize_gumroad_product_key(tier_key) == key:
             if float(usd).is_integer():
@@ -2901,51 +2806,12 @@ async def auth_callback(
     return redirect
 
 
-# Keep video uploads behind administrator authentication.
+# Keep the standalone upload API admin-only; API keys resolve to their owner
+# through get_current_user, so only keys belonging to an admin can use it.
 from youtube_api import build_youtube_upload_api_router
+
 app.include_router(build_youtube_upload_api_router(require_admin, get_db))
-@app.get("/api/admin/u3d-youtube/oauth/start")
-async def admin_u3d_youtube_oauth_start(admin: User = Depends(require_admin)):
-    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
-    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
-    if not U3D_YOUTUBE_CLIENT_ID:
-        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
-    state = secrets.token_urlsafe(32)
-    query = urlencode({"client_id": U3D_YOUTUBE_CLIENT_ID, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "response_type": "code", "scope": YOUTUBE_UPLOAD_SCOPE, "access_type": "offline", "prompt": "consent", "state": state})
-    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
-    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
-    return response
 
-
-@app.get("/api/oauth/u3d-youtube/callback")
-async def admin_u3d_youtube_oauth_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, db: AsyncSession = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
-    if error:
-        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
-    if not user or not is_admin_email(user.email):
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
-    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
-    if not code:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
-    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
-    async with worker_http_client() as client:
-        token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": U3D_YOUTUBE_CLIENT_ID, "client_secret": U3D_YOUTUBE_CLIENT_SECRET, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "grant_type": "authorization_code"}, timeout=30.0)
-    if token_response.status_code != 200:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
-    refresh = token_response.json().get("refresh_token")
-    if not refresh:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
-    from database import U3dYoutubeCredentials
-    row = await db.get(U3dYoutubeCredentials, 1)
-    now = datetime.utcnow()
-    if row:
-        row.refresh_token, row.updated_at = refresh, now
-    else:
-        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
-    await db.commit()
-    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
-    response.delete_cookie("u3d_yt_oauth_state")
-    return response
 
 @app.get("/api/admin/youtube/oauth/start")
 async def admin_youtube_oauth_start(
@@ -2995,11 +2861,85 @@ async def admin_youtube_oauth_callback(
     refresh = tokens.get("refresh_token")
     if not refresh:
         return RedirectResponse(url="/?youtube_error=no_refresh_token_reauthorize_with_prompt")
-    # The Google Brand Account chooser selects the channel. The first upload
-    # response reports channelId so the client can verify the destination.
+    # Channel selection happens in Google's Brand Account chooser. The upload
+    # response includes channelId for validation against the owner channel.
     await save_youtube_refresh_token(db, refresh)
     response = RedirectResponse(url="/?youtube_connected=1")
     response.delete_cookie("yt_oauth_state")
+    return response
+
+
+@app.get("/api/admin/u3d-youtube/oauth/start")
+async def admin_u3d_youtube_oauth_start(
+    admin: User = Depends(require_admin),
+):
+    """Start the separate U3D provider OAuth flow; never changes AutoRig credentials."""
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
+    if not U3D_YOUTUBE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
+    state = secrets.token_urlsafe(32)
+    query = urlencode({
+        "client_id": U3D_YOUTUBE_CLIENT_ID,
+        "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": YOUTUBE_UPLOAD_SCOPE,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    })
+    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
+    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
+    return response
+
+
+@app.get("/api/oauth/u3d-youtube/callback")
+async def admin_u3d_youtube_oauth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    """Store U3D provider OAuth in its own table; do not alter AutoRig's token."""
+    if error:
+        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
+    if not user or not is_admin_email(user.email):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
+    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
+    if not code:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    async with worker_http_client() as client:
+        token_response = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": U3D_YOUTUBE_CLIENT_ID,
+                "client_secret": U3D_YOUTUBE_CLIENT_SECRET,
+                "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            },
+            timeout=30.0,
+        )
+    if token_response.status_code != 200:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
+    refresh = token_response.json().get("refresh_token")
+    if not refresh:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
+    from database import U3dYoutubeCredentials
+    row = await db.get(U3dYoutubeCredentials, 1)
+    now = datetime.utcnow()
+    if row:
+        row.refresh_token = refresh
+        row.updated_at = now
+    else:
+        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
+    await db.commit()
+    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
+    response.delete_cookie("u3d_yt_oauth_state")
     return response
 
 
@@ -3666,10 +3606,7 @@ async def buy_credits_checkout(
     if required_credits is not None and required_credits <= 0:
         required_credits = None
     page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
-    package_label = (
-        "AutoRig Unlimited Monthly" if product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
-        else _checkout_pack_label(product_key)
-    )
+    package_label = _checkout_pack_label(product_key)
     price_label = _checkout_pack_price_label(product_key)
     intent_id = None
 
@@ -4614,7 +4551,6 @@ async def api_create_task(
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
             file = fu
 
-    explicit_v3 = pipeline == "v3"
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
@@ -4662,58 +4598,12 @@ async def api_create_task(
         # Generate public URL (URL-encode filename for special chars, spaces, cyrillic)
         from urllib.parse import quote
         final_url = f"{APP_URL}/u/{upload_token}/{quote(filename)}"
-
-        # ASCII FBX (owner 2026-10-10): the converters reject it and Blender cannot
-        # import it, so it becomes a GLB here for legacy and V3 alike. The original
-        # upload stays beside the GLB; a failure is told in the visitor's language.
-        import fbx_ascii
-
-        if fbx_ascii.is_ascii_fbx(Path(filepath)):
-            glb_name = os.path.splitext(os.path.basename(filename))[0] + ".glb"
-            try:
-                receipt = await asyncio.to_thread(
-                    fbx_ascii.ascii_fbx_to_glb, Path(filepath), Path(upload_dir) / glb_name)
-            except Exception as exc:
-                print(f"[Upload] ASCII FBX {upload_token}/{filename} not convertible: {exc}")
-                from user_language import user_error_detail
-                raise HTTPException(status_code=422, detail=user_error_detail("fbx_unreadable"))
-            print(f"[Upload] ASCII FBX {upload_token}/{filename} -> {glb_name} "
-                  f"({receipt['inserted_a_keys']} array key(s) repaired, {receipt['bytes']} bytes)")
-            final_url = f"{APP_URL}/u/{upload_token}/{quote(glb_name)}"
-            uploaded_bytes = int(receipt["bytes"])
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
     if not disk_headroom_checked:
         await ensure_request_disk_headroom(db, context="task_create")
-
-    # V3 conveyor (2026-10-10): the route switch picks V3; a V3 task never
-    # falls back to the legacy rig (v3_intake.route_enabled, AUTORIG_V3_ROUTES).
-    from v3_intake import route_enabled as _v3_route_enabled
-
-    if _v3_route_enabled("api" if via_api else "website",
-                         is_admin=bool(user and is_admin_email(user.email)), explicit=explicit_v3):
-        from v3_intake import V3IntakeError, admit_upload as _v3_admit_upload, local_upload_path
-
-        v3_source = local_upload_path(final_url)
-        if v3_source is None:
-            raise HTTPException(status_code=400, detail={
-                "code": "v3_upload_required",
-                "message": "V3 needs the model file itself (GLB, FBX or OBJ upload).",
-            })
-        try:
-            task = await _v3_admit_upload(
-                db, path=v3_source, original_url=final_url, filename=v3_source.name,
-                owner_type=owner_type, owner_id=owner_id, origin="api" if via_api else "website",
-                created_via_api=via_api, requested_intent="convert" if pipeline == "convert" else "rig",
-                input_type=input_type, input_bytes=uploaded_bytes,
-            )
-        except V3IntakeError as exc:
-            raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.detail})
-        _save_preflight_render_image(task.id, preflight_render_image_data_url
-                                     or _pop_preflight_render_image_from_meta(rig_v2_detection_meta))
-        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     preflight_render_image_data_url = (
         preflight_render_image_data_url
@@ -5834,15 +5724,8 @@ async def api_gumroad_ping(
         or is_plugin_product
     )
     should_notify_purchase = False
-    # The monthly membership is not a credit pack: it gets its own branch below
-    # and must never be paid out as credits.
-    is_subscription_product = product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
 
-    if (
-        _is_autorig_credit_product(product_key)
-        and not is_subscription_product
-        and email and email != "unknown"
-    ):
+    if _is_autorig_credit_product(product_key) and email and email != "unknown":
         try:
             async with AsyncSessionLocal() as db:
                 purchase = GumroadPurchase(
@@ -5892,56 +5775,6 @@ async def api_gumroad_ping(
         except Exception as e:
             print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
 
-    if is_subscription_product and email and email != "unknown":
-        # Every membership event (first sale, monthly renewal, cancellation,
-        # refund) is stored in the ledger, then the ledger is replayed onto the
-        # user with the same code that runs at login, so a buyer who is already
-        # signed in gets the plan at once and one who signs up later gets it then.
-        try:
-            from auth import apply_pending_gumroad_credits
-
-            async with AsyncSessionLocal() as db:
-                purchase = GumroadPurchase(
-                    sale_id=sale_id,
-                    email=email,
-                    product_permalink=product_key,
-                    product_name=product_name,
-                    price=price_cents,
-                    refunded=refunded,
-                    is_recurring_charge=is_recurring_charge,
-                    subscription_id=subscription_id,
-                    license_key=license_key,
-                    test=is_test,
-                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
-                    credited=False,
-                    credits_added=0,
-                )
-                db.add(purchase)
-                try:
-                    await db.flush()
-                except IntegrityError:
-                    await db.rollback()
-                    purchase = None
-                if purchase is not None:
-                    user_result = await db.execute(
-                        select(User).where(func.lower(User.email) == email.lower())
-                    )
-                    user = user_result.scalar_one_or_none()
-                    if user:
-                        await apply_pending_gumroad_credits(db, user)
-                        if checkout_email != "unknown":
-                            user.gumroad_email = checkout_email
-                        print(
-                            f"[Gumroad] Subscription event sale={sale_id} user={email} "
-                            f"status={user.autorig_subscription_status} "
-                            f"until={user.autorig_subscription_period_end}",
-                            flush=True,
-                        )
-                    await db.commit()
-                    should_notify_purchase = True
-        except Exception as e:
-            print(f"[Gumroad] Subscription handling failed for {sale_id}: {e}", flush=True)
-
     if is_plugin_product:
         try:
             async with AsyncSessionLocal() as db:
@@ -5986,12 +5819,9 @@ async def api_gumroad_ping(
         notice_package = (
             f"Blender Plugin ABCD {notice_price}" if is_plugin_product else _checkout_pack_label(product_key)
         )
-        if is_subscription_product:
-            notice_kind = "subscription"
-            notice_package = "AutoRig Unlimited Monthly" + (" (renewal)" if is_recurring_charge else "")
         asyncio.create_task(
             broadcast_credits_purchased(
-                credits=0 if (is_plugin_product or is_subscription_product) else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
+                credits=0 if is_plugin_product else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
                 price=notice_price,
                 user_email=email,
                 product=product_key or product,
@@ -7769,11 +7599,6 @@ async def api_retry_task(
     
     if not is_owner:
         raise HTTPException(status_code=403, detail="Not authorized to retry this task")
-    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
-        from v3_runtime_mount import v3_retry
-
-        await v3_retry(db, task)
-        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
     
     # Check if task is eligible for retry
     if task.status == "done":
@@ -7872,12 +7697,6 @@ async def api_restart_task(
     )
     if not (is_owner or is_admin):
         raise HTTPException(status_code=403, detail="Not authorized to restart this task")
-
-    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
-        from v3_runtime_mount import v3_retry
-
-        await v3_retry(db, task)
-        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     # Age gate: 1 minute
     task_age = datetime.utcnow() - task.created_at
@@ -10101,12 +9920,9 @@ async def api_admin_restart_incomplete_tasks(
     """
     from database import Task
     
-    # Count incomplete tasks (V3 rows restart only as a new V3 attempt)
+    # Count incomplete tasks
     result = await db.execute(
-        select(Task).where(
-            Task.status.in_(["created", "processing", "error"]),
-            Task.pipeline_kind != "v3",
-        )
+        select(Task).where(Task.status.in_(["created", "processing", "error"]))
     )
     incomplete_tasks = result.scalars().all()
     task_count = len(incomplete_tasks)
@@ -13055,7 +12871,6 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
     r = await db.execute(
         select(Task).where(
             Task.status == "processing",
-            Task.pipeline_kind != "v3",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )
@@ -13376,59 +13191,6 @@ async def ensure_disk_headroom_for_new_task(
     return summary
 
 
-# Downloads · V3 (owner bug 2026-10-12: from 19:24 to 05:55 UTC every upload got 503 and nobody knew): one DEV
-# alert when the disk guard starts refusing new work, one when it lets work in again. The episode lives in a file so
-# a restart neither repeats nor loses it.
-NEW_WORK_PAUSE_STATE = Path(os.getenv("AUTORIG_NEW_WORK_PAUSE_STATE", "/srv/autorig/data/var/funnel/new-work-pause.json"))
-
-
-def _dev_alert_text(text: str) -> None:
-    import urllib.request
-
-    boundary = "pause" + os.urandom(8).hex()
-    parts = []
-    for name, value in (("agent", "Downloads · V3"), ("project", "AutoRig V3"), ("kind", "text"), ("caption", text)):
-        parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n"
-                      f"Content-Type: text/plain; charset=utf-8\r\n\r\n").encode("utf-8") + value.encode("utf-8") + b"\r\n")
-    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
-    req = urllib.request.Request(os.getenv("AUTORIG_DEV_SEND", "https://autorig.online/dev/api/send"),
-                                 data=b"".join(parts), method="POST",
-                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                                          "User-Agent": "autorig-storage/1"})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            print(f"[Request Disk] DEV alert sent ({resp.status})")
-    except Exception as exc:
-        print(f"[Request Disk] DEV alert failed: {exc}")
-
-
-def _new_work_pause_event(paused: bool, reason: str = "") -> None:
-    """Called on every guarded request: alerts only when the paused/open state changes."""
-    try:
-        exists = NEW_WORK_PAUSE_STATE.is_file()
-        if paused and not exists:
-            NEW_WORK_PAUSE_STATE.parent.mkdir(parents=True, exist_ok=True)
-            tmp = NEW_WORK_PAUSE_STATE.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"since": datetime.utcnow().isoformat() + "Z", "reason": reason[:300]}))
-            os.replace(tmp, NEW_WORK_PAUSE_STATE)
-            text = (f"🛑 AutoRig: new tasks are PAUSED by the disk guard — every upload gets 503 until it clears. "
-                    f"{reason[:240]}")
-        elif not paused and exists:
-            try:
-                since = json.loads(NEW_WORK_PAUSE_STATE.read_text()).get("since", "?")
-            except (OSError, ValueError):
-                since = "?"
-            NEW_WORK_PAUSE_STATE.unlink(missing_ok=True)
-            text = f"✅ AutoRig: new tasks accepted again (paused since {since})."
-        else:
-            return
-        import threading
-
-        threading.Thread(target=_dev_alert_text, args=(text,), daemon=True).start()
-    except Exception as exc:  # an alert never breaks the request path
-        print(f"[Request Disk] pause alert bookkeeping failed: {exc}")
-
-
 async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dict[str, Any]:
     """
     Request-path disk guard. It may remove regenerable bundle ZIPs, stale terminal
@@ -13442,7 +13204,6 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
         # The storage numbers are for the log; the visitor gets a sentence in their language
         # (Localization V3: a Persian customer once saw this raw string in an alert).
         print(f"[Request Disk] new work paused before {context}: {cache_block}")
-        _new_work_pause_event(True, f"artifact cache: {cache_block}")
         from user_language import user_error_detail
 
         raise HTTPException(
@@ -13469,7 +13230,6 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
             f"[Request Disk] new work paused before {context}: {free_gb:.2f}GB free, "
             f"target is {NEW_TASK_MIN_FREE_GB:.2f}GB"
         )
-        _new_work_pause_event(True, f"free {free_gb:.1f} GB < {NEW_TASK_MIN_FREE_GB:.0f} GB")
         from user_language import user_error_detail
 
         raise HTTPException(
@@ -13477,7 +13237,6 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
             detail=user_error_detail("storage_paused", retry_after_seconds=600),
             headers={"Retry-After": "600"},
         )
-    _new_work_pause_event(False)
     return result
 
 
@@ -17232,18 +16991,6 @@ app.include_router(
     )
 )
 
-# V3 conveyor read API for the task page: /api/task/{id}/v3-shell and /api/task/{id}/v3.
-from v3_runtime_mount import build_v3_read_router
-
-app.include_router(
-    build_v3_read_router(
-        get_db=get_db,
-        get_current_user=get_current_user,
-        task_model=Task,
-        is_admin_email=is_admin_email,
-    )
-)
-
 # Task page V3 (Task page · V3 agent, 2026-10-10): the live task page, its
 # state API and the feed that opens a task's own models in the Unity viewer.
 import task_page_live
@@ -17639,18 +17386,6 @@ async def video_page():
 async def model3d_page():
     """A picture turned into geometry by the farm's own Hunyuan3D."""
     return _static_html_response("3dmodel.html")
-
-
-@app.get("/system_prompts")
-async def system_prompts_page():
-    """Every system prompt of the graphs and the server's own rules, edited live."""
-    return _static_html_response("system_prompts.html")
-
-
-@app.get("/queue")
-async def queue_page():
-    """Every finished render of this device, a page at a time, made for a phone."""
-    return _static_html_response("queue.html")
 
 
 @app.get("/nodes")

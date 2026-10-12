@@ -21,34 +21,32 @@ $log = 'C:\ProgramData\AutoRig\fleet-ltx23\advertise.log'
 $blockFile = 'C:\ProgramData\AutoRig\fleet-ltx23\advertise_block.txt'
 New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
 if ($NodeName -match '^F5') { $NodeName = 'f5' } elseif ($NodeName -match '^F15') { $NodeName = 'f15' }
-elseif ($NodeName -match '^WIN-HGEREJIMQDO') { $NodeName = 'f12' } elseif ($NodeName -match '^RYZEN-SERVER') { $NodeName = 'Raptor' }
+elseif ($NodeName -match '^WIN-HGEREJIMQDO|^WIN-5IO40PMGN0P') { $NodeName = 'f12' } elseif ($NodeName -match '^RYZEN-SERVER') { $NodeName = 'Raptor' }
 function Log($m) { Add-Content -Path $log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m) -Encoding utf8 }
 function Has([string]$rel) { Test-Path (Join-Path $models $rel) }
 
 $tokens = @()
-# Video is LTX-2.5 distilled (int8-convrot transformer, Gemma 4 encoder with
-# the LTX projection, 2.5 VAEs). The historical tokens keep their names so
-# saved graphs and callers do not break: gen_animation_by_url (default video),
-# gen_animation_ltx23_by_url and gen_animation_ltx10eros_by_url all run the
-# single-stage graph, gen_animation_hq_by_url the two-stage graph, which also
-# needs the x2 latent upscaler. The LTX 2.3 / LTX-2 19B / LTXV 13B files no
-# longer advertise anything.
-if ((Has 'diffusion_models\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors') -and
-    (Has 'text_encoders\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors') -and
-    (Has 'vae\ltx-2.5-video-vae-bf16.safetensors') -and
-    (Has 'vae\ltx-2.5-audio-vae-bf16.safetensors')) {
-    $tokens += @('gen_animation_ltx25_by_url.json', 'gen_animation_by_url.json',
-                 'gen_animation_ltx23_by_url.json', 'gen_animation_ltx10eros_by_url.json')
-    if (Has 'latent_upscale_models\ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors') {
-        $tokens += @('gen_animation_ltx25_hq_by_url.json', 'gen_animation_hq_by_url.json')
-    }
-}
-# MiniMax H3 (full int8-convrot, nvfp4 encoder, turbo LoRA). Needs 64 GB RAM.
-if ((Has 'diffusion_models\minimax_h3_fl2va_pruned_int8_convrot.safetensors') -and
+# Video is LTX-10Eros v1.4 since 2026-09-29 (owner): the full LTX 2.3 checkpoint
+# with its video and audio VAE inside, the Gemma 3 12B text encoder and the
+# author's DMD LoRA (without it the 9-step schedule smears the clip). The
+# historical tokens keep their names so saved graphs and callers do not break:
+# gen_animation_by_url (default video), _ltx23, _ltx10eros, _ltx25 and both HQ
+# names all run the same single-stage 10Eros graph. LTX-2.5 files no longer
+# advertise anything.
+$ltxTokens = @('gen_animation_ltx25_by_url.json', 'gen_animation_by_url.json',
+               'gen_animation_ltx23_by_url.json', 'gen_animation_ltx10eros_by_url.json',
+               'gen_animation_ltx25_hq_by_url.json', 'gen_animation_hq_by_url.json')
+if ((Has 'checkpoints\ltx10eros_v14_2989669.safetensors') -and
+    (Has 'text_encoders\gemma_3_12B_it_fp4_mixed.safetensors') -and
+    (Has 'loras\ltx10eros_v14_dmd_lora_2989633.safetensors')) { $tokens += $ltxTokens }
+# MiniMax H3 line: the H3 Eros Max transformer (owner, 2026-09-29) with the stock
+# H3 text encoder, both VAEs and the 4-step turbo LoRA.
+$h3Tokens = @('gen_video_minimax_h3_by_url.json')
+if ((Has 'diffusion_models\h3ErosMax_beta5_3185144.safetensors') -and
     (Has 'text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors') -and
     (Has 'vae\minimax_h3_video_vae_fp16.safetensors') -and
     (Has 'vae\minimax_h3_audio_vae_fp32.safetensors') -and
-    (Has 'loras\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors')) { $tokens += 'gen_video_minimax_h3_by_url.json' }
+    (Has 'loras\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors')) { $tokens += $h3Tokens }
 # FLUX.2 klein image pair.
 if ((Has 'diffusion_models\flux-2-klein-4b.safetensors') -and
     (Has 'text_encoders\qwen_3_4b_fp4_flux2.safetensors') -and
@@ -64,6 +62,12 @@ if ((Has 'diffusion_models\z_image_turbo_fp8_e4m3fn.safetensors') -and
     (Has 'vae\ae.safetensors') -and
     (Has 'model_patches\Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors')) {
     $tokens += @('gen_image.json','gen_image_control_pose.json','gen_image_control_depth.json','gen_image_control_canny.json')
+}
+# ControlNet maps (the /api/controlnet jobs): only the preprocessor node pack is
+# needed; its annotator weights download on first use. Until 2026-09-26 only f12
+# advertised these, and with f12 offline every map job sat blocked.
+if (Test-Path (Join-Path (Split-Path $models) 'custom_nodes\comfyui_controlnet_aux')) {
+    $tokens += @('gen_control_depth.json','gen_control_pose.json','gen_control_canny.json','gen_control_normal.json')
 }
 # Krea 2 Turbo is the quality tier with the live LoRA ecosystem.
 if ((Has 'diffusion_models\krea2_turbo_fp8_scaled.safetensors') -and
@@ -89,7 +93,11 @@ catch { Log ('dashboard read failed: ' + $_.Exception.Message); exit 1 }
 $me = $dash.servers | Where-Object { $_.render_server_name -eq $NodeName }
 if (-not $me) { Log "$NodeName is not registered; refusing to invent an entry"; exit 1 }
 $have = @($me.available_workflows)
-$keep = @($have | Where-Object { $blocked -notcontains $_ })
+# Video tokens follow the files both ways (2026-09-29): a token of the LTX or H3
+# line that the files on disk no longer justify is withdrawn, so a box never
+# advertises a model it cannot load. Every other token stays additive.
+$videoTokens = @($ltxTokens + $h3Tokens)
+$keep = @($have | Where-Object { $blocked -notcontains $_ -and ($videoTokens -notcontains $_ -or $tokens -contains $_) })
 $add = @($tokens | Where-Object { $keep -notcontains $_ })
 $new = @($keep + $add)
 if (-not (Compare-Object $new $have)) { Log "$NodeName already advertises exactly what it should"; exit 0 }

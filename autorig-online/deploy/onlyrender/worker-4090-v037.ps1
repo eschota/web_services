@@ -96,9 +96,9 @@ if (-not $tunnel) {
 & ssh.exe -o ConnectTimeout=10 autorig-vps 'curl -fsS --max-time 10 http://127.0.0.1:19409/system_stats >/dev/null'
 if ($LASTEXITCODE -ne 0) { throw 'The VPS cannot reach the v0.37 worker' }
 
+# The LTX and video-control tokens are added further down, only when the
+# LTX-10Eros files answer in /object_info (2026-09-29).
 $workflows = @(
-    'gen_animation_ltx23_by_url.json','gen_animation_ltx10eros_by_url.json',
-    'gen_video_ltx23_control_by_url.json','gen_video_ltx23_pose_by_url.json','gen_video_ltx23_depth_by_url.json',
     'gen_image_flux2_klein.json','gen_image_flux2_klein_edit.json','gen_image_flux2_avatar.json'
 )
 # Pony/SDXL (gen_image_sdxl*.json) retired 2026-09-23; the checkpoint and the
@@ -120,25 +120,71 @@ if (Test-Path "$runtime\WAN2_PROMOTED") {
     foreach ($node in 'WanAnimate2ToVideo','WanAnimate2Cache') { if (-not (Test-ComfyNode $node)) { throw "Missing promoted node $node" } }
     $workflows += 'gen_video_wan_animate2_by_url.json'
 }
-# LTX-2.5 weights live on C: (R: is full); extra_model_paths.yaml maps C:\AIModels.
-$ltx25 = 'C:\AIModels'
-if ((Test-Path "$ltx25\diffusion_models\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors") -and
-    (Test-Path "$ltx25\text_encoders\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors") -and
-    (Test-Path "$ltx25\vae\ltx-2.5-video-vae-bf16.safetensors") -and
-    (Test-Path "$ltx25\vae\ltx-2.5-audio-vae-bf16.safetensors")) {
-    # The historical tokens run the same LTX-2.5 graphs since 2026-09-23.
-    $workflows += @('gen_animation_ltx25_by_url.json', 'gen_animation_by_url.json')
-    if (Test-Path "$ltx25\latent_upscale_models\ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors") {
-        $workflows += @('gen_animation_ltx25_hq_by_url.json', 'gen_animation_hq_by_url.json')
+# LTX-10Eros and H3 Eros Max (owner, 2026-09-29) are decided below, after
+# Test-ComfyFile, from what ComfyUI itself lists (C:\AIModels and R: alike).
+# Fleet parity (2026-09-27): the nodes the fleet boxes use for T-pose/legacy
+# (RMBG), enhancement (TiledDiffusion, easy-use) and Qwen-Image 2512 (GGUF) are
+# now in runtime\custom_nodes, so this box also claims gen_image.json and the
+# canny token, the ControlNet map tokens, both Stable Audio 3 tokens and the
+# LTX-2.5 CrossView token - each only when its nodes and files answer.
+function Test-ComfyFile([string]$Class, [string]$InputName, [string]$File) {
+    try {
+        $info = Invoke-RestMethod "$comfyUrl/object_info/$Class" -TimeoutSec 20
+        $spec = $info.$Class.input.required.$InputName
+        if (-not $spec) { $spec = $info.$Class.input.optional.$InputName }
+        if ($spec[0] -eq 'COMBO') { return @($spec[1].options) -contains $File }
+        return @($spec[0]) -contains $File
+    } catch { return $false }
+}
+$zimage = (Test-ComfyFile 'UNETLoader' 'unet_name' 'z_image_turbo_fp8_e4m3fn.safetensors') -and
+          (Test-ComfyFile 'CLIPLoader' 'clip_name' 'qwen_3_4b.safetensors') -and (Test-ComfyFile 'VAELoader' 'vae_name' 'ae.safetensors')
+if ($zimage -and (Test-ComfyNode 'RMBG') -and (Test-ComfyNode 'TiledDiffusion') -and (Test-ComfyNode 'UnetLoaderGGUF') -and
+    (Test-ComfyNode 'easy cleanGpuUsed')) { $workflows += 'gen_image.json' }
+if ($zimage -and (Test-ComfyNode 'ZImageFunControlnet') -and (Test-ComfyNode 'TiledDiffusion') -and
+    (Test-ComfyNode 'UnetLoaderGGUF') -and (Test-ComfyFile 'UpscaleModelLoader' 'model_name' '4x_NMKD-Siax_200k.pth') -and
+    (Test-ComfyFile 'UpscaleModelLoader' 'model_name' 'RealESRGAN_x2.pth')) { $workflows += 'gen_image_control_canny.json' }
+foreach ($pair in @(@('gen_control_canny.json','CannyEdgePreprocessor'), @('gen_control_depth.json','DepthAnythingV2Preprocessor'),
+                    @('gen_control_normal.json','BAE-NormalMapPreprocessor'), @('gen_control_pose.json','OpenposePreprocessor'))) {
+    if (Test-ComfyNode $pair[1]) { $workflows += $pair[0] }
+}
+if (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'stable_audio_3_medium.safetensors') { $workflows += 'gen_music_sa3.json' }
+if (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'stable_audio_3_small_music.safetensors') { $workflows += 'gen_music_sa3_small.json' }
+# SDXL family is back for the civitai autopost (2026-10-08: its anime/SDXL «gen» posts credit the characters'
+# Illustrious / NoobAI / Pony / SDXL LoRAs). With f5 out of the fleet and f12 training, nothing else claimed
+# gen_image_sdxl.json and those jobs sat Pending (2026-10-09). The request names the checkpoint; claim the token only
+# when ComfyUI lists all four bases (C:\AIModels\checkpoints).
+if ((Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'sdxl_base_10.safetensors') -and
+    (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'illustrious_xl_v01.safetensors') -and
+    (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'noobai_xl_eps_v11.safetensors') -and
+    (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'pony_v6_xl.safetensors')) { $workflows += 'gen_image_sdxl.json' }
+# LTX-10Eros v1.4 (owner, 2026-09-29): the LTX 2.3 checkpoint with its VAEs, the
+# Gemma 3 12B text encoder and the author's DMD LoRA. Every historical LTX token,
+# the HQ names included, runs the same single-stage 10Eros graph.
+$eros = (Test-ComfyFile 'CheckpointLoaderSimple' 'ckpt_name' 'ltx10eros_v14_2989669.safetensors') -and
+        (Test-ComfyFile 'LTXAVTextEncoderLoader' 'text_encoder' 'gemma_3_12B_it_fp4_mixed.safetensors') -and
+        (Test-ComfyFile 'LoraLoaderModelOnly' 'lora_name' 'ltx10eros_v14_dmd_lora_2989633.safetensors')
+if ($eros) {
+    $workflows += @('gen_animation_ltx25_by_url.json', 'gen_animation_by_url.json',
+                    'gen_animation_ltx23_by_url.json', 'gen_animation_ltx10eros_by_url.json',
+                    'gen_animation_ltx25_hq_by_url.json', 'gen_animation_hq_by_url.json')
+    # Pose / depth / canny control: the LTX 2.3 Union-Control IC-LoRA on 10Eros.
+    if ((Test-ComfyNode 'LTXAddVideoICLoRAGuide') -and
+        (Test-ComfyFile 'LTXICLoRALoaderModelOnly' 'lora_name' 'ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors')) {
+        $workflows += @('gen_video_ltx23_control_by_url.json','gen_video_ltx23_pose_by_url.json','gen_video_ltx23_depth_by_url.json')
     }
 }
-# MiniMax H3 (full int8-convrot transformer, nvfp4 Qwen3-VL encoder, 4-step turbo LoRA).
-if ((Test-Path "$ltx25\diffusion_models\minimax_h3_fl2va_pruned_int8_convrot.safetensors") -and
-    (Test-Path "$ltx25\text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors") -and
-    (Test-Path "$ltx25\vae\minimax_h3_video_vae_fp16.safetensors") -and
-    (Test-Path "$ltx25\vae\minimax_h3_audio_vae_fp32.safetensors") -and
-    (Test-Path "$ltx25\loras\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors") -and
+# MiniMax H3 line: the H3 Eros Max transformer with the stock H3 encoder, VAEs and turbo LoRA.
+if ((Test-ComfyFile 'UNETLoader' 'unet_name' 'h3ErosMax_beta5_3185144.safetensors') -and
+    (Test-ComfyFile 'CLIPLoader' 'clip_name' 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors') -and
+    (Test-ComfyFile 'VAELoader' 'vae_name' 'minimax_h3_video_vae_fp16.safetensors') -and
+    (Test-ComfyFile 'VAELoader' 'vae_name' 'minimax_h3_audio_vae_fp32.safetensors') -and
+    (Test-ComfyFile 'LoraLoaderModelOnly' 'lora_name' 'minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors') -and
     (Test-ComfyNode 'MiniMaxH3ImageToVideo')) { $workflows += 'gen_video_minimax_h3_by_url.json' }
+if ($eros -and (Test-ComfyNode 'LTXAddVideoICLoRAGuide') -and
+    (Test-ComfyFile 'LTXICLoRALoaderModelOnly' 'lora_name' 'ltx-2.3-22b-ic-lora-crossview-prompt-v0.9.safetensors')) {
+    $workflows += 'gen_video_ltx25_crossview_by_url.json'
+}
+$workflows = @($workflows | Select-Object -Unique)
 # Identity: renderfin ignores an empty map, and the old Schnell override must go.
 $overrides = @{'gen_image.json'='gen_image.json'}
 Set-Worker @{render_operation='info';render_server_url='http://127.0.0.1:19409';gpu_name='RTX 4090';status='online';available_workflows=$workflows;workflow_overrides=$overrides;basic_auth=$false}

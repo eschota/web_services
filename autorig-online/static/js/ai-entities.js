@@ -394,7 +394,9 @@
    * to be finished before it is.
    */
   function startTask(host, serviceId) {
-    const timingService = serviceId === 'avatar_video' || serviceId === 'video_control'
+    const timingService = serviceId === 'avatar_from_image'
+      ? 'vision'
+      : serviceId === 'avatar_video' || serviceId === 'video_control'
       ? 'video'
       : serviceId === 'avatar_image'
         ? 'image'
@@ -963,7 +965,7 @@
   injectStyles();
 
   global.AIEntities = {
-    TEXT: 'text', IMAGE: 'image', VIDEO: 'video', MODEL3D: 'model3d',
+    TEXT: 'text', IMAGE: 'image', VIDEO: 'video', AVATAR: 'avatar', MODEL3D: 'model3d',
     queuePlaceLabel: queuePlaceLabel,
     queueAdminMarkup: queueAdminMarkup,
     entity: entity,

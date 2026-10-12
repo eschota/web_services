@@ -14,7 +14,7 @@ test('motion video runner calls the endpoint declared by the backend service', (
   const start = source.indexOf('const RUNNERS = {');
   const end = source.indexOf("['pose', 'depth', 'canny'].forEach", start);
   const runners = vm.runInNewContext(source.slice(start, end) + '; RUNNERS', {
-    pollForFile() {}, pollAiStatus() {}, poll3dStatus() {},
+    pollForFile() {}, pollAiStatus() {}, pollAvatarStatus() {}, poll3dStatus() {},
   });
   const catalogue = fs.readFileSync(path.resolve(path.dirname(sourcePath),
     '..', '..', 'backend', 'ai_services.py'), 'utf8');
@@ -117,7 +117,7 @@ function harness(graphs) {
     `  window.__aiNodesTest = {
       runGraph, cancelRun, resetCanvasExecutionState,
       submitJson,
-      bodyFor, RUNNERS, runnerFor,
+      bodyFor, RUNNERS, runnerFor, pollAvatarStatus,
       continuableResults, restoredExecutions, completedExecutions,
       activeExecutions, runRequests, setMeta
     };
@@ -251,6 +251,39 @@ test('Avatar video runner and request body match the typed service contract', ()
     control_video_url:'https://example.test/drive.mp4',
     image_url:'https://example.test/keyframe.png', prompt:'turn and wave',
   });
+});
+
+test('Avatar from image runner sends a typed image and returns a pinned Avatar', () => {
+  const h = harness([graph([input('a')])]);
+  assert.equal(h.api.RUNNERS.avatar_from_image.api, '/api/ai/avatar-from-image');
+  assert.equal(h.api.RUNNERS.avatar_from_image.field, 'avatar_string');
+  assert.equal(h.api.RUNNERS.avatar_from_image.type, 'avatar');
+  const body = h.api.bodyFor('avatar_from_image', {
+    image: 'https://autorig.online/api/ai/avatar-assets/a/hash.png',
+  }, {});
+  assert.deepEqual(JSON.parse(JSON.stringify(body)), {
+    image_url: 'https://autorig.online/api/ai/avatar-assets/a/hash.png',
+  });
+});
+
+test('Avatar from image polls its owner-scoped status URL to completion', async () => {
+  const h = harness([graph([input('a')])]);
+  const calls = [];
+  h.setFetch(async url => {
+    calls.push(url);
+    return response(200, JSON.stringify({
+      success_bool: true, finished_bool: true, status_string: 'completed',
+      avatar_string: 'av_1234567890abcdef12345678@1',
+    }));
+  });
+  const runner = h.api.RUNNERS.avatar_from_image;
+  const value = await h.api.pollAvatarStatus({
+    finished_bool: false, status_string: 'queued', task_id_string: 'avj_abc',
+    status_url_string: '/api/ai/avatar-from-image/status/avj_abc',
+    retry_after_seconds_float: 0.01,
+  }, runner, () => {});
+  assert.equal(value, 'av_1234567890abcdef12345678@1');
+  assert.deepEqual(calls, ['/api/ai/avatar-from-image/status/avj_abc']);
 });
 
 test('a catalogue newer than cached runner JS asks for a reload instead of throwing TypeError', () => {

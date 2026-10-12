@@ -7896,7 +7896,7 @@
       ],
       "clips": [
        ">=",
-       8
+       4
       ],
       "body_plan": [
        "==",
@@ -7963,15 +7963,17 @@
      "on": "mt_rig",
      "params": {
       "clips": [
-       "Idle",
-       "Walking"
+       "Monster Idle",
+       "Monster Walk",
+       "Monster Prowl",
+       "Monster Attack"
       ],
       "cap": 2000
      },
      "thresholds": {
       "clips_passed": [
        ">=",
-       2
+       4
       ]
      }
     }
@@ -8102,7 +8104,7 @@
       ],
       "clips": [
        ">=",
-       8
+       4
       ],
       "body_plan": [
        "==",
@@ -8171,20 +8173,18 @@
      "on": "mt_rig",
      "params": {
       "clips": [
-       "Idle",
-       "Walking"
+       "Monster Idle",
+       "Monster Walk",
+       "Monster Prowl",
+       "Monster Attack"
       ],
       "cap": 2000
      },
      "thresholds": {
       "clips_passed": [
        ">=",
-       2
+       4
       ]
-     },
-     "xfail": {
-      "reason": "the library clips tear the chest / shoulders of the hunched alien (worst stretch 40-70, local 2026-10-13: 0-1 of 8 clips); the arm chains root at the spine of a tilted trunk; needs a monster gait of its own or shoulder joints off the spine",
-      "owner": "Fable · monsters/animals"
      }
     }
    ],

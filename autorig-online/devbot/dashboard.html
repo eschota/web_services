@@ -87,6 +87,7 @@
   <span class="pill">improve <b id="c-imp">–</b></span>
   <span class="pill" id="c-live">…</span>
   <a class="pill" href="/dev/youtube">U3D YouTube API</a>
+  <a class="pill" href="https://map.autorig.online/" target="_blank" rel="noopener">🗺️ map.autorig.online</a>
 </header>
 
 <div class="wrap">
@@ -105,6 +106,8 @@
     </div>
     <div class="card">
       <h2>Скиллы для агентов</h2>
+      <input id="skill-q" type="search" placeholder="поиск: image edit, unity, youtube…" autocomplete="off"
+             style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:inherit;font:inherit">
       <div id="skills"><div class="sd">загрузка…</div></div>
     </div>
     <div class="card">
@@ -220,19 +223,25 @@ document.getElementById("roster").addEventListener("click", async ev => {
 
 function renderSkills(cat) {
   const el = document.getElementById("skills");
-  if (!cat || !cat.skills || !cat.skills.length) { el.innerHTML = `<div class="sd">пусто</div>`; return; }
+  if (!cat || !cat.skills || !cat.skills.length) { el.innerHTML = `<div class="sd">ничего не найдено</div>`; return; }
   el.innerHTML = cat.skills.map(s => `<div class="skill">
-      <div class="st">${esc(s.icon || "🧩")} ${esc(s.title)}</div>
-      <div class="sd">${esc(s.summary)}</div>
-      <div class="sc ${s.cost_kind === "paid" ? "paid" : ""}">${esc(s.cost)} · ${esc(s.typical_time)}</div>
-      ${s.instructions_url ? `<div class="sd"><a href="${esc(s.instructions_url)}" target="_blank" rel="noopener" title="Полная инструкция для агента: отдайте эту ссылку другому агенту">🔗 ${esc(String(s.instructions_url).replace(/^https?:\/\//, ""))}</a></div>` : ""}
-      ${s.instructions_markdown ? `<details><summary>Инструкция для агента</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit">${esc(s.instructions_markdown)}</pre></details>` : ""}
-      ${s.research_markdown ? `<details><summary>Сравнение моделей и требования</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit">${esc(s.research_markdown)}</pre></details>` : ""}
+      <div class="st">${esc(s.icon || "🧩")} <a href="${esc(s.instructions_url)}" target="_blank" rel="noopener" title="Полная инструкция для агента: отдайте эту ссылку другому агенту">${esc(s.title)}</a></div>
+      <div class="sd">${esc(s.description)}</div>
+      <div class="sc ${s.cost === "paid" ? "paid" : ""}">${esc(s.id)} · v${esc(s.version)} · ${esc(s.updated)}${(s.tags || []).length ? " · " + esc(s.tags.join(", ")) : ""}</div>
     </div>`).join("") +
-    `<div class="sd" style="margin-top:10px">полный контракт: <a href="${BASE}/api/skills">/api/skills</a> · все инструкции: <a href="${BASE}/skills">/skills</a></div>`;
+    `<div class="sd" style="margin-top:10px">${cat.count} · JSON: <a href="${BASE}/api/skills">/api/skills</a> · markdown: <a href="${BASE}/skills">/skills</a> · поиск: <code>?q=</code></div>`;
 }
 
-fetch(BASE + "/api/skills").then(r => r.json()).then(renderSkills).catch(() => {});
+let skillTimer = null;
+function loadSkills(q) {
+  fetch(BASE + "/api/skills" + (q ? "?q=" + encodeURIComponent(q) : ""))
+    .then(r => r.json()).then(renderSkills).catch(() => {});
+}
+document.getElementById("skill-q").addEventListener("input", e => {
+  clearTimeout(skillTimer);
+  skillTimer = setTimeout(() => loadSkills(e.target.value.trim()), 200);
+});
+loadSkills("");
 
 let atBottom = true;
 addEventListener("scroll", () => {

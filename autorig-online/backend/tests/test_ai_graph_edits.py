@@ -16,7 +16,7 @@ if str(BACKEND) not in sys.path:
 import ai_graph  # noqa: E402
 import ai_graph_edits  # noqa: E402
 import ai_model_catalogue  # noqa: E402
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 
@@ -86,6 +86,22 @@ class ApplyOperationsTests(unittest.TestCase):
         self.assertEqual(invalidated, [])
         self.assertEqual(set(edited.results), {"text1", "image1", "video1"})
         self.assertTrue(summary["renamed_bool"])
+
+    def test_follow_input_size_metadata_and_explicit_size_override(self):
+        graph = ai_graph.Graph(**_payload())
+        graph.nodes[1].params["_follow_input_size"] = True
+        edited, _, _ = ai_graph_edits.apply_operations(graph, [
+            {"op": "update_params", "id": "image1", "values": {"width": 832}},
+        ])
+        self.assertIs(edited.nodes[1].params["_follow_input_size"], False)
+        following, _, _ = ai_graph_edits.apply_operations(edited, [
+            {"op": "update_params", "id": "image1", "values": {"_follow_input_size": True}},
+        ])
+        self.assertIs(following.nodes[1].params["_follow_input_size"], True)
+        with self.assertRaises(HTTPException):
+            ai_graph_edits.apply_operations(graph, [
+                {"op": "update_params", "id": "image1", "values": {"_follow_input_size": "yes"}},
+            ])
 
     def test_add_connect_disconnect_and_remove_keep_valid_wiring(self):
         graph = ai_graph.Graph(**_payload())

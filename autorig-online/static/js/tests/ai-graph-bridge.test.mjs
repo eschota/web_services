@@ -23,11 +23,16 @@ function fixture() {
   const links = [];
   const results = {'1':{status:'done', type:'text', value:'hello'}};
   const data = {'1':{pos_x:0, pos_y:0}};
+  const metadata = new Map([['1', {inFields:[], outFields:['value']}]]);
 
   const getGraph = () => ({
     name,
-    nodes:nodes.map(node => ({...node, x:data[node.id].pos_x, y:data[node.id].pos_y,
-                              params:{...(node.params || {})}})),
+    nodes:nodes.map(node => {
+      const params = {...(node.params || {})};
+      const item = metadata.get(node.id);
+      if (typeof item?.followInputSize === 'boolean') params._follow_input_size = item.followInputSize;
+      return {...node, x:data[node.id].pos_x, y:data[node.id].pos_y, params};
+    }),
     links:links.map(link => ({...link})),
     results:{...results}
   });
@@ -39,6 +44,7 @@ function fixture() {
       const index = nodes.findIndex(node => node.id === id);
       if (index >= 0) nodes.splice(index, 1);
       delete data[id];
+      metadata.delete(id);
     },
     removeSingleConnection() {}, addConnection() {}
   };
@@ -50,6 +56,8 @@ function fixture() {
       width:'960', height:'540', steps:'0', cfg:'0', checkpoint:'', ...(params || {})
     }});
     data[id] = {pos_x:x, pos_y:y};
+    metadata.set(id, {inFields:[], outFields:['image_url_string'],
+      followInputSize:!params || params._follow_input_size !== false});
     return id;
   };
   const applyParams = (id, params) => {
@@ -62,7 +70,7 @@ function fixture() {
   const bridge = loadBridge().create({
     editor, getGraph, addServiceNode,
     addInputNode() { throw new Error('not used'); },
-    applyParams, getMeta() { return {inFields:[], outFields:['image_url_string']}; },
+    applyParams, getMeta(id) { return metadata.get(String(id)); },
     setGraphName(value) { name = value; },
     invalidateNodeAndDownstream() {}
   });
@@ -90,6 +98,7 @@ test('new node accepts materialised defaults and numeric DOM strings', async () 
   assert.equal(added.params.width, '1030');
   assert.equal(added.params.height, '1527');
   assert.equal(added.params.steps, '0');
+  assert.equal(added.params._follow_input_size, true);
   assert.deepEqual(result.graph.results, base.results, 'validated old results were not imported');
 });
 
@@ -116,4 +125,25 @@ test('existing numeric parameter compares equal across number and DOM string for
     operations:[{op:'update_params', id:'2', values:{width:1030}}], invalidatedIds:['2']
   });
   assert.equal(second.graph.nodes.find(node => node.id === '2').params.width, '1030');
+});
+
+test('explicit manual dimensions persist fixed mode through apply and reload', async () => {
+  const {bridge, getGraph} = fixture();
+  const firstGraph = {name:'Graph', nodes:[...getGraph().nodes, {
+    id:'image-fixed', kind:'service', service:'image', x:50, y:60,
+    params:{width:1216, height:832, _follow_input_size:false}
+  }], links:[]};
+  const first = await bridge.applyGraph(firstGraph, {
+    baseGraph:getGraph(), operations:[{op:'add_node', node:firstGraph.nodes[1]}], invalidatedIds:[]
+  });
+  const fixed = first.graph.nodes.find(node => node.id === '2');
+  assert.equal(fixed.params.width, '1216');
+  assert.equal(fixed.params.height, '832');
+  assert.equal(fixed.params._follow_input_size, false);
+
+  const reloaded = JSON.parse(JSON.stringify(first.graph));
+  const second = await bridge.applyGraph(reloaded, {
+    baseGraph:first.graph, operations:[], invalidatedIds:[]
+  });
+  assert.equal(second.graph.nodes.find(node => node.id === '2').params._follow_input_size, false);
 });

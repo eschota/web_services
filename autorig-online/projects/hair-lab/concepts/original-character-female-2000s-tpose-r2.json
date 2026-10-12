@@ -79,20 +79,36 @@
     "attempts_at_receipt": 0,
     "initial_wait_estimate_seconds": 1958,
     "label": "hair-lab original r2 replacement-of-a923c333556b41d084a050bd59e67909",
-    "last_observed_utc": "2026-10-12T03:18:11Z",
+    "last_observed_utc": "2026-10-12T05:23:14Z",
     "last_observed_status": "queued",
     "last_observed_stage": "waiting for a free farm box",
     "last_observed_attempts": 0,
     "capacity_evidence": {
       "farm_queued_jobs": 1,
       "farm_running_jobs": 0,
-      "converter_queue_total": 5,
-      "queued_age_seconds_approx": 13170,
-      "scheduler_assessment": "normal admission wait under four hours; no eligible capable Hunyuan box at observation time",
-      "f13": "blocked and not accepting converter/Hunyuan work; three converter tasks queued",
-      "f7": "the only Hunyuan-ready box, busy with AI Vision and not accepting Hunyuan",
-      "worker_4090": "degraded, 6.21 GiB VRAM free, and not available to the Gen3D dispatcher",
+      "converter_queue_total": 6,
+      "queued_age_seconds_approx": 20693,
+      "scheduler_assessment": "eligibility mismatch after more than five hours: f7 is idle and explicitly accepts Hunyuan, but Gen3D rejects it because the fleet's overall box state is blocked by unrelated asset_preflight not_run",
+      "f13": "correctly blocked for this job: accepts no work and has three pending Vision tasks",
+      "f7": "idle, queue depth zero, hunyuan_enabled=true and converter accepting.hunyuan=true; excluded only because fleet state_string=blocked from asset_preflight not_run",
+      "f12": "Hunyuan-ready in fleet but deliberately excluded by live Gen3D policy",
+      "worker_4090": "idle but outside the Gen3D dispatcher registry/eligibility path",
       "policy": "background jobs require an idle box; shared converter boxes require an empty AutoRig queue"
+    },
+    "live_admission_fix": {
+      "commit": "c5e0f05ed4023cdbafdde30ff995778d2dfdfc96",
+      "deployed_module_sha256": "64370081ce3ef5b5b3b04b151eb69d48f4617ee15eaa8aa9970df9dad286e65c",
+      "deployed_utc": "2026-10-12T06:00:00Z",
+      "observed_effect": "f7 became capable and the existing job was dispatched without resubmission",
+      "last_observed_utc": "2026-10-12T06:06:35Z",
+      "last_observed_status": "running",
+      "last_observed_stage": "GeneratingShape",
+      "last_observed_progress": 20,
+      "last_observed_attempts": 1,
+      "resource_gate": "eight automatically refunded f7 admissions were refused while the resident AI model released the GPU: 2397-2553 MiB free, 7000 MiB required",
+      "latest_worker_task_id": "9651accc-1c07-43c8-bc9f-91ec1a550365",
+      "gpu_handoff_evidence": "f7 AI node changed to loaded=false/accepting=false gpu_busy_comfyui; the same existing Gen3D job then entered GeneratingShape without intervention",
+      "assessment": "expected asynchronous AI-to-Hunyuan yield completed; scheduler and idle offload are working, with retry noise but no remaining capacity blocker"
     }
   }
 }

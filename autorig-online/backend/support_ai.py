@@ -33,6 +33,7 @@ from database import AsyncSessionLocal, SupportChatMessage, SupportChatSession, 
 
 DIR = Path(os.environ.get("SUPPORT_AI_DIR", "/srv/autorig/data/support_ai"))
 SETTINGS, STATE, DRAFTS = DIR / "settings.json", DIR / "state.json", DIR / "drafts.json"
+EVENTS = DIR / "events.jsonl"         # Astra's watch loop reads it (mt/astra/watchloop.py): escalations, misses
 GATEWAY = os.environ.get("ASTRA_GATEWAY_URL", "http://127.0.0.1:8266/v1")
 LOCAL = os.environ.get("SUPPORT_AI_BACKEND", "http://127.0.0.1:8200")
 MODEL = os.environ.get("SUPPORT_AI_MODEL", "gpt-6-luna")
@@ -130,6 +131,16 @@ def settings():
     if doc.get("mode") not in MODES:
         doc["mode"] = "live"
     return doc
+
+
+def log_event(**ev):
+    """One line per handled visitor message for Astra's watch loop (the visitor's text stays untrusted data)."""
+    try:
+        DIR.mkdir(parents=True, exist_ok=True)
+        with open(EVENTS, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": round(time.time(), 1), **ev}, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"[SupportAI] events: {type(exc).__name__}")
 
 
 def set_mode(mode, by=""):
@@ -303,6 +314,8 @@ async def handle(bot, sess, thread_text, latest, mode):
     else:
         await post_draft(bot, sess, reply, lang, note=("нужен человек: " + esc) if esc else brain)
     print(f"[SupportAI] session {sess.id}: {mode} {lang} {brain}{' escalated' if esc else ''}")
+    log_event(session=sess.id, lang=lang, brain=brain, mode=mode, escalated=esc or "",
+              visitor=str(latest or "")[:600], email=bool(sess.user_email))
 
 
 async def tick(bot):

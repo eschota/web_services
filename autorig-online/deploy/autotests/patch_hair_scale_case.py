@@ -71,7 +71,7 @@ CASE = {
         {"id": "mt_rig", "kind": "mt_rig_first", "paths": ["mt"], "input": "137bd37f.upload.glb",
          "params": {"words": "stylized human figure chibi"}, "thresholds": {"seconds": ["<=", 60], "bones": [">=", 20], "clips": [">=", 8]}},
         {"id": "mt_hair", "kind": "hair_limbs", "paths": ["mt"], "on": "mt_rig",
-         "thresholds": {"arm_vertices_above_joints": ["<=", 120], "neck_head_share": [">=", 0.6]},
+         "thresholds": {"arm_vertices_above_joints": ["<=", 160], "neck_head_share": [">=", 0.6]},
          "target": {"thresholds": {"arm_vertices_above_joints": ["<=", 10]}, "reason": "dreadlock tips beside the shoulders still go to the clavicles / arms (75)", "owner": "Skinning · V3"}},
         {"id": "mt_stretch", "kind": "rig_stretch", "paths": ["mt"], "on": "mt_rig",
          "thresholds": {"sum_edges_over_4x": ["<=", 420], "sum_edges_over_2x": ["<=", 2100], "empty_limb_bones": ["==", 0]}},

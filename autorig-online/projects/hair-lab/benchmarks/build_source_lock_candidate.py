@@ -6,6 +6,7 @@ from pathlib import Path
 import bpy, bmesh
 from mathutils import Vector
 from mathutils.kdtree import KDTree
+from mathutils.bvhtree import BVHTree
 from bpy_extras.object_utils import world_to_camera_view
 
 def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -32,11 +33,14 @@ def select_guides(bundle, center, count=22):
     take([x for x in gs if x[0].get('kind')!='hairline'],count,15)
     return chosen[:count]
 
-def atlas_material(name, albedo, normal, mask, tint, use_normal=True):
+def atlas_material(name, albedo, normal, mask, tint, use_normal=True, normalize_albedo=False):
     m=bpy.data.materials.new(name);m.use_nodes=True;m.diffuse_color=(*tint,1);m.surface_render_method='DITHERED'
     n=m.node_tree.nodes;n.clear();out=n.new('ShaderNodeOutputMaterial');bs=n.new('ShaderNodeBsdfPrincipled');bs.inputs['Base Color'].default_value=(*tint,1);bs.inputs['Roughness'].default_value=.48;bs.inputs['Metallic'].default_value=0
     tex=n.new('ShaderNodeTexImage');tex.image=bpy.data.images.load(str(albedo),check_existing=True);tex.image.colorspace_settings.name='sRGB';mix=n.new('ShaderNodeMixRGB');mix.blend_type='MULTIPLY';mix.inputs[0].default_value=1;mix.inputs[2].default_value=(*tint,1)
-    m.node_tree.links.new(tex.outputs['Color'],mix.inputs[1]);m.node_tree.links.new(mix.outputs['Color'],bs.inputs['Base Color']);m.node_tree.links.new(tex.outputs['Alpha'],bs.inputs['Alpha'])
+    color_output=tex.outputs['Color']
+    if normalize_albedo:
+        div=n.new('ShaderNodeVectorMath');div.operation='DIVIDE';div.inputs[1].default_value=(.62631,.569373,.518633);m.node_tree.links.new(tex.outputs['Color'],div.inputs[0]);color_output=div.outputs['Vector']
+    clip=n.new('ShaderNodeMath');clip.operation='GREATER_THAN';clip.inputs[1].default_value=.36;m.node_tree.links.new(tex.outputs['Alpha'],clip.inputs[0]);m.node_tree.links.new(color_output,mix.inputs[1]);m.node_tree.links.new(mix.outputs['Color'],bs.inputs['Base Color']);m.node_tree.links.new(clip.outputs[0],bs.inputs['Alpha'])
     if use_normal:
         nt=n.new('ShaderNodeTexImage');nt.image=bpy.data.images.load(str(normal),check_existing=True);nt.image.colorspace_settings.name='Non-Color';nm=n.new('ShaderNodeNormalMap');nm.inputs['Strength'].default_value=.65;m.node_tree.links.new(nt.outputs['Color'],nm.inputs['Color']);m.node_tree.links.new(nm.outputs['Normal'],bs.inputs['Normal'])
     mt=n.new('ShaderNodeTexImage');mt.image=bpy.data.images.load(str(mask),check_existing=True);mt.image.colorspace_settings.name='Non-Color';sep=n.new('ShaderNodeSeparateColor');inv=n.new('ShaderNodeMath');inv.operation='SUBTRACT';inv.inputs[0].default_value=1;m.node_tree.links.new(mt.outputs['Color'],sep.inputs['Color']);m.node_tree.links.new(sep.outputs['Red'],bs.inputs['Metallic']);m.node_tree.links.new(mt.outputs['Alpha'],inv.inputs[1]);m.node_tree.links.new(inv.outputs[0],bs.inputs['Roughness']);m.node_tree.links.new(bs.outputs[0],out.inputs[0]);return m
@@ -44,22 +48,45 @@ def atlas_material(name, albedo, normal, mask, tint, use_normal=True):
 def flat_material(name,color,rough=.55):
     m=bpy.data.materials.new(name);m.diffuse_color=(*color,1);m.use_nodes=True;bs=m.node_tree.nodes.get('Principled BSDF');bs.inputs['Base Color'].default_value=(*color,1);bs.inputs['Roughness'].default_value=rough;return m
 
-def make_card(record, root, tip, samples, width, rect, kd, shell_obj, material):
+def make_card(record, root, tip, samples, width, rect, kd, shell_obj, material, surface_bvh=None, surface_offset=0):
     points=[transform(record['_matrix'],vec(s['position'])) for s in samples]
-    nearest=kd.find(root)[1];desired=(shell_obj.matrix_world.to_3x3()@shell_obj.data.vertices[nearest].normal).normalized();verts=[];uv=[];tris=[]
+    nearest=kd.find(root)[1];fallback=(shell_obj.matrix_world.to_3x3()@shell_obj.data.vertices[nearest].normal).normalized();surface_normals=[]
+    if surface_bvh:
+        projected=[]
+        for p in points:
+            hit,n,_,_=surface_bvh.find_nearest(p);n=n.normalized() if n and n.length>.001 else fallback;projected.append(hit+n*surface_offset);surface_normals.append(n)
+        points=projected
+    else:surface_normals=[fallback for _ in points]
+    verts=[];vertex_normals=[];uv=[];tris=[]
     for i,p in enumerate(points):
         if i==0:t=(points[1]-p).normalized()
         elif i==len(points)-1:t=(p-points[i-1]).normalized()
         else:t=(points[i+1]-points[i-1]).normalized()
-        right=t.cross(desired);right=right.normalized() if right.length>.001 else Vector((1,0,0));w=width*float(samples[i]['widthScale']);verts.extend((p+right*w,p-right*w));v=i/(len(points)-1);uv.extend(((rect['u1'],v),(rect['u0'],v)))
+        desired=surface_normals[i];right=t.cross(desired);right=right.normalized() if right.length>.001 else Vector((1,0,0));w=width*float(samples[i]['widthScale']);verts.extend((p+right*w,p-right*w));vertex_normals.extend((desired,desired));v=i/(len(points)-1);uv.extend(((rect['u1'],v),(rect['u0'],v)))
         if i<len(points)-1:b=i*2;tris.extend(((b,b+1,b+2),(b+1,b+3,b+2)))
     mean=Vector((0,0,0));
     for a,b,c in tris:mean+=(verts[b]-verts[a]).cross(verts[c]-verts[a])
-    if mean.dot(desired)<0:tris=[(a,c,b) for a,b,c in tris]
+    if mean.dot(sum(surface_normals,Vector((0,0,0))))<0:tris=[(a,c,b) for a,b,c in tris]
     mesh=bpy.data.meshes.new(record['id']);mesh.from_pydata(verts,[],tris);mesh.update();layer=mesh.uv_layers.new(name='UVMap')
     for poly in mesh.polygons:
         for li,vi in zip(poly.loop_indices,poly.vertices):layer.data[li].uv=uv[vi]
-    mesh.set_sharp_from_angle(angle=math.radians(35));mesh.calc_tangents(uvmap='UVMap');obj=bpy.data.objects.new(record['id'],mesh);obj['source_primitive']=4;obj['source_vertex']=record['sourceCompactVertex'];obj['stable_id']=record['id'];obj.data.materials.append(material);return obj
+    mesh.normals_split_custom_set([vertex_normals[mesh.loops[li].vertex_index] for li in range(len(mesh.loops))]);mesh.calc_tangents(uvmap='UVMap');obj=bpy.data.objects.new(record['id'],mesh);obj['source_primitive']=4;obj['source_vertex']=record['sourceCompactVertex'];obj['stable_id']=record['id'];obj.data.materials.append(material);return obj
+
+def merge_card_objects(cards,material):
+    verts=[];normals=[];uvs=[];tris=[];ranges=[]
+    for obj in cards:
+        mesh=obj.data;mesh.calc_loop_triangles();uv=mesh.uv_layers.active;corners=mesh.corner_normals;start_v=len(verts);start_t=len(tris)
+        normal_matrix=obj.matrix_world.to_3x3().inverted().transposed()
+        for tri in mesh.loop_triangles:
+            ids=[]
+            for li in tri.loops:
+                loop=mesh.loops[li];ids.append(len(verts));verts.append(obj.matrix_world@mesh.vertices[loop.vertex_index].co);normals.append((normal_matrix@corners[li].vector).normalized());uvs.append(tuple(uv.data[li].uv))
+            tris.append(tuple(ids))
+        ranges.append({'stableId':obj['stable_id'],'sourceVertex':int(obj['source_vertex']),'vertexStart':start_v,'vertexCount':len(verts)-start_v,'triangleStart':start_t,'triangleCount':len(tris)-start_t})
+    mesh=bpy.data.meshes.new('hair-primitive-merged-wisps');mesh.from_pydata(verts,[],tris);mesh.update();layer=mesh.uv_layers.new(name='UVMap')
+    for poly in mesh.polygons:
+        for li,vi in zip(poly.loop_indices,poly.vertices):layer.data[li].uv=uvs[vi]
+    mesh.normals_split_custom_set([normals[mesh.loops[li].vertex_index] for li in range(len(mesh.loops))]);mesh.calc_tangents(uvmap='UVMap');obj=bpy.data.objects.new('hair-primitive-merged-wisps',mesh);obj.data.materials.append(material);obj['stable_id']='merged-wisps';obj['card_ranges_json']=json.dumps(ranges,separators=(',',':'));return obj,ranges
 
 def import_glb(path):
     before=set(bpy.data.objects);bpy.ops.import_scene.gltf(filepath=str(path));return [o for o in bpy.data.objects if o not in before]
@@ -110,13 +137,13 @@ def portable_primitive(obj, stable_id, material, polygon_filter=None):
     mesh=obj.data;mesh.calc_loop_triangles();uv_layer=mesh.uv_layers.active
     try:mesh.calc_tangents(uvmap=uv_layer.name if uv_layer else '')
     except Exception:pass
-    normal_matrix=obj.matrix_world.to_3x3().inverted().transposed();basis=obj.matrix_world.to_3x3();positions=[];normals=[];tangents=[];uvs=[];indices=[]
+    normal_matrix=obj.matrix_world.to_3x3().inverted().transposed();basis=obj.matrix_world.to_3x3();corners=mesh.corner_normals;positions=[];normals=[];tangents=[];uvs=[];indices=[]
     for tri in mesh.loop_triangles:
         poly=mesh.polygons[tri.polygon_index]
         if polygon_filter and not polygon_filter(poly):continue
         for li in tri.loops:
-            loop=mesh.loops[li];p=blender_to_y_up(obj.matrix_world@mesh.vertices[loop.vertex_index].co);n=blender_to_y_up((normal_matrix@mesh.vertices[loop.vertex_index].normal).normalized());t=blender_to_y_up((basis@loop.tangent).normalized()) if loop.tangent.length>.001 else Vector((1,0,0));positions.extend(round(x,7) for x in p);normals.extend(round(x,7) for x in n);tangents.extend((round(t.x,7),round(t.y,7),round(t.z,7),round(float(loop.bitangent_sign),7)));uvs.extend(round(float(x),7) for x in (uv_layer.data[li].uv if uv_layer else (0,0)));indices.append(len(indices))
-    return {'stableId':stable_id,'material':material,'positions':positions,'normals':normals,'tangents':tangents,'uv':uvs,'indices':indices,'triangles':len(indices)//3}
+            loop=mesh.loops[li];p=blender_to_y_up(obj.matrix_world@mesh.vertices[loop.vertex_index].co);n=blender_to_y_up((normal_matrix@corners[li].vector).normalized());t=blender_to_y_up((basis@loop.tangent).normalized()) if loop.tangent.length>.001 else Vector((1,0,0));positions.extend(round(x,7) for x in p);normals.extend(round(x,7) for x in n);tangents.extend((round(t.x,7),round(t.y,7),round(t.z,7),round(float(loop.bitangent_sign),7)));uvs.extend(round(float(x),7) for x in (uv_layer.data[li].uv if uv_layer else (0,0)));indices.append(len(indices))
+    return {'stableId':stable_id,'material':material,'positions':positions,'normals':normals,'tangents':tangents,'uv':uvs,'indices':indices,'triangles':len(indices)//3,'normalSource':'mesh.corner_normals[loop].vector'}
 
 def main(a):
     t0=time.perf_counter();out=Path(a.out);out.mkdir(parents=True,exist_ok=True);bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -129,11 +156,17 @@ def main(a):
     for i,v in enumerate(shell_obj.data.vertices):kd.insert(shell_obj.matrix_world@v.co,i)
     kd.balance();atlas={r['id']:{'u0':r['uvRect'][0],'v0':r['uvRect'][1],'u1':r['uvRect'][2],'v1':r['uvRect'][3]} for r in manifest['atlas']['rects']}
     if a.card_mode=='flat':mat=flat_material('source pink flat cards',(0.58,0.175,0.235),.52)
-    else:mat=atlas_material('hair.strands.retro candidate',a.albedo,a.normal,a.mask,(0.58,0.175,0.235),use_normal=a.card_mode=='atlas')
+    else:mat=atlas_material('hair.strands.retro candidate',a.albedo,a.normal,a.mask,(0.58,0.175,0.235),use_normal=a.card_mode=='atlas',normalize_albedo=a.normalize_atlas)
     cards=[]
+    shell_world=[shell_obj.matrix_world@v.co for v in shell_obj.data.vertices];surface_bvh=BVHTree.FromPolygons(shell_world,[tuple(p.vertices) for p in shell_obj.data.polygons],all_triangles=True) if a.project_cards else None
     matrix=guides['coordinates']['normalizedToSource']
     for rec,root,tip,direction,length in selected:
-        rec=dict(rec);rec['_matrix']=matrix;converted=[dict(s,position=y_up_to_blender(transform(matrix,vec(s['position'])))) for s in rec['samples']];rec['_matrix']=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];obj=make_card(rec,root,tip,converted,float(rec['width'])*18.722475*.56,atlas[rec['atlasRectId']],kd,shell_obj,mat);bpy.context.scene.collection.objects.link(obj);cards.append(obj);candidate.append(obj)
+        rec=dict(rec);rec['_matrix']=matrix;converted=[dict(s,position=y_up_to_blender(transform(matrix,vec(s['position'])))) for s in rec['samples']];rec['_matrix']=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];obj=make_card(rec,root,tip,converted,float(rec['width'])*18.722475*a.card_width_scale,atlas[rec['atlasRectId']],kd,shell_obj,mat,surface_bvh,a.surface_offset);bpy.context.scene.collection.objects.link(obj);cards.append(obj);candidate.append(obj)
+    merge_ranges=[]
+    if a.merge_cards and cards:
+        original_cards=list(cards);merged,merge_ranges=merge_card_objects(original_cards,mat);bpy.context.scene.collection.objects.link(merged)
+        for obj in original_cards:bpy.data.objects.remove(obj,do_unlink=True)
+        cards=[merged];candidate=[candidate_base]+shell+cards
     # source includes original source object; imported shell objects must not leak into source view.
     source_only=list(source);candidate_only=list(candidate);set_visible(source_only,True);set_visible(candidate_only,False)
     # Frame the verified Hair primitive, not the whole single-mesh character.
@@ -162,7 +195,7 @@ def main(a):
     # Export additive hair only: QEM shell + stable lock-card nodes.
     bpy.ops.object.select_all(action='DESELECT')
     for o in shell+cards:o.select_set(True)
-    bpy.context.view_layer.objects.active=shell_obj;glb=out/'hair-source-locks.glb';bpy.ops.export_scene.gltf(filepath=str(glb),export_format='GLB',use_selection=True,export_apply=True)
+    bpy.context.view_layer.objects.active=shell_obj;glb=out/'hair-source-locks.glb';bpy.ops.export_scene.gltf(filepath=str(glb),export_format='GLB',use_selection=True,export_apply=True,export_tangents=True,export_extras=True)
     hair_slots={i for i,m in enumerate(source_mesh.data.materials) if m and m.name.lower()=='hair'}
     maps={'albedo':{'kind':'albedo-alpha','path':str(Path(a.albedo).resolve()),'sha256':sha(a.albedo),'format':'PNG sRGB RGBA alpha coverage'},'normal':{'kind':'tangent-normal','path':str(Path(a.normal).resolve()),'sha256':sha(a.normal),'format':'PNG linear tangent OpenGL +Y'},'mask':{'kind':'urp-mask','path':str(Path(a.mask).resolve()),'sha256':sha(a.mask),'format':'PNG linear R metallic/G AO/B 1/A smoothness'},'direction':{'kind':'strand-direction','path':str((Path(a.albedo).parent/'hair.strands.retro_direction.png').resolve()),'sha256':sha(Path(a.albedo).parent/'hair.strands.retro_direction.png'),'format':'PNG linear RG du/dv,+V; B confidence; A coverage'}}
     atlas_semantics={'size':[1024,1024],'orientation':'root v0 PNG bottom; tip v1 PNG top','rects':manifest['atlas']['rects'],'cutoff':.36}
@@ -173,11 +206,11 @@ def main(a):
     source_json={'schema':'autorig.hair.source-neutral/1','sourceSha256':sha(a.source),'coordinates':coordinates,'primitive':portable_primitive(source_mesh,'source-hair-primitive-4',{'mode':'source-base-color','baseColorFactor':[.577621,.174994,.235256,1]},lambda p:p.material_index in hair_slots)};source_json['artifactSha256']=geometry_artifact_sha([source_json['primitive']])
     source_path=out/'source-hair-neutral.json';source_path.write_text(json.dumps(source_json,separators=(',',':')))
     candidate_primitives=[portable_primitive(shell_obj,'qem-shell-2500',{'mode':'source-base-color','baseColorFactor':[.577621,.174994,.235256,1]})]+[portable_primitive(o,o.name,{'mode':'atlas-cards','baseColorFactor':[.577621,.174994,.235256,1],'atlasKey':'hair.strands.retro'}) for o in cards]
-    candidate_json={'schema':'autorig.hair.hybrid-candidate/1','sourceSha256':sha(a.source),'coordinates':coordinates,'materials':maps,'atlas':atlas_semantics,'primitives':candidate_primitives,'limitations':['additive WIP; semantic replacement gate closed','static art preview; deformation not validated here']};candidate_json['artifactSha256']=geometry_artifact_sha(candidate_primitives)
+    candidate_json={'schema':'autorig.hair.hybrid-candidate/1','sourceSha256':sha(a.source),'coordinates':coordinates,'materials':maps,'atlas':atlas_semantics,'cardMergeRanges':merge_ranges,'primitives':candidate_primitives,'limitations':['additive WIP; semantic replacement gate closed','static art preview; deformation not validated here']};candidate_json['artifactSha256']=geometry_artifact_sha(candidate_primitives)
     candidate_path=out/'candidate-geometry.json';candidate_path.write_text(json.dumps(candidate_json,separators=(',',':')))
     finite_uv=all(math.isfinite(x) and 0<=x<=1 for o in cards for uv in o.data.uv_layers.active.data for x in uv.uv);finite_tangent=all(math.isfinite(x) for o in cards for loop in o.data.loops for x in loop.tangent)
     exposure_gate=all(v['sourceExposure']['meanLuminance']>=.08 and v['candidateExposure']['meanLuminance']>=.08 and v['sourceExposure']['clippedFraction']<=.02 and v['candidateExposure']['clippedFraction']<=.02 for v in rendered.values())
-    report={'schema':'autorig.hair.source-lock-candidate/1','status':'wip_visual_candidate','variant':{'cardMode':a.card_mode,'locks':a.locks},'source':{'sha256':sha(a.source),'hairPrimitive':4,'deletedHairFacesInCandidateBody':deleted},'inputs':{'guidesSha256':sha(a.guides),'shellSha256':sha(a.shell),'atlasAlbedoSha256':sha(a.albedo),'atlasNormalSha256':sha(a.normal),'atlasMaskSha256':sha(a.mask)},'atlasPhotometry':{'opaqueTexelCount':len(opaque_rgb),'meanOpaqueAlbedoLinear':[round(x,6) for x in mean_linear],'sourceBaseColorFactor':source_base,'effectiveMultipliedLinear':[round(x,6) for x in effective],'channelRetention':[round(mean_linear[i],6) for i in range(3)]},'selection':{'inputGuides':len(guides['guides']),'selectedLocks':len(selected),'stableIds':[x[0]['id'] for x in selected]},'geometry':{'shellTriangles':sum(len(o.data.polygons) for o in shell if o.type=='MESH'),'cardTriangles':sum(len(o.data.polygons) for o in cards),'cardObjects':len(cards),'finiteUv':finite_uv,'finiteTangents':finite_tangent,'alphaCoverageAtCutoff':round(alpha_cov,6)},'captureGate':{'meanLuminanceMin':.08,'clippedFractionMax':.02,'pass':exposure_gate},'views':rendered,'glb':{'path':str(glb),'sha256':sha(glb),'bytes':glb.stat().st_size},'portable':{'sourceNeutral':{'path':str(source_path),'sha256':sha(source_path),'artifactSha256':source_json['artifactSha256']},'candidate':{'path':str(candidate_path),'sha256':sha(candidate_path),'artifactSha256':candidate_json['artifactSha256']}},'timingSeconds':round(time.perf_counter()-t0,4),'limitations':['QEM shell is additive WIP and semantic replacement gate remains closed','cards use source-tip NMS and approximate roots','no animation/deformation in this art comparison']};(out/'report.json').write_text(json.dumps(report,indent=2));print(json.dumps({'ok':True,'captureGate':exposure_gate,'locks':len(selected),'triangles':report['geometry'],'glb':str(glb),'seconds':report['timingSeconds']}))
+    report={'schema':'autorig.hair.source-lock-candidate/1','status':'wip_visual_candidate','variant':{'cardMode':a.card_mode,'locks':a.locks,'surfaceProjected':a.project_cards,'surfaceOffset':a.surface_offset,'cardWidthScale':a.card_width_scale,'atlasNormalized':a.normalize_atlas,'cardsMerged':a.merge_cards},'source':{'sha256':sha(a.source),'hairPrimitive':4,'deletedHairFacesInCandidateBody':deleted},'inputs':{'guidesSha256':sha(a.guides),'shellSha256':sha(a.shell),'atlasAlbedoSha256':sha(a.albedo),'atlasNormalSha256':sha(a.normal),'atlasMaskSha256':sha(a.mask)},'atlasPhotometry':{'opaqueTexelCount':len(opaque_rgb),'meanOpaqueAlbedoLinear':[round(x,6) for x in mean_linear],'sourceBaseColorFactor':source_base,'effectiveMultipliedLinear':[round(x,6) for x in effective],'channelRetention':[round(mean_linear[i],6) for i in range(3)]},'selection':{'inputGuides':len(guides['guides']),'selectedLocks':len(selected),'stableIds':[x[0]['id'] for x in selected],'mergeRanges':merge_ranges},'geometry':{'shellTriangles':sum(len(o.data.polygons) for o in shell if o.type=='MESH'),'cardTriangles':sum(len(o.data.polygons) for o in cards),'cardObjects':len(cards),'finiteUv':finite_uv,'finiteTangents':finite_tangent,'alphaCoverageAtCutoff':round(alpha_cov,6)},'captureGate':{'meanLuminanceMin':.08,'clippedFractionMax':.02,'pass':exposure_gate},'views':rendered,'glb':{'path':str(glb),'sha256':sha(glb),'bytes':glb.stat().st_size},'portable':{'sourceNeutral':{'path':str(source_path),'sha256':sha(source_path),'artifactSha256':source_json['artifactSha256']},'candidate':{'path':str(candidate_path),'sha256':sha(candidate_path),'artifactSha256':candidate_json['artifactSha256']}},'timingSeconds':round(time.perf_counter()-t0,4),'limitations':['QEM shell is additive WIP and semantic replacement gate remains closed','cards use source-tip NMS and approximate roots','no animation/deformation in this art comparison']};(out/'report.json').write_text(json.dumps(report,indent=2));print(json.dumps({'ok':True,'captureGate':exposure_gate,'locks':len(selected),'triangles':report['geometry'],'glb':str(glb),'seconds':report['timingSeconds']}))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--source',required=True);p.add_argument('--shell',required=True);p.add_argument('--guides',required=True);p.add_argument('--manifest',required=True);p.add_argument('--albedo',required=True);p.add_argument('--normal',required=True);p.add_argument('--mask',required=True);p.add_argument('--out',required=True);p.add_argument('--locks',type=int,default=22);p.add_argument('--card-mode',choices=('flat','atlas-no-normal','atlas'),default='atlas');p.add_argument('--size',type=int,default=768);main(p.parse_args(sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else None))
+    p=argparse.ArgumentParser();p.add_argument('--source',required=True);p.add_argument('--shell',required=True);p.add_argument('--guides',required=True);p.add_argument('--manifest',required=True);p.add_argument('--albedo',required=True);p.add_argument('--normal',required=True);p.add_argument('--mask',required=True);p.add_argument('--out',required=True);p.add_argument('--locks',type=int,default=22);p.add_argument('--card-mode',choices=('flat','atlas-no-normal','atlas'),default='atlas');p.add_argument('--project-cards',action='store_true');p.add_argument('--surface-offset',type=float,default=.12);p.add_argument('--card-width-scale',type=float,default=.28);p.add_argument('--normalize-atlas',action='store_true');p.add_argument('--merge-cards',action='store_true');p.add_argument('--size',type=int,default=768);main(p.parse_args(sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else None))

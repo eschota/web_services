@@ -6,7 +6,8 @@ Submits an only_rig conversion straight to the node (the backend never sees it),
 2 s and prints one JSON line: seconds from submit to pickup, to viewer_rig_ready (both viewer GLBs
 complete, the "rig in the viewer" point of the owner's one-minute rule) and to Completed, plus the
 per-stage durations of logs/stage_timing.jsonl. The default input is the 66ba97ba evidence model
-(read only). --keep-temp-cmd runs once the rig is ready (e.g. to drop SAVETEMP.txt for a diagnosis).
+(read only). --keep-temp-cmd runs once the rig is ready (e.g. to drop SAVETEMP.txt for a diagnosis);
+--early runs it right after the submit instead.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ def _get(url: str, timeout: float = 20.0):
 def main() -> int:
     args = sys.argv[1:]
     keep_cmd = None
+    early = "--early" in args
+    if early:
+        args.remove("--early")
     if "--keep-temp-cmd" in args:
         i = args.index("--keep-temp-cmd")
         keep_cmd = args[i + 1]
@@ -45,6 +49,12 @@ def main() -> int:
     out = {"box": box, "task_id": task_id, "guid": guid, "progress_page": body.get("progress_page"), "input_url": input_url}
     marks = {}
     final = {}
+    if keep_cmd and early:  # e.g. SAVETEMP.txt before the rig stages (diagnosis runs, slower)
+        for _ in range(30):
+            if subprocess.run(keep_cmd.format(guid=guid), shell=True, timeout=60).returncode == 0:
+                break
+            time.sleep(2)
+        keep_cmd = None
     while time.time() - t0 < 1800:
         try:
             final = _get(f"{base}/api-converter-glb/status/{task_id}")
