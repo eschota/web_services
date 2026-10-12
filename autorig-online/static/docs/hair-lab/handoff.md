@@ -17,7 +17,7 @@ This page is the public-safe feature checkpoint. It contains measured progress, 
 | Dynamics | **r6 verified as a bounded shell test** | Full-shell native CPU Burst deformation, copies and mesh upload measured p50/p90 **1.9485/2.0051 ms** over 180 frames. Guide simulation is a separate **3.1263 ms** stage. Core/Burst parity reached 2.18e-7 m position and 0.00399° normal direction; 28 core tests passed. See [real motion](real-motion.md). |
 | Head collision | **Open** | No accepted true-head collider exists. The tested closed proxy overfills concavities and is not accepted as production collision geometry. |
 | Materials | **Technical intake checked; art not accepted** | Original atlas and Full/Light pair passed 56 importer checks and actual Unity usage/stand captures. Sparse test ribbons are not a hairstyle. The material remains unadmitted and unexportable pending art and real-head validation. |
-| Task integration | **Source-only** | MT operation source commit `71fac68` exists, but it is not mounted in the task/API and has not changed customer tasks. Parser hardening and Vision scheduling remain in progress. |
+| Task integration | **Source-only** | MT operation hardening `fd479e4` includes streaming GLB validation and bound feature/resolved-generator versions;15 tests passed on a server audit copy. It is not mounted in the task/API and has not changed customer tasks. |
 | Real Hair product | **Pre-release development** | Portable guide/card and dynamics technology is being validated for Unity/URP. No finished package, store submission or release is claimed. |
 
 ## Latest evidence
@@ -28,7 +28,7 @@ The r6 full-shell comparison confirms that the native Burst path matches the ref
 
 Normal validation reports eight disagreements in the source shell and nine after deformation, leaving one new dynamic release blocker. A follow-up normal fix now exists in source only. It is **pending temporal-continuity review and a Unity rerun**: a lower mismatch count cannot justify visible shading pops. R6 remains the latest verified result and the new fix is not promoted to verified status here.
 
-A second registered packet for a fused bob contains source-bound geometry and aligned ID, depth, normal and color crops. It is an input packet for a future segmentation pass, **not a hair mask or completed segmentation**.
+A second registered packet for a fused bob contains source-bound geometry and aligned ID, depth, normal and color crops. One free-farm Vision request completed in19.54s, but its472-triangle diagnostic missed bangs and lower locks. Root inspected and rejected the registered overlay; original hair stays and Apply remains disabled. DEV6771 contains this failure evidence, not accepted segmentation.
 
 DEV6767 contains the r6 motion evidence. It was delivered for review; delivery is not approval.
 

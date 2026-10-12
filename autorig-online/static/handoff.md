@@ -72,6 +72,8 @@ Hair Lab acceptance criteria:
 
 **Full-shell continuation r6:** the native CPU Burst shell path measures p50/p90 **1.9485/2.0051ms**, including input/output copies and Unity mesh upload, over180 reference-comparison frames. Guide simulation is a separate **3.1263ms** stage. Core/Burst parity is2.18e-7m position and0.00399° normal direction;28 core tests pass. Normal checks report8 source disagreements and9 after deformation. The new triangle2209 disagreement is a release blocker being investigated, not accepted quality. There is still no true-head collider, the final atlas is pending and automatic Apply remains0/5. A registered fused-bob packet is input evidence, not completed hair segmentation. DEV6767 (`0b1be8594739`) was delivered, not approved. MT operation source commit `71fac68` is unmounted; parser hardening and Vision scheduling are still in progress. WebGL and complete hairstyle latency remain unvalidated.
 
+**Follow-up at10:10 local:** MT hardening `fd479e4` adds streaming parsing and verified concrete generator-version bindings;15 Linux audit tests pass, still unmounted. A real fused-bob Vision request completed19.54s but missed bangs/lower locks, so its diagnostic472-face mask was rejected (DEV6771). Normal-smoothing experiments are disabled by default after independent review found temporal/state problems; the verified r6 mode is retained. RealMaterials technical intake passed actual usage/stand captures but remains unadmitted pending hair art. No automatic customer model replacement or service restart occurred.
+
 - five visibly different presets derived from the analyzed hairstyle;
 - stable front, side, back and top silhouette without scalp leaks;
 - exact attachment to the current head and ears with preserved accessories;
