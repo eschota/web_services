@@ -466,8 +466,35 @@ def cmd_mt_deploy(args) -> int:
     if os.geteuid() != 0:
         raise SystemExit("run with sudo")
     overlay = parse_overlay(args.mt_file)
+    # --mt-patch (2026-10-13): several agents edit fastrig.py; a whole-file candidate staged before the gate slot
+    # freed was always "older than production" by the time it ran. A unified diff is applied here, after the gate
+    # lock is held, onto the CURRENT production file, so it can never roll back another agent's install.
+    for item in getattr(args, "mt_patch", None) or []:
+        rel, _, diff = item.partition("=")
+        rel = rel.strip()
+        if not rel.startswith("mt/") or not diff or not pathlib.Path(diff).is_file():
+            raise SystemExit(f"--mt-patch wants mt/<rel>=<unified diff file>: {item}")
+        if rel in overlay:
+            raise SystemExit(f"{rel}: give either --mt-file or --mt-patch, not both")
+        stage = pathlib.Path("/srv/autorig/data/autotests/patched") / f"{now()}-{os.getpid()}"
+        stage.mkdir(parents=True, exist_ok=True)
+        base = MT_PROD / rel
+        out = stage / pathlib.Path(rel).name
+        if base.is_file():
+            shutil.copy2(base, out)
+        else:
+            out.write_text("")
+        r = subprocess.run(["patch", "--batch", "--forward", "--silent", "-r", "-", str(out), diff],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"NOT INSTALLED: --mt-patch for {rel} does not apply to current production:\n"
+                  f"{(r.stdout + r.stderr)[-1500:]}")
+            return 1
+        os.utime(out, None)
+        overlay[rel] = str(out.resolve())
+        print(f"patched {rel} onto production ({base.stat().st_size if base.is_file() else 0} bytes) -> {out}")
     if not overlay:
-        raise SystemExit("nothing to deploy: --mt-file mt/<rel>=<file>")
+        raise SystemExit("nothing to deploy: --mt-file mt/<rel>=<file> or --mt-patch mt/<rel>=<diff>")
     # Stale candidates (2026-10-11): a deploy whose fastrig.py was staged before another agent's install replaced it
     # wholesale and silently rolled the geodesic skin engine back. A candidate older than the production file it
     # replaces was not built on that production copy: refuse it (AUTORIG_ALLOW_STALE=1 overrides, owner only).
@@ -590,7 +617,9 @@ def main() -> int:
     g.add_argument("--post-dev-on-fail", action="store_true", help="post the card to DEV only when the gate fails")
     g.add_argument("--json", action="store_true")
     d = sub.add_parser("mt-deploy")
-    d.add_argument("--mt-file", action="append", required=True)
+    d.add_argument("--mt-file", action="append")
+    d.add_argument("--mt-patch", action="append",
+                   help="mt/<rel>=<unified diff>: applied onto CURRENT production after the gate lock (2026-10-13)")
     d.add_argument("--tier", choices=("base", "extended"), default="base")
     d.add_argument("--jobs", type=int, default=6)
     d.add_argument("--restart", action="store_true")
