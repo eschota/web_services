@@ -3180,3 +3180,22 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   solver-onlyprofile max500/tols1e-6/budget900, QualityQAthresholdsНЕменялись. F15jobs/zebra-walk-plane-fit-v6,
   localexecsession16475АКТИВЕН; window35–40PASS68.8s/кframe45за94.64s. 107+30=137farmcontractPASS.
   CodeSHA89bab96683e9…; дальшеactualBlender/GLTF/retarget/LBS+Unity/ownerverdict. Не дублироватьпроцесс.
+
+### Копытные · 2026-10-13 20:46 UTC
+
+- V6 выше НЕ активен: ERROR45–50. V7 сsourceeligibility прошёл100кадров,
+  ERROR100–105; prefix0–99 сохранён. ExactJacobian auditPASS/нулевые missingdependencies;
+  повтор solver остановлен своимPID1492, поскольку нужен фиксobjective/root-limb decomposition.
+- Реальный100/141prefix экспортированBlender/GLTF, retarget/LBS100samples,
+  candidateSHA194646fd85aa553d…; penetration7–8%H→0.7–1.5%H, ноLF/RHslideусилился.
+  Это QAFAILdiagnostic, не полныйWalk и не принятие. SourceGPUнеповторялся.
+- Unity F1jobc03977776e814f4dac85 PASS540frames60fps. DEV7279/media1243df8284b0
+  отправленс явнымpartialscope; ownerverdictPENDING/owncursor2508.
+- F15suite143contractPASS; testedCLIв/dev/tools atomicupdate, customerpathНЕсмонтирован.
+  Подробности/точныеSHA/метрики `autorig-online/docs/equine-walk-source-physics-20261013.md`.
+- Дальше новыйsource-backed torso-relativeverticalobjective, freshschema/fit;
+  старыйprefixподдругойobjectiveнепродолжать. Затемsource/export/LBS/Unity+отдельныйverdict.
+- V8freshobjective4 запущен20:47UTCF15, actorPID5692/launcher16092/SSHsession59410.
+  Источникнеповторялся, толькоCPUfit. Exactprofile/job/codeSHAвканоническомequinecheckpoint.
+  Production144contractPASS, exacttestedCLIinstalled; equine-prefix-exportзарегистрирован.
+  Не дублироватьэтотprocess; послеterminalstatus обновить checkpoint иactualQA/media.

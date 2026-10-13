@@ -8,6 +8,7 @@
   "raw_observations_module": {"path": "<code root>/equines/equine_raw_observations.py", "sha256": "<sha256>"},
   "limb_constraints_module": {"path": "<code root>/equines/equine_limb_constraints.py", "sha256": "<sha256>"},
   "contact_evidence_module": {"path": "<code root>/equines/equine_contact_evidence.py", "sha256": "<sha256>"},
+  "source_eligibility_module": {"path": "<code root>/equines/fitting_adapter/equine_source_eligibility.py", "sha256": "<sha256>"},
   "constraint_fit_module": {"path": "<code root>/equines/fitting_adapter/equine_constraint_fit.py", "sha256": "<sha256>"},
   "animation_fitting_code": "<managed runtime>/code/animation_fitting",
   "output_root": "<fresh project work root>",
@@ -24,5 +25,6 @@
   "expected_array_sha256": null,
   "constraint_options": {},
   "contact_options": {},
+  "eligibility_options": {},
   "fit_options": {}
 }

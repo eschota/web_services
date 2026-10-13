@@ -25,6 +25,8 @@ def main():
             'clip_requested':job['clip'],'source_override':str(glb.resolve()),'command':command,'saver':value,'saver_tag':manifest['tag'],
             'saver_manifest_sha256':manifest.get('sha256'),'saver_install':install,'exit_code':proc.returncode,
             'wall_seconds':time.time()-begin,'qa_decision':job['qa_decision'],'owner_acceptance':False,'activation_allowed':False}
+    if 'source_frame_scope' in job:
+        record['source_frame_scope']=job['source_frame_scope']
     (out/'capture-receipt.json').write_text(json.dumps(record,indent=2)+'\n')
     ok=proc.returncode==0 and value.get('ok') and value.get('clip')==job['clip'] and value.get('frames')==540 and (out/'preview.mp4').is_file()
     print(json.dumps({'ok':ok,'clip':value.get('clip'),'frames':value.get('frames'),'source_sha256':sha(glb)}))

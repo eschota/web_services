@@ -5,6 +5,7 @@
   "surface_anchors": {"path": "<immutable actionless bundle>/surface_anchors.json", "sha256": "<sha256>"},
   "constraints": {"path": "<equine_limb_constraints output.json>", "sha256": "<sha256>"},
   "contact_evidence": {"path": "<measured contact evidence.json>", "sha256": "<sha256>"},
+  "source_eligibility": {"path": "<source-bound target eligibility.json>", "sha256": "<sha256>"},
   "profile": {"path": "<run-scoped engineering profile.json>", "sha256": "<sha256>"},
   "solver_control_profile": {"path": "<optional solver-control profile.json>", "sha256": "<sha256>"},
   "action_contract": {"path": "<full34 walk action contract.json>", "sha256": "<sha256>"},
@@ -12,6 +13,13 @@
   "output": "<fresh work root>/walk-fitted-animation.json",
   "progress_file": "<fresh work root>/walk-fitted-animation.progress.json",
   "resume_from": {"path": "<optional prior diagnostic progress.json>", "sha256": "<exact sha256>"},
+  "diagnostic_audit": {
+    "fitter_code_sha256": "<exact staged equine_constraint_fit.py sha256>",
+    "window_start": 45,
+    "finite_difference_step": 0.000001,
+    "unexpected_derivative_tolerance": 0.0000001,
+    "output": "<fresh work root>/window-45-jacobian-audit.json"
+  },
   "options": {
     "max_rotation_delta_rad": 0.75,
     "rest_weight": 0.01,
@@ -22,6 +30,7 @@
     ,"max_fit_seconds": 300
     ,"hoof_huber_delta_height_ratio": 0.05
     ,"joint_huber_delta_height_ratio": 0.05
+    ,"limb_torso_vertical_weight": 1.0
     ,"solver_ftol": 0.00000001
     ,"solver_xtol": 0.00000001
     ,"solver_gtol": 0.00000001

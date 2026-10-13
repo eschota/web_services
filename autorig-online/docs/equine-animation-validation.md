@@ -226,3 +226,20 @@ preserving the objective profile and changing only pinned solver controls.
 Actual window35–40 passed after68.8s; next frame45 after94.64s. F15 project
 `zebra-walk-plane-fit-v6`, local exec session16475. Full137farm contract checks
 pass, but real complete motion/export/retarget/owner acceptance are still pending.
+
+### Superseding checkpoint, 2026-10-13 20:46 UTC
+
+V6 is terminal ERROR45–50. V7 source-eligibility objective completed100frames,
+then ERROR100–105. Actual100/141 diagnostic prefix was FK-replayed, exported in
+Blender, retargeted, LBS-sampled and captured in Unity on F1. DEV7279/media
+1243df8284b0 is explicitly partial/QAFAIL; owner verdict is pending.
+Penetration improved on the same100frames, but LF/RH sliding worsened and
+four-leg gait remains unproven. A source-backed limb-to-torso vertical objective
+is required; a changed objective cannot resume the old prefix. Detailed hashes,
+before/after metrics, exact terminal jobs and next steps live in
+`equine-walk-source-physics-20261013.md`. Latest farm contract suite143PASS does
+not approve motion. Full34/category-library/customer activation remains pending.
+Fresh V8 objective4 is now running on F15 (actor5692, launcher16092,
+foregroundSSHsession59410); source/RAW stages are reused. Latest production
+contracts144PASS. Follow that process without duplicating it; exact pins are in
+the detailed checkpoint. A running fit is not an accepted clip.

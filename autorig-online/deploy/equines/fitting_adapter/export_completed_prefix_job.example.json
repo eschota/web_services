@@ -1,0 +1,13 @@
+{
+  "schema": "autorig.equine-prefix-export-job/1",
+  "accepted": false,
+  "library_activation": false,
+  "checkpoint": {"path": "<completed-prefix progress.json>", "sha256": "<sha256>"},
+  "original_fit_job": {"path": "<exact original fit-job.json>", "sha256": "<sha256>"},
+  "code_pins": {
+    "equine_constraint_fit.py": {"path": "<exact staged fitter>", "sha256": "<sha256>"},
+    "export_completed_prefix.py": {"path": "<exact staged exporter>", "sha256": "<sha256>"},
+    "animation_fitting.rig.py": {"path": "<exact staged runtime rig.py>", "sha256": "<sha256>"}
+  },
+  "output": "<fresh work root>/walk-prefix-0-99-diagnostic.json"
+}

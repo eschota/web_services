@@ -12,5 +12,6 @@
     "solver_xtol": 0.000001,
     "solver_gtol": 0.000001,
     "solver_x_scale": 1.0
+    ,"resume_failed_window_best_seed": true
   }
 }

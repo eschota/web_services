@@ -140,3 +140,75 @@ The failed window35–40 passed in68.8s; frame45 started at94.64s. Do not duplic
 the process. Failure checkpoints now preserve best finite failed-window values,
 and resumed prefix metrics are recomputed by FK without changing parameters.
 Latest farm contract suite:107top-level plus30adapter checks,137PASS.
+
+## Actual continuation and Unity diagnostic, 2026-10-13 20:46 UTC
+
+The active-V6 statement above is superseded. V6 ended ERROR at window45–50;
+its frame0–44 prefix is preserved. Exact finite-difference audit found zero
+undeclared Jacobian dependencies. The input constraints included physically
+inconsistent Toe/Foot pairs. The new source-eligibility tool measures actual
+immutable weighted-anchor reach, adjacent own-chain support and pair jumps;
+it rejects targets without replacing points, mirroring or synthesizing contact.
+
+V7, objective `autorig.equine-window-objective/3-source-eligibility-physics-sparsity`,
+used the retained RAW data and ended ERROR at window100–105 after436.156s,
+max500evaluations, cost0.36004336. Completed frame0–99 parameters are preserved
+in `jobs/zebra-walk-plane-fit-v7/walk-fitted-animation.json.progress.json`.
+An exact window100 audit has709rows/90variables and zero unexpected derivatives.
+Hoof/joint/torso costs dominate; contact/velocity costs are only9.6e-6.
+A same-objective retry was stopped through its own PID1492 after confirming
+that solver iterations cannot repair the incorrect root/limb decomposition.
+No new suffix output was accepted. No GPU stages were replayed.
+
+The verified prefix exporter replayed FK without optimization into a fresh
+explicit `DIAGNOSTIC_PARTIAL_REFERENCE_NOT_LIBRARY` motion (100of141frames,
+loopfalse). Motion SHA d3eec1d3e00596ef20c908f4198720b0d790809757590a99169106d5ac09e38b.
+Actual Blender apply/export, source GLTF re-read, target retarget and LBS sample
+all completed on F15. Target candidate SHA
+194646fd85aa553dfb9eadc0e25c1d9f9a98a154ebc5a137c0e89a16e88049f2.
+All32bones retain real100samples/4.125s. Originals remain unchanged.
+
+Same exact source frames0–99 at24fps, inferred bind-floor diagnostic only:
+
+| Leg | Before penetration %H | After penetration %H | Before slide H/s | After slide H/s |
+|---|---:|---:|---:|---:|
+| LF |7.60|1.46|1.59|2.73|
+| RF |6.96|1.49|0.97|0.92|
+| LH |7.78|1.04|1.22|1.16|
+| RH |8.14|0.67|1.28|2.20|
+
+Reduced penetration is not gait acceptance: LF/RH vertical swing is compressed,
+and output proximity to an inferred floor cannot establish video contact.
+Source measured-contact coverage is poor; hidden frames stay pending.
+Loop/four-beat-loop gates are not an acceptance metric for a partial one-shot.
+Correct four-limb alternation and actual grounded stance remain unproven.
+
+Fresh Unity540frames/60fps capture on F1, farmjob c03977776e814f4dac85,
+exit0, exact candidate override/Walk verified in loaded-event log.
+DEV media1243df8284b0/Telegram7279 is explicitly partial100of141, QAFAIL;
+owner verdict pending (own inbox cursor2508). It is not a new accepted Walk.
+
+F15 suite-v14:107top-level+36adapter=143contractchecksPASS. ZIP SHA
+90f95df78a45abad4e941ccb37d0ebab47988ee74f6e6d6d2dbe6a7ea4236247.
+Tested fitter snapshot installed atomically into DEV CLI (sourceSHA
+ba38133446d28b3127ee3e1e096810aa625e32d75a8cd522ca141556b86244cb);
+VPS options/preflight only, customer path/library still inactive.
+
+Next: new objective with same-frame measured limb-to-torso vertical residual,
+eligible own anchors only, geometry nonpenetration one-sided. It needs a fresh
+objective schema/fit, not an incompatible prefix resume. Then real export/LBS,
+fresh Unity per-task verdict and the remaining full34/category corpus gates.
+
+V8 started20:47UTC on F15 with fresh objective
+`autorig.equine-window-objective/4-source-relative-vertical-eligibility-physics`.
+Actual actorPID5692, launcher16092, foregroundSSHsession59410; follow this process,
+do not duplicate it. Source/constraints/contact/eligibility inputs are preserved,
+no GPU work. ProfileSHA cc01647165a99292e057961e2fb8791db4968fc7a94e41d20f6d1a15b40d5a96,
+fit-jobSHA 291ec6a93c82a2cf40004195aea4855acebeb60511fed50140987c83acf5dd67.
+Solver max500/tols1e-6/budget900; QA thresholds unchanged.
+Latest suite-v15 production144PASS (107+37), including real root-translation
+invariance/missing-torso admission checks. ZIP SHA
+e196ff90a449037a1b1cba6ecc3db2b4aa0f7edf42b4c5cc451d1da66df025d8;
+fitterSHA 4129ec02e45c2a155154da1e57723cacbb13d4053afe628c79e96ddefb1d3043.
+This exact tested fitter is installed in DEV CLI; `equine-prefix-export` is also
+registered with a describe contract. Both remain diagnostics/farm-only execute.

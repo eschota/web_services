@@ -5,7 +5,7 @@ sys.path.insert(0,str(pathlib.Path(__file__).resolve().parent))
 import equine_constraint_fit as fit
 class Contract(unittest.TestCase):
  def test_options_are_public_and_bounded(self):
-  got=fit.options_get(); self.assertEqual(set(got),set(fit.OPTIONS)); self.assertEqual(got['max_nfev']['value'],250); self.assertEqual(got['max_root_translation_height_ratio']['value'],.5); self.assertEqual(got['max_fit_seconds']['value'],300.0)
+  got=fit.options_get(); self.assertEqual(set(got),set(fit.OPTIONS)); self.assertEqual(got['max_nfev']['value'],250); self.assertEqual(got['max_root_translation_height_ratio']['value'],.5); self.assertEqual(got['max_fit_seconds']['value'],300.0); self.assertEqual(got['limb_torso_vertical_weight']['value'],1.0)
   with self.assertRaises(ValueError): fit.options_get({'max_rotation_delta_rad':2})
   with self.assertRaises(ValueError): fit.options_get({'max_root_translation_height_ratio':3})
  def test_axis_conversion_is_explicit(self): self.assertEqual(fit.gltf_to_blender([1,2,3]),[1,-3,2])
@@ -22,7 +22,8 @@ class Contract(unittest.TestCase):
   constraints={'schema':fit.CONSTRAINTS,'action':'walk_forward','timing':timing,'constraints':rows,'provenance':{'immutable_manifest_sha256':manifest['sha256'],'source_model_sha256':source}}
   cp=w('constraints.json',constraints); profile=w('profile.json',{'scope':'run','run_id':'r1','accepted':False,'category_default':False,'source_sha256':source,'constraints_sha256':cp['sha256'],'fit_options':{}}); action=w('action.json',{'action_id':'walk_forward','taxonomy':'full34','frame_count':action_frames,'fps':action_fps,'loop':True})
   hooves={leg:{'source_anchor_id':f'{leg}:1','frames':[{'frame':i,'source_frame':i,'state':'PENDING','reason':'fixture'} for i in range(constraint_frames)]} for leg in fit.LEGS}; evidence=w('contact.json',{'schema':'autorig.equine-measured-contact-evidence.v1','state':'measured_source_contact_evidence','accepted_observations':False,'animation_qa_pass':False,'hooves':hooves,'timing':timing,'provenance':{'constraints_sha256':cp['sha256'],'opposite_leg_inference':False,'mirroring':False,'hidden_point_interpolation':False,'gait_phase_prior':False}})
-  return {'schema':fit.SCHEMA,'action_id':'walk_forward','bundle_manifest':manifest,'surface_anchors':surface,'constraints':cp,'contact_evidence':evidence,'profile':profile,'action_contract':action,'output':str(root/'out.json')}
+  eligibility=w('eligibility.json',{'schema':'autorig.equine-source-chain-eligibility.v1','state':'source_bound_target_eligibility','constraints_sha256':cp['sha256'],'targets':{leg:{f'{leg}:1':{'frames':[{'frame':i,'source_frame':i,'observed':False,'eligible':False,'reasons':['MISSING_OBSERVATION']} for i in range(constraint_frames)]}} for leg in fit.LEGS},'pending':[]})
+  return {'schema':fit.SCHEMA,'action_id':'walk_forward','bundle_manifest':manifest,'surface_anchors':surface,'constraints':cp,'contact_evidence':evidence,'source_eligibility':eligibility,'profile':profile,'action_contract':action,'output':str(root/'out.json')}
  def test_requires_exact_four_legs(self):
   with self.assertRaisesRegex(ValueError,'exactly LF RF LH RH'): fit.preflight(self._job({'LF','RF','LH'}))
  def test_constraint_timing_must_equal_action(self):
@@ -78,4 +79,9 @@ class Contract(unittest.TestCase):
   import numpy as np
   tiny=np.asarray([1e-14,-1e-14]); got=fit.pseudo_huber_residual(tiny,.05); np.testing.assert_allclose(got,tiny,rtol=1e-12,atol=0)
   large=fit.pseudo_huber_residual(np.asarray([10.0]),.05)[0]; self.assertGreater(large,0); self.assertLess(large,10.0); self.assertAlmostEqual(large,math.sqrt(2*.05*10),delta=.01)
+ def test_source_relative_vertical_is_root_translation_invariant_and_requires_admission_torso(self):
+  import numpy as np
+  source=np.asarray([1.,2.,3.]); torso=np.asarray([0.,1.,0.]); actual=np.asarray([2.,4.,5.]); actual_torso=np.asarray([1.,2.,2.]); up=np.asarray([0.,1.,0.]); shift=np.asarray([9.,-4.,3.])
+  first=fit.source_relative_vertical_residual(source,torso,actual,actual_torso,up,admitted=True); shifted=fit.source_relative_vertical_residual(source,torso,actual+shift,actual_torso+shift,up,admitted=True); self.assertAlmostEqual(first,shifted)
+  self.assertIsNone(fit.source_relative_vertical_residual(source,None,actual,actual_torso,up,admitted=True)); self.assertIsNone(fit.source_relative_vertical_residual(source,torso,actual,actual_torso,up,admitted=False))
 if __name__=='__main__': unittest.main()

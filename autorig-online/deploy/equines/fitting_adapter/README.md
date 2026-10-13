@@ -88,6 +88,11 @@ TRF window preserves finite best parameters/cost/status/optimality. Explicit
 pins and objective options match; solver-only tolerances/evaluation limits may
 change and are recorded. Partial prefixes are never clips and never resume
 automatically.
+For a pinned failed window, `diagnostic_audit` evaluates the recorded best
+finite parameter vector without optimization. It compares finite-difference
+callbacks against declared exact sparsity and reports unexpected derivatives
+plus cost split by hoof/joint/torso/ground/contact/temporal residual kind. It
+creates no animation clip and requires a fresh diagnostic output.
 Solver termination changes belong in a separate run-scoped
 `autorig.equine-solver-control-profile/1` pinned to the immutable objective
 profile SHA. It may override only solver controls; proportions, physics weights
@@ -99,3 +104,18 @@ without filling or mirroring, builds source-plane constraints, writes a
 run-only unaccepted profile and exact non-loop Walk contract, then executes the
 bounded IK fitter. All artifacts are new under a fresh project work root; it
 does not enqueue work, use a GPU, mount customer paths, publish or send media.
+
+`export_completed_prefix.py` replays only a strictly verified contiguous
+checkpoint prefix through immutable RigBundle FK. It performs no optimization
+and emits `DIAGNOSTIC_PARTIAL_REFERENCE_NOT_LIBRARY`, loop=false, with exact
+original frame mapping and original action length/hash. Remaining frames stay
+explicitly pending; the partial reference cannot activate a library or hide the
+failed suffix. See `export_completed_prefix_job.example.json`.
+
+Source eligibility rejects impossible weighted-anchor reach and unsupported
+own-chain targets before fitting; rejected original points remain diagnostic.
+Objective v4 also measures same-frame limb-to-torso vertical displacement using
+eligible own Toe/Foot/Leg/UpLeg and real measured torso anchors. Root translation
+cancels from this residual. `limb_torso_vertical_weight` is a run-profile option;
+no category default, synthetic contact, gait phase or mirrored leg is introduced.
+The objective schema changes, so earlier completed prefixes cannot resume into it.

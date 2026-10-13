@@ -23,7 +23,7 @@ def main():
   for name,row in (req.get('code_pins') or {}).items(): code[name]={'path':str(pin(row,f'code:{name}')),'sha256':row['sha256']}
   if not code: raise ValueError('exact original code pins required')
   paths,c,_,_,opt=FIT.preflight(job)
-  full={'bundle_manifest_sha256':sha(paths['bundle_manifest']),'action_contract_sha256':sha(paths['action_contract']),'constraints_sha256':sha(paths['constraints']),'profile_sha256':sha(paths['profile']),'contact_evidence_sha256':sha(paths['contact_evidence']),'surface_anchors_sha256':sha(paths['surface_anchors']),'source_model_sha256':c.get('provenance',{}).get('source_model_sha256')}
+  full={'bundle_manifest_sha256':sha(paths['bundle_manifest']),'action_contract_sha256':sha(paths['action_contract']),'constraints_sha256':sha(paths['constraints']),'profile_sha256':sha(paths['profile']),'contact_evidence_sha256':sha(paths['contact_evidence']),'source_eligibility_sha256':sha(paths['source_eligibility']),'surface_anchors_sha256':sha(paths['surface_anchors']),'source_model_sha256':c.get('provenance',{}).get('source_model_sha256')}
   if legacy.get('schema')!='autorig.equine-constraint-fit-progress/1' or legacy.get('objective_schema')!=FIT.OBJECTIVE_SCHEMA or not isinstance(legacy.get('variable_order'),list) or not legacy['variable_order']: raise ValueError('legacy checkpoint schema/order invalid')
   for key,value in (legacy.get('pins') or {}).items():
    if key not in full or full[key]!=value: raise ValueError(f'legacy checkpoint source pin mismatch: {key}')
