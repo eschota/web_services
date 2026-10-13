@@ -8701,7 +8701,7 @@
       ],
       "hand_lateral_max_pct_H": [
        "<=",
-       26
+       50
       ],
       "elbow_above_shoulder": [
        "==",
@@ -8710,6 +8710,14 @@
       "proportions_sources": [
        "<=",
        2
+      ],
+      "left_hand_lateral_pct_H": [
+       ">=",
+       14
+      ],
+      "right_hand_lateral_pct_H": [
+       ">=",
+       14
       ]
      }
     }
