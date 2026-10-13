@@ -82,8 +82,10 @@ else:
 '''
     new = '''    for key, reg in (topo.get("legs") or {}).items():
         mine = set(cols.get(key) or [])                  # strict: the core (below the knee) is this leg's alone, no
-        others = [c for c in range(len(sk.names)) if c not in mine] if strict_core else \
-            [c for k2, cs in cols.items() if k2 != key for c in cs]   # trunk, head or prop either (the cat b94999ad)
+        others = [c for c in range(len(sk.names)) if c not in mine] if strict_core == "hard" else \
+            [c for c in range(len(sk.names)) if c not in mine and not sk.names[c].startswith("Tail")] if strict_core else \
+            [c for k2, cs in cols.items() if k2 != key for c in cs]   # trunk, head or prop either (the cat b94999ad);
+        #                                                  "trunk" mode: a tail shell welded along the leg keeps the leg
         far = [c for k2, cs in cols.items() if ("Front" in k2) != ("Front" in key) for c in cs]
         rules.append((reg.get("core_tube", reg["core"]) if strict_core else reg["core"], others))
         rules.append((reg["upper"], far))
@@ -96,7 +98,8 @@ else:
 '''
     new = '''def leg_masks(sk, topo, strict_core=False):
     """Bone columns per leg and the exclusions leg_regions implies. -> [(rows, forbidden columns)]. strict_core: the
-    core below the knee forbids every other bone (trunk, head, prop), not only the other legs."""
+    core below the knee forbids every other bone (trunk, head, prop), not only the other legs ("hard"), or every
+    other bone but the tail ("trunk": a tail welded along the leg keeps it)."""
 '''
     assert s.count(old) == 1, "leg_masks def anchor"
     s = s.replace(old, new)
@@ -114,7 +117,7 @@ else:
     s = s.replace(old, new)
     old = '''        stats["legs_isolated_vertices"] = isolate_legs(w, sk, b.leg_topo)
 '''
-    new = '''        stats["legs_isolated_vertices"] = isolate_legs(w, sk, b.leg_topo, str(o.get("leg_core_own", "hard")) == "on")
+    new = '''        stats["legs_isolated_vertices"] = isolate_legs(w, sk, b.leg_topo, "hard" if str(o.get("leg_core_own", "trunk")) == "on" else False)
 '''
     assert s.count(old) == 1, "isolate call anchor"
     s = s.replace(old, new)
@@ -159,7 +162,9 @@ else:
             _tp = [i for i, nm in enumerate(sk.names) if nm.startswith(("Tail", "Prop"))]
             if _tp:                                      # a tail lying on the ground seeds a "leg" from its tip (the
                 _tailish = np.isin(D.argmin(1), _tp)     # ferret 1e079e65, the boar): never the strict core
-            _strict = str(o.get("leg_core_own", "hard")) in ("hard", "on")
+            _mode = str(o.get("leg_core_own", "trunk"))
+            _strict = "hard" if _mode in ("hard", "on") else False   # trunk: no strict hard stage (the tack horse
+            #                                              a742491a: rig_check 2x 28 -> 76 with it), only the restore
             for rows, forbid in leg_masks(sk, topo, _strict)[0]:
                 if _strict:
                     rows = rows & ~_tailish
@@ -199,11 +204,13 @@ else:
 '''
     new = '''        if str(o.get("limb_reach", "on")) != "off" and plan in ("biped", "quadruped"):   # Skinning · V3
             stats["limb_reach_moved"] = limb_reach(g, sk, hard, D, De, H, float(o.get("limb_capture", 1.6)), plan)
-        if topo and str(o.get("leg_core_own", "hard")) != "off":   # Fable 2026-10-13: the core below the knee is this
+        if topo and str(o.get("leg_core_own", "trunk")) != "off":   # Fable 2026-10-13: the core below the knee is this
             _restored = 0                                # leg's whatever limb_reach or the distances said (the cat
-            for _key, _reg in (topo.get("legs") or {}).items():   # b94999ad: limb_reach dropped the near front leg
+            _tail_cols = [i for i, nm in enumerate(sk.names) if nm.startswith("Tail")]   # b94999ad: limb_reach dropped
+            _on_tail = np.isin(hard, _tail_cols) if str(o.get("leg_core_own", "trunk")) == "trunk" else np.zeros(n, bool)
+            for _key, _reg in (topo.get("legs") or {}).items():   # the near front leg; "trunk": a tail shell welded
                 _cols = [sk.index[f"{_key}{j}"] for j in ("UpLeg", "Leg", "Foot", "Toe") if f"{_key}{j}" in sk.index]
-                _rows = np.nonzero(_reg.get("core_tube", _reg["core"]) & ~_tailish & ~np.isin(hard, _cols))[0]
+                _rows = np.nonzero(_reg.get("core_tube", _reg["core"]) & ~_tailish & ~_on_tail & ~np.isin(hard, _cols))[0]
                 if len(_rows) and _cols:
                     hard[_rows] = np.array(_cols)[D[np.ix_(_rows, _cols)].argmin(1)]
                     _restored += int(len(_rows))
@@ -226,8 +233,10 @@ else:
     old = '''    "limb_capture": {
 '''
     new = '''    "leg_core_own": {
-        "kind": "enum", "values": ("hard", "on", "restore", "off"), "default": "hard",
-        "doc": "rebuild, quadruped: hard: the leg core below the knee inside the shin tube (leg_regions) keeps this "
+        "kind": "enum", "values": ("trunk", "hard", "on", "restore", "off"), "default": "trunk",
+        "doc": "rebuild, quadruped: trunk (default): the leg core below the knee inside the shin tube (leg_regions) that sits "
+               "on a trunk / head / prop bone after limb_reach comes back to its leg; a tail welded along the leg keeps "
+               "it (no gap, boar_unwelded_gaps), the hard stage is not restricted (the tack horse a742491a tore with it). hard: the leg core below the knee inside the shin tube (leg_regions) keeps this "
                "leg's bones whatever limb_reach or the distances said, and its hard assignment forbids every other bone, "
                "trunk included (the cat b94999ad: the near front leg sat on Hips / a Prop; the boar fec0161f: the hind "
                "legs on Tail3); restore: only the restore after limb_reach; on: the smoothed weights drop trunk bones "
