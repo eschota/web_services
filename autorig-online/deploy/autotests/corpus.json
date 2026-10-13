@@ -8714,6 +8714,111 @@
      }
     }
    ]
+  },
+  {
+   "id": "cat_front_leg_own_bones",
+   "task": "b94999ad-d50e-4b52-8f42-659493e15cbf",
+   "cost": 2,
+   "defect": "Fable · monsters/animals 2026-10-13 (colour_track paint): the cat's near front leg sat on Hips / Spine, its paw on the floor Prop. Cause: limb_reach dropped the leg component (the UpLeg root zone missed it) and its fallback handed the paw to the nearest allowed bone, the floor blob. Fix (fastrig.skin, option leg_core_own=hard): the leg core below the knee inside the shin tube keeps this leg's bones whatever limb_reach said, its hard assignment forbids every other bone, and limb_reach's fallback never picks a Prop for a body vertex",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "b94999ad.model.glb",
+     "params": {
+      "words": "stylized cat quadruped",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       25
+      ]
+     }
+    },
+    {
+     "id": "leg_own",
+     "kind": "quad_leg_trunk",
+     "on": "mt_rig",
+     "thresholds": {
+      "pct_LeftFront": [
+       "<=",
+       15
+      ]
+     },
+     "xfail": {
+      "reason": "lands with fastrig.py quadskin chain",
+      "owner": "Fable monsters/animals"
+     }
+    }
+   ],
+   "note": "before the fix LeftFront: 170 of 188 core vertices on Hips / Spine / Prop1 (90 %); after: 0. The cat's own fit defect (all four toes on one ground cluster, the shoulder on Hips) is cat_quadruped_orient / Rig classes"
+  },
+  {
+   "id": "boar_hind_legs_not_tail",
+   "task": "fec0161f-da28-4a35-8495-dc2256b090a5",
+   "cost": 2,
+   "defect": "Fable · monsters/animals 2026-10-13 (colour_track paint): the boar's hind legs were skinned to Tail3 / Tail (geodesic_assign: the tail shell welded along the legs reaches their cores first), so the hind legs stood still in every clip. Fix: the leg core inside the shin tube keeps its own leg's bones (fastrig.skin leg_core_own=hard). The stretch that the moving legs now expose in the fused tail shell is boar_tail_shell / boar_unwelded_gaps (Rig classes)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "fec0161f.model.glb",
+     "params": {
+      "words": "stylized boar",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "leg_own",
+     "kind": "quad_leg_trunk",
+     "on": "mt_rig",
+     "thresholds": {
+      "pct_LeftHind": [
+       "<=",
+       50
+      ],
+      "pct_RightHind": [
+       "<=",
+       50
+      ]
+     },
+     "xfail": {
+      "reason": "lands with fastrig.py quadskin chain",
+      "owner": "Fable monsters/animals"
+     }
+    }
+   ],
+   "note": "before: LeftHind 236 / 236 and RightHind 340 / 340 core vertices on Tail3 / Tail; after: 0. QA stretch rises (603 -> 789 edges, rig_check 4x 116 -> 230) because the fused tail shell now follows moving legs"
   }
  ]
 }
