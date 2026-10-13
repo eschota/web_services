@@ -111,13 +111,9 @@ u = bc.read_text(encoding="utf-8")
 if "Skirt" in u:
     print("bone_check: already patched (fabric)")
 else:
-    old = '''    return [n for n in m.drawn() if not n.startswith(("Prop", "Mane", "Hair_"))]   # hair chains run through cards
-'''
-    new = '''    return [n for n in m.drawn() if not n.startswith(("Prop", "Mane", "Hair_", "Skirt", "Cape"))]   # hair / cloth chains
-'''
+    old = '    return [n for n in m.drawn() if not n.startswith(("Prop", "Mane", "Hair_"))]   # hair chains run through cards' + chr(10)
+    new = '    return [n for n in m.drawn() if not n.startswith(("Prop", "Mane", "Hair_", "Skirt", "Cape"))]   # hair / cloth chains' + chr(10)
     assert u.count(old) == 1, "bone_check anchor"
     u = u.replace(old, new)
-    bc.write_bytes(u.replace("
-", "
-").encode("utf-8"))
+    bc.write_bytes(u.replace(chr(13) + chr(10), chr(10)).encode("utf-8"))
     print("bone_check: fabric chains skipped")
