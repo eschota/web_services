@@ -8647,6 +8647,73 @@
      "note": "farm 2026-10-13: rig_check 4x 342 -> 21"
     }
    ]
+  },
+  {
+   "id": "soldier_arms_pressed",
+   "task": "87f13fa7-81c1-4b56-b671-498a402a866f",
+   "cost": 2,
+   "defect": "2026-10-13 (task 87f13fa7, a low-poly Call of Duty soldier GLB, 2 614 vertices): the arms are pressed against the jacket, so on the voxel solid the sleeve is fused to the torso along its length: the geodesic from each hand entered the trunk at the waist on every grid (80 .. 160), pose_skeleton found no arm (use=false), fastrig fell back to proportions + mirror and the forearms / hands sat inside the torso (hands at x 12 % H while the real hands hang at 16 .. 23 % H). Fix: the forearms cut as weapons go back (rig_first._limb_props_back), a chain that joins the trunk 12 % H under the silhouette shoulder is marked low_join, and a side without a chain to the shoulder gets the tube from fastrig's silhouette shoulder (level with the other side) down to the most lateral low hand tip, the forearm along the traced climb from the hand, when that tube lies in the solid (pose_skeleton.salvage). The pre-turn trace is restored when the T turn is undone.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "87f13fa7.model.glb",
+     "params": {
+      "words": "soldier in a jacket, arms at his sides"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_arms",
+     "kind": "arm_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "arms_found": [
+       "==",
+       2
+      ],
+      "arm_y_min_pct_H": [
+       ">=",
+       60
+      ],
+      "arm_y_diff_pct_H": [
+       "<=",
+       8
+      ],
+      "hand_lateral_max_pct_H": [
+       "<=",
+       26
+      ],
+      "elbow_above_shoulder": [
+       "==",
+       0
+      ],
+      "proportions_sources": [
+       "<=",
+       2
+      ]
+     }
+    }
+   ]
   }
  ]
 }
