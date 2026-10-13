@@ -911,6 +911,17 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
             "prop_bones_held": sum(1 for b in rig.get("bones", []) if str(b.get("name", "")).startswith("Prop")
                                    and re.search(r"(Hand|ForeArm)$", str(b.get("parent") or ""))),
             "prop_bones_n": sum(1 for b in rig.get("bones", []) if str(b.get("name", "")).startswith("Prop")),
+            # Voxel parts · V3 (2026-10-14): Prop bones on a root of their own (a base, a floating object), the
+            # stage's decisions as fastrig used them (rig.json voxel_parts), the weld-split vertex copies
+            "prop_bones_root": sum(1 for b in rig.get("bones", []) if str(b.get("name", "")).startswith("Prop")
+                                   and not b.get("parent")),
+            "voxel_props": len((rig.get("voxel_parts") or {}).get("props") or []),
+            "voxel_held_props": sum(1 for h in (rig.get("voxel_parts") or {}).get("props") or []
+                                    if h == "voxel_parts:held_prop"),
+            "voxel_floating": sum(1 for h in (rig.get("voxel_parts") or {}).get("props") or []
+                                  if h == "voxel_parts:floating_object"),
+            "voxel_held_found": int(((rig.get("voxel_parts") or {}).get("counts") or {}).get("held_prop") or 0),
+            "split_duplicated": int((rig.get("checks") or {}).get("hair_arm_split_vertices_duplicated") or 0),
             # V3 triage rig_stretch: the rig's own rig_check, edges over 2x / 4x summed over its check times
             "rig_check_2x": sum(int(v.get("edges_over_2x") or 0) for k, v in
                                 ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items()

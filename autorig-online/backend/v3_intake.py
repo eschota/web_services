@@ -522,13 +522,22 @@ def obj_to_glb(data: bytes) -> bytes:
 
     Material libraries and textures are not part of a single-file upload, so
     every material is a plain named PBR material; geometry is exact (fan
-    triangulation of polygons, negative indices resolved)."""
+    triangulation of polygons, negative indices resolved).
+
+    Voxel parts · V3 (owner 2026-10-14: held props «должны определяться на основе анализа MTL OBJ ID»): an OBJ with
+    two or more `o` / `g` groups keeps them: one node + mesh per group (named by the group), one primitive per usemtl
+    inside it, the group and material names also in extras.autorig.source_group / source_material, so
+    mt/voxel_parts.py finds «o sword» / «usemtl Blade» by name. An OBJ with fewer groups is converted exactly as
+    before."""
     import numpy as np
 
     positions, uvs, normals = [], [], []
     groups: Dict[str, list] = {}
     order: list = []
     current = "default"
+    group = None                                                          # the current o / g name
+    by_group: Dict[str, Dict[str, list]] = {}
+    group_order: list = []
     for raw in data.decode("utf-8", "replace").splitlines():
         parts = raw.split()
         if not parts:
@@ -542,6 +551,8 @@ def obj_to_glb(data: bytes) -> bytes:
             normals.append((float(parts[1]), float(parts[2]), float(parts[3])))
         elif head == "usemtl":
             current = " ".join(parts[1:])[:120] or "default"
+        elif head in ("o", "g"):
+            group = " ".join(parts[1:])[:120] or None
         elif head == "f" and len(parts) >= 4:
             corners = []
             for token in parts[1:]:
@@ -557,12 +568,21 @@ def obj_to_glb(data: bytes) -> bytes:
             if current not in groups:
                 groups[current] = []
                 order.append(current)
+            gname = group or "default"
+            if gname not in by_group:
+                by_group[gname] = {}
+                group_order.append(gname)
+            mats_g = by_group[gname].setdefault(current, [])
             for k in range(1, len(corners) - 1):                       # fan triangulation
-                groups[current].append((corners[0], corners[k], corners[k + 1]))
+                tri = (corners[0], corners[k], corners[k + 1])
+                groups[current].append(tri)
+                mats_g.append(tri)
     if not positions or not any(groups.values()):
         raise V3IntakeError("invalid_obj", "the OBJ has no faces")
     if len(positions) > 5_000_000:
         raise V3IntakeError("source_size", "the OBJ has more than 5M vertices")
+    if len(group_order) >= 2:
+        return _obj_groups_glb(positions, uvs, normals, by_group, group_order)
     P = np.asarray(positions, np.float32)
     T = np.asarray(uvs, np.float32) if uvs else None
     N = np.asarray(normals, np.float32) if normals else None
@@ -623,6 +643,84 @@ def obj_to_glb(data: bytes) -> bytes:
            "meshes": [{"name": "model", "primitives": primitives}], "materials": materials,
            "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
     js = json.dumps(doc, separators=(",", ":")).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
+    return b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body
+
+
+def _obj_groups_glb(positions, uvs, normals, by_group, group_order) -> bytes:
+    """obj_to_glb for an OBJ with groups: a node + mesh per group with its own compact vertex buffers (the
+    primitives of one group share them), one material per usemtl name shared by every group that uses it."""
+    import numpy as np
+
+    P = np.asarray(positions, np.float32)
+    T = np.asarray(uvs, np.float32) if uvs else None
+    N = np.asarray(normals, np.float32) if normals else None
+    every = [c for g in by_group.values() for tris in g.values() for t in tris for c in t]
+    with_uv = T is not None and all(c[1] >= 0 for c in every)
+    with_n = N is not None and all(c[2] >= 0 for c in every)
+    blob, views, accessors = bytearray(), [], []
+
+    def add(array, kind, target=None, minmax=False):
+        array = np.ascontiguousarray(array)
+        blob.extend(bytes(-len(blob) % 4))
+        view = {"buffer": 0, "byteOffset": len(blob), "byteLength": int(array.nbytes)}
+        if target:
+            view["target"] = target
+        blob.extend(array.tobytes())
+        views.append(view)
+        comp = 5125 if array.dtype == np.uint32 else 5126
+        acc = {"bufferView": len(views) - 1, "componentType": comp, "count": int(array.shape[0]), "type": kind}
+        if minmax:
+            acc.update(min=[float(x) for x in array.min(0)], max=[float(x) for x in array.max(0)])
+        accessors.append(acc)
+        return len(accessors) - 1
+
+    materials, mat_index, meshes, nodes = [], {}, [], []
+    for gname in group_order:
+        keys: Dict[tuple, int] = {}
+        vp, vt, vn, prims = [], [], [], []
+        for mname, tris in by_group[gname].items():
+            indices = []
+            for tri in tris:
+                for corner in tri:
+                    key = (corner[0], corner[1] if with_uv else -1, corner[2] if with_n else -1)
+                    slot = keys.get(key)
+                    if slot is None:
+                        if not 0 <= corner[0] < len(P):
+                            raise V3IntakeError("invalid_obj", "a face references a missing vertex")
+                        slot = keys[key] = len(vp)
+                        vp.append(corner[0])
+                        vt.append(key[1])
+                        vn.append(key[2])
+                    indices.append(slot)
+            prims.append((mname, np.asarray(indices, np.uint32)))
+        attributes = {"POSITION": add(P[np.asarray(vp)], "VEC3", 34962, True)}
+        if with_uv:
+            attributes["TEXCOORD_0"] = add(T[np.asarray(vt)], "VEC2", 34962)
+        if with_n:
+            normal = N[np.asarray(vn)]
+            length = np.linalg.norm(normal, axis=1, keepdims=True)
+            attributes["NORMAL"] = add(np.where(length > 0, normal / np.maximum(length, 1e-12), [0, 1, 0])
+                                       .astype(np.float32), "VEC3", 34962)
+        primitives = []
+        for mname, idx in prims:
+            if mname not in mat_index:
+                mat_index[mname] = len(materials)
+                materials.append({"name": mname, "pbrMetallicRoughness": {"baseColorFactor": [.8, .8, .8, 1],
+                                                                          "metallicFactor": 0, "roughnessFactor": .8},
+                                  "extras": {"autorig": {"source_material": mname}}})
+            primitives.append({"attributes": attributes, "indices": add(idx, "SCALAR", 34963),
+                               "material": mat_index[mname], "mode": 4,
+                               "extras": {"autorig": {"source_group": gname, "source_material": mname}}})
+        meshes.append({"name": gname, "primitives": primitives, "extras": {"autorig": {"source_group": gname}}})
+        nodes.append({"mesh": len(meshes) - 1, "name": gname, "extras": {"autorig": {"source_group": gname}}})
+    blob.extend(bytes(-len(blob) % 4))
+    doc = {"asset": {"version": "2.0", "generator": "AutoRig V3 intake obj_to_glb (groups)"},
+           "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes,
+           "meshes": meshes, "materials": materials,
+           "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
+    js = json.dumps(doc, separators=(",", ":"), ensure_ascii=False).encode()
     js += b" " * (-len(js) % 4)
     body = struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
     return b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body

@@ -913,6 +913,27 @@
    "what": "blocky avatar, box arms flush against a box torso (V3 run 74825fff)",
    "sha256": "e51569a69ff7b111deded91d1fefa038757fb8d521492a43cfbb88902956b307",
    "bytes": 916472
+  },
+  "synthetic.voxparts_obj_groups_sword.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/voxparts_obj_groups_sword.glb",
+   "task": null,
+   "what": "the warrior 66ba97ba as an OBJ with o body (usemtl Skin) + o sword (usemtl Blade), through the intake's obj_to_glb with groups (deploy/autotests/make_voxparts_corpus.py)",
+   "sha256": "c57a64a60c4fe0031496facda151292f6e190cd31fb8225a115a9f81f3f2a3c9",
+   "bytes": 540796
+  },
+  "synthetic.voxparts_obj_groups_sword.obj": {
+   "source": "/srv/autorig/data/autotests/synthetic/voxparts_obj_groups_sword.obj",
+   "task": null,
+   "what": "the OBJ itself (o body / o sword, usemtl Skin / Blade) for the intake tests (make_voxparts_corpus.py)",
+   "sha256": "bd7efcd734ab0b13bfb7efbc76f191c082e1074fcf7b5be39c4b523688aeb74b",
+   "bytes": 1110200
+  },
+  "synthetic.voxparts_companion.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/voxparts_companion.glb",
+   "task": null,
+   "what": "the mannequin 8a1b1cc5 subdivided to edges <= 2 % H with the horse 31cc3ff3 scaled to 30 % H standing beside its feet (make_voxparts_corpus.py)",
+   "sha256": "bae1a41cc29ddc471b33f63d9dae910346152ef402a900ff828f1c07978ce390",
+   "bytes": 1005828
   }
  },
  "profiles": {
@@ -9670,6 +9691,187 @@
      },
      "thresholds": {
       "exit": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "obj_groups_sword",
+   "task": "synthetic (66ba97ba split by OBJ groups)",
+   "cost": 3,
+   "defect": "owner 2026-10-14 (Voxel parts · V3): held props must be found from OBJ groups / MTL names even when the sword touches the hand (one voxel component with the body). The intake keeps o/g groups as meshes (v3_intake.obj_to_glb), mt/voxel_parts.py carves the named group out and fastrig rigs it as a rigid Prop on the hand; the words do not name a sword",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.voxparts_obj_groups_sword.glb",
+     "params": {
+      "words": "female warrior"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "prop_bones_held": [
+       ">=",
+       1
+      ],
+      "voxel_held_found": [
+       ">=",
+       1
+      ]
+     },
+     "note": "voxel_held_found: the stage found the sword by its OBJ group / MTL name before the first fit; parts_cluster's post-fit pass may then own the same vertices (objects.npz first)"
+    },
+    {
+     "id": "mt_prop_rigid",
+     "kind": "prop_rigidity",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "words": "sword"
+     },
+     "thresholds": {
+      "props_found": [
+       ">=",
+       1
+      ],
+      "one_bone_fraction": [
+       ">=",
+       0.99
+      ],
+      "rigid_fraction": [
+       ">=",
+       0.99
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "empty_limb_bones": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "companion_animal",
+   "task": "synthetic (8a1b1cc5 + 31cc3ff3)",
+   "cost": 2,
+   "defect": "owner 2026-10-14 (Voxel parts · V3): a piece not voxel-connected to the body is rigged as its own object: a small animal beside a biped's feet is a floating_object on a root Prop bone of its own, out of the body fit and skin; the biped's rig and QA stay as mannequin_rigpath's",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "synthetic.voxparts_companion.glb",
+     "params": {
+      "words": "rigpath test mannequin"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "prop_bones_n": [
+       "==",
+       1
+      ],
+      "prop_bones_root": [
+       "==",
+       1
+      ],
+      "prop_bones_held": [
+       "==",
+       0
+      ],
+      "voxel_floating": [
+       "==",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_fit",
+     "kind": "skeleton_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "clips": [
+       ">=",
+       8
+      ],
+      "joints_outside_bbox": [
+       "<=",
+       0
+      ]
+     },
+     "note": "spine_lateral_offset is measured against the whole scene's box (mannequin + animal), so it is not a threshold here"
+    },
+    {
+     "id": "mt_centring",
+     "kind": "centring",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "outside": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "empty_limb_bones": [
        "==",
        0
       ]
