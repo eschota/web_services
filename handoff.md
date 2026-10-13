@@ -2903,3 +2903,18 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   quadskin3 в очереди. Сторож `/home/debian/monster/relaunch_after_soldier.sh` (лог `relaunch.log`) ждёт XFAIL/фикс
   солдата и перезапускает manev2b → quadskin3b, после установки quadskin3b снимает XFAIL с
   `cat_front_leg_own_bones` / `boar_hind_legs_not_tail`. После установки: `sudo autorig-mt-restart --wait`.
+
+### Дополнение 04:35 UTC — итоговые дефолты скина четвероногих и грива v2 на проде
+
+- **Грива v2 установлена** (manev2b: GATE PASS 235; `mane.py 1964f325a969`, `bone_check.py dedfc83cf43d`).
+- **Скин ног, финальные дефолты** (chain quadskin4, MT `b7f41d4`, web `59e1f97f`): `leg_core_own=trunk` — ядро
+  голени/лапы, оказавшееся после limb_reach на кости туловища/головы/пропа, возвращается ноге; хвост, приваренный
+  вдоль ноги, НЕ забираем (кабан: щель 9–40 % H и `boar_unwelded_gaps`); строгой hard-стадии нет (tack-лошадь
+  a742491a с ней рвалась: 2x 28 → 76). `quad_contact_split=on` — контакты нога|нога и нога|хвост режутся и
+  закрываются крышками cut_cap v3, но только на сваренных мешах (`quad_split_min_welded` 0.6: кот 0.84, хорёк 0.86,
+  олень 0.94 — режем; кабан 0.32, лошади 0.42/0.26 — нет: иначе dups/cross_leg_edges).
+- Матрица (rig_check_4x сумма; QA max рёбер, клипов): кот 161 → 99 (239 → 144), хорёк 218 → 59 (8/8), кабан 331 →
+  329 (dups 0; задние ноги остаются на хвосте — кейс `boar_hind_legs_not_tail` XFAIL, owner Rig classes),
+  лошадь 31cc 40 = прод (8/8), лошадь a742 9/28/5.45 = прод (8/8), олень 2683 (QA 6152 → 482).
+- Ловушка патч-скриптов: guard «already patched» по строке, которая встречается в doc другой опции
+  (`quad_contact_split` упомянут в doc `leg_core_own`) — guard теперь по `quad_split_min_welded`.
