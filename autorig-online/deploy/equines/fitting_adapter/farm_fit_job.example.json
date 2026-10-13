@@ -1,0 +1,26 @@
+{
+  "schema": "autorig.equine-farm-fit-job/1",
+  "work_root": "<MT_ROOT>/.work/equine-fitting/<candidate-id>",
+  "python": "<managed-runtime>/venv/Scripts/python.exe",
+  "runtime_root": "<managed-runtime>",
+  "action_id": "<one exact full34 action id>",
+  "bundle_manifest": {"path": "<bundle>/immutable_manifest.json", "sha256": "<sha256>"},
+  "anchor_map": {"path": "<tracker-anchor-map.json>", "sha256": "<sha256>"},
+  "video": {"path": "<reference.mp4>", "sha256": "<sha256>"},
+  "joint_profile": {"path": "<run-scoped-joint-profile.json>", "sha256": "<sha256>"},
+  "fit_config": {"path": "<supported-fitting-config.json>", "sha256": "<sha256>"},
+  "action_contract": {"path": "<full34-action-contract.json>", "sha256": "<sha256>"},
+  "contact_profile": {"path": "<action-contact-profile.json>", "sha256": "<sha256>"},
+  "runtime_lock": {"path": "<runtime-lock.v1.json>", "sha256": "<sha256>"},
+  "runtime_repos": {
+    "tapnet": {"path": "<tapnet>", "commit": "<commit>", "license": "LICENSE", "license_sha256": "<sha256>"},
+    "sam2": {"path": "<sam2>", "commit": "<commit>", "license": "LICENSE", "license_sha256": "<sha256>"},
+    "video_depth_anything": {"path": "<video-depth-anything>", "commit": "<commit>", "license": "LICENSE", "license_sha256": "<sha256>"}
+  },
+  "model_checkpoints": {
+    "tapnextpp": {"path": "<tapnextpp_ckpt.pt>", "sha256": "<sha256>"},
+    "sam2_hiera_tiny": {"path": "<sam2.1_hiera_tiny.pt>", "sha256": "<sha256>"},
+    "video_depth_anything_small": {"path": "<video_depth_anything_vits.pth>", "sha256": "<sha256>"}
+  },
+  "qa_receipt": {"path": "<added only for --finalize>", "sha256": "<sha256>"}
+}

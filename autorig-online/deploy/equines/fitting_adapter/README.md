@@ -35,3 +35,14 @@ prepared, undispatched job specification.
 an explicitly authored, source/rig-hash-bound, run-scoped candidate with exact
 bone axes and ranged regularization options. It does not infer constraints and
 cannot approve or promote a category default.
+
+`build_runtime_bundle.py` packages the full Python runtime source, schemas,
+semantic configurations and runtime lock without models or customer data.
+`farm_fit_video.py` is preflight-only by default. `--execute` invokes the
+pinned tracking runtime and the existing optimizer CLI while retaining every
+observation/report; it stops at pending QA. `--finalize` requires a separate
+SHA-bound PASS receipt but currently writes `registry-export-pending.json`:
+Blender-space local channels cannot be called registry34/glTF +Y until the
+fitted source is applied and exported through Blender, then re-read in glTF
+bases. It never writes the canonical library or sends DEV media. See
+`farm_fit_job.example.json` for every required public option and proof.

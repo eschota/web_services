@@ -12,10 +12,10 @@
   "inputs": {
     "source_glb": "exact active c5 source GLB; source-preparation only",
     "rig_json": "matching active c5 rig.json; root supplies exact run after current rerig",
-    "code_zip": ".work/equine-fitting-code-a710c7c7-v4.zip",
-    "code_zip_sha256": "40e674051f5605d1b25d4f8ad03c1aa3ff412046985ef4e9c94c23c99db1f812"
+    "code_zip": ".work/equine-fitting-code-a710c7c7-v5.zip",
+    "code_zip_sha256": "a343f478153abbca9b46f19af3b07be7b81c4ef4ce0d812feb21926a9b5943e0"
   },
-  "command": "farm_actionless_job.ps1 -CodeZip ... -CodeZipSha256 40e674051f5605d1b25d4f8ad03c1aa3ff412046985ef4e9c94c23c99db1f812 -Blender 'C:\\Program Files\\Blender Foundation\\Blender 4.3\\blender.exe' -PythonExe <adjacent-console-python.exe> -SourceGlb <active-c5-source> -RigJson <matching-current-c5-rig> -TaskId <c5-task-uuid> -RunId <current-c5-run> -WorkRoot ...",
+  "command": "farm_actionless_job.ps1 -CodeZip ... -CodeZipSha256 a343f478153abbca9b46f19af3b07be7b81c4ef4ce0d812feb21926a9b5943e0 -Blender 'C:\\Program Files\\Blender Foundation\\Blender 4.3\\blender.exe' -PythonExe <adjacent-console-python.exe> -SourceGlb <active-c5-source> -RigJson <matching-current-c5-rig> -TaskId <c5-task-uuid> -RunId <current-c5-run> -WorkRoot ...",
   "outputs": ["actionless-bundle/immutable_manifest.json", "tracker-anchor-map.json", "result.json"],
   "publication": "none; smoke evidence only until owner and registry gates accept it"
 }

@@ -85,3 +85,34 @@ the video/rig/library hashes and include this case in the semantic-motion
 regression corpus. The new clip must improve actual four-hoof contacts, phase
 order and motion, then receive a new per-task owner verdict. Numeric deformation
 alone (the earlier 10/10) does not prove that a walk is anatomically correct.
+
+## Latest concrete checkpoint
+
+- F15 source preparation PASS: farm job `14581fae0e7040b1acfc`, 77.8 seconds,
+  26,584 vertices / 39,973 faces; immutable actionless bundle 3,667,250 bytes.
+  Manifest SHA `64523e1e230fa0849ecc519df4a41f5de2cba5f8779978a962e73ac908041e19`;
+  anchor map SHA `1a9c0d3d22ad6d02a3c126b66215669b2ab8cb7429797fe4e9ec419ae2049323`.
+  This is source preparation, not the customer rig latency or animation acceptance.
+- Export subset v5 code ZIP SHA
+  `a343f478153abbca9b46f19af3b07be7b81c4ef4ce0d812feb21926a9b5943e0`.
+  Earlier smoke failures were corrected by the adjacent console Python, import
+  closure and Blender-version compositor detection; keep their failed receipts.
+- F15 managed Python3.10 runtime installed. TAPNext++/SAM2/VDA-small checkpoint
+  sizes and SHA-256, source Git commits and licenses all verified on F15.
+  Existing weights were copied, not newly downloaded; owner GPU was not used.
+- New zebra Walk reference: Renderfin `98ab5cae-8d73-4ea2-bbae-bd7f50a8a80b`,
+  H3 on f12, 132.2 seconds, video SHA
+  `ebe1c36a7b0643bdc0a43efb3498480d59f480551cc6e5f7ec772bc19397256a`.
+  DEV media `b415b1de1e9d`, Telegram 7129, scope **reference video only**.
+  Await its owner verdict; this never approves the 3D retarget or full34 release.
+- Full-runtime fitting code artifact SHA
+  `594b6e43ec05e645ecb36b22a7238d3152b924a6184292997a7daa8466459b25`.
+  Next: source observations/explicit run-scoped constraints, fit, actual Blender
+  apply/export and re-read glTF reference channels. Blender local bone bases
+  cannot be called glTF local transforms by simply rotating the quaternions.
+- Same-chat continuation/inbox heartbeat `v3-dev-34` is active every five
+  minutes, quiet on unchanged/non-actionable state. It must continue these
+  existing jobs, never duplicate them, and keep owner verdict scopes separate.
+
+No complete accepted animation library exists yet; all family pointers remain
+unpromoted and customer-path integration remains pending.

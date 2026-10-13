@@ -28,14 +28,14 @@ def patch(source: Path, output: Path) -> None:
     helper = '''def scene_compositing_enabled(scene: bpy.types.Scene) -> bool:
     """Blender 4 uses Scene.use_nodes; Blender 5 uses RenderSettings.use_compositing."""
     render = scene.render
-    if hasattr(render, "use_compositing"):
+    if hasattr(scene, "compositing_node_group"):
         return bool(render.use_compositing)
     return bool(scene.use_nodes)
 
 
 def set_scene_compositing(scene: bpy.types.Scene, enabled: bool) -> None:
     render = scene.render
-    if hasattr(render, "use_compositing"):
+    if hasattr(scene, "compositing_node_group"):
         render.use_compositing = bool(enabled)
     else:
         scene.use_nodes = bool(enabled)

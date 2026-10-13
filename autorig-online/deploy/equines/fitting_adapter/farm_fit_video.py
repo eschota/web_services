@@ -18,6 +18,15 @@ def pin(row,label):
     p=Path(row['path']).resolve()
     if not p.is_file() or sha(p)!=row['sha256']: raise ValueError(f'{label} missing or SHA mismatch')
     return p
+def repo_pin(row,label):
+    p=Path(row['path']).resolve()
+    if not p.is_dir(): raise ValueError(f'{label} repository missing')
+    got=subprocess.run(['git','-C',str(p),'rev-parse','HEAD'],capture_output=True,text=True).stdout.strip().lower()
+    if got!=str(row.get('commit') or '').lower(): raise ValueError(f'{label} commit mismatch')
+    license_path=(p/row['license']).resolve()
+    if p not in license_path.parents or not license_path.is_file() or sha(license_path)!=row['license_sha256']:
+        raise ValueError(f'{label} license proof mismatch')
+    return p
 def atomic(p,v):
     p=Path(p); p.parent.mkdir(parents=True,exist_ok=True); q=p.with_name(f'.{p.name}.{os.getpid()}.tmp'); q.write_text(json.dumps(v,indent=2,allow_nan=False)+'\n',encoding='utf-8'); os.replace(q,p)
 def progress(work,stage,state,detail=''):
@@ -43,8 +52,8 @@ def preflight(job):
     if cam.get('mode')!='positive_camera_z': raise ValueError('bundle has no calibrated camera-Z contract')
     repos=job.get('runtime_repos') or {}; models=job.get('model_checkpoints') or {}
     if not repos or not models: raise ValueError('runtime repo/checkpoint proofs are required')
-    for group,rows in (('runtime_repo',repos),('checkpoint',models)):
-        for name,row in rows.items(): pin(row,f'{group}:{name}')
+    for name,row in repos.items(): repo_pin(row,f'runtime_repo:{name}')
+    for name,row in models.items(): pin(row,f'checkpoint:{name}')
     return paths,bundle,anchors,profile,action
 def materialize_bundle(source,profile,work):
     # Exact supported path: old optimizer reads LIMIT_ROTATION only from skeleton.json.
@@ -77,16 +86,34 @@ def normalize_quaternion(q):
     n=math.sqrt(sum(float(x)*float(x) for x in q))
     if n<1e-12: raise ValueError('zero quaternion')
     q=[float(x)/n for x in q]; return [-x for x in q] if q[3]<0 else q
+def resample_frames(frames,count,fps):
+    if len(frames)<2 or count<2: raise ValueError('resampling requires at least two source and target frames')
+    src_end=float(frames[-1]['time_seconds']); target=[]
+    for i in range(count):
+        t=src_end*i/(count-1); hi=next((k for k,x in enumerate(frames) if float(x['time_seconds'])>=t),len(frames)-1); lo=max(0,hi-1)
+        a,b=frames[lo],frames[hi]; span=float(b['time_seconds'])-float(a['time_seconds']); w=0.0 if span<=0 else (t-float(a['time_seconds']))/span
+        bones={}
+        if set(a['bones'])!=set(b['bones']): raise ValueError('bone inventory changes between fitted frames')
+        for name in a['bones']:
+            aa,bb=a['bones'][name],b['bones'][name]; qa,qb=normalize_quaternion(aa['local_rotation_xyzw']),normalize_quaternion(bb['local_rotation_xyzw'])
+            if sum(qa[j]*qb[j] for j in range(4))<0: qb=[-x for x in qb]
+            bones[name]={'parent':aa['parent'],'local_translation':[(1-w)*float(aa['local_translation'][j])+w*float(bb['local_translation'][j]) for j in range(3)],'local_rotation_xyzw':normalize_quaternion([(1-w)*qa[j]+w*qb[j] for j in range(4)])}
+        target.append({'frame':i,'time_seconds':i/float(fps),'root_translation':[(1-w)*float(a['root_translation'][j])+w*float(b['root_translation'][j]) for j in range(3)],'bones':bones})
+    return target
 def finalize(job,paths,action,work):
     fitted=work/'fitted-animation.json'; qa=pin(job['qa_receipt'],'qa_receipt'); q=rd(qa)
     if q.get('passed') is not True or q.get('fitted_sha256')!=sha(fitted): raise ValueError('QA receipt is not a hash-bound PASS')
-    src=rd(fitted); frames=src.get('frames') or []
-    if len(frames)!=int(action['frame_count']): raise ValueError('fitted frame count differs from action contract; explicit resampling stage is required')
-    out=[]
-    for f in frames:
-        out.append({'frame':f['frame'],'time_seconds':f['frame']/float(action['fps']),'root_translation':f['root_translation'],'bones':{n:{'parent':b['parent'],'local_translation':b['local_translation'],'local_rotation_xyzw':normalize_quaternion(b['local_rotation_xyzw'])} for n,b in f['bones'].items()}})
-    candidate={'schema':OUT,'state':'candidate_not_promoted','action_id':job['action_id'],'taxonomy':'full34','loop':bool(action['loop']),'fps':float(action['fps']),'frame_count':len(out),'source_video_sha256':paths['video'] and sha(paths['video']),'fitted_sha256':sha(fitted),'qa_receipt_sha256':sha(qa),'reference_skeleton':src['transform_contract'],'coordinate_contract':{'source_bundle':'Blender world, Z/up from bundle ground plane','registry_local':'root WORLD; children PARENT_BONE','target_glTF':'conversion to +Y-up is a later explicit retarget/export stage; no basis mixing here'},'frames':out,'promotion_allowed':False}
-    atomic(work/'source-motion-candidate.json',candidate); progress(work,'candidate','done','source motion only; not promoted')
+    # Known boundary: fitted channels and skeleton are in Blender world/bone
+    # frames. They cannot be labelled registry34/glTF +Y by rotating local
+    # quaternions; Blender import may change each bone's local basis. A real
+    # apply_fitted_motion -> GLB export and re-read is required first.
+    pending={'schema':'autorig.equine-registry-export-pending/1','state':'export_required','action_id':job['action_id'],
+             'fitted_sha256':sha(fitted),'qa_receipt_sha256':sha(qa),'source_video_sha256':sha(paths['video']),
+             'required_stage':'apply_fitted_motion.py in Blender 4.3, export derived GLB, then derive reference skeleton and absolute local glTF +Y channels from that GLB',
+             'reason':'Blender Z-up/root and per-bone local bases are not registry34 glTF +Y bases',
+             'source_preservation':'original GLB remains unchanged; export must use a derived output path',
+             'promotion_allowed':False}
+    atomic(work/'registry-export-pending.json',pending); progress(work,'registry_export','pending',pending['required_stage'])
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--job',required=True,type=Path); ap.add_argument('--execute',action='store_true'); ap.add_argument('--finalize',action='store_true'); a=ap.parse_args(); job=rd(a.job); work=Path(job['work_root']).resolve(); work.mkdir(parents=True,exist_ok=True)
     try:
