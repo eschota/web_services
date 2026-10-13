@@ -829,6 +829,13 @@
    "what": "gorilla bust: head, torso, arms, no legs (Vision: quadruped)",
    "sha256": "0abed4a29405871683b980f4e939e659e90fe0e3b6158b760e3ff37c983ac73c",
    "bytes": 435032
+  },
+  "c9bd6e18.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/e8bd8883614ffbf2a13d/proj/model.glb",
+   "task": "c9bd6e18 (= 9b8096b0 = b869db5a, uploaded three times)",
+   "what": "a woman in a floor-length traditional dress, A-pose; the V3 run's model.glb (Draco, 978k vertices): the dress panels were bound to the thighs and shins, the hem joined the two feet",
+   "sha256": "a8dd070ca35860d18b60538979cdd742c67a945cc69551d0a880b57f5a4fb83c",
+   "bytes": 17549064
   }
  },
  "profiles": {

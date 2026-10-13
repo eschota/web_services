@@ -41,7 +41,7 @@ SPEC = {
     "root_skip": {"min": 0.0, "max": 0.6, "default": 0.08, "doc": "share of the piece's height from its top that keeps the body's weights entirely"},
     "root_blend": {"min": 0.02, "max": 1.0, "default": 0.22, "doc": "share of the piece's height over which the body's weights fade into the chains"},
     "split": {"values": ("on", "off"), "default": "on", "doc": "split the faces that weld a fabric piece onto a limb (weld_split)"},
-    "sway_deg": {"min": 0.0, "max": 30.0, "default": 6.0, "doc": "swing amplitude of the chains in the clips (deg, at the tip)"},
+    "sway_deg": {"min": 0.0, "max": 30.0, "default": 4.0, "doc": "swing amplitude of the chains in the clips (deg, at the tip); all sectors of a piece swing in phase, the lag runs along the chain only"},
     "sway_lag": {"min": 0.0, "max": 2.0, "default": 0.6, "doc": "phase lag per bone along a chain"},
     "words": {"values": ("on", "off"), "default": "on",
               "doc": "on: a layer is built only when the model's words (Vision what / clothing / materials, the task's words) name it: robe / dress / skirt ... for the skirt, cape / cloak / mantle for the cape, long hair / braid for the hair; off: by geometry alone (fused thighs read as a skirt on the corpus warriors)"},
@@ -432,7 +432,7 @@ def rig_check_extend(anim, sk, Rc, opts=None):
     ph = 2 * np.pi * times / float(times[-1] or 1)
     X = Rc.T @ np.eye(3)[0]
     for nm, kind, k, seg in _bones(sk.names):
-        deg = o["sway_deg"] * (0.4 + 0.6 * seg / 3.0) * np.sin(2 * ph - o["sway_lag"] * seg - 0.3 * k)
+        deg = o["sway_deg"] * (0.4 + 0.6 * seg / 3.0) * np.sin(2 * ph - o["sway_lag"] * seg )
         vals = np.stack([F.quat(X, float(d)) for d in deg])
         channels.append((sk.index[nm], "rotation", vals))
     return times, channels
@@ -453,7 +453,7 @@ def extend_clips(clips: list, doc: dict, run_dir=None, opts=None) -> list:
         hz = 1.4 if loco.search(c.get("name") or "") else 0.4
         amp = o["sway_deg"] * (1.0 if loco.search(c.get("name") or "") else 0.5)
         for nm, kind, k, seg in bones:
-            deg = amp * (0.4 + 0.6 * seg / 3.0) * np.sin(2 * np.pi * hz * times - o["sway_lag"] * seg - 0.3 * k)
+            deg = amp * (0.4 + 0.6 * seg / 3.0) * np.sin(2 * np.pi * hz * times - o["sway_lag"] * seg )
             h = np.radians(deg) / 2
             c["rotations"][nm] = np.stack([X[0] * np.sin(h), X[1] * np.sin(h), X[2] * np.sin(h), np.cos(h)], 1)
     return clips
