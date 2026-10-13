@@ -1,0 +1,191 @@
+<title>Карта конвейера V3</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one wide engineering drawing (SVG) first, then a compact stage table; lanes = who runs it. */
+:root{
+  --bg:#f6f7f4; --fg:#1d2320; --muted:#5e6862; --line:#aab3ad; --panel:#ffffff;
+  --must:#e8eef6; --must-b:#3b5f8f;      /* обязательный этап на VPS */
+  --farm:#e6f3ea; --farm-b:#2f7a4c;      /* работа на ферме */
+  --opt:#f5f1e6;  --opt-b:#9a7b2f;       /* фоновый / необязательный */
+  --rig:#f2e9f3;  --rig-b:#7a4b86;       /* внутри rig */
+  --loop:#b8372f;                        /* перериг */
+  --star:#d99a1c;
+  --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#15181a; --fg:#e6e9e4; --muted:#9aa49d; --line:#4a5551; --panel:#1d2124;
+  --must:#213246; --must-b:#8fb4e6; --farm:#1d3326; --farm-b:#7fcf9a; --opt:#332d1d; --opt-b:#d9b65a;
+  --rig:#2e2232; --rig-b:#cf9ad9; --loop:#ff7a70; --star:#f2b84b; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#15181a; --fg:#e6e9e4; --muted:#9aa49d; --line:#4a5551; --panel:#1d2124;
+  --must:#213246; --must-b:#8fb4e6; --farm:#1d3326; --farm-b:#7fcf9a; --opt:#332d1d; --opt-b:#d9b65a;
+  --rig:#2e2232; --rig-b:#cf9ad9; --loop:#ff7a70; --star:#f2b84b; color-scheme:dark }
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);padding-block:20px 48px;padding-inline:16px;max-width:1500px;margin:0 auto}
+h1{font-size:22px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+.legend{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:12px;margin:0 0 12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:22px;height:13px;border-radius:3px;border:2px solid}
+.sw.must{background:var(--must);border-color:var(--must-b)} .sw.farm{background:var(--farm);border-color:var(--farm-b)}
+.sw.opt{background:var(--opt);border-color:var(--opt-b);border-style:dashed} .sw.rig{background:var(--rig);border-color:var(--rig-b)}
+.sw.loop{border-color:var(--loop);background:transparent}
+figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;overflow-x:auto}
+svg{display:block;min-width:1100px;max-width:100%;height:auto;font-family:var(--sans)}
+figcaption{font-size:12px;color:var(--muted);margin-top:8px}
+.n{stroke-width:1.6} .must{fill:var(--must);stroke:var(--must-b)} .farm{fill:var(--farm);stroke:var(--farm-b)}
+.opt{fill:var(--opt);stroke:var(--opt-b);stroke-dasharray:5 4} .rig{fill:var(--rig);stroke:var(--rig-b)}
+.t{font-size:12.5px;font-weight:500;fill:var(--fg)} .s{font-size:10.5px;fill:var(--muted);font-family:var(--mono)}
+.e{fill:none;stroke:var(--line);stroke-width:1.5;marker-end:url(#ar)} .e.loop{stroke:var(--loop);marker-end:url(#arl)}
+.e.bg{stroke-dasharray:4 4} .lab{font-size:10.5px;fill:var(--muted);font-family:var(--mono)} .lab.loop{fill:var(--loop)}
+.lane{font-size:11px;fill:var(--muted);font-family:var(--mono);letter-spacing:.06em}
+.frame{fill:none;stroke:var(--rig-b);stroke-dasharray:3 5;stroke-width:1}
+table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:18px;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+td.m{font-family:var(--mono);font-size:11.5px;white-space:nowrap}
+.tw{overflow-x:auto}
+</style>
+
+<h1>Карта конвейера V3</h1>
+<p class="sub">Один запуск задачи: что обязательно, что фоном, что на ферме, откуда перериг. Снято с прода 2026-10-14 (rig v3.2026-10-13.8). Лимиты в секундах.</p>
+<div class="legend">
+  <span><i class="sw must"></i>обязательно · VPS</span>
+  <span><i class="sw farm"></i>на ферме</span>
+  <span><i class="sw opt"></i>фоном, не блокирует</span>
+  <span><i class="sw rig"></i>шаги внутри rig</span>
+  <span><i class="sw loop"></i>перериг</span>
+  <span>★ риг виден во вьювере (бюджет 60 с)</span>
+</div>
+
+<figure>
+<svg viewBox="0 0 1480 1010" role="img" aria-label="Этапы V3 от запуска до публикации, фоновые задачи, проверки QA и путь перерига при открытии задачи">
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--line)"/></marker>
+  <marker id="arl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--loop)"/></marker>
+</defs>
+
+<!-- lane labels -->
+<text class="lane" x="20" y="48">ОСНОВНОЙ ПУТЬ</text>
+<text class="lane" x="20" y="208">ВНУТРИ RIG · rig_first.build → fastrig.build</text>
+<text class="lane" x="20" y="418">ФОНОМ</text>
+<text class="lane" x="20" y="578">QA · ПУБЛИКАЦИЯ</text>
+<text class="lane" x="20" y="808">ПЕРЕРИГ ПРИ ОТКРЫТИИ · rerig_open (без QA, phases.json не трогается)</text>
+
+<!-- ===== lane A: main path y=70 ===== -->
+<rect class="n must" x="20" y="70" width="90" height="54" rx="7"/><text class="t" x="65" y="102" text-anchor="middle">Запуск</text>
+<rect class="n must" x="140" y="70" width="120" height="54" rx="7"/><text class="t" x="200" y="93" text-anchor="middle">source</text><text class="s" x="200" y="110" text-anchor="middle">sha256 · helpers</text>
+<rect class="n must" x="290" y="70" width="150" height="54" rx="7"/><text class="t" x="365" y="93" text-anchor="middle">rig</text><text class="s" x="365" y="110" text-anchor="middle">child 5 ГБ · ≤900</text>
+<rect class="n opt" x="470" y="70" width="130" height="54" rx="7"/><text class="t" x="535" y="93" text-anchor="middle">fast analysis</text><text class="s" x="535" y="110" text-anchor="middle">правки суставов · ≤300</text>
+<rect class="n must" x="630" y="70" width="120" height="54" rx="7"/><text class="t" x="690" y="93" text-anchor="middle">retarget</text><text class="s" x="690" y="110" text-anchor="middle">библиотека клипов</text>
+<g><circle cx="830" cy="97" r="27" fill="var(--panel)" stroke="var(--star)" stroke-width="2.2"/><text x="830" y="93" text-anchor="middle" font-size="15" fill="var(--star)">★</text><text class="s" x="830" y="110" text-anchor="middle">вьювер</text></g>
+<rect class="n farm" x="900" y="70" width="170" height="54" rx="7"/><text class="t" x="985" y="93" text-anchor="middle">analysis</text><text class="s" x="985" y="110" text-anchor="middle">проекции · Vision ≤90</text>
+<rect class="n must" x="1100" y="70" width="110" height="54" rx="7"/><text class="t" x="1155" y="93" text-anchor="middle">classify</text><text class="s" x="1155" y="110" text-anchor="middle">категория</text>
+<rect class="n must" x="1240" y="70" width="150" height="54" rx="7"/><text class="t" x="1315" y="93" text-anchor="middle">риг ≠ категория?</text><text class="s" x="1315" y="110" text-anchor="middle">plan · forward · props</text>
+
+<path class="e" d="M110 97H140"/><path class="e" d="M260 97H290"/><path class="e" d="M440 97H470"/><path class="e" d="M600 97H630"/><path class="e" d="M750 97H803"/><path class="e" d="M857 97H900"/><path class="e" d="M1070 97H1100"/><path class="e" d="M1210 97H1240"/>
+<!-- re-rig loop from A9 back to rig -->
+<path class="e loop" d="M1315 70V36H365V70"/><text class="lab loop" x="840" y="31" text-anchor="middle">да → перериг: rig → fast → retarget</text>
+<!-- analysis failure note -->
+<text class="lab" x="985" y="140" text-anchor="middle">Vision нет ответа → analysis_verified=false → needs_review</text>
+
+<!-- ===== lane B: inside rig y=225/285 ===== -->
+<rect class="frame" x="100" y="215" width="1370" height="150" rx="10"/>
+<path class="e" d="M365 124V160H120V225"/>
+<g font-size="12">
+<rect class="n rig" x="120" y="225" width="150" height="40" rx="6"/><text class="t" x="195" y="250" text-anchor="middle">helpers · skin bake</text>
+<rect class="n rig" x="285" y="225" width="150" height="40" rx="6"/><text class="t" x="360" y="250" text-anchor="middle">ось вверх · lying</text>
+<rect class="n rig" x="450" y="225" width="150" height="40" rx="6"/><text class="t" x="525" y="250" text-anchor="middle">перед · words</text>
+<rect class="n rig" x="615" y="225" width="150" height="40" rx="6"/><text class="t" x="690" y="250" text-anchor="middle">props до рига</text>
+<rect class="n rig" x="780" y="225" width="150" height="40" rx="6"/><text class="t" x="855" y="250" text-anchor="middle">limb stabilize</text>
+<rect class="n rig" x="945" y="225" width="150" height="40" rx="6"/><text class="t" x="1020" y="250" text-anchor="middle">hands? serpent?</text>
+<rect class="n rig" x="1110" y="225" width="150" height="40" rx="6"/><text class="t" x="1185" y="250" text-anchor="middle">multilimb · monster</text>
+<rect class="n rig" x="1275" y="225" width="180" height="40" rx="6"/><text class="t" x="1365" y="250" text-anchor="middle">fastrig.build</text>
+<path class="e" d="M270 245H285"/><path class="e" d="M435 245H450"/><path class="e" d="M600 245H615"/><path class="e" d="M765 245H780"/><path class="e" d="M930 245H945"/><path class="e" d="M1095 245H1110"/><path class="e" d="M1260 245H1275"/>
+<text class="s" x="1020" y="278" text-anchor="middle">да → свой билдер, выход</text>
+<!-- second row -->
+<path class="e" d="M1365 265V300H1335"/>
+<rect class="n rig" x="1140" y="285" width="195" height="40" rx="6"/><text class="t" x="1237" y="310" text-anchor="middle">fit → skin → cut_cap → stamp</text>
+<rect class="n rig" x="990" y="285" width="135" height="40" rx="6"/><text class="t" x="1057" y="310" text-anchor="middle">tessellate</text>
+<rect class="n rig" x="840" y="285" width="135" height="40" rx="6"/><text class="t" x="907" y="310" text-anchor="middle">props после</text>
+<rect class="n rig" x="690" y="285" width="135" height="40" rx="6"/><text class="t" x="757" y="310" text-anchor="middle">pose trace</text>
+<rect class="n rig" x="540" y="285" width="135" height="40" rx="6"/><text class="t" x="607" y="310" text-anchor="middle">box arms</text>
+<rect class="n rig" x="390" y="285" width="135" height="40" rx="6"/><text class="t" x="457" y="310" text-anchor="middle">fit check</text>
+<path class="e" d="M1140 305H1125"/><path class="e" d="M990 305H975"/><path class="e" d="M840 305H825"/><path class="e" d="M690 305H675"/><path class="e" d="M540 305H525"/>
+<text class="s" x="1237" y="345" text-anchor="middle">RIG_VERSION → rig.json · rigged.glb</text>
+<text class="s" x="757" y="345" text-anchor="middle">бюджет +30 с, под нагрузкой пропускается</text>
+</g>
+<path class="e" d="M390 305H330V160"/>
+
+<!-- ===== lane C: background y=440 ===== -->
+<rect class="n opt" x="140" y="440" width="120" height="54" rx="7"/><text class="t" x="200" y="463" text-anchor="middle">voxels</text><text class="s" x="200" y="480" text-anchor="middle">live · ≤240</text>
+<rect class="n opt" x="290" y="440" width="120" height="54" rx="7"/><text class="t" x="350" y="463" text-anchor="middle">centring</text><text class="s" x="350" y="480" text-anchor="middle">только событие</text>
+<rect class="n farm" x="470" y="440" width="170" height="54" rx="7" stroke-dasharray="5 4"/><text class="t" x="555" y="463" text-anchor="middle">texture · autotex</text><text class="s" x="555" y="480" text-anchor="middle">ферма · ≤12 мин</text>
+<rect class="n farm" x="900" y="440" width="170" height="54" rx="7" stroke-dasharray="5 4"/><text class="t" x="985" y="463" text-anchor="middle">card · scale</text><text class="s" x="985" y="480" text-anchor="middle">Vision · без лимита</text>
+<rect class="n opt" x="1100" y="440" width="110" height="54" rx="7"/><text class="t" x="1155" y="463" text-anchor="middle">skeleton DB</text><text class="s" x="1155" y="480" text-anchor="middle">запись</text>
+<rect class="n opt" x="1240" y="440" width="150" height="54" rx="7"/><text class="t" x="1315" y="463" text-anchor="middle">rig judge</text><text class="s" x="1315" y="480" text-anchor="middle">сервис · needs_review</text>
+<path class="e bg" d="M200 124V440"/><path class="e" d="M260 467H290"/>
+<path class="e bg" d="M830 124V400H555V440"/><text class="lab" x="700" y="395" text-anchor="middle">после ★</text>
+<path class="e bg" d="M1155 124V440"/><text class="lab" x="1185" y="300" >classify ok</text>
+
+<!-- ===== lane D: QA y=600 ===== -->
+<rect class="n farm" x="470" y="600" width="170" height="54" rx="7"/><text class="t" x="555" y="623" text-anchor="middle">limb check</text><text class="s" x="555" y="640" text-anchor="middle">ферма · QA ждёт ≤420</text>
+<rect class="n farm" x="680" y="600" width="230" height="54" rx="7"/><text class="t" x="795" y="623" text-anchor="middle">numeric QA + detach</text><text class="s" x="795" y="640" text-anchor="middle">прокси 50k · ферма · ≤600 · hedge 60</text>
+<rect class="n must" x="950" y="600" width="110" height="54" rx="7"/><text class="t" x="1005" y="623" text-anchor="middle">QA gates</text><text class="s" x="1005" y="640" text-anchor="middle">9 ворот</text>
+<rect class="n must" x="1100" y="600" width="130" height="54" rx="7"/><text class="t" x="1165" y="623" text-anchor="middle">confirm wait</text><text class="s" x="1165" y="640" text-anchor="middle">кэш анализа · ≤40</text>
+<rect class="n must" x="1270" y="600" width="110" height="54" rx="7"/><text class="t" x="1325" y="623" text-anchor="middle">publish</text><text class="s" x="1325" y="640" text-anchor="middle">sha · attempt-N</text>
+<rect class="n opt" x="1240" y="690" width="170" height="54" rx="7"/><text class="t" x="1325" y="713" text-anchor="middle">exports · scene</text><text class="s" x="1325" y="730" text-anchor="middle">FBX/ZIP ≤400 · notify</text>
+
+<path class="e" d="M690 124V560H555V600"/><text class="lab" x="640" y="555" text-anchor="middle">после retarget</text>
+<path class="e" d="M1315 124V560H795V600"/><text class="lab" x="1060" y="555" text-anchor="middle">нет</text>
+<path class="e" d="M640 627H680"/><path class="e" d="M910 627H950"/><path class="e" d="M1060 627H1100"/><path class="e" d="M1230 627H1270"/>
+<path class="e bg" d="M555 494V560"/><text class="lab" x="600" y="520">QA ждёт ≤60</text>
+<path class="e bg" d="M985 494V560H1325V600"/>
+<path class="e bg" d="M1005 654V680H1155V494"/><text class="lab" x="1080" y="675" text-anchor="middle">после gates</text>
+<path class="e bg" d="M1060 627V560H1315V494"/>
+<path class="e" d="M1325 654V690"/>
+<!-- publish swap retry -->
+<path class="e loop" d="M1380 627H1430V580H1005V600"/><text class="lab loop" x="1240" y="575" text-anchor="middle">риг сменился → QA снова (≤3)</text>
+<!-- confirm disagree → re-rig -->
+<path class="e loop" d="M1165 600V525H1440V36H1315" marker-end="none"/><text class="lab loop" x="1300" y="520" text-anchor="middle">кэш не сошёлся → перериг</text>
+<text class="s" x="1005" y="672" text-anchor="middle">FAIL → needs_review</text>
+
+<!-- ===== lane E: rerig_open y=830 ===== -->
+<rect class="n opt" x="20" y="830" width="160" height="54" rx="7"/><text class="t" x="100" y="853" text-anchor="middle">запрос перерига</text><text class="s" x="100" y="870" text-anchor="middle">rerig_requests/*.json</text>
+<rect class="n must" x="210" y="830" width="110" height="54" rx="7"/><text class="t" x="265" y="853" text-anchor="middle">rerig_open</text><text class="s" x="265" y="870" text-anchor="middle">loop 3 с</text>
+<rect class="n must" x="350" y="830" width="130" height="54" rx="7"/><text class="t" x="415" y="853" text-anchor="middle">rig_first.build</text><text class="s" x="415" y="870" text-anchor="middle">≤900</text>
+<rect class="n opt" x="510" y="830" width="110" height="54" rx="7"/><text class="t" x="565" y="853" text-anchor="middle">fast --apply</text>
+<rect class="n must" x="650" y="830" width="100" height="54" rx="7"/><text class="t" x="700" y="853" text-anchor="middle">animate</text><text class="s" x="700" y="870" text-anchor="middle">клипы</text>
+<rect class="n must" x="780" y="830" width="170" height="54" rx="7"/><text class="t" x="865" y="853" text-anchor="middle">install</text><text class="s" x="865" y="870" text-anchor="middle">новая версия скина</text>
+<rect class="n opt" x="980" y="830" width="90" height="54" rx="7"/><text class="t" x="1025" y="853" text-anchor="middle">poster</text><text class="s" x="1025" y="870" text-anchor="middle">≤200</text>
+<rect class="n farm" x="1100" y="830" width="160" height="54" rx="7" stroke-dasharray="5 4"/><text class="t" x="1180" y="853" text-anchor="middle">arm clearance</text><text class="s" x="1180" y="870" text-anchor="middle">≤600</text>
+<rect class="n opt" x="1290" y="830" width="160" height="54" rx="7"/><text class="t" x="1370" y="853" text-anchor="middle">blueprint reapply</text><text class="s" x="1370" y="870" text-anchor="middle">ручные правки</text>
+<path class="e" d="M180 857H210"/><path class="e" d="M320 857H350"/><path class="e" d="M480 857H510"/><path class="e" d="M620 857H650"/><path class="e" d="M750 857H780"/><path class="e" d="M950 857H980"/><path class="e" d="M1070 857H1100"/><path class="e" d="M1260 857H1290"/>
+<!-- triggers into E0 -->
+<text class="lab" x="20" y="925">← открытие задачи с другой RIG_VERSION (бэкенд)</text>
+<text class="lab" x="20" y="943">← plan_matches_category = false (QA gates)</text>
+<text class="lab" x="20" y="961">← поздний confirm кэша анализа</text>
+<path class="e loop" d="M1005 654V760H100V830"/><text class="lab loop" x="560" y="755" text-anchor="middle">gates: план ≠ категория · поздний confirm</text>
+<text class="s" x="865" y="925" text-anchor="middle">старые версии и файлы клиента остаются · один перериг на задачу и версию</text>
+</svg>
+<figcaption>Сплошные стрелки — обязательная последовательность; пунктир — фоновая задача, которую следующий этап ждёт не дольше указанного; красные — петли перерига. Ферма: f1 f2 f7 f11 f13 через farmjobs, локальный резерв на VPS включается через 60 с (hedge).</figcaption>
+</figure>
+
+<div class="tw"><table>
+<thead><tr><th>Этап</th><th>Где</th><th>Блокирует</th><th>Лимит</th><th>Выход</th></tr></thead>
+<tbody>
+<tr><td>source</td><td class="m">VPS</td><td>да (sha256)</td><td class="m">—</td><td class="m">proj/model.glb · proj/helpers.json</td></tr>
+<tr><td>rig</td><td class="m">VPS · child</td><td>да (≥1 кость, rigged.glb)</td><td class="m">5 ГБ · 900 с</td><td class="m">rig/rigged.glb · rig/rig.json · timings_s</td></tr>
+<tr><td>fast analysis</td><td class="m">VPS · child</td><td>нет</td><td class="m">300 с</td><td class="m">analysis/fast.json · category.json · limb_collision.json</td></tr>
+<tr><td>retarget</td><td class="m">VPS · child</td><td>только исключение</td><td class="m">—</td><td class="m">клипы в rigged.glb · rig.json.clips · anim_qa</td></tr>
+<tr><td>★ риг во вьювере</td><td class="m">—</td><td>цель 60 с</td><td class="m">нет жёсткого</td><td class="m">first_rig_in_viewer · live_rig_first_ready</td></tr>
+<tr><td>texture</td><td class="m">ферма</td><td>нет (QA ждёт 60 с)</td><td class="m">12 мин</td><td class="m">texture/&lt;id&gt;/model.glb · новая версия скина</td></tr>
+<tr><td>analysis · classify</td><td class="m">ферма (проекции) · Vision</td><td>проекции да · Vision нет</td><td class="m">600 с · 90 с</td><td class="m">proj/sheet_*.png · v3/analysis.json</td></tr>
+<tr><td>card · scale</td><td class="m">Vision</td><td>publish ждёт без лимита</td><td class="m">—</td><td class="m">card/card.json · v3/scale.json</td></tr>
+<tr><td>риг ≠ категория</td><td class="m">VPS · child</td><td>перериг</td><td class="m">—</td><td class="m">analysis/category.json · parts</td></tr>
+<tr><td>limb check</td><td class="m">ферма · hedge</td><td>QA ждёт 420 с</td><td class="m">300 с</td><td class="m">analysis/limb_collision.{json,png}</td></tr>
+<tr><td>numeric QA + detach</td><td class="m">ферма · hedge 60 с</td><td>ворота</td><td class="m">600 с</td><td class="m">rig/numeric-qa.json · rig/.numeric/</td></tr>
+<tr><td>QA gates</td><td class="m">VPS</td><td>FAIL → needs_review</td><td class="m">—</td><td class="m">rig/rig-qa.json</td></tr>
+<tr><td>publish</td><td class="m">VPS</td><td>да (sha)</td><td class="m">3 попытки</td><td class="m">v3-dispatch/runs/…/attempt-N/</td></tr>
+<tr><td>exports · scene</td><td class="m">blender-worker</td><td>нет</td><td class="m">400 с</td><td class="m">rig/rigged.fbx · zip · downloads.json</td></tr>
+<tr><td>rerig_open</td><td class="m">VPS · child</td><td>нет QA</td><td class="m">900 с</td><td class="m">rig/skin/vN · poster</td></tr>
+</tbody></table></div>
