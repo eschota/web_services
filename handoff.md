@@ -3067,3 +3067,17 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   (seconds 169 > 150 — нагрузка) и `luchador_flying_upright` (clips 7, up '+y'), которые в headown3-прогоне прошли —
   перезапущена (10:46). После установки стартует `equine_gen.sh` (ферма: trot/canter/gallop/look с сидами до
   прохождения гейта) и сторож снимает XFAIL с equine_*.
+
+### Копытные, milestone 3 (~11:55 UTC): гейт аллюров на проде, ферма генерирует
+
+- **gaitgate установлен** (GATE PASS 241; `gait_gate.py e7bec5a55f01`, `animal_video.py c24bc378cac8`, `animpick.py
+  48b3e0231417`), MT перезапущен 11:38; equine_* кейсы снова live (сторож). Зебра d3d37033 на проде v2: **10/10**.
+- **Ферма** (`equine_gen.sh`, H3 с белой лошади 028d1acd…): рысь seed 41 — период 2.21 с при верном диагональном
+  порядке (lag 0.61) → v1 гейта отверг; seed 7 — lag 0.38 отвергнут на границе; seed 123 — хуже; кентер seed 41 —
+  lag 0.65 = кентер с правой ноги (съёмка с другой стороны). Выводы → **gait_gate v2/v3**: (1) медленный дубль с
+  верным порядком ног **ретаймится** (`speed` в записи, `animal_video.apply` делит период) вместо отказа,
+  `python -m mt.gait_gate retime <lib>` чинит сохранённые записи; (2) зеркальные окна лага (`lf_lag_alt`) для
+  walk/canter/gallop, рысь 0.35–0.65. Цепочка gaitgate3 в гейте. (3) `category_gen.sh` хранит каждый дубль
+  `<clip>.seed<N>.json` и выбирает лучший — раньше последний сид затирал лучший.
+- Ловушка шаблона цепочек: rel без изменений (animpick уже на проде) → `no change` и выход; патч-скрипт теперь
+  пропускает отсутствующий файл, а rel не перечисляем. MT `834940a`+v3, web `7b4bee81`+.
