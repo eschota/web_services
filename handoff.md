@@ -2932,3 +2932,7 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 * rerig_triage оставил задаче риг 03:08 (пины без поворота): backfill.score повёрнутого рига (4, 0, 0.0458, 3) против
   (0, 0, 0, 1) — limb collision severity 2 на одной руке после поворота. Новые задачи ригуются с поворотом (правило
   движка); пер-задачный ре-риг — только проверка.
+- **quadskin4 установлен 04:46 UTC** (GATE PASS 235; `fastrig.py` + `skin_tools.py b994877f683e`). XPASS → сняты XFAIL:
+  `cat_front_leg_own_bones/leg_own`, `ferret_long_neck/mt_stretch_strict`, `quad_tail_monster/mt_stretch`.
+  `autorig-mt-restart --wait` отказал (живой V3-ран) — перезапуск поставлен с ожиданием до 25 мин
+  (`/home/debian/monster/mt_restart.log`); rerig_open перезапущен сразу.

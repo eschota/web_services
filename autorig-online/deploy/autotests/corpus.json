@@ -6233,10 +6233,6 @@
        "<=",
        120
       ]
-     },
-     "xfail": {
-      "reason": "fused legs stretch, no-gap (2026-10-12: no weld splits for non-bipeds; the old split hid the stretch behind gaps)",
-      "owner": "Rig path · V3"
      }
     }
    ]
@@ -7109,10 +7105,6 @@
        "<=",
        150
       ]
-     },
-     "xfail": {
-      "reason": "without Vision words the standing monster rigs as a biped (orient: two feet); with Vision quadruped the tail trace takes rig_check 4x 501 -> 68 (census 2026-10-12)",
-      "owner": "Rig path · V3"
      }
     }
    ]
@@ -8764,10 +8756,6 @@
        "<=",
        25
       ]
-     },
-     "xfail": {
-      "reason": "lands with the quadskin3 chain (leg_core_own=hard + quad_contact_split=on)",
-      "owner": "Fable monsters/animals"
      }
     }
    ],
