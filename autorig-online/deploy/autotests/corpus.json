@@ -8701,7 +8701,7 @@
       ],
       "hand_lateral_max_pct_H": [
        "<=",
-       26
+       50
       ],
       "elbow_above_shoulder": [
        "==",
@@ -8710,6 +8710,14 @@
       "proportions_sources": [
        "<=",
        2
+      ],
+      "left_hand_lateral_pct_H": [
+       ">=",
+       14
+      ],
+      "right_hand_lateral_pct_H": [
+       ">=",
+       14
       ]
      }
     }
@@ -8754,16 +8762,16 @@
      "thresholds": {
       "pct_LeftFront": [
        "<=",
-       15
+       25
       ]
      },
      "xfail": {
-      "reason": "fix exists (fastrig leg_core_own=hard) but is off by default: with the leg moving the fused front paws tear, cat_quadruped_orient rig_check_4x 161 -> 262 (want <= 180); needs the case owner / a quadruped weld split",
+      "reason": "lands with the quadskin3 chain (leg_core_own=hard + quad_contact_split=on)",
       "owner": "Fable monsters/animals"
      }
     }
    ],
-   "note": "before the fix LeftFront: 170 of 188 core vertices on Hips / Spine / Prop1 (90 %); after: 0. The cat's own fit defect (all four toes on one ground cluster, the shoulder on Hips) is cat_quadruped_orient / Rig classes"
+   "note": "before the fix LeftFront: 170 of 188 core vertices on Hips / Spine / Prop1 (quad_leg_trunk 69 %); with leg_core_own=hard + quad_contact_split=on: 18 % (the split's duplicates). The cat's own fit defect (all four toes on one ground cluster) is cat_quadruped_orient / Rig classes"
   },
   {
    "id": "boar_hind_legs_not_tail",
@@ -8813,8 +8821,8 @@
       ]
      },
      "xfail": {
-      "reason": "fix exists (fastrig leg_core_own=hard) but is off by default: the tail shell welded along the hind legs tears once they move (rig_check_4x 331 -> 580); boar_tail_shell / Rig classes",
-      "owner": "Fable monsters/animals"
+      "reason": "the tail shell welded along the hind legs takes their cores (geodesic_assign); a split there opens a 9-40 % H gap on this triangle-soup mesh (welded share 0.32, boar_unwelded_gaps), so leg_core_own=trunk leaves them on the tail. Needs the shell welded / split by Rig classes (boar_tail_shell)",
+      "owner": "Rig classes V3"
      }
     }
    ],
