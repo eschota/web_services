@@ -1,0 +1,52 @@
+{
+ "id": "equine_sitting_horse",
+ "task": "74f7cd37",
+ "cost": 3,
+ "defect": "Fable · equines 2026-10-13: a sitting horse (hind legs folded forward and splayed): the fit read the splayed hind legs as the front pair and the standing front legs as hind, forward_axis -z, so the real front legs' lower parts bind to Hips / Spine and tear in Walk / Jump / Rear (6/10, 60-66 edges)",
+ "checks": [
+  {
+   "id": "mt_rig",
+   "kind": "mt_rig_first",
+   "paths": [
+    "mt"
+   ],
+   "tier": "base",
+   "input": "74f7cd37.model.glb",
+   "params": {
+    "words": "stylized horse",
+    "body": "quadruped"
+   },
+   "thresholds": {
+    "seconds": [
+     "<=",
+     90
+    ],
+    "body_plan": [
+     "==",
+     "quadruped"
+    ],
+    "bones": [
+     ">=",
+     25
+    ],
+    "clips": [
+     ">=",
+     8
+    ]
+   }
+  },
+  {
+   "id": "mt_qa",
+   "kind": "mt_numeric_qa",
+   "on": "mt_rig",
+   "tier": "base",
+   "thresholds": {
+    "clips_passed": [
+     ">=",
+     9
+    ]
+   }
+  }
+ ],
+ "note": "XFAIL until the sitting-pose fit lands (milestone 2)"
+}

@@ -836,6 +836,27 @@
    "what": "a woman in a floor-length traditional dress, A-pose; the V3 run's model.glb (Draco, 978k vertices): the dress panels were bound to the thighs and shins, the hem joined the two feet",
    "sha256": "a8dd070ca35860d18b60538979cdd742c67a945cc69551d0a880b57f5a4fb83c",
    "bytes": 17549064
+  },
+  "d3d37033.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c5ff1c6306858a9e5e8a/proj/model.glb",
+   "task": "d3d37033 (#2007)",
+   "what": "zebra, the V3 run's model.glb (Draco)",
+   "sha256": "3c482d67aad7cc9360d348f1fe650ea473c100838fcb19df1cb01c3260be514e",
+   "bytes": 4927408
+  },
+  "ebc474ba.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c33c0d6f735cfb9e1c8f/proj/model.glb",
+   "task": "ebc474ba",
+   "what": "saddled horse, the V3 run's model.glb",
+   "sha256": "c0379df7ed6ba478bc42d042e27b0590e6ecc2214eef99aaaebe4ddb17afb433",
+   "bytes": 3546580
+  },
+  "74f7cd37.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/5b447b5d03cd66f8fa6a/proj/model.glb",
+   "task": "74f7cd37",
+   "what": "stylized sitting horse (hind legs folded forward and splayed), the V3 run's model.glb",
+   "sha256": "436fd8572cfc38d9c28832b653cc28592f27d72d35f98459f4db9f8ac1a75a93",
+   "bytes": 131908
   }
  },
  "profiles": {
@@ -8928,6 +8949,171 @@
      }
     }
    ]
+  },
+  {
+   "id": "equine_zebra_neck",
+   "task": "d3d37033-#2007",
+   "cost": 3,
+   "defect": "Fable · equines 2026-10-13: the zebra's muzzle and throat (1385 vertices past the Head joint) were skinned to Spine2 / Spine1 (the radius-scaled free-vertex assignment lets the thick trunk outbid the thin head), so every neck clip tore: numeric QA 5/10, Look Around 205, Canter 177, Rear 493 stretched edges. Fix: fastrig head_own (neck tube / jaw sphere -> Neck / Head only; the skull-vs-chest rule spares that skin)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "input": "d3d37033.model.glb",
+     "params": {
+      "words": "zebra",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_qa",
+     "kind": "mt_numeric_qa",
+     "on": "mt_rig",
+     "tier": "base",
+     "thresholds": {
+      "clips_passed": [
+       ">=",
+       9
+      ]
+     },
+     "xfail": {
+      "reason": "lands with the headown2 chain (fastrig head_own)",
+      "owner": "Fable monsters/animals"
+     }
+    }
+   ],
+   "note": "with head_own: 10/10, every clip 0 stretched edges; the horse video gaits (walk/trot/canter/gallop/rear/idle) + Look Around / Tail Wag / Jump"
+  },
+  {
+   "id": "equine_saddled_horse",
+   "task": "ebc474ba",
+   "cost": 3,
+   "defect": "Fable · equines 2026-10-13: the owner's reference horse: 10/10 on prod, the guard against regressions of the equine fixes",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "input": "ebc474ba.model.glb",
+     "params": {
+      "words": "saddled horse",
+      "body": "quadruped"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_qa",
+     "kind": "mt_numeric_qa",
+     "on": "mt_rig",
+     "tier": "base",
+     "thresholds": {
+      "clips_passed": [
+       ">=",
+       9
+      ]
+     }
+    }
+   ],
+   "note": "prod 2026-10-13: 10/10 (Rear 117 edges, passing)"
+  },
+  {
+   "id": "equine_sitting_horse",
+   "task": "74f7cd37",
+   "cost": 3,
+   "defect": "Fable · equines 2026-10-13: a sitting horse (hind legs folded forward and splayed): the fit read the splayed hind legs as the front pair and the standing front legs as hind, forward_axis -z, so the real front legs' lower parts bind to Hips / Spine and tear in Walk / Jump / Rear (6/10, 60-66 edges)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "input": "74f7cd37.model.glb",
+     "params": {
+      "words": "stylized horse",
+      "body": "quadruped"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       25
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_qa",
+     "kind": "mt_numeric_qa",
+     "on": "mt_rig",
+     "tier": "base",
+     "thresholds": {
+      "clips_passed": [
+       ">=",
+       9
+      ]
+     },
+     "xfail": {
+      "reason": "the sitting-pose fit (splayed hind legs read as the front pair, forward -z) - equine milestone 2",
+      "owner": "Fable monsters/animals"
+     }
+    }
+   ],
+   "note": "XFAIL until the sitting-pose fit lands (milestone 2)"
   }
  ]
 }

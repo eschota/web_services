@@ -1,0 +1,52 @@
+{
+ "id": "equine_saddled_horse",
+ "task": "ebc474ba",
+ "cost": 3,
+ "defect": "Fable · equines 2026-10-13: the owner's reference horse: 10/10 on prod, the guard against regressions of the equine fixes",
+ "checks": [
+  {
+   "id": "mt_rig",
+   "kind": "mt_rig_first",
+   "paths": [
+    "mt"
+   ],
+   "tier": "base",
+   "input": "ebc474ba.model.glb",
+   "params": {
+    "words": "saddled horse",
+    "body": "quadruped"
+   },
+   "thresholds": {
+    "seconds": [
+     "<=",
+     90
+    ],
+    "body_plan": [
+     "==",
+     "quadruped"
+    ],
+    "bones": [
+     ">=",
+     25
+    ],
+    "clips": [
+     ">=",
+     8
+    ]
+   }
+  },
+  {
+   "id": "mt_qa",
+   "kind": "mt_numeric_qa",
+   "on": "mt_rig",
+   "tier": "base",
+   "thresholds": {
+    "clips_passed": [
+     ">=",
+     9
+    ]
+   }
+  }
+ ],
+ "note": "prod 2026-10-13: 10/10 (Rear 117 edges, passing)"
+}

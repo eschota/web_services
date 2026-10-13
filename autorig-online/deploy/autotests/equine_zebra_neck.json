@@ -1,0 +1,53 @@
+{
+ "id": "equine_zebra_neck",
+ "task": "d3d37033-#2007",
+ "cost": 3,
+ "defect": "Fable · equines 2026-10-13: the zebra's muzzle and throat (1385 vertices past the Head joint) were skinned to Spine2 / Spine1 (the radius-scaled free-vertex assignment lets the thick trunk outbid the thin head), so every neck clip tore: numeric QA 5/10, Look Around 205, Canter 177, Rear 493 stretched edges. Fix: fastrig head_own (neck tube / jaw sphere -> Neck / Head only; the skull-vs-chest rule spares that skin)",
+ "checks": [
+  {
+   "id": "mt_rig",
+   "kind": "mt_rig_first",
+   "paths": [
+    "mt"
+   ],
+   "tier": "base",
+   "input": "d3d37033.model.glb",
+   "params": {
+    "words": "zebra",
+    "body": "quadruped",
+    "forward_axis": "+z"
+   },
+   "thresholds": {
+    "seconds": [
+     "<=",
+     90
+    ],
+    "body_plan": [
+     "==",
+     "quadruped"
+    ],
+    "bones": [
+     ">=",
+     25
+    ],
+    "clips": [
+     ">=",
+     8
+    ]
+   }
+  },
+  {
+   "id": "mt_qa",
+   "kind": "mt_numeric_qa",
+   "on": "mt_rig",
+   "tier": "base",
+   "thresholds": {
+    "clips_passed": [
+     ">=",
+     9
+    ]
+   }
+  }
+ ],
+ "note": "with head_own: 10/10, every clip 0 stretched edges; the horse video gaits (walk/trot/canter/gallop/rear/idle) + Look Around / Tail Wag / Jump"
+}

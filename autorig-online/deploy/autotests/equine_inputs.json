@@ -1,0 +1,17 @@
+{
+ "d3d37033.model.glb": {
+  "source": "/srv/autorig/data/motion_transfer/runs/c5ff1c6306858a9e5e8a/proj/model.glb",
+  "task": "d3d37033 (#2007)",
+  "what": "zebra, the V3 run's model.glb (Draco)"
+ },
+ "ebc474ba.model.glb": {
+  "source": "/srv/autorig/data/motion_transfer/runs/c33c0d6f735cfb9e1c8f/proj/model.glb",
+  "task": "ebc474ba",
+  "what": "saddled horse, the V3 run's model.glb"
+ },
+ "74f7cd37.model.glb": {
+  "source": "/srv/autorig/data/motion_transfer/runs/5b447b5d03cd66f8fa6a/proj/model.glb",
+  "task": "74f7cd37",
+  "what": "stylized sitting horse (hind legs folded forward and splayed), the V3 run's model.glb"
+ }
+}
