@@ -8,15 +8,17 @@ set -e; set -o pipefail
 D=/home/debian/monster; A=/srv/autorig/autotests; MT=/srv/autorig/data/motion_transfer/mt
 TAG=$1; shift
 ST=$D/${TAG}_$(date -u +%H%M%S); mkdir -p $ST/base $ST/new
-RELS=""
+RELS=""; NEWF=()
 for spec in "$@"; do                                  # pass 1: one copy of every current prod file named
+  case "$spec" in +*) continue;; esac                 # +<rel>=<path>: a NEW module, shipped whole with --mt-file
   rel=${spec%%=*}
   if [ ! -f $ST/new/$rel ]; then cp $MT/$rel $ST/base/$rel; cp $MT/$rel $ST/new/$rel; RELS="$RELS $rel"; fi
 done
 for spec in "$@"; do                                  # pass 2: the scripts, in order (a script may touch several rels)
+  case "$spec" in +*) rel=${spec#+}; rel=${rel%%=*}; cp ${spec#*=} $ST/new/$rel; NEWF+=(--mt-file mt/$rel=$ST/new/$rel); continue;; esac
   /srv/autorig/venv/bin/python3 ${spec#*=} $ST/new
 done
-ARGS=()
+ARGS=("${NEWF[@]}")
 for rel in $RELS; do
   /srv/autorig/venv/bin/python3 -c "import sys; s=open('$ST/new/$rel','rb').read(); assert s.count(bytes([8]))==0, 'backspace bytes in $rel'"
   /srv/autorig/venv/bin/python3 -m py_compile $ST/new/$rel

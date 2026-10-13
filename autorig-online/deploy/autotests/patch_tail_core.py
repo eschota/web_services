@@ -35,6 +35,9 @@ else:
     r, src = None, "trace"
     if tt.get("used") and tt.get("radius_pct_H"):
         r = float(tt["radius_pct_H"]) / 100.0 * H
+    if r is not None and r > float(o.get("tail_fat_pct_H", 10.0)) / 100.0 * H:   # a fat tail (the cartoon monster
+        return None, cols, {"why": f"a fat tail ({r / H * 100:.1f} % H): its rings are the tail, nothing to strip",   # 48db2b25:
+                            "radius_pct_H": round(r / H * 100, 2)}                                      # 16.7 % H, 62 % body)
     if r is None and str(o.get("tail_core_own", "trace")) != "always":
         return None, cols, {"why": "the tail trace was not used: no tube (tail_core_own=always estimates one)",
                             "trace": {k: tt.get(k) for k in ("why", "short", "shell_rejected")}}
@@ -144,7 +147,7 @@ def leg_regions(b, J, pinned=()):
                 if _tail_mask is not None:
                     _rows = np.nonzero(~_tail_mask & ~prop)[0]
                     A[np.ix_(_rows, _tail_cols)] = False
-                    _front = [sk.index[nm] for nm in ("Spine1", "Spine2", "Neck", "Head") if nm in sk.index]
+                    _front = [sk.index[nm] for nm in ("Spine", "Spine1", "Spine2", "Neck", "Head") if nm in sk.index]
                     if _front and "Hips" in sk.index:     # what the tail loses behind the hips goes to the hind
                         _back = _rows[p[_rows, 2] < sk.head[sk.index["Hips"]][2]]   # half, never the shoulders
                         A[np.ix_(_back, _front)] = False
@@ -201,6 +204,10 @@ else:
                "thickness; else the thickness behind the chain) - measured 2026-10-13: baby elephant 0e32ccf1 Tail3 "
                "27k -> 5.7k vertices, rig_check_4x 4029 -> 2036, but the ferret 59 -> 326 and the boar's welded legs "
                "tear (288 -> 580), so not the default until the trace is right (Rig classes)."},
+    "tail_fat_pct_H": {
+        "kind": "float", "min": 2.0, "max": 40.0, "default": 10.0,
+        "doc": "rebuild, quadruped: a traced tail thicker than this (% of H) is a fat tail whose rings are the tail itself: "
+               "tail_core_own strips nothing (the cartoon monster 48db2b25, 16.7 % H)."},
     "tail_tube": {
         "kind": "float", "min": 1.0, "max": 6.0, "default": 2.5,
         "doc": "rebuild, quadruped: the tail tube's reach in tail radii (tail_core_own; 2.5 keeps the axolotl's fin)."},
