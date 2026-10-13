@@ -3056,3 +3056,14 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   генерация H3 → гейт аллюров → библиотека `animal_motion_lib/<species>/`; родня делит её через `animpick.VIDEO_KIN`;
   любой новый риг категории получает клипы ретаргетом в `rig_first.animate` (уже так работает: `video_library_clips`
   заменяет процедурные, numeric QA по клипам в конвейере). Копытные — первый прогон (`equine_gen.sh`, после gaitgate).
+
+### Копытные, milestone 2c (~11:00 UTC): head_own установлен
+
+- **headown3 установлен** (GATE PASS 242; `fastrig.py 636e826c8c10`, `skin_tools.py e1c7042f6b02`), autorig-mt и
+  rerig_open перезапущены. Зебра d3d37033 поставлена на перериг (`rerig_requests/…__v3.2026-10-13.7.json`, by
+  fable-equines). Ловушка: `grep -o 'RIG_VERSION = "…"'` ловит и пример из докстринга — имя файла запроса получилось
+  с переводом строки; удалён, запрос пересоздан.
+- gaitgate (гейт аллюров + look-клип): первая попытка упала на чужих live-кейсах `zup_lying_conveyor/mt_rig`
+  (seconds 169 > 150 — нагрузка) и `luchador_flying_upright` (clips 7, up '+y'), которые в headown3-прогоне прошли —
+  перезапущена (10:46). После установки стартует `equine_gen.sh` (ферма: trot/canter/gallop/look с сидами до
+  прохождения гейта) и сторож снимает XFAIL с equine_*.
