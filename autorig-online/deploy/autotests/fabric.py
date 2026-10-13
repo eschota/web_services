@@ -32,6 +32,7 @@ SPEC = {
     "skirt_tube": {"min": 1.0, "max": 3.0, "default": 1.4, "doc": "skin farther than this many leg radii from the leg axes is skirt"},
     "skirt_min_midline": {"min": 0.3, "max": 1.0, "default": 0.7, "doc": "share of the hip -> hem rows with surface between the legs that makes a skirt"},
     "skirt_min_vertices": {"min": 20, "max": 5000, "default": 80},
+    "skirt_hem_below_knee": {"min": -0.5, "max": 1.0, "default": 0.1, "doc": "the hem must sit at least this share of the thigh length below the knee (fused thighs are not a skirt)"},
     "skirt_inner": {"min": 0.0, "max": 0.95, "default": 0.55, "doc": "skin closer to a leg axis than this share of its row's girth radius is a leg under the robe, not skirt"},
     "sector_girth_pct_H": {"min": 10.0, "max": 100.0, "default": 30.0, "doc": "one chain per this much of the hem's girth (% of H)"},
     "sectors_min": {"min": 2, "max": 12, "default": 4},
@@ -42,7 +43,12 @@ SPEC = {
     "split": {"values": ("on", "off"), "default": "on", "doc": "split the faces that weld a fabric piece onto a limb (weld_split)"},
     "sway_deg": {"min": 0.0, "max": 30.0, "default": 6.0, "doc": "swing amplitude of the chains in the clips (deg, at the tip)"},
     "sway_lag": {"min": 0.0, "max": 2.0, "default": 0.6, "doc": "phase lag per bone along a chain"},
-    "cape_depth": {"min": 0.1, "max": 1.0, "default": 0.3, "doc": "skin this share of the torso depth behind the spine, below the shoulders, is cape"},
+    "words": {"values": ("on", "off"), "default": "on",
+              "doc": "on: a layer is built only when the model's words (Vision what / clothing / materials, the task's words) name it: robe / dress / skirt ... for the skirt, cape / cloak / mantle for the cape, long hair / braid for the hair; off: by geometry alone (fused thighs read as a skirt on the corpus warriors)"},
+    "cape_angle": {"min": 30.0, "max": 180.0, "default": 120.0, "doc": "the cape covers the back and the sides: azimuth from straight behind (deg)"},
+    "cape_inner": {"min": 0.0, "max": 0.95, "default": 0.55, "doc": "skin nearer the spine axis than this share of its row's girth radius is the body under the cape"},
+    "cape_standoff": {"min": 1.0, "max": 10.0, "default": 2.0, "doc": "the rows' outer / inner radius ratio (p90 / p10) a hanging sheet must show"},
+    "cape_depth": {"min": 0.1, "max": 1.0, "default": 0.3, "doc": "(v1, unused) skin this share of the torso depth behind the spine is cape"},
     "cape_min_vertices": {"min": 20, "max": 5000, "default": 120},
     "hair_min_vertices": {"min": 20, "max": 5000, "default": 100},
 }
@@ -82,6 +88,42 @@ def options_for(run_dir, opts=None) -> dict:
         pass
     given.update(opts or {})
     return options(given)
+
+
+SKIRT_WORDS = re.compile(r"robe|dress|skirt|gown|tunic|kimono|hanfu|cloak|cassock|frock|toga|sari|kilt|poncho|coat|"
+                         r"fabric|textile|cloth|garment|плать|юбк|мант|халат|кимоно|туник|ряс|тог|сари|килт|пончо|пальто|ткан|одежд", re.I)
+CAPE_WORDS = re.compile(r"\bcapes?\b|cloak|mantle|\bплащ|накидк|мантия|мантию|мантии", re.I)
+HAIR_WORDS = re.compile(r"long hair|flowing hair|ponytail|braid|pigtail|twin ?tails|длинн\w* волос|хвост\w* волос|кос[аы]|локон", re.I)
+
+
+def words_of(run_dir, extra="") -> str:
+    """The model's words: the caller's, rig/words.txt, Vision's what / clothing / materials, parts_cluster's."""
+    parts = [extra or ""]
+    try:
+        rd = pathlib.Path(run_dir)
+        try:
+            parts.append((rd / "rig" / "words.txt").read_text(encoding="utf-8"))
+        except OSError:
+            pass
+        try:
+            ph = json.loads((rd / "phases.json").read_text(encoding="utf-8"))
+            for st in ph.get("phases") or []:
+                if st.get("id") == "classify":
+                    res = st.get("result") or {}
+                    for k in ("what", "clothing", "materials", "props", "rest_pose"):
+                        v = res.get(k)
+                        parts.append(" ".join(v) if isinstance(v, list) else str(v or ""))
+        except (OSError, ValueError):
+            pass
+        try:
+            from . import parts_cluster as _PC, fastrig as _F
+            parts.append(_PC.words_for(rd) or "")
+            parts.append(str(_F.run_info(rd).get("what") or ""))
+        except Exception:                                        # noqa: BLE001
+            pass
+    except Exception:                                            # noqa: BLE001
+        pass
+    return " ".join(x for x in parts if x)
 
 
 def _smoothstep(x):
@@ -155,6 +197,10 @@ def detect_skirt(b, sk, w, o, hair=None, prop=None):
     if span < 8 or share < o["skirt_min_midline"]:
         return {"why": f"midline covers {share:.2f} of {span} rows", "mask": None}
     hem_y = foot_y + step * hem_row
+    knee_y = float(max(J["LeftLeg"][1], J["RightLeg"][1]))
+    if hem_y > knee_y - o["skirt_hem_below_knee"] * (hip_y - knee_y):   # fused thighs cover the midline down to the
+        return {"why": f"the hem ({(hem_y - foot_y) / H * 100:.0f} % H) is above the knee: fused thighs, no skirt",   # crotch
+                "mask": None}                                            # only (the corpus warriors); a skirt reaches
     # the robe IS the lower body's surface from the hips to the hem (the leg radius measured on leg-dominated skin is
     # the robe's own radius, so a leg-tube test keeps the robe on the legs): every vertex of the covered rows is
     # skirt, except skin well inside its row's girth (a leg modelled under the robe) and anything far out sideways
@@ -181,38 +227,43 @@ def detect_skirt(b, sk, w, o, hair=None, prop=None):
 
 
 def detect_cape(b, sk, w, o, hair=None, prop=None, skirt=None):
-    """A thin sheet hanging behind the back below the shoulders: skin behind the spine by cape_depth x the torso depth
-    (the torso's own back is nearer the spine), between the shoulders and the hem. -> dict or None."""
+    """v2 (the knight c4c595a8: a cape from the shoulders to the feet skinned to the arm chains): a sheet hanging
+    behind and around the body below the shoulders. Per height row the skin in the back and side azimuths whose
+    radius from the spine axis is at least cape_inner x the row's girth radius (p90); the body under it is nearer.
+    The rows must show a standing-off sheet (p90 / p10 >= cape_standoff). -> dict or None."""
     ix = sk.index
-    if not all(n in ix for n in ("Hips", "Spine2", "Neck")):
+    if not all(n in ix for n in ("Hips", "Spine2", "Neck", "LeftArm", "RightArm")):
         return None
     p, H = b.p, b.H
     body = np.asarray(b.body, bool)
-    hips, sp2, neck = sk.head[ix["Hips"]], sk.head[ix["Spine2"]], sk.head[ix["Neck"]]
-    torso = body & (p[:, 1] > hips[1]) & (p[:, 1] < neck[1]) & (np.abs(p[:, 0] - sp2[0]) < 0.15 * H)
-    if torso.sum() < 50:
-        return None
-    # the back line: the torso's rearmost skin per height row, at its deepest
-    rows = np.floor((p[:, 1] - hips[1]) / (0.02 * H)).astype(np.int64)
-    back = {}
-    for r_ in np.unique(rows[torso]):
-        m = torso & (rows == r_)
-        back[r_] = float(np.percentile(p[m, 2], 15))     # the back surface (forward is +z)
-    depth = float(np.ptp(p[torso, 2]))
-    zb = np.array([back.get(r_, np.nan) for r_ in rows])
-    cand = body & (p[:, 1] < neck[1]) & np.isfinite(zb) & (p[:, 2] < zb - o["cape_depth"] * depth)
-    cand |= body & (p[:, 1] <= hips[1]) & (p[:, 2] < float(np.nanmin(list(back.values()))) - o["cape_depth"] * depth) \
-        & (np.abs(p[:, 0] - sp2[0]) < 0.5 * H)
-    for m_ in (hair, prop, skirt):
+    hips, neck = sk.head[ix["Hips"]], sk.head[ix["Neck"]]
+    sh_y = float(max(sk.head[ix["LeftArm"]][1], sk.head[ix["RightArm"]][1]))
+    foot_y = float(max(sk.head[ix[n]][1] for n in ("LeftFoot", "RightFoot") if n in ix)) if "LeftFoot" in ix else float(p[body, 1].min())
+    rows = np.floor((p[:, 1] - foot_y) / (0.02 * H)).astype(np.int64)
+    t = np.clip((p[:, 1] - hips[1]) / max(float(neck[1] - hips[1]), 1e-6), -1.0, 1.5)
+    axis = hips[None, :] + t[:, None] * (neck - hips)[None, :]
+    rel = p - axis
+    rad = np.linalg.norm(rel[:, [0, 2]], axis=1)
+    ang = np.degrees(np.arctan2(rel[:, 0], -rel[:, 2]))          # 0 = straight behind (-z), +-180 in front
+    zone = body & (p[:, 1] < sh_y) & (p[:, 1] > foot_y - 0.02 * H) & (np.abs(ang) < o["cape_angle"])
+    for m_ in (hair, prop):
         if m_ is not None:
-            cand &= ~m_
-    top = w.argmax(1)
-    limb = np.array([any(k in nm for k in ("Arm", "Hand", "Leg", "Foot", "Toe")) for nm in sk.names])
-    cand &= ~limb[top]                                   # an arm hanging behind the back is not a cape
+            zone &= ~m_
+    cand = np.zeros(len(p), bool)
+    ratios = []
+    for r_ in np.unique(rows[zone]):
+        m = zone & (rows == r_)
+        if m.sum() < 12:
+            continue
+        p10, p90 = np.percentile(rad[m], [10, 90])
+        ratios.append(p90 / max(p10, 1e-6))
+        cand[m] = rad[m] >= o["cape_inner"] * p90
+    if len(ratios) < 4 or float(np.median(ratios)) < o["cape_standoff"]:
+        return {"why": f"no standing-off sheet (median p90/p10 {float(np.median(ratios)) if ratios else 0:.2f})", "mask": None}
     if cand.sum() < o["cape_min_vertices"]:
-        return None
-    return {"mask": cand, "top_y": float(min(neck[1], p[cand, 1].max())), "hem_y": float(p[cand, 1].min()),
-            "centre": np.array([sp2[0], sp2[1], float(np.median(p[cand, 2]))]), "parent": "Spine2", "kind": "Cape"}
+        return {"why": f"too few cape vertices ({int(cand.sum())})", "mask": None}
+    return {"mask": cand, "top_y": sh_y, "hem_y": float(p[cand, 1].min()), "centre": np.array([hips[0], hips[1], hips[2]]),
+            "parent": "Spine2", "kind": "Cape", "standoff": round(float(np.median(ratios)), 2)}
 
 
 def detect_hair(b, sk, w, o, hair=None, taken=None):
@@ -296,14 +347,19 @@ def build(piece, b, sk, w, src, o, H):
         W[np.arange(len(idx)), col0 + 1] += share * t
     base = np.zeros_like(W)
     base[:, :n0] = w[idx, :n0]
+    limb = np.array([any(k in nm for k in ("Arm", "Hand", "Leg", "Foot", "Toe")) for nm in sk.names[:n0]])
+    if piece["kind"] in ("Cape", "Hair_F"):                       # a cape hangs from the trunk, never from the arms
+        base[:, np.nonzero(limb)[0]] = 0                          # that it covered (the knight: the hands held the cape)
     bs = base.sum(1, keepdims=True)
-    base = np.where(bs > 1e-6, base / np.maximum(bs, 1e-12), 0)
+    fallback = np.zeros(W.shape[1])
+    fallback[sk.index[piece["parent"]]] = 1.0
+    base = np.where(bs > 1e-6, base / np.maximum(bs, 1e-12), fallback[None, :])
     rb = _smoothstep((h - o["root_skip"]) / max(o["root_blend"], 1e-6))[:, None]
     w[idx] = (1 - rb) * base + rb * W
     return w, chains, mask
 
 
-def apply(run_dir, b, sk, w, Rc, plan="biped", opts=None, hair=None, prop=None, taken=None):
+def apply(run_dir, b, sk, w, Rc, plan="biped", opts=None, hair=None, prop=None, taken=None, words=""):
     if plan != "biped":
         return None
     o = options_for(run_dir, opts)
@@ -311,16 +367,29 @@ def apply(run_dir, b, sk, w, Rc, plan="biped", opts=None, hair=None, prop=None, 
         return None
     H = b.H
     pieces, info = [], {}
-    sk_piece = detect_skirt(b, sk, w, o, hair, prop) if o["skirt"] == "on" else None
+    wd = words_of(run_dir, words) if o["words"] == "on" else ""
+    free = o["words"] == "off" or not wd.strip()         # no words at all (Vision never answered): geometry decides
+    want = {"skirt": o["skirt"] == "on" and (free or bool(SKIRT_WORDS.search(wd))),
+            "cape": o["cape"] == "on" and (free or bool(CAPE_WORDS.search(wd))),
+            "hair": o["hair"] == "on" and (free or bool(HAIR_WORDS.search(wd)))}
+    info["words"] = dict(want)
+    cp = detect_cape(b, sk, w, o, hair, prop) if want["cape"] else None
+    cape_mask = None
+    if cp:
+        info["cape"] = {k: v for k, v in cp.items() if k not in ("mask", "centre")}
+        if cp.get("mask") is not None:
+            cape_mask = cp["mask"]
+            info["cape"]["vertices"] = int(cape_mask.sum())
+            pieces.append(cp)
+    sk_piece = detect_skirt(b, sk, w, o, hair, prop) if want["skirt"] else None
     if sk_piece:
         info["skirt"] = {k: v for k, v in sk_piece.items() if k not in ("mask", "centre")}
         if sk_piece.get("mask") is not None:
-            pieces.append(sk_piece)
-    cp = detect_cape(b, sk, w, o, hair, prop, sk_piece.get("mask") if sk_piece else None) if o["cape"] == "on" else None
-    if cp:
-        info["cape"] = {"vertices": int(cp["mask"].sum())}
-        pieces.append(cp)
-    hp = detect_hair(b, sk, w, o, hair, taken) if o["hair"] == "on" else None
+            if cape_mask is not None:
+                sk_piece["mask"] = sk_piece["mask"] & ~cape_mask
+            if sk_piece["mask"].sum() >= o["skirt_min_vertices"]:
+                pieces.append(sk_piece)
+    hp = detect_hair(b, sk, w, o, hair, taken) if want["hair"] else None
     if hp:
         info["hair"] = {"vertices": int(hp["mask"].sum())}
         pieces.append(hp)
