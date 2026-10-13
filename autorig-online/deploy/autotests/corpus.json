@@ -794,6 +794,13 @@
    "what": "low-poly robot, T-pose, the right forearm a separate floating piece (V3 run ec62d096)",
    "sha256": "d9d64a02d2d7ba57580a565e871a459ff9bb9387323ef6490b98dc75fdde8d98",
    "bytes": 9828
+  },
+  "0a629e36.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c572dea9826b37d2fd70/proj/model.glb",
+   "task": "0a629e36",
+   "what": "monarch caterpillar (Vision: multi-legged; category.json: quadruped / feline), the V3 run's model.glb",
+   "sha256": "3c40325bfd6212d8293d342049344abb2a77bfab4127fcbcc50af5cf1491d9f3",
+   "bytes": 17347128
   }
  },
  "profiles": {
@@ -8499,6 +8506,50 @@
      "note": "2026-10-13: right arm vertices 0 -> 72"
     }
    ]
+  },
+  {
+   "id": "caterpillar_plan_routing",
+   "task": "0a629e36",
+   "cost": 2,
+   "defect": "Rig classes 2026-10-13: Vision says «multi-legged monarch caterpillar» but category.json says quadruped / feline, creature.plan_for picked quadruped and the serpent detector never ran although caterpillar is in SERPENT_WORDS. Fix: crawler words (caterpillar, larva, worm, centipede, ...) win over the body / category words in plan_for: serpent when SERPENT_WORDS name it, multileg otherwise",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "0a629e36.model.glb",
+     "params": {
+      "words": "multi-legged monarch caterpillar quadruped feline",
+      "body": "quadruped"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "serpent"
+      ],
+      "bones": [
+       ">=",
+       10
+      ],
+      "clips": [
+       ">=",
+       4
+      ]
+     },
+     "xfail": {
+      "reason": "crawler routing lands with creature.py chain 9",
+      "owner": "Fable monsters/animals"
+     }
+    }
+   ],
+   "note": "extended tier (17 MB model); the words carry the category's quadruped / feline on purpose: the crawler word must win"
   }
  ]
 }
