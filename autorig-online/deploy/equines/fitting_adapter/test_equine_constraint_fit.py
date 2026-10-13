@@ -39,6 +39,10 @@ class Contract(unittest.TestCase):
  def test_block_sparsity_uses_one_or_adjacent_full_frame_blocks(self):
   matrix=fit.sparsity_from_dependencies([(0,),(0,1),(2,)],3,3).toarray()
   self.assertEqual(matrix.shape,(3,9)); self.assertEqual(matrix[0].tolist(),[1,1,1,0,0,0,0,0,0]); self.assertEqual(matrix[1].tolist(),[1,1,1,1,1,1,0,0,0]); self.assertEqual(matrix[2].tolist(),[0,0,0,0,0,0,1,1,1])
+ def test_cross_leg_skin_influence_adds_actual_other_chain_ancestor_dof(self):
+  bones={'LeftFrontFoot':SimpleNamespace(parent='LeftFrontLeg'),'LeftFrontLeg':SimpleNamespace(parent='Spine2'),'RightFrontFoot':SimpleNamespace(parent='RightFrontLeg'),'RightFrontLeg':SimpleNamespace(parent='Spine2'),'Spine2':SimpleNamespace(parent=None)}
+  anchor=SimpleNamespace(influences=[SimpleNamespace(bone='LeftFrontFoot',weight=.7),SimpleNamespace(bone='RightFrontFoot',weight=.3)])
+  got=fit.influence_variable_indices(anchor,bones,{'LeftFrontLeg':2,'RightFrontLeg':7,'Spine2':9},[10,11]); self.assertEqual(got,[2,7,9,10,11])
  def test_sole_geometry_counts_distinct_source_ids_and_world_points(self):
   rows=[SimpleNamespace(vertex_id=7,rest_world=[0,0,0]),SimpleNamespace(vertex_id=7,rest_world=[0,0,0]),SimpleNamespace(vertex_id=8,rest_world=[0,0,0]),SimpleNamespace(vertex_id=9,rest_world=[1,0,0])]
   stats=fit.sole_geometry_stats(rows,2.0); self.assertEqual(stats['source_vertex_ids'],[7,8,9]); self.assertEqual(stats['distinct_source_vertex_count'],3); self.assertEqual(stats['distinct_world_point_count'],2)

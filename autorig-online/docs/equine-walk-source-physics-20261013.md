@@ -106,7 +106,7 @@ valid throughout the clip.
   real source/export/retarget LBS checks and fresh Unity owner review. Correct
   four-limb alternation is required, separately from reduced target residuals.
 
-Production contract suites passed107top-level +27adapter tests on F15, CPU only;
+Production contract suites passed107top-level +28adapter tests on F15, CPU only;
 these are not model acceptance. The Windows registry concurrency containment
 race was repaired and tested without weakening symlink/junction protection.
 `equine-motion` and `equine-constraint-fit` are registered in `/dev/tools`;
@@ -114,11 +114,17 @@ VPS fitting CLI only exposes options/preflight, heavy execute is farm-only.
 Source prototypes are not mounted into customer tasks, and family pointers remain
 unpromoted. Preserve per-task owner verdicts across the original five-task corpus.
 
-Latest actual run: `jobs/zebra-walk-plane-fit-v4` on F15, code artifact SHA
-`2f2313231fb6dc4d6970b3e79f3b34985a6dec2183d93bdc382508033200788d`.
+Latest actual run: `jobs/zebra-walk-plane-fit-v5` on F15, code artifact SHA
+`ba2bb86cef5b4774d57992a157b960b3f61e879ef959fef9a5266b9ed2c59b72`.
 It uses the twelve measured joint targets, robust Toe/joint residuals, sparse
 physics windows and the actual managed farm identity guard. Source arrays were
 reused; no GPU inference was replayed. The run is bounded at900seconds and is
 not a completed or accepted clip yet. Continue its own process/checkpoint;
 do not duplicate it. Local orchestrator session70292 holds the foreground SSH
 process; progress files survive under that exact farm project directory.
+V4 was stopped with its frame34 checkpoint intact after its coarse dependency
+pattern proved too slow. V5 derives exact Jacobian columns from every nonzero
+skin influence and its real ancestors, including cross-leg weights. Its
+first30frames took73.77s versus349.09s for V4, without changing the objective.
+V5 records exact variable order and objective schema; old prefixes are not
+silently resumed or accepted.

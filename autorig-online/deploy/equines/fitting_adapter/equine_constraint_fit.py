@@ -64,9 +64,16 @@ def checkpoint(path,value):
 def sparsity_from_dependencies(dependencies,n_total,frame_blocks):
  from scipy.sparse import lil_matrix
  matrix=lil_matrix((len(dependencies),n_total*frame_blocks),dtype='int8')
- for row,blocks in enumerate(dependencies):
-  if not blocks or any(not isinstance(block,int) or block<0 or block>=frame_blocks for block in blocks): raise ValueError('invalid residual dependency block')
-  for block in blocks: matrix[row,block*n_total:(block+1)*n_total]=1
+ for row,columns in enumerate(dependencies):
+  if not columns: raise ValueError('residual dependency columns cannot be empty')
+  for item in columns:
+   if isinstance(item,int):
+    if item<0 or item>=frame_blocks: raise ValueError('invalid residual dependency block')
+    matrix[row,item*n_total:(item+1)*n_total]=1
+   else:
+    block,index=item
+    if not isinstance(block,int) or not isinstance(index,int) or block<0 or block>=frame_blocks or index<0 or index>=n_total: raise ValueError('invalid residual dependency column')
+    matrix[row,block*n_total+index]=1
  return matrix.tocsr()
 def sole_geometry_stats(anchors,height):
  import numpy as np
@@ -77,6 +84,15 @@ def sole_geometry_stats(anchors,height):
   point=np.asarray(anchor.rest_world,dtype=np.float64)
   if not any(float(np.linalg.norm(point-other))<=epsilon for other in distinct): distinct.append(point)
  return {'source_vertex_ids':vertex_ids,'distinct_source_vertex_count':len(vertex_ids),'distinct_world_point_count':len(distinct),'world_point_epsilon':epsilon}
+def influence_variable_indices(anchor,bones,variable_index,root_indices=()):
+ found=set(root_indices)
+ for influence in anchor.influences:
+  if float(influence.weight)==0: continue
+  name=influence.bone
+  while name is not None:
+   if name in variable_index: found.add(variable_index[name])
+   name=bones[name].parent
+ return sorted(found)
 def joint_constraint_rows(row,chain,anchor_bones,frame_count):
  raw=row.get('joint_constraints') or {}; out={}
  if not isinstance(raw,dict): raise ValueError('joint_constraints must be an object')
@@ -204,6 +220,13 @@ def execute(job,paths,c,p,a,opt):
    if any(frame<0 or frame>=frame_count for frame in measured): raise ValueError(f'torso {role} frame outside action contract')
    torso_docs[role]={'anchor':anchor,'measured':measured}
  root_enabled=any(doc['measured'] for doc in torso_docs.values()); n_joint=len(variables); n_total=n_joint+(2 if root_enabled else 0)
+ variable_index={bone:i for i,bone in enumerate(variables)}; root_indices=list(range(n_joint,n_total))
+ def anchor_indices(anchor_ids):
+  found=set(root_indices)
+  for anchor_id in anchor_ids:
+   found.update(influence_variable_indices(rig.anchors[anchor_id],rig.bones,variable_index,root_indices))
+  return sorted(found)
+ anchor_dependency={anchor_id:anchor_indices([anchor_id]) for anchor_id in rig.anchors}
  lo=np.full(n_total,-opt['max_rotation_delta_rad']); hi=-lo
  if root_enabled:
   lo[n_joint:]=-opt['max_root_translation_height_ratio']*height; hi[n_joint:]=-lo[n_joint:]
@@ -221,24 +244,29 @@ def execute(job,paths,c,p,a,opt):
   def evaluate(x,tag=False):
    if time.monotonic()-began>opt['max_fit_seconds']: raise TimeoutError(f'fit exceeded max_fit_seconds={opt["max_fit_seconds"]}')
    rows=[]; deps=[]; states=[]
-   def add(values,blocks):
+   def add(values,columns):
     vals=np.asarray(values,float).reshape(-1).tolist(); rows.extend(vals)
-    if tag: deps.extend([tuple(blocks)]*len(vals))
+    if tag: deps.extend([tuple(columns)]*len(vals))
+   def cols(wi,indices): return [(wi,index) for index in indices]
    for wi,frame in enumerate(range(start,stop)):
     xx,root,pos=state(x,wi); states.append((xx,pos)); targets=[(doc,t) for doc in chain_docs.values() if (t:=doc['measured'].get(frame)) is not None]; joint_targets=[(leg,bone,doc,t) for leg,docs in joint_docs.items() for bone,doc in docs.items() if (t:=doc['measured'].get(frame)) is not None]; torso_targets=[(role,doc,t) for role,doc in torso_docs.items() if (t:=doc['measured'].get(frame)) is not None]
     for doc,(target,confidence) in targets:
-     delta=pos[doc['anchor']]-target; robust=pseudo_huber_residual(delta,opt['hoof_huber_delta_height_ratio']*height); add(robust*math.sqrt(max(confidence,1e-6))*opt['target_scale'],[wi])
+     delta=pos[doc['anchor']]-target; robust=pseudo_huber_residual(delta,opt['hoof_huber_delta_height_ratio']*height); add(robust*math.sqrt(max(confidence,1e-6))*opt['target_scale'],cols(wi,anchor_dependency[doc['anchor']]))
     for _,_,doc,(target,confidence) in joint_targets:
-     delta=(pos[doc['anchor']]-target); robust=pseudo_huber_residual(delta,opt['joint_huber_delta_height_ratio']*height); add(robust*math.sqrt(max(confidence,1e-6))*opt['joint_target_weight'],[wi])
-    for _,doc,(target,confidence) in torso_targets: add((pos[doc['anchor']]-target)*math.sqrt(max(confidence,1e-6))*opt['target_scale'],[wi])
-    add(xx*opt['rest_weight'],[wi]); prev=previous if wi==0 else states[wi-1][0]; add((xx-prev)*opt['temporal_weight'],[wi] if wi==0 else [wi-1,wi])
+     delta=(pos[doc['anchor']]-target); robust=pseudo_huber_residual(delta,opt['joint_huber_delta_height_ratio']*height); add(robust*math.sqrt(max(confidence,1e-6))*opt['joint_target_weight'],cols(wi,anchor_dependency[doc['anchor']]))
+    for _,doc,(target,confidence) in torso_targets: add((pos[doc['anchor']]-target)*math.sqrt(max(confidence,1e-6))*opt['target_scale'],cols(wi,anchor_dependency[doc['anchor']]))
+    for index,value in enumerate(xx*opt['rest_weight']): add([value],[(wi,index)])
+    prev=previous if wi==0 else states[wi-1][0]
+    for index,value in enumerate((xx-prev)*opt['temporal_weight']): add([value],[(wi,index)] if wi==0 else [(wi-1,index),(wi,index)])
     for leg,sole in sole_sets.items():
-     pts=np.asarray([pos[k] for k in sole['anchor_ids']]); signed=pts@up-rig.ground_height; add(np.minimum(0,signed+tol)*opt['ground_nonpenetration_weight'],[wi])
-     if contact_state[leg][frame]['state']=='OBSERVED_CONTACT': add([float(np.mean(signed))*opt['contact_height_weight']],[wi])
+     pts=np.asarray([pos[k] for k in sole['anchor_ids']]); signed=pts@up-rig.ground_height
+     for anchor_id,value in zip(sole['anchor_ids'],np.minimum(0,signed+tol)*opt['ground_nonpenetration_weight']): add([value],cols(wi,anchor_dependency[anchor_id]))
+     sole_indices=anchor_indices(sole['anchor_ids'])
+     if contact_state[leg][frame]['state']=='OBSERVED_CONTACT': add([float(np.mean(signed))*opt['contact_height_weight']],cols(wi,sole_indices))
      if frame and contact_state[leg][frame]['state']=='OBSERVED_CONTACT' and contact_state[leg][frame-1]['state']=='OBSERVED_CONTACT':
       prior=states[wi-1][1] if wi else boundary_pos
       if prior is not None:
-       prevpts=np.asarray([prior[k] for k in sole['anchor_ids']]); delta=np.mean(pts,0)-np.mean(prevpts,0); tangent=delta-up*np.dot(delta,up); add(tangent*fps*opt['planted_velocity_weight'],[wi] if wi==0 else [wi-1,wi])
+       prevpts=np.asarray([prior[k] for k in sole['anchor_ids']]); delta=np.mean(pts,0)-np.mean(prevpts,0); tangent=delta-up*np.dot(delta,up); add(tangent*fps*opt['planted_velocity_weight'],cols(wi,sole_indices) if wi==0 else cols(wi-1,sole_indices)+cols(wi,sole_indices))
    return (rows,deps) if tag else rows
   seed_rows,dependencies=evaluate(x0,True)
   sparsity=sparsity_from_dependencies(dependencies,n_total,count)
@@ -264,7 +292,8 @@ def execute(job,paths,c,p,a,opt):
    observed[frame]=xx.copy()
   previous=observed[stop-1].copy()
   progress_path=pathlib.Path(job.get('progress_file') or (str(job['output'])+'.progress.json'))
-  checkpoint(progress_path,{'schema':'autorig.equine-constraint-fit-progress/1','state':'diagnostic_partial_not_clip','accepted':False,'automatic_resume':False,'resume_requires_explicit_new_job':True,'completed_through_frame':stop-1,'window':{'start':start,'stop':stop,'nfev':int(result.nfev),'cost':float(result.cost)},'pins':{'constraints_sha256':sha(paths['constraints']),'profile_sha256':sha(paths['profile']),'contact_evidence_sha256':sha(paths['contact_evidence']),'surface_anchors_sha256':sha(paths['surface_anchors']),'source_model_sha256':c.get('provenance',{}).get('source_model_sha256')},'options':opt,'elapsed_seconds':time.monotonic()-began,'solved_parameters':{str(frame):observed[frame].tolist() for frame in sorted(observed)}})
+  variable_order=[f'{bone}.{"xyz"[var_axis[bone]]}' for bone in variables]+(['root_translation.forward','root_translation.up'] if root_enabled else [])
+  checkpoint(progress_path,{'schema':'autorig.equine-constraint-fit-progress/1','state':'diagnostic_partial_not_clip','accepted':False,'automatic_resume':False,'resume_requires_explicit_new_job':True,'completed_through_frame':stop-1,'objective_schema':'autorig.equine-window-objective/2-exact-lbs-ancestor-sparsity','variable_order':variable_order,'window':{'start':start,'stop':stop,'nfev':int(result.nfev),'cost':float(result.cost)},'pins':{'constraints_sha256':sha(paths['constraints']),'profile_sha256':sha(paths['profile']),'contact_evidence_sha256':sha(paths['contact_evidence']),'surface_anchors_sha256':sha(paths['surface_anchors']),'source_model_sha256':c.get('provenance',{}).get('source_model_sha256')},'options':opt,'elapsed_seconds':time.monotonic()-began,'solved_parameters':{str(frame):observed[frame].tolist() for frame in sorted(observed)}})
  if not observed: raise ValueError('constraints contain no observed target frame')
  # Missing frames use bounded time interpolation only; provenance stays INFERRED/PENDING.
  keys=sorted(observed); values=[]; provenance=[]
