@@ -81,6 +81,9 @@ def patch_animal_video():
 
 def patch_animpick():
     q = d / "animpick.py"
+    if not q.is_file():
+        print("animpick: not in this tree, skipped")
+        return
     t = q.read_text(encoding="utf-8")
     if '"look": "Look Around"' in t:
         print("animpick: already patched (look)")

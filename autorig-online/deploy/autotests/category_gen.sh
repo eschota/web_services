@@ -16,9 +16,23 @@ for c in $CLIPS; do
   for seed in 41 7 123; do
     echo "== $c seed=$seed $(date -u +%H:%M)"
     sudo -u autorig nice -n 19 env PYTHONPATH=. /srv/autorig/venv/bin/python3 -P -m mt.animal_video --run $RUN --what "$WHAT" --clip $c --model h3 --seed $seed 2>&1 | grep -E "period_s|quality|Traceback|Error" | head -3
+    cp $LIB/$c.json $LIB/$c.seed$seed.json 2>/dev/null       # every take is kept; the best one becomes the entry
     q=$(python3 -c "import json; d=json.load(open('$LIB/$c.json')); print(d.get('quality'), '|', (d.get('quality_why') or {}).get('gait'))" 2>/dev/null)
     echo "   -> $q"
     case "$q" in ok*) break;; esac
   done
+  /srv/autorig/venv/bin/python3 - "$LIB" "$c" <<PY
+import json, glob, sys, os
+lib, clip = sys.argv[1], sys.argv[2]
+takes = []
+for f in sorted(glob.glob(f"{lib}/{clip}.seed*.json")):
+    e = json.load(open(f)); g = (e.get("quality_why") or {}).get("gait") or {}
+    takes.append((0 if e.get("quality") == "ok" else 1, len(g.get("why") or []), f, e))
+if takes:
+    takes.sort(key=lambda t: (t[0], t[1]))
+    best = takes[0]
+    json.dump(best[3], open(f"{lib}/{clip}.json", "w"), indent=1)
+    print("   best take:", os.path.basename(best[2]), best[3].get("quality"), (best[3].get("quality_why") or {}).get("gait", {}).get("why"))
+PY
 done
 echo "CATEGORY_GEN_FINAL $SP $(date -u +%H:%M)"

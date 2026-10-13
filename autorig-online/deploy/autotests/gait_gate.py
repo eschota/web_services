@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import numpy as np
 
-RULES = {
-    "walk": {"period": (0.8, 1.7), "lf_lag": (0.12, 0.38), "min_amp": 10.0},
-    "trot": {"period": (0.5, 1.0), "lf_lag": (0.38, 0.62), "min_amp": 10.0},
-    "canter": {"period": (0.45, 0.85), "lf_lag": (0.2, 0.5), "min_amp": 10.0},
-    "gallop": {"period": (0.35, 0.65), "lf_lag": (0.2, 0.6), "min_amp": 10.0},
+RULES = {                                            # lf_lag: the lag of the near front leg behind the near hind leg,
+    # in cycle fractions; a take filmed from the other side gives 1 - lag (the other lead / the mirrored sequence),
+    # which is the same gait, so the mirrored window counts too
+    "walk": {"period": (0.8, 1.7), "lf_lag": (0.12, 0.38), "lf_lag_alt": (0.62, 0.88), "min_amp": 10.0},
+    "trot": {"period": (0.5, 1.0), "lf_lag": (0.35, 0.65), "min_amp": 10.0},
+    "canter": {"period": (0.45, 0.85), "lf_lag": (0.2, 0.5), "lf_lag_alt": (0.5, 0.8), "min_amp": 10.0},
+    "gallop": {"period": (0.35, 0.65), "lf_lag": (0.2, 0.6), "lf_lag_alt": (0.4, 0.8), "min_amp": 10.0},
     "run": {"period": (0.35, 1.0), "min_amp": 10.0},
     "idle": {"max_amp": 6.0},
     "rear": {"period": (2.5, 9.0), "front_amp": (35.0, 130.0), "hind_amp": (8.0, 90.0), "one_shot": True},
@@ -72,8 +74,11 @@ def judge(entry: dict, rules: dict | None = None) -> dict:
     if "lf_lag" in r:
         if "lf_lag" not in m:
             why.append("no LH / LF curves to read the footfall order")
-        elif not (r["lf_lag"][0] <= m["lf_lag"] <= r["lf_lag"][1]):
-            why.append(f"front leg lags hind by {m['lf_lag']:.2f} of the cycle, wanted {r['lf_lag']} ({clip})")
+        else:
+            lag = m["lf_lag"]
+            windows = [r["lf_lag"]] + ([r["lf_lag_alt"]] if "lf_lag_alt" in r else [])
+            if not any(w[0] - 1e-6 <= lag <= w[1] + 1e-6 for w in windows):
+                why.append(f"front leg lags hind by {lag:.2f} of the cycle, wanted {windows} ({clip})")
     if "front_amp" in r and not (r["front_amp"][0] <= m["front_amp_deg"] <= r["front_amp"][1]):
         why.append(f"front legs lift {m['front_amp_deg']} deg, wanted {r['front_amp']}")
     if "hind_amp" in r and not (r["hind_amp"][0] <= m["hind_amp_deg"] <= r["hind_amp"][1]):
