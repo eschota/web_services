@@ -801,6 +801,20 @@
    "what": "monarch caterpillar (Vision: multi-legged; category.json: quadruped / feline), the V3 run's model.glb",
    "sha256": "3c40325bfd6212d8293d342049344abb2a77bfab4127fcbcc50af5cf1491d9f3",
    "bytes": 17347128
+  },
+  "8a67fa01.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/75550318f8dde26027b3/proj/model.glb",
+   "task": "8a67fa01-434b-47fe-bb77-5fe4aa7d69db",
+   "what": "white horse in a walking pose, one hind hoof forward (V3 run 75550318)",
+   "sha256": "63b6dc9763dd4bd29cfe1b01068c86cead1750a6faa56f078aafa9731ac89666",
+   "bytes": 2593492
+  },
+  "d8595e8d.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/74d3849f9bf8a4154a7e/proj/model.glb",
+   "task": "d8595e8d-2de2-4613-bc01-29501ccce7ff",
+   "what": "white-tailed deer buck in a walking pose, a hind hoof lifted (V3 run 74d3849f)",
+   "sha256": "6f10a7afeaf0838ecd250e08171db29b7f31d7313f2d9d55c33e7c3b3a63aafa",
+   "bytes": 15900520
   }
  },
  "profiles": {
@@ -8542,14 +8556,109 @@
        ">=",
        4
       ]
-     },
-     "xfail": {
-      "reason": "crawler routing lands with creature.py chain 9",
-      "owner": "Fable monsters/animals"
      }
     }
    ],
    "note": "extended tier (17 MB model); the words carry the category's quadruped / feline on purpose: the crawler word must win"
+  },
+  {
+   "id": "quad_gait_legs",
+   "task": "8a67fa01-434b-47fe-bb77-5fe4aa7d69db",
+   "cost": 2,
+   "defect": "Rig classes V3 (2026-10-13, bone_outside on the white horse 8a67fa01 / 7fd6fef6 and the deer d8595e8d in a walking pose): the side-view leg columns took one hoof of a staggered pair, both chains of the pair rode one leg (the right hind foot on the left leg, the shank across the belly: 16 samples outside, rig_check 4x 738), the other leg went to the hanging-tail search. Fix: fastrig.trace_gait_legs - each ground contact (and a lifted hoof) traced up over the mesh, each chain fitted on its own leg's points, the traced legs excluded from the tail searches; options gait_legs, gait_min_step, gait_widen",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8a67fa01.model.glb",
+     "params": {
+      "words": "white horse",
+      "body": "quadruped",
+      "forward_axis": "-x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ],
+      "rig_check_4x": [
+       "<=",
+       200
+      ]
+     },
+     "xfail": {
+      "reason": "trace_gait_legs is in the Rig classes mt-deploy, not installed yet",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "leg_outside_samples": [
+       "<=",
+       4
+      ]
+     },
+     "note": "farm 2026-10-13: RightHindLeg 16 -> 0, rig_check 4x 738 -> 37",
+     "xfail": {
+      "reason": "trace_gait_legs is in the Rig classes mt-deploy, not installed yet",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "deer_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "d8595e8d.model.glb",
+     "params": {
+      "words": "white-tailed deer buck",
+      "body": "quadruped",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "rig_check_4x": [
+       "<=",
+       120
+      ]
+     },
+     "note": "farm 2026-10-13: rig_check 4x 342 -> 21",
+     "xfail": {
+      "reason": "trace_gait_legs is in the Rig classes mt-deploy, not installed yet",
+      "owner": "Rig classes · V3"
+     }
+    }
+   ]
   }
  ]
 }

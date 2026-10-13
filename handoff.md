@@ -2810,3 +2810,24 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   `mane=off` по умолчанию. c7 (colour_track: 3/4-ракурс, зажим кистей/стоп, замена боковых дублей) — в гейте.
 - Автостэш общего чекаута R:\autorig: при `git pull --rebase --autostash` три записи `stash@{0..2}` (чужие незакоммиченные
   правки corpus.json и др.), конфликт corpus.json разрешён версией HEAD; стэши не удалены.
+
+## Гусеница → serpent/multileg, грива off проверена (2026-10-13 01:50 UTC, на проде, агент «Fable · monsters/animals»)
+
+- **0a629e36** (Vision «multi-legged monarch caterpillar», category.json quadruped/feline → риг quadruped 32 костей,
+  QA 0/8, 672 растянутых рёбер): `creature.plan_for` — слова ползунов (`CRAWLER_WORDS`: caterpillar/larva/maggot/grub/
+  centipede/millipede/worm/slug/leech/…, рус. гусениц/личинк/черв/многонож/…) проверяются ДО bird/quadruped: serpent,
+  если `serpent.SERPENT_WORDS` знает слово, иначе multileg; quadruped никогда. MT `3654560`, прод `creature.py
+  e4a35f9590e5` (chain 9, GATE PASS 229/1 XPASS/18 XFAIL). Re-rig через `rerig_requests/<task>__v3.2026-10-13.2.json`
+  (`by: fable-monsters`, воркер rerig_open перезапущен): v3 serpent 19 костей, Crawl/Slither/Idle/Strike/Head Turn,
+  rig_check 2x/4x 2143/888 → 132/48, numeric QA 6/6 (41 ребро). `rig/numeric-qa.json` и `rig-qa.json` рана rerig_open НЕ
+  переписывает (там ещё quadruped) — QA считал `checks.mt_numeric_qa` на копии. DEV 7027/7028.
+- Кейс `caterpillar_plan_routing` (вход `0a629e36.model.glb`, extended, mt_rig_first words с quadruped/feline нарочно:
+  слово ползуна должно победить) — XFAIL до установки, unxfail в том же chain 9; web `25cbe401` + зеркало corpus.json.
+- Ловушка патч-скриптов: `'''…r"\b…"…'''` — внешняя строка не raw, `\b` стал backspace (первый запуск chain 9 убит,
+  ничего не установлено); `patch_crawler.py` теперь с `r'''`. Проверять `s.count(bytes([8]))` перед деплоем.
+- **Лошадь 31cc3ff3**: chain 8 установлен (`mane.py a70c7519a345` mane=off по умолчанию, `animal_video.py 856cd6350c8e`
+  период = пик автокорреляции). Свежий билд корпусного `31cc3ff3.model.glb` на установленном MT (words «white horse»,
+  body quadruped, +z): quadruped 32 кости, Mane* нет, `checks.bone_outside` 0 из 624 сэмплов. Старые 24 сэмпла на Mane*
+  были из билда с mane=auto. autorig-mt перезапущен (`autorig-mt-restart --wait`) 01:44 UTC.
+- RIG_VERSION не бампал (Rig classes только что поднял до v3.2026-10-13.2); ползуны переригуются при открытии по
+  несовпадению версии, как и все.
