@@ -215,6 +215,14 @@ The early fitter ignored twelve actual limb tracks; RF knee/upper-leg remained
 confident on all86frames after its Toe confidence collapsed. The next source
 fit uses each leg's own Foot/Leg/UpLeg measurements and explicit physical
 constraints. Hidden Toe positions remain PENDING, no mirroring or gait prior
-is labelled observation. Farm run `zebra-walk-plane-fit-v4` is active; continue
-it without duplication. Production F15 contract suites134PASS are not model
+is labelled observation. Farm run `zebra-walk-plane-fit-v5` ended at window35–40
+with max evaluations exceeded; frame0–34 prefix is preserved. No fit process is
+active. Continue only by explicit pinned resume, without GPU replay. Production
+F15 contract suites135PASS are not model
 acceptance. No full34 family pointer or customer-path activation has occurred.
+
+V6 is now active: explicit verified continuation of the V5 frame0–34 prefix,
+preserving the objective profile and changing only pinned solver controls.
+Actual window35–40 passed after68.8s; next frame45 after94.64s. F15 project
+`zebra-walk-plane-fit-v6`, local exec session16475. Full137farm contract checks
+pass, but real complete motion/export/retarget/owner acceptance are still pending.

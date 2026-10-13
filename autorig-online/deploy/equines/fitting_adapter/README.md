@@ -82,6 +82,16 @@ root only along the measured source forward/up axes; root rotation stays zero.
 Without torso evidence the root remains exactly fixed as before. Hoof and torso
 REST/fitted residuals and bound hits are recorded per measured frame. Progress
 is emitted every ten frames and `max_fit_seconds` bounds the CPU solve.
+Every completed window writes a non-accepted diagnostic checkpoint. A failed
+TRF window preserves finite best parameters/cost/status/optimality. Explicit
+`resume_from` is allowed only when objective schema, variable order, all source
+pins and objective options match; solver-only tolerances/evaluation limits may
+change and are recorded. Partial prefixes are never clips and never resume
+automatically.
+Solver termination changes belong in a separate run-scoped
+`autorig.equine-solver-control-profile/1` pinned to the immutable objective
+profile SHA. It may override only solver controls; proportions, physics weights
+and source constraints remain bound to the original objective profile.
 
 `farm_constraint_fit_pipeline.py` is the isolated CPU farm entrypoint for real
 pinned `tracks.json`/NPZ and the immutable bundle's `surface_anchors.json`. It records an ffprobe timing receipt, converts RAW2D

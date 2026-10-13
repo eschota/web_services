@@ -20,7 +20,7 @@ class Contract(unittest.TestCase):
   manifest=w('immutable_manifest.json',{'files':[{'filename':'surface_anchors.json','sha256':surface['sha256'],'bytes':pathlib.Path(surface['path']).stat().st_size}]}); source='1'*64; timing={'frame_count':constraint_frames,'fps':constraint_fps,'source_frame_indices':list(range(constraint_frames))}
   rows={leg:{'source_anchor_id':f'{leg}:1'} for leg in (constraint_legs or fit.LEGS)}
   constraints={'schema':fit.CONSTRAINTS,'action':'walk_forward','timing':timing,'constraints':rows,'provenance':{'immutable_manifest_sha256':manifest['sha256'],'source_model_sha256':source}}
-  cp=w('constraints.json',constraints); profile=w('profile.json',{'scope':'run','accepted':False,'category_default':False,'source_sha256':source,'constraints_sha256':cp['sha256'],'fit_options':{}}); action=w('action.json',{'action_id':'walk_forward','taxonomy':'full34','frame_count':action_frames,'fps':action_fps,'loop':True})
+  cp=w('constraints.json',constraints); profile=w('profile.json',{'scope':'run','run_id':'r1','accepted':False,'category_default':False,'source_sha256':source,'constraints_sha256':cp['sha256'],'fit_options':{}}); action=w('action.json',{'action_id':'walk_forward','taxonomy':'full34','frame_count':action_frames,'fps':action_fps,'loop':True})
   hooves={leg:{'source_anchor_id':f'{leg}:1','frames':[{'frame':i,'source_frame':i,'state':'PENDING','reason':'fixture'} for i in range(constraint_frames)]} for leg in fit.LEGS}; evidence=w('contact.json',{'schema':'autorig.equine-measured-contact-evidence.v1','state':'measured_source_contact_evidence','accepted_observations':False,'animation_qa_pass':False,'hooves':hooves,'timing':timing,'provenance':{'constraints_sha256':cp['sha256'],'opposite_leg_inference':False,'mirroring':False,'hidden_point_interpolation':False,'gait_phase_prior':False}})
   return {'schema':fit.SCHEMA,'action_id':'walk_forward','bundle_manifest':manifest,'surface_anchors':surface,'constraints':cp,'contact_evidence':evidence,'profile':profile,'action_contract':action,'output':str(root/'out.json')}
  def test_requires_exact_four_legs(self):
@@ -43,6 +43,22 @@ class Contract(unittest.TestCase):
   bones={'LeftFrontFoot':SimpleNamespace(parent='LeftFrontLeg'),'LeftFrontLeg':SimpleNamespace(parent='Spine2'),'RightFrontFoot':SimpleNamespace(parent='RightFrontLeg'),'RightFrontLeg':SimpleNamespace(parent='Spine2'),'Spine2':SimpleNamespace(parent=None)}
   anchor=SimpleNamespace(influences=[SimpleNamespace(bone='LeftFrontFoot',weight=.7),SimpleNamespace(bone='RightFrontFoot',weight=.3)])
   got=fit.influence_variable_indices(anchor,bones,{'LeftFrontLeg':2,'RightFrontLeg':7,'Spine2':9},[10,11]); self.assertEqual(got,[2,7,9,10,11])
+ def test_resume_rejects_order_source_and_objective_option_drift(self):
+  order=['A.x','root_translation.forward']; pins={'constraints_sha256':'1'*64}; options={k:v['value'] for k,v in fit.options_get().items()}; doc={'schema':'autorig.equine-constraint-fit-progress/1','objective_schema':fit.OBJECTIVE_SCHEMA,'variable_order':order,'pins':pins,'options':options,'completed_through_frame':0,'solved_parameters':{'0':[0,0]}}
+  end,_,meta=fit.validate_resume(doc,order,pins,{**options,'max_nfev':500}); self.assertEqual(end,0); self.assertTrue(meta['objective_options_identical'])
+  with self.assertRaisesRegex(ValueError,'variable order'): fit.validate_resume(doc,list(reversed(order)),pins,options)
+  with self.assertRaisesRegex(ValueError,'source pins'): fit.validate_resume(doc,order,{'constraints_sha256':'2'*64},options)
+  with self.assertRaisesRegex(ValueError,'objective options'): fit.validate_resume(doc,order,pins,{**options,'target_scale':2.0})
+ def test_solver_control_profile_can_change_solver_only_not_objective_or_base(self):
+  job=self._job(); base=pathlib.Path(job['profile']['path']); root=base.parent
+  def attach(payload):
+   p=root/'solver.json'; p.write_text(json.dumps(payload),encoding='utf-8'); job['solver_control_profile']={'path':str(p),'sha256':fit.sha(p)}
+  common={'schema':'autorig.equine-solver-control-profile/1','scope':'run','run_id':'r1','accepted':False,'category_default':False,'base_profile_sha256':fit.sha(base)}
+  attach({**common,'solver_options':{'max_nfev':500,'solver_ftol':1e-6}}); *_,options=fit.preflight(job); self.assertEqual(options['max_nfev'],500)
+  attach({**common,'solver_options':{'target_scale':2.0}})
+  with self.assertRaisesRegex(ValueError,'solver-only'): fit.preflight(job)
+  attach({**common,'base_profile_sha256':'0'*64,'solver_options':{'max_nfev':500}})
+  with self.assertRaisesRegex(ValueError,'base profile'): fit.preflight(job)
  def test_sole_geometry_counts_distinct_source_ids_and_world_points(self):
   rows=[SimpleNamespace(vertex_id=7,rest_world=[0,0,0]),SimpleNamespace(vertex_id=7,rest_world=[0,0,0]),SimpleNamespace(vertex_id=8,rest_world=[0,0,0]),SimpleNamespace(vertex_id=9,rest_world=[1,0,0])]
   stats=fit.sole_geometry_stats(rows,2.0); self.assertEqual(stats['source_vertex_ids'],[7,8,9]); self.assertEqual(stats['distinct_source_vertex_count'],3); self.assertEqual(stats['distinct_world_point_count'],2)

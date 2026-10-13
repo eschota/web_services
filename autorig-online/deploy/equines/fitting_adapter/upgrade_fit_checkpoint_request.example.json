@@ -1,0 +1,11 @@
+{
+  "schema": "autorig.equine-checkpoint-upgrade-request/1",
+  "accepted": false,
+  "automatic_resume": false,
+  "legacy_checkpoint": {"path": "<v5 progress.json>", "sha256": "<sha256>"},
+  "original_fit_job": {"path": "<exact original v5 fit-job.json>", "sha256": "<sha256>"},
+  "code_pins": {
+    "equine_constraint_fit.py": {"path": "<exact staged v5 fitter>", "sha256": "<sha256>"},
+    "animation_fitting.rig.py": {"path": "<exact staged runtime rig.py>", "sha256": "<sha256>"}
+  }
+}

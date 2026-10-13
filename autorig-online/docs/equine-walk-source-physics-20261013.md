@@ -118,13 +118,25 @@ Latest actual run: `jobs/zebra-walk-plane-fit-v5` on F15, code artifact SHA
 `ba2bb86cef5b4774d57992a157b960b3f61e879ef959fef9a5266b9ed2c59b72`.
 It uses the twelve measured joint targets, robust Toe/joint residuals, sparse
 physics windows and the actual managed farm identity guard. Source arrays were
-reused; no GPU inference was replayed. The run is bounded at900seconds and is
-not a completed or accepted clip yet. Continue its own process/checkpoint;
-do not duplicate it. Local orchestrator session70292 holds the foreground SSH
-process; progress files survive under that exact farm project directory.
+reused; no GPU inference was replayed. The run ended with ERROR at window35–40
+because `max_nfev=250` was exhausted. No full clip was written. The completed
+frame0–34 prefix survives under that exact farm project directory and locally
+as `fit-v5-prefix.json` (SHA411ceb498eed4a61e72fbaf7054b21d8075acef7058aaa3c5ba8800fa6ecbb2e).
+Do not replay its GPU stages or restart the whole source blindly.
 V4 was stopped with its frame34 checkpoint intact after its coarse dependency
 pattern proved too slow. V5 derives exact Jacobian columns from every nonzero
 skin influence and its real ancestors, including cross-leg weights. Its
 first30frames took73.77s versus349.09s for V4, without changing the objective.
 V5 records exact variable order and objective schema; old prefixes are not
 silently resumed or accepted.
+
+V6 is an explicit continuation of the attested V5 prefix, not a new observation
+or an approved clip. Original objective profile SHA and all data/physics options
+remain unchanged. A separate pinned solver-control profile uses500evaluations
+and1e-6 termination tolerances, with900s bound; no quality thresholds changed.
+Code artifact SHA89bab96683e915e5186a227c34fe6c57384a6a270df4d3e01002281d5f3490b1.
+F15 `jobs/zebra-walk-plane-fit-v6`, local execution session16475 is active.
+The failed window35–40 passed in68.8s; frame45 started at94.64s. Do not duplicate
+the process. Failure checkpoints now preserve best finite failed-window values,
+and resumed prefix metrics are recomputed by FK without changing parameters.
+Latest farm contract suite:107top-level plus30adapter checks,137PASS.

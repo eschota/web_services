@@ -1,0 +1,16 @@
+{
+  "schema": "autorig.equine-solver-control-profile/1",
+  "scope": "run",
+  "run_id": "<same run id as immutable objective profile>",
+  "accepted": false,
+  "category_default": false,
+  "base_profile_sha256": "<exact objective fit-profile SHA256>",
+  "solver_options": {
+    "max_nfev": 500,
+    "max_fit_seconds": 900,
+    "solver_ftol": 0.000001,
+    "solver_xtol": 0.000001,
+    "solver_gtol": 0.000001,
+    "solver_x_scale": 1.0
+  }
+}

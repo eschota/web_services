@@ -23,6 +23,10 @@ OPTIONS={
  'target_scale':(1.0,.1,10.0,'Multiplier on confidence-weighted measured hoof residuals.'),
  'max_root_translation_height_ratio':(.5,.01,2.0,'Engineering bound for measured torso-driven root travel along source forward/up.'),
  'max_fit_seconds':(300,10,3600,'Wall-time ceiling for the complete CPU fit.'),
+ 'solver_ftol':(1e-8,1e-12,1e-3,'SciPy TRF engineering convergence tolerance; not an animation QA threshold.'),
+ 'solver_xtol':(1e-8,1e-12,1e-3,'SciPy TRF engineering step tolerance; not an animation QA threshold.'),
+ 'solver_gtol':(1e-8,1e-12,1e-3,'SciPy TRF engineering gradient tolerance; not an animation QA threshold.'),
+ 'solver_x_scale':(1.0,1e-3,100.0,'SciPy variable scale; numeric only unless a separately reviewed diagnostic adds jac mode.'),
  'window_frames':(5,2,9,'Bounded temporal solve window; never a global sequence solve.'),
  'sole_band_height_ratio':(.015,.001,.10,'Bottom strip above each actual Foot/Toe anchor minimum / source height.'),
  'sole_min_count':(3,1,64,'Minimum immutable sole anchors required per leg.'),
@@ -61,6 +65,21 @@ def atomic(p,v):
  q=p.with_name(f'.{p.name}.{os.getpid()}.tmp'); q.write_text(json.dumps(v,indent=2,allow_nan=False)+'\n',encoding='utf-8'); os.replace(q,p)
 def checkpoint(path,value):
  p=pathlib.Path(path); p.parent.mkdir(parents=True,exist_ok=True); q=p.with_name(f'.{p.name}.{os.getpid()}.tmp'); q.write_text(json.dumps(value,indent=2,allow_nan=False)+'\n',encoding='utf-8'); os.replace(q,p)
+OBJECTIVE_SCHEMA='autorig.equine-window-objective/2-exact-lbs-ancestor-sparsity'
+SOLVER_ONLY_OPTIONS={'max_nfev','max_fit_seconds','solver_ftol','solver_xtol','solver_gtol','solver_x_scale'}
+def validate_resume(document,variable_order,pins,options):
+ if document.get('schema')!='autorig.equine-constraint-fit-progress/1' or document.get('objective_schema')!=OBJECTIVE_SCHEMA: raise ValueError('resume objective schema mismatch')
+ if document.get('variable_order')!=variable_order: raise ValueError('resume variable order mismatch')
+ if document.get('pins')!=pins: raise ValueError('resume source pins mismatch')
+ old=document.get('options') or {}
+ objective_keys=(set(old)|set(options))-SOLVER_ONLY_OPTIONS
+ mismatch=sorted(k for k in objective_keys if old.get(k)!=options.get(k))
+ if mismatch: raise ValueError(f'resume objective options mismatch: {mismatch}')
+ solved=document.get('solved_parameters')
+ if not isinstance(solved,dict) or not solved: raise ValueError('resume solved prefix missing')
+ end=document.get('completed_through_frame')
+ if not isinstance(end,int) or sorted(int(k) for k in solved)!=list(range(end+1)): raise ValueError('resume prefix is not contiguous from frame 0')
+ return end,solved,{'changed_solver_options':{k:{'old':old.get(k),'new':options.get(k)} for k in SOLVER_ONLY_OPTIONS if old.get(k)!=options.get(k)},'objective_options_identical':True}
 def sparsity_from_dependencies(dependencies,n_total,frame_blocks):
  from scipy.sparse import lil_matrix
  matrix=lil_matrix((len(dependencies),n_total*frame_blocks),dtype='int8')
@@ -167,6 +186,15 @@ def preflight(job):
  if job.get('options') is not None:
   requested={k:v['value'] for k,v in options_get(job['options']).items()}
   if requested!=opt: raise ValueError('job options differ from the source/constraints-bound profile')
+ if job.get('solver_control_profile') is not None:
+  solver_path=pin(job['solver_control_profile'],'solver_control_profile'); solver=rd(solver_path)
+  allowed={'schema','scope','run_id','accepted','category_default','base_profile_sha256','solver_options'}
+  if set(solver)!=allowed or solver.get('schema')!='autorig.equine-solver-control-profile/1' or solver.get('scope')!='run' or solver.get('run_id')!=p.get('run_id') or solver.get('accepted') is not False or solver.get('category_default') is not False or solver.get('base_profile_sha256')!=sha(paths['profile']): raise ValueError('solver control profile contract/base profile mismatch')
+  values=solver.get('solver_options')
+  if not isinstance(values,dict) or not values or set(values)-SOLVER_ONLY_OPTIONS: raise ValueError('solver control profile may contain solver-only options')
+  checked={k:v['value'] for k,v in options_get({**opt,**values}).items()}
+  if any(checked[k]!=opt[k] for k in set(opt)-SOLVER_ONLY_OPTIONS): raise ValueError('solver control profile changed objective options')
+  opt.update({k:checked[k] for k in values}); paths['solver_control_profile']=solver_path
  return paths,c,p,a,opt
 def execute(job,paths,c,p,a,opt):
  farm_identity=farm_execute_guard()
@@ -230,8 +258,17 @@ def execute(job,paths,c,p,a,opt):
  lo=np.full(n_total,-opt['max_rotation_delta_rad']); hi=-lo
  if root_enabled:
   lo[n_joint:]=-opt['max_root_translation_height_ratio']*height; hi[n_joint:]=-lo[n_joint:]
- observed={}; previous=np.zeros(n_total); metrics={}; W=int(opt['window_frames']); tol=opt['penetration_tolerance_height_ratio']*height
- for start in range(0,frame_count,W):
+ variable_order=[f'{bone}.{"xyz"[var_axis[bone]]}' for bone in variables]+(['root_translation.forward','root_translation.up'] if root_enabled else [])
+ current_pins={'bundle_manifest_sha256':sha(paths['bundle_manifest']),'action_contract_sha256':sha(paths['action_contract']),'constraints_sha256':sha(paths['constraints']),'profile_sha256':sha(paths['profile']),'contact_evidence_sha256':sha(paths['contact_evidence']),'surface_anchors_sha256':sha(paths['surface_anchors']),'source_model_sha256':c.get('provenance',{}).get('source_model_sha256')}; solver_profile_sha=sha(paths['solver_control_profile']) if 'solver_control_profile' in paths else None
+ progress_path=pathlib.Path(job.get('progress_file') or (str(job['output'])+'.progress.json')); observed={}; previous=np.zeros(n_total); metrics={}; W=int(opt['window_frames']); tol=opt['penetration_tolerance_height_ratio']*height; resume_meta=None; first_frame=0
+ if job.get('resume_from') is not None:
+  resume_path=pin(job['resume_from'],'resume_from'); resume=rd(resume_path); end,solved,resume_meta=validate_resume(resume,variable_order,current_pins,opt)
+  if end>=frame_count-1: raise ValueError('resume prefix already covers the full action')
+  observed={int(k):np.asarray(v,float) for k,v in solved.items()}
+  if any(v.shape!=(n_total,) or not np.isfinite(v).all() for v in observed.values()): raise ValueError('resume parameter vector invalid')
+  previous=observed[end].copy(); first_frame=end+1
+  if first_frame%W: raise ValueError('resume prefix must end on a completed window boundary')
+ for start in range(first_frame,frame_count,W):
   stop=min(frame_count,start+W); count=stop-start
   if time.monotonic()-began>opt['max_fit_seconds']: raise TimeoutError(f'fit exceeded max_fit_seconds={opt["max_fit_seconds"]}')
   print(json.dumps({'stage':'fit','frame':start,'frames':frame_count,'window_stop':stop,'elapsed_seconds':round(time.monotonic()-began,2)}),flush=True)
@@ -275,25 +312,14 @@ def execute(job,paths,c,p,a,opt):
    rows=evaluate(x)
    if len(rows)!=len(seed_rows): raise RuntimeError('residual row count changed after jacobian contract construction')
    return rows
-  result=least_squares(residual_checked,x0,bounds=(blo,bhi),max_nfev=int(opt['max_nfev']),method='trf',jac_sparsity=sparsity)
-  if not result.success or not np.isfinite(result.x).all(): raise RuntimeError(f'window {start}:{stop} bounded solve failed: {result.message}')
+  result=least_squares(residual_checked,x0,bounds=(blo,bhi),max_nfev=int(opt['max_nfev']),method='trf',jac_sparsity=sparsity,ftol=opt['solver_ftol'],xtol=opt['solver_xtol'],gtol=opt['solver_gtol'],x_scale=opt['solver_x_scale'])
+  if not result.success or not np.isfinite(result.x).all():
+   checkpoint(progress_path,{'schema':'autorig.equine-constraint-fit-progress/1','state':'diagnostic_failed_window_not_clip','accepted':False,'automatic_resume':False,'resume_requires_explicit_new_job':True,'completed_through_frame':start-1,'objective_schema':OBJECTIVE_SCHEMA,'variable_order':variable_order,'solver_control_profile_sha256':solver_profile_sha,'window':{'start':start,'stop':stop,'success':bool(result.success),'status':int(result.status),'message':str(result.message),'nfev':int(result.nfev),'cost':float(result.cost) if math.isfinite(float(result.cost)) else None,'optimality':float(result.optimality) if math.isfinite(float(result.optimality)) else None,'best_finite_parameters':result.x.tolist() if np.isfinite(result.x).all() else None},'pins':current_pins,'options':opt,'resume_compatibility':resume_meta,'elapsed_seconds':time.monotonic()-began,'solved_parameters':{str(frame):observed[frame].tolist() for frame in sorted(observed)}})
+   raise RuntimeError(f'window {start}:{stop} bounded solve failed: {result.message}')
   for wi,frame in enumerate(range(start,stop)):
-   xx=result.x[wi*n_total:(wi+1)*n_total]; _,root,fitted_pos=state(result.x,wi); hits={bone:bool(abs(abs(xx[i])-opt['max_rotation_delta_rad'])<=1e-5) for i,bone in enumerate(variables)}; targets=[(doc,t) for doc in chain_docs.values() if (t:=doc['measured'].get(frame)) is not None]; joint_targets=[(leg,bone,doc,t) for leg,docs in joint_docs.items() for bone,doc in docs.items() if (t:=doc['measured'].get(frame)) is not None]; torso_targets=[(role,doc,t) for role,doc in torso_docs.items() if (t:=doc['measured'].get(frame)) is not None]
-   metrics[frame]={}
-   for doc,(target,confidence) in targets:
-    before=float(np.linalg.norm(rest_pos[doc['anchor']]-target)); after=float(np.linalg.norm(fitted_pos[doc['anchor']]-target)); leg=next(k for k,v in chain_docs.items() if v is doc)
-    metrics[frame][leg]={'confidence':confidence,'before_world':before,'after_world':after,'before_height_ratio':before/height,'after_height_ratio':after/height,'bound_hit':any(hits[b] for b in doc['chain']),'robust_delta_height_ratio':opt['hoof_huber_delta_height_ratio'],'target_clamped':False}
-   for role,doc,(target,confidence) in torso_targets:
-    before=float(np.linalg.norm(rest_pos[doc['anchor']]-target)); after=float(np.linalg.norm(fitted_pos[doc['anchor']]-target)); metrics[frame][f'torso:{role}']={'confidence':confidence,'before_world':before,'after_world':after,'before_height_ratio':before/height,'after_height_ratio':after/height,'root_forward_bound_hit':bool(root_enabled and abs(abs(xx[n_joint])-hi[n_joint])<=1e-5),'root_up_bound_hit':bool(root_enabled and abs(abs(xx[n_joint+1])-hi[n_joint+1])<=1e-5)}
-   for leg,bone,doc,(target,confidence) in joint_targets:
-    before=float(np.linalg.norm(rest_pos[doc['anchor']]-target)); after=float(np.linalg.norm(fitted_pos[doc['anchor']]-target)); metrics[frame][f'joint:{leg}:{bone}']={'confidence':confidence,'before_world':before,'after_world':after,'before_height_ratio':before/height,'after_height_ratio':after/height,'source_anchor_id':doc['anchor'],'runtime_track_id':doc['runtime_track_id'],'robust_delta_height_ratio':opt['joint_huber_delta_height_ratio'],'target_clamped':False}
-   for leg,sole in sole_sets.items():
-    pts=np.asarray([fitted_pos[k] for k in sole['anchor_ids']]); signed=pts@up-rig.ground_height; metrics[frame][f'physics:{leg}']={'contact_state':contact_state[leg][frame]['state'],'min_height_ratio':float(np.min(signed)/height),'mean_height_ratio':float(np.mean(signed)/height),'penetrating_vertices':int(np.sum(signed < -tol))}
-   observed[frame]=xx.copy()
+   observed[frame]=result.x[wi*n_total:(wi+1)*n_total].copy()
   previous=observed[stop-1].copy()
-  progress_path=pathlib.Path(job.get('progress_file') or (str(job['output'])+'.progress.json'))
-  variable_order=[f'{bone}.{"xyz"[var_axis[bone]]}' for bone in variables]+(['root_translation.forward','root_translation.up'] if root_enabled else [])
-  checkpoint(progress_path,{'schema':'autorig.equine-constraint-fit-progress/1','state':'diagnostic_partial_not_clip','accepted':False,'automatic_resume':False,'resume_requires_explicit_new_job':True,'completed_through_frame':stop-1,'objective_schema':'autorig.equine-window-objective/2-exact-lbs-ancestor-sparsity','variable_order':variable_order,'window':{'start':start,'stop':stop,'nfev':int(result.nfev),'cost':float(result.cost)},'pins':{'constraints_sha256':sha(paths['constraints']),'profile_sha256':sha(paths['profile']),'contact_evidence_sha256':sha(paths['contact_evidence']),'surface_anchors_sha256':sha(paths['surface_anchors']),'source_model_sha256':c.get('provenance',{}).get('source_model_sha256')},'options':opt,'elapsed_seconds':time.monotonic()-began,'solved_parameters':{str(frame):observed[frame].tolist() for frame in sorted(observed)}})
+  checkpoint(progress_path,{'schema':'autorig.equine-constraint-fit-progress/1','state':'diagnostic_partial_not_clip','accepted':False,'automatic_resume':False,'resume_requires_explicit_new_job':True,'completed_through_frame':stop-1,'objective_schema':OBJECTIVE_SCHEMA,'variable_order':variable_order,'solver_control_profile_sha256':solver_profile_sha,'window':{'start':start,'stop':stop,'success':True,'status':int(result.status),'message':str(result.message),'nfev':int(result.nfev),'cost':float(result.cost),'optimality':float(result.optimality)},'pins':current_pins,'options':opt,'resume_compatibility':resume_meta,'elapsed_seconds':time.monotonic()-began,'solved_parameters':{str(frame):observed[frame].tolist() for frame in sorted(observed)}})
  if not observed: raise ValueError('constraints contain no observed target frame')
  # Missing frames use bounded time interpolation only; provenance stays INFERRED/PENDING.
  keys=sorted(observed); values=[]; provenance=[]
@@ -301,9 +327,31 @@ def execute(job,paths,c,p,a,opt):
   if frame in observed: values.append(observed[frame]); provenance.append('SOURCE_PLANE_OBSERVED')
   else:
    left=max([k for k in keys if k<frame],default=keys[0]); right=min([k for k in keys if k>frame],default=keys[-1]); w=0 if right==left else (frame-left)/(right-left); values.append(observed[left]*(1-w)+observed[right]*w); provenance.append('INFERRED_PENDING')
- frames=[]
+ def measure_frame(frame,x,previous_centroids):
+  e={bone:np.eye(3)[var_axis[bone]]*x[i] for i,bone in enumerate(variables)}; root=np.zeros(3) if not root_enabled else forward_axis*x[n_joint]+up_axis*x[n_joint+1]; world,local=rig.forward_kinematics(root,np.zeros(3),e); fitted_pos=rig.anchor_positions(world); hits={bone:bool(abs(abs(x[i])-opt['max_rotation_delta_rad'])<=1e-5) for i,bone in enumerate(variables)}; result={}
+  for leg,doc in chain_docs.items():
+   target=doc['measured'].get(frame)
+   if target is not None:
+    point,confidence=target; before=float(np.linalg.norm(rest_pos[doc['anchor']]-point)); after=float(np.linalg.norm(fitted_pos[doc['anchor']]-point)); result[leg]={'confidence':confidence,'before_world':before,'after_world':after,'before_height_ratio':before/height,'after_height_ratio':after/height,'bound_hit':any(hits[b] for b in doc['chain']),'robust_delta_height_ratio':opt['hoof_huber_delta_height_ratio'],'target_clamped':False}
+  for role,doc in torso_docs.items():
+   target=doc['measured'].get(frame)
+   if target is not None:
+    point,confidence=target; before=float(np.linalg.norm(rest_pos[doc['anchor']]-point)); after=float(np.linalg.norm(fitted_pos[doc['anchor']]-point)); result[f'torso:{role}']={'confidence':confidence,'before_world':before,'after_world':after,'before_height_ratio':before/height,'after_height_ratio':after/height,'root_forward_bound_hit':bool(root_enabled and abs(abs(x[n_joint])-hi[n_joint])<=1e-5),'root_up_bound_hit':bool(root_enabled and abs(abs(x[n_joint+1])-hi[n_joint+1])<=1e-5)}
+  for leg,docs in joint_docs.items():
+   for bone,doc in docs.items():
+    target=doc['measured'].get(frame)
+    if target is not None:
+     point,confidence=target; before=float(np.linalg.norm(rest_pos[doc['anchor']]-point)); after=float(np.linalg.norm(fitted_pos[doc['anchor']]-point)); result[f'joint:{leg}:{bone}']={'confidence':confidence,'before_world':before,'after_world':after,'before_height_ratio':before/height,'after_height_ratio':after/height,'source_anchor_id':doc['anchor'],'runtime_track_id':doc['runtime_track_id'],'robust_delta_height_ratio':opt['joint_huber_delta_height_ratio'],'target_clamped':False}
+  centroids={}
+  for leg,sole in sole_sets.items():
+   pts=np.asarray([fitted_pos[k] for k in sole['anchor_ids']]); signed=pts@up-rig.ground_height; centroid=np.mean(pts,0); centroids[leg]=centroid; speed=None
+   if frame and previous_centroids.get(leg) is not None and contact_state[leg][frame]['state']=='OBSERVED_CONTACT' and contact_state[leg][frame-1]['state']=='OBSERVED_CONTACT':
+    delta=centroid-previous_centroids[leg]; speed=float(np.linalg.norm(delta-up*np.dot(delta,up))*fps/height)
+   result[f'physics:{leg}']={'contact_state':contact_state[leg][frame]['state'],'min_height_ratio':float(np.min(signed)/height),'mean_height_ratio':float(np.mean(signed)/height),'penetrating_vertices':int(np.sum(signed < -tol)),'planted_tangential_speed_height_per_second':speed}
+  return root,local,result,centroids
+ frames=[]; previous_centroids={}
  for frame,x in enumerate(values):
-  e={bone:np.eye(3)[var_axis[bone]]*x[i] for i,bone in enumerate(variables)}; root=np.zeros(3) if not root_enabled else forward_axis*x[n_joint]+up_axis*x[n_joint+1]; _,local=rig.forward_kinematics(root,np.zeros(3),e)
+  root,local,metrics[frame],previous_centroids=measure_frame(frame,x,previous_centroids)
   bones={name:{'parent':rig.bones[name].parent,'local_matrix':flatten_matrix(local[name]),'local_translation':[float(v) for v in local[name][:3,3]],'local_rotation_xyzw':quaternion_xyzw_from_matrix(local[name])} for name in rig.bone_order}
   by_leg={leg:('SOURCE_PLANE_OBSERVED' if frame in doc['measured'] else 'INFERRED_PENDING') for leg,doc in chain_docs.items()}
   whole='SOURCE_PLANE_OBSERVED' if all(v=='SOURCE_PLANE_OBSERVED' for v in by_leg.values()) else 'INFERRED_PENDING'
@@ -312,7 +360,7 @@ def execute(job,paths,c,p,a,opt):
   frames.append({'frame':frame,'time_seconds':frame/fps,'root_translation':root.tolist(),'root_rotation_rotvec':[0,0,0],'evidence':whole,'evidence_by_leg':by_leg,'evidence_by_joint':joint_evidence,'root_translation_evidence':('SOURCE_TORSO_OBSERVED' if torso_by_role and all(v=='SOURCE_PLANE_OBSERVED' for v in torso_by_role.values()) else 'INFERRED_PENDING' if root_enabled else 'ROOT_FIXED_NO_TORSO_EVIDENCE'),'evidence_by_torso':torso_by_role,'target_residuals':metrics.get(frame,{}),'bones':bones})
  dofs=[f'{b}.{"xyz"[var_axis[b]]}' for b in variables]+(['root_translation.forward','root_translation.up'] if root_enabled else [])
  coverage={'toe_targets':{leg:len(doc['measured']) for leg,doc in chain_docs.items()},'joint_targets':{leg:{bone:len(doc['measured']) for bone,doc in docs.items()} for leg,docs in joint_docs.items()},'contact_states':{leg:{state:sum(1 for row in contact_state[leg].values() if row['state']==state) for state in ('OBSERVED_CONTACT','OBSERVED_SWING','PENDING')} for leg in LEGS},'four_leg_toe_observed_frames':sum(1 for frame in range(frame_count) if all(frame in chain_docs[leg]['measured'] for leg in LEGS))}
- output={'schema':'autorig-fitted-animation.v1','state':'walk_engineering_candidate_not_accepted','rig_bundle':{'path':str(rig.metadata_path),'sha256':rig.metadata_sha256},'observations':{'path':str(paths['constraints']),'sha256':sha(paths['constraints']),'provenance':c.get('provenance')},'frame_count':frame_count,'fps':fps,'duration_seconds':(frame_count-1)/fps,'loop':bool(a.get('loop')),'transform_contract':{'schema':'autorig-fitted-transform-contract.v1','source_armature_name':rig.armature_name,'source_armature_world_matrix':flatten_matrix(rig.armature_world),'root_local_matrix_space':'WORLD','child_local_matrix_space':'PARENT_BONE','rotation_channel':'QUATERNION','scale_animation':False,'translation_policy':{'mode':'root_only','bones':[n for n in rig.bone_order if rig.bones[n].parent is None]}},'active_bones':variables,'degrees_of_freedom':dofs,'config':{'engineering_search_options':opt,'profile_sha256':sha(paths['profile']),'constraints_sha256':sha(paths['constraints']),'contact_evidence_sha256':sha(paths['contact_evidence']),'surface_anchors_sha256':sha(paths['surface_anchors']),'sole_sets':sole_sets,'ground_plane':{'normal':up.tolist(),'height':rig.ground_height,'provenance':'SOURCE_GEOMETRY_PLANE_CANDIDATE','video_ground_observed':False},'anatomical_limits_claimed':False},'optimizer':{'kind':'bounded_window_scipy_least_squares','farm_identity':farm_identity,'window_frames':W,'observed_frames':keys,'inferred_frames':[i for i,x in enumerate(provenance) if x!='SOURCE_PLANE_OBSERVED'],'source_height':height,'residual_metric':'hoof/joint/torso/sole physics in immutable bundle world and source-height units','root_translation_enabled':root_enabled,'root_rotation_enabled':False,'elapsed_seconds':time.monotonic()-began,'measurement_coverage':coverage},'qa':{'decision':None,'animation_quality_approved':False,'assumptions':c.get('assumptions'),'pending':sorted(set(c.get('pending') or [])|set(contact.get('pending') or [])|({'four_leg_measured_gait_not_demonstrated'} if coverage['four_leg_toe_observed_frames']==0 else set())|{'SOURCE_GEOMETRY_PLANE_CANDIDATE','real_post_retarget_3d_QA'})},'frames':frames}
+ output={'schema':'autorig-fitted-animation.v1','state':'walk_engineering_candidate_not_accepted','rig_bundle':{'path':str(rig.metadata_path),'sha256':rig.metadata_sha256},'observations':{'path':str(paths['constraints']),'sha256':sha(paths['constraints']),'provenance':c.get('provenance')},'frame_count':frame_count,'fps':fps,'duration_seconds':(frame_count-1)/fps,'loop':bool(a.get('loop')),'transform_contract':{'schema':'autorig-fitted-transform-contract.v1','source_armature_name':rig.armature_name,'source_armature_world_matrix':flatten_matrix(rig.armature_world),'root_local_matrix_space':'WORLD','child_local_matrix_space':'PARENT_BONE','rotation_channel':'QUATERNION','scale_animation':False,'translation_policy':{'mode':'root_only','bones':[n for n in rig.bone_order if rig.bones[n].parent is None]}},'active_bones':variables,'degrees_of_freedom':dofs,'config':{'engineering_search_options':opt,'profile_sha256':sha(paths['profile']),'solver_control_profile_sha256':solver_profile_sha,'constraints_sha256':sha(paths['constraints']),'contact_evidence_sha256':sha(paths['contact_evidence']),'surface_anchors_sha256':sha(paths['surface_anchors']),'sole_sets':sole_sets,'ground_plane':{'normal':up.tolist(),'height':rig.ground_height,'provenance':'SOURCE_GEOMETRY_PLANE_CANDIDATE','video_ground_observed':False},'anatomical_limits_claimed':False},'optimizer':{'kind':'bounded_window_scipy_least_squares','farm_identity':farm_identity,'window_frames':W,'observed_frames':keys,'inferred_frames':[i for i,x in enumerate(provenance) if x!='SOURCE_PLANE_OBSERVED'],'source_height':height,'residual_metric':'hoof/joint/torso/sole physics in immutable bundle world and source-height units','root_translation_enabled':root_enabled,'root_rotation_enabled':False,'elapsed_seconds':time.monotonic()-began,'measurement_coverage':coverage},'qa':{'decision':None,'animation_quality_approved':False,'assumptions':c.get('assumptions'),'pending':sorted(set(c.get('pending') or [])|set(contact.get('pending') or [])|({'four_leg_measured_gait_not_demonstrated'} if coverage['four_leg_toe_observed_frames']==0 else set())|{'SOURCE_GEOMETRY_PLANE_CANDIDATE','real_post_retarget_3d_QA'})},'frames':frames}
  atomic(pathlib.Path(job['output']),output)
 def main():
  ap=argparse.ArgumentParser(); ap.add_argument('--job',type=pathlib.Path); ap.add_argument('--execute',action='store_true'); ap.add_argument('--options-get',action='store_true'); ap.add_argument('--describe',action='store_true'); args=ap.parse_args()

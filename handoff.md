@@ -3169,8 +3169,14 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   PhysicsFAIL ужевsource: penetration7.5–9%H/slide. Главная причина неподвижнойRF: fitterигнорировал12реальных
   limbtracks; послеf55 Toe0/86confident, Foot64/86, Leg86/86, Up86/86. Теперь каждуюногу fit-им по еёсобственным
   Foot/Leg/Up данным; hiddenToePENDING, безmirroring/придуманныхphase observations.
-- F15CPU `jobs/zebra-walk-plane-fit-v4` активен, localexecsession70292; codeSHA2f2313231fb6….
-  bounded900s sparsewindows, geometryplaneCANDIDATE/неvideoGround; checkpoints послеокон. Supersededv3
+- F15CPU `jobs/zebra-walk-plane-fit-v5` завершён ERRORwindow35–40:max_nfev250; codeSHAba2bb86cef5b….
+  bounded900s sparsewindows, geometryplaneCANDIDATE/неvideoGround; сохранён f0–34prefix с точнымvariableorder.
+  НетактивногоCPUfit/GPUjob; продолжатьтолько explicitSHA-boundresume, не весьисточниксначала. Supersededv3
   остановлен ссохранениемf19prefix. Не дублироватьCPU/GPU jobs. Далееactualexport/retarget/LBS+freshUnityverdict.
-- F15production107+27=134contracttestsPASS; НЕmodelacceptance. `equine-constraint-fit` в/dev/tools,
+- F15production107+28=135contracttestsPASS; НЕmodelacceptance. `equine-constraint-fit` в/dev/tools,
   executeguardactualfarmbox, VPSoptions/preflightonly. Full34/library/customerpath всёещёНЕактивированы.
+
+- Продолжение19:55UTC: v6explicitresume изverifiedf0–34prefixv5; originalobjectiveprofileSHAсохранён,
+  solver-onlyprofile max500/tols1e-6/budget900, QualityQAthresholdsНЕменялись. F15jobs/zebra-walk-plane-fit-v6,
+  localexecsession16475АКТИВЕН; window35–40PASS68.8s/кframe45за94.64s. 107+30=137farmcontractPASS.
+  CodeSHA89bab96683e9…; дальшеactualBlender/GLTF/retarget/LBS+Unity/ownerverdict. Не дублироватьпроцесс.
