@@ -11,7 +11,7 @@ class DB:
     async def __aenter__(self): return self
     async def __aexit__(self,*args): pass
     async def execute(self,*args):
-        task=SimpleNamespace(owner_type='anon',content_rating='safe',guid=None,worker_api=None,
+        task=SimpleNamespace(owner_type='anon',status='needs_review',content_rating='safe',guid=None,worker_api=None,
             collection_title=None,collection_member_title=None,collection_index=None,collection_size=None,error_message='bind failed')
         return SimpleNamespace(scalar_one_or_none=lambda:task)
 
@@ -44,6 +44,7 @@ class TerminalDelivery(unittest.IsolatedAsyncioTestCase):
         await delivery.broadcast_task_done('fixture',extra_html='needs review: deformation')
         self.api.send_video.assert_awaited_once(); self.api.send_photo.assert_not_awaited(); self.api.send_message.assert_not_awaited()
         self.assertIn('needs review',self.api.send_video.call_args.kwargs['caption'])
+        self.assertNotIn('Task completed',self.api.send_video.call_args.kwargs['caption'])
         bot.mark_task_done_notification_sent.assert_awaited_once_with('fixture')
 
     async def test_poster_does_not_satisfy_video_only_completion(self):
@@ -61,6 +62,12 @@ class TerminalDelivery(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Task failed',self.api.send_message.call_args.kwargs['text'])
         self.assertNotIn('Task completed',self.api.send_message.call_args.kwargs['text'])
         self.api.send_video.assert_not_awaited()
+
+    async def test_failed_video_does_not_send_text_as_completion(self):
+        async def failed_video(factory,**kwargs): return None
+        with patch.object(bot,'_send_with_retry',new=failed_video): await delivery.broadcast_task_done('fixture')
+        self.api.send_message.assert_not_awaited(); self.api.send_photo.assert_not_awaited()
+        bot.mark_task_done_notification_sent.assert_not_awaited()
 
     async def test_missing_delivery_module_does_not_reserve_done(self):
         with patch.dict('sys.modules',{'telegram_task_completion':None}),patch.object(bot,'AsyncSessionLocal') as session:

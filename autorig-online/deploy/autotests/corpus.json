@@ -9452,6 +9452,32 @@
      }
     }
    ]
+  },
+  {
+   "id": "backend_terminal_notifications",
+   "task": null,
+   "cost": 1,
+   "defect": "V3 terminal callback removed by a Telegram edit; QA review tasks hidden in startup totals",
+   "checks": [
+    {
+     "id": "callbacks_and_review_counts",
+     "kind": "backend_unittests",
+     "paths": [
+      "backend"
+     ],
+     "params": {
+      "modules": [
+       "tests.test_telegram_task_completion"
+      ]
+     },
+     "thresholds": {
+      "exit": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
   }
  ]
 }

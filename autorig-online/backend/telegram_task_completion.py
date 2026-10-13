@@ -200,6 +200,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
     metrics_line = _api._format_task_metrics(await _api._task_telegram_metrics(task_id))
     owner_email = None
     content_rating = 'unknown'
+    task_state = None
     collection_title = None
     collection_member_title = None
     collection_index = None
@@ -210,6 +211,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
             result = await db.execute(select(Task).where(Task.id == task_id))
             task = result.scalar_one_or_none()
             if task:
+                task_state = getattr(task, 'status', None)
                 if task.owner_type == 'user':
                     owner_email = task.owner_id
                 cr = getattr(task, 'content_rating', None)
@@ -241,7 +243,8 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
         done_parts.append(f'⏱ {html.escape(dur)}')
     done_parts.extend(timing_parts)
     done_parts.append(html.escape(metrics_line))
-    text = f'✅ <b>Task completed</b>\n{rating_line}\n' + ' | '.join(done_parts)
+    heading = '🟡 <b>Task needs review</b>' if task_state == 'needs_review' else '✅ <b>Task completed</b>'
+    text = heading + f'\n{rating_line}\n' + ' | '.join(done_parts)
     if collection_title:
         text += f'\n🧩 <b>{html.escape(str(collection_title)[:160])}</b> · {int(collection_index or 0)}/{int(collection_size or 0)}'
         if collection_member_title:
@@ -341,8 +344,8 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
                 return _inner()
             result = await _api._send_with_retry(_send, retry_network=False)
             if result is None:
-                print(f'[Telegram] send_video failed for chat={chat_id}, task={task_id}; sending text fallback')
-                return await _api._send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML, disable_web_page_preview=False, reply_markup=generate_markup, reply_to_message_id=rt, allow_sending_without_reply=True), retry_network=False)
+                print(f'[Telegram] send_video failed for chat={chat_id}, task={task_id}; video-only delivery remains pending')
+                return None
             return result
     results = await asyncio.gather(*[_one(cid) for cid in chat_ids])
     sent_count = sum((1 for r in results if r is not None))
