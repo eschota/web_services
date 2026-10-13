@@ -1,0 +1,21 @@
+{
+  "schema": "autorig.equine-actionless-farm-job/1",
+  "state": "prepared_not_dispatched",
+  "target": "f15",
+  "work_root": "<MT_ROOT>/.work/equine-fitting/zebra-<source_sha12>",
+  "requirements": {
+    "blender": "C:\\Program Files\\Blender Foundation\\Blender 4.3\\blender.exe (fleet reports 4.3.2)",
+    "gpu": false,
+    "network": false,
+    "maximum_bundle_bytes": 67108864
+  },
+  "inputs": {
+    "source_glb": "exact active c5 source GLB; source-preparation only",
+    "rig_json": "matching active c5 rig.json; root supplies exact run after current rerig",
+    "code_zip": ".work/equine-fitting-code-a710c7c7-v4.zip",
+    "code_zip_sha256": "40e674051f5605d1b25d4f8ad03c1aa3ff412046985ef4e9c94c23c99db1f812"
+  },
+  "command": "farm_actionless_job.ps1 -CodeZip ... -CodeZipSha256 40e674051f5605d1b25d4f8ad03c1aa3ff412046985ef4e9c94c23c99db1f812 -Blender 'C:\\Program Files\\Blender Foundation\\Blender 4.3\\blender.exe' -PythonExe <adjacent-console-python.exe> -SourceGlb <active-c5-source> -RigJson <matching-current-c5-rig> -TaskId <c5-task-uuid> -RunId <current-c5-run> -WorkRoot ...",
+  "outputs": ["actionless-bundle/immutable_manifest.json", "tracker-anchor-map.json", "result.json"],
+  "publication": "none; smoke evidence only until owner and registry gates accept it"
+}

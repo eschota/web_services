@@ -3081,3 +3081,34 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   `<clip>.seed<N>.json` и выбирает лучший — раньше последний сид затирал лучший.
 - Ловушка шаблона цепочек: rel без изменений (animpick уже на проде) → `no change` и выход; патч-скрипт теперь
   пропускает отсутствующий файл, а rel не перечисляем. MT `834940a`+v3, web `7b4bee81`+.
+
+## Копытные · полный игровой набор и отдельная DEV-валидация (2026-10-13, Codex «Найди handoff по V3»)
+
+- Прямой заказ владельца: все новые копытные автоматически получают полный принятый набор; тестировать существующие
+  задачи сервера и валидировать КАЖДУЮ отдельно через DEV. В чате подтверждён полный игровой набор с атаками,
+  реакциями на удар, падением, смертью и подъёмом: `animal-base-30-v1` + canter/start/rear/tail = **34**, не 14.
+- Собственный checkpoint: `autorig-online/docs/equine-animation-validation.md`; новые изолированные инструменты
+  `autorig-online/deploy/equines/`: immutable per-family registry с отдельными DEV-вердиктами на exact task/rig/media,
+  3D retarget с сохранением target hierarchy/geometry/weights, physical/contact QA, read-only GLB/LBS sampler,
+  adapter для source-bound fitting bundle. Они **ещё не смонтированы в customer rig path** и не доказывают готовую библиотеку.
+- Проверки на VPS `.work/equines-20261013/tools`: registry 14 PASS, retarget 10 PASS, contact QA 24 PASS, sampler 3 PASS
+  (последний sampler options/axes patch требует повторной проверки). Это fixture/contract tests, НЕ acceptance моделей.
+- DEV 7123 uid `72c401c9d051`: реальные 9 s/60 fps Unity на f1, Walk зебры d3d37033 (active c5ff…, rig .7;
+  server .8), scope BEFORE only. Владелец, inbox2455 13:11:35 UTC: «это полностью некорректная ходьба или анимация.»
+  **ОТКЛОНЕНО**. Фиксировать в semantic-motion regression; source `ace8a3c0…`, видео/ответ/GLB sample в локальной
+  `.work/equines-20261013/` и VPS project `.work/equines-20261013/tools/`. Не считать deformation 10/10 правильной походкой.
+- Read-only actual sample Walk: 89 кадров/1.4583 s; contact events LH/LF/RH/RF = 3/10/7/7; min height относительно
+  bind/rest sole = -3.2..-6.0 % H. Ground inferred, video identity unknown; QA **PENDING/FAIL**, это диагностика,
+  не подтверждённый world-space gait. Не спрятать penetration сменой ground по анимированному минимуму.
+- Source-prep F15: old Blender4.3 exporter code-only subset v4 ZIP SHA `40e67405…`; активный job `9a8efced5a4c4956a6fc`.
+  Предыдущие jobs `777478…` (pythonw subprocess) и `62d942…` (missing package dependency) FAIL; сохранены, не evidence.
+  Anchors используют Blender-world ground normal, не смешивать Z-up bundle с Y-up GLTF. `e8ad0ca…` на сервере
+  оказался старым rig `v3.2026-10-12.2`, НЕ current .8. Сверять реальную task binding прежде каждого job.
+- Имеющиеся TAPNext++/SAM2/VDA-small transferred в managed F15 `C:/ProgramData/AutoRig/equine-fitting`;
+  НОВЫЕ model weights не скачивались; owner4090 GPU не запускался. Отдельный Python3.10 runtime/deps устанавливается
+  (SSH exec session `36439`; первый install FAIL из-за старого pip, исправлен process-local pip25.2/bootstrap).
+  Ни один inference GPU job ещё не запускался; проверить checkpoint/repo/license hashes прежде работы.
+- Дальше: дождаться реального actionless export, подготовить измеренные 3D observations и run-scoped joint-limit
+  candidate (не выдавать за исходные constraints или accepted category default), fit/retarget корректный Walk и сравнить
+  same-task metrics/Unity media до-после. Затем полный 34-action corpus per-family; owner receipt на каждую задачу;
+  только после всех PASS/accept продвигать atomic family pointer и подключать новый полный набор входящим задачам.
