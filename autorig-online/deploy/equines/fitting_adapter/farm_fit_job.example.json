@@ -11,6 +11,8 @@
   "fit_config": {"path": "<supported-fitting-config.json>", "sha256": "<sha256>"},
   "action_contract": {"path": "<full34-action-contract.json>", "sha256": "<sha256>"},
   "contact_profile": {"path": "<action-contact-profile.json>", "sha256": "<sha256>"},
+  "existing_observations": {"path": "<optional accepted observations.json; omit to track>", "sha256": "<sha256>"},
+  "existing_observation_manifest": {"path": "<required with existing observations>/observation_bundle_manifest.json", "sha256": "<sha256>"},
   "runtime_lock": {"path": "<runtime-lock.v1.json>", "sha256": "<sha256>"},
   "runtime_repos": {
     "tapnet": {"path": "<tapnet>", "commit": "<commit>", "license": "LICENSE", "license_sha256": "<sha256>"},

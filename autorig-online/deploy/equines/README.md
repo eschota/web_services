@@ -114,3 +114,41 @@ and the single root as `hips_translation`, matching the current
 rest error, bone lengths before/after, root travel, height/ground calibration,
 and named ranged options. `retarget_library` is atomic: it returns only after
 every required action succeeds.
+
+## Actual glTF source and derived target GLB
+
+`equine_gltf_retarget.py` adapts the exact
+`autorig.registry34.gltf-source-motion/1` document emitted by
+`fitting_adapter/farm_export_fitted.py`. It accepts the exporter’s actual node
+hierarchy, local TRS channels and accessor samples. A separate reviewed
+`autorig.hoof-source-calibration.v1` document maps every retained source node
+to a target bone and supplies measured model-space head/tail points, height,
+ground baseline and forward axis. Nothing is inferred from Blender axes.
+Non-retained Armature/ancestor nodes are not discarded: their exact static TRS
+chain is composed into both the retained rest transform and every animated
+sample, expressed locally to the nearest retained parent. Singular, reflected,
+or shear-producing compositions fail closed; composed model translations are
+never mislabeled as child-local values.
+
+Single-action engineering candidates such as the accepted zebra Walk may be
+adapted and materialized independently. They remain `candidate_not_release`;
+only `retarget_library` with the exact full-34 input may represent complete
+library coverage.
+
+Python integration:
+
+```python
+entry, bone_map = equine_gltf_retarget.adapt_source_motion(source_motion, calibration)
+receipt = equine_gltf_retarget.write_retargeted_glb(
+    existing_target_glb, fresh_derived_glb, entry, target_rig_json, bone_map
+)
+```
+
+The target must use explicit node TRS, exact rig hierarchy and static nonzero
+node scales. Matrix fallback, source scale/morph channels, sparse source
+animation accessors, missing mappings and nonuniform channel timing fail
+closed. A target containing old animations is rejected by default; the runtime
+does not activate customer/custom animation paths. The writer creates a new
+GLB plus `.receipt.json`, leaves the input untouched, preserves protected JSON
+objects and the original BIN as an exact prefix, then records before/after
+SHA-256 values. Publication and default-library activation remain separate.

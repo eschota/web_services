@@ -34,7 +34,10 @@ prepared, undispatched job specification.
 `joint_limit_candidate.py` is the next-phase declaration gate. It accepts only
 an explicitly authored, source/rig-hash-bound, run-scoped candidate with exact
 bone axes and ranged regularization options. It does not infer constraints and
-cannot approve or promote a category default.
+cannot approve or promote a category default. Use
+`python joint_limit_candidate.py --options-get` for the exact current
+`FittingConfig` field names, defaults and public ranges. Legacy
+`joint_limit_weight` / `temporal_weight` / `jerk_weight` profiles are rejected.
 
 `build_runtime_bundle.py` packages the full Python runtime source, schemas,
 semantic configurations and runtime lock without models or customer data.
@@ -46,6 +49,15 @@ Blender-space local channels cannot be called registry34/glTF +Y until the
 fitted source is applied and exported through Blender, then re-read in glTF
 bases. It never writes the canonical library or sends DEV media. See
 `farm_fit_job.example.json` for every required public option and proof.
+
+When `existing_observations` and `existing_observation_manifest` are supplied,
+preflight verifies every observation artifact, accepted diagnostics, exact
+video/original-bundle identity, calibrated camera-Z evidence and all required
+anchors. `--execute` then skips tracking, records an explicit binding from the
+original calibrated bundle to the private joint-limit-only bundle, and fits
+the existing observations. Joint-profile optimizer overrides must use exact
+`FittingConfig` field names; legacy generic regularization names fail instead
+of being silently ignored. `allow_unbounded_joints` always remains false.
 
 `build_motion_export_bundle.py` creates the minimal Blender 4.3 subset for the
 existing `apply_fitted_motion.py`. `farm_export_fitted.py` is preflight-only by

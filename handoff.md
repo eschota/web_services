@@ -3132,3 +3132,26 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   Full34 library и customerpath НЕ активированы; инструменты продолжают готовиться и проверяться на ферме.
 - ActualF15firstframegeometrypreflight: correlation0.825949 >=0.65; видео141decodedframes768x448.
   НикакойGPUinference вpreflight; этоalignment, НЕwalkQA. DEVdiagnosticCLIнаrejectedsampleвернулpassfalse/PENDING.
+
+### Срочный разбор завершения задач · 2026-10-13 17:00 UTC
+
+- По скриншоту владельца проверены все5задач: outputs3/3, state `needs_review`, реальный numeric deformation FAIL;
+  не висят вprocessing. Статистика бота раньше скрывала239needs_review.
+- Найден live-патч с повреждённойграницей функций Telegram: completion body попалвerrorfunction,
+  `broadcast_task_done`+helpers отсутствовали. NameError был ДОперезапуска15:57.
+- Исправлено и задеплоено: isolated telegram_task_completion.py, forwarders, needs_reviewвстатистике,
+  yellow review outcome вместо ложного completed, video-onlypolicy сохранена. Production7testsPASS;
+  backend/base8checksPASS+новый corpuscase backend_terminal_notifications.
+- Active at deploy `live-20261013e-postfooter-qa-label`; storagePID4018299, MTPID2628551безрестарта.
+  Renderfin resume dryrun+actualqueues проверены; legacywipeflag1 НЕ менялся, effectivepolicyresume по livecode.
+- Подробный checkpoint `autorig-online/docs/v3-task-completion-20261013.md`; read-only5runtriage в
+  `.work/task-completion-20261013/mt-five-run-triage.md`. Needsreviewриг ещёнеисправлен; source/dataсохранены.
+- DEV7155/media74052a74754d — текущийпроблемныйdrZomboss diagnostic-only, НЕ исправленный результат/acceptance.
+  Восстановленные функции проверены на realtask сstubbednetwork/writes; старыеnotifsвдругиечаты вручнуюнеповторялись.
+- Общаяпричина5rigQAотказов уточнена: geometric ownership привязываетчасти корпусаккостямног;
+  bindidentityнеобщаяпричина, UValiasрасхожденияусиливают4модели, ноTendenz(alias0) тоже89–180xstretch.
+  Аудит `.work/task-completion-20261013/common-skin-cause.md`, существующийконтекстFable/monsters/animals.
+- Анимациикопытных: actualTAP/SAM/VDA v5 выполнились178.7s, ноcameraZFAILp95~19.5%H; thresholdsНЕослаблялись.
+  v6уступилновомуcustomerRenderдоinference. НетактивногоobservationGPUjob. v7preparedНЕenqueued;
+  далееrawcapture/reuse+source-planeconstraintcandidate, послепроверкиfleet/jobs бездубликатов.
+  28productionlabtestsPASS, actualF15boundedBundleloaderPASS/originalunchanged; этоНЕacceptance.

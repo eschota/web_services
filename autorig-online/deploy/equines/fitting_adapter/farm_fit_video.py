@@ -9,6 +9,7 @@ import argparse, hashlib, json, math, os, subprocess, sys, time
 from pathlib import Path
 
 JOB='autorig.equine-farm-fit-job/1'; OUT='autorig.registry34.source-motion-candidate/1'
+FIT_FIELDS={'reprojection_weight','depth_weight','silhouette_weight','joint_rest_weight','joint_velocity_weight','joint_acceleration_weight','root_velocity_weight','root_acceleration_weight','contact_height_weight','contact_slide_weight','loop_pose_weight','loop_velocity_weight','robust_loss','f_scale','max_nfev','max_variables','allow_unbounded_joints','active_bones'}
 def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 def rd(p):
     v=json.loads(Path(p).read_text(encoding='utf-8'))
@@ -55,6 +56,50 @@ def preflight(job):
     for name,row in repos.items(): repo_pin(row,f'runtime_repo:{name}')
     for name,row in models.items(): pin(row,f'checkpoint:{name}')
     return paths,bundle,anchors,profile,action
+def existing_observations(job,paths,bundle,anchors):
+    row=job.get('existing_observations')
+    if row is None: return None
+    obs=pin(row,'existing_observations'); manifest=pin(job['existing_observation_manifest'],'existing_observation_manifest'); root=manifest.parent; md=rd(manifest)
+    if md.get('schema')!='autorig-tracking-observation-bundle.v1': raise ValueError('unsupported observation manifest schema')
+    covered=set()
+    for item in md.get('files') or []:
+        rel=Path(item.get('path',''))
+        if rel.is_absolute() or '..' in rel.parts: raise ValueError('observation manifest path escapes bundle')
+        p=(root/rel).resolve()
+        if root.resolve() not in p.parents or not p.is_file() or p.stat().st_size!=item.get('bytes') or sha(p)!=item.get('sha256'): raise ValueError(f'observation artifact mismatch: {rel}')
+        covered.add(rel.as_posix())
+    if obs.resolve().parent!=root.resolve() or obs.name not in covered or 'diagnostics.json' not in covered: raise ValueError('observation manifest does not cover observations/diagnostics')
+    payload=rd(obs); diagnostics=rd(root/'diagnostics.json'); prov=payload.get('provenance') or {}; bundle_meta=rd(bundle/'fitting_bundle.json')
+    if diagnostics.get('decision')!='accepted_observations' or diagnostics.get('animation_quality_approved') is not False: raise ValueError('observations diagnostics are not accepted non-animation-QA evidence')
+    if prov.get('source_video_sha256')!=sha(paths['video']): raise ValueError('observations video SHA mismatch')
+    if prov.get('bundle_sha256')!=sha(bundle/'fitting_bundle.json') or prov.get('immutable_manifest_sha256')!=sha(bundle/'immutable_manifest.json'): raise ValueError('observations original bundle identity mismatch')
+    if prov.get('relative_depth_contract')!='calibrated_to_camera_z_from_immutable_actionless_reference' or not isinstance(prov.get('camera_z_calibration'),dict): raise ValueError('observations lack valid camera-Z calibration evidence')
+    depth=payload.get('depth') or []
+    if not depth or any(x.get('mode')!='camera_z' for x in depth): raise ValueError('observations do not expose calibrated camera_z frames')
+    required={x['anchor_id'] for x in anchors['tracks']}; observed={x.get('anchor_id') for x in payload.get('tracks') or []}
+    if not required<=observed: raise ValueError(f'observations miss required anchors: {sorted(required-observed)}')
+    return obs
+def merged_fit_config(paths,profile,work):
+    base=rd(paths['fit_config'])
+    if base.get('schema')!='autorig-fitting-config.v1': raise ValueError('fit config schema mismatch')
+    unknown=set(base)-({'schema'}|FIT_FIELDS)
+    if unknown: raise ValueError(f'unsupported fit config fields: {sorted(unknown)}')
+    overrides=profile.get('fitting_config_overrides')
+    if overrides is None:
+        if profile.get('regularization'): raise ValueError('legacy joint_profile.regularization names do not map to FittingConfig; provide exact fitting_config_overrides')
+        overrides={}
+    if not isinstance(overrides,dict) or set(overrides)-FIT_FIELDS: raise ValueError(f'unknown joint profile FittingConfig fields: {sorted(set(overrides or {})-FIT_FIELDS)}')
+    merged={**base,**overrides,'schema':'autorig-fitting-config.v1'}
+    if merged.get('allow_unbounded_joints') is not False: raise ValueError('allow_unbounded_joints must remain false')
+    for name,value in merged.items():
+        if name.endswith('_weight') and (isinstance(value,bool) or not math.isfinite(float(value)) or float(value)<0): raise ValueError(f'{name} must be finite and non-negative')
+    if merged.get('robust_loss') not in {'linear','soft_l1','huber','cauchy','arctan'}: raise ValueError('unsupported robust_loss')
+    if not math.isfinite(float(merged.get('f_scale',0))) or float(merged.get('f_scale',0))<=0: raise ValueError('f_scale must be finite positive')
+    for name in ('max_nfev','max_variables'):
+        if isinstance(merged.get(name),bool) or not isinstance(merged.get(name),int) or merged[name]<=0: raise ValueError(f'{name} must be positive integer')
+    active=merged.get('active_bones')
+    if active is not None and (not isinstance(active,list) or any(not isinstance(x,str) or not x for x in active) or len(active)!=len(set(active))): raise ValueError('active_bones must be unique strings or null')
+    atomic(work/'effective-fit-config.json',merged); return work/'effective-fit-config.json'
 def materialize_bundle(source,profile,work):
     # Exact supported path: old optimizer reads LIMIT_ROTATION only from skeleton.json.
     import shutil
@@ -70,17 +115,25 @@ def materialize_bundle(source,profile,work):
     manifest=rd(out/'immutable_manifest.json')
     for row in manifest['files']:
         p=out/row['filename']; row.update(sha256=sha(p),bytes=p.stat().st_size)
+    manifest['bundle_manifest']={'filename':'fitting_bundle.json','sha256':sha(out/'fitting_bundle.json'),'bytes':(out/'fitting_bundle.json').stat().st_size}
+    manifest['bundle_file_count']=len(manifest['files'])
+    manifest['bundle_total_bytes']=sum(row['bytes'] for row in manifest['files'])
     atomic(out/'immutable_manifest.json',manifest); return out
 def execute(job,paths,bundle,anchors,profile,action,work):
-    python=Path(job['python']).resolve(); runtime=Path(job['runtime_root']).resolve(); contact=pin(job['contact_profile'],'contact_profile')
-    bounded=materialize_bundle(bundle,profile,work); obsdir=work/'observations'; fitted=work/'fitted-animation.json'
-    cmd=[python,'-m','animation_fitting.tracking_runtime','--runtime-root',runtime,'--runtime-lock',paths['runtime_lock'],'observe','--video',paths['video'],'--bundle',bounded,'--output-dir',obsdir,'--device','cuda','--with-depth','--contact-profile',contact]
-    for row in anchors['tracks']: cmd += ['--priority-anchor-id',row['anchor_id']]
-    if action['loop']: cmd+=['--loop']
-    run(cmd,work,'observe')
-    observations=obsdir/'observations.json'
-    if not observations.is_file(): raise RuntimeError('runtime produced no observations.json')
-    fit=[python,'-m','animation_fitting','fit','--bundle',bounded,'--observations',observations,'--config',paths['fit_config'],'--output',fitted,'--loop' if action['loop'] else '--one-shot']
+    python=Path(job['python']).resolve(); runtime=Path(job['runtime_root']).resolve()
+    observations=existing_observations(job,paths,bundle,anchors)
+    bounded=materialize_bundle(bundle,profile,work); fitted=work/'fitted-animation.json'; config=merged_fit_config(paths,profile,work)
+    if observations is None:
+        contact=pin(job['contact_profile'],'contact_profile')
+        obsdir=work/'observations'; cmd=[python,'-m','animation_fitting.tracking_runtime','--runtime-root',runtime,'--runtime-lock',paths['runtime_lock'],'observe','--video',paths['video'],'--bundle',bundle,'--output-dir',obsdir,'--device','cuda','--with-depth','--contact-profile',contact]
+        for row in anchors['tracks']: cmd += ['--priority-anchor-id',row['anchor_id']]
+        if action['loop']: cmd+=['--loop']
+        run(cmd,work,'observe'); observations=obsdir/'observations.json'
+        if not observations.is_file(): raise RuntimeError('runtime produced no observations.json')
+    else:
+        atomic(work/'observations-binding.json',{'schema':'autorig.equine-existing-observations-binding/1','observations_sha256':sha(observations),'original_bundle_sha256':sha(bundle/'fitting_bundle.json'),'original_manifest_sha256':sha(bundle/'immutable_manifest.json'),'bounded_bundle_sha256':sha(bounded/'fitting_bundle.json'),'calibration_artifacts_unchanged':True,'change':'joint limits added to private skeleton only'})
+        progress(work,'observe','reused',str(observations))
+    fit=[python,'-m','animation_fitting','fit','--bundle',bounded,'--observations',observations,'--config',config,'--output',fitted,'--loop' if action['loop'] else '--one-shot']
     run(fit,work,'fit'); progress(work,'qa','pending','external real QA receipt required before finalize'); return fitted
 def normalize_quaternion(q):
     n=math.sqrt(sum(float(x)*float(x) for x in q))
@@ -117,7 +170,10 @@ def finalize(job,paths,action,work):
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--job',required=True,type=Path); ap.add_argument('--execute',action='store_true'); ap.add_argument('--finalize',action='store_true'); a=ap.parse_args(); job=rd(a.job); work=Path(job['work_root']).resolve(); work.mkdir(parents=True,exist_ok=True)
     try:
-        paths,bundle,anchors,profile,action=preflight(job); progress(work,'preflight','done')
+        paths,bundle,anchors,profile,action=preflight(job)
+        if job.get('existing_observations') is not None: existing_observations(job,paths,bundle,anchors)
+        merged_fit_config(paths,profile,work)
+        progress(work,'preflight','done')
         if not a.execute and not a.finalize: print(json.dumps({'state':'preflight_pass','next':'execute_opt_in'},indent=2)); return 0
         if a.execute: execute(job,paths,bundle,anchors,profile,action,work)
         if a.finalize: finalize(job,paths,action,work)

@@ -167,3 +167,37 @@ unpromoted and customer-path integration remains pending.
 - Installed DEV CLI evaluated the preserved rejected Walk sample as
   `pass=false`, evidence/action gates `PENDING`. It did not turn fixture PASS
   into animation acceptance.
+
+## Observation and integration checkpoint, 2026-10-13 17:05 UTC
+
+- v4 `afb07ebb5a3f459d86f1` reached an idle F15 but refused the 6,144 MiB
+  trial with 4,873 MiB free. v5 `3aad50ce8af140b59391` actually completed
+  TAPNext++ tracking, SAM2 masks and VDA-small inference in 178.7 s. Peak CUDA
+  allocated 4,093.28 MiB, reserved 5,186 MiB. This is measured source-job cost,
+  not a customer rig latency or a general memory guarantee.
+- v5 calibration **FAIL**: absolute Spearman 0.60206; median error 2.71% H;
+  p95 error 19.51% H. The camera-Z thresholds were not relaxed and this was not
+  declared valid 3D observations. The old runtime wrote raw arrays only after
+  calibration PASS, so those completed model outputs were not retained.
+- v6 `a62874c4ba944b839f2f` yielded before inference when a customer render
+  arrived during the idle-cache admission check. All observation jobs are now
+  terminal; no observation GPU job is running.
+- Raw measurement preservation/reuse and a customer-priority GPU watchdog are
+  prepared. The watchdog terminates only its own actor, verifies its PID before
+  releasing its lease, and retains completed stages. Raw measurements remain
+  explicitly uncalibrated/unapproved. Candidate v7 spec is prepared in project
+  `.work`, **not enqueued**; check actual jobs and farm state before dispatch.
+- Added strict observed-3D adapter, source sagittal-limb constraints, and actual
+  derived-GLB writer. Sagittal constraints are candidate assumptions for linear
+  locomotion; hidden frames are not synthesized, and no ground/camera confidence
+  or accepted depth is invented. Turns/combat are outside that adapter's scope.
+- Production lab suites: 28 tests PASS, plus Python compilation checks. Actual
+  F15 immutable bounded-bundle loader smoke PASS (32 bones), originals unchanged.
+  The limits in that smoke were tool-test values, not anatomical/default approval.
+- Source glTF ancestor TRS is composed before retargeting; the writer preserves
+  protected target structures and original BIN prefix. Real fitted/exported Walk
+  and per-task Unity QA remain outstanding; these tools are not customer-mounted.
+- Work was interrupted by the owner's customer task incident. See
+  `v3-task-completion-20261013.md`: Telegram callbacks/statistics repaired in
+  production, but the five customer rigs still need their genuine skin defects
+  repaired. Diagnostic media 7155 does not approve a rig or the equid library.
