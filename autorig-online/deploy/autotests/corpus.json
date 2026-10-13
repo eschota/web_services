@@ -8076,10 +8076,10 @@
      "thresholds": {
       "leg_outside_samples": [
        "<=",
-       27
+       25
       ]
      },
-     "note": "rig_first path 2026-10-13: hind legs 32 -> 26 samples outside (mirror_repair v2); the hock is still not a joint"
+     "note": "rig_first path: 32 -> 26 (mirror_repair v2) -> 24 (leg_recentre_pairs, 2026-10-13); farm build 21 -> 16"
     }
    ]
   },
