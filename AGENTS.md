@@ -475,6 +475,41 @@ Owner rule, 2026-10-10:
 * **Example, task 583622f3** (the «potato»): only `dpgoe.obj` was uploaded.
   It has UVs and `usemtl Apotat0o1Mtl`, but no .mtl and no images.
 
+## A Conveyor, Not One-Offs (owner order, 2026-10-13)
+
+> у лошадей надо делать анимации а не швами заниматься … нужно чтобы агент
+> научился генерировать правильные видео ролики референсы и переносить
+> анимацию с них на лошадей. но так чтобы это делалось уже автоматически
+> ретаргетингом для всех категорий этого типа. а не разово, мы делаем
+> конвеерное производство ригов и анимаций, все этапы должны автономно
+> работать в движке, а не улучшать одну конкретную модель и анимировать
+
+* **The product is the conveyor.** Every stage runs autonomously in the
+  engine for every model of a category: plan, fit, skin, clips, retarget, QA,
+  preview.
+  * A fix is done only when it works for the whole category.
+  * Hand-tuning, re-animating or hand-picking clips for one task is not a
+    fix. A task is the test case, the engine is the deliverable.
+* **Animations come from generated reference videos.**
+  * For each category (horse and other equines, quadrupeds, birds, monsters,
+    bipeds…) the engine keeps a library of correct reference videos of the
+    gaits and actions: walk, trot, canter, gallop, idle, rear, look around,
+    attack…
+  * The videos are generated on the farm with the approved video stack
+    (LTX-2.5/H3), quality-gated and stored once per category.
+  * The motion is extracted from them once, so the clips are reusable.
+  * Every new model of that category gets the clips by automatic retarget
+    onto its own rig, with numeric QA on each clip. Nobody animates a single
+    model by hand or per task.
+  * Procedural clips are only the fallback when the library has no clip
+    for the category.
+* **Priorities follow what the customer sees.** When the rig and the skin
+  are acceptable and the animation is not, the animation library and the
+  retarget come first; seam and edge polishing waits.
+* **Report per category, not per model:** clips passing QA across the
+  category's corpus set, plus GIFs of several different models playing the
+  same library clip.
+
 ## Customer Tasks First (owner order, 2026-10-11)
 
 > давай ка приоритет на авториг задачи сделаем … чо там всё висит то, компов же
