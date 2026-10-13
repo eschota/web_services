@@ -163,6 +163,9 @@ def detect_skirt(b, sk, w, o, hair=None, prop=None):
         for bn, nx in (("UpLeg", "Leg"), ("Leg", "Foot")):
             rr = np.minimum(rr, _seg(p, J[side + bn], J[side + nx]))
     inrows = band & (p[:, 1] >= hem_y - 0.02 * H) & (np.abs(xs) < 1.2 * sep + 0.15 * H)
+    arm = np.array([any(k in nm for k in ("Shoulder", "Arm", "Hand")) for nm in sk.names])[top]
+    inrows &= ~arm                                       # hands and sleeves hanging at hip height keep their arm
+    #                                                      weights (the chibi 2237e3e5: the Rig path's v2b lesson)
     outer = np.zeros(len(p), bool)
     for r_ in np.unique(rows[inrows]):
         m = inrows & (rows == r_)
