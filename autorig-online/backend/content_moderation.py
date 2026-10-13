@@ -16,6 +16,7 @@ import json
 import os
 import re
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -876,7 +877,34 @@ def build_free3d_similar_query(
     return q
 
 
+_POSTER_FAILS: Dict[str, Tuple[int, float]] = {}      # task id -> (failures, earliest next attempt, monotonic)
+POSTER_GIVE_UP_AFTER = 8
+
+
+def _poster_backoff_s(failures: int) -> float:
+    return min(60.0 * (2 ** max(0, failures - 1)), 6 * 3600.0)
+
+
+def _load_v3_run_image_bytes(task: Any) -> Optional[bytes]:
+    """The task's V3 run render, when the converter's own poster cannot be fetched."""
+    try:
+        from task_downloads_v3 import MT_ROOT, v3_run_of
+        run = v3_run_of(task)
+        if not run:
+            return None
+        for name in ("persp_lit.png", "front_lit.png", "persp_albedo.png"):
+            p = Path(MT_ROOT) / "runs" / run / "proj" / name
+            if p.is_file():
+                return p.read_bytes()
+    except Exception as e:
+        print(f"[ContentModeration] V3 run image load failed for task {task.id}: {e}")
+    return None
+
+
 async def _run_task_poster_classification_impl(task_id: str) -> None:
+    fails = _POSTER_FAILS.get(task_id)
+    if fails and time.monotonic() < fails[1]:
+        return                                              # in backoff: the recovery loop asks again later, cheaply
     async with AsyncSessionLocal() as db:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task:
@@ -905,29 +933,55 @@ async def _run_task_poster_classification_impl(task_id: str) -> None:
         version = f"{CONTENT_CLASSIFIER_VERSION}:preflight" if image_source == "preflight_render" else CONTENT_CLASSIFIER_VERSION
 
         if image_bytes is None and not poster_url:
+            image_bytes = _load_v3_run_image_bytes(task)
+            if image_bytes is not None:
+                image_source = "v3_render"
+                version = f"{CONTENT_CLASSIFIER_VERSION}:v3render"
+        if image_bytes is None and not poster_url:
+            n = _POSTER_FAILS.get(task_id, (0, 0.0))[0] + 1
+            _POSTER_FAILS[task_id] = (n, time.monotonic() + _poster_backoff_s(n))
             task.content_rating = "unknown"
             task.content_score = None
-            task.content_classified_at = None
-            task.content_classifier_version = _clip_classifier_version(f"{version}:poster_pending")
+            if n >= POSTER_GIVE_UP_AFTER:
+                task.content_classified_at = now
+                task.content_classifier_version = _clip_classifier_version(f"{version}:poster_unavailable")
+            else:
+                task.content_classified_at = None
+                task.content_classifier_version = _clip_classifier_version(f"{version}:poster_pending")
             task.updated_at = now
             await db.commit()
             return
 
         if image_bytes is None:
             try:
-                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                    resp = await client.get(poster_url)
+                from worker_transport import worker_http_client, worker_transport_url
+                async with worker_http_client(timeout=60.0, follow_redirects=True) as client:
+                    resp = await client.get(worker_transport_url(poster_url))   # the VPS tunnel, not the dead gateway
                     resp.raise_for_status()
                     image_bytes = resp.content
+                _POSTER_FAILS.pop(task_id, None)
             except Exception as e:
-                print(f"[ContentModeration] Poster fetch failed for task {task_id}: {e}")
-                task.content_rating = "unknown"
-                task.content_score = None
-                task.content_classified_at = None
-                task.content_classifier_version = _clip_classifier_version(f"{version}:poster_pending")
-                task.updated_at = now
-                await db.commit()
-                return
+                image_bytes = _load_v3_run_image_bytes(task)                    # the V3 render stands in for the poster
+                if image_bytes is not None:
+                    image_source = "v3_render"
+                    version = f"{CONTENT_CLASSIFIER_VERSION}:v3render"
+                    _POSTER_FAILS.pop(task_id, None)
+                else:
+                    n = _POSTER_FAILS.get(task_id, (0, 0.0))[0] + 1
+                    _POSTER_FAILS[task_id] = (n, time.monotonic() + _poster_backoff_s(n))
+                    if n <= 2 or n >= POSTER_GIVE_UP_AFTER:                     # a line per failure of a storm was the problem
+                        print(f"[ContentModeration] Poster fetch failed for task {task_id} (attempt {n}): {str(e)[:160]}")
+                    task.content_rating = "unknown"
+                    task.content_score = None
+                    if n >= POSTER_GIVE_UP_AFTER:
+                        task.content_classified_at = now
+                        task.content_classifier_version = _clip_classifier_version(f"{version}:poster_unavailable")
+                    else:
+                        task.content_classified_at = None
+                        task.content_classifier_version = _clip_classifier_version(f"{version}:poster_pending")
+                    task.updated_at = now
+                    await db.commit()
+                    return
 
         try:
             rating, score = await asyncio.to_thread(classify_image_bytes, image_bytes)
