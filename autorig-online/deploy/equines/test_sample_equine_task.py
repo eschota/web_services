@@ -13,8 +13,8 @@ def fixture(path, *, morph=False, omit=None):
     nodes = []
     positions = {
         "Hips": [0, 0, 0], "Head": [0, 2, 0], "Tail_End": [0, 1, -1],
-        "LeftFrontFoot": [-.5, 0, .8], "RightFrontFoot": [.5, 0, .8],
-        "LeftHindFoot": [-.5, 0, -.8], "RightHindFoot": [.5, 0, -.8],
+        "LeftFrontFoot": [.5, 0, .8], "RightFrontFoot": [-.5, 0, .8],
+        "LeftHindFoot": [.5, 0, -.8], "RightHindFoot": [-.5, 0, -.8],
     }
     for name in names:
         nodes.append({"name": name, "translation": positions.get(name, [0, 0, 0])})
@@ -33,7 +33,7 @@ def fixture(path, *, morph=False, omit=None):
         ibm.append(matrix.T.reshape(-1))
     times = np.asarray([0, 1], np.float32)
     hips = np.asarray([[0, 0, 0], [0, 0, .2]], np.float32)
-    lf = np.asarray([positions["LeftFrontFoot"], [-.5, -.5, .8]], np.float32)
+    lf = np.asarray([positions["LeftFrontFoot"], [.5, -.5, .8]], np.float32)
     arrays = [pos, joint, weight, np.asarray(ibm, np.float32), times, hips, lf]
     blob = bytearray(); views = []; accessors = []
     types = [(5126, "VEC3"), (5123, "VEC4"), (5126, "VEC4"), (5126, "MAT4"),
@@ -62,6 +62,7 @@ def fixture(path, *, morph=False, omit=None):
     raw += struct.pack("<II", len(js), 0x4E4F534A) + js
     raw += struct.pack("<II", len(blob), 0x004E4942) + blob
     path.write_bytes(raw)
+    (path.parent / "rig.json").write_text(json.dumps({"forward_axis": "+z"}))
 
 
 class SamplerTests(unittest.TestCase):
@@ -85,6 +86,10 @@ class SamplerTests(unittest.TestCase):
             self.assertEqual(result["sample"]["ground"]["inference"], "minimum selected bind/rest sole vertex Y")
             self.assertLess(result["sample"]["hooves"]["LF"]["positions"][-1][1], 0)
             self.assertIn("ground_plane_confidence", result["evaluation"]["pending"])
+            self.assertEqual(result["sample"]["axes"]["right"], [-1.0, 0.0, 0.0])
+            self.assertEqual(result["sample"]["axes"]["forward"], [0.0, 0.0, 1.0])
+            self.assertTrue(result["sample"]["axes"]["source_supported"])
+            self.assertEqual(result["sampling"]["options"]["min_chain_weight"]["value"], .7)
 
     def test_morph_and_missing_exact_chain_fail_closed(self):
         for kwargs, text in (({"morph": True}, "morph"), ({"omit": "RightHindToe_End"}, "required unique node")):
@@ -98,6 +103,22 @@ class SamplerTests(unittest.TestCase):
         middle = sampler.slerp(a, b, .5)
         self.assertAlmostEqual(float(np.linalg.norm(middle)), 1.0)
         self.assertAlmostEqual(abs(float(middle[1])), 2**-.5, places=6)
+
+    def test_options_are_documented_and_range_checked(self):
+        opts = sampler.options_get({"min_chain_weight": .8, "sole_band_height_ratio": .02})
+        self.assertEqual(opts["min_chain_weight"]["value"], .8)
+        self.assertTrue(opts["sole_band_height_ratio"]["doc"])
+        with self.assertRaises(ValueError): sampler.options_get({"min_chain_weight": .49})
+        with self.assertRaises(ValueError): sampler.options_get({"sole_band_height_ratio": .051})
+
+    def test_missing_forward_metadata_never_guesses_an_axis(self):
+        with tempfile.TemporaryDirectory() as td:
+            run = Path(td); (run / "rig").mkdir(); fixture(run / "rig" / "rigged.glb")
+            (run / "rig" / "rig.json").unlink()
+            result = sampler.sample(run, "task-1", "Walk", fps=12, frame_cap=20)
+            self.assertFalse(result["sample"]["axes"]["source_supported"])
+            self.assertEqual(result["sample"]["axes"]["forward_source"], "pending")
+            self.assertIn("source_supported_3d_axes", result["evaluation"]["pending"])
 
 
 if __name__ == "__main__":

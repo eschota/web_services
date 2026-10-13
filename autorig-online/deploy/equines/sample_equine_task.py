@@ -14,6 +14,21 @@ LEGS={"LF":("LeftFrontFoot","LeftFrontToe","LeftFrontToe_End"),
       "RF":("RightFrontFoot","RightFrontToe","RightFrontToe_End"),
       "LH":("LeftHindFoot","LeftHindToe","LeftHindToe_End"),
       "RH":("RightHindFoot","RightHindToe","RightHindToe_End")}
+OPTION_SPEC={
+    "min_chain_weight":(.7,.5,1.0,"Minimum summed weight to the exact Foot/Toe chain for a source sole vertex."),
+    "sole_band_height_ratio":(.01,.001,.05,"Lowest bind-world surface band thickness divided by bind model height."),
+}
+
+def options_get(options=None):
+    supplied=dict(options or {}); unknown=set(supplied)-set(OPTION_SPEC)
+    if unknown: raise ValueError("unknown options: "+", ".join(sorted(unknown)))
+    out={}
+    for name,(default,low,high,doc) in OPTION_SPEC.items():
+        value=supplied.get(name,default)
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(float(value)) or not low<=float(value)<=high:
+            raise ValueError(f"{name} must be finite in [{low}, {high}]")
+        out[name]={"value":float(value),"default":default,"min":low,"max":high,"doc":doc}
+    return out
 
 def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
@@ -95,8 +110,11 @@ def node_id(d,name):
     if len(ids)!=1: raise ValueError(f"required unique node missing: {name}")
     return ids[0]
 
-def sample(run_dir,task_id,clip,fps=60,frame_cap=600):
-    run_dir=Path(run_dir); source=run_dir/"rig"/"rigged.glb"; d,b=glb(source)
+def sample(run_dir,task_id,clip,fps=60,frame_cap=600,min_chain_weight=.7,sole_band_height_ratio=.01):
+    configured=options_get({"min_chain_weight":min_chain_weight,"sole_band_height_ratio":sole_band_height_ratio})
+    min_chain_weight=configured["min_chain_weight"]["value"]; sole_band_height_ratio=configured["sole_band_height_ratio"]["value"]
+    run_dir=Path(run_dir); source=run_dir/"rig"/"rigged.glb"; rig_path=run_dir/"rig"/"rig.json"; d,b=glb(source)
+    rig_doc=json.loads(rig_path.read_text(encoding="utf-8")) if rig_path.is_file() else {}
     if any(m.get("weights") for m in d.get("meshes",[])): raise ValueError("mesh weights/morphs unsupported")
     nodes=d.get("nodes",[]); par=parents(d); base=[]; base_trs=[]
     for n in nodes:
@@ -160,13 +178,13 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600):
     # geometry, never by animation.  Within its lowest 1% height band choose
     # the vertex nearest the band's XZ centre, then stable source ids.
     anchors={}
-    band=max((ymax-ymin)*.01,1e-8)
+    band=max((ymax-ymin)*sole_band_height_ratio,1e-8)
     for leg,ids in leg_slots.items():
         candidates=[]
         for ri,r in enumerate(records):
             slots={r["slot"][x] for x in ids}; dom=np.where(np.isin(r["js"],list(slots)),r["ws"],0).sum(1)
-            for vi in np.flatnonzero((dom>=.7)&r["surface"]): candidates.append((ri,int(vi),float(dom[vi]),r["bind"][vi]))
-        if not candidates: raise ValueError(f"no >=0.7 dominant anchor vertices: {leg}")
+            for vi in np.flatnonzero((dom>=min_chain_weight)&r["surface"]): candidates.append((ri,int(vi),float(dom[vi]),r["bind"][vi]))
+        if not candidates: raise ValueError(f"no >={min_chain_weight} dominant anchor vertices: {leg}")
         low=min(float(x[3][1]) for x in candidates); sole=[x for x in candidates if float(x[3][1])<=low+band]
         centre=np.mean(np.asarray([x[3][[0,2]] for x in sole]),axis=0)
         chosen=min(sole,key=lambda x:(float(np.sum((x[3][[0,2]]-centre)**2)),float(x[3][1]),x[0],x[1]))
@@ -190,6 +208,12 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600):
             posed.append((w[r["node"]]@np.c_[p,np.ones(len(p))].T).T[:,:3])
         for leg,a in anchors.items(): tracks[leg].append(posed[a["record"]][a["vertex"]])
     ground=min(float(a["bind"][1]) for a in anchors.values())
+    axis_values={"+x":[1,0,0],"-x":[-1,0,0],"+y":[0,1,0],"-y":[0,-1,0],"+z":[0,0,1],"-z":[0,0,-1]}
+    forward=np.asarray(axis_values.get(str(rig_doc.get("forward_axis") or "").lower(),[0,0,0]),float); up=np.asarray([0.,1.,0.])
+    forward=forward-up*float(forward@up); fn=float(np.linalg.norm(forward)); forward=forward/fn if fn>1e-8 else forward
+    left=(anchors["LF"]["bind"]+anchors["LH"]["bind"])/2; rightp=(anchors["RF"]["bind"]+anchors["RH"]["bind"])/2
+    right=rightp-left; right=right-up*float(right@up)-(forward*float(right@forward) if fn>1e-8 else 0); rn=float(np.linalg.norm(right))
+    right=right/rn if rn>1e-8 else right; axes_ok=bool(fn>1e-8 and rn>1e-8 and abs(float(right@forward))<.05)
     norm=lambda rows:[[round(float(x),8),round(float(y-ground),8),round(float(z),8)] for x,y,z in rows]
     provenance={"source_observed":False,"identity_observed":False,"generated":False,"mirrored":None,
                 "source_video_mirrored":"unknown","motion_source_identity":"pending",
@@ -198,7 +222,9 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600):
          "loop":clip.lower() in contract.LOOPS,"clip_type":"loop" if clip.lower() in contract.LOOPS else "one_shot",
          "ground":{"normal":[0,1,0],"offset":0,"inference":"minimum selected bind/rest sole vertex Y",
                    "confidence":"pending_no_explicit_plane"},
-         "axes":{"up":[0,1,0],"forward":[0,0,1],"right":[1,0,0],"source_supported":True},
+         "axes":{"up":[0,1,0],"forward":forward.tolist(),"right":right.tolist(),"source_supported":axes_ok,
+                 "forward_source":"rig.json.forward_axis" if fn>1e-8 else "pending",
+                 "right_source":"mean(RF,RH)-mean(LF,LH) bind sole anchors" if rn>1e-8 else "pending"},
          "root":{"positions":norm(roots),"quaternions":[list(map(float,q)) for q in rootq],"source_track":"Hips"},
          "hooves":{leg:{"positions":norm(rows),"source_track":"+".join(LEGS[leg]),
                          "anchor":{"mesh_node":anchors[leg]["mesh_node"],"mesh":anchors[leg]["mesh"],
@@ -212,7 +238,9 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600):
     if "missing_evidence:ground_plane_confidence" not in report["failures"]: report["failures"].append("missing_evidence:ground_plane_confidence")
     report["pass"]=False
     return {"schema":"autorig.equine-task-sample/1","task_id":task_id,"run_dir":str(run_dir),"clip":clip,
-            "source":{"path":str(source),"sha256":sha(source)},"sampling":{"fps":fps,"frame_cap":frame_cap},
+            "source":{"path":str(source),"sha256":sha(source),"rig_json_path":str(rig_path) if rig_path.is_file() else None,
+                      "rig_json_sha256":sha(rig_path) if rig_path.is_file() else None},
+            "sampling":{"fps":fps,"frame_cap":frame_cap,"options":configured},
             "geometry":{"model_height_bind_world":ymax-ymin,"bind_world_y_min":ymin,"bind_world_y_max":ymax,
                         "ground_bind_world_y":ground,"ground_confidence":"pending_no_explicit_plane"},
             "provenance":{"rendered_rig_geometry_measured":True,"source_video_identity":"pending","observed_motion":False},
@@ -231,9 +259,12 @@ def matrix_quat(m):
 def main():
     p=argparse.ArgumentParser(); p.add_argument("--run-dir",type=Path,required=True); p.add_argument("--task-id",required=True)
     p.add_argument("--clip",required=True); p.add_argument("--output",type=Path,required=True); p.add_argument("--fps",type=int,default=60)
-    p.add_argument("--frame-cap",type=int,default=600); a=p.parse_args()
+    p.add_argument("--frame-cap",type=int,default=600)
+    p.add_argument("--min-chain-weight",type=float,default=.7); p.add_argument("--sole-band-height-ratio",type=float,default=.01); a=p.parse_args()
     if not 1<=a.fps<=240 or not 12<=a.frame_cap<=10000: p.error("fps 1..240; frame-cap 12..10000")
-    out=sample(a.run_dir,a.task_id,a.clip,a.fps,a.frame_cap); a.output.parent.mkdir(parents=True,exist_ok=True)
+    try: out=sample(a.run_dir,a.task_id,a.clip,a.fps,a.frame_cap,a.min_chain_weight,a.sole_band_height_ratio)
+    except ValueError as exc: p.error(str(exc))
+    a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(out,indent=1),encoding="utf-8"); print(json.dumps({"output":str(a.output),"source":out["source"],"evaluation":out["evaluation"]}))
 
 if __name__=="__main__": main()

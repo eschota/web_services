@@ -46,3 +46,12 @@ Blender-space local channels cannot be called registry34/glTF +Y until the
 fitted source is applied and exported through Blender, then re-read in glTF
 bases. It never writes the canonical library or sends DEV media. See
 `farm_fit_job.example.json` for every required public option and proof.
+
+`build_motion_export_bundle.py` creates the minimal Blender 4.3 subset for the
+existing `apply_fitted_motion.py`. `farm_export_fitted.py` is preflight-only by
+default; `--execute` applies the fitted source to a derived copy, verifies the
+original GLB hash stayed unchanged, exports a one-action GLB, then parses the
+actual glTF accessors. Its result contains the actual glTF +Y reference
+skeleton and node-local animation channels and remains
+`candidate_pending_real_qa` with promotion disabled. Invocation fields are in
+`farm_export_job.example.json`.

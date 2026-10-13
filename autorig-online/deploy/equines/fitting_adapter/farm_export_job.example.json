@@ -1,0 +1,10 @@
+{
+  "schema": "autorig.equine-motion-export-job/1",
+  "work_root": "<MT_ROOT>/.work/equine-fitting/<candidate>/gltf-export",
+  "blender": "C:\\Program Files\\Blender Foundation\\Blender 4.3\\blender.exe",
+  "action_id": "<exact full34 action id>",
+  "source_glb": {"path": "<original source GLB>", "sha256": "<sha256>"},
+  "fitted_motion": {"path": "<fitted-animation.json>", "sha256": "<sha256>"},
+  "action_contract": {"path": "<full34 action contract>", "sha256": "<sha256>"},
+  "export_code_zip": {"path": "<motion-export-code.zip>", "sha256": "<sha256>"}
+}

@@ -3112,3 +3112,23 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   candidate (не выдавать за исходные constraints или accepted category default), fit/retarget корректный Walk и сравнить
   same-task metrics/Unity media до-после. Затем полный 34-action corpus per-family; owner receipt на каждую задачу;
   только после всех PASS/accept продвигать atomic family pointer и подключать новый полный набор входящим задачам.
+
+### Продолжение копытных · 2026-10-13 15:30 UTC
+
+- Предыдущие строки про source-prep job9a8… и runtime session36439 устарели. Source-prep **PASS** F15
+  `14581fae0e7040b1acfc`; runtime/model/repo/license hashes verified. Точный checkpoint в
+  `autorig-online/docs/equine-animation-validation.md`.
+- Владелец **принял только новый видеореференс Walk** зебры: DEV b415b1de1e9d/7129, inbox2456,
+  15:14:26 UTC, «Принять ✅». Исходный 3D Walk по media72c… по-прежнему ОТКЛОНЁН; перенос/другие задачи/full34 не приняты.
+- Observation v1 `1fbb885ca4884e29b752` FAIL до inference: старый CLI требует14GB на8GBF15.
+  Исправлен isolated resource adapter (default14GB preserved; explicit candidate6GB, sequential smallmodels,
+  idlecache release только при пустой очереди). v2 `23c52fd4b2134588992f` уступилклиентскомуComfyUI, FAIL доinference.
+  v3 `61f27a5ac3864b60afdb` FAILпосле306.5s: клиентскийComfyUIвсёещёbusy, inferenceНЕначался.
+  Нетактивногоobservationjob; неперезапускатьтотжезанятыйслотнемедленно. Следующийheartbeat сначалаidlequeueF15,
+  затемfreshcandidateID+updatedexplicitffprobe. Не дублироватьleasedjobs.
+  ffprobeотсутствовал,existingbinaryскопированвmanagedproject,следующийjobпередаётexplicitpath.
+  Модели не скачивались, ownerGPU не использовался. Production29contractchecksPASS; equine-motion live/dev/tools.
+- Реальный Blender apply/export/re-read adapter подготовлен, его actualQA ещё впереди после3Dfit.
+  Full34 library и customerpath НЕ активированы; инструменты продолжают готовиться и проверяться на ферме.
+- ActualF15firstframegeometrypreflight: correlation0.825949 >=0.65; видео141decodedframes768x448.
+  НикакойGPUinference вpreflight; этоalignment, НЕwalkQA. DEVdiagnosticCLIнаrejectedsampleвернулpassfalse/PENDING.

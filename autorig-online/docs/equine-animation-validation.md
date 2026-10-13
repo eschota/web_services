@@ -104,7 +104,9 @@ alone (the earlier 10/10) does not prove that a walk is anatomically correct.
   H3 on f12, 132.2 seconds, video SHA
   `ebe1c36a7b0643bdc0a43efb3498480d59f480551cc6e5f7ec772bc19397256a`.
   DEV media `b415b1de1e9d`, Telegram 7129, scope **reference video only**.
-  Await its owner verdict; this never approves the 3D retarget or full34 release.
+  **Reference accepted**: owner inbox 2456 (`78ec4c2faad1`) at 15:14:26 UTC,
+  «Принять ✅». Receipt saved in the project reference folder and cursor acked.
+  This never approves the 3D retarget or full34 release.
 - Full-runtime fitting code artifact SHA
   `594b6e43ec05e645ecb36b22a7238d3152b924a6184292997a7daa8466459b25`.
   Next: source observations/explicit run-scoped constraints, fit, actual Blender
@@ -116,3 +118,52 @@ alone (the earlier 10/10) does not prove that a walk is anatomically correct.
 
 No complete accepted animation library exists yet; all family pointers remain
 unpromoted and customer-path integration remains pending.
+
+## Source tracking checkpoint: accepted reference 2456
+
+- Farm observation v1 job `1fbb885ca4884e29b752` failed before inference (5.2 s):
+  the old tracking CLI requires 14,000 MiB free GPU memory, impossible on F15's
+  8 GB GPU. At pickup only 683 MiB was free. The failed log/result is preserved;
+  there are no observations from that attempt.
+- An isolated resource adapter now retains the old 14,000 MiB default and
+  accepts a range-checked, explicitly run-scoped limit [4,096,24,000]. The F15
+  candidate requests 6,144 MiB, sequential fp16/256 TAPNext++, SAM2 tiny, VDA
+  small with encoder chunk 1. This is an engineering trial, not a proven memory
+  budget. It refuses while customer ComfyUI jobs are queued/running; optional
+  idle-cache release only unloads cached models, never cancels a prompt.
+- Observation v2 `23c52fd4b2134588992f` refused cache release because customer
+  ComfyUI work was active (15.3 s). No inference or cancellation occurred.
+- Observation v3 `61f27a5ac3864b60afdb` ended after 306.5 s: customer ComfyUI
+  remained busy throughout the bounded 300 s wait; inference never started.
+  Preserve the failed receipt. Do not immediately repeat while the same resource
+  condition holds. Next heartbeat must verify F15's idle queue first, then use
+  a fresh candidate ID and the updated explicit ffprobe path.
+  Farm work root:
+  `C:/ProgramData/AutoRig/equine-fitting/jobs/zebra-walk-observe-2456-v3`.
+  Inputs/receipt pins live in production project `observe-v3/`; full masks and
+  depth remain on F15 for fitting; compact diagnostics return through farmjobs.
+  Never duplicate a leased job. All three observation attempts are now terminal.
+- The accepted five-second video is not automatically declared a cyclic clip.
+  Observation uses the six exact immutable source anchors plus dense seeds;
+  source identity/visibility and calibrated depth still need real QA.
+- `ffprobe` was absent on F15. An existing installed binary is copied into
+  its managed project, and the next job explicitly pins its path. No inference
+  observations exist yet. Do not confuse queue leasing with a completed stage.
+- New Blender apply/export/re-read adapter and a code-only subset are prepared.
+  Code ZIP SHA `a1473514e5ba8d45313cb8cc579ceade1f263721e1d98ba53014fb9fdb744819`.
+  Actual execution awaits fitted motion. Registry candidate remains pending QA.
+- GLB sampler physical right is measured from right-minus-left bind hoof
+  anchors; forward requires explicit rig metadata. Missing axes remain pending.
+  Weight/sole-band options are range-checked and preserved in each receipt.
+- Production contract checks: 29 tests PASS in 0.058 s (5 sampler, 24 motion).
+  `equine-motion` CLI is installed and listed live at `/dev/tools.json` with
+  options/describe verified. It only produces diagnostics; no customer-path
+  activation or automatic library promotion was added.
+- Real first-frame geometry preflight on F15: combined correlation **0.825949**
+  versus the existing 0.65 threshold (intensity 0.989383, edge 0.626195).
+  Actual decoded reference has **141 frames**, 768x448. The earlier Renderfin
+  nominal 125-frame setting does not replace decoded-video provenance.
+  This CPU check loaded no model and proves alignment, not motion quality.
+- Installed DEV CLI evaluated the preserved rejected Walk sample as
+  `pass=false`, evidence/action gates `PENDING`. It did not turn fixture PASS
+  into animation acceptance.
