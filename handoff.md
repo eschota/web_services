@@ -2776,3 +2776,25 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   Кейсы: `monster_crouched_scp` и `monster_alien_crouched` — mt_qa на 4 клипах своего набора (`clips_passed >= 4`), XFAIL снят.
 - Git: MT `b9979e3`, `f9c9365`, `8dc70dd`, `e7cc220`; web `aa4dd063`. Не сделано: 3/4-вид для видео-MT, видео prowl/attack
   (suspect / не снято), правая рука SCP (слита с коленом), грива лошади.
+
+## Грива, 3/4-ракурс видео-MT, видео-аллюры четвероногих (2026-10-13 00:40 UTC, агент «Fable · monsters/animals»)
+
+- **Грива** `mt/mane.py` (прод, гейт PASS 20261013T001439Z, RIG_VERSION `v3.2026-10-13.1`): регион = кожа шеи (Spine2/Neck) выше
+  собственного расстояния верхней кожи на `stand_off` 1.35 (перцентиль 35 по бинам дуги), сегменты вдоль шеи → цепи
+  `Mane{k} > Mane{k}1` с корнем НА коже (основание волос остаётся на весах шеи, `root_skip`), parent Neck, качается только
+  концевой сегмент (`root_sway` 0); сл. по словам (`MANE_WORDS`: horse/pony/zebra/lion/грив/лошад…; rig_first хранит слова
+  вызова в `rig/words.txt`). На гейте первая версия (parent Head, качание корня) завалила `horse_quadruped_legs` (2x 83) и
+  `cat_quadruped_orient` (4x 215: загривок кота читался гривой) — отсюда слова и Neck. **Итог на лошади 31cc3ff3**: rig_check
+  2x/4x не меняется (90/40), но numeric QA 6/6 → 3/6 (Walk 16→31, Rear 21→71): регион (726 вершин на проде) захватывает кожу
+  шеи. Для задачи слой выключен per-run (`runs/028d…/mane_options.json`, скин v6, QA 6/6); **по умолчанию `mane=off`** (деплой
+  mane.py ждёт гейт). DEV 7022. Следующий шаг: регион по hair-cards (тонкие ребристые оболочки) и шов как weld_split.
+- **3/4-ракурс видео-MT** (`colour_track` `view=3q`: камера на 45° к фронту, углы раз-укорачиваются в боковую плоскость;
+  кисти/стопы зажаты ±40° и не решают «suspect»; проходящий 3/4-дубль заменяет отсутствующий/suspect боковой под простым ключом):
+  prowl/attack обоих монстров — ok; перериг: 35356012 скин v10, 9a465c98 скин v8: Video Walk / Prowl / Attack, numeric QA 3/3
+  (4.7/5.2, 13.3/6.4), поверх своего набора 4/4. DEV 7020, 7021. Деплой colour_track round 2 — в гейте (c7).
+- **Видео-аллюры четвероногих** (LK-трекер animal_video на фермe, H3): boar walk ok (trot suspect 124°, idle «на полу»), fox walk/trot
+  ok (idle на полу), deer trot/idle ok (walk suspect) → библиотека `animal_motion_lib/{boar,fox,deer}`; перериги: boar v7, fox v2,
+  deer v1 — клипы прикреплены (гейт качества), но numeric QA на этих ригах не проходит ни с видео, ни с процедурными (fox 4x 317 —
+  скин самих ригов, задача Rig path). Кот 06f232e5: LK walk/trot suspect (период на полу) → очередь цветного трекера
+  (cat/boar trot/deer walk) идёт. DEV 7016, 7017.
+- Git: MT `743f760`, `0df3889`, `91864ba`, `17ac534`, mane off `HEAD`; web — этот handoff.
