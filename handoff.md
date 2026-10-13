@@ -2890,3 +2890,16 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 - **Деплой-шаблон** `fable_mt_patch_chain.sh` (`vps_deploy_patch.sh` на VPS): проход 1 копирует текущие прод-файлы,
   проход 2 гонит патч-скрипты по порядку, diff → `mt-deploy --mt-patch`. MT `ddba812`, `f4e09ca`, `1fb1051`; web
   `8517d395`, `be543f62`, `564af49e`. DEV: 4 пары раскрасок + GIF гривы.
+
+### Дополнение 04:10 UTC — контакт-сплит четвероногих делает leg_core_own=hard дефолтом
+
+- `fastrig.contact_split(..., pairs="limbs")` + опция `quad_contact_split` (on): у четвероногих режутся ТОЛЬКО контакты
+  нога|нога (лапа на лапе) и нога|хвост (хвостовая оболочка вдоль ног), нога|туловище — никогда; дыры закрывает
+  cut_cap v3 (`fused_limbs=cap_split`, как у бипедов). Метрика гейта rig_check_4x (сумма кадров) прод → hard+split:
+  кот 161 → **85**, хорёк 218 → **51** (QA 8/8), кабан 331 → 306, лошадь 40 → 0 (8/8), олень → 2607 (QA 6152 → 4628).
+  Дефолты: `leg_core_own=hard`, `quad_contact_split=on`. MT `3e4d9bf`, web `049b1a4d`; патчи
+  `patch_quad_skin.py` + `patch_quad_split.py` (порядок важен).
+- Гейт: manev2 прошёл весь корпус кроме блокера `soldier_arms_pressed/mt_arms` (чужой, у Limb stabilization);
+  quadskin3 в очереди. Сторож `/home/debian/monster/relaunch_after_soldier.sh` (лог `relaunch.log`) ждёт XFAIL/фикс
+  солдата и перезапускает manev2b → quadskin3b, после установки quadskin3b снимает XFAIL с
+  `cat_front_leg_own_bones` / `boar_hind_legs_not_tail`. После установки: `sudo autorig-mt-restart --wait`.
