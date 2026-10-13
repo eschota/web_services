@@ -212,3 +212,32 @@ e196ff90a449037a1b1cba6ecc3db2b4aa0f7edf42b4c5cc451d1da66df025d8;
 fitterSHA 4129ec02e45c2a155154da1e57723cacbb13d4053afe628c79e96ddefb1d3043.
 This exact tested fitter is installed in DEV CLI; `equine-prefix-export` is also
 registered with a describe contract. Both remain diagnostics/farm-only execute.
+
+### V8 terminal and next reprojection objective, 2026-10-13 20:58 UTC
+
+V8 completed all141frames, exit0, elapsed376.985s. No V8 fit process remains.
+FittedSHA e7ac542ea7d64d65050d634921fd707f75bb51d8c876000b0372094444d054ee;
+progressSHA32bcc1477687c85e50b45ed705c2367c4c081be8ccee6e51f8862e4ec5211ae8,
+completed_through_frame140. Real Blender/export/GLTF/retarget/LBS also completed;
+targetSHA835a017b485a78a830f3f49f42907adf225ace680ab911a658a20389ec1129e4.
+Full141sample min heights LF-1.89%H/RF-1.57%/LH-1.15%/RH-0.86%; inferred-floor
+slide0.92–2.23H/s. QAFAIL. Source LFToe median residual10.59%H, otherToes3.52–4.49%.
+Effective measured contacts LF0/RF1/LH6/RH0; correct four-leg stance remains pending.
+
+V8 captureF13 e68c9a5a95ca49ab9afc recorded540frames but OS exit3221225477
+(0xC0000005) after statusoktrue: wrapper correctly rejected it. Log reports active
+RenderTexture release during shutdown. A fresh F1-only capture
+ad420a0f08ec41dfb448 passed540frames60fps, exit0, exact candidate override verified.
+DEV7283/media4aa8682e9d4a delivered full141diagnostic/QAFAIL, owner verdict pending.
+F1 success does not repair the F13 saver cleanup defect; cached viewer reviewer
+is preparing the general cleanup fix with actual farm validation.
+
+Read-only camera reprojection audit of exact V8 FK/LBS vs unchanged RAW pixels:
+LFToe median31.78px/p95105.82, RF50.74/126.26, LH18.21/34.08, RH29.06/127.27;
+torso medians4.48–7.85px. Fixed sagittal ray-plane intersections create incompatible
+3D targets; more iterations of that objective are not justified. The source-fit
+author is preparing a fresh generic direct-pixel objective using the immutable
+source camera and real FK/LBS, with exact RAW/bundle/camera/code pins. No metric
+depth claim, invented phase, mirrored leg or plane-derived planted-contact truth.
+No V9 job has been launched yet. Continue cached author context, then farm tests,
+one bounded CPU run, real export/LBS and a fresh separate owner verdict.

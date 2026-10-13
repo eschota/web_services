@@ -3199,3 +3199,16 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   Источникнеповторялся, толькоCPUfit. Exactprofile/job/codeSHAвканоническомequinecheckpoint.
   Production144contractPASS, exacttestedCLIinstalled; equine-prefix-exportзарегистрирован.
   Не дублироватьэтотprocess; послеterminalstatus обновить checkpoint иactualQA/media.
+
+### Копытные · 2026-10-13 20:58 UTC
+
+- V8terminalPASSsolver141frames376.985s, ноactualexport/retarget/LBS QAFAIL:
+  penetration0.86–1.89%H/slide0.92–2.23H/s; fourlegcontactнеизмерен. V8процессНЕактивен.
+- CaptureF13e68c9… ERROR0xC0000005послевидеозаписи; wrapperНЕослаблялся.
+  ПовторF1ad420… PASS540frames60fpsexit0, DEV7283/media4aa8682e9d4a QAFAILdiagnostic,
+  ownerpending. CachedviewerreviewerделаетобщийRenderTexturecleanupfix/фармпроверки.
+- Exactsourcecameraaudit: ToeRAWreprojectionmedian18–51px/p95до127px. Plane3Dtargets
+  несовместимы; cachedsourcefitauthorготовитdirectpixelobjective+productiontests.
+  V9ещёНЕзапущен. ИсходныеRAW/rigсохранены, ownerGPUнеиспользуется.
+- ВсеexactSHA/метрики/процессыв `equine-walk-source-physics-20261013.md`;
+  no acceptedWalk/full34/familypointer/customeractivation.

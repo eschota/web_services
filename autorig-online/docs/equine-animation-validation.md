@@ -243,3 +243,12 @@ Fresh V8 objective4 is now running on F15 (actor5692, launcher16092,
 foregroundSSHsession59410); source/RAW stages are reused. Latest production
 contracts144PASS. Follow that process without duplicating it; exact pins are in
 the detailed checkpoint. A running fit is not an accepted clip.
+
+V8 is now terminal:141frames/376.985s, actual export/retarget/LBS done but QAFAIL.
+F13 Unity quit crashed after encode; F1 repeat passed and full diagnostic video
+DEV7283/media4aa8682e9d4a was delivered. Both task videos remain pending owner
+verdicts. Camera audit found18–51px median Toe reprojection errors, so the next
+fresh source objective fits unchanged RAWpixels through the immutable camera
+instead of treating ray-plane intersections as measured metric-depth targets.
+V9 is under implementation, not dispatched. Viewer cleanup is a separate cached
+author fix; no customer-path/library activation has occurred.
