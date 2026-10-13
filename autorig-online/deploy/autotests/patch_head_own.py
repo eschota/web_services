@@ -35,21 +35,39 @@ else:
             _rr = D[np.isin(_near0, _nh)][:, _nh].min(1)   # head_own_tube such radii (the sitting horse 74f7cd37: a
             _rad = float(np.median(_rr)) if len(_rr) >= 10 else 0.08 * H   # lowered head's half-space took the chest)
             _tube = np.minimum(seg_dist(p, _nk, _hd)[0], seg_dist(p, _hd, _ht)[0]) <= float(o.get("head_own_tube", 2.0)) * _rad
-            _rows = np.nonzero((_tn > _mg) & _tube & ~prop & (part < 0))[0]
+            _jaw = np.linalg.norm(p - _hd, axis=1) <= float(o.get("head_own_sphere", 2.5)) * _rad   # the throat under
+            _rows = np.nonzero(((_tn > _mg) | _jaw) & _tube & ~prop & (part != HAIR))[0]     # the jaw is neck, not trunk
             if len(_rows) and _others:
                 A[np.ix_(_rows, _others)] = False
-            _rows2 = np.nonzero((_th > _mg) & _tube & ~prop & (part < 0))[0]
+            _rows2 = np.nonzero((_th > _mg) & _tube & ~prop & (part != HAIR))[0]
             _not_head = [i for i in range(len(sk.names)) if i not in _head_only and sk.deform[i] and not sk.names[i].startswith("Prop")]
             if len(_rows2) and _not_head:
                 A[np.ix_(_rows2, _not_head)] = False
             _none = ~A.any(1)
             if _none.any():
                 A[_none] = np.asarray(sk.deform, bool)[None, :]
+            _head_keep = np.zeros(n, bool)
+            _head_keep[_rows2] = True                    # the skull rule below never bars the Head on this skin
             stats["head_own"] = {"neck_rows": int(len(_rows)), "head_rows": int(len(_rows2)), "radius_pct_H": round(_rad / H * 100, 2)}
         De = D.copy()
         free = part < 0                                  # no label: distances in units of each bone's own thickness,
 '''
     assert s.count(old) == 1, "De anchor"
+    s = s.replace(old, new)
+    old = '''        De = D.copy()
+        free = part < 0                                  # no label: distances in units of each bone's own thickness,
+'''
+    new = '''        if "_head_keep" not in dir():
+            _head_keep = np.zeros(n, bool)
+        De = D.copy()
+        free = part < 0                                  # no label: distances in units of each bone's own thickness,
+'''
+    assert s.count(old) == 1, "De anchor 2"
+    s = s.replace(old, new)
+    old = '''                De[free & ((p - hd) @ ax < 0), sk.index["Head"]] = np.inf'''
+    new = '''                De[free & ((p - hd) @ ax < 0) & ~_head_keep, sk.index["Head"]] = np.inf   # head_own: the throat
+                #                                          under the jaw is the head's (the zebra d3d37033)'''
+    assert s.count(old) == 1, "skull rule anchor"
     s = s.replace(old, new)
     p.write_bytes(s.replace("\r\n", "\n").encode("utf-8"))
     assert p.read_bytes().count(bytes([8])) == 0
@@ -72,6 +90,10 @@ else:
         "kind": "float", "min": 1.0, "max": 6.0, "default": 2.0,
         "doc": "rebuild, quadruped: head_own acts within this many neck radii of the Neck -> Head -> nose chain (a lowered "
                "head's half-space alone took the sitting horse's chest)."},
+    "head_own_sphere": {
+        "kind": "float", "min": 0.0, "max": 6.0, "default": 2.5,
+        "doc": "rebuild, quadruped: skin within this many neck radii of the Head joint (the jaw, the throat under it) is "
+               "neck / head too (the zebra: Head | Spine2 edges at the throat tore in Look Around / Rear)."},
     "head_own_margin_pct_H": {
         "kind": "float", "min": 0.0, "max": 10.0, "default": 2.0,
         "doc": "rebuild, quadruped: head_own starts this far past each joint plane, in % of H."},
