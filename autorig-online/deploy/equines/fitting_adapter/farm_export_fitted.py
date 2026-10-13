@@ -107,7 +107,7 @@ def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--job',required=True,type=pathlib.Path); ap.add_argument('--execute',action='store_true'); a=ap.parse_args(); job=rd(a.job)
     try:
         source=pin(job['source_glb'],'source_glb'); fitted=pin(job['fitted_motion'],'fitted_motion'); action=rd(pin(job['action_contract'],'action_contract')); code=pin(job['export_code_zip'],'export_code_zip')
-        if action.get('action_id')!=job.get('action_id') or action.get('taxonomy')!='full34': raise ValueError('action contract mismatch')
+        if action.get('action_id')!=job.get('action_id') or action.get('taxonomy')!='full34' or not isinstance(action.get('loop'),bool): raise ValueError('action contract/timing scope mismatch')
         blender=pathlib.Path(job['blender']).resolve(); work=pathlib.Path(job['work_root']).resolve()
         if not blender.is_file(): raise ValueError('Blender missing')
         result={'schema':'autorig.equine-motion-export-preflight/1','state':'preflight_pass','source_sha256':sha(source),'fitted_sha256':sha(fitted),'code_sha256':sha(code),'action_id':job['action_id'],'next':'execute_opt_in'}
@@ -121,7 +121,7 @@ def main():
         derived=out/f"{job['action_id']}.glb"; manifest=out/f"{job['action_id']}.animation-manifest.json"
         if not derived.is_file() or not manifest.is_file(): raise RuntimeError('derived GLB/manifest missing')
         channels=reread(derived,job['action_id'])
-        candidate={'schema':'autorig.registry34.gltf-source-motion/1','state':'candidate_pending_real_qa','action_id':job['action_id'],'taxonomy':'full34','source_glb_sha256':before,'fitted_motion_sha256':sha(fitted),'derived_glb':{'path':str(derived),'sha256':sha(derived),'bytes':derived.stat().st_size},'export_manifest_sha256':sha(manifest),'coordinate_contract':channels['coordinate_system'],'reference_skeleton':channels['reference_skeleton'],'channels':channels['channels'],'qa_approved':False,'promotion_allowed':False}
+        candidate={'schema':'autorig.registry34.gltf-source-motion/1','state':'candidate_pending_real_qa','action_id':job['action_id'],'taxonomy':'full34','loop':action['loop'],'source_glb_sha256':before,'fitted_motion_sha256':sha(fitted),'derived_glb':{'path':str(derived),'sha256':sha(derived),'bytes':derived.stat().st_size},'export_manifest_sha256':sha(manifest),'coordinate_contract':channels['coordinate_system'],'reference_skeleton':channels['reference_skeleton'],'channels':channels['channels'],'qa_approved':False,'promotion_allowed':False}
         atomic(work/'gltf-source-motion.json',candidate); print(json.dumps({'state':candidate['state'],'output':str(work/'gltf-source-motion.json')},indent=2)); return 0
     except Exception as e: print(f'ERROR: {e}',file=sys.stderr); return 2
 if __name__=='__main__': raise SystemExit(main())

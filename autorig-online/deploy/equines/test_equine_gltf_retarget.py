@@ -40,7 +40,7 @@ def source_candidate():
        "translation":[0,1,0],"rotation_xyzw":[0,0,0,1],"scale":[1,1,1]}]
     times=[0.0,1/30,2/30]
     return {"schema":GR.SOURCE_SCHEMA,"state":"candidate_pending_real_qa","action_id":"walk_forward",
-            "taxonomy":"full34","source_glb_sha256":"a"*64,"derived_glb":{"sha256":"b"*64},
+            "taxonomy":"full34","loop":False,"source_glb_sha256":"a"*64,"derived_glb":{"sha256":"b"*64},
             "reference_skeleton":sk,"channels":[
               {"node":1,"node_name":"src_root","path":"translation","interpolation":"LINEAR","times":times,
                "values":[[0,1,0],[.5,1,0],[1,1,0]]},
@@ -52,7 +52,7 @@ def source_candidate():
 
 def calibration():
     return {"schema":"autorig.hoof-source-calibration.v1","height":2.0,"ground_baseline":0.0,
-            "forward_axis":[0,0,1],"loop":True,"bones":{
+            "forward_axis":[0,0,1],"up_axis":[0,1,0],"loop":True,"bones":{
               "1":{"target":"root","head":[0,0,0],"tail":[0,1,0]},
               "2":{"target":"spine","head":[0,1,0],"tail":[0,2,0]}}}
 
@@ -88,13 +88,27 @@ class GltfRetargetTests(unittest.TestCase):
         self.assertEqual(spine["parent"],"src_root")
         self.assertEqual(spine["rest_translation"],[0.0,1.0,0.0])
 
-    def test_source_adapter_rejects_unmapped_scale_and_nonuniform(self):
-        bad=source_candidate(); bad["channels"][0]["path"]="scale"
-        with self.assertRaisesRegex(GR.GltfRetargetError,"scale/morph"):
+    def test_source_adapter_accepts_only_constant_rest_scale_and_rejects_animated_scale(self):
+        good=source_candidate(); times=good["channels"][0]["times"]
+        good["channels"].append({"node":1,"node_name":"src_root","path":"scale","interpolation":"LINEAR",
+                                 "times":times,"values":[[1,1,1],[1,1,1],[1,1,1]]})
+        adapted,_=GR.adapt_source_motion(good,calibration())
+        self.assertEqual(adapted["source_motion"]["ignored_static_rest_scale_channels"],1)
+        self.assertNotIn("1.scale",adapted["tracks"])
+        bad=source_candidate(); bad["channels"].append({"node":1,"node_name":"src_root","path":"scale",
+            "interpolation":"LINEAR","times":bad["channels"][0]["times"],"values":[[1,1,1],[1.01,1,1],[1,1,1]]})
+        with self.assertRaisesRegex(GR.GltfRetargetError,"animated or unexpected scale"):
             GR.adapt_source_motion(bad,calibration())
+
+    def test_source_adapter_rejects_nonuniform_times(self):
         bad=source_candidate(); bad["channels"][1]["times"]=[0,.02,.07]
         with self.assertRaisesRegex(GR.GltfRetargetError,"exact sample times"):
             GR.adapt_source_motion(bad,calibration())
+
+    def test_source_adapter_requires_explicit_up_axis(self):
+        missing=calibration(); missing.pop("up_axis")
+        with self.assertRaisesRegex(GR.GltfRetargetError,"up_axis"):
+            GR.adapt_source_motion(source_candidate(),missing)
 
     def test_full_source_aggregate_is_exact_and_single_walk_stays_candidate(self):
         ids=("walk_forward","trot_jog")

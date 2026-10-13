@@ -88,6 +88,12 @@ def interp(times,vals,t,rotation=False):
     j=int(np.searchsorted(times,t)); f=(t-times[j-1])/(times[j]-times[j-1])
     return slerp(vals[j-1],vals[j],f) if rotation else vals[j-1]*(1-f)+vals[j]*f
 
+def frame_count(duration,fps,cap):
+    """Count endpoint-inclusive frames; absorb only Float32-near-integer interval noise."""
+    intervals=float(duration)*int(fps); nearest=round(intervals)
+    steps=int(nearest if abs(intervals-nearest)<=1e-5 else math.ceil(intervals))
+    return min(int(cap),max(2,steps+1))
+
 def parents(d):
     out={}
     for p,n in enumerate(d.get("nodes",[])):
@@ -110,6 +116,13 @@ def node_id(d,name):
     if len(ids)!=1: raise ValueError(f"required unique node missing: {name}")
     return ids[0]
 
+def first_node_id(d,names):
+    for name in names:
+        ids=[i for i,n in enumerate(d.get("nodes",[])) if n.get("name")==name]
+        if len(ids)>1: raise ValueError(f"required unique node duplicated: {name}")
+        if ids: return ids[0],name
+    raise ValueError("required node missing: "+" or ".join(names))
+
 def sample(run_dir,task_id,clip,fps=60,frame_cap=600,min_chain_weight=.7,sole_band_height_ratio=.01):
     configured=options_get({"min_chain_weight":min_chain_weight,"sole_band_height_ratio":sole_band_height_ratio})
     min_chain_weight=configured["min_chain_weight"]["value"]; sole_band_height_ratio=configured["sole_band_height_ratio"]["value"]
@@ -124,6 +137,12 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600,min_chain_weight=.7,sole_ba
         base_trs.append((t,q,s)); base.append(trs(t,q,s))
     animations=[a for a in d.get("animations",[]) if a.get("name")==clip]
     if len(animations)!=1: raise ValueError("clip must match exactly one animation")
+    extras=animations[0].get("extras") or {}
+    if not isinstance(extras,dict): raise ValueError("animation extras must be an object")
+    loop_extra=extras.get("loop")
+    if loop_extra is not None and not isinstance(loop_extra,bool): raise ValueError("animation extras.loop must be boolean")
+    loop_value=loop_extra if isinstance(loop_extra,bool) else clip.lower() in contract.LOOPS
+    loop_source="animation.extras.loop" if isinstance(loop_extra,bool) else "legacy_action_policy_pending"
     channels={}; amin=math.inf; amax=-math.inf
     for ch in animations[0].get("channels",[]):
         target=ch.get("target",{}); path=target.get("path"); ni=target.get("node")
@@ -138,11 +157,11 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600,min_chain_weight=.7,sole_ba
         if va.shape[1] != (4 if path=="rotation" else 3): raise ValueError("animation output width mismatch")
         channels[key]=(ti,va); amin=min(amin,float(ti[0])); amax=max(amax,float(ti[-1]))
     if not channels or not amax>amin: raise ValueError("empty/zero-duration clip")
-    count=min(frame_cap,max(2,int(math.ceil((amax-amin)*fps))+1)); times=np.linspace(amin,amax,count)
+    count=frame_count(amax-amin,fps,frame_cap); times=np.linspace(amin,amax,count)
     leg_slots={}; required=set()
     for leg,names in LEGS.items():
         ids={node_id(d,n) for n in names}; leg_slots[leg]=ids; required|=ids
-    hips=node_id(d,"Hips"); head=node_id(d,"Head"); tail=node_id(d,"Tail_End")
+    hips=node_id(d,"Hips"); head=node_id(d,"Head"); tail,tail_name=first_node_id(d,("Tail_End","Tail3"))
     records=[]; bind_world=worlds(d,base,par); ymin=math.inf; ymax=-math.inf
     for ni,n in enumerate(nodes):
         if "mesh" not in n: continue
@@ -219,7 +238,8 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600,min_chain_weight=.7,sole_ba
                 "source_video_mirrored":"unknown","motion_source_identity":"pending",
                 "measurement":"actual_glb_lbs_source_bound_sole_vertex"}
     doc={"action":clip.lower(),"times":[round(float(t-amin),8) for t in times],"model_height":ymax-ymin,
-         "loop":clip.lower() in contract.LOOPS,"clip_type":"loop" if clip.lower() in contract.LOOPS else "one_shot",
+         "loop":loop_value,"clip_type":"loop" if loop_value else "one_shot",
+         "loop_metadata":{"source":loop_source,"explicit":isinstance(loop_extra,bool)},
          "ground":{"normal":[0,1,0],"offset":0,"inference":"minimum selected bind/rest sole vertex Y",
                    "confidence":"pending_no_explicit_plane"},
          "axes":{"up":[0,1,0],"forward":forward.tolist(),"right":right.tolist(),"source_supported":axes_ok,
@@ -232,8 +252,11 @@ def sample(run_dir,task_id,clip,fps=60,frame_cap=600,min_chain_weight=.7,sole_ba
                                    "chain_weight":anchors[leg]["weight"],
                                    "bind_point":norm([anchors[leg]["bind"]])[0]},**provenance} for leg,rows in tracks.items()},
          "head":{"quaternions":[list(map(float,q)) for q in heads],"source_track":"Head","source_observed":False},
-         "tail":{"positions":norm(tails),"source_track":"Tail_End","source_observed":False}}
+         "tail":{"positions":norm(tails),"source_track":tail_name,"source_observed":False}}
     report=contract.evaluate(doc)
+    if not isinstance(loop_extra,bool):
+        if "loop_metadata_source" not in report["pending"]: report["pending"].append("loop_metadata_source")
+        if "missing_evidence:loop_metadata_source" not in report["failures"]: report["failures"].append("missing_evidence:loop_metadata_source")
     if "ground_plane_confidence" not in report["pending"]: report["pending"].append("ground_plane_confidence")
     if "missing_evidence:ground_plane_confidence" not in report["failures"]: report["failures"].append("missing_evidence:ground_plane_confidence")
     report["pass"]=False

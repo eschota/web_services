@@ -145,10 +145,44 @@ receipt = equine_gltf_retarget.write_retargeted_glb(
 ```
 
 The target must use explicit node TRS, exact rig hierarchy and static nonzero
-node scales. Matrix fallback, source scale/morph channels, sparse source
-animation accessors, missing mappings and nonuniform channel timing fail
-closed. A target containing old animations is rejected by default; the runtime
+node scales. Matrix fallback, morph channels, sparse source animation
+accessors, missing mappings and nonuniform channel timing fail closed. Blender
+may export a scale channel even when scale never moves; it is ignored only when
+every sample matches that node's declared static rest scale within `1e-6`, and
+the adapter records the ignored count and tolerance. Animated or mismatched
+scale fails closed. A target containing old animations is rejected by default; the runtime
 does not activate customer/custom animation paths. The writer creates a new
 GLB plus `.receipt.json`, leaves the input untouched, preserves protected JSON
 objects and the original BIN as an exact prefix, then records before/after
 SHA-256 values. Publication and default-library activation remain separate.
+
+For the actual c5ff zebra Walk, `zebra_walk_actual_retarget_inputs.json` pins
+the local actionless bundle and rig metadata while explicitly leaving the F15
+source-motion result and exact target GLB pending. Once those two files exist,
+construct a job with schema `autorig.hoof-actual-retarget-job.v1`, state
+`prepared_waiting_actual_source_motion`, pinned `source_motion`,
+`actionless_bundle`, `target_rig`, and `target_glb`, fresh `output_glb` and
+`result_json`, plus `existing_animation_policy: replace`; then run:
+
+```text
+python prepare_actual_walk_retarget.py --job actual-walk-retarget-job.json
+```
+
+The driver derives calibration only from the same-source actionless identity,
+actual glTF node inventory, and exact target rig head/tail data. It makes no
+camera-Z acceptance claim and uses no procedural motion. After writing, it
+re-reads numeric accessors, checks shared sample times and normalized
+quaternions, reports channel counts and root travel, and leaves the result as a
+non-activated single-action candidate. `loop` must be an explicit boolean in
+the source-motion export and is propagated unchanged; this accepted 141-frame
+Walk fit is `false` until a cycle is independently approved. An animated
+Armature/ancestor which lacks an exact target mapping is rejected rather than
+silently losing its translation.
+
+Bone-frame calibration primarily uses the declared model forward axis. When a
+bone direction is nearly parallel to it (common for equine Spine/Neck), the
+engine uses the explicitly declared anatomical up axis (`+Y` for this glTF
+contract). The switch threshold is the ranged
+`frame_parallel_dot_threshold` option, and source/target fallback bone names
+are recorded in retarget metadata. Zero-length bones, parallel forward/up
+axes, and a bone parallel to both references remain hard failures.

@@ -67,3 +67,25 @@ actual glTF accessors. Its result contains the actual glTF +Y reference
 skeleton and node-local animation channels and remains
 `candidate_pending_real_qa` with promotion disabled. Invocation fields are in
 `farm_export_job.example.json`.
+
+`equine_constraint_fit.py` is the first single-Walk CPU fitter for measured
+`equine_limb_constraints` output. It selects hinge axes from each immutable
+source bone basis and the measured sagittal-plane normal, preserves rest bone
+lengths/hierarchy through `RigBundle.forward_kinematics`, and writes a fresh
+`autorig-fitted-animation.v1` compatible with `apply_fitted_motion.py`.
+Engineering search bounds are public options, not anatomical defaults. Missing
+frames are time-interpolated only and labelled `INFERRED_PENDING`; no opposite
+leg or half-cycle mirroring occurs. Output remains unaccepted and requires real
+post-retarget 3D QA. See `equine_constraint_fit_job.example.json`.
+When source-bound torso constraints are present, the fitter may translate the
+root only along the measured source forward/up axes; root rotation stays zero.
+Without torso evidence the root remains exactly fixed as before. Hoof and torso
+REST/fitted residuals and bound hits are recorded per measured frame. Progress
+is emitted every ten frames and `max_fit_seconds` bounds the CPU solve.
+
+`farm_constraint_fit_pipeline.py` is the isolated CPU farm entrypoint for real
+pinned `tracks.json`/NPZ and the immutable bundle's `surface_anchors.json`. It records an ffprobe timing receipt, converts RAW2D
+without filling or mirroring, builds source-plane constraints, writes a
+run-only unaccepted profile and exact non-loop Walk contract, then executes the
+bounded IK fitter. All artifacts are new under a fresh project work root; it
+does not enqueue work, use a GPU, mount customer paths, publish or send media.

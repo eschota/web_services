@@ -63,7 +63,11 @@ def main():
         import torch
         torch.cuda.reset_peak_memory_stats()
         marker=Path(limits.inference_marker) if limits.inference_marker else None
-        if marker: marker.write_text(json.dumps({'pid':os.getpid(),'state':'gpu_admitted'}))
+        if marker:
+            temporary=marker.with_suffix('.tmp')
+            temporary.write_text(json.dumps({'pid':os.getpid(),'parent_pid':os.getppid(),
+                'actor_token':os.environ.get('AUTORIG_EQUINE_ACTOR_TOKEN'),'state':'gpu_admitted'}))
+            os.replace(temporary,marker)
         try:
             return _execute(args)
         finally:

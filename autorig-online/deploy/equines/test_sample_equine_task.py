@@ -6,7 +6,7 @@ import numpy as np
 import sample_equine_task as sampler
 
 
-def fixture(path, *, morph=False, omit=None):
+def fixture(path, *, morph=False, omit=None, explicit_loop=None):
     names = ["Hips", "Head", "Tail_End"] + [name for chain in sampler.LEGS.values() for name in chain]
     if omit:
         names.remove(omit)
@@ -46,14 +46,17 @@ def fixture(path, *, morph=False, omit=None):
     primitive = {"attributes": {"POSITION": 0, "JOINTS_0": 1, "WEIGHTS_0": 2}}
     if morph:
         primitive["targets"] = [{"POSITION": 0}]
+    animation = {"name": "Walk", "samplers": [{"input": 4, "output": 5, "interpolation": "LINEAR"},
+                                                    {"input": 4, "output": 6, "interpolation": "LINEAR"}],
+                 "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}},
+                              {"sampler": 1, "target": {"node": names.index("LeftFrontFoot"), "path": "translation"}}]}
+    if explicit_loop is not None:
+        animation["extras"] = {"loop": explicit_loop}
     document = {
         "asset": {"version": "2.0"}, "buffers": [{"byteLength": len(blob)}],
         "bufferViews": views, "accessors": accessors, "nodes": nodes,
         "meshes": [{"primitives": [primitive]}], "skins": [{"joints": joints, "inverseBindMatrices": 3}],
-        "animations": [{"name": "Walk", "samplers": [{"input": 4, "output": 5, "interpolation": "LINEAR"},
-                                                          {"input": 4, "output": 6, "interpolation": "LINEAR"}],
-                        "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}},
-                                     {"sampler": 1, "target": {"node": names.index("LeftFrontFoot"), "path": "translation"}}]}],
+        "animations": [animation],
         "scenes": [{"nodes": [0, mesh_node]}], "scene": 0,
     }
     js = json.dumps(document, separators=(",", ":")).encode()
@@ -119,6 +122,21 @@ class SamplerTests(unittest.TestCase):
             self.assertFalse(result["sample"]["axes"]["source_supported"])
             self.assertEqual(result["sample"]["axes"]["forward_source"], "pending")
             self.assertIn("source_supported_3d_axes", result["evaluation"]["pending"])
+
+    def test_explicit_non_loop_walk_survives_clip_name_policy(self):
+        with tempfile.TemporaryDirectory() as td:
+            run = Path(td); (run / "rig").mkdir(); fixture(run / "rig" / "rigged.glb", explicit_loop=False)
+            result = sampler.sample(run, "task-1", "Walk", fps=12, frame_cap=20)
+            self.assertFalse(result["sample"]["loop"])
+            self.assertEqual(result["sample"]["clip_type"], "one_shot")
+            self.assertEqual(result["sample"]["loop_metadata"]["source"], "animation.extras.loop")
+            self.assertNotIn("loop_metadata_source", result["evaluation"]["pending"])
+
+    def test_float32_duration_keeps_requested_24fps_frame_count(self):
+        duration = float(np.float32(5.833333492))
+        self.assertEqual(sampler.frame_count(duration, 24, 600), 141)
+        times = np.linspace(0.0, duration, sampler.frame_count(duration, 24, 600))
+        self.assertEqual(float(times[-1]), duration)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,30 @@
+{
+  "schema": "autorig.hoof-actual-retarget-inputs.v1",
+  "state": "prepared_waiting_f15_source_motion_and_exact_target_glb",
+  "action_id": "walk_forward",
+  "task_run_id": "c5ff1c6306858a9e5e8a",
+  "source_identity": {
+    "actionless_bundle": {
+      "path": "R:/autorig/.work/equines-20261013/actionless-zebra-v5/reference/actionless-bundle/fitting_bundle.json",
+      "sha256": "4a077d7c801e864c81da0d4972d270be476bc1861f44ebc9e327d81f41161140"
+    },
+    "source_and_target_glb_sha256": "ace8a3c0adcab0fe33ad24269d3fc4993ee6a1d28f19ab6d5f3b0ef57c2c816c"
+  },
+  "target_rig": {
+    "path": "R:/autorig/.work/equines-20261013/media/probe/c5ff1c6306858a9e5e8a.rig.json",
+    "sha256": "940d3968dd9cf6aaf000351518e95b0de0a423ee74a60d8065db0c84b56c6b6e"
+  },
+  "pending_inputs": {
+    "source_motion": "gltf-source-motion.json emitted after actual F15 fit/export, including loop=false from exact action contract",
+    "target_glb": "exact existing c5ff1c6306858a9e5e8a rigged.glb with required SHA-256"
+  },
+  "execution_policy": {
+    "existing_animation_policy": "replace",
+    "source_loop_must_equal_exact_action_contract": false,
+    "fresh_output_only": true,
+    "accepted_camera_z_claim": false,
+    "procedural_override_used": false,
+    "activation_allowed": false,
+    "release_complete": false
+  }
+}

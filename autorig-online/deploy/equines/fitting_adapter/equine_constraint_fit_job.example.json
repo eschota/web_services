@@ -1,0 +1,24 @@
+{
+  "schema": "autorig.equine-constraint-fit-job/1",
+  "action_id": "walk_forward",
+  "bundle_manifest": {"path": "<immutable actionless bundle>/immutable_manifest.json", "sha256": "<sha256>"},
+  "surface_anchors": {"path": "<immutable actionless bundle>/surface_anchors.json", "sha256": "<sha256>"},
+  "constraints": {"path": "<equine_limb_constraints output.json>", "sha256": "<sha256>"},
+  "contact_evidence": {"path": "<measured contact evidence.json>", "sha256": "<sha256>"},
+  "profile": {"path": "<run-scoped engineering profile.json>", "sha256": "<sha256>"},
+  "action_contract": {"path": "<full34 walk action contract.json>", "sha256": "<sha256>"},
+  "animation_fitting_code": "<managed runtime>/code/animation_fitting",
+  "output": "<fresh work root>/walk-fitted-animation.json",
+  "progress_file": "<fresh work root>/walk-fitted-animation.progress.json",
+  "options": {
+    "max_rotation_delta_rad": 0.75,
+    "rest_weight": 0.01,
+    "temporal_weight": 0.05,
+    "max_nfev": 250,
+    "target_scale": 1.0
+    ,"max_root_translation_height_ratio": 0.5
+    ,"max_fit_seconds": 300
+    ,"hoof_huber_delta_height_ratio": 0.05
+    ,"joint_huber_delta_height_ratio": 0.05
+  }
+}

@@ -21,6 +21,7 @@ import equine_retarget as ER
 
 SOURCE_SCHEMA = "autorig.registry34.gltf-source-motion/1"
 RECEIPT_SCHEMA = "autorig.hoof-retargeted-glb.v1"
+STATIC_REST_SCALE_TOLERANCE = 1.0e-6
 JSON_CHUNK = 0x4E4F534A
 BIN_CHUNK = 0x004E4942
 
@@ -136,6 +137,10 @@ def adapt_source_motion(candidate: Mapping[str, Any], calibration: Mapping[str, 
         raise GltfRetargetError("reviewed source calibration schema required")
     rows = calibration.get("bones")
     if not isinstance(rows, Mapping) or not rows: raise GltfRetargetError("source calibration bone map missing")
+    forward_axis=_finite_vector(calibration.get("forward_axis"),3,"source calibration forward_axis")
+    up_axis=_finite_vector(calibration.get("up_axis"),3,"source calibration up_axis")
+    if math.sqrt(sum(v*v for v in forward_axis))<1e-8 or math.sqrt(sum(v*v for v in up_axis))<1e-8:
+        raise GltfRetargetError("source calibration axes are singular")
     by_index = {}
     for raw in reference:
         if not isinstance(raw, Mapping) or not isinstance(raw.get("index"), int): raise GltfRetargetError("invalid reference node")
@@ -183,11 +188,12 @@ def adapt_source_motion(candidate: Mapping[str, Any], calibration: Mapping[str, 
                       "tail": _finite_vector(spec.get("tail"), 3, f"{name}.tail")})
         bone_map[name] = {"target": target, "optional_decorative": optional}
     common_times, tracks, seen, channel_data = None, {}, set(), {}
+    ignored_static_scale_channels=0
     for number, channel in enumerate(channels):
         if not isinstance(channel, Mapping): raise GltfRetargetError("invalid source channel")
         node, path = channel.get("node"), channel.get("path")
         if node not in selected: raise GltfRetargetError("animated source node lacks exact calibration/mapping")
-        if path not in {"rotation", "translation"}: raise GltfRetargetError("scale/morph/unknown source channel forbidden")
+        if path not in {"rotation", "translation", "scale"}: raise GltfRetargetError("morph/unknown source channel forbidden")
         if channel.get("interpolation") != "LINEAR": raise GltfRetargetError("only LINEAR source channels supported")
         if (node, path) in seen: raise GltfRetargetError("duplicate source node/property channel")
         seen.add((node, path))
@@ -205,6 +211,12 @@ def adapt_source_motion(candidate: Mapping[str, Any], calibration: Mapping[str, 
         width = 4 if path == "rotation" else 3
         if not isinstance(values, list) or len(values) != len(times): raise GltfRetargetError("source channel sample mismatch")
         values = [_finite_vector(v, width, f"channel {number}") for v in values]
+        if path=="scale":
+            rest_scale=_finite_vector(by_index[node].get("scale"),3,f"node {node} rest scale")
+            if any(any(abs(actual-expected)>STATIC_REST_SCALE_TOLERANCE for actual,expected in zip(sample,rest_scale)) for sample in values):
+                raise GltfRetargetError(f"node {node}: animated or unexpected scale channel forbidden")
+            ignored_static_scale_channels+=1
+            continue
         channel_data.setdefault(node,{})[path]=values
     # Collapse every omitted static ancestor into every animated sample.  The
     # result is still local to the nearest retained parent, never model/world.
@@ -231,10 +243,13 @@ def adapt_source_motion(candidate: Mapping[str, Any], calibration: Mapping[str, 
                                  "coordinate_system": "right_handed_y_up", "track_space": "local"},
              "reference_skeleton": {"height": calibration.get("height"),
                                     "ground_baseline": calibration.get("ground_baseline"),
-                                    "forward_axis": calibration.get("forward_axis"), "bones": bones},
+                                    "forward_axis": forward_axis,
+                                    "up_axis":up_axis, "bones": bones},
              "tracks": tracks,
              "source_motion": {"schema": SOURCE_SCHEMA, "derived_glb": copy.deepcopy(candidate.get("derived_glb")),
                                "source_glb_sha256": candidate.get("source_glb_sha256"),
+                               "ignored_static_rest_scale_channels": ignored_static_scale_channels,
+                               "static_rest_scale_tolerance": STATIC_REST_SCALE_TOLERANCE,
                                "candidate_only": True, "release_complete": False}}
     return entry, bone_map
 
@@ -297,14 +312,17 @@ def target_from_glb(target_bytes: bytes, rig_doc: Mapping[str, Any]) -> tuple[di
     forward = rig_doc.get("forward_axis", "+z")
     forward = {"+z":[0,0,1],"-z":[0,0,-1],"+x":[1,0,0],"-x":[-1,0,0]}.get(forward, forward)
     return {"height": height, "ground_baseline": min(v[1] for v in points),
-            "forward_axis": forward, "bones": bones}, name_to_index
+            "forward_axis": forward, "up_axis":[0,1,0], "bones": bones}, name_to_index
 
 
-def append_clip_bytes(target_bytes: bytes, clip: Mapping[str, Any], *, allow_existing_animations: bool = False) -> bytes:
+def append_clip_bytes(target_bytes: bytes, clip: Mapping[str, Any], *, existing_animation_policy: str = "reject") -> bytes:
     doc, original_binary = _read_glb(target_bytes)
-    if doc.get("animations") and not allow_existing_animations:
-        raise GltfRetargetError("target already has animations; explicit opt-in required")
+    if existing_animation_policy not in {"reject","replace","preserve"}:
+        raise GltfRetargetError("invalid existing animation policy")
+    if doc.get("animations") and existing_animation_policy == "reject":
+        raise GltfRetargetError("target already has animations; explicit policy required")
     output = copy.deepcopy(doc); binary = bytearray(original_binary)
+    if existing_animation_policy == "replace": output["animations"]=[]
     output.setdefault("bufferViews", []); output.setdefault("accessors", []); output.setdefault("animations", [])
     by_name = {node.get("name"): index for index,node in enumerate(output.get("nodes") or []) if node.get("name")}
     times = clip.get("times")
@@ -341,14 +359,15 @@ def append_clip_bytes(target_bytes: bytes, clip: Mapping[str, Any], *, allow_exi
 
 def write_retargeted_glb(target_path: os.PathLike[str] | str, output_path: os.PathLike[str] | str,
                          entry: Mapping[str, Any], rig_doc: Mapping[str, Any], bone_map: Mapping[str, Any],
-                         options: Mapping[str, Any] | None = None, *, candidate_only: bool = True) -> dict[str, Any]:
+                         options: Mapping[str, Any] | None = None, *, candidate_only: bool = True,
+                         existing_animation_policy: str = "reject") -> dict[str, Any]:
     source_path=pathlib.Path(target_path).resolve(); destination=pathlib.Path(output_path).resolve()
     receipt_path=destination.with_suffix(destination.suffix+".receipt.json")
     if source_path == destination or not source_path.is_file(): raise GltfRetargetError("source target GLB missing or output aliases it")
     if destination.exists() or receipt_path.exists(): raise GltfRetargetError("derived output or receipt already exists")
     target_bytes=source_path.read_bytes(); target_doc,node_map=target_from_glb(target_bytes,rig_doc)
     clip=ER.retarget_entry(entry,target_doc,bone_map,options)
-    derived=append_clip_bytes(target_bytes,clip)
+    derived=append_clip_bytes(target_bytes,clip,existing_animation_policy=existing_animation_policy)
     destination.parent.mkdir(parents=True,exist_ok=True)
     fd,temp_name=tempfile.mkstemp(prefix=f".{destination.name}.",suffix=".tmp",dir=str(destination.parent))
     try:
@@ -373,6 +392,7 @@ def write_retargeted_glb(target_path: os.PathLike[str] | str, output_path: os.Pa
             "original_binary_prefix_sha256":_sha(after_bin[:len(before_bin)]),
             "protected_json_sha256":preservation,
             "node_count":len(node_map),"retarget_metadata":clip["retarget_metadata"],
+            "existing_animation_policy":existing_animation_policy,
             "activation_allowed":False,"release_complete":False}
     encoded=(json.dumps(receipt,ensure_ascii=False,sort_keys=True,indent=2,allow_nan=False)+"\n").encode("utf-8")
     fd,temp_name=tempfile.mkstemp(prefix=f".{receipt_path.name}.",suffix=".tmp",dir=str(receipt_path.parent))

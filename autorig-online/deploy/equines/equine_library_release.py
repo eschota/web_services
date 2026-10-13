@@ -180,15 +180,38 @@ def _task_id(value: Any) -> str:
 
 
 def _root(path: os.PathLike[str] | str) -> pathlib.Path:
-    root = pathlib.Path(path).resolve()
+    # Canonicalize only after the directory exists.  On Windows, resolving a
+    # not-yet-created descendant concurrently can alternate between drive and
+    # volume/junction spellings and make an actually-contained child appear to
+    # escape in another spawned process.
+    root = pathlib.Path(os.path.abspath(os.fspath(path)))
     root.mkdir(parents=True, exist_ok=True)
-    return root
+    return pathlib.Path(os.path.realpath(root))
 
 
 def _under(root: pathlib.Path, *parts: str) -> pathlib.Path:
-    candidate = root.joinpath(*parts).resolve()
-    if candidate != root and root not in candidate.parents:
+    root = pathlib.Path(os.path.realpath(root))
+    candidate = pathlib.Path(os.path.abspath(os.path.join(os.fspath(root), *(os.fspath(p) for p in parts))))
+    root_key, candidate_key = os.path.normcase(os.fspath(root)), os.path.normcase(os.fspath(candidate))
+    try:
+        lexical_inside = os.path.commonpath((root_key, candidate_key)) == root_key
+    except ValueError:
+        lexical_inside = False
+    if not lexical_inside:
         raise RegistryError("path escapes registry root")
+    # Preserve fail-closed symlink/junction protection without resolving a
+    # future leaf.  Check the nearest existing ancestor, or the leaf itself if
+    # it already exists, against the now-existing canonical root.
+    existing = candidate
+    while not os.path.lexists(existing) and existing != root:
+        existing = existing.parent
+    existing_real = os.path.normcase(os.path.realpath(existing))
+    try:
+        real_inside = os.path.commonpath((root_key, existing_real)) == root_key
+    except ValueError:
+        real_inside = False
+    if not real_inside:
+        raise RegistryError("path escapes registry root through symlink or junction")
     return candidate
 
 
@@ -317,6 +340,9 @@ def _validate_tracks(entry: Mapping[str, Any], action: str) -> None:
     forward = skeleton.get("forward_axis")
     if not isinstance(forward, list) or len(forward) != 3 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(float(v)) for v in forward) or math.sqrt(sum(float(v)**2 for v in forward)) < 1e-8:
         raise RegistryError(f"{action}: reference_skeleton.forward_axis is invalid")
+    up = skeleton.get("up_axis")
+    if not isinstance(up, list) or len(up) != 3 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(float(v)) for v in up) or math.sqrt(sum(float(v)**2 for v in up)) < 1e-8:
+        raise RegistryError(f"{action}: reference_skeleton.up_axis is invalid")
     bone_names = set()
     for bone in skeleton["bones"]:
         if not isinstance(bone, Mapping) or not isinstance(bone.get("name"), str) or bone["name"] in bone_names:

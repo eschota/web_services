@@ -8,7 +8,7 @@ import equine_retarget as rt
 
 def skeleton(height=2.0, forward=(0, 0, 1), spine_length=1.0):
     return {
-        "height": height, "ground_baseline": 0.0, "forward_axis": list(forward),
+        "height": height, "ground_baseline": 0.0, "forward_axis": list(forward), "up_axis":[0,1,0],
         "bones": [
             {"name": "root", "parent": None, "rest_translation": [0, 1, 0],
              "rest_rotation": [0, 0, 0, 1], "rest_scale": [1, 1, 1],
@@ -71,6 +71,18 @@ class RetargetTests(unittest.TestCase):
         self.assertAlmostEqual(clip["hips_translation"][-1][0], 0.0, places=6)
         self.assertAlmostEqual(abs(clip["hips_translation"][-1][2]), 1.0, places=6)
 
+    def test_forward_parallel_horizontal_bone_uses_explicit_up_and_preserves_bend(self):
+        source=entry(); target=skeleton()
+        for value in (source["reference_skeleton"],target):
+            spine=next(b for b in value["bones"] if b["name"]=="spine")
+            spine["head"]=[0,1,0]; spine["tail"]=[0,1,1]
+        clip=rt.retarget_entry(source,target,MAP)
+        self.assertIn("spine",clip["retarget_metadata"]["source_anatomical_up_fallback_bones"])
+        self.assertIn("spine",clip["retarget_metadata"]["target_anatomical_up_fallback_bones"])
+        rest=clip["rotations"]["spine"][0]; bend=clip["rotations"]["spine"][1]
+        self.assertAlmostEqual(abs(sum(a*b for a,b in zip(rest,[0,0,0,1]))),1.0,places=6)
+        self.assertLess(abs(sum(a*b for a,b in zip(rest,bend))),0.999)
+
     def test_different_proportions_keep_target_bone_lengths_and_static_translations(self):
         source = entry()
         source["tracks"]["spine.translation"] = {
@@ -117,6 +129,9 @@ class RetargetTests(unittest.TestCase):
         legacy = entry(); legacy.pop("tracks"); legacy["curves"] = {"spine": [0, 1, 0]}
         with self.assertRaisesRegex(rt.RetargetError, "legacy curves"):
             rt.retarget_entry(legacy, skeleton(), MAP)
+        missing_up=entry(); missing_up["reference_skeleton"].pop("up_axis")
+        with self.assertRaisesRegex(rt.RetargetError,"up_axis"):
+            rt.retarget_entry(missing_up,skeleton(),MAP)
 
     def test_full_34_library_is_atomic_and_complete(self):
         rows = [entry(action=action) for action in release.BASE_ACTIONS]

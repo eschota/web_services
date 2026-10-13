@@ -5,7 +5,24 @@ next fitting stage; the queue receives diagnostics and an artifact inventory.
 This stage does not certify hoof identity, gait quality, or a library release.
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, pathlib, shutil, subprocess, time, urllib.request, zipfile
+import argparse, hashlib, json, os, pathlib, shutil, subprocess, time, urllib.request, uuid, zipfile
+
+def verify_actor(active, launcher_pid, token):
+    """A Windows venv redirector and its actual interpreter have distinct PIDs."""
+    if (active.get('actor_token') != token or active.get('state') != 'gpu_admitted' or
+            isinstance(active.get('pid'),bool) or not isinstance(active.get('pid'),int) or active['pid']<=0 or
+            (active['pid'] != launcher_pid and active.get('parent_pid') != launcher_pid)):
+        raise ValueError('unexpected GPU actor marker')
+    return active['pid']
+
+def stop_own_tree(process):
+    """Stop only the process tree started by this wrapper, including venv child."""
+    if process.poll() is not None: return
+    if os.name=='nt':
+        subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],check=True,
+            stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    else: process.terminate()
+    process.wait(timeout=30)
 
 def digest(path):
     h = hashlib.sha256()
@@ -62,33 +79,43 @@ def main():
     for row in anchor['tracks']: cmd.extend(['--priority-anchor-id',row['anchor_id']])
     # A generated reference is not assumed cyclic merely because its action is Walk.
     shutil.copyfile(inputs/'observe-job.json',work/'observe-job.json')
+    token=uuid.uuid4().hex; env['AUTORIG_EQUINE_ACTOR_TOKEN']=token
+    watchdog_error=None
     with (work/'observe.log').open('wb') as log:
         result = subprocess.Popen(cmd,cwd=work,env=env,stdout=log,stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         yielded=False
-        while result.poll() is None:
-            time.sleep(1)
-            if not marker.is_file() or job.get('reuse_raw_only') is True: continue
-            active=json.loads(marker.read_text())
-            if active.get('pid') != result.pid: raise ValueError('unexpected GPU actor marker')
-            try:
-                with urllib.request.urlopen('http://127.0.0.1:8588/queue',timeout=2) as r: q=json.load(r)
-                busy=bool(q.get('queue_running') or q.get('queue_pending'))
-            except Exception: busy=True
-            if busy:
-                log.write(b'Customer render arrived: terminate our own GPU actor and preserve completed raw stages\n'); log.flush()
-                result.terminate(); result.wait(timeout=30); yielded=True
-                lease=managed/'equine-tracking.lock'
-                if lease.is_file():
-                    owner=json.loads(lease.read_text())
-                    if owner.get('pid') != result.pid: raise ValueError('GPU lease belongs to another actor')
-                    lease.unlink()
-                if marker.is_file(): marker.unlink()
-                break
+        actor_pid=None
+        try:
+            while result.poll() is None:
+                time.sleep(1)
+                if not marker.is_file() or job.get('reuse_raw_only') is True: continue
+                active=json.loads(marker.read_text())
+                actor_pid=verify_actor(active,result.pid,token)
+                try:
+                    with urllib.request.urlopen('http://127.0.0.1:8588/queue',timeout=2) as r: q=json.load(r)
+                    busy=bool(q.get('queue_running') or q.get('queue_pending'))
+                except Exception: busy=True
+                if busy:
+                    log.write(b'Customer render arrived: stop our own interpreter tree; retain RAW stages\n'); log.flush()
+                    stop_own_tree(result); yielded=True
+                    break
+        except Exception as exc:
+            watchdog_error=str(exc)
+            log.write(('Watchdog failure: '+watchdog_error+'\n').encode()); log.flush()
+        finally:
+            # A watchdog exception must never leave a live inference orphan.
+            stop_own_tree(result)
+            lease=managed/'equine-tracking.lock'
+            if lease.is_file() and actor_pid is not None:
+                owner=json.loads(lease.read_text())
+                if owner.get('pid')==actor_pid: lease.unlink()
+            if marker.is_file() and actor_pid is not None: marker.unlink()
     shutil.copyfile(work/'observe.log',out/'observe.log')
     inventory = [{'path':str(f.relative_to(work)), 'bytes':f.stat().st_size,'sha256':digest(f)} for f in sorted(work.rglob('*')) if f.is_file()]
     report = {'schema':'autorig.equine-observe-receipt/1','candidate_id':job['candidate_id'],'farm_work_root':str(work),
-        'exit_code':75 if yielded else result.returncode,'yielded_to_customer':yielded,'source_video_sha256':digest(video),'source_bundle_manifest_sha256':job['bundle_manifest_sha256'],
+        'exit_code':75 if yielded else (2 if watchdog_error else result.returncode),'watchdog_error':watchdog_error,
+        'yielded_to_customer':yielded,'source_video_sha256':digest(video),'source_bundle_manifest_sha256':job['bundle_manifest_sha256'],
         'ffprobe_sha256':job['ffprobe_sha256'],
         'raw_measurements_root':str(raw_root),'raw_scope_sha256':raw_scope,
         'source_reference_media_uid':job['reference_media_uid'],'source_reference_verdict':job['reference_verdict_inbox_id'],
@@ -103,6 +130,6 @@ def main():
         f=obs/name
         if f.is_file(): shutil.copyfile(f,out/name)
     print(json.dumps(report,ensure_ascii=False))
-    return 75 if yielded else result.returncode
+    return 75 if yielded else (2 if watchdog_error else result.returncode)
 
 if __name__ == '__main__': raise SystemExit(main())

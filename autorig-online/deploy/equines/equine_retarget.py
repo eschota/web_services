@@ -19,12 +19,14 @@ DEFAULT_OPTIONS = {
     "quaternion_norm_tolerance": 0.02,
     "singular_epsilon": 1.0e-8,
     "continuity_flip_dot": 0.0,
+    "frame_parallel_dot_threshold": 0.98,
 }
 OPTION_RANGES = {
     "root_motion_scale": (0.1, 10.0),
     "quaternion_norm_tolerance": (1.0e-6, 0.1),
     "singular_epsilon": (1.0e-12, 1.0e-3),
     "continuity_flip_dot": (-0.1, 0.1),
+    "frame_parallel_dot_threshold": (0.90, 0.999999),
 }
 
 
@@ -55,7 +57,7 @@ def target_from_ap_rig(rig: Any) -> dict[str, Any]:
     points = [coord for bone in bones for coord in (bone["head"], bone["tail"]) if len(coord) == 3]
     ground = min((float(point[1]) for point in points), default=0.0)
     return {"height": float(getattr(rig, "H", 0) or doc.get("model_height_units") or 0),
-            "ground_baseline": ground, "forward_axis": list(forward_value), "bones": bones}
+            "ground_baseline": ground, "forward_axis": list(forward_value), "up_axis":[0,1,0], "bones": bones}
 
 
 def options_get() -> dict[str, Any]:
@@ -141,12 +143,15 @@ def _qfrom_to(a, b, eps):
     return _qnorm((c[0], c[1], c[2], 1.0 + d), eps, 1.0, "axis calibration")
 
 
-def _frame(direction, forward, eps):
+def _frame(direction, forward, up, eps, parallel_dot_threshold):
     # Canonical +Y follows the bone; canonical +Z follows projected model forward.
     y = _unit(direction, eps, "bone direction")
-    z0 = _vsub(forward, _vmul(y, _dot(forward, y)))
+    forward=_unit(forward,eps,"model forward"); up=_unit(up,eps,"anatomical up")
+    fallback=abs(_dot(y,forward)) >= parallel_dot_threshold
+    reference=up if fallback else forward
+    z0 = _vsub(reference, _vmul(y, _dot(reference, y)))
     if _norm(z0) <= eps:
-        raise RetargetError("singular bone frame: forward axis parallel to bone")
+        raise RetargetError("singular bone frame: forward and anatomical up axes parallel to bone")
     z = _unit(z0, eps, "bone forward")
     x = _unit(_cross(y, z), eps, "bone side")
     z = _cross(x, y)
@@ -161,7 +166,7 @@ def _frame(direction, forward, eps):
         s=math.sqrt(1+m11-m00-m22)*2; q=((m01+m10)/s,0.25*s,(m12+m21)/s,(m02-m20)/s)
     else:
         s=math.sqrt(1+m22-m00-m11)*2; q=((m02+m20)/s,(m12+m21)/s,0.25*s,(m10-m01)/s)
-    return _qnorm(q, eps, 1.0, "bone frame")
+    return _qnorm(q, eps, 1.0, "bone frame"), ("anatomical_up" if fallback else "forward")
 
 
 def _skeleton(value: Any, label: str, opt: Mapping[str, float]):
@@ -172,6 +177,9 @@ def _skeleton(value: Any, label: str, opt: Mapping[str, float]):
     if not math.isfinite(height) or height <= opt["singular_epsilon"] or not math.isfinite(ground):
         raise RetargetError(f"{label} skeleton has invalid height/ground baseline")
     forward = _unit(_vec(value.get("forward_axis"), 3, f"{label}.forward_axis"), opt["singular_epsilon"], f"{label} forward")
+    up = _unit(_vec(value.get("up_axis"), 3, f"{label}.up_axis"), opt["singular_epsilon"], f"{label} up")
+    if abs(_dot(forward,up)) > 1.0- opt["singular_epsilon"]:
+        raise RetargetError(f"{label} forward/up axes are parallel")
     raw = value.get("bones")
     if not isinstance(raw, list) or not raw:
         raise RetargetError(f"{label} skeleton has no bones")
@@ -193,7 +201,7 @@ def _skeleton(value: Any, label: str, opt: Mapping[str, float]):
         if bone["parent"] is not None and bone["parent"] not in bones:
             raise RetargetError(f"{label}.{name} parent is missing")
         _unit(_vsub(bone["tail"], bone["head"]), opt["singular_epsilon"], f"{label}.{name} length")
-    return {"height": height, "ground_baseline": ground, "forward_axis": forward, "bones": bones}
+    return {"height": height, "ground_baseline": ground, "forward_axis": forward, "up_axis":up, "bones": bones}
 
 
 def _mapping(value: Any, source_bones, target_bones):
@@ -263,12 +271,17 @@ def retarget_entry(entry: Mapping[str, Any], target_rig: Mapping[str, Any], bone
     rotations, translations = {}, {}
     root_sources = {name for name, bone in src["bones"].items() if bone["parent"] is None}
     root_scale = tgt["height"] / src["height"] * opt["root_motion_scale"]
+    source_fallback_bones=[]; target_fallback_bones=[]
     for track_id, source_name, prop, values in rows:
         target_name, optional = mapping[source_name]
         if target_name is None and optional: continue
         sb, tb = src["bones"][source_name], tgt["bones"][target_name]
-        sf = _frame(_vsub(sb["tail"], sb["head"]), src["forward_axis"], opt["singular_epsilon"])
-        tf = _frame(_vsub(tb["tail"], tb["head"]), tgt["forward_axis"], opt["singular_epsilon"])
+        sf,sbasis = _frame(_vsub(sb["tail"], sb["head"]), src["forward_axis"],src["up_axis"],
+                           opt["singular_epsilon"],opt["frame_parallel_dot_threshold"])
+        tf,tbasis = _frame(_vsub(tb["tail"], tb["head"]), tgt["forward_axis"],tgt["up_axis"],
+                           opt["singular_epsilon"],opt["frame_parallel_dot_threshold"])
+        if sbasis=="anatomical_up" and source_name not in source_fallback_bones: source_fallback_bones.append(source_name)
+        if tbasis=="anatomical_up" and target_name not in target_fallback_bones: target_fallback_bones.append(target_name)
         calibration = _qmul(_qconj(tf), _qmul(global_cal, sf))
         if prop == "rotation":
             out = []
@@ -311,6 +324,10 @@ def retarget_entry(entry: Mapping[str, Any], target_rig: Mapping[str, Any], bone
             "retarget_metadata": {"schema": SCHEMA, "options": opt,
                 "reference_height": src["height"], "target_height": tgt["height"],
                 "reference_ground_baseline": src["ground_baseline"], "target_ground_baseline": tgt["ground_baseline"],
+                "reference_forward_axis":list(src["forward_axis"]),"reference_up_axis":list(src["up_axis"]),
+                "target_forward_axis":list(tgt["forward_axis"]),"target_up_axis":list(tgt["up_axis"]),
+                "source_anatomical_up_fallback_bones":source_fallback_bones,
+                "target_anatomical_up_fallback_bones":target_fallback_bones,
                 "height_ratio": tgt["height"] / src["height"], "root_motion_scale": root_scale,
                 "pose0_vs_target_rest_max_radians": pose0,
                 "target_bone_lengths_before": lengths, "target_bone_lengths_after": dict(lengths),

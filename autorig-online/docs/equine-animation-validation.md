@@ -201,3 +201,20 @@ unpromoted and customer-path integration remains pending.
   `v3-task-completion-20261013.md`: Telegram callbacks/statistics repaired in
   production, but the five customer rigs still need their genuine skin defects
   repaired. Diagnostic media 7155 does not approve a rig or the equid library.
+
+## Measured reconstruction continuation, 2026-10-13 19:20 UTC
+
+Canonical detailed checkpoint: `equine-walk-source-physics-20261013.md`.
+RAW v7 data were retained despite a Windows venv watchdog PID failure; the
+watchdog was repaired and verified with a real own child on F15 without CUDA.
+Owner accepted only the RAW diagnostic (inbox2504). Actual source-derived Walk
+v2 was exported, retargeted and captured in Unity on f1: DEV7212/media912ef8dddb56.
+Owner rejected it in inbox2507 and explicitly required proper limb alternation
+in inbox2508. Source fitting, not retarget serialization, caused its physics FAIL.
+The early fitter ignored twelve actual limb tracks; RF knee/upper-leg remained
+confident on all86frames after its Toe confidence collapsed. The next source
+fit uses each leg's own Foot/Leg/UpLeg measurements and explicit physical
+constraints. Hidden Toe positions remain PENDING, no mirroring or gait prior
+is labelled observation. Farm run `zebra-walk-plane-fit-v4` is active; continue
+it without duplication. Production F15 contract suites134PASS are not model
+acceptance. No full34 family pointer or customer-path activation has occurred.

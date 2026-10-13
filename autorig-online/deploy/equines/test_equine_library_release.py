@@ -31,7 +31,7 @@ def entries():
                                 "fps": 30.0, "duration_s": (frames - 1) / 30.0,
                                 "coordinate_system": "right_handed_y_up", "track_space": "local"},
             "reference_skeleton": {
-                "height": 2.0, "ground_baseline": 0.0, "forward_axis": [0, 0, 1],
+                "height": 2.0, "ground_baseline": 0.0, "forward_axis": [0, 0, 1], "up_axis":[0,1,0],
                 "bones": [
                     {"name": "root", "parent": None, "rest_translation": [0, 1, 0],
                      "rest_rotation": [0, 0, 0, 1], "rest_scale": [1, 1, 1],

@@ -158,6 +158,8 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
                       immutable_manifest_path: str | Path, immutable_manifest_sha256: str,
                       skeleton_path: str | Path, skeleton_sha256: str,
                       source_video_sha256: str, action: str,
+                      surface_anchors_path: str | Path | None = None,
+                      surface_anchors_sha256: str | None = None,
                       options: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Return source-plane IK candidate constraints; never an acceptance verdict."""
     if action not in ALLOWED_ACTIONS:
@@ -170,9 +172,14 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
         "manifest": _pin(immutable_manifest_path, immutable_manifest_sha256, "immutable_manifest"),
         "skeleton": _pin(skeleton_path, skeleton_sha256, "skeleton"),
     }
+    if (surface_anchors_path is None) != (surface_anchors_sha256 is None):
+        raise ConstraintContractError("surface anchors path and SHA-256 must be supplied together")
+    if surface_anchors_path is not None:
+        paths["surface_anchors"] = _pin(surface_anchors_path, str(surface_anchors_sha256), "surface_anchors")
     observations, anchor_map = _json(paths["observations"], "observations"), _json(paths["anchor_map"], "anchor_map")
     bundle, manifest, skeleton = (_json(paths[name], name) for name in ("bundle", "manifest", "skeleton"))
-    if observations.get("schema") != "autorig-fitting-observations.v1":
+    observation_schema = observations.get("schema")
+    if observation_schema not in {"autorig-fitting-observations.v1", "autorig.equine-raw-2d-measurements.v1"}:
         raise ConstraintContractError("unsupported observations schema")
     if anchor_map.get("schema") != "autorig.equine-fitting-anchor-map/1":
         raise ConstraintContractError("unsupported anchor-map schema")
@@ -185,17 +192,91 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
     artifact = bundle.get("artifacts", {}).get("skeleton", {})
     if artifact.get("sha256") != skeleton_sha256:
         raise ConstraintContractError("fitting bundle does not bind source skeleton")
+    source_anchor_positions: dict[str, np.ndarray] = {}
+    source_anchor_bones: dict[str, str] = {}
+    if "surface_anchors" in paths:
+        surface_artifact = bundle.get("artifacts", {}).get("surface_anchors", {})
+        manifest_surface = next((row for row in manifest.get("files", [])
+                                 if isinstance(row, Mapping) and row.get("filename") == "surface_anchors.json"), None)
+        if (surface_artifact.get("sha256") != surface_anchors_sha256 or
+                not isinstance(manifest_surface, Mapping) or manifest_surface.get("sha256") != surface_anchors_sha256):
+            raise ConstraintContractError("bundle/manifest does not bind surface anchors")
+        surface = _json(paths["surface_anchors"], "surface_anchors")
+        bones = surface.get("bones")
+        if not isinstance(bones, list): raise ConstraintContractError("surface-anchor bones missing")
+        for bone in bones:
+            if not isinstance(bone, Mapping) or not isinstance(bone.get("bone"), str):
+                raise ConstraintContractError("invalid surface-anchor bone")
+            for point in bone.get("points", []):
+                if not isinstance(point, Mapping) or isinstance(point.get("vertex_id"), bool) or not isinstance(point.get("vertex_id"), int):
+                    raise ConstraintContractError("invalid surface-anchor point identity")
+                exact_id = f"{bone['bone']}:{point['vertex_id']}"
+                if exact_id in source_anchor_positions: raise ConstraintContractError("duplicate surface-anchor identity")
+                source_anchor_positions[exact_id] = _vector(point.get("world"), 3, exact_id + ".world")
+                source_anchor_bones[exact_id] = bone["bone"]
     source = bundle.get("source", {})
     if anchor_map.get("source_sha256") != source.get("sha256"):
         raise ConstraintContractError("anchor map/source model mismatch")
     provenance = observations.get("provenance") if isinstance(observations.get("provenance"), Mapping) else {}
-    if provenance.get("runtime") != "autorig-official-animal-tracking.v1":
-        raise ConstraintContractError("observations are not from the official tracking runtime")
+    if observation_schema == "autorig-fitting-observations.v1":
+        if provenance.get("runtime") != "autorig-official-animal-tracking.v1":
+            raise ConstraintContractError("observations are not from the official tracking runtime")
+        input_state = "accepted_runtime_observations"
+    else:
+        if (observations.get("measurement_state") != "raw_2d_measurements" or
+                observations.get("calibration_accepted") is not False or
+                observations.get("accepted_observations") is not False or
+                observations.get("animation_quality_approved") is not False or
+                observations.get("camera_z_accepted") is not False or
+                provenance.get("producer") != "farm_raw_capture.tracks" or
+                provenance.get("metric_depth_used") is not False or
+                provenance.get("points_generated") is not False or
+                provenance.get("points_mirrored") is not False or
+                provenance.get("hidden_points_interpolated") is not False or
+                provenance.get("anchor_map_sha256") != anchor_map_sha256 or
+                provenance.get("source_model_sha256") != bundle.get("source", {}).get("sha256") or
+                not isinstance(provenance.get("raw_array_sha256"), Mapping)):
+            raise ConstraintContractError("RAW 2D measurement identity/negative acceptance flags are invalid")
+        raw_array_hashes = provenance["raw_array_sha256"]
+        required_raw_arrays = {"points_xy", "visible", "confidence", "anchor_ids", "seed_points_xy"}
+        if (set(raw_array_hashes) != required_raw_arrays or
+                any(not isinstance(value, str) or SHA_RE.fullmatch(value) is None
+                    for value in raw_array_hashes.values())):
+            raise ConstraintContractError("RAW 2D measurement array-hash binding is invalid")
+        if "surface_anchors" in paths and provenance.get("surface_anchors_sha256") != surface_anchors_sha256:
+            raise ConstraintContractError("RAW 2D measurement surface-anchor binding is invalid")
+        input_state = "raw_2d_measurements"
     expected_video = str(source_video_sha256 or "").lower()
     if not SHA_RE.fullmatch(expected_video) or provenance.get("source_video_sha256") != expected_video:
         raise ConstraintContractError("observations source-video hash mismatch")
     if provenance.get("bundle_sha256") != fitting_bundle_sha256 or provenance.get("immutable_manifest_sha256") != immutable_manifest_sha256:
         raise ConstraintContractError("observations source bundle hashes mismatch")
+
+    frame_count, fps = observations.get("frame_count"), observations.get("fps")
+    if (isinstance(frame_count, bool) or not isinstance(frame_count, int) or frame_count < 1 or
+            isinstance(fps, bool) or not isinstance(fps, (int, float)) or not math.isfinite(float(fps)) or float(fps) <= 0):
+        raise ConstraintContractError("observation timing frame_count/fps is invalid")
+    timing = observations.get("timing") if isinstance(observations.get("timing"), Mapping) else None
+    if timing is None:
+        if observation_schema != "autorig-fitting-observations.v1":
+            raise ConstraintContractError("RAW 2D measurements require explicit timing")
+        source_indices, timing_verified, timing_source = list(range(frame_count)), True, "official_runtime_full_source"
+    else:
+        source_indices = timing.get("source_frame_indices")
+        timing_fps = timing.get("fps")
+        if (isinstance(timing_fps, bool) or not isinstance(timing_fps, (int, float)) or
+                not math.isfinite(float(timing_fps)) or timing.get("frame_count") != frame_count or
+                float(timing_fps) != float(fps) or
+                timing.get("source_video_sha256") != expected_video or
+                not isinstance(source_indices, list) or len(source_indices) != frame_count or
+                any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in source_indices) or
+                any(b <= a for a, b in zip(source_indices, source_indices[1:])) or
+                timing.get("retimed") is not False or timing.get("loop_declared") is not False):
+            raise ConstraintContractError("observation timing/source-frame mapping is invalid")
+        full_source = timing.get("full_source") is True
+        if full_source and source_indices != list(range(frame_count)):
+            raise ConstraintContractError("full-source timing must use identity frame mapping")
+        timing_verified, timing_source = timing.get("verified") is True, str(timing.get("source") or "")
 
     rows = anchor_map.get("tracks")
     if not isinstance(rows, list): raise ConstraintContractError("anchor-map tracks missing")
@@ -240,7 +321,12 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
             if track["anchor_id"] in by_anchor: raise ConstraintContractError("duplicate observed anchor")
             by_anchor[track["anchor_id"]] = track
 
-    constraints, pending = {}, []
+    inherited_pending = observations.get("pending", [])
+    if not isinstance(inherited_pending, list) or any(not isinstance(value, str) for value in inherited_pending):
+        raise ConstraintContractError("observation pending list is invalid")
+    constraints, pending = {}, list(inherited_pending)
+    if not timing_verified:
+        pending.append("unverified_source_timing")
     for semantic_id, (leg, _) in HOOFS.items():
         source_row = by_semantic[semantic_id]
         anchor_id = source_row["anchor_id"]
@@ -248,7 +334,7 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
         if not isinstance(track, Mapping):
             pending.append(f"missing_observed_hoof:{semantic_id}"); continue
         points = track.get("points")
-        if not isinstance(points, list):
+        if not isinstance(points, list) or len(points) != frame_count:
             pending.append(f"missing_observed_hoof:{semantic_id}"); continue
         plane_point = anchors[semantic_id] + physical_right * opt["sagittal_plane_offset_ratio"] * height
         emitted, masks = [], {"visible": [], "confident": [], "intersected": []}
@@ -269,7 +355,8 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
                     residual = abs(float(np.dot(physical_right, candidate - plane_point))) / height
                     if (distance > 0 and distance / height <= opt["max_constraint_distance_ratio"] and
                             residual <= opt["max_plane_deviation_ratio"]):
-                        emitted.append({"frame": frame, "position": _gltf(candidate).tolist(),
+                        emitted.append({"frame": frame, "source_frame": source_indices[frame],
+                                        "position": _gltf(candidate).tolist(),
                                         "confidence": confidence, "plane_residual_ratio": residual})
                         intersected = True
             masks["intersected"].append(intersected)
@@ -282,10 +369,116 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
             "plane": {"normal": _gltf(physical_right).tolist(), "point": _gltf(plane_point).tolist(),
                       "offset_ratio": opt["sagittal_plane_offset_ratio"]},
             "constraints": emitted, "masks": masks,
+            "joint_constraints": {},
         }
+        if "surface_anchors" in paths:
+            for joint_bone in chains[semantic_id][1:4]:  # Foot, Leg, UpLeg from the actual source chain.
+                candidates = sorted(anchor for anchor in by_anchor if source_anchor_bones.get(anchor) == joint_bone)
+                if not candidates:
+                    pending.append(f"missing_observed_limb_joint:{leg}:{joint_bone}"); continue
+                if len(candidates) != 1:
+                    pending.append(f"ambiguous_observed_limb_joint:{leg}:{joint_bone}"); continue
+                joint_anchor = candidates[0]
+                joint_track = by_anchor[joint_anchor]
+                joint_points = joint_track.get("points")
+                if not isinstance(joint_points, list) or len(joint_points) != frame_count:
+                    pending.append(f"missing_observed_limb_joint:{leg}:{joint_bone}"); continue
+                joint_plane_point = (source_anchor_positions[joint_anchor] +
+                                     physical_right * opt["sagittal_plane_offset_ratio"] * height)
+                joint_emitted, joint_masks = [], {"visible": [], "confident": [], "intersected": []}
+                for frame, point in enumerate(joint_points):
+                    visible = isinstance(point, Mapping) and point.get("frame") == frame and point.get("visible") is True
+                    confidence = float(point.get("confidence", 0.0)) if isinstance(point, Mapping) else 0.0
+                    confident = math.isfinite(confidence) and confidence >= opt["min_frame_confidence"]
+                    joint_masks["visible"].append(visible); joint_masks["confident"].append(confident)
+                    intersected = False
+                    if visible and confident:
+                        x, y = float(point["x"]), float(point["y"])
+                        local = np.asarray([(x - cx) / fx, (cy - y) / fy, -1.0, 0.0])
+                        direction = _unit((matrix @ local)[:3], "camera ray")
+                        denominator = float(np.dot(physical_right, direction))
+                        if abs(denominator) >= opt["min_ray_plane_dot"]:
+                            distance = float(np.dot(physical_right, joint_plane_point - origin) / denominator)
+                            candidate = origin + distance * direction
+                            residual = abs(float(np.dot(physical_right, candidate - joint_plane_point))) / height
+                            if (distance > 0 and distance / height <= opt["max_constraint_distance_ratio"] and
+                                    residual <= opt["max_plane_deviation_ratio"]):
+                                joint_emitted.append({"frame": frame, "source_frame": source_indices[frame],
+                                                      "position": _gltf(candidate).tolist(),
+                                                      "confidence": confidence,
+                                                      "plane_residual_ratio": residual})
+                                intersected = True
+                    joint_masks["intersected"].append(intersected)
+                    if visible and not intersected:
+                        pending.append(f"unresolved_visible_limb_joint:{leg}:{joint_bone}:{frame}")
+                if len(joint_emitted) != len(joint_points):
+                    pending.append(f"partial_limb_joint_constraint_track:{leg}:{joint_bone}")
+                constraints[leg]["joint_constraints"][joint_bone] = {
+                    "source_bone": joint_bone, "source_anchor_id": joint_anchor,
+                    "runtime_track_id": joint_track.get("id"),
+                    "derivation": "derived_from_source_plane_constraint",
+                    "generated": False, "mirrored": False,
+                    "plane": {"normal": _gltf(physical_right).tolist(),
+                              "point": _gltf(joint_plane_point).tolist(),
+                              "offset_ratio": opt["sagittal_plane_offset_ratio"]},
+                    "constraints": joint_emitted, "masks": joint_masks,
+                }
+    torso_constraints = {}
+    torso_bones = ("Hips", "Spine", "Spine1", "Spine2")
+    if "surface_anchors" in paths:
+        for torso_bone in torso_bones:
+            candidates = sorted(anchor_id for anchor_id in by_anchor
+                                if source_anchor_bones.get(anchor_id) == torso_bone)
+            if not candidates:
+                pending.append(f"missing_observed_torso_bone:{torso_bone}"); continue
+            if len(candidates) != 1:
+                pending.append(f"ambiguous_observed_torso_bone:{torso_bone}"); continue
+            anchor_id = candidates[0]
+            track = by_anchor[anchor_id]
+            points = track.get("points")
+            if not isinstance(points, list) or len(points) != frame_count:
+                pending.append(f"missing_observed_torso_bone:{torso_bone}"); continue
+            plane_point = source_anchor_positions[anchor_id] + physical_right * opt["sagittal_plane_offset_ratio"] * height
+            emitted, masks = [], {"visible": [], "confident": [], "intersected": []}
+            for frame, point in enumerate(points):
+                visible = isinstance(point, Mapping) and point.get("frame") == frame and point.get("visible") is True
+                confidence = float(point.get("confidence", 0.0)) if isinstance(point, Mapping) else 0.0
+                confident = math.isfinite(confidence) and confidence >= opt["min_frame_confidence"]
+                masks["visible"].append(visible); masks["confident"].append(confident)
+                intersected = False
+                if visible and confident:
+                    x, y = float(point["x"]), float(point["y"])
+                    local = np.asarray([(x - cx) / fx, (cy - y) / fy, -1.0, 0.0])
+                    direction = _unit((matrix @ local)[:3], "camera ray")
+                    denominator = float(np.dot(physical_right, direction))
+                    if abs(denominator) >= opt["min_ray_plane_dot"]:
+                        distance = float(np.dot(physical_right, plane_point - origin) / denominator)
+                        candidate = origin + distance * direction
+                        residual = abs(float(np.dot(physical_right, candidate - plane_point))) / height
+                        if (distance > 0 and distance / height <= opt["max_constraint_distance_ratio"] and
+                                residual <= opt["max_plane_deviation_ratio"]):
+                            emitted.append({"frame": frame, "source_frame": source_indices[frame],
+                                            "position": _gltf(candidate).tolist(), "confidence": confidence,
+                                            "plane_residual_ratio": residual})
+                            intersected = True
+                masks["intersected"].append(intersected)
+                if visible and not intersected: pending.append(f"unresolved_visible_torso:{anchor_id}:{frame}")
+            if len(emitted) != len(points): pending.append(f"partial_torso_constraint_track:{anchor_id}")
+            torso_constraints[anchor_id] = {
+                "source_bone": torso_bone, "source_anchor_id": anchor_id, "runtime_track_id": track.get("id"),
+                "derivation": "derived_from_source_plane_constraint", "generated": False, "mirrored": False,
+                "plane": {"normal": _gltf(physical_right).tolist(), "point": _gltf(plane_point).tolist(),
+                          "offset_ratio": opt["sagittal_plane_offset_ratio"]},
+                "constraints": emitted, "masks": masks,
+            }
     return {
         "schema": SCHEMA, "state": "fit_candidate_constraints", "accepted_observations": False,
-        "animation_qa_pass": False, "action": action, "constraints": constraints,
+        "animation_qa_pass": False, "action": action, "input_measurement_state": input_state,
+        "timing": {"frame_count": frame_count, "fps": float(fps),
+                   "source_frame_indices": source_indices, "source_video_sha256": expected_video,
+                   "verified": timing_verified, "source": timing_source,
+                   "retimed": False, "loop_declared": False},
+        "constraints": constraints, "torso_constraints": torso_constraints,
         "pending": sorted(set(pending)), "assumptions": {
             "fixed_camera": True, "sagittal_limb_motion": True,
             "requires_real_post_retarget_3d_validation": True,
@@ -293,10 +486,13 @@ def build_constraints(*, observations_path: str | Path, observations_sha256: str
         },
         "axes": {"up": _gltf(physical_up).tolist(), "forward": _gltf(physical_forward).tolist(),
                  "right": _gltf(physical_right).tolist(), "source": "exact_source_hoof_anchors"},
+        "source_height": height,
         "options": opt, "provenance": {
             "observations_sha256": observations_sha256, "source_video_sha256": expected_video,
+            "raw_npz_sha256": provenance.get("raw_npz_sha256"),
             "anchor_map_sha256": anchor_map_sha256, "fitting_bundle_sha256": fitting_bundle_sha256,
             "immutable_manifest_sha256": immutable_manifest_sha256, "skeleton_sha256": skeleton_sha256,
+            "surface_anchors_sha256": surface_anchors_sha256,
             "source_model_sha256": source.get("sha256"),
         },
     }

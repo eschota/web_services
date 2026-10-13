@@ -3155,3 +3155,22 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   v6уступилновомуcustomerRenderдоinference. НетактивногоobservationGPUjob. v7preparedНЕenqueued;
   далееrawcapture/reuse+source-planeconstraintcandidate, послепроверкиfleet/jobs бездубликатов.
   28productionlabtestsPASS, actualF15boundedBundleloaderPASS/originalunchanged; этоНЕacceptance.
+
+### Копытные · измеренный Walk и исправление источника, 2026-10-13 19:20 UTC
+
+- Канонический подробный checkpoint `autorig-online/docs/equine-walk-source-physics-20261013.md`.
+  Старые строки «v7 не enqueued / данных нет» выше устарели: v7job076419… wrapperFAIL из-за
+  WindowsvenvredirectorPID, но RAW24tracks/141frames сохранены. Exactownactor остановлен приcustomerbusy;
+  watchdog исправлен, realF15CPU-onlyredirector smokePASS, customerprocesses/GPU не трогались.
+- Владелец принял ТОЛЬКО RAWdiagnostic DEV7208/inbox2504. Реальный Walkv2 Source→Blender→GLTF→retarget→Unity
+  DEV7212/media912ef8dddb56 ОТКЛОНЁН inbox2507; inbox2508 требует чередования ног. Не переносить этот verdict
+  на sourcevideo, другие модели, полный набор или familyrelease.
+- Retarget численно точный: rotation≤0.04149deg, translation≤5.09e-7, source/targetLBSheightdelta≤1.81e-7H.
+  PhysicsFAIL ужевsource: penetration7.5–9%H/slide. Главная причина неподвижнойRF: fitterигнорировал12реальных
+  limbtracks; послеf55 Toe0/86confident, Foot64/86, Leg86/86, Up86/86. Теперь каждуюногу fit-им по еёсобственным
+  Foot/Leg/Up данным; hiddenToePENDING, безmirroring/придуманныхphase observations.
+- F15CPU `jobs/zebra-walk-plane-fit-v4` активен, localexecsession70292; codeSHA2f2313231fb6….
+  bounded900s sparsewindows, geometryplaneCANDIDATE/неvideoGround; checkpoints послеокон. Supersededv3
+  остановлен ссохранениемf19prefix. Не дублироватьCPU/GPU jobs. Далееactualexport/retarget/LBS+freshUnityverdict.
+- F15production107+27=134contracttestsPASS; НЕmodelacceptance. `equine-constraint-fit` в/dev/tools,
+  executeguardactualfarmbox, VPSoptions/preflightonly. Full34/library/customerpath всёещёНЕактивированы.
