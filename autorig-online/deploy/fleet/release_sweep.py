@@ -40,11 +40,15 @@ def log(msg):
 
 
 def newest(p: pathlib.Path) -> float:
-    """Newest mtime of the directory itself and its first two levels (cheap; a release is hardlinked trees)."""
+    """Newest mtime/ctime of the directory itself and its first level (cheap; a release is hardlinked trees).
+    ctime counts too: `cp -a` keeps the source's mtimes, so a release staged a minute ago has an old mtime
+    (2026-10-13: the sweep deleted a freshly staged release, then `current` was repointed at it)."""
     try:
-        m = p.lstat().st_mtime
+        st = p.lstat()
+        m = max(st.st_mtime, st.st_ctime)
         for c in p.iterdir():
-            m = max(m, c.lstat().st_mtime)
+            cs = c.lstat()
+            m = max(m, cs.st_mtime, cs.st_ctime)
         return m
     except OSError:
         return time.time()
@@ -118,6 +122,9 @@ def sweep_releases() -> int:
     freed = 0
     for d in others:
         if d.name in keep or time.time() - newest(d) < 2 * 3600:
+            continue
+        live = {os.path.realpath(x) for x in (CURRENT, ROOT / "current.new") if os.path.lexists(x)}
+        if str(d) in live or os.path.realpath(d) in live:            # repointed meanwhile
             continue
         freed += remove(d, "old release")
     log(f"releases: kept {len(keep)} ({cur.name} + rollback + in use), freed ~{freed / 2 ** 30:.2f} GB")
