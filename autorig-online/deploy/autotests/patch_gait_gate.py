@@ -15,8 +15,9 @@ p = d / "animal_video.py"
 s = p.read_text(encoding="utf-8")
 if "gait_gate" in s:
     print("animal_video: already patched (gait gate)")
-    sys.exit(0)
-old = '''    "clip": {"values": ("walk", "trot", "canter", "gallop", "rear", "idle", "run", "prowl", "attack"), "default": "walk"},'''
+    old = None
+else:
+    old = '''    "clip": {"values": ("walk", "trot", "canter", "gallop", "rear", "idle", "run", "prowl", "attack"), "default": "walk"},'''
 new = '''    "clip": {"values": ("walk", "trot", "canter", "gallop", "rear", "idle", "run", "prowl", "attack", "look"), "default": "walk"},'''
 assert s.count(old) == 1, "clip values"
 s = s.replace(old, new)
@@ -53,3 +54,15 @@ s = s.replace(old, new)
 p.write_bytes(s.replace("\r\n", "\n").encode("utf-8"))
 assert p.read_bytes().count(bytes([8])) == 0
 print("animal_video: gait gate + look clip")
+
+q = d / "animpick.py"
+t = q.read_text(encoding="utf-8")
+if 'Look Around"}' in t and '"look": "Look Around"' in t:
+    print("animpick: already patched (look)")
+else:
+    old2 = 'VIDEO_CLIP_NAMES = {"walk": "Walk", "trot": "Trot", "canter": "Canter", "gallop": "Gallop", "rear": "Rear", "idle": "Idle"}'
+    new2 = old2[:-1] + ',' + chr(10) + '                    "look": "Look Around"}   # a generated look-around replaces the procedural one'
+    assert t.count(old2) == 1, "animpick anchor"
+    t = t.replace(old2, new2)
+    q.write_bytes(t.replace(chr(13) + chr(10), chr(10)).encode("utf-8"))
+    print("animpick: look video clip")
