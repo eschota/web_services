@@ -706,8 +706,8 @@
   },
   "fec0161f.model.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/5b49fa4f622634597cbb/proj/model.glb",
-   "task": "fec0161f",
-   "what": "stylized boar, a triangle soup (16446 verts -> 5222 welded, 3247 raw islands)",
+   "task": "fec0161f-da28-4a35-8495-dc2256b090a5",
+   "what": "stylized boar, short curled tail (V3 run 5b49fa4f)",
    "sha256": "3d102fb7ea3083b61aede3734ccedb7943042237cf98543ccfe07a7e1b598fa9",
    "bytes": 665340
   },
@@ -766,6 +766,20 @@
    "what": "low-poly alien creature: a hunched crouching alien, thick bent legs (knee 83-94 deg), long arms to the ground (the V3 run's model.glb)",
    "sha256": "79947d49f972f045d5c9859df30610284419b1fb3dbfc1e5c25f57b424d05cfd",
    "bytes": 34877008
+  },
+  "31cc3ff3.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/028d1acdb7187c532921/proj/model.glb",
+   "task": "31cc3ff3-1526-41e2-bcf4-aaac56c38015",
+   "what": "white horse, arched neck, helpers stripped (V3 run 028d1acd)",
+   "sha256": "96ac9bb0529aa55af46ee71d31c30c9ca23215b5f4960d49a55c341b843d2747",
+   "bytes": 971996
+  },
+  "e41336fe.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/2b25bbe13b5117a3a2b6/proj/model.glb",
+   "task": "e41336fe-73eb-4cc3-b11b-20aaa80fceba",
+   "what": "African elephant, hanging trunk and tusks (V3 run 2b25bbe1)",
+   "sha256": "945a2f3356d78c8429c4aeab93586a28514929cf82f2fae861b0832451b76a05",
+   "bytes": 1611516
   }
  },
  "profiles": {
@@ -8189,6 +8203,172 @@
     }
    ],
    "note": "extended tier (34 MB model). leg_type digitigrade: the right leg's hock sits 22.7 % H above the toe (the left reads crouched); the aggregate prefers digitigrade."
+  },
+  {
+   "id": "horse_neck_curve",
+   "task": "31cc3ff3-1526-41e2-bcf4-aaac56c38015",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, bone_outside on the horses 31cc3ff3 / ebc474ba / a742491a: Neck 14-22 samples outside): fit_quadruped put Neck and Head on the straight Spine2 -> nose line, through the throat of an arched neck. Fix: fastrig.neck_follow - the same joints on the neck's medial curve (geodesic rings from the nose), Head at the poll bend; options neck_follow*",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "31cc3ff3.model.glb",
+     "params": {
+      "words": "white horse",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "neck_head_outside_samples": [
+       "<=",
+       3
+      ]
+     },
+     "note": "farm 2026-10-13: Neck 14 -> 0"
+    }
+   ]
+  },
+  {
+   "id": "elephant_trunk_chain",
+   "task": "e41336fe-73eb-4cc3-b11b-20aaa80fceba",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, bone_outside on e41336fe: Head 20 samples outside): the nose was a tusk tip and one Head -> Nose_End bone crossed the air instead of following the hanging trunk. Fix: fastrig.trunk_chain - with trunk words the trunk is traced (geodesic rings from its lowest midline tip ahead of the front legs) and gets Trunk1 -> Trunk2 -> Trunk3 -> Nose_End; options trunk_chain, trunk_min_len_pct_H",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "e41336fe.model.glb",
+     "params": {
+      "words": "African elephant",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "neck_head_outside_samples": [
+       "<=",
+       4
+      ],
+      "trunk_bones": [
+       "==",
+       3
+      ]
+     },
+     "note": "farm 2026-10-13: Head 20 -> 0, trunk 3 bones"
+    }
+   ]
+  },
+  {
+   "id": "boar_tail_shell",
+   "task": "fec0161f-da28-4a35-8495-dc2256b090a5",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, bone_outside on fec0161f: Tail2 19 samples outside 8 % H deep): the tail trace found only a short curl, so the shell tail fit stayed, rooted in the left thigh 23 % H off the midline. Fix: tail_trace.shell_plausible rejects such a shell chain; a short trace then gives a stub that the hanging-tail search fills (rig_check 4x 309 -> 288)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "fec0161f.model.glb",
+     "params": {
+      "words": "stylized boar",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "tail_outside_samples": [
+       "<=",
+       14
+      ]
+     },
+     "note": "farm 2026-10-13: Tail2/Tail3 26 -> 10"
+    }
+   ]
   }
  ]
 }
