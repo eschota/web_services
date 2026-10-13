@@ -815,6 +815,20 @@
    "what": "white-tailed deer buck in a walking pose, a hind hoof lifted (V3 run 74d3849f)",
    "sha256": "6f10a7afeaf0838ecd250e08171db29b7f31d7313f2d9d55c33e7c3b3a63aafa",
    "bytes": 15900520
+  },
+  "e44c6669.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/6e6f25a52bfa5e364001/proj/model.glb",
+   "task": "e44c6669-1973-4744-a199-6f6383f9f3a0",
+   "what": "crouching gorilla, arms forward (Vision: quadruped)",
+   "sha256": "071fd49e891fdb04523ccecd1b29a6d8b55e29a7c17b8f687c3ab16d43b4aa91",
+   "bytes": 65257776
+  },
+  "8e8d43ba.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/8db7273ad798b833194c/proj/model.glb",
+   "task": "8e8d43ba-a665-4202-8d78-b82e84d45e8b",
+   "what": "gorilla bust: head, torso, arms, no legs (Vision: quadruped)",
+   "sha256": "0abed4a29405871683b980f4e939e659e90fe0e3b6158b760e3ff37c983ac73c",
+   "bytes": 435032
   }
  },
  "profiles": {
@@ -8815,6 +8829,98 @@
     }
    ],
    "note": "before: LeftHind 236 / 236 and RightHind 340 / 340 core vertices on Tail3 / Tail; after: 0. QA stretch rises (603 -> 789 edges, rig_check 4x 116 -> 230) because the fused tail shell now follows moving legs"
+  },
+  {
+   "id": "gorilla_crouch_biped",
+   "task": "e44c6669-1973-4744-a199-6f6383f9f3a0",
+   "cost": 3,
+   "defect": "Vision files every gorilla under quadruped and creature.plan_for rigged the crouching biped gorilla as a 4-legged animal (rig_check 4x 8421, clips to 1031x). Fix 2026-10-13 (Rig path V3): PRIMATE_WORDS -> biped unless the words say on all fours / knuckle-walking (4x 5566, worst clip 310x). Open: the arm fit (RightHand owns the whole hanging forearm, the other arm raised forward)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "e44c6669.model.glb",
+     "tier": "extended",
+     "params": {
+      "words": "Gorilla quadruped"
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       600
+      ]
+     },
+     "xfail": {
+      "reason": "biped arm fit on the crouching gorilla: the wrist sits near the elbow of the hanging arm (5566 edges over 4x on the farm, 2026-10-13)",
+      "owner": "Rig path · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "gorilla_bust_legless",
+   "task": "8e8d43ba-a665-4202-8d78-b82e84d45e8b",
+   "cost": 1,
+   "defect": "a gorilla bust (no legs) rigged as a quadruped from the Vision category (rig_check 4x 113, QA 3/8). Fix 2026-10-13 (Rig path V3): primates are bipeds (4x 2, QA 5/10). Open: a legless bust still gets leg chains, LeftUpLeg owns 3106 torso vertices",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8e8d43ba.model.glb",
+     "params": {
+      "words": "gray gorilla quadruped"
+     },
+     "thresholds": {
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_stretch",
+     "kind": "rig_stretch",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "sum_edges_over_4x": [
+       "<=",
+       40
+      ]
+     }
+    }
+   ]
   }
  ]
 }
