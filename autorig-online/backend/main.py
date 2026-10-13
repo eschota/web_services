@@ -14806,7 +14806,7 @@ async def api_free3d_search(
     endpoint = "/api-embeddings/browse" if use_browse else "/api-embeddings/"
 
     last_error: Optional[str] = None
-    for attempt in range(2):
+    for attempt in range(3):
         timeout = 8.0 if attempt == 0 else 12.0
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -14835,7 +14835,8 @@ async def api_free3d_search(
             }
         except Exception as e:
             last_error = str(e)
-            if attempt == 0:
+            if attempt < 2:
+                await asyncio.sleep(0.3 * (attempt + 1))
                 continue
 
             print(f"[Free3D] Search error ({endpoint}): {e}")
