@@ -87,6 +87,41 @@ def judge(entry: dict, rules: dict | None = None) -> dict:
     return {"ok": not why, "why": why, "metrics": m, "rule": r}
 
 
+def retime(entry: dict, rules: dict | None = None) -> float | None:
+    """A generated take whose footfall order is right but whose tempo is off (H3 often trots in slow motion: the
+    horse trot came out at 2.21 s) is not wrong, only slow: the clip is played at `speed` so that period / speed sits
+    in the middle of the gait's real range (animal_video.apply divides the period by entry["speed"]).
+    -> the speed to store, or None when the take needs no retime or fails for another reason."""
+    clip = str(entry.get("clip") or "")
+    r = (rules or RULES).get(clip) or {}
+    if "period" not in r or r.get("one_shot"):
+        return None
+    j = judge(entry, rules)
+    others = [w for w in j["why"] if not w.startswith("period ")]
+    if others:
+        return None
+    period = float(entry.get("period_s") or 0.0)
+    lo, hi = r["period"]
+    if period <= 0 or lo <= period <= hi:
+        return None
+    speed = period / ((lo + hi) / 2)
+    return round(speed, 4) if 0.25 <= speed <= 6.0 else None
+
+
+def judge_or_retime(entry: dict, rules: dict | None = None) -> dict:
+    """judge(); when only the tempo is off, the retimed take passes with entry["speed"] set. -> the verdict."""
+    j = judge(entry, rules)
+    if j["ok"]:
+        return j
+    sp = retime(entry, rules)
+    if sp is None:
+        return j
+    entry["speed"] = sp
+    j2 = judge({**entry, "period_s": float(entry["period_s"]) / sp}, rules)
+    j2["retimed"] = {"speed": sp, "period_s": round(float(entry["period_s"]) / sp, 4), "was": j["why"]}
+    return j2
+
+
 def audit(lib_root) -> list:
     """Every entry of the library judged. -> [(species, clip, ok, why)]."""
     import json
@@ -104,6 +139,18 @@ def audit(lib_root) -> list:
 
 if __name__ == "__main__":
     import sys
+    if len(sys.argv) > 2 and sys.argv[1] == "retime":          # python -m mt.gait_gate retime <lib>: fix stored entries
+        import json
+        import pathlib
+        for p in sorted(pathlib.Path(sys.argv[2]).glob("*/*.json")):
+            e = json.loads(p.read_text(encoding="utf-8"))
+            j = judge_or_retime(e)
+            if j.get("retimed"):
+                e["quality"] = "ok" if j["ok"] else e.get("quality")
+                e.setdefault("quality_why", {})["gait"] = j
+                p.write_text(json.dumps(e, indent=1), encoding="utf-8")
+                print("retimed", p.parent.name, p.stem, j["retimed"])
+        sys.exit(0)
     for sp, clip, ok, why, m in audit(sys.argv[1] if len(sys.argv) > 1 else "animal_motion_lib"):
         print(f"{'PASS' if ok else 'FAIL':4s} {sp:18s} {clip:7s} period {m['period_s']:.2f}s lf_lag {m.get('lf_lag')} "
               f"legs {m['limb_amp_deg']} neck {m['neck_amp_deg']}  {'; '.join(why)}")

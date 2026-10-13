@@ -17,8 +17,26 @@ if (here / "gait_gate.py").is_file():
 def patch_animal_video():
     p = d / "animal_video.py"
     s = p.read_text(encoding="utf-8")
-    if "gait_gate" in s:
-        print("animal_video: already patched (gait gate)")
+    if "judge_or_retime" in s:
+        print("animal_video: already patched (gait gate v2)")
+        return
+    if "gait_gate" in s:                                 # v1 -> v2: the retime
+        old1 = "            gate = _GG.judge({\"clip\": o[\"clip\"], \"period_s\": period, \"loop\": loop, \"curves\": cyc})"
+        new1 = ("            _ge = {\"clip\": o[\"clip\"], \"period_s\": period, \"loop\": loop, \"curves\": cyc}\n"
+                "            gate = _GG.judge_or_retime(_ge)              # a slow take is retimed (entry speed), not rejected\n"
+                "            speed = float(_ge.get(\"speed\") or 1.0)")
+        assert s.count(old1) == 1, "v1 gate anchor"
+        s = s.replace(old1, new1)
+        old2 = "    gate = None\n    if plan == \"quadruped\":"
+        new2 = "    gate, speed = None, 1.0\n    if plan == \"quadruped\":"
+        assert s.count(old2) == 1, "gate None anchor"
+        s = s.replace(old2, new2)
+        old3 = "             \"plan\": plan, \"loop\": loop, \"quality\": quality,\n             \"quality_why\": {\"trunk_ptp_deg\""
+        new3 = "             \"speed\": speed, \"plan\": plan, \"loop\": loop, \"quality\": quality,\n             \"quality_why\": {\"trunk_ptp_deg\""
+        assert s.count(old3) == 1, "entry anchor"
+        s = s.replace(old3, new3)
+        p.write_bytes(s.replace("\r\n", "\n").encode("utf-8"))
+        print("animal_video: gait gate v2 (retime)")
         return
     old = '''    "clip": {"values": ("walk", "trot", "canter", "gallop", "rear", "idle", "run", "prowl", "attack"), "default": "walk"},'''
     new = '''    "clip": {"values": ("walk", "trot", "canter", "gallop", "rear", "idle", "run", "prowl", "attack", "look"), "default": "walk"},'''
@@ -39,17 +57,19 @@ def patch_animal_video():
              "plan": plan, "loop": loop, "quality": quality,
              "quality_why": {"trunk_ptp_deg": round(trunk_ptp, 1), "limb_ptp_deg": round(limb_ptp, 1), "at_floor": at_floor},'''
     new = '''    quality = "suspect" if (trunk_ptp > o["trunk_max_deg"] or limb_ptp > o["limb_max_deg"] or at_floor) else "ok"
-    gate = None
+    gate, speed = None, 1.0
     if plan == "quadruped":                                     # Gait gate · V3 (mt/gait_gate.py): real gait timing
         try:
             from . import gait_gate as _GG
-            gate = _GG.judge({"clip": o["clip"], "period_s": period, "loop": loop, "curves": cyc})
+            _ge = {"clip": o["clip"], "period_s": period, "loop": loop, "curves": cyc}
+            gate = _GG.judge_or_retime(_ge)              # a slow take is retimed (entry speed), not rejected
+            speed = float(_ge.get("speed") or 1.0)
             if not gate["ok"]:
                 quality = "suspect"
         except Exception as exc:                                 # noqa: BLE001 - the gate never breaks the path
             gate = {"ok": None, "why": [f"{type(exc).__name__}: {exc}"[:120]]}
     entry = {"schema": SCHEMA, "species": species, "what": what, "clip": o["clip"], "period_s": round(period, 4),
-             "plan": plan, "loop": loop, "quality": quality,
+             "speed": speed, "plan": plan, "loop": loop, "quality": quality,
              "quality_why": {"trunk_ptp_deg": round(trunk_ptp, 1), "limb_ptp_deg": round(limb_ptp, 1), "at_floor": at_floor,
                              "gait": gate},'''
     assert s.count(old) == 1, "quality anchor"
