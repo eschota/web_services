@@ -24,8 +24,12 @@ import re
 import numpy as np
 
 SPEC = {
-    "fabric": {"values": ("off", "auto", "on"), "default": "auto",
-               "doc": "auto: a biped whose geometry shows a skirt / robe, a cape or long loose hair gets fabric chains; off: never"},
+    "fabric": {"values": ("off", "auto", "on"), "default": "off",
+               "doc": "auto: a biped whose words and geometry show a skirt / robe, a cape or long loose hair gets fabric chains; "
+                      "off (default, 2026-10-13): measured on the farm the layer helps the robe 00a99bb9 (6/9 -> 8/9) and the "
+                      "knight's cape (rig_check_4x 958 -> 479) but hurts the dresses in the library clips (red dress 2822b4a7 "
+                      "6/10 -> 0/9, Idle 1189 edges: tears inside one Skirt root bone with any root_base, not the split, not the "
+                      "sway) - unresolved, so nothing ships by default; per run: <run>/fabric_options.json or FABRIC_FABRIC=auto"},
     "skirt": {"values": ("on", "off"), "default": "on", "doc": "the skirt / robe layer"},
     "cape": {"values": ("on", "off"), "default": "on", "doc": "the cape layer"},
     "hair": {"values": ("on", "off"), "default": "on", "doc": "the long loose hair layer"},
