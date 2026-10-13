@@ -8880,8 +8880,8 @@
       ]
      },
      "xfail": {
-      "reason": "biped arm fit on the crouching gorilla: the wrist sits near the elbow of the hanging arm (5566 edges over 4x on the farm, 2026-10-13)",
-      "owner": "Rig path · V3"
+      "reason": "biped arm fit on the crouching gorilla: the wrist sits near the elbow of the hanging arm, the other arm raised forward (5566 edges over 4x, 2026-10-13); a posed-arm release",
+      "owner": "Limb stabilization · V3"
      }
     }
    ]
