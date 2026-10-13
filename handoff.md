@@ -2936,3 +2936,18 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   `cat_front_leg_own_bones/leg_own`, `ferret_long_neck/mt_stretch_strict`, `quad_tail_monster/mt_stretch`.
   `autorig-mt-restart --wait` отказал (живой V3-ран) — перезапуск поставлен с ожиданием до 25 мин
   (`/home/debian/monster/mt_restart.log`); rerig_open перезапущен сразу.
+
+### Дополнение 05:40 UTC — tail_core_own (кости хвоста владеют только трубкой хвоста)
+
+- `fastrig.tail_tube_mask` + опция `tail_core_own` (`trace` по умолчанию | `always` | `off`), `tail_tube` 2.5 радиуса,
+  `tail_tube_min_pct_H` 1, `tail_root_blend_pct_H` 6; жёсткая стадия (A) и сглаженные веса; вершины вне трубки за
+  бёдрами теряют и кости передней половины (Spine1/2, Neck, Head), иначе плавник аксолотля уходил на Spine2.
+  Запасные оценки радиуса (`always`): заглушка-хвост (трасса «a tail of … body lengths»/short) → толщина кончика;
+  иначе медиана расстояний до цепи за третьим суставом; геодезические кольца (`tail_geodesic`, off) — держали плавник
+  аксолотля, но лезли на ноги кабана/хорька и круп кота.
+- Числа (rig_check_4x сумма; QA): трасса сработала — кот хвост 881 → 294 вершин (97, QA 133), лошадь 40 → 0 (8/8),
+  олень 2683 → 3849 (XFAIL deer_chibi; QA 0 → 1/8). `always`: слон 0e32ccf1 Tail3 27 216 → 5 697 (21 → 4.4 %),
+  4x 1102 (текущий прод) → 2036, QA 6/8 → 0/8; аксолотль 29d69e24 (плавник, трасса «зигзаг») 116 → 90; кабан 288 →
+  580 (ноги с хвоста рвут приваренную оболочку); хорёк 59 → 326 — поэтому `always` не дефолт. Трассу чинит Rig classes;
+  при `used=True` правило берёт её радиус само.
+- Цепочка tailcore (`patch_tail_core.py`) в гейте; MT/web коммиты ниже в логе. DEV: картинка владения хвостом слон/кот.
