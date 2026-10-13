@@ -871,6 +871,20 @@
    "what": "a blue hedgehog character standing in its file (742 747 vertices, 1.09 x 2.0 x 1.22): the orientator read its five head spikes as paws and laid it down (+z, quadruped 0.9), every clip stretched 50..115x (2026-10-13)",
    "sha256": "6ecbe6b86a4f69f1a03969a96381ac5baf0432313812561a30bc917b15a0af2d",
    "bytes": 43723532
+  },
+  "0e32ccf1.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/901a43c62be9902d7c7a/proj/model.glb",
+   "task": "0e32ccf1-eaa3-472c-ad5b-d3352c34ed59",
+   "what": "stylized baby elephant, the tail curled round the right hind leg (V3 run 901a43c6)",
+   "sha256": "509bd636dac9d674b3a4b69298b7092b3322a0faf50d190e4bb80ca17f6ac9bb",
+   "bytes": 22282524
+  },
+  "29d69e24.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/38f9d2c7497920daca86/proj/model.glb",
+   "task": "29d69e24-f1fc-4a6a-9e2a-c1c018c99f8a",
+   "what": "cute axolotl dragon, a fat tail lying on the floor (V3 run 38f9d2c7)",
+   "sha256": "c556d8885f562483c68755ebddd0ef488b5ed46694eab162a84a29d85beb7fe9",
+   "bytes": 18390468
   }
  },
  "profiles": {
@@ -9000,6 +9014,10 @@
        ">=",
        8
       ]
+     },
+     "xfail": {
+      "reason": "clips >= 8 needs the generated look clip (gaitgate chain); 7 on current prod",
+      "owner": "Fable monsters/animals"
      }
     },
     {
@@ -9056,6 +9074,10 @@
        ">=",
        8
       ]
+     },
+     "xfail": {
+      "reason": "clips >= 8 needs the generated look clip (gaitgate chain); 7 on current prod",
+      "owner": "Fable monsters/animals"
      }
     },
     {
@@ -9068,6 +9090,10 @@
        ">=",
        9
       ]
+     },
+     "xfail": {
+      "reason": "the mt_rig step is XFAIL until the look clip lands",
+      "owner": "Fable monsters/animals"
      }
     }
    ],
@@ -9108,6 +9134,10 @@
        ">=",
        8
       ]
+     },
+     "xfail": {
+      "reason": "clips >= 8 needs the generated look clip (gaitgate chain); 7 on current prod",
+      "owner": "Fable monsters/animals"
      }
     },
     {
@@ -9232,6 +9262,130 @@
        ">=",
        15
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "quad_tail_floor_knee",
+   "task": "29d69e24-f1fc-4a6a-9e2a-c1c018c99f8a",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, bone_outside on the axolotl 29d69e24 and the baby elephant 0e32ccf1): (1) the hind leg column rows spanned the axolotl's fat tail lying on the floor, so the tail trace stopped 20 units short and the tail tip (169 vertices) went to Hips; (2) with the trace, the tail tip lying on the croup tore Hips|Tail3 (tail | trunk contact never split); (3) the tail's floor-side skin out of the tube, hanging below the knees, went to Hips and the hind leg tore it; (4) the baby elephant's thick thigh (radius 20 % H) won the back of the shin down to mid-shin and the knee bend tore it. Fix: tail_trace (tip beyond the hind column, whole rings with a taper-aware widen, fallback to whole rings when the column leaves none), fastrig quad_tail_contact_split, tail_owns_hanging, knee_upleg_bar_pct_H",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "29d69e24.model.glb",
+     "params": {
+      "words": "cute axolotl dragon",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ],
+      "rig_check_4x": [
+       "<=",
+       80
+      ]
+     },
+     "xfail": {
+      "reason": "tail on the floor: tip cut short by the hind column, Hips|Tail3 and Hips|HindLeg tears (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "tail_outside_samples": [
+       "<=",
+       6
+      ]
+     },
+     "xfail": {
+      "reason": "tail on the floor: tip cut short by the hind column (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "elephant_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "0e32ccf1.model.glb",
+     "params": {
+      "words": "stylized baby elephant",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ],
+      "rig_check_4x": [
+       "<=",
+       1060
+      ]
+     },
+     "xfail": {
+      "reason": "thigh wins the back of the shin, knee tear; the tail tip on the croup (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "elephant_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "elephant_rig",
+     "thresholds": {
+      "tail_outside_samples": [
+       "<=",
+       16
+      ]
+     },
+     "xfail": {
+      "reason": "the shell tail fit over the croup (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
      }
     }
    ]
