@@ -9021,10 +9021,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "clips >= 8 needs the generated look clip (gaitgate chain); 7 on current prod",
-      "owner": "Fable monsters/animals"
      }
     },
     {
@@ -9037,10 +9033,6 @@
        ">=",
        9
       ]
-     },
-     "xfail": {
-      "reason": "lands with the headown2 chain (fastrig head_own)",
-      "owner": "Fable monsters/animals"
      }
     }
    ],
@@ -9081,10 +9073,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "clips >= 8 needs the generated look clip (gaitgate chain); 7 on current prod",
-      "owner": "Fable monsters/animals"
      }
     },
     {
@@ -9097,10 +9085,6 @@
        ">=",
        9
       ]
-     },
-     "xfail": {
-      "reason": "the mt_rig step is XFAIL until the look clip lands",
-      "owner": "Fable monsters/animals"
      }
     }
    ],
@@ -9141,10 +9125,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "clips >= 8 needs the generated look clip (gaitgate chain); 7 on current prod",
-      "owner": "Fable monsters/animals"
      }
     },
     {
@@ -9213,6 +9193,10 @@
        ">=",
        30
       ]
+     },
+     "xfail": {
+      "reason": "flaky until the judge fix lands (prod judge traces the flat +y grid first, 23..37 s under load, and the 25 s cap then skips the +x candidate: gaitgate run up=+y, headown3 run +x); chain96/97 deploys cheap-first candidates + 40 s cap",
+      "owner": "Limb stabilization · V3"
      }
     }
    ]
@@ -9320,10 +9304,6 @@
        "<=",
        80
       ]
-     },
-     "xfail": {
-      "reason": "tail on the floor: tip cut short by the hind column, Hips|Tail3 and Hips|HindLeg tears (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     },
     {
@@ -9338,10 +9318,6 @@
        "<=",
        6
       ]
-     },
-     "xfail": {
-      "reason": "tail on the floor: tip cut short by the hind column (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     },
     {
