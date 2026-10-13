@@ -44,6 +44,11 @@ class RenderPrompt(BaseModel):
     image_url: str = ""
     image_url_end: str = ""
     control_video_url: str = ""
+    # A clip whose last `video_prefix_frames` frames (and their sound) are
+    # anchored at the start of the video, so it continues that clip (MiniMax
+    # H3 clip guide). Empty = no prefix, the template's prefix branch is pruned.
+    video_prefix_url: str = ""
+    video_prefix_frames: int = 22
     # Ordered FLUX.2 reference inputs. Avatar requests put the canonical
     # identity image first, an optional detail/second identity view next, and
     # the scene/composition reference last. The order is meaningful to the
@@ -102,6 +107,12 @@ class RenderPrompt(BaseModel):
     @classmethod
     def _clamp_frame_count(cls, v: int) -> int:
         return max(0, min(400, int(v or 0)))
+
+    @field_validator("video_prefix_frames")
+    @classmethod
+    def _clamp_prefix_frames(cls, v: int) -> int:
+        # The H3 clip guide takes 17k+5 frames; renderfin snaps down to that grid.
+        return max(5, min(124, int(v or 22)))
 
     @field_validator("reference_image_urls", mode="before")
     @classmethod

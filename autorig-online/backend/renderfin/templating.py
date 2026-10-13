@@ -64,6 +64,7 @@ def render_workflow_text(
     image_filename: str,
     image_end_filename: str = "",
     control_video_filename: str = "",
+    video_prefix_filename: str = "",
     output_prefix: str,
     workflow_type: str = "",
     frames: int = 0,
@@ -100,6 +101,7 @@ def render_workflow_text(
     # $image_end must go first: "$image" is a prefix of it.
     text = text.replace("$image_end", _json_escape(image_end_filename or ""))
     text = text.replace("$control_video", _json_escape(control_video_filename or ""))
+    text = text.replace("$video_prefix", _json_escape(video_prefix_filename or ""))
     text = text.replace("$image", _json_escape(image_filename or ""))
     # $output_url must go last: it is a prefix of $output_url_Isolated etc.
     text = text.replace("$output_url", _json_escape(output_prefix or ""))
@@ -112,6 +114,10 @@ def render_workflow_text(
     if randomize_seeds:
         _randomize_seeds(workflow, seed)
     _normalize_workflow(workflow, width=width, height=height, workflow_type=workflow_type)
+    # The prefix guide goes first: it hangs off the end-frame guide, so with
+    # both absent the guider falls back to the end guide, then to frame 0.
+    if not (video_prefix_filename or "").strip():
+        _prune_optional_guide(workflow, OPTIONAL_PREFIX_GUIDE, "prefix clip")
     if not (image_end_filename or "").strip():
         _prune_optional_guide(workflow)
     # Last, so a chosen model is not undone by normalisation or pruning.
@@ -162,17 +168,21 @@ def _normalize_workflow(
 
 
 OPTIONAL_GUIDE = "AIGent optional end-frame guide"
+# A clip whose frames and sound anchor the start of the video (MiniMax H3 only):
+# the same optional-branch pattern, its feeders titled "... prefix clip".
+OPTIONAL_PREFIX_GUIDE = "AIGent optional prefix guide"
 
 
-def _prune_optional_guide(workflow):
+def _prune_optional_guide(workflow, title=OPTIONAL_GUIDE, orphan_suffix="end frame"):
     """Drop the end-frame branch when no second image was given.
 
     The farm only schedules workflow names a node advertises, so the frame-to-frame guide lives
     inside the normal template. Without an end image its LoadImage would fail, and the whole
     chain is removed instead: consumers fall back to the guide it was chained from.
+    `title` names the guide node to drop and `orphan_suffix` the titles of what only fed it.
     """
     target = next((nid for nid, node in workflow.items()
-                   if isinstance(node, dict) and (node.get("_meta") or {}).get("title") == OPTIONAL_GUIDE), None)
+                   if isinstance(node, dict) and (node.get("_meta") or {}).get("title") == title), None)
     if target is None:
         return
     inputs = workflow[target]["inputs"]
@@ -195,7 +205,7 @@ def _prune_optional_guide(workflow):
                       if isinstance(value, list) and value}
         orphans = [nid for nid, node in workflow.items()
                    if isinstance(node, dict) and nid not in referenced
-                   and (node.get("_meta") or {}).get("title", "").endswith("end frame")]
+                   and (node.get("_meta") or {}).get("title", "").endswith(orphan_suffix)]
         if not orphans:
             return
         for nid in orphans:

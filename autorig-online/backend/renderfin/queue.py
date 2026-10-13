@@ -2121,6 +2121,15 @@ class RenderQueue:
         if (getattr(prompt, "image_url_end", "") or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
             image_end_filename = await comfy_adapter.upload_image(self._client, server, name, data)
+        video_prefix_filename = ""
+        prefix_url = str(getattr(prompt, "video_prefix_url", "") or "").strip()
+        if prefix_url:
+            # The clip this video continues: its last frames and their sound go
+            # to the template's prefix guide (MiniMax H3), pruned when absent.
+            from .video_input import download_prepare_prefix
+            name, data = await download_prepare_prefix(
+                self._client, prefix_url, int(getattr(prompt, "video_prefix_frames", 22) or 22))
+            video_prefix_filename = await comfy_adapter.upload_image(self._client, server, name, data)
         reference_filenames: List[str] = []
         for reference_url in reference_urls:
             name, data = await comfy_adapter.download_input_image(
@@ -2151,6 +2160,7 @@ class RenderQueue:
             image_filename=image_filename,
             image_end_filename=image_end_filename,
             control_video_filename=control_video_filename,
+            video_prefix_filename=video_prefix_filename,
             output_prefix=task.id,
             workflow_type=prompt.type,
             frames=prompt.frame_count,

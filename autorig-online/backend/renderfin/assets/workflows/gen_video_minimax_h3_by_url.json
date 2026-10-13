@@ -2,8 +2,11 @@
  "model": {
   "class_type": "UNETLoader",
   "inputs": {
-   "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+   "unet_name": "h3ErosMax_beta5_3185144.safetensors",
    "weight_dtype": "default"
+  },
+  "_meta": {
+   "title": "AUTORIG_H3_EROS_MAX"
   }
  },
  "turbo_lora": {
@@ -151,6 +154,76 @@
    "title": "AIGent optional end-frame guide"
   }
  },
+ "prefix_video": {
+  "class_type": "LoadVideo",
+  "inputs": {
+   "file": "$video_prefix"
+  },
+  "_meta": {
+   "title": "Load prefix clip"
+  }
+ },
+ "prefix_parts": {
+  "class_type": "GetVideoComponents",
+  "inputs": {
+   "video": [
+    "prefix_video",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Split prefix clip"
+  }
+ },
+ "prefix_scale": {
+  "class_type": "ImageScale",
+  "inputs": {
+   "image": [
+    "prefix_parts",
+    0
+   ],
+   "width": $width,
+   "height": $height,
+   "crop": "center",
+   "upscale_method": "lanczos"
+  },
+  "_meta": {
+   "title": "Scale prefix clip"
+  }
+ },
+ "prefix_guide": {
+  "class_type": "MiniMaxH3AddGuide",
+  "inputs": {
+   "positive": [
+    "end_guide",
+    0
+   ],
+   "latent": [
+    "i2v",
+    1
+   ],
+   "frame_idx": 0,
+   "vae": [
+    "video_vae",
+    0
+   ],
+   "audio_vae": [
+    "audio_vae",
+    0
+   ],
+   "image": [
+    "prefix_scale",
+    0
+   ],
+   "audio": [
+    "prefix_parts",
+    1
+   ]
+  },
+  "_meta": {
+   "title": "AIGent optional prefix guide"
+  }
+ },
  "noise": {
   "class_type": "RandomNoise",
   "inputs": {
@@ -186,7 +259,7 @@
     0
    ],
    "conditioning": [
-    "end_guide",
+    "prefix_guide",
     0
    ]
   }

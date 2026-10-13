@@ -28,6 +28,10 @@ from .errors import RequestFaultError
 
 
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
+# A source larger than the cap is fetched up to this size and transcoded down
+# (owner, 2026-09-27: never reject a big clip, make it fit).
+MAX_RAW_VIDEO_BYTES = 2 * 1024 * 1024 * 1024
+TRANSCODE_LONG_SIDE = 960
 MAX_DIMENSION = 2048
 MAX_DURATION_SECONDS = 16.4
 PROCESS_TIMEOUT_SECONDS = 60.0
@@ -97,7 +101,7 @@ def _validated_frame_count(frame_count: int, fps: int) -> Tuple[int, int]:
     return frame_count, fps
 
 
-async def _run_process(*argv: str) -> bytes:
+async def _run_process(*argv: str, timeout: float = 0) -> bytes:
     try:
         process = await asyncio.create_subprocess_exec(
             *argv,
@@ -108,7 +112,7 @@ async def _run_process(*argv: str) -> bytes:
         raise VideoInputError(f"cannot start {argv[0]}: {exc}") from exc
     try:
         stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=PROCESS_TIMEOUT_SECONDS
+            process.communicate(), timeout=timeout or PROCESS_TIMEOUT_SECONDS
         )
     except asyncio.TimeoutError as exc:
         process.kill()
@@ -169,7 +173,9 @@ def _validate_container_probe(
         raise VideoInputError("ffprobe found no container")
     formats = {part.strip().lower() for part in str(format_row.get("format_name") or "").split(",")}
     if not formats.intersection(allowed_formats):
-        raise VideoInputError(error_message)
+        # Content is sniffed by ffprobe, not by the address: say what arrived.
+        raise VideoInputError(f"{error_message} (got {sorted(formats) or 'nothing'}; a picture wired "
+                              "into a video socket, or a page instead of a file?)")
     try:
         duration = float(format_row.get("duration") or 0)
     except (TypeError, ValueError) as exc:
@@ -191,7 +197,66 @@ def _validate_mp4_probe(probe: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-async def _download(client: httpx.AsyncClient, url: str, target: Path) -> None:
+_CIVITAI_CDN_SEGMENT = re.compile(r"^(/[A-Za-z0-9_-]+/[0-9a-fA-F-]{36}/)([^/]+)(/[^/]+)$")
+
+
+def _smaller_civitai_variant(url: str) -> str:
+    """The same Civitai clip transcoded to 1080 px wide, or "" if not a CDN link.
+
+    Originals on image.civitai.* can be hundreds of MB; the CDN serves any
+    width on request, and a control input or a first frame never needs more
+    than half-HD (owner, 2026-09-27).
+    """
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if not host.startswith("image.civitai."):
+        return ""
+    match = _CIVITAI_CDN_SEGMENT.match(parts.path)
+    if not match or "width=1080" in match.group(2):
+        return ""
+    path = match.group(1) + "transcode=true,width=1080,optimized=true" + match.group(3)
+    return parts._replace(path=path).geturl()
+
+
+async def _download(client, url, target):
+    """Fetch a control video that fits the 100 MB cap, making it fit if it does not.
+
+    1. As served. 2. A Civitai original: the same clip at 1080 px from the CDN.
+    3. Anything else: fetched whole (up to 2 GB) and transcoded to at most
+       960 px on the long side, H.264, the first 16.4 s.
+    """
+    try:
+        return await _download_once(client, url, target)
+    except VideoInputError as error:
+        if "exceeds the 100 MB limit" not in str(error):
+            raise
+    smaller = _smaller_civitai_variant(url)
+    if smaller:
+        try:
+            return await _download_once(client, smaller, target)
+        except VideoInputError as error:
+            if "exceeds the 100 MB limit" not in str(error):
+                raise
+    raw = target.with_name(target.stem + ".raw" + (target.suffix or ".mp4"))
+    try:
+        await _download_once(client, smaller or url, raw, limit=MAX_RAW_VIDEO_BYTES)
+        scale = (f"scale=w='if(gte(iw,ih),min({TRANSCODE_LONG_SIDE},iw),-2)':"
+                 f"h='if(gte(iw,ih),-2,min({TRANSCODE_LONG_SIDE},ih))'")
+        await _run_process(
+            FFMPEG_BIN, "-v", "error", "-y", "-i", str(raw), "-t", str(MAX_DURATION_SECONDS),
+            "-vf", scale + ",scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", "-fpsmax", "30",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(target), timeout=600)
+    finally:
+        raw.unlink(missing_ok=True)
+    if not target.is_file() or target.stat().st_size == 0:
+        raise VideoInputError("oversized video could not be transcoded")
+    if target.stat().st_size > MAX_VIDEO_BYTES:
+        raise VideoInputError("video is still over 100 MB after transcoding to half-HD")
+
+
+async def _download_once(client: httpx.AsyncClient, url: str, target: Path,
+                         limit: int = MAX_VIDEO_BYTES) -> None:
     current_url = _validated_url(url)
     may_follow_redirect = (urlsplit(current_url).hostname or "").rstrip(".").lower() in _CIVITAI_HOSTS
     try:
@@ -222,13 +287,13 @@ async def _download(client: httpx.AsyncClient, url: str, target: Path) -> None:
                         declared_size = int(declared)
                     except ValueError as exc:
                         raise VideoInputError("invalid control video Content-Length") from exc
-                    if declared_size < 1 or declared_size > MAX_VIDEO_BYTES:
+                    if declared_size < 1 or declared_size > limit:
                         raise VideoInputError("control video exceeds the 100 MB limit")
                 size = 0
                 with target.open("wb") as output:
                     async for chunk in response.aiter_bytes(DOWNLOAD_CHUNK_BYTES):
                         size += len(chunk)
-                        if size > MAX_VIDEO_BYTES:
+                        if size > limit:
                             raise VideoInputError("control video exceeds the 100 MB limit")
                         output.write(chunk)
                 if size == 0:
@@ -303,6 +368,7 @@ async def download_prepare_video(
     fps: int = 24,
     *,
     allow_shorter: bool = False,
+    keep_audio: bool = False,
 ) -> Tuple[str, bytes]:
     """Download and normalize a trusted control video.
 
@@ -330,6 +396,11 @@ async def download_prepare_video(
         source_probe = await _probe(source)
         _validate_source_probe(source_probe)
         source_duration = float((source_probe.get("format") or {}).get("duration") or 0)
+        if keep_audio and source_duration > MAX_DURATION_SECONDS + 0.05:
+            # An enlargement is the whole clip or nothing: never a silent trim.
+            raise VideoInputError(
+                f"the clip is {source_duration:.1f} s; Upscale 2x takes clips up to "
+                f"{MAX_DURATION_SECONDS} s - split it first")
         available_frames = max(1, int(math.floor(source_duration * fps + 1e-6)))
         held_tail_frames = 0 if allow_shorter else max(0, frame_count - available_frames)
         video_filter = (
@@ -355,7 +426,7 @@ async def download_prepare_video(
             "-y",
             "-i", str(source),
             "-map", "0:v:0",
-            "-an",
+            *(["-map", "0:a:0?", "-c:a", "aac", "-b:a", "192k"] if keep_audio else ["-an"]),
             "-vf", video_filter,
             "-frames:v", str(frame_count),
             "-c:v", "libx264",
@@ -398,4 +469,107 @@ async def download_prepare_video(
     finally:
         # ``work_dir`` came from mkdtemp under ``temp_root`` and was checked
         # above.  Never remove the shared root or any sibling job.
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# MiniMax H3 anchors a clip guide of 17k+5 frames (5, 22, 39, ...); the node
+# crops a longer batch down to that grid, so the prefix is cut to it here.
+PREFIX_FRAME_STEP = 17
+PREFIX_FRAME_MIN = 5
+PREFIX_FRAME_MAX = 124
+
+
+def prefix_frame_count(frames: int) -> int:
+    """The largest 17k+5 count at or below `frames`, within 5..124."""
+    try:
+        count = int(frames or 0)
+    except (TypeError, ValueError):
+        count = 0
+    count = max(PREFIX_FRAME_MIN, min(PREFIX_FRAME_MAX, count))
+    return count - (count - PREFIX_FRAME_MIN) % PREFIX_FRAME_STEP
+
+
+async def download_prepare_prefix(
+    client: httpx.AsyncClient,
+    url: str,
+    frames: int,
+    fps: int = 24,
+) -> Tuple[str, bytes]:
+    """Download a trusted clip and cut its LAST `frames` frames, with their sound.
+
+    The result is what a video continues: 24 fps, H.264 yuv420p, AAC, exactly
+    `prefix_frame_count(frames)` frames. A source shorter than that holds its
+    last frame (never loops). The same admission checks as a control video.
+    """
+    admitted_url = _validated_url(url)
+    count = prefix_frame_count(frames)
+    if isinstance(fps, bool) or not isinstance(fps, int) or fps != 24:
+        raise VideoInputError("prefix video fps must be 24")
+    temp_root = (config.RENDER_DIR / ".video-input-temp").resolve()
+    temp_root.mkdir(parents=True, exist_ok=True)
+    work_dir = Path(tempfile.mkdtemp(prefix="prefix-", dir=temp_root)).resolve()
+    try:
+        work_dir.relative_to(temp_root)
+    except ValueError as exc:  # defensive: never clean an unexpected path
+        raise VideoInputError("video input temporary directory escaped its root") from exc
+    source = work_dir / "source.mp4"
+    output = work_dir / "prefix.mp4"
+    filename = f"prefix-{uuid.uuid4().hex}.mp4"
+    try:
+        await _download(client, admitted_url, source)
+        source_probe = await _probe(source, count_frames=True)
+        source_stream = _validate_source_probe(source_probe)
+        source_duration = float((source_probe.get("format") or {}).get("duration") or 0)
+        try:
+            source_frames = int(source_stream.get("nb_read_frames") or 0)
+        except (TypeError, ValueError):
+            source_frames = 0
+        if source_frames <= 0:
+            source_frames = max(1, int(math.floor(source_duration * fps + 1e-6)))
+        # Output-side seek (after -i): frame-accurate, both streams cut together.
+        start = max(0, source_frames - count) / fps
+        video_filter = (
+            f"fps={fps},"
+            "scale=w='min(2048,iw)':h='min(2048,ih)':"
+            "force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            f"tpad=stop_mode=clone:stop_duration={count / fps:.6f}"
+        )
+        await _run_process(
+            FFMPEG_BIN,
+            "-v", "error",
+            "-y",
+            "-i", str(source),
+            "-ss", f"{start:.6f}",
+            "-map", "0:v:0",
+            "-map", "0:a:0?", "-c:a", "aac", "-b:a", "192k",
+            "-vf", video_filter,
+            "-frames:v", str(count),
+            "-t", f"{count / fps + 0.5 / fps:.6f}",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-metadata", f"comment=AutoRig video prefix: the last {count} frames of the source",
+            "-movflags", "+faststart+use_metadata_tags",
+            str(output),
+        )
+        if not output.is_file():
+            raise VideoInputError("ffmpeg produced no prefix video")
+        size = output.stat().st_size
+        if size < 1 or size > MAX_VIDEO_BYTES:
+            raise VideoInputError("prepared prefix video exceeds the 100 MB limit")
+        output_probe = await _probe(output, count_frames=True)
+        stream = _validate_mp4_probe(output_probe)
+        if str(stream.get("codec_name") or "").lower() != "h264":
+            raise VideoInputError("prepared prefix video is not H.264")
+        if str(stream.get("pix_fmt") or "").lower() != "yuv420p":
+            raise VideoInputError("prepared prefix video is not yuv420p")
+        try:
+            decoded_frames = int(stream.get("nb_read_frames") or 0)
+        except (TypeError, ValueError) as exc:
+            raise VideoInputError("cannot verify prepared prefix video frame count") from exc
+        if decoded_frames != count:
+            raise VideoInputError(
+                f"prepared prefix video has {decoded_frames} frames; expected {count}"
+            )
+        return filename, output.read_bytes()
+    finally:
         shutil.rmtree(work_dir, ignore_errors=True)

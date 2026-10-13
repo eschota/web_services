@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
+import ai_graph_context
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,26 @@ async def api_render_task_status(task_id: str):
             "error_string": row.get("error_string") or row.get("error") or "",
             "started_at_unix_float": row.get("started_at") or 0,
             "created_at_unix_float": row.get("created_at") or 0,
+            # When the box finished and how long it rendered (lightbox info).
+            "finished_at_unix_float": row.get("finished_at") or 0,
+            "render_seconds_float": (round(float(row["finished_at"]) - float(row["started_at"]), 1)
+                                     if row.get("finished_at") and row.get("started_at") else 0),
             # Where in the line this job is, so "queued" can say how long a
             # wait it is. Zero while it is not waiting: running, or finished.
             "queue_position_int": int(row.get("queue_position_int") or 0),
-            "queue_length_int": int(row.get("queue_length_int") or 0)}
+            "queue_length_int": int(row.get("queue_length_int") or 0),
+            # Restart resume (2026-10-11): the job came back by itself after a
+            # server restart; the editor shows the localized line.
+            "restart_resumes_int": int(row.get("restart_resumes_int") or 0),
+            "notice_string": str(row.get("notice_string") or "")}
+    try:
+        import user_language
+        if result["notice_string"] and not result["finished_bool"]:
+            result["notice_message_string"] = user_language.t("render_" + result["notice_string"])
+        if str(result["error_string"]).startswith("restart_resume_exhausted"):
+            result["message_string"] = user_language.t("render_restart_resume_exhausted")
+    except Exception:
+        pass
     import ai_request_cache
     await ai_request_cache.anote_result(task_id, state, result)
     return result
@@ -124,7 +141,11 @@ AI_MODELS: List[Dict[str, object]] = [
         "default": False,
     },
 ]
-DEFAULT_MODEL_ID = "bonsai2-27b"
+# Owner 2026-10-07: «зачем вообще нам разные модели, давай оставим одну uncensored». With AI_MODEL_SINGLE set, every
+# request - whatever model it names, or none - is served by that one model, so the farm nodes keep one model resident
+# and never swap 7 GB of weights between tasks. Unset keeps the two-model behaviour.
+SINGLE_MODEL_ID = os.getenv("AI_MODEL_SINGLE", "").strip().lower()
+DEFAULT_MODEL_ID = SINGLE_MODEL_ID or "bonsai2-27b"
 
 MAX_PROMPT_CHARS = 8000
 MAX_INLINE_IMAGE_BYTES = 12 * 1024 * 1024
@@ -246,7 +267,7 @@ class TextRequest(BaseModel):
 
 
 def _model_entry(model_id: Optional[str]) -> Dict[str, object]:
-    wanted = str(model_id or DEFAULT_MODEL_ID).strip().lower()
+    wanted = SINGLE_MODEL_ID or str(model_id or DEFAULT_MODEL_ID).strip().lower()
     for entry in AI_MODELS:
         if str(entry["id"]).lower() == wanted:
             return entry
@@ -298,6 +319,9 @@ def _worker_entries() -> List[Tuple[Dict[str, object], Dict[str, object]]]:
     return pairs
 
 
+EXTRA_3D_WORKERS_FILE = os.getenv("AUTORIG_EXTRA_3D_WORKERS_FILE", "/srv/autorig/secrets/site-3d-extra-workers.json")
+
+
 def _load_hunyuan_workers() -> List[Dict[str, object]]:
     """Nodes allowed to run Hunyuan, which is a narrower set than AI Vision.
 
@@ -313,6 +337,18 @@ def _load_hunyuan_workers() -> List[Dict[str, object]]:
         if raw.get("canary_approved") is False:
             continue
         workers.append(entry)
+    # 3D-only boxes the site may use but Renderfin's character pipeline must not
+    # (worker-4090's local Hunyuan adapter, 2026-09-27). Same entry shape.
+    try:
+        extra = json.loads(pathlib.Path(EXTRA_3D_WORKERS_FILE).read_text(encoding="utf-8"))
+        for raw in (extra.get("workers") if isinstance(extra, dict) else extra) or []:
+            if raw.get("enabled") is False or not raw.get("url") or not raw.get("token"):
+                continue
+            workers.append({key: raw[key] for key in raw if key != "notes"})
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception("Could not read %s", EXTRA_3D_WORKERS_FILE)
     return workers
 
 
@@ -353,6 +389,8 @@ async def _node_is_free(client: httpx.AsyncClient, worker: Dict[str, object]) ->
         payload = response.json()
     except Exception:
         return False, {}
+    if payload.get("accepting_ai_vision") is False:
+        return False, {}                    # the node says it takes no AI work: its queue would never run
     # Real occupancy lives in tasks_summary; the top level has no such fields,
     # and reading them made every node look idle, so AI work queued behind a
     # twenty-minute conversion instead of going to a free node.
@@ -529,6 +567,14 @@ def _expected_wait(worker: Dict[str, object], info: Dict[str, object], now: floa
     return (depth + 1) * _answer_seconds(key, now)
 
 
+def _node_idle(worker: Dict[str, object], info: Dict[str, object], now: float) -> bool:
+    """Nothing running or queued on the node, none of ours in flight or just picked, no conversion."""
+    key = _probe_key(worker)
+    if any(activity in AI_BUSY_ACTIVITIES for activity in (info.get("activities") or [])):
+        return False
+    return max(int(info.get("load") or 0), _inflight(key, now), _recent_picks(key, now)) == 0
+
+
 def _recent_picks(key: tuple, now: float) -> int:
     picks = _AI_RECENT_PICKS.get(key)
     while picks and now - picks[0] > AI_PROBE_FRESH_SECONDS + 3:
@@ -631,6 +677,7 @@ async def _pick_worker(
     # but queueing behind a conversion costs however long that conversion runs.
     now = time.monotonic()
     carrying.sort(key=lambda item: (
+        0 if _node_idle(item[0], item[1], now) else 1,   # a free node first (owner 2026-10-12: «должно быть 7(0)»)
         round(_expected_wait(item[0], item[1], now), 3),
         0 if wanted and item[1].get("loaded") == wanted else 1,
     ))
@@ -661,6 +708,55 @@ def _output_budget(model: Dict[str, object], asked: Optional[int]) -> int:
     if asked and int(asked) > 0:
         return int(asked)
     return int(model.get("default_output_tokens") or 1024)
+
+
+# Owner rule 2026-09-27: every generator runs without text when it has
+# pictures. The user's text wins; these fill in only when it is empty.
+DEFAULT_REMIX_PROMPT = ("Remix {images} into one coherent image: unify the style and lighting, "
+                        "combine the subjects and the story of all inputs; image 1 is the base "
+                        "scene and composition; give every face one vivid, playful expression (teasing, flirting, a wink, her tongue out or a bitten lip - one of them, not all), never a blank one.")
+DEFAULT_VARIATION_PROMPT = ("A clean, style-consistent variation of the reference picture: keep the "
+                            "subject, composition, colours and lighting; give every face one vivid, playful expression (teasing, flirting, a wink, her tongue out or a bitten lip - one of them, not all), never a blank one.")
+DEFAULT_STRUCTURE_PROMPT = ("A detailed, natural, well-lit photograph that follows the given "
+                            "structure map exactly.")
+DEFAULT_ANIMATE_PROMPT = ("Animate the picture with lively, natural motion that fits the scene; every "
+                          "face shows vivid, playful emotion (teasing, flirting, a wink, her tongue out or a "
+                          "bitten lip - one or two at a time, rarely a laugh), never a static or blank face; "
+                          "keep the subject, style and framing.")
+DEFAULT_TRANSITION_PROMPT = ("A smooth, lively transition from the first frame to the last frame; every face "
+                             "shows vivid, playful emotion (teasing, flirting, a wink, her tongue out or a bitten "
+                             "lip - one or two at a time, rarely a laugh); keep the subject and style consistent.")
+# Earlier defaults (before vivid emotions, then the laughing ones of the same
+# day, 2026-09-29): a node that saved one of them still means "the default",
+# so it gets today's default.
+LEGACY_REMIX_PROMPTS = ("Remix {images} into one coherent image: unify the style and lighting, "
+                        "combine the subjects and the story of all inputs; image 1 is the base "
+                        "scene and composition.",
+                        "Remix {images} into one coherent image: unify the style and lighting, "
+                        "combine the subjects and the story of all inputs; image 1 is the base "
+                        "scene and composition; give every face a vivid, extravagant expression (cheeky, laughing, teasing, biting her lip), never a blank one.")
+LEGACY_ANIMATE_PROMPTS = ("Animate the picture naturally: subtle, realistic motion that fits the "
+                          "scene; keep the subject, style and framing.",
+                          "Animate the picture with lively, natural motion that fits the scene; every "
+                          "face shows a vivid, extravagant emotion (cheeky, laughing, teasing, biting her lip), never a static or blank face; keep the subject, style and framing.")
+
+
+def default_image_prompt(body) -> str:
+    """The prompt an image request gets when its own is empty ('' = nothing to go on)."""
+    pictures = [str(item or "").strip() for item in
+                [getattr(body, "image_url", None)] + list(getattr(body, "reference_image_urls", None) or [])]
+    count = len([item for item in pictures if item]) + (1 if getattr(body, "image_base64", None) else 0)
+    custom = str(getattr(body, "system_prompt", None) or "").strip()
+    if custom and custom != DEFAULT_REMIX_PROMPT and custom not in LEGACY_REMIX_PROMPTS and count >= 1:
+        return custom.replace("{images}", ", ".join(f"image {index}" for index in range(1, count + 1)))
+    if count >= 2:
+        names = ", ".join(f"image {index}" for index in range(1, count + 1))
+        return DEFAULT_REMIX_PROMPT.replace("{images}", names)
+    if count == 1:
+        return DEFAULT_VARIATION_PROMPT
+    if any(getattr(body, name, None) for name in ("control_pose", "control_depth", "control_canny")):
+        return DEFAULT_STRUCTURE_PROMPT
+    return ""
 
 
 def _validate_prompt(raw: str) -> str:
@@ -698,7 +794,13 @@ def _standing_instruction(system_prompt: Optional[str], structured: bool) -> str
     is the whole point of it; an unstructured one carries only what the caller
     sent, so the plain /vision and /text pages behave exactly as before.
     """
-    text = str(system_prompt or "").strip()
+    # Live library (2026-09-30): an edit on /system_prompts reaches the next
+    # task; a prompt nobody edited comes back unchanged.
+    try:
+        import prompt_library
+        text = str(prompt_library.resolve(system_prompt) or "").strip()
+    except Exception:
+        text = str(system_prompt or "").strip()
     if not structured:
         return text
     return (text or _default_system_prompt()).strip() + "\n" + STRUCTURED_OUTPUT_INSTRUCTION
@@ -825,6 +927,12 @@ def _effective_model_settings(service_id: str, checkpoint: Optional[str],
     import ai_model_catalogue
     import ai_model_defaults
 
+    # A node or caller that names a retired model (canonical_file maps it to
+    # its replacement; LTX-2.5 -> LTX-10Eros on 2026-09-29) carries the step
+    # count the retired model's fixed schedule needed (8 for LTX-2.5). The
+    # replacement has its own fixed schedule: that count is dropped, not refused.
+    if checkpoint and ai_model_defaults.canonical_file(checkpoint) != str(checkpoint).strip():
+        explicit = {key: value for key, value in explicit.items() if key != "steps"}
     mode = str(mode or "").strip().lower()
     control_channel = str(control_channel or "").strip().lower()
     entries = ai_model_catalogue.entries()
@@ -946,15 +1054,47 @@ def _render_model_profile(service_id: str, checkpoint: Optional[str],
     ]
 
 
+def _qwen_model_settings(checkpoint: Optional[str], lora: Optional[str]) -> Dict[str, object]:
+    """Qwen-Image nodes asked this and got a 400 (2026-09-28): the model's own
+    settings, the default model when none is named, its LoRA's trigger. The
+    mode does not matter here: Qwen-Image 2.1 samples on a fixed schedule."""
+    import ai_model_catalogue
+    import ai_model_defaults
+    import ai_qwen_image_api
+    name = str(checkpoint or "").strip()
+    entry = ai_model_catalogue.known_file(name, "checkpoint") if name else None
+    if not entry or str(entry.get("family") or "") != "qwen_image":
+        installed = ai_qwen_image_api.installed_checkpoints()
+        name = installed[0] if installed else name
+        entry = ai_model_catalogue.known_file(name, "checkpoint") or {}
+    effective: Dict[str, object] = {"checkpoint": name, "main_size_width": 960, "main_size_height": 540}
+    for key, value in (entry.get("recommended") or {}).items():
+        if key in ("steps", "cfg", "sampler", "scheduler"):
+            effective[key] = value
+    lora_entry = ai_model_catalogue.known_file(str(lora or "").strip(), "lora") if lora else None
+    return {
+        "success_bool": True,
+        "service_string": "qwen_image",
+        "checkpoint_string": name,
+        "lora_string": str((lora_entry or {}).get("file") or ""),
+        "trigger_prefix_string": ai_model_defaults.add_triggers("", [lora_entry]) if lora_entry else "",
+        "effective_params_object": effective,
+        "sampling_policy_object": entry.get("sampling_policy") or {},
+        "server_time_unix_int": int(time.time()),
+    }
+
+
 @router.get("/api/ai/model-settings")
 async def api_ai_model_settings(service: str, checkpoint: Optional[str] = None,
                                 lora: Optional[str] = None, control_channel: str = "", mode: str = ""):
     """Resolved catalogue defaults used when a model selection changes."""
     service_id = str(service or "").strip().lower()
+    if service_id == "qwen_image":
+        return _qwen_model_settings(checkpoint, lora)
     if service_id not in ("image", "video"):
         raise HTTPException(status_code=400, detail={
             "error_string": "unknown_service",
-            "message_string": "service must be image or video"})
+            "message_string": "service must be image, video or qwen_image"})
     effective, trigger_prefix = _effective_model_settings(
         service_id, checkpoint, lora, {},
         use_default=not (service_id == "image" and bool(control_channel or mode)),
@@ -1098,6 +1238,16 @@ async def _fetch_status(
     return response.json() or {}
 
 
+def _degenerate_answer(text: str) -> bool:
+    """True for a long answer that is nearly all one repeated non-word character."""
+    compact = "".join(str(text or "").split())
+    if len(compact) < 24:
+        return False
+    top = max(compact.count(ch) for ch in set(compact))
+    char = max(set(compact), key=compact.count)
+    return not char.isalnum() and top >= 0.9 * len(compact)
+
+
 def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
                    service_id: str = "", *,
                    served_model: str = "") -> Dict[str, object]:
@@ -1112,6 +1262,14 @@ def _public_status(task_id: str, model_id: str, raw: Dict[str, object],
     # state, so a restart between submit and poll changes nothing.
     answer = str(raw.get("answer") or "")
     output_text, was_structured = _extract_output_text(answer)
+    if status == "Completed" and _degenerate_answer(output_text):
+        # A model stuck repeating one character (1024 "?" from the 9B vision
+        # model, 2026-09-29) is not an answer: passed on, it became the next
+        # node's prompt. Fail it so the node shows an error and a re-render
+        # asks again (a failed task is never served from the request cache).
+        status = "Failed"
+        raw = dict(raw, error=("The model returned an unreadable answer (one character repeated); "
+                               "render the node again"))
     return {
         "success_bool": status != "Failed",
         "task_id_string": task_id,
@@ -1444,10 +1602,13 @@ VIDEO_QUALITIES = {
 # which also gives inpaint a model again (FLUX.1 Fill Dev was never installed).
 LEGACY_IMAGE_MODES = {"z_depth", "t_pose", "open_pose", "inpaint"}
 LEGACY_IMAGE_MODE_FAMILY = "zimage"
-# Pose / depth / canny video control runs LTX-2.5 with the Union-Control
-# IC-LoRA. The 2.3 name is accepted from nodes saved before the migration.
-VIDEO_CONTROL_CHECKPOINT = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
-VIDEO_CONTROL_CHECKPOINTS = (VIDEO_CONTROL_CHECKPOINT, "ltx-2.3-22b-distilled-1.1")
+# Pose / depth / canny video control runs LTX-10Eros (an LTX 2.3 model, the
+# base the Union-Control IC-LoRA was trained on) since 2026-09-29. Older LTX
+# names reach this check already mapped to it by canonical_file; the 2.5 and
+# 2.3 names are still accepted from nodes saved before the swaps.
+VIDEO_CONTROL_CHECKPOINT = "ltx10eros_v14_2989669.safetensors"
+VIDEO_CONTROL_CHECKPOINTS = (VIDEO_CONTROL_CHECKPOINT, "ltx-2.5-22b-distilled",
+                             "ltx-2.3-22b-distilled-1.1")
 LTX25_HQ_WORKFLOW = "gen_animation_ltx25_hq_by_url.json"
 
 
@@ -1619,13 +1780,54 @@ def _check_stack_family(stack, checkpoint_file: str) -> None:
 
 def _stack_profile(service_id: str, prompt: Optional[str], stack_value: object,
                    single_lora: Optional[str]) -> List[Dict[str, object]]:
-    """Catalogue facts of the stacked LoRAs, for the request-cache key."""
+    """Catalogue facts of the stacked LoRAs, for the request-cache key.
+
+    A stacked LoRA's trigger word is part of it (2026-09-29): a LoRA that gains
+    one renders again instead of answering from the cache without it. A LoRA
+    without one keeps the key it had.
+    """
     try:
         _clean, stack, _override = _lora_stack_request(service_id, prompt, stack_value, single_lora)
     except HTTPException:
         return []
-    return [{key: item.entry.get(key) for key in ("file", "sha256", "source_version_id")}
-            for item in stack]
+    profile = []
+    for item in stack:
+        facts = {key: item.entry.get(key) for key in ("file", "sha256", "source_version_id")}
+        if item.entry.get("triggers"):
+            facts["triggers"] = item.entry.get("triggers")
+        profile.append(facts)
+    return profile
+
+
+def _apply_lora_triggers(prompt: str, model_payload: Dict[str, object], lora_stack,
+                         extra_text: Optional[str]) -> Tuple[str, List[str]]:
+    """(final prompt, triggers put in front of it) for an Image or Video render.
+
+    Owner rules 2026-09-28 / 2026-09-29: the checkpoint's, the single LoRA's
+    and every stacked LoRA's primary trigger (a LoRA at weight 0 adds none),
+    in that order, then the node's own `lora_trigger_text` phrases verbatim.
+    Called after the prompt edit and translation, so no trigger passes
+    through the LLM. The node's phrases belong to its LoRAs: with none
+    selected they are left out.
+    """
+    import ai_model_catalogue
+    import ai_model_defaults
+    loras = [ai_model_catalogue.known_file(str(model_payload.get("lora") or ""), "lora")]
+    loras += [item.entry for item in lora_stack or [] if item.strength_model != 0]
+    loras = [entry for entry in loras if entry]
+    entries = [ai_model_catalogue.known_file(str(model_payload.get("checkpoint") or ""), "checkpoint")]
+    extra = ai_model_defaults.split_trigger_text(extra_text) if loras else []
+    return ai_model_defaults.apply_triggers(prompt, entries + loras, extra)
+
+
+def _trigger_record(applied: List[str], extra_text: Optional[str]) -> Dict[str, object]:
+    """What the answer's effective parameters say about triggers (params_used)."""
+    record: Dict[str, object] = {}
+    if applied:
+        record["triggers_applied"] = list(applied)
+    if str(extra_text or "").strip():
+        record["lora_trigger_text"] = str(extra_text).strip()
+    return record
 
 
 class ImageRequest(BaseModel):
@@ -1633,6 +1835,12 @@ class ImageRequest(BaseModel):
     # and comes back as "prompt must not be empty" instead of FastAPI's
     # "Field required", which reads like the caller used the wrong field name.
     prompt: str = Field("", description="What to draw; <lora:NAME:WEIGHT> tags pick LoRAs")
+    prompt_edit: Optional[str] = Field(None, max_length=4000, description=(
+        "An instruction applied to `prompt` by the text LLM before rendering (any language); "
+        "alone it is the prompt"))
+    prompt_translate: Optional[bool] = Field(True, description="Translate a non-English prompt to English")
+    system_prompt: Optional[str] = Field(None, max_length=12000, description=(
+        "Used only when prompt is empty and pictures are given; {images} = image 1..N"))
     image_url: Optional[str] = Field(None, description="Reference image URL")
     image_base64: Optional[str] = Field(None, description="Reference image, inline")
     wait_seconds: Optional[float] = Field(None, ge=0, le=MAX_WAIT_SECONDS)
@@ -1651,6 +1859,9 @@ class ImageRequest(BaseModel):
     lora_strength: Optional[float] = Field(None, ge=0, le=2)
     loras: Optional[LoraStackValue] = Field(
         None, description="LoRA stack: [{name, strength, strength_clip}] or '<lora:NAME:W> ...'")
+    lora_trigger_text: Optional[str] = Field(None, max_length=2000, description=(
+        "Extra trigger phrases of the selected LoRAs, one per line or separated by '|': put "
+        "verbatim right after the automatic trigger, after the prompt edit and translation"))
     clip_skip: Optional[int] = Field(None, ge=1, le=12)
     control_pose: Optional[str] = Field(None, description="Precomputed pose control-map URL")
     control_depth: Optional[str] = Field(None, description="Precomputed depth control-map URL")
@@ -1660,8 +1871,11 @@ class ImageRequest(BaseModel):
     control_end: float = Field(1.0, ge=0, le=1)
     reference_image_urls: Optional[List[str]] = Field(
         None, description=("More pictures after image_url, in order: image 1 is image_url, "
-                           "image 2 the first entry here. FLUX.2 klein only; 4 in all. "
+                           "image 2 the first entry here; 3 in all. Since 2026-09-26 "
+                           "these edits run on Qwen-Image 2.1 turbo. "
                            "A video URL stands for its first frame"))
+    internal_pipeline: Optional[str] = Field(
+        None, description="Internal callers only (avatar build): keep the named model for an edit")
 
 
 # Several pictures composed into one (renderfin.multiref). Only FLUX.2 klein
@@ -1737,8 +1951,9 @@ async def api_image_docs():
                                   "control_pose", "control_depth",
                                   "control_canny", "reference_image_urls"],
         "multi_reference_object": {
-            "max_images_int": MULTIREF_MAX_IMAGES,
+            "max_images_int": 3,
             "families_array": sorted(MULTIREF_FAMILIES),
+            "edit_model_string": "Qwen-Image 2.1 turbo (since 2026-09-26 every picture edit and multi-picture edit is redirected to POST /api/qwen-image)",
             "note_string": ("image_url is image 1, reference_image_urls follow in order; "
                             "refer to them as image 1, image 2... in the prompt. "
                             "A video URL stands for its first frame"),
@@ -1749,10 +1964,75 @@ async def api_image_docs():
     }
 
 
+def _retired_edit_reason(body: "ImageRequest") -> str:
+    """Why this /api/image request is an edit that now belongs to Qwen 2.1, or "".
+
+    One edit model on the farm (owner, 2026-09-26): instruction edits and
+    multi-picture edits run on Qwen-Image 2.1 turbo only. FLUX.2 klein stays a
+    text-to-image model here; its edit and multi-reference templates stay on
+    the boxes for rollback and for the avatar pipeline, which names itself.
+    """
+    if str(body.internal_pipeline or "").strip():
+        return ""
+    if body.reference_image_urls and any(str(item or "").strip() for item in body.reference_image_urls):
+        return "several pictures"
+    has_picture = bool(str(body.image_url or "").strip() or str(body.image_base64 or "").strip())
+    if not has_picture or body.mode or body.control_pose or body.control_depth or body.control_canny:
+        return ""
+    import ai_model_catalogue
+    import ai_model_defaults
+    selected = (ai_model_catalogue.known_file(str(body.checkpoint or ""), "checkpoint")
+                or ai_model_catalogue.known_file(str(body.lora or ""), "lora"))
+    if selected and ai_model_defaults.model_family(selected) in MULTIREF_FAMILIES:
+        return "a FLUX.2 klein picture edit"
+    return ""
+
+
+async def _redirected_edit(body: "ImageRequest", reason: str) -> Dict[str, object]:
+    import ai_qwen_image_api
+    extras = [str(item or "").strip() for item in (body.reference_image_urls or [])
+              if str(item or "").strip()]
+    total = len(extras) + (1 if (body.image_url or body.image_base64) else 0)
+    if total > ai_qwen_image_api.MAX_REFERENCE_IMAGES:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "too_many_reference_images",
+            "message_string": (f"Edits run on Qwen-Image 2.1 turbo, which takes at most "
+                               f"{ai_qwen_image_api.MAX_REFERENCE_IMAGES} pictures; "
+                               f"{total} were wired in"),
+            "max_int": ai_qwen_image_api.MAX_REFERENCE_IMAGES})
+    image_url = str(body.image_url or "").strip() or None
+    if not image_url and not body.image_base64 and extras:
+        image_url, extras = extras[0], extras[1:]
+    request = ai_qwen_image_api.QwenImageRequest(
+        # Empty text is fine: Qwen-Image applies its remix/variation default.
+        prompt=str(body.prompt or "").strip(), image_url=image_url,
+        image_base64=body.image_base64, mode="edit",
+        width=body.width, height=body.height, seed=body.seed or None,
+        wait_seconds=body.wait_seconds, reference_image_urls=extras or None)
+    note = (f"/api/image: {reason} is retired since 2026-09-26; the edit ran on "
+            "Qwen-Image 2.1 turbo (POST /api/qwen-image)")
+    logger.warning("image edit deprecation: %s (checkpoint=%s)", note, body.checkpoint)
+    answer = dict(await ai_qwen_image_api.api_qwen_image(request))
+    answer["deprecation_string"] = note
+    answer.setdefault("poll_url_string", answer.get("image_url_string"))
+    answer["effective_params_object"] = {
+        "checkpoint": answer.get("checkpoint_string"),
+        "work_flow": ("qwen_image21_edit_multi.json" if extras else "qwen_image21_edit.json"),
+        "service": "qwen_image",
+        "main_size_width": answer.get("width_int"), "main_size_height": answer.get("height_int"),
+        "prompt": request.prompt, "noise_seed": body.seed or 0,
+    }
+    return answer
+
+
 @router.post("/api/image")
 async def api_image(body: ImageRequest):
     import ai_request_cache
+    retired_edit = _retired_edit_reason(body)
+    if retired_edit:
+        return await _redirected_edit(body, retired_edit)
     payload = body.model_dump(exclude_none=True)
+    payload.pop("internal_pipeline", None)
     if "image" in ("vision", "text"):
         model = _model_entry(body.model)
         payload["model"] = model["id"]
@@ -1767,11 +2047,20 @@ async def api_image(body: ImageRequest):
         profile = profile + _stack_profile("image", body.prompt, body.loras, body.lora)
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     return await ai_request_cache.run_cached("image", payload,
-        lambda: _uncached_api_image(body), namespace="ai-exact-models-20260922-v4")
+        lambda: _uncached_api_image(body), namespace="ai-exact-models-20260922-v4-flirt20260929")
 
 
 async def _uncached_api_image(body: ImageRequest):
     """Prompt (and optionally a reference picture) into a generated image."""
+    import ai_prompt_edit
+    body.prompt, _edit = await ai_prompt_edit.resolve(body.prompt, body.prompt_edit, body.prompt_translate)
+    if not str(body.prompt or "").strip():
+        fallback = default_image_prompt(body)
+        if not fallback:
+            raise HTTPException(status_code=400, detail={
+                "error_string": "prompt_required",
+                "message_string": "Nothing to draw: connect a prompt (Text / Vision) or a picture"})
+        body.prompt = fallback
     prompt = _validate_prompt(body.prompt)
     prompt, lora_stack, single_strength = _lora_stack_request(
         "image", prompt, body.loras, body.lora)
@@ -1825,9 +2114,10 @@ async def _uncached_api_image(body: ImageRequest):
                 raise HTTPException(status_code=400, detail={
                     "error_string": "control_model_incompatible",
                     "message_string": str(exc)}) from None
-        if trigger_prefix:
-            import ai_model_defaults
-            prompt = ai_model_defaults.add_triggers(prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
+        # Triggers: the checkpoint's and the single LoRA's, then every stacked
+        # LoRA's primary word in stack order, then the node's own phrases.
+        prompt, triggers_applied = _apply_lora_triggers(
+            prompt, model_payload, lora_stack, body.lora_trigger_text)
         payload: Dict[str, object] = {
             "prompt": prompt, "main_size_width": int(body.width or 960),
             "main_size_height": int(body.height or 540),
@@ -1889,6 +2179,7 @@ async def _uncached_api_image(body: ImageRequest):
             payload["noise_seed"] = int(body.seed)
         _lora_dispatch_gate(payload)
         try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload, timeout=SUBMIT_TIMEOUT_SECONDS
             )
@@ -1929,21 +2220,27 @@ async def _uncached_api_image(body: ImageRequest):
             "finished_bool": ready,
             "image_url_string": output_url,
             "poll_url_string": output_url,
-            "effective_params_object": {k: payload[k] for k in (
+            "effective_params_object": dict({k: payload[k] for k in (
                 "main_size_width", "main_size_height", "steps", "cfg", "sampler",
                 "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "loras",
-                "work_flow", "prompt", "noise_seed", "reference_image_urls")
-                if k in payload},
+                "work_flow", "prompt", "negative_prompt", "noise_seed", "reference_image_urls")
+                if k in payload}, **_trigger_record(triggers_applied, body.lora_trigger_text)),
+            "triggers_applied_array": triggers_applied,
             "server_time_unix_int": int(time.time()),
         }
 
 class VideoRequest(BaseModel):
+    prompt_edit: Optional[str] = Field(None, max_length=4000, description=(
+        "An instruction applied to `prompt` by the text LLM before rendering (any language); "
+        "alone it is the prompt"))
+    prompt_translate: Optional[bool] = Field(True, description="Translate a non-English prompt to English")
     control_video_url: Optional[str] = Field(None, description="Driving MP4 for whole-sequence motion guidance")
     control_channel: Optional[str] = Field(None, pattern="^(canny|pose|depth)$")
     control_strength: float = Field(0.8, ge=0, le=1)
     image_url: Optional[str] = Field(None, description="First frame, public URL")
     image_base64: Optional[str] = Field(None, description="First frame, inline")
     prompt: Optional[str] = Field(None, description="What should happen in the clip")
+    system_prompt: Optional[str] = Field(None, max_length=12000, description="Used only when prompt is empty")
     frame_count: Optional[int] = Field(None, ge=8, le=400)
     # Giving a last frame turns the clip into a journey between two pictures;
     # passing the first frame again is how a loop is made. Renderfin prunes the
@@ -1951,6 +2248,14 @@ class VideoRequest(BaseModel):
     # is unchanged by its existence.
     image_url_end: Optional[str] = Field(None, description="Last frame, public URL")
     image_base64_end: Optional[str] = Field(None, description="Last frame, inline")
+    # A video prefix (MiniMax H3 only): the last `video_prefix_frames` frames of
+    # this clip, with their sound, are anchored at the start of the new video,
+    # which then continues the clip with the motion it had. The first frame
+    # should be the first of those frames. Absent = the plain animation.
+    video_prefix_url: Optional[str] = Field(None, description=(
+        "Public MP4 the new video continues: its last frames start this clip (MiniMax H3)"))
+    video_prefix_frames: Optional[int] = Field(None, ge=5, le=124, description=(
+        "How many frames of the prefix clip to anchor (17k+5 grid, default 22 = 0.9 s)"))
     quality: Optional[str] = Field(None, description="standard or hq")
     width: Optional[int] = Field(None, ge=256, le=2048)
     height: Optional[int] = Field(None, ge=256, le=2048)
@@ -1959,6 +2264,9 @@ class VideoRequest(BaseModel):
     lora_strength: Optional[float] = Field(None, ge=0, le=2)
     loras: Optional[LoraStackValue] = Field(
         None, description="LoRA stack: [{name, strength, strength_clip}] or '<lora:NAME:W> ...'")
+    lora_trigger_text: Optional[str] = Field(None, max_length=2000, description=(
+        "Extra trigger phrases of the selected LoRAs, one per line or separated by '|': put "
+        "verbatim right after the automatic trigger, after the prompt edit and translation"))
     negative_prompt: Optional[str] = Field(None, description="What to avoid")
     steps: Optional[int] = Field(None, ge=1, le=100)
     cfg: Optional[float] = Field(None, ge=0, le=30)
@@ -1966,6 +2274,35 @@ class VideoRequest(BaseModel):
     scheduler: Optional[str] = None
     creativity: Optional[float] = Field(None, ge=0, le=1)
     seed: Optional[int] = Field(None, ge=0, description="0 or absent randomises")
+
+
+VIDEO_PREFIX_FAMILY = "minimax_h3"
+VIDEO_PREFIX_DEFAULT_FRAMES = 22
+
+
+def _video_prefix_fields(body: "VideoRequest", video_family: str) -> Dict[str, object]:
+    """Renderfin fields of a video prefix request, or {} when none was asked for.
+
+    The prefix is a clip the new video continues (its last frames and sound
+    anchor the start). Only the MiniMax H3 template carries the guide; any
+    other model answers 400 rather than silently rendering a plain animation.
+    """
+    url = str(body.video_prefix_url or "").strip()
+    if not url:
+        return {}
+    if str(video_family or "").strip().lower() != VIDEO_PREFIX_FAMILY:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "unsupported_video_prefix",
+            "message_string": "A video prefix is supported by MiniMax H3 only; choose that checkpoint"})
+    from renderfin.video_input import validate_video_url, VideoInputError
+    try:
+        validate_video_url(url)
+    except (ValueError, VideoInputError) as error:
+        raise HTTPException(status_code=400, detail={
+            "error_string": "invalid_video_prefix",
+            "message_string": str(error)}) from None
+    return {"video_prefix_url": url,
+            "video_prefix_frames": int(body.video_prefix_frames or VIDEO_PREFIX_DEFAULT_FRAMES)}
 
 
 @router.get("/api/video")
@@ -1977,8 +2314,8 @@ async def api_video_docs():
         "url_string": "/api/video",
         "required_fields_array": ["image_url or image_base64"],
         "optional_fields_array": ["prompt", "frame_count", "image_url_end",
-                                  "image_base64_end", "quality", "negative_prompt",
-                                  "steps", "creativity", "seed"],
+                                  "image_base64_end", "video_prefix_url", "video_prefix_frames",
+                                  "quality", "negative_prompt", "steps", "creativity", "seed"],
         "produces_string": "video",
         "note_string": "A clip is animated from the frame you give it; expect minutes, not seconds.",
         "server_time_unix_int": int(time.time()),
@@ -2001,8 +2338,8 @@ async def api_video(body: VideoRequest):
         profile = _render_model_profile("video", body.checkpoint, body.lora)
         profile = profile + _stack_profile("video", body.prompt, body.loras, body.lora)
     payload["profile_hash"] = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
-    namespace = ("ai-video-control-latent-crop-20260922-v1"
-                 if body.control_video_url else "ai-video-exact-models-20260922-v5")
+    namespace = ("ai-video-control-latent-crop-20260922-v1-flirt20260929"
+                 if body.control_video_url else "ai-video-exact-models-20260922-v5-flirt20260929")
     return await ai_request_cache.run_cached("video", payload,
         lambda: _uncached_api_video(body), namespace=namespace)
 
@@ -2013,6 +2350,9 @@ async def _uncached_api_video(body: VideoRequest):
     Renderfin treats a request with an image and no `type` as an animation, so
     the frame is what selects the workflow; the caller never names one.
     """
+    import ai_prompt_edit
+    body.prompt, _edit = await ai_prompt_edit.resolve(body.prompt, body.prompt_edit, body.prompt_translate,
+                                                      kind="video")
     if bool(body.control_video_url) != bool(body.control_channel):
         raise HTTPException(400, detail="Choose both a driving video and its control channel")
     if body.control_video_url:
@@ -2026,6 +2366,10 @@ async def _uncached_api_video(body: VideoRequest):
             raise HTTPException(400, detail=str(error)) from None
         if body.lora:
             raise HTTPException(400, detail="Video control uses its dedicated Union adapter; remove the style LoRA")
+    if not body.image_url and not body.image_base64 and (body.image_url_end or body.image_base64_end):
+        # One picture wired to the Last-frame socket only: animate from it.
+        body.image_url, body.image_base64 = body.image_url_end, body.image_base64_end
+        body.image_url_end = body.image_base64_end = None
     if not body.image_url and not body.image_base64:
         raise HTTPException(status_code=400, detail={
             "error_string": "image_required",
@@ -2063,10 +2407,22 @@ async def _uncached_api_video(body: VideoRequest):
             )
         if last_frame:
             payload["image_url_end"] = last_frame
+        if not (video_prompt and str(video_prompt).strip()):
+            try:
+                import prompt_library
+                custom = str(prompt_library.resolve(body.system_prompt) or "").strip()
+            except Exception:
+                custom = str(body.system_prompt or "").strip()
+            if custom and custom != DEFAULT_ANIMATE_PROMPT and custom not in LEGACY_ANIMATE_PROMPTS:
+                video_prompt = custom
+            else:
+                video_prompt = DEFAULT_TRANSITION_PROMPT if last_frame else DEFAULT_ANIMATE_PROMPT
+        triggers_applied: List[str] = []
         if video_prompt and str(video_prompt).strip():
             rendered_prompt = _validate_prompt(video_prompt)
-            import ai_model_defaults
-            payload["prompt"] = ai_model_defaults.add_triggers(rendered_prompt, [{"triggers": [part.strip() for part in trigger_prefix.split(",")]}])
+            # Triggers after the prompt edit and translation (2026-09-29).
+            payload["prompt"], triggers_applied = _apply_lora_triggers(
+                rendered_prompt, model_payload, lora_stack, body.lora_trigger_text)
         if body.frame_count:
             payload["frame_count"] = int(body.frame_count)
         payload.update(model_payload)
@@ -2079,6 +2435,7 @@ async def _uncached_api_video(body: VideoRequest):
         video_family = ai_model_defaults.model_family(selected_video_model)
         payload["frame_count"] = clamp_video_frames(
             selected_video_model, int(payload.get("frame_count") or 97))
+        payload.update(_video_prefix_fields(body, video_family))
         quality_workflow = _video_quality_workflow(
             quality, video_family, str(payload.get("work_flow") or ""))
         if quality_workflow:
@@ -2087,10 +2444,10 @@ async def _uncached_api_video(body: VideoRequest):
             payload["negative_prompt"] = str(body.negative_prompt).strip()[:MAX_PROMPT_CHARS]
         if body.control_video_url:
             if not any(name in str(payload.get('checkpoint', '')) for name in VIDEO_CONTROL_CHECKPOINTS):
-                raise HTTPException(400, detail="Video control requires the LTX-2.5 distilled model")
-            # The control templates are LTX-2.5 graphs carrying the 2.3
-            # Union-Control IC-LoRA; a saved node that still names the 2.3
-            # transformer is rendered on the model those graphs were built for.
+                raise HTTPException(400, detail="Video control requires the LTX-10Eros model")
+            # The control templates are LTX-10Eros graphs carrying the 2.3
+            # Union-Control IC-LoRA; a saved node that still names an older
+            # LTX file is rendered on the model those graphs were built for.
             payload['checkpoint'] = VIDEO_CONTROL_CHECKPOINT
             payload['control_video_url'] = body.control_video_url
             payload['control_strength'] = body.control_strength
@@ -2105,6 +2462,7 @@ async def _uncached_api_video(body: VideoRequest):
             payload["noise_seed"] = int(body.seed)
         _lora_dispatch_gate(payload)
         try:
+            payload = {**payload, **ai_graph_context.fields()}  # which graph node asked (2026-09-28)
             response = await client.post(
                 RENDERFIN_BASE + "/api-render", json=payload,
                 timeout=SUBMIT_TIMEOUT_SECONDS,
@@ -2133,11 +2491,13 @@ async def _uncached_api_video(body: VideoRequest):
             "poll_url_string": output_url,
             "source_image_url_string": frame,
             "end_image_url_string": last_frame,
-            "effective_params_object": {k: payload[k] for k in (
+            "effective_params_object": dict({k: payload[k] for k in (
                 "main_size_width", "main_size_height", "steps", "cfg", "sampler",
                 "scheduler", "clip_skip", "checkpoint", "lora", "lora_strength", "loras",
-                "work_flow", "prompt", "noise_seed")
-                if k in payload},
+                "work_flow", "prompt", "negative_prompt", "noise_seed", "frame_count", "fps",
+                "video_prefix_url", "video_prefix_frames")
+                if k in payload}, **_trigger_record(triggers_applied, body.lora_trigger_text)),
+            "triggers_applied_array": triggers_applied,
             "server_time_unix_int": int(time.time()),
         }
 
@@ -2243,6 +2603,36 @@ async def api_3dmodel_docs():
     }
 
 
+# A Hunyuan box refuses a job at once when its disk is short ("Hunyuan disk
+# gate failed: 12.8 GiB free; 15 GiB required", f13 2026-09-27). Such a box is
+# skipped for a while, and a job it refused is sent to the next box under the
+# same task id, so the graph node keeps waiting instead of failing.
+DISK_GATE_COOLDOWN_SECONDS = 30 * 60
+_3D_DISK_REFUSED: Dict[str, float] = {}
+_3D_JOBS: Dict[str, Dict[str, object]] = {}
+
+
+def _disk_refused(node_key: str) -> bool:
+    return time.time() - _3D_DISK_REFUSED.get(node_key, 0.0) < DISK_GATE_COOLDOWN_SECONDS
+
+
+async def _pick_3d_worker(client: httpx.AsyncClient, exclude: List[str]) -> Optional[Dict[str, object]]:
+    workers = [w for w in _load_hunyuan_workers()
+               if _node_key(w) not in exclude and not _disk_refused(_node_key(w))]
+    probes = await asyncio.gather(*(_node_is_free(client, w) for w in workers), return_exceptions=True)
+    candidates = []
+    for worker, probe in zip(workers, probes):
+        if isinstance(probe, Exception) or not isinstance(probe, tuple):
+            continue
+        ok, info = probe
+        if ok:
+            candidates.append((int((info or {}).get("load") or 0), worker))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
 @router.post("/api/3dmodel")
 async def api_3dmodel(body: ModelRequest):
     """Turn a picture into a 3D model on a farm node cleared for Hunyuan."""
@@ -2273,23 +2663,11 @@ async def api_3dmodel(body: ModelRequest):
             raise HTTPException(status_code=503, detail={
                 "error_string": "no_3d_node_available",
                 "message_string": "No farm node is currently cleared for 3D generation"})
-        probes = await asyncio.gather(
-            *(_node_is_free(client, worker) for worker in workers),
-            return_exceptions=True,
-        )
-        candidates = []
-        for worker, probe in zip(workers, probes):
-            if isinstance(probe, Exception) or not isinstance(probe, tuple):
-                continue
-            ok, info = probe
-            if ok:
-                candidates.append((int((info or {}).get("load") or 0), worker))
-        if not candidates:
+        worker = await _pick_3d_worker(client, [])
+        if worker is None:
             raise HTTPException(status_code=503, detail={
                 "error_string": "no_3d_node_available",
                 "message_string": "No 3D-capable node answered; try again shortly"})
-        candidates.sort(key=lambda item: item[0])
-        worker = candidates[0][1]
 
         payload: Dict[str, object] = {"image_url": picture}
         if body.quality:
@@ -2297,6 +2675,8 @@ async def api_3dmodel(body: ModelRequest):
         if body.background_method:
             payload["background_method"] = str(body.background_method).strip().lower()
         worker_task_id = await _submit(client, worker, "/generate-3d", payload)
+        _3D_JOBS[f"{_node_key(worker)}.{worker_task_id}"] = {
+            "payload": payload, "tried": [_node_key(worker)], "current": ""}
         return {
             "success_bool": True,
             "task_id_string": f"{_node_key(worker)}.{worker_task_id}",
@@ -2325,6 +2705,31 @@ async def api_3dmodel_status(task_id: str):
             raise HTTPException(status_code=404, detail={
                 "error_string": "task_not_found", "message_string": "No such task"})
         return _gen3d_answer(response.json() or {}, str(task_id))
+    job = _3D_JOBS.get(str(task_id))
+    answer = await _3dmodel_status_of(str((job or {}).get("current") or task_id))
+    if job is not None and answer.get("status_string") == "failed" \
+            and "disk gate" in str(answer.get("error_string") or "").lower():
+        _3D_DISK_REFUSED[str(answer.get("node_string") or "")] = time.time()
+        async with httpx.AsyncClient() as client:
+            worker = await _pick_3d_worker(client, list(job["tried"]))
+            if worker is not None:
+                try:
+                    new_id = await _submit(client, worker, "/generate-3d", dict(job["payload"]))
+                except Exception:
+                    new_id = ""
+                if new_id:
+                    job["tried"].append(_node_key(worker))
+                    job["current"] = f"{_node_key(worker)}.{new_id}"
+                    logger.warning("3D job %s: %s refused at the disk gate, moved to %s",
+                                   task_id, answer.get("node_string"), job["current"])
+                    answer = await _3dmodel_status_of(str(job["current"]))
+    if job is not None and job.get("current"):
+        answer["rerouted_to_string"] = str(job["current"])
+    answer["task_id_string"] = str(task_id)
+    return answer
+
+
+async def _3dmodel_status_of(task_id: str):
     node_key, _, worker_task_id = str(task_id).partition(".")
     if not node_key or not worker_task_id:
         raise HTTPException(status_code=400, detail={
