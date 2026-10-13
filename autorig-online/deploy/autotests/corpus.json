@@ -8600,10 +8600,6 @@
        "<=",
        200
       ]
-     },
-     "xfail": {
-      "reason": "trace_gait_legs is in the Rig classes mt-deploy, not installed yet",
-      "owner": "Rig classes · V3"
      }
     },
     {
@@ -8619,11 +8615,7 @@
        4
       ]
      },
-     "note": "farm 2026-10-13: RightHindLeg 16 -> 0, rig_check 4x 738 -> 37",
-     "xfail": {
-      "reason": "trace_gait_legs is in the Rig classes mt-deploy, not installed yet",
-      "owner": "Rig classes · V3"
-     }
+     "note": "farm 2026-10-13: RightHindLeg 16 -> 0, rig_check 4x 738 -> 37"
     },
     {
      "id": "deer_rig",
@@ -8652,11 +8644,7 @@
        120
       ]
      },
-     "note": "farm 2026-10-13: rig_check 4x 342 -> 21",
-     "xfail": {
-      "reason": "trace_gait_legs is in the Rig classes mt-deploy, not installed yet",
-      "owner": "Rig classes · V3"
-     }
+     "note": "farm 2026-10-13: rig_check 4x 342 -> 21"
     }
    ]
   }
