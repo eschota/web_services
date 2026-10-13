@@ -114,7 +114,7 @@ else:
     s = s.replace(old, new)
     old = '''        stats["legs_isolated_vertices"] = isolate_legs(w, sk, b.leg_topo)
 '''
-    new = '''        stats["legs_isolated_vertices"] = isolate_legs(w, sk, b.leg_topo, str(o.get("leg_core_own", "off")) == "on")
+    new = '''        stats["legs_isolated_vertices"] = isolate_legs(w, sk, b.leg_topo, str(o.get("leg_core_own", "hard")) == "on")
 '''
     assert s.count(old) == 1, "isolate call anchor"
     s = s.replace(old, new)
@@ -159,7 +159,7 @@ else:
             _tp = [i for i, nm in enumerate(sk.names) if nm.startswith(("Tail", "Prop"))]
             if _tp:                                      # a tail lying on the ground seeds a "leg" from its tip (the
                 _tailish = np.isin(D.argmin(1), _tp)     # ferret 1e079e65, the boar): never the strict core
-            _strict = str(o.get("leg_core_own", "off")) in ("hard", "on")
+            _strict = str(o.get("leg_core_own", "hard")) in ("hard", "on")
             for rows, forbid in leg_masks(sk, topo, _strict)[0]:
                 if _strict:
                     rows = rows & ~_tailish
@@ -199,7 +199,7 @@ else:
 '''
     new = '''        if str(o.get("limb_reach", "on")) != "off" and plan in ("biped", "quadruped"):   # Skinning · V3
             stats["limb_reach_moved"] = limb_reach(g, sk, hard, D, De, H, float(o.get("limb_capture", 1.6)), plan)
-        if topo and str(o.get("leg_core_own", "off")) != "off":   # Fable 2026-10-13: the core below the knee is this
+        if topo and str(o.get("leg_core_own", "hard")) != "off":   # Fable 2026-10-13: the core below the knee is this
             _restored = 0                                # leg's whatever limb_reach or the distances said (the cat
             for _key, _reg in (topo.get("legs") or {}).items():   # b94999ad: limb_reach dropped the near front leg
                 _cols = [sk.index[f"{_key}{j}"] for j in ("UpLeg", "Leg", "Foot", "Toe") if f"{_key}{j}" in sk.index]
@@ -226,15 +226,16 @@ else:
     old = '''    "limb_capture": {
 '''
     new = '''    "leg_core_own": {
-        "kind": "enum", "values": ("hard", "on", "restore", "off"), "default": "off",
+        "kind": "enum", "values": ("hard", "on", "restore", "off"), "default": "hard",
         "doc": "rebuild, quadruped: hard: the leg core below the knee inside the shin tube (leg_regions) keeps this "
                "leg's bones whatever limb_reach or the distances said, and its hard assignment forbids every other bone, "
                "trunk included (the cat b94999ad: the near front leg sat on Hips / a Prop; the boar fec0161f: the hind "
                "legs on Tail3); restore: only the restore after limb_reach; on: the smoothed weights drop trunk bones "
                "there too. Measured 2026-10-13 (gate metric rig_check_4x, sum over frames): horse 40 -> 0, cat 161 -> "
                "262 and ferret 218 -> 425 (the legs now move, so the fused paws / the tail shell welded along the legs "
-               "tear: quadrupeds get no weld split), boar 331 -> 580; off (today's behaviour) until the case owners "
-               "accept the thresholds or the contacts are split."},
+               "tear without a split); with quad_contact_split=on (paw | paw and leg | tail contacts split and capped): "
+               "cat 161 -> 85, ferret 218 -> 51, boar 331 -> 306, horse 40 -> 0, deer 2607. off: the behaviour before "
+               "2026-10-13."},
     "leg_column_trunk": {
         "kind": "enum", "values": ("on", "off"), "default": "off",
         "doc": "rebuild, quadruped: body above the fit's leg column top that is not inside the leg's tube never takes "
