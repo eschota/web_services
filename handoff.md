@@ -3002,3 +3002,25 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
   Look Around/Rear/Canter прод vs head_own.
 - Локальный стенд: `scratchpad/q/eq/` (прод mt + патч), `animal_motion_lib` синхронизирован с прода (видеоаллюры
   horse: walk/trot/canter/gallop/rear/idle; zebra: walk); `MT_ROOT=$PWD` обязателен для видеоклипов.
+
+### Копытные, milestone 2 — конвейер референсов (приказ владельца «конвейер, а не разовые», AGENTS.md 32279d4e; ~09:10 UTC)
+
+- **Гейт аллюров `mt/gait_gate.py`** (новый модуль; хук в `animal_video.run_path` → сгенерированный клип, не прошедший
+  гейт, сохраняется как `quality: suspect` с причинами и к ригам не крепится; `animpick.VIDEO_CLIP_NAMES` знает
+  `look` → «Look Around» (сгенерированный заменяет процедурный)). Правила — данные `RULES` по аллюрам: порядок
+  постановки ног читается по фазам максимума углов UpLeg: шаг — LF отстаёт от LH на ~0.25 цикла (латеральная
+  последовательность LH, LF, RH, RF), период 0.8–1.7 с; рысь — ~0.5 (диагонали), 0.5–1.0 с; кентер ~0.33, 0.45–0.85 с;
+  галоп 0.3–0.6, 0.35–0.65 с; idle — ноги ≤ 6°; rear — one-shot 2.5–9 с, перед ≥ 35°; look — шея/голова ≥ 10°, ноги ≤ 8°.
+  Дальние ноги в библиотеке зеркалятся на полпериода, поэтому трёхтактный кентер судится по ближней паре.
+- **Аудит текущей библиотеки** (`python mt/gait_gate.py animal_motion_lib`): horse walk/idle/rear PASS, zebra walk PASS;
+  **horse trot FAIL** (период 2.21 с, LF-лаг 0.10 — это не рысь), **canter FAIL** (лаг 0.08), **gallop FAIL** (0.75 с,
+  лаг 0.17); fox/buck trot тоже FAIL (лаг 0.27/0.05). Т.е. нынешние рысь/кентер/галоп лошадей — неверные референсы.
+- **Перегенерация** `/home/debian/monster/equine_gen.sh` (ферма, H3 через renderfin, источник — ран белой лошади
+  028d1acdb7187c532921): trot, canter, gallop, look; до 3 сидов (41, 7, 123) до прохождения гейта. Стартует
+  автоматически после установки цепочки gaitgate (`--mt-patch` + новый файл). Лог `equine_gen.log`.
+- Сидящая лошадь 74f7cd37: разрывы — сложенные задние ноги приварены к животу (пары HindFoot/Spine, Hips/HindFoot);
+  с `quad_contact_split=all` (разрез нога|туловище тоже) **10/10** (было 6/10) — опция есть в `patch_quad_split.py`
+  («all»), по умолчанию не включена (швы — не моя задача сейчас); кейс `equine_sitting_horse` XFAIL с этой пометкой.
+- Корпус: `equine_zebra_neck` (XFAIL до headown2), `equine_saddled_horse` (страховка 10/10), `equine_sitting_horse`
+  (XFAIL); входы d3d37033/ebc474ba/74f7cd37 model.glb. GIF-сетка «пять копытных, одна рысь»: `scratchpad/q/gif_grid.py`.
+  MT `faf4fd9`, `9f5b324`; web `d1734b2e`, `bbccc277`, `03600d7c`.
