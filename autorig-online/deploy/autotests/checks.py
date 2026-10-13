@@ -1450,12 +1450,16 @@ def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
     a = check.get("params") or {}
     inp = check.get("input")
-    on = check.get("on")                                   # an earlier step's output: "mt_rig" -> the MT run's rig
+    on = check.get("on")                                   # an earlier rig step of this case: its MT run's rig
     target = None
-    if on == "mt_rig":
-        if "run" not in ctx:
-            raise RuntimeError("needs the mt_rig step of this case")
-        target = ctx["run"] / "rig" / "rigged.glb"
+    if on:
+        # Every rig step records its run under its own id (main), so a case may hold several rigs
+        # (mt_rig, elephant_rig, girl_rig...) and a check names the one it judges (2026-10-14).
+        run = (ctx.get("runs") or {}).get(on) or (ctx.get("run") if on == "mt_rig" else None)
+        if run is None:
+            raise RuntimeError(f"needs the {on} step of this case")
+        ctx["run"] = run
+        target = run / "rig" / "rigged.glb"
     elif inp:
         target = _input(inp)
     if k == "mt_rig_first":
@@ -1489,11 +1493,13 @@ def run_check(check: dict, ctx: dict) -> dict:
     if k == "centring":
         return centring(target, ctx["work"], a.get("res", 96))
     if k == "prop_rigidity":
-        rig_json = ctx["run"] / "rig" / "rig.json" if on == "mt_rig" else (_input(a["rig_json"]) if a.get("rig_json") else None)
-        words = a.get("words", ctx.get("words", "") if on == "mt_rig" else "")
+        # `on` names any mt_rig_first check of the case (mt_rig, girl_rig, demon_rig...): its run holds the rig.json
+        # (2026-10-14: a case whose rig check is not called "mt_rig" ERRORed with KeyError and blocked every gate).
+        rig_json = _input(a["rig_json"]) if a.get("rig_json") else (ctx["run"] / "rig" / "rig.json" if on else None)
+        words = a.get("words", ctx.get("words", "") if on else "")
         return prop_rigidity(target, ctx["work"], words, rig_json)
     if k == "bone_outside":
-        rig_json = ctx["run"] / "rig" / "rig.json" if on == "mt_rig" else _input(a["rig_json"])
+        rig_json = _input(a["rig_json"]) if a.get("rig_json") else ctx["run"] / "rig" / "rig.json"
         return bone_outside(target, rig_json)
     if k == "limb_collision":
         return limb_collision(target)
@@ -1580,6 +1586,8 @@ def main():
         try:
             metrics = run_check(check, ctx)
             row = {"case": case["id"], "check": check["id"], "metrics": metrics}
+            if ctx.get("run") is not None and not check.get("on"):   # a rig step: remember its run by id
+                ctx.setdefault("runs", {})[check["id"]] = ctx["run"]
         except Exception as exc:                                   # noqa: BLE001 - reported as ERROR, never hidden
             row = {"case": case["id"], "check": check["id"], "error": f"{type(exc).__name__}: {exc}"[:800],
                    "trace": traceback.format_exc()[-1500:]}

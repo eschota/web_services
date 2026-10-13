@@ -892,6 +892,27 @@
    "what": "a stylized woman with the arms down and the hands on the hips: both arm chains start at the neck and run down inside the chest, each half of the torso skinned to its side's arm, 8/9 clips at 912..2592x (2026-10-13)",
    "sha256": "f85b7f2fbf9a17d4d3230af26308d149bf683ca51ba39fa57789242e8b780cea",
    "bytes": 8938532
+  },
+  "8601aa36.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ccfc481c738464250131/proj/model.glb",
+   "task": "8601aa36-e05e-4241-9319-0668b6ba0a5b",
+   "what": "muscular demon warrior, claw-toed boots (V3 run ccfc481c)",
+   "sha256": "ee3c3a51da3bf99d1cb6bab453cc8caad8d7e2c161b0315971254a252781f506",
+   "bytes": 3110668
+  },
+  "068641d0.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/d7e408a99e2dcf4a3df5/proj/model.glb",
+   "task": "068641d0-ea5d-452e-82a5-30f7f6065023",
+   "what": "low-poly girl in an A-pose, 492 vertices (V3 run d7e408a9)",
+   "sha256": "2cf6d537a7207b402e4ac08bc48704b8cf239cbb68ede4316c11401a16078cc0",
+   "bytes": 23036
+  },
+  "b969f436.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/74825fff19347f13aa66/proj/model.glb",
+   "task": "b969f436-d547-4f5e-ae88-df6ab2ff2cf3",
+   "what": "blocky avatar, box arms flush against a box torso (V3 run 74825fff)",
+   "sha256": "e51569a69ff7b111deded91d1fefa038757fb8d521492a43cfbb88902956b307",
+   "bytes": 916472
   }
  },
  "profiles": {
@@ -9021,6 +9042,10 @@
        ">=",
        8
       ]
+     },
+     "xfail": {
+      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
+      "owner": "Fable · equines"
      }
     },
     {
@@ -9033,6 +9058,10 @@
        ">=",
        9
       ]
+     },
+     "xfail": {
+      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
+      "owner": "Fable · equines"
      }
     }
    ],
@@ -9073,6 +9102,10 @@
        ">=",
        8
       ]
+     },
+     "xfail": {
+      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
+      "owner": "Fable · equines"
      }
     },
     {
@@ -9085,6 +9118,10 @@
        ">=",
        9
       ]
+     },
+     "xfail": {
+      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
+      "owner": "Fable · equines"
      }
     }
    ],
@@ -9125,6 +9162,10 @@
        ">=",
        8
       ]
+     },
+     "xfail": {
+      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
+      "owner": "Fable · equines"
      }
     },
     {
@@ -9193,10 +9234,6 @@
        ">=",
        30
       ]
-     },
-     "xfail": {
-      "reason": "flaky until the judge fix lands (prod judge traces the flat +y grid first, 23..37 s under load, and the 25 s cap then skips the +x candidate: gaitgate run up=+y, headown3 run +x); chain96/97 deploys cheap-first candidates + 40 s cap",
-      "owner": "Limb stabilization · V3"
      }
     }
    ]
@@ -9231,10 +9268,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "same model: the rig built on the laid-down body; XFAIL with mt_upright",
-      "owner": "Limb stabilization · V3"
      }
     },
     {
@@ -9257,10 +9290,6 @@
        ">=",
        15
       ]
-     },
-     "xfail": {
-      "reason": "the standing spiky character is laid down +z as a quadruped on prod (the lying-biped judge of 2026-10-13 08:58 does not keep it upright there); blocked every MT deploy 09:14..; under investigation",
-      "owner": "Limb stabilization · V3"
      }
     }
    ]
@@ -9449,6 +9478,175 @@
      "xfail": {
       "reason": "the arms sit inside the chest",
       "owner": "Limb stabilization · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "biped_ends_blocks",
+   "task": "b969f436-d547-4f5e-ae88-df6ab2ff2cf3",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13): (1) the blocky avatar b969f436 (arms_unbound): box arms flush against a box torso show no armpit, so the arms were fitted from proportions inside the torso / the headphones and the arm blocks rode the thighs; (2) the low-poly girl 068641d0 (bone_outside 33): the Arm joint 2 % H off the thin arm prism's ring, the bone left the prism; (3) the demon 8601aa36 (bone_outside 31): the toe ran between two claws to the tip of one, along the sole. Fix: fastrig block_arms (+ rigid block arms, block_arm_rigid_below), limb_root_centre, end_gap_trim, toe_end_mid",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "b969f436.model.glb",
+     "params": {
+      "words": "blocky humanoid avatar",
+      "body": "biped",
+      "forward_axis": "-z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     },
+     "xfail": {
+      "reason": "block arms flush against the torso (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "outside_samples": [
+       "<=",
+       4
+      ]
+     },
+     "xfail": {
+      "reason": "block arms flush against the torso (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "girl_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "068641d0.model.glb",
+     "params": {
+      "words": "low-poly girl",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     },
+     "xfail": {
+      "reason": "Arm joint off the thin arm prism (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "girl_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "girl_rig",
+     "thresholds": {
+      "outside_samples": [
+       "<=",
+       36
+      ]
+     },
+     "xfail": {
+      "reason": "Arm joint off the thin arm prism (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "demon_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "8601aa36.model.glb",
+     "params": {
+      "words": "muscular demon warrior",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     },
+     "xfail": {
+      "reason": "toe between two claws (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
+     }
+    },
+    {
+     "id": "demon_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "on": "demon_rig",
+     "thresholds": {
+      "foot_outside_samples": [
+       "<=",
+       2
+      ]
+     },
+     "xfail": {
+      "reason": "toe between two claws (fix in the gate 2026-10-13)",
+      "owner": "Rig classes · V3"
      }
     }
    ]
