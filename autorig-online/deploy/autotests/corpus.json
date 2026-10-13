@@ -857,6 +857,20 @@
    "what": "stylized sitting horse (hind legs folded forward and splayed), the V3 run's model.glb",
    "sha256": "436fd8572cfc38d9c28832b653cc28592f27d72d35f98459f4db9f8ac1a75a93",
    "bytes": 131908
+  },
+  "afdee37e.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ad0cbd6c5ad78402e044/proj/model.glb",
+   "task": "afdee37e",
+   "what": "a luchador in a Superman flying pose (32 010 vertices, longest axis x, 1.0 x 0.41 x 0.56): the orientator found no feet and kept the file's +y, fastrig ran the spine vertically through the lying body (2026-10-13)",
+   "sha256": "193502e1cde6bdc972c13486bb561497af06d62049a8c0f0ee42e74dc33d9cf3",
+   "bytes": 1980448
+  },
+  "3eb3f28d.source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/7d6ed83bc9b13c17ac8e/proj/model_source.glb",
+   "task": "3eb3f28d",
+   "what": "a blue hedgehog character standing in its file (742 747 vertices, 1.09 x 2.0 x 1.22): the orientator read its five head spikes as paws and laid it down (+z, quadruped 0.9), every clip stretched 50..115x (2026-10-13)",
+   "sha256": "6ecbe6b86a4f69f1a03969a96381ac5baf0432313812561a30bc917b15a0af2d",
+   "bytes": 43723532
   }
  },
  "profiles": {
@@ -9114,6 +9128,113 @@
     }
    ],
    "note": "XFAIL until the sitting-pose fit lands (milestone 2)"
+  },
+  {
+   "id": "luchador_flying_upright",
+   "task": "afdee37e",
+   "cost": 2,
+   "defect": "2026-10-13 (task afdee37e): a luchador in a flying pose, longest axis x; the orientator found no feet (two fists at one end, two feet at the other) and kept +y, so fastrig ran the spine vertically through the lying body and the arms sat in the body (58 % H). rig_first._lying_biped judges the orientator's pick against the file's +y and both ends of the long axis by the voxel trace: +x reads one arm chain and two feet at the bottom, +y none -> the model stands on +x before the rig.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "afdee37e.model.glb",
+     "params": {
+      "words": "luchador wrestler character, flying pose"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       120
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+x"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       30
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hedgehog_spikes_not_paws",
+   "task": "3eb3f28d",
+   "cost": 4,
+   "tier": "extended",
+   "defect": "2026-10-13 (task 3eb3f28d): a blue hedgehog character standing in its file; the orientator read the five head spikes as paws at the low end of +z and laid it down as a quadruped (0.9), every library clip stretched 50..115x. rig_first._lying_biped: the file's +y reads two arm chains on the voxel trace, +z none -> the file's own up stays. (The arm chains then run into the spikes: a separate defect of the spiky head.)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3eb3f28d.source.glb",
+     "params": {
+      "words": "blue hedgehog character"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       400
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       15
+      ]
+     }
+    }
+   ]
   }
  ]
 }

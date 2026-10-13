@@ -3024,3 +3024,22 @@ farm job `viewer_preview` (bundle `preview` в `/srv/autorig/farmjobs/farmjobs.p
 - Корпус: `equine_zebra_neck` (XFAIL до headown2), `equine_saddled_horse` (страховка 10/10), `equine_sitting_horse`
   (XFAIL); входы d3d37033/ebc474ba/74f7cd37 model.glb. GIF-сетка «пять копытных, одна рысь»: `scratchpad/q/gif_grid.py`.
   MT `faf4fd9`, `9f5b324`; web `d1734b2e`, `bbccc277`, `03600d7c`.
+
+## Limb stabilization · V3 — лежащие / летящие бипеды, кожа поворота переживает перестройки (2026-10-13 08:58 UTC)
+
+* MT на проде: rig_first 51f8bff2e631, pose_skeleton a5901598f6ad, fastrig f5f5d8d615d1 (`--mt-patch`); gate PASS 240.
+  Зеркало MT в Git (HANDOFF.md там же, подробно).
+* `rig_first._lying_biped`: выбор ориентатора судится воксельной трассой против +y файла и концов длинной оси
+  (плоское тело): побеждает up с двумя ступнями внизу и бóльшим числом цепочек рук; базовый гард не судится,
+  уверенный quadruped/bird уступает только полному бипеду (2 руки против 0). Лучадор afdee37e встал на +x, ёж 3eb3f28d
+  остался стоять (ориентатор клал его как «квадрупеда» по пяти шипам). Лист до/после в DEV (msg 7066).
+* Кожа спасённых рук после поворота (turn_skin) теперь переживает перестройки (fast_analysis --apply, backfill):
+  маркер stab/turn_skin.json + хук в fastrig.build — до этого опубликованный риг солдата терял её.
+* Корпус: luchador_flying_upright, hedgehog_spikes_not_paws (rig_upright), входы afdee37e / 3eb3f28d (106 кейсов).
+* Очередь (после разблокировки «cut + cap» в повороте): f68a910e (сырой split: щель 36.6 -> 8.5 % H, но рёбер-растяжек
+  на кромках 104 -> 190, клипы 5 -> 9 fail — нужны крышки cut_cap v3 на освобождённые кромки; 5 плавающих кусков =
+  аксессуары кистей, помеченные трассой как Trunk), 8a1107e0 (триггер по короткой руке + плечо силуэта доводят
+  трассу до кулаков и поворот в T, но предплечья размазываются без освобождения контактов forearm|biceps и
+  fist|head; клипы 4 -> 1 fail, collision L high), 0a099ad5 (рука в кармане, рюкзак на плече), e44c6669 (горилла:
+  трасса пропускается бюджетом 30 с на 814k вершин — нужна трасса ДО первой сборки; кулак на земле читается как
+  ступня). Хранятся в patch_arm_sheets_with_contact_split.py / patch_arm_sheets_bb_full.py (scratchpad), не на проде.
