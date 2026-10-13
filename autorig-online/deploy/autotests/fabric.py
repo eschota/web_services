@@ -41,6 +41,7 @@ SPEC = {
     "root_skip": {"min": 0.0, "max": 0.6, "default": 0.08, "doc": "share of the piece's height from its top that keeps the body's weights entirely"},
     "root_blend": {"min": 0.02, "max": 1.0, "default": 0.22, "doc": "share of the piece's height over which the body's weights fade into the chains"},
     "split": {"values": ("on", "off"), "default": "on", "doc": "split the faces that weld a fabric piece onto a limb (weld_split)"},
+    "root_base": {"values": ("body", "legs_avg", "trunk"), "default": "body", "doc": "what the piece's top blends into: body (the weights it had, legs included: the robe 00a99bb9 8/9), legs_avg (both legs averaged: the robe 6/9), trunk (Hips / Spine only: the robe 4/9)"},
     "sway_deg": {"min": 0.0, "max": 30.0, "default": 4.0, "doc": "swing amplitude of the chains in the clips (deg, at the tip); all sectors of a piece swing in phase, the lag runs along the chain only"},
     "sway_lag": {"min": 0.0, "max": 2.0, "default": 0.6, "doc": "phase lag per bone along a chain"},
     "words": {"values": ("on", "off"), "default": "on",
@@ -348,8 +349,19 @@ def build(piece, b, sk, w, src, o, H):
     base = np.zeros_like(W)
     base[:, :n0] = w[idx, :n0]
     limb = np.array([any(k in nm for k in ("Arm", "Hand", "Leg", "Foot", "Toe")) for nm in sk.names[:n0]])
-    if piece["kind"] in ("Cape", "Hair_F"):                       # a cape hangs from the trunk, never from the arms
-        base[:, np.nonzero(limb)[0]] = 0                          # that it covered (the knight: the hands held the cape)
+    rbase = str(o.get("root_base", "body"))
+    if piece["kind"] in ("Cape", "Hair_F") or rbase == "trunk":
+        base[:, np.nonzero(limb)[0]] = 0                          # the root blend goes into the trunk (Hips / Spine),
+        #                                                           never the legs or arms the piece covered
+    elif rbase == "legs_avg":                                     # the skirt's top follows BOTH legs equally: a
+        for j in ("UpLeg", "Leg", "Foot", "Toe", "ToeBase"):      # left | right ramp at the front midline tore the
+            li, ri = sk.index.get("Left" + j), sk.index.get("Right" + j)   # floor-length dress inside one Skirt bone
+            if li is not None and ri is not None and li < n0 and ri < n0:
+                avg = (base[:, li] + base[:, ri]) / 2
+                base[:, li] = avg
+                base[:, ri] = avg
+        arm = np.array([any(k in nm for k in ("Arm", "Hand")) for nm in sk.names[:n0]])
+        base[:, np.nonzero(arm)[0]] = 0
     bs = base.sum(1, keepdims=True)
     fallback = np.zeros(W.shape[1])
     fallback[sk.index[piece["parent"]]] = 1.0
