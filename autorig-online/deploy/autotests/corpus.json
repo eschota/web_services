@@ -8758,7 +8758,7 @@
       ]
      },
      "xfail": {
-      "reason": "lands with fastrig.py quadskin chain",
+      "reason": "fix exists (fastrig leg_core_own=hard) but is off by default: with the leg moving the fused front paws tear, cat_quadruped_orient rig_check_4x 161 -> 262 (want <= 180); needs the case owner / a quadruped weld split",
       "owner": "Fable monsters/animals"
      }
     }
@@ -8813,7 +8813,7 @@
       ]
      },
      "xfail": {
-      "reason": "lands with fastrig.py quadskin chain",
+      "reason": "fix exists (fastrig leg_core_own=hard) but is off by default: the tail shell welded along the hind legs tears once they move (rig_check_4x 331 -> 580); boar_tail_shell / Rig classes",
       "owner": "Fable monsters/animals"
      }
     }
