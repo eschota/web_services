@@ -780,6 +780,20 @@
    "what": "African elephant, hanging trunk and tusks (V3 run 2b25bbe1)",
    "sha256": "945a2f3356d78c8429c4aeab93586a28514929cf82f2fae861b0832451b76a05",
    "bytes": 1611516
+  },
+  "0fef017a.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/4757baf09f0dc6202ce6/proj/model.glb",
+   "task": "0fef017a-7655-4751-8304-f3eecb5e0f2b",
+   "what": "anime girl with a thin crescent ornament above the hair (V3 run 4757baf0)",
+   "sha256": "5d6ecfbfa5466fccbfd3bb93cccba8b62e048091750255abe5ef4dda09460d6a",
+   "bytes": 436668
+  },
+  "b74614dc.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ec62d0964538f7b9f340/proj/model.glb",
+   "task": "b74614dc-f485-47a2-afca-87239d930f83",
+   "what": "low-poly robot, T-pose, the right forearm a separate floating piece (V3 run ec62d096)",
+   "sha256": "d9d64a02d2d7ba57580a565e871a459ff9bb9387323ef6490b98dc75fdde8d98",
+   "bytes": 9828
   }
  },
  "profiles": {
@@ -8292,6 +8306,10 @@
       "clips": [
        ">=",
        1
+      ],
+      "rig_check_4x": [
+       "<=",
+       10
       ]
      }
     },
@@ -8367,6 +8385,118 @@
       ]
      },
      "note": "farm 2026-10-13: Tail2/Tail3 26 -> 10"
+    }
+   ]
+  },
+  {
+   "id": "head_ornament_top",
+   "task": "0fef017a-7655-4751-8304-f3eecb5e0f2b",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, bone_outside on 0fef017a): a thin crescent ornament over the hair made the bounding-box top the head top; Head (95 % H) and HeadTop_End hung in the air, Head 24 samples outside. Fix: fit_biped takes the highest midline row that is head_top_min_width_pct_H wide in front AND deep in the side view for 2.4 % H",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "0fef017a.model.glb",
+     "params": {
+      "words": "anime girl",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "head_outside_samples": [
+       "<=",
+       5
+      ]
+     },
+     "note": "2026-10-13: Head 24 -> 3"
+    }
+   ]
+  },
+  {
+   "id": "robot_detached_forearm",
+   "task": "b74614dc-f485-47a2-afca-87239d930f83",
+   "cost": 1,
+   "defect": "Rig classes V3 (2026-10-13, arms_unbound.right on b74614dc): the robot's right forearm is a separate floating piece; find_props made it a «floating component» prop on the LEFT arm, the right arm chain fell back to proportions and its forearm / hand had 0 vertices. Fix: fastrig.detached_limbs - a floating piece on the arm line next to a side where the body reaches far less than on the other is body",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "b74614dc.model.glb",
+     "params": {
+      "words": "low-poly humanoid robot",
+      "body": "biped",
+      "forward_axis": "-z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ],
+      "prop_bones_n": [
+       "==",
+       0
+      ]
+     }
+    },
+    {
+     "id": "mt_limbs",
+     "kind": "limb_collision",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "min_arm_vertices": [
+       ">=",
+       20
+      ]
+     },
+     "note": "2026-10-13: right arm vertices 0 -> 72"
     }
    ]
   }
