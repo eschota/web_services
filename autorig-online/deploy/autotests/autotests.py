@@ -206,15 +206,23 @@ def judge(check: dict, row: dict) -> dict:
         if (metric == "seconds" or metric.endswith("_seconds")) and op in ("<=", "<") and isinstance(value, (int, float)):
             # Time budgets are customer-run budgets; a gate under VPS load (other agents' runs, renders) inflates the
             # wall time. Scale by the 1-min load over a third of the cores, capped at 2.5x, and record it (2026-10-11).
+            # The load over the case's own run is the 5-min average as much as the last minute's (2026-10-13).
             try:
-                factor = min(2.5, max(1.0, os.getloadavg()[0] / max(1.0, (os.cpu_count() or 8) / 3)))
+                la = os.getloadavg()
+                raw = max(la[0], la[1]) / max(1.0, (os.cpu_count() or 8) / 3)
+                factor = min(2.5, max(1.0, raw))
             except OSError:
-                factor = 1.0
+                raw = factor = 1.0
             if os.environ.get("AUTORIG_GATE_STRICT_TIME") == "1":
-                factor = 1.0
+                raw = factor = 1.0
             if factor > 1.0:
                 out.setdefault("load_scaled", {})[metric] = {"budget": value, "factor": round(factor, 2)}
                 value = round(value * factor, 1)
+            # At the cap the box is saturated and wall time says nothing about the code: an overrun there is recorded,
+            # not judged. The live 60 s budget is still judged by `gate live` and the nightly run (2026-10-13).
+            if raw >= 2.5 and have is not None and not OPS[op](have, value):
+                out.setdefault("time_unjudged_load_saturated", {})[metric] = {"have": have, "budget": value, "load_factor": round(raw, 2)}
+                continue
         ok = have is not None and OPS[op](have, value)
         if not ok:
             out["failed"].append(f"{metric}={have!r} (want {op} {value!r})")
@@ -476,6 +484,9 @@ def cmd_mt_deploy(args) -> int:
             raise SystemExit(f"--mt-patch wants mt/<rel>=<unified diff file>: {item}")
         if rel in overlay:
             raise SystemExit(f"{rel}: give either --mt-file or --mt-patch, not both")
+        if not pathlib.Path(diff).read_text(errors="replace").strip():
+            print(f"--mt-patch {rel}: empty diff, production already has it; skipped")
+            continue
         stage = pathlib.Path("/srv/autorig/data/autotests/patched") / f"{now()}-{os.getpid()}"
         stage.mkdir(parents=True, exist_ok=True)
         base = MT_PROD / rel
