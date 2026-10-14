@@ -510,6 +510,39 @@ Owner rule, 2026-10-10:
   category's corpus set, plus GIFs of several different models playing the
   same library clip.
 
+## Defect Buttons On Every Task Notice (owner order, 2026-10-14)
+
+> теперь каждая модель авторига должна иметь кнопки при отправке в телеграм,
+> которые ты обязан следить постоянно и запускать проверки соответственно
+> нажатой кнопке … наша задача исправлять риг модели на уровне пайплайна и
+> чтобы похожие модели ригались правильно. Так же с каждой моделью снизу
+> показывай ссылками топ 5 самых похожих по эмбеддингу 3д моделей
+
+* Every AutoRig task notice in Telegram (the completion / needs-review message
+  of `autorig-storage-telegram`) carries four inline buttons instead of the old
+  «Коллекция» / «Сабмитить»:
+  1. «Неправильный трансформ модели» (`transform`)
+  2. «Разрыв меша после скининга» (`tear`)
+  3. «Слишком широкие локти» (`elbows`)
+  4. «Непонятная ошибка» (`unknown`)
+* A press is a work order. It is recorded as a defect report
+  (`GET /api/mt/defect-reports`, one record per task and button with the
+  presser, the time and the run), acknowledged in the same chat, and the
+  matching checks start at once: the anim stand (front + right) plus the
+  class-specific check (transform → orientation judge and up/front evidence;
+  tear → stand stretch + detach report; elbows → stand elbow width vs the
+  category norm; unknown → the full stand analysis + triage classes).
+* The lead watches the reports continuously (the same loop as the triage
+  watcher) and dispatches each one to the agent of its class. The agent posts
+  the investigation (cause, evidence, the pipeline stage) and the result (the
+  fix, before/after numbers, which similar models it covers) as a reply in the
+  same Telegram chat, through the DEV send API with `reply_to` of the notice.
+  A fix is a pipeline fix for the category, never a hand repair of one model.
+* Below every task notice: links to the top 5 most similar 3D models by
+  embedding (the analysis cache's CLIP sheet vector and the skeleton DB's
+  pose vector), as `https://autorig.online/task?id=…` with the similarity
+  score, so the owner can judge how the embeddings work.
+
 ## One Handoff Per Rig Category (owner order, 2026-10-14)
 
 > веди для каждой категории ригов свой handoff.md, чтобы можно было восстановить
