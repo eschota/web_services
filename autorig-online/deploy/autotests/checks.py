@@ -1041,10 +1041,12 @@ def hand_detect(ctx, input_name, words=""):
             "max_branches": max([g.get("branches") or 0 for g in d.get("groups") or []] or [0])}
 
 
-def mt_fast_analysis(ctx):
-    """The V3 fast analysis stage (mt.fast_analysis: bone_check, heel rules, symmetry, proportions, parts)."""
+def mt_fast_analysis(ctx, apply=False):
+    """The V3 fast analysis stage (mt.fast_analysis: bone_check, heel rules, symmetry, proportions, parts). apply=True
+    runs it as the conveyor does (--apply: the fast fix rebuilds and keeps the best candidate, Joint centring · V3);
+    applied_after = the bone samples outside the rig that ends up installed."""
     run = ctx["run"]
-    p, wall = _child([PY, "-P", "-m", "mt.fast_analysis", "--dir", str(run)], timeout=600)
+    p, wall = _child([PY, "-P", "-m", "mt.fast_analysis", "--dir", str(run)] + (["--apply"] if apply else []), timeout=600)
     if p.returncode != 0:
         raise RuntimeError(f"fast_analysis exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
     fa = json.loads((run / "analysis" / "fast.json").read_text())
@@ -1061,7 +1063,12 @@ def mt_fast_analysis(ctx):
             "leg_rules_failed": len((res.get("leg_joint_rules") or {}).get("failed") or []),   # Leg fit V3
             "leg_rule_codes": (res.get("leg_joint_rules") or {}).get("failed"),
             "warnings": len(fa.get("warnings") or []), "symmetry_worst_pct_H": (res.get("symmetry_check") or {}).get("worst_pct_H"),
-            "ops_total_s": (fa.get("timings") or {}).get("total")}
+            "ops_total_s": (fa.get("timings") or {}).get("total"),
+            **({"applied": int(bool((fa.get("applied") or {}).get("applied"))),
+                "applied_after": ((fa.get("applied") or {}).get("after") if (fa.get("applied") or {}).get("applied")
+                                  else bo.get("outside_before")),
+                "applied_candidate": (fa.get("applied") or {}).get("candidate"),
+                "joint_centring_proposal": (bo.get("joint_centring") or {}).get("official_after")} if apply else {})}
 
 
 def s_doc(path):
@@ -1592,7 +1599,7 @@ def run_check(check: dict, ctx: dict) -> dict:
         return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False),
                             a.get("body", ""))
     if k == "mt_fast_analysis":
-        return mt_fast_analysis(ctx)
+        return mt_fast_analysis(ctx, bool(a.get("apply")))
     if k == "hand_rig":
         return hand_rig(ctx)
     if k == "monster_rig":

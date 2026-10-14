@@ -976,6 +976,20 @@
    "what": "wild boar, a Z-up upload in mid-stride (V3 run 9b9fb727); Vision BODY: quadruped",
    "sha256": "4986a3997761632ded2f864cbcd041b1094e7b7d1db0d5c2dfd39e345106d649",
    "bytes": 5426512
+  },
+  "6df39fce.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/95cbe8fd652f7fd5972f/proj/model.glb",
+   "task": "6df39fce-5b64-4d5e-abb1-7f5695e64bd4",
+   "what": "Doberman Pinscher, docked tail stub, open mesh at the mouth (V3 run 95cbe8fd, triage bone_outside 2026-10-14)",
+   "sha256": "04a85f36892b5c66c3672e1b5905c7783cd63901d5de1e9d51ba449f29caec53",
+   "bytes": 98456
+  },
+  "3f17c22f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f514db35e15620d46f73/proj/model.glb",
+   "task": "3f17c22f-4e34-4e32-b1e0-6bfc5d59fc81",
+   "what": "low-poly anime character, 1130 vertices, big flat faces (V3 run f514db35, stand bone_outside)",
+   "sha256": "46bb72a9ea7bcf10aa67fccddc1270f0af7170154d67e1d0de5fa9215c615d50",
+   "bytes": 51428
   }
  },
  "profiles": {
@@ -10464,7 +10478,7 @@
      },
      "owner": "Leakage · V3",
      "xfail": {
-      "reason": "the weight mask (mt/weight_mask.py) is not installed yet: old code 13.9 % far-limb leak; flips to pass at install",
+      "reason": "the weight mask (mt/weight_mask.py) is installed OFF: on, the gate of 2026-10-14 regressed elephant_trunk_chain, gorilla_bust_legless and joint_reweld_holes; with MT_WEIGHT_MASK=on this case passes (13.9 -> 4.35 % far-limb leak)",
       "owner": "Leakage · V3"
      }
     }
@@ -10553,6 +10567,143 @@
        0
       ]
      }
+    }
+   ]
+  },
+  {
+   "id": "bone_outside_doberman_tail_head",
+   "task": "6df39fce-5b64-4d5e-abb1-7f5695e64bd4",
+   "cost": 1,
+   "defect": "Joint centring V3 (2026-10-14, triage bone_outside 6df39fce): the quadruped fit left the docked tail chain (Tail1..Tail3) bunched behind the croup and the Head bone through the open mouth, 81 bone samples outside; the fast fix's bone_check.solve rebuilt to 68. Fix: mt/joint_centring.py as the fast fix's second candidate (each joint on its section's deepest point of the voxel solid, bones outside pulled in along the depth gradient; the rebuild that measures best is kept)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6df39fce.model.glb",
+     "params": {
+      "words": "Doberman Pinscher",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_fix",
+     "kind": "mt_fast_analysis",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "apply": true
+     },
+     "thresholds": {
+      "op_errors": [
+       "==",
+       0
+      ],
+      "applied_after": [
+       "<=",
+       24
+      ]
+     },
+     "note": "local / farm 2026-10-14: 81 -> solve 68 / joint_centring 14 (Head, Tail3 left)"
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "tail_outside_samples": [
+       "<=",
+       16
+      ]
+     },
+     "note": "the installed rig after mt_fix (the fast fix replaced rig/rigged.glb)"
+    }
+   ]
+  },
+  {
+   "id": "bone_outside_lowpoly_biped",
+   "task": "3f17c22f-4e34-4e32-b1e0-6bfc5d59fc81",
+   "cost": 1,
+   "defect": "Joint centring V3 (2026-10-14, stand bone_outside f514db35): a 1130-vertex anime character; its bones sit just outside big flat faces (18 samples), bone_check.solve proposed nothing. Fix: mt/joint_centring.py in the fast fix (S >= one cell deep counts as inside, so a sample cannot hide a cell outside a low-poly face)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3f17c22f.model.glb",
+     "params": {
+      "words": "Low-poly anime character",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_fix",
+     "kind": "mt_fast_analysis",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "apply": true
+     },
+     "thresholds": {
+      "op_errors": [
+       "==",
+       0
+      ],
+      "applied_after": [
+       "<=",
+       10
+      ]
+     },
+     "note": "farm 2026-10-14: 18 -> 0 (joint_centring candidate; solve: nothing to correct); with the centre line kept on a symmetric body (mt-deploy 2): 18 -> 9, Hips left"
     }
    ]
   }
