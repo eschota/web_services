@@ -742,6 +742,80 @@ async def _normalize_with_converter(db, original_url: str) -> tuple[bytes, Dict[
     raise V3IntakeError("normalization_failed", "; ".join(errors)[:600] or "no converter worker is configured")
 
 
+class _Pending(Exception):
+    """The farm Blender job of this task is still running; the pump comes back later (not a failure)."""
+
+
+def _save_v3(task, v3: Dict[str, Any]) -> None:
+    settings = _settings(task)
+    settings["v3"] = v3
+    task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+    task.updated_at = datetime.utcnow()
+
+
+async def _normalize_fbx(db, task, source_url: str, local: Optional[Path]) -> tuple[bytes, Dict[str, Any]]:
+    """FBX -> GLB, in this order (2026-10-15, the converters lost /api-converter-glb-to-fbx):
+    1. binary FBX on a farm box's Blender (v3_fbx_farm, non-blocking: raises _Pending while the job runs);
+    2. assimp on the VPS (ASCII FBX is repaired first);
+    3. the converter endpoint, in case a converter ever brings it back."""
+    import v3_fbx_farm
+    import v3_textures
+
+    notes: list = []
+    now = datetime.utcnow().timestamp()
+    if local is not None and v3_fbx_farm.available() and v3_fbx_farm.is_binary_fbx(local):
+        v3 = dict((_settings(task).get("v3") or {}))
+        job = v3.get("normalize_job")
+        if not job:
+            job = await asyncio.to_thread(v3_fbx_farm.start, task.id, local)
+            v3.update(normalize_job=job, normalize_job_at=now, retry_at=now + 3, stage="normalization")
+            _save_v3(task, v3)
+            await db.commit()
+            print(f"[V3 intake] {task.id} FBX -> GLB queued on the farm Blender (job {job})")
+            raise _Pending()
+        state, info, glb = await asyncio.to_thread(v3_fbx_farm.poll, job, float(v3.get("normalize_job_at") or now), now)
+        if state == "pending":
+            v3["retry_at"] = now + 3
+            _save_v3(task, v3)
+            await db.commit()
+            raise _Pending()
+        for key in ("normalize_job", "normalize_job_at"):
+            v3.pop(key, None)
+        _save_v3(task, v3)
+        await db.commit()
+        await asyncio.to_thread(v3_fbx_farm.cleanup, task.id)
+        if state == "no_mesh":
+            raise V3IntakeError("no_mesh", "the FBX has a skeleton but no mesh (or an empty scene); upload the model with its mesh")
+        if state == "done" and glb:
+            glb_facts(glb)
+            audit: Dict[str, Any] = {"schema": "autorig.v3.texture-audit/1", "format": "fbx"}
+            try:
+                glb, embedded, missing = v3_textures.embed_external_images(glb, local.parent)
+                glb, audit["normals"] = v3_textures.fix_normals(glb)
+                audit.update(embedded=embedded, missing=missing, textured_materials=v3_textures.glb_textured(glb))
+                audit["status"] = "source_ok" if audit["textured_materials"] and not missing else                     ("missing_files" if missing else "none")
+            except Exception as exc:                            # noqa: BLE001 - the plain GLB still binds
+                audit["audit_error"] = str(exc)[:200]
+            return glb, {"method": f"blender-farm:{info.get('importer') or 'fbx'}", "box": info.get("box"),
+                         "job": info.get("job"), "blender": info.get("blender"), "textures": audit,
+                         "meshes": info.get("meshes"), "verts": info.get("verts"), "bones": info.get("bones")}
+        notes.append(f"farm Blender: {str(info.get('error') or info.get('code'))[:160]}")
+    if local is not None:
+        try:
+            data, audit = await asyncio.to_thread(v3_textures.normalize_textured, local)
+        except Exception as exc:                                # noqa: BLE001
+            data, audit = None, {"error": str(exc)[:200]}
+        if data is not None:
+            receipt = dict(audit.pop("assimp", None) or {})
+            glb_facts(data)
+            return data, {**receipt, "method": "v3-intake:" + str(receipt.get("method") or "assimp"), "textures": audit}
+        notes.append(f"assimp: {str(audit.get('assimp_error') or audit.get('error'))[:160]}")
+    try:
+        return await _normalize_with_converter(db, source_url)
+    except V3IntakeError as exc:
+        raise V3IntakeError("normalization_failed", "; ".join(notes + [str(exc)])[:600]) from None
+
+
 async def pump_v3_intake(session_factory) -> int:
     """Bind V3 rows whose FBX/OBJ source has not been normalized yet (restart-safe, idempotent)."""
     from sqlalchemy import select, text
@@ -779,13 +853,15 @@ async def pump_v3_intake(session_factory) -> int:
                     normalization = {"method": "v3-intake:obj_to_glb", "obj_sha256": hashlib.sha256(raw).hexdigest(),
                                      "textures": audit}
                 else:
-                    data, normalization = await _normalize_with_converter(db, source_url)
+                    data, normalization = await _normalize_fbx(db, task, source_url, local)
                 await bind_existing_task(db, task, data=data, origin=str(intake.get("origin") or "website"),
                                          requested_intent=str(intake.get("requested_intent") or "rig"),
                                          filename=str(intake.get("filename") or ""),
                                          original={"url": task.input_url, "format": intake.get("format")},
                                          normalization=normalization)
                 done += 1
+            except _Pending:
+                continue
             except Exception as exc:
                 await db.rollback()
                 task = await db.get(Task, task_id)
@@ -796,7 +872,7 @@ async def pump_v3_intake(session_factory) -> int:
                 waited = datetime.utcnow().timestamp() - started
                 # An unreachable converter is a wait, not a verdict; a broken
                 # source or a hard deadline ends the task explicitly.
-                final = isinstance(exc, V3IntakeError) and exc.code in ("invalid_glb", "invalid_obj", "source_size") \
+                final = isinstance(exc, V3IntakeError) and exc.code in ("invalid_glb", "invalid_obj", "source_size", "no_mesh") \
                     or waited >= NORMALIZE_DEADLINE_SECONDS
                 delay = NORMALIZE_RETRY_SECONDS[min(attempts - 1, len(NORMALIZE_RETRY_SECONDS) - 1)]
                 v3.update(normalize_attempts=attempts, normalize_started_at=started, error=str(exc)[:600],
