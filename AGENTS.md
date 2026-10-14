@@ -510,6 +510,24 @@ Owner rule, 2026-10-10:
   category's corpus set, plus GIFs of several different models playing the
   same library clip.
 
+## One Handoff Per Rig Category (owner order, 2026-10-14)
+
+> веди для каждой категории ригов свой handoff.md, чтобы можно было восстановить
+> принципы рига и анимации для каждой категории 3д моделей
+
+* The MT repo keeps `docs/categories/<category>/handoff.md`, one per rig category:
+  `biped`, `quadruped`, `equine`, `monster`, `serpent`, `bird`, `multilimb`, `hands`,
+  `vehicle`, `primate` (a biped variant). `docs/categories/README.md` is the index
+  and the template.
+* Each file holds everything needed to rebuild that category's rig and animation
+  from scratch: how the category is detected, the skeleton template and its
+  options, the fit rules, the skin rules, the clip library and how it is made,
+  the QA thresholds, the corpus cases, the known defects with their status, and
+  the dated decisions of the owner.
+* Every agent that changes a category's rig path, skin, clips or QA updates that
+  category's handoff in the same change, with the date and the numbers. The
+  general `HANDOFF.md` only points to them.
+
 ## Customer Tasks First (owner order, 2026-10-11)
 
 > давай ка приоритет на авториг задачи сделаем … чо там всё висит то, компов же
