@@ -876,6 +876,50 @@ def mt_arm_clearance(ctx):
     return out
 
 
+QUAD_FORWARD_YAW = {"+z": 0.0, "-z": 180.0, "+x": -90.0, "-x": 90.0}   # mt.fastrig.FORWARD_YAW
+
+
+def quad_leg_frame(run, rig) -> dict:
+    """Quad legs · V3 (2026-10-14): a quadruped rig's legs in its fit frame (rig.json forward_axis + proj/yaw.json, as
+    mt.fastrig.build turns it: +Z the head end, +Y up, +X the model's left), from rig.json alone:
+    quad_crossed_pairs  pairs whose Left knee or foot lies > 2 % H right of the Right one (0 on a right rig);
+    quad_front_knees_ahead  the front knees ahead of the hind knees, share of the body length (>= 0.12 on a standing
+                        animal; the short-leg column fit put all four knees mid-body: -0.56 .. +0.03);
+    quad_up_biped_trace 1 when proj/orient.json took the up from the biped voxel trace (the boars / wolves stood on
+                        their tails, 2026-10-14);
+    quad_legs_final_fail the failed leg checks fastrig recorded (rig.json quad_legs.final_fail; -1 without the record).
+    Empty for a rig without quadruped legs."""
+    import math
+    heads = {b["name"]: np.asarray(b["head"], float) for b in rig.get("bones") or [] if b.get("head")}
+    need = [f"{s_}{l}{k}" for s_ in ("Left", "Right") for l in ("Front", "Hind") for k in ("Leg", "Foot")]
+    if any(n not in heads for n in need) or "Hips" not in heads:
+        return {}
+    fa = str(rig.get("forward_axis") or "+z")
+    yp = pathlib.Path(run) / "proj" / "yaw.json"
+    yj = json.loads(yp.read_text()) if yp.is_file() else {}
+    chg = (rig.get("forward_check") or {}).get("changed")
+    yaw = yj.get("yaw_deg") if (yj.get("forward_axis") == fa and yj.get("yaw_deg") is not None and not chg) \
+        else QUAD_FORWARD_YAW.get(fa, 0.0)
+    a = math.radians(float(yaw))
+    Rc = np.array([[math.cos(a), 0, math.sin(a)], [0, 1, 0], [-math.sin(a), 0, math.cos(a)]])
+    J = {k: v @ Rc.T for k, v in heads.items()}
+    ys = np.array([v[1] for v in J.values()])
+    H = float(ys.max() - ys.min()) or 1.0
+    front = max(float(J[n][2]) for n in ("Nose_End", "Head", "Spine2", "Hips") if n in J)
+    back = min(float(J[n][2]) for n in ("Hips", "LeftHindFoot", "RightHindFoot", "LeftHindToe_End", "RightHindToe_End")
+               if n in J)
+    crossed = sum(1 for l in ("Front", "Hind")
+                  if min(float(J[f"Left{l}{k}"][0] - J[f"Right{l}{k}"][0]) for k in ("Leg", "Foot")) < -0.02 * H)
+    zf = (float(J["LeftFrontLeg"][2]) + float(J["RightFrontLeg"][2])) / 2
+    zh = (float(J["LeftHindLeg"][2]) + float(J["RightHindLeg"][2])) / 2
+    op = pathlib.Path(run) / "proj" / "orient.json"
+    oj = json.loads(op.read_text()) if op.is_file() else {}
+    ql = rig.get("quad_legs")
+    return {"quad_crossed_pairs": crossed, "quad_front_knees_ahead": round((zf - zh) / max(front - back, 1e-9), 3),
+            "quad_up_biped_trace": int(str(oj.get("plan")) == "biped" and "voxel trace" in str(oj.get("why"))),
+            "quad_legs_final_fail": len(ql.get("final_fail") or []) if isinstance(ql, dict) else -1}
+
+
 def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body=""):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
@@ -928,7 +972,8 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
                                 if str(k).startswith("t=") and isinstance(v, dict)),
             "rig_check_4x": sum(int(v.get("edges_over_4x") or 0) for k, v in
                                 ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items()
-                                if str(k).startswith("t=") and isinstance(v, dict))}
+                                if str(k).startswith("t=") and isinstance(v, dict)),
+            **quad_leg_frame(run, rig)}                  # Quad legs · V3 (2026-10-14)
 
 
 def hand_rig(ctx):

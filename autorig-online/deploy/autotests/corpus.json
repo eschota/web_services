@@ -962,6 +962,20 @@
    "what": "slender humanoid creature (yellow skeleton), arms hanging with the hands on the thighs (V3 proj model)",
    "sha256": "a754afd2e38ebeee468fdada2acfebc9b43dc138b76db84be3168e85cff0b9b1",
    "bytes": 743832
+  },
+  "56fa7b00.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a9ecd34e602e14be9091/proj/model.glb",
+   "task": "56fa7b00-d951-4af6-b616-9c5be5c6bbc1",
+   "what": "T-pose cartoon biped, forearms on the Head before the weight mask (Weight mask · V3, 2026-10-14)",
+   "sha256": "668436c99a7163f7a6ee2d3cfe7f9a6ee4657b56bb454da0f2213ce7e5808245",
+   "bytes": 630612
+  },
+  "8304926c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9b9fb7271bc226062268/proj/model.glb",
+   "task": "8304926c-c076-42df-b6cc-f2eabc151cd4",
+   "what": "wild boar, a Z-up upload in mid-stride (V3 run 9b9fb727); Vision BODY: quadruped",
+   "sha256": "4986a3997761632ded2f864cbcd041b1094e7b7d1db0d5c2dfd39e345106d649",
+   "bytes": 5426512
   }
  },
  "profiles": {
@@ -10382,6 +10396,162 @@
       },
       "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (open_cut_edges 762 on v3.2026-10-14.6)",
       "owner": "Seams · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "weight_mask_leakage",
+   "task": "56fa7b00-d951-4af6-b616-9c5be5c6bbc1",
+   "cost": 1,
+   "defect": "Weight mask · V3 (2026-10-14, vertex_leakage = #2 defect of the stand analysis, docs/leakage-spec-20261014.md): a T-pose cartoon biped (a9ecd34e, 14.6k vertices) whose forearms and hands were hard-assigned to the Head (Running: RightForeArm -> HeadTop_End 705 vertices, LeftForeArm 569; stand far-limb leak 13.9 %). Fix: mt/weight_mask.py after the skin - the geometric home bone of every vertex through the voxel solid, a gate (reassign_ratio, mirror pairs, islands that heal), no weight beyond 2 skeleton steps from the home, a tapered rim. Old code 13.9 % / 57 edges over 4x / worst 13.1; new 4.3 % / 51 / 9.9.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "56fa7b00.model.glb",
+     "params": {
+      "words": "stylized cartoon character",
+      "body": "biped",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "stand",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "clip": "auto",
+      "size": 256
+     },
+     "thresholds": {
+      "metrics_present": [
+       "==",
+       1
+      ],
+      "leak_far_pct": [
+       "<=",
+       8.0
+      ],
+      "edges_over_4x": [
+       "<=",
+       80
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ]
+     },
+     "owner": "Leakage · V3",
+     "xfail": {
+      "reason": "the weight mask (mt/weight_mask.py) is not installed yet: old code 13.9 % far-limb leak; flips to pass at install",
+      "owner": "Leakage · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "quad_up_vision_quadruped",
+   "task": "8304926c-c076-42df-b6cc-f2eabc151cd4",
+   "cost": 1,
+   "defect": "Quad legs · V3 (2026-10-14, triage legs_mixed 8304926c, d8a88a09, f731fcad; the boar fec0161f regressed the same way): rig_first._lying_biped read the upturned boar's front legs as two arm chains on the voxel trace and replaced the orientator's +z «quadruped: 4 foot blobs at the low end» (0.9) by +y «biped»: the boar stood on its tail, both leg pairs crossed (L-R knee/foot -24.8 / -13.3 % H), front knees 0.23 of the body length behind the hind ones, rig_check torn front|hind (803 cross-leg edges), stand worst edge 395x. Fix: Vision's body plan (category.json / the classify phase) agreeing with the orientator's quadruped pick keeps the pick. After: up +z, 0 crossed pairs, front knees ahead 0.44, worst edge 22x.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8304926c.model.glb",
+     "params": {
+      "words": "wild boar",
+      "body": "quadruped",
+      "forward_axis": "-x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "quad_up_biped_trace": [
+       "==",
+       0
+      ],
+      "quad_crossed_pairs": [
+       "==",
+       0
+      ],
+      "quad_front_knees_ahead": [
+       ">=",
+       0.12
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "quad_short_leg_knees",
+   "task": "a982eb2f",
+   "cost": 1,
+   "defect": "Quad legs · V3 (2026-10-14, wrong_up_forward / legs_mixed on the short-legged quadrupeds a982eb2f, ccffe753, 6d2e65f4, 29d69e24, 0e32ccf1, d9fecb23, fec0161f): the side-view leg column of a short leg reached the belly below 0.3 H, where fit_quadruped does not look for the leg's widening, so all four knees met mid-body (front knees ahead of the hind ones by 0.004 of the body length) and the clips swung the pairs through each other (stand worst edge 132x). Fix: fastrig.fit_quadruped_checked - quad_legs_check in the body frame, a failed check re-fits the legs from their traced masks (named by their roots) or from columns capped where each leg widens into the trunk (options quad_legs*, quad_order_min, quad_trace_max_verts). After: 0.225, worst edge 25x.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "a982eb2f.model.glb",
+     "params": {
+      "words": "green armored quadruped",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "quad_crossed_pairs": [
+       "==",
+       0
+      ],
+      "quad_front_knees_ahead": [
+       ">=",
+       0.12
+      ],
+      "quad_legs_final_fail": [
+       "==",
+       0
+      ]
      }
     }
    ]
