@@ -896,7 +896,7 @@
   "8601aa36.model.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/ccfc481c738464250131/proj/model.glb",
    "task": "8601aa36-e05e-4241-9319-0668b6ba0a5b",
-   "what": "muscular demon warrior, claw-toed boots (V3 run ccfc481c)",
+   "what": "demon, the right hand resting on the thigh (V3 run ccfc481c738464250131 proj/model.glb)",
    "sha256": "ee3c3a51da3bf99d1cb6bab453cc8caad8d7e2c161b0315971254a252781f506",
    "bytes": 3110668
   },
@@ -1414,6 +1414,54 @@
       ]
      },
      "note": "cloth mode reports (off by default); the warrior has no clothing words - no layer expected"
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6",
+     "target": {
+      "thresholds": {
+       "open_cut_edges": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (open_cut_edges 74 on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {},
+     "target": {
+      "thresholds": {
+       "hole_copies": [
+        "<=",
+        0
+       ],
+       "slit_max_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (78 hole copies, 30.0 % H on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -2363,6 +2411,25 @@
        0
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
     }
    ]
   },
@@ -7794,6 +7861,25 @@
        0.5
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
     }
    ]
   },
@@ -8859,6 +8945,44 @@
        14
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hole_copies": [
+       "<=",
+       0
+      ],
+      "slit_max_pct_H": [
+       "<=",
+       1.0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
     }
    ]
   },
@@ -9815,6 +9939,29 @@
       ]
      },
      "note": "Voxel parts V3 2026-10-14: the sword mesh and its Prop bone survive the V3 FBX export (f1, Blender 5.1: 2 skinned meshes, model names body / sword / Prop)"
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {},
+     "target": {
+      "thresholds": {
+       "hole_copies": [
+        "<=",
+        0
+       ],
+       "slit_max_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (142 hole copies, 89.6 % H on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -10062,6 +10209,44 @@
        1.0
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+    },
+    {
+     "id": "low_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "low_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
     }
    ]
   },
@@ -10115,6 +10300,88 @@
        "<=",
        15.0
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "demon_hand_thigh",
+   "task": "8601aa36-e05e-4241-9319-0668b6ba0a5b",
+   "cost": 2,
+   "owner": "Seams · V3",
+   "defect": "Rig fixes V3 / Seams V3 (2026-10-14): the demon's right hand rests on its thigh; the contact split (RightUpLeg | RightArm) left 421 hole copies that gaped 31.8 % H in the clips (no lid). Seams V3: every split candidate is probed split / loop lid / partial weld / weld, never an open slit",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8601aa36.model.glb",
+     "params": {
+      "words": "demon"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {},
+     "target": {
+      "thresholds": {
+       "hole_copies": [
+        "<=",
+        0
+       ],
+       "slit_max_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (535 hole copies, 51.2 % H on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6",
+     "target": {
+      "thresholds": {
+       "open_cut_edges": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (open_cut_edges 762 on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
      }
     }
    ]

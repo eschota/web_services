@@ -1344,6 +1344,35 @@ def rig_upright(ctx):
     return out
 
 
+def seam_weights(ctx):
+    """Seams · V3 (2026-10-14, docs/seams-spec-20261014.md): one weight per coincident copy, no open slit.
+    seam_weight_mismatch: the engine's own count in rig.json (coincident written pairs whose weights differ and that
+    are not its split copies of one welded vertex; -1 = the rig predates the check); open_cut_edges: recounted on the
+    final GLB (mt/cut_cap.open_cut_edges: boundary edges whose both ends are copies with other weights = holes);
+    diverging_copies: every copy whose weights differ from another copy of its position."""
+    from mt import cut_cap as CC, seam_policy as SP
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    c = rig.get("checks") or {}
+    data = (run / "rig" / "rigged.glb").read_bytes()
+    js, binary, prims = SP._parse(data)
+    div = 0
+    if prims:
+        import numpy as np
+        names, _parts = SP._part_names(js)
+        nb = max(len(names), int(max(r["J"].max(initial=0) for r in prims)) + 1)
+        P = np.concatenate([r["P"] for r in prims])
+        J = np.concatenate([r["J"] for r in prims])
+        W = np.concatenate([r["W"] for r in prims])
+        div = int(SP._diverging(P, J, W, nb)[1].sum())
+    sp = rig.get("seam_policy") or {}
+    m = c.get("seam_weight_mismatch")
+    return {"seam_weight_mismatch": -1 if m is None else int(m), "open_cut_edges": int(CC.open_cut_edges(data)),
+            "diverging_copies": div, "engine_open_hole_copies": c.get("seam_open_hole_copies"),
+            "policy": sp.get("policy"), "candidates": sp.get("candidates_n"), "kept": sp.get("kept"),
+            "welded": sp.get("welded"), "policy_seconds": sp.get("seconds")}
+
+
 def dup_gaps(glb_path, frames=12):
     """Rig path V3 (owner #1935, the boar falling apart): vertices that share a position (UV seams, a triangle soup)
     must move together. -> {diverging_dups: vertices whose weights differ from their position's mean (L1 > 0.05),
@@ -1463,7 +1492,7 @@ def monster_rig(ctx):
             "detect_s": mn.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
 
 
-def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512):
+def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512, on_run=None):
     """Anim stand · V3 (mt/anim_stand.py, owner 2026-10-14): the 4-view stand (1 s bind pose, then Running for a
     biped) of a corpus rig on the tree under test, in a child at the conveyor's size: its wall seconds, that the
     metrics and the mp4 / gif / sheet exist, the step length in H, the elbow width in shoulder widths, the stretch and
@@ -1471,8 +1500,12 @@ def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512):
     run = pathlib.Path(ctx["work"]) / "stand" / "a57a00000000000000d1"
     shutil.rmtree(run.parent, ignore_errors=True)
     (run / "rig").mkdir(parents=True)
-    shutil.copyfile(_input(rig_input), run / "rig" / "rigged.glb")
-    shutil.copyfile(_input(rig_json_input), run / "rig" / "rig.json")
+    if on_run is not None:                               # Weight mask · V3 (2026-10-14): the stand of this case's own
+        rig_src = (pathlib.Path(on_run) / "rig" / "rigged.glb", pathlib.Path(on_run) / "rig" / "rig.json")   # rig step
+    else:
+        rig_src = (_input(rig_input), _input(rig_json_input))
+    shutil.copyfile(rig_src[0], run / "rig" / "rigged.glb")
+    shutil.copyfile(rig_src[1], run / "rig" / "rig.json")
     p, wall = _child([PY, "-P", "-m", "mt.anim_stand", str(run), "--clip", clip, "--size", str(int(size))], timeout=300)
     if p.returncode != 0:
         raise RuntimeError(f"anim_stand exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
@@ -1488,7 +1521,9 @@ def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512):
             "step_length_H": m.get("step_length_H"), "stride_period_s": m.get("stride_period_s"),
             "elbow_width_sw_min": ew.get("min"), "elbow_width_sw_mean": ew.get("mean"),
             "worst_edge_ratio": (m.get("stretch") or {}).get("worst_edge_ratio"),
-            "leak_pct": (m.get("leak") or {}).get("share_pct"), "seconds_by_stage": m.get("seconds")}
+            "leak_pct": (m.get("leak") or {}).get("share_pct"), "seconds_by_stage": m.get("seconds"),
+            "leak_far_pct": (m.get("leak") or {}).get("far_share_pct"),
+            "edges_over_4x": (m.get("stretch") or {}).get("edges_over_4x")}
 
 
 # ------------------------------------------------------------------------------------------------ dispatch
@@ -1518,7 +1553,8 @@ def run_check(check: dict, ctx: dict) -> dict:
     if k == "monster_rig":
         return monster_rig(ctx)
     if k == "anim_stand":                                          # Anim stand · V3 (2026-10-14)
-        return anim_stand(ctx, a["rig"], a["rig_json"], a.get("clip", "auto"), a.get("size", 512))
+        return anim_stand(ctx, a.get("rig"), a.get("rig_json"), a.get("clip", "auto"), a.get("size", 512),
+                          ctx.get("run") if on else None)
     if k == "multilimb_rig":
         return multilimb_rig(ctx)
     if k == "hand_detect":
@@ -1615,6 +1651,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         _r = _dc.check(pathlib.Path(target).read_bytes(), frames=int(a.get("frames", 12)))
         return {k_: _r.get(k_) for k_ in ("cuts", "hole_copies", "slit_max_pct_H", "torn_copies",
                                           "detach_max_pct_H", "released_max_pct_H")}
+    if k == "seam_weights":                               # Seams · V3 (2026-10-14)
+        return seam_weights(ctx)
     if k == "dup_gaps":
         return dup_gaps(ctx["run"] / "rig" / "rigged.glb")
     if k == "rig_upright":
