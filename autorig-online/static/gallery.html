@@ -109,7 +109,8 @@
                 const nextBtn = document.getElementById('gallery-next');
 
                 try {
-                    grid.innerHTML = `<div class="card" style="padding: 1rem; color: var(--text-muted);">${(typeof window.t === 'function') ? t('gallery_loading') : 'Loading…'}</div>`;
+                    // keep the server-rendered cards on screen until the live ones arrive
+                    if (!grid.querySelector('.gallery-card')) grid.innerHTML = `<div class="card" style="padding: 1rem; color: var(--text-muted);">${(typeof window.t === 'function') ? t('gallery_loading') : 'Loading…'}</div>`;
 
                     const params = new URLSearchParams({
                         page: String(this.page),
@@ -138,7 +139,7 @@
                         return;
                     }
 
-                    grid.innerHTML = items.map(it => {
+                    grid.innerHTML = items.map((it, idx) => {
                         const modelUrl = `/task?id=${encodeURIComponent(it.task_id)}`;
                         const thumbUrl = it.thumbnail_url || `/thumb/${it.task_id}`;
                         const videoUrl = it.video_url || `/api/video/${it.task_id}`;
@@ -152,7 +153,7 @@
                         return `
                             <a href="${modelUrl}" class="gallery-card" data-task-id="${it.task_id}" data-video-url="${videoUrl}" style="text-decoration:none;">
                                 <div class="gallery-card-media">
-                                    <img src="${thumbUrl}" loading="lazy" alt="">
+                                    <img src="${thumbUrl}" ${idx < 2 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"'} decoding="async" width="270" height="480" alt="">
                                     ${rigBadge}
                                 </div>
                                 <div class="gallery-card-meta">

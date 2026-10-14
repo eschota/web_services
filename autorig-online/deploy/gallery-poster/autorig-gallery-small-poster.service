@@ -1,0 +1,17 @@
+[Unit]
+Description=AutoRig small card posters (WebP) for the public gallery
+[Service]
+Type=oneshot
+User=autorig
+Group=autorig
+Slice=autorig.slice
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=100%
+MemoryMax=800M
+ExecStart=/srv/autorig/venv/bin/python3 -P /srv/autorig/gallery-poster/gallery_small_poster.py
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/srv/autorig/data/static/posters-s

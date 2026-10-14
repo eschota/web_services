@@ -1929,7 +1929,16 @@ const App = {
 
             // Use TaskCard component if available
             if (typeof TaskCard !== 'undefined') {
-                grid.innerHTML = items.map(it => TaskCard.render(it, { currentSort: 'date' })).join('');
+                // Build off-DOM and swap once the first posters (already cached from the server-rendered cards)
+                // are decoded, so the crawlable cards never flash.
+                const next = document.createElement('div');
+                next.innerHTML = items.map((it, i) => TaskCard.render(it, { currentSort: 'date', eager: i < 2 })).join('');
+                const firstImgs = Array.from(next.querySelectorAll('img.tc-thumb')).slice(0, 4);
+                await Promise.race([
+                    Promise.all(firstImgs.map(im => (im.decode ? im.decode().catch(() => {}) : Promise.resolve()))),
+                    new Promise(r => setTimeout(r, 1200))
+                ]);
+                grid.replaceChildren(...Array.from(next.childNodes));
                 TaskCard.attachHandlers(grid, { currentSort: 'date' });
             } else {
                 // Fallback if TaskCard not loaded

@@ -14422,7 +14422,20 @@ def v3_poster_path(task_id: str) -> Optional[Path]:
         return None
 
 
+SMALL_POSTER_DIR = Path(os.getenv("AUTORIG_SMALL_POSTER_DIR", "/srv/autorig/data/static/posters-s"))
+
+
 def thumb_url_for(task_id: str) -> str:
+    # Gallery perf (2026-10-15): cards get the small static WebP poster (nginx /pw/, immutable, ?v=<mtime>)
+    # made by autorig-gallery-small-poster; /thumb stays the full-size picture (og:image, task page).
+    if _V3_POSTER_ID.match(str(task_id or "")):
+        try:
+            small = SMALL_POSTER_DIR / f"{task_id}.webp"
+            st = small.stat()
+            if st.st_size > 500:
+                return f"/pw/{task_id}.webp?v={int(st.st_mtime):x}"
+        except OSError:
+            pass
     path = v3_poster_path(task_id)
     if path is None:
         return f"/thumb/{task_id}"
@@ -16434,12 +16447,18 @@ def _static_html_response(filename: str) -> HTMLResponse:
     path = (live_static if live_static.is_dir() else STATIC_DIR) / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Not found")
-    return HTMLResponse(
-        content=_inject_static_layout(
-            path.read_text(encoding="utf-8"),
-            canonical_path=STATIC_PAGE_CANONICAL_PATHS.get(filename),
-        )
+    content = _inject_static_layout(
+        path.read_text(encoding="utf-8"),
+        canonical_path=STATIC_PAGE_CANONICAL_PATHS.get(filename),
     )
+    try:
+        # Gallery perf (2026-10-15): a live JS/CSS edit must reach home/gallery at once, so every /static
+        # reference carries its current content stamp (as on /task) instead of a stale ?v= from the file.
+        import task_page_live as _tpl
+        content = _tpl.stamp_static_assets(content)
+    except Exception as exc:
+        print(f"[static] stamp: {type(exc).__name__}: {exc}")
+    return HTMLResponse(content=content)
 
 
 def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:

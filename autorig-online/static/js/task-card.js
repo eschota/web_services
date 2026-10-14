@@ -19,6 +19,9 @@ const TaskCard = {
      */
     render(item, options = {}) {
         const currentSort = options.currentSort || 'date';
+        // Gallery perf (2026-10-15): only the first 1-2 above-the-fold posters load eagerly; the video src is
+        // assigned lazily (hover / in view) by setupAutoplay, never at render time.
+        const eager = !!options.eager;
         
         const taskUrl = `/task?id=${item.task_id}`;
         const mediaVersion = encodeURIComponent(
@@ -72,7 +75,7 @@ const TaskCard = {
         const rigIconHtml = `<span class="tc-rig-icon" title="Rig type"><img src="${rigIconSrc}" alt="" width="64" height="64" loading="lazy" decoding="async" aria-hidden="true"></span>`;
         const badgesHtml = salesHtml ? `<div class="tc-badges">${salesHtml}</div>` : '';
         
-        return `<a href="${taskUrl}" class="tc-card" data-task-id="${item.task_id}"><div class="tc-media"><img class="tc-thumb" src="${thumbUrl}" alt="" onload="this.classList.add('loaded')" onerror="this.onerror=null;this.src='/static/images/poster-missing.svg';this.classList.add('loaded')"><video class="tc-video" src="${videoUrl}" muted loop playsinline preload="none"></video>${authorHtml}${versionHtml}${rigIconHtml}${badgesHtml}</div></a>`;
+        return `<a href="${taskUrl}" class="tc-card" data-task-id="${item.task_id}"><div class="tc-media"><img class="tc-thumb" src="${thumbUrl}" alt="" width="360" height="640" ${eager ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"'} decoding="async" onload="this.classList.add('loaded')" onerror="this.onerror=null;this.src='/static/images/poster-missing.svg';this.classList.add('loaded')"><video class="tc-video" data-src="${videoUrl}" muted loop playsinline preload="none"></video>${authorHtml}${versionHtml}${rigIconHtml}${badgesHtml}</div></a>`;
     },
     
     /**
@@ -112,24 +115,56 @@ const TaskCard = {
      */
     setupAutoplay(container) {
         if (!container) container = document;
-        
-        container.querySelectorAll('.tc-card').forEach(card => {
+        const conn = navigator.connection || {};
+        // No video at all on data saver / slow links: the static poster stays.
+        if (conn.saveData || /(^|-)2g$/.test(String(conn.effectiveType || ''))) return;
+        const mq = (q) => !!(window.matchMedia && window.matchMedia(q).matches);
+        const reduceMotion = mq('(prefers-reduced-motion: reduce)');
+        const canHover = mq('(hover: hover) and (pointer: fine)');
+        const active = [];
+
+        const start = (card) => {
             const video = card.querySelector('.tc-video');
             const thumb = card.querySelector('.tc-thumb');
-            if (!video || !thumb) return;
-            
-            card.addEventListener('mouseenter', () => {
-                video.play().catch(() => {});
+            if (!video) return;
+            if (!video.getAttribute('src')) {
+                const src = video.getAttribute('data-src');
+                if (!src) return;
+                video.setAttribute('src', src);
+            }
+            video.addEventListener('playing', () => {
                 video.style.opacity = '1';
-                thumb.style.opacity = '0';
+                if (thumb) thumb.style.opacity = '0';
+            }, { once: true });
+            video.play().catch(() => {});
+            active.push(card);
+            // at most two videos in memory at once on touch screens
+            while (active.length > 2) stop(active[0]);
+        };
+
+        const stop = (card) => {
+            const video = card.querySelector('.tc-video');
+            const thumb = card.querySelector('.tc-thumb');
+            const k = active.indexOf(card);
+            if (k >= 0) active.splice(k, 1);
+            if (!video) return;
+            try { video.pause(); video.removeAttribute('src'); video.load(); } catch (_) {}
+            video.style.opacity = '0';
+            if (thumb) thumb.style.opacity = '1';
+        };
+
+        const cards = container.querySelectorAll('.tc-card');
+        if (canHover) {
+            cards.forEach(card => {
+                card.addEventListener('mouseenter', () => start(card));
+                card.addEventListener('mouseleave', () => stop(card));
             });
-            
-            card.addEventListener('mouseleave', () => {
-                video.pause();
-                video.currentTime = 0;
-                video.style.opacity = '0';
-                thumb.style.opacity = '1';
-            });
-        });
+        } else if (!reduceMotion && 'IntersectionObserver' in window) {
+            const io = new IntersectionObserver((entries) => {
+                entries.forEach(e => (e.isIntersecting ? start(e.target) : stop(e.target)));
+            }, { threshold: 0.75 });
+            cards.forEach(card => io.observe(card));
+        }
     }
+
 };
