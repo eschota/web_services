@@ -1,0 +1,95 @@
+<title>База эмбеддингов AutoRig V3</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column of six store cards, each a fixed field grid; verdict and next steps at the end. */
+:root{--bg:#f6f7f4;--fg:#1d2320;--muted:#5e6862;--line:#aab3ad;--panel:#ffffff;--acc:#3b5f8f;--yes:#2f7a4c;--no:#b8372f;
+  --sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#15181a;--fg:#e6e9e4;--muted:#9aa49d;--line:#4a5551;--panel:#1d2124;--acc:#8fb4e6;--yes:#7fcf9a;--no:#ff7a70;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#15181a;--fg:#e6e9e4;--muted:#9aa49d;--line:#4a5551;--panel:#1d2124;--acc:#8fb4e6;--yes:#7fcf9a;--no:#ff7a70;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);padding-block:20px 48px;padding-inline:16px;max-width:980px;margin:0 auto;line-height:1.45}
+h1{font-size:22px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin:0 0 18px}
+h2{font-size:15px;font-weight:600;margin:26px 0 8px;letter-spacing:.02em}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:0 0 12px}
+.card h3{font-size:15px;margin:0 0 8px;font-weight:600}
+.card h3 code{font-family:var(--mono);font-size:12.5px;color:var(--muted);font-weight:400}
+dl{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;margin:0;font-size:13.5px}
+dt{color:var(--muted);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding-top:2px}
+dd{margin:0;min-width:0}
+code{font-family:var(--mono);font-size:12.5px}
+.yes{color:var(--yes);font-weight:500}.no{color:var(--no);font-weight:500}
+ul{margin:4px 0 0;padding-left:18px}li{margin:2px 0}
+.verdict{border-left:3px solid var(--acc);padding-left:12px}
+@media (max-width:520px){dl{grid-template-columns:1fr}dt{padding-top:6px}}
+</style>
+
+<h1>База эмбеддингов AutoRig V3</h1>
+<p class="sub">Что реализовано, как работает, где используется и где нет. Снято с кода прода 2026-10-14 (file:line в отчёте картографа; здесь только суть).</p>
+
+<h2>Коротко</h2>
+<p class="verdict">Настоящих векторных баз три: индекс скелетов, кэш анализа и библиотека текстур. Всё остальное, что ведёт себя как «база категории», — рукописные таблицы правил, списки слов и папки клипов по видам. <span class="no">Ни одна из баз не участвует в выборе оси «верх», плана тела и расстановки суставов:</span> ориентатор чисто геометрический, категория назначается подсчётом очков по словам Vision, а индекс скелетов читается только для подсказки «похожие риги» агенту сессии.</p>
+
+<h2>Шесть хранилищ</h2>
+
+<div class="card"><h3>1. Индекс скелетов <code>mt/skeleton_db.py · skeleton_db/skeletons.json · 3,06 МБ · 413 записей</code></h3>
+<dl>
+<dt>Назначение</dt><dd>Ближайшие ранее риганные задачи, чтобы агент сессии мог предложить «повторить тот конвейер».</dd>
+<dt>Ключ</dt><dd>id запуска (run).</dd>
+<dt>Что хранит</dt><dd>Текстовые поля (описание, категория, план тела, кости, клипы, статус QA, операции) и четыре вектора: <code>topology</code> 128 (хэш имён костей, рёбер parent→child, глубины), <code>pose</code> 128 (длины и направления 24 костей, нормированные на высоту; <b>не</b> абсолютные позиции), <code>anim</code> 128 (хэш имён клипов), <code>text</code> 512 (CLIP-эмбеддинг описания). Категория — обычное поле, в векторы не входит.</dd>
+<dt>Кто пишет</dt><dd>Конвейер после QA фоном; <code>--index-all</code>. Состав: humanoid 298, quadruped 71, other 18, hands 12, vehicle 4, bird 3.</dd>
+<dt>Кто читает</dt><dd><code>fast_analysis</code> кладёт 3 соседа по <code>topology</code> в <code>fast.json["similar"]</code> и в дайджест агента; API <code>/api/mt/skeletons/similar</code>; кэш анализа переиспользует вектора как дескриптор.</dd>
+<dt>Поиск</dt><dd>Полный перебор по косинусу одного вида вектора.</dd>
+<dt>Не используется</dt><dd><span class="no">rig_first / fastrig (расстановка суставов), назначение категории, ось «верх» и «перед».</span></dd>
+<dt>Слабость</dt><dd>Все риги одного шаблона дают cos 1,0 по топологии: у свежего запуска соседи — кабан, «робот-краб» и «other».</dd>
+</dl></div>
+
+<div class="card"><h3>2. Кэш анализа <code>mt/analysis_db.py · analysis_db/analysis.json · 2,28 МБ · 352 записи</code></h3>
+<dl>
+<dt>Назначение</dt><dd>Пропустить или сократить вызовы Vision на ферме в фазе analysis.</dd>
+<dt>Ключи</dt><dd>Уровень 0: sha256 исходника (или без helper-мешей). Уровень A: дескриптор рига {topo, pose} из индекса скелетов. Уровень B: CLIP-эмбеддинг (512) листа проекций <code>sheet_lit.png</code>.</dd>
+<dt>Что хранит</dt><dd>run, sha, forward_axis, ответ классификации (what / body / rest_pose / materials / hair / props), план тела, категория, geo, img, счётчики hits / disputed.</dd>
+<dt>Поиск</dt><dd>Точное совпадение по sha; гео-совпадение (topo cos ≥ 0,98 и pose cos ≥ 0,90) — <span class="no">выключено по умолчанию</span> после того, как ёжик был прочитан как краб; совпадение по картинке требует CLIP cos ≥ 0,97 <b>и</b> согласия гео. Попадание превращается в синтетический ответ Vision, настоящий Vision потом подтверждает фоном (ждём до 40 с; расхождение → перериг).</dd>
+<dt>Статистика</dt><dd>Попаданий 37 из 255 (~15 %): exact 23, geo 8, img 6; подтверждений 8 согласных, 4 спорных. Состав: humanoid 256, quadruped 61, other 14.</dd>
+<dt>Не используется</dt><dd><span class="no">Ось «верх»/«перед» от похожей модели не берётся: своя ось рига остаётся, выравнивание всегда идёт в настоящий Vision.</span></dd>
+</dl></div>
+
+<div class="card"><h3>3. CLIP ViT-B/32 на numpy <code>mt/clip_np.py · models/clip-vit-b32.npz · 304 МБ</code></h3>
+<dl>
+<dt>Что это</dt><dd>Обе башни CLIP в numpy: <code>embed_images</code> и <code>embed_texts</code> дают единичные векторы 512.</dd>
+<dt>Кто вызывает</dt><dd>Индекс скелетов (текст описания), кэш анализа (лист проекций), библиотека текстур <code>texlib</code> (альбедо и тексты, порог переиспользования 0,60; 806 наборов, <code>texlib/embeddings.npz</code> 4,3 МБ), разовый скрипт поиска по галерее.</dd>
+<dt>Банки</dt><dd><span class="no">Размеченного банка и центроидов по категориям нет</span>: только поиск ближайшего соседа среди 352 листов и 806 текстур.</dd>
+<dt>Исследование, не прод</dt><dd><code>orient_parts.py</code> (CLIP-пробы «upright» / «front») и контракт <code>orient-by-parts</code> с хранилищем <code>orient_parts_lib.npz</code>, которого на проде нет.</dd>
+</dl></div>
+
+<div class="card"><h3>4. Приоры категорий: правила и списки слов <code>fast_registry.json v11 · creature.py · monster.py · multilimb.py · constitution.py</code></h3>
+<dl>
+<dt>Реестр категорий</dt><dd>13 категорий (humanoid, quadruped, hands, vehicle, bird, multi_legged, fish, upright, serpent, insect…): слова тела, regex ключевых слов и подкатегорий, обязательные кости, диапазоны пропорций (нога/рост, рука/рост, голова/рост), список проверок, правила для агента.</dd>
+<dt>Как назначается категория</dt><dd>Очки: совпадение <code>body</code> от Vision — 5, regex по what/hair/props — 2, план «hands» — 10; неизвестное тело создаёт новую категорию по ближайшей базовой. <span class="no">Эмбеддинги не участвуют.</span> Результат в <code>analysis/category.json</code>.</dd>
+<dt>Планы существ</dt><dd><code>creature.plan_for</code>: слова → bird / upright / serpent / multileg / quadruped / biped; списки BIRD_WORDS, FISH_WORDS, UPRIGHT_WORDS, PRIMATE_WORDS, QUAD_WORDS и др. Монстр: слова + геометрические пороги (короткие ноги &lt; 30 % H, длинные &gt; 56 %). Многорукие: слова + минимальная длина лишней руки + вопрос Vision по видам.</dd>
+<dt>Конституция</dt><dd>Диапазоны пропорций по подкатегориям; к ригу применяются только ultra_fat и toy_mascot (уверенность ≥ 0,6).</dd>
+<dt>Библиотека движений по видам</dt><dd><code>animal_motion_lib/&lt;вид&gt;/&lt;клип&gt;.json</code> (horse, zebra, cat, fox, boar, buck, creature…); родство VIDEO_KIN делит клипы (zebra → horse → donkey).</dd>
+</dl></div>
+
+<div class="card"><h3>5. Бэкенд сайта <code>autorig-online/backend</code></h3>
+<dl>
+<dt>Категория</dt><dd>Только читает <code>category.json</code> / <code>fast.json</code> (заголовки SEO, загрузки). Реестр живёт в MT.</dd>
+<dt>Эмбеддинги</dt><dd><span class="no">Ни картинок, ни мешей для похожести в галерее или дедупа нет.</span> Единственный семантический поиск — внешний прокси free3d.online. Лиц-эмбеддингов нет, сходство аватара — суждение Vision.</dd>
+<dt>Наследие</dt><dd>Rig-v2: Vision возвращает <code>animal_type</code> из 12 поддерживаемых видов.</dd>
+</dl></div>
+
+<div class="card"><h3>6. Нормы стенда <code>mt/stand_analysis.py · stand/analysis.json</code></h3>
+<dl>
+<dt>Что это</dt><dd>p10 / медиана / p90 метрик стенда (шаг, локти, колени) по категориям, по задачам без дефектов; пороги детекторов в <code>DETECT</code>.</dd>
+<dt>Использование</dt><dd>Только отчёт; <span class="no">никто их не запрашивает в конвейере.</span></dd>
+</dl></div>
+
+<h2>Вывод</h2>
+<p class="verdict">Того, что вы ожидаете («воксельный анализатор понимает, где ноги и руки, и сверяет их топологию с базой категории»), в проде <span class="no">нет</span>. Есть 413 скелетов с векторами длин и направлений костей, но они не сравниваются с текущей моделью ни при выборе «верха», ни при фите. Ось «верх» решают геометрия (<code>orient.estimate_up</code>, <code>base_guard</code>) и воксельный судья лежащего бипеда, план тела — слова Vision и списки слов.</p>
+
+<h2>Что сделать, чтобы база работала на риг</h2>
+<ul>
+<li>Собрать из индекса скелетов приор категории: по 413 записям (только с пройденным QA) — канонические пропорции и направления цепочек ног/рук/шеи относительно «верха» для каждой категории реестра. Это один файл <code>skeleton_db/category_priors.json</code>, версионируемый.</li>
+<li>Использовать приор в выборе «верха» и плана тела: кандидат оси отклоняется, если трассированные цепочки ног смотрят вбок или вверх, а голова вниз относительно приора. Агент «Orientation · V3» сейчас делает первую версию на задаче cb402cd3.</li>
+<li>Заменить topology-вектор, который даёт cos 1,0 для всех ригов одного шаблона, на вектор, в котором есть пропорции и пространственная раскладка (он уже есть как <code>pose</code>; искать по паре topo+pose).</li>
+<li>Включить гео-уровень кэша анализа обратно только вместе с приором, который отбрасывает «ёжик = краб».</li>
+</ul>
