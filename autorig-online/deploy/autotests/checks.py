@@ -1578,6 +1578,44 @@ def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512, on_run=Non
             "edges_over_4x": (m.get("stretch") or {}).get("edges_over_4x")}
 
 
+def stand_tear(ctx, clip="auto", fps=12):
+    """«Mesh falls apart» on every rig of the corpus (owner order 2026-10-14, Anim stand · V3): the stand's stretch
+    (mt.anim_stand.stretch_metrics = mt.skin_postvalidate.validate_glb) on the case's rig step with the stand's clip
+    rule (biped Running, quadruped q-gallop, monster its own walk, else rig_check), at the stand's 12 fps samples,
+    metrics only (no video). worst_edge_ratio, edges_over_4x (visible: ratio > 4 and grown > 0.5 % of the model),
+    tear = ratio > 30."""
+    import math as _m
+    import shutil as _sh
+    from mt import anim_stand as AS
+    run = ctx["run"]
+    t = time.time()
+    holder = []
+    try:
+        glb, rj, _src = AS.resolve_rig(run)
+        rig = AS._pick_rig(run, glb, rj, holder)
+        choice = AS.choose_clip(rig, clip)
+        c = AS.build_clip(rig, choice)
+        o = AS.options({})
+        times = np.asarray(c["times"], float)
+        dur = float(times[-1]) if len(times) else 0.0
+        play = min(dur, float(o["clip_seconds_max"]))
+        n = int(_m.floor(play * fps + 1e-6)) + (0 if c.get("loop") and play >= dur - 1e-6 and dur > 0 else 1)
+        if not (c["rotations"] or c.get("translations")) or n < 2:
+            return {"seconds": round(time.time() - t, 3), "clip": c.get("name"), "status": "no_clip",
+                    "worst_edge_ratio": 1.0, "edges_over_4x": 0, "tear": False, "stretch_valid": 1}
+        idx = AS.resample(c, np.arange(n) / fps)["_idx"]
+        st = AS.stretch_metrics(AS.Model(glb), c, idx, int(o["stretch_proxy_verts"]))
+    finally:
+        for d in holder:
+            _sh.rmtree(d, ignore_errors=True)
+    return {"seconds": round(time.time() - t, 3), "clip": c.get("name"), "clip_why": choice.get("why"),
+            "status": st.get("status"), "worst_edge_ratio": st.get("worst_edge_ratio"),
+            "edges_over_4x": st.get("edges_over_4x"), "tear": bool(st.get("tear")), "samples": st.get("samples"),
+            "stretch_valid": int(st.get("status") in ("failed", "numeric_deformation_passed")),
+            "stretch_reason": st.get("reason"),
+            "proxy": bool(st.get("proxy"))}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1604,6 +1642,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return hand_rig(ctx)
     if k == "monster_rig":
         return monster_rig(ctx)
+    if k == "anim_stand" and a.get("mode") == "tear" and on:   # stand_tear: the stand's stretch of this rig step
+        return stand_tear(ctx, a.get("clip", "auto"))
     if k == "anim_stand":                                          # Anim stand · V3 (2026-10-14)
         return anim_stand(ctx, a.get("rig"), a.get("rig_json"), a.get("clip", "auto"), a.get("size", 512),
                           ctx.get("run") if on else None)

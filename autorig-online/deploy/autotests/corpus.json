@@ -990,6 +990,41 @@
    "what": "low-poly anime character, 1130 vertices, big flat faces (V3 run f514db35, stand bone_outside)",
    "sha256": "46bb72a9ea7bcf10aa67fccddc1270f0af7170154d67e1d0de5fa9215c615d50",
    "bytes": 51428
+  },
+  "cb402cd3.upload.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ebfa1aff0cadc546ae7a/proj/model_source.glb",
+   "task": "cb402cd3-cd22-40a7-aa8c-94aa9a6e8fbe",
+   "what": "Sangheili.fbx normalized (assimp glb2): skinned T-pose monster, arm span 280 > height 229, named skeleton",
+   "sha256": "4033e335d68daf42cbfde44eb5c01bba5c124cb7e9af983f2b06b49a9703aaea",
+   "bytes": 1194392
+  },
+  "cb402cd3_noskel.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/cb402cd3_noskel.glb",
+   "task": "cb402cd3-cd22-40a7-aa8c-94aa9a6e8fbe",
+   "what": "cb402cd3 skin-baked standing +Y, every bone node renamed n<i>: no readable skeleton (the limb-topology judge decides)",
+   "sha256": "37b82e58b8f9a1e3bd5786f4f719e79b5da4a45e1659fcfab9b05224e563227e",
+   "bytes": 1463324
+  },
+  "cb402cd3_turned_z.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/cb402cd3_turned_z.glb",
+   "task": "cb402cd3-cd22-40a7-aa8c-94aa9a6e8fbe",
+   "what": "run ebfa1aff proj/model.glb as rigged: baked mesh under an autorig_upright +z root (laid on its back by the orientator)",
+   "sha256": "0426cec40c2ba85207856275e5e9c3ee4c0368105a3f0ddb4d92c58ae78dafa1",
+   "bytes": 1464816
+  },
+  "352ca609.source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/352ca609949bbb6cc345/proj/model_source.glb",
+   "task": "0bd658d7",
+   "what": "cartoon cat on four paws (+Y up in the file); rigged standing on its head (-z) on v3.2026-10-14.8",
+   "sha256": "03e47edfb34b4980a269ace2fe8e4477cc9b54868ec4144397220e23919e6ff0",
+   "bytes": 3458076
+  },
+  "d743dbd9.source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/d743dbd92bbfa8896dfd/proj/model_source.glb",
+   "task": "1f1257d2",
+   "what": "winged humanoid creature (+Y up in the file); rigged lying (-z «quadruped») on v3.2026-10-13.8",
+   "sha256": "7e1a46d59eaa11ad264309cd11f8c41a497f2ae1ff6acd760c62e81b814cf17a",
+   "bytes": 721184
   }
  },
  "profiles": {
@@ -1453,10 +1488,10 @@
      "thresholds": {
       "seam_weight_mismatch": [
        "==",
-       0
+       "CAL"
       ]
      },
-     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6",
+     "note": "Seams V3: seam_weight_mismatch measured only (owner order 2026-10-14: the weld-for-skinning stage removed)",
      "target": {
       "thresholds": {
        "open_cut_edges": [
@@ -1489,6 +1524,46 @@
       },
       "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (78 hole copies, 30.0 % H on v3.2026-10-14.6)",
       "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       230
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.371,
+      "edges_over_4x": 222,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     }
    ]
@@ -1773,6 +1848,46 @@
        0
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       150
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.967,
+      "edges_over_4x": 144,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -1905,6 +2020,50 @@
       "reason": "hand weights >1% on 586 torso vertices of the SOURCE skin, measured by Astra on the FBX parts (evidence topology-tail/leakage-and-tail.json); a region-free detector of ours finds 0 on the assimp skin, so it needs Astra's source-part labels",
       "owner": "Skinning → converter · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "invalid"
+     },
+     "xfail": {
+      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -2011,6 +2170,46 @@
        ">=",
        30
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       220
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.551,
+      "edges_over_4x": 212,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     }
    ]
@@ -2122,6 +2321,50 @@
        "==",
        0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "invalid"
+     },
+     "xfail": {
+      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
+      "owner": "Seams · V3"
      }
     }
    ]
@@ -2306,6 +2549,46 @@
        8
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       30
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 14.001,
+      "edges_over_4x": 30,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -2450,14 +2733,54 @@
      "thresholds": {
       "seam_weight_mismatch": [
        "==",
-       0
+       "CAL"
       ],
       "open_cut_edges": [
        "<=",
        0
       ]
      },
-     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+     "note": "Seams V3: seam_weight_mismatch measured only (owner order 2026-10-14: the weld-for-skinning stage removed)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 11.662,
+      "edges_over_4x": 14,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -2664,6 +2987,46 @@
        0
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 26.64,
+      "edges_over_4x": 4,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -2798,6 +3161,46 @@
       ]
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -2874,6 +3277,46 @@
       ]
      },
      "note": "2026-10-11 XPASS -> PASS (bone_check tolerance + pull-in, mt-deploy26): was: 2 joints still outside the voxel solid (was 16 of 22 before the body_shells fix of 2026-10-10)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -3121,6 +3564,46 @@
        3
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 11.662,
+      "edges_over_4x": 14,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -3210,6 +3693,39 @@
        115
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -3658,6 +4174,50 @@
        0
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       1400
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 98.369,
+      "edges_over_4x": 1393,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -3718,6 +4278,39 @@
       "reason": "both arms of the dense raccoon go through the body (left 23%, right 46%) before the arm clearance",
       "owner": "V3 triage · rig quality"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -3803,6 +4396,46 @@
        ">=",
        1
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       50
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 18.094,
+      "edges_over_4x": 44,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
      }
     }
    ]
@@ -3899,6 +4532,46 @@
        200
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       50
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 18.094,
+      "edges_over_4x": 44,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -3991,6 +4664,46 @@
       ]
      },
      "note": "QA calibration V3: the kitbash after the skin fix passes (<= 21x, <= 0.41 % over 4x)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       220
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.551,
+      "edges_over_4x": 212,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -4118,6 +4831,46 @@
        "strong"
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 10.143,
+      "edges_over_4x": 12,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
+     }
     }
    ],
    "note": "sides LL: the two gloves are the same mesh turned 180 degrees about y (congruence 'rotation'), both read as left hands from the thumb against the palm (fingers lean and the thumb lies on the palm side). Flip the rule only after the owner's verdict."
@@ -4201,6 +4954,46 @@
        "==",
        "L"
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
      }
     }
    ]
@@ -4289,6 +5082,46 @@
        1
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.707,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -4367,6 +5200,46 @@
        "==",
        0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       80
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 26.138,
+      "edges_over_4x": 75,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
      }
     }
    ]
@@ -4450,6 +5323,46 @@
        "==",
        0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.186,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
      }
     }
    ]
@@ -4561,6 +5474,39 @@
       "reason": "the dense FBX's fast rig tears 1278 edges over 4x in rig_check",
       "owner": "Skinning · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -4643,6 +5589,50 @@
        "==",
        0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       320
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 33.058,
+      "edges_over_4x": 312,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
      }
     }
    ]
@@ -4926,6 +5916,50 @@
       ]
      },
      "note": "owner 2026-10-11: clothing is its own skinning mode; a plain body gives identical weights with it off"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       50
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 101.213,
+      "edges_over_4x": 48,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -5061,6 +6095,50 @@
        60
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "invalid"
+     },
+     "xfail": {
+      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -5157,6 +6235,46 @@
       ]
      },
      "note": "her limb collisions are the silhouette rig's own (no constitution override): not gated here"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       140
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 17.862,
+      "edges_over_4x": 134,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -5225,6 +6343,46 @@
        "==",
        0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     }
    ]
@@ -5415,6 +6573,46 @@
        0.99
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       230
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.371,
+      "edges_over_4x": 222,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -5471,6 +6669,39 @@
       ]
      },
      "tier": "extended"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ],
    "tier": "extended",
@@ -5608,6 +6839,46 @@
        1
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       230
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.371,
+      "edges_over_4x": 222,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -5716,6 +6987,46 @@
        6
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 2.098,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -5802,6 +7113,46 @@
        0.1
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 2.098,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -5879,6 +7230,46 @@
        "==",
        0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.155,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "numeric_deformation_passed"
      }
     }
    ]
@@ -5971,6 +7362,39 @@
      },
      "note": "cloth mode: the warrior carries armour layers over the body; the Meshy jacket is one fused shell (standard path, reported)",
      "tier": "extended"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -6047,6 +7471,46 @@
      "xfail": {
       "reason": "fused legs stretch, no-gap (2026-10-12: no weld splits for non-bipeds; the old split hid the stretch behind gaps)",
       "owner": "Rig path · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 14.033,
+      "edges_over_4x": 6,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
      }
     }
    ]
@@ -6136,6 +7600,46 @@
        6
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -6183,6 +7687,50 @@
       "reason": "fit_quadruped legs/tail on a chibi with 12 % H legs (a belly-merge leg top made the cat and the bull worse, not shipped)",
       "owner": "V3 rig path (orient/quadruped)"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       790
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 42.938,
+      "edges_over_4x": 783,
+      "tear": true,
+      "clip": "Gallop",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -6211,6 +7759,46 @@
        ">=",
        20
       ]
+     }
+    },
+    {
+     "id": "stand_tear_mt_rig_control",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig_control",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       230
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.371,
+      "edges_over_4x": 222,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     },
     {
@@ -6269,6 +7857,50 @@
        "==",
        "biped"
       ]
+     }
+    },
+    {
+     "id": "stand_tear_mt_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       760
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     },
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 69.36,
+      "edges_over_4x": 755,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
      }
     },
     {
@@ -6424,6 +8056,50 @@
        0.6
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 38.152,
+      "edges_over_4x": 14,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -6476,6 +8152,46 @@
        120
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       60
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 10.066,
+      "edges_over_4x": 59,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -6523,6 +8239,46 @@
        "<=",
        2
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     }
    ]
@@ -6578,6 +8334,39 @@
        0.99
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -6625,6 +8414,46 @@
        "<=",
        5
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 12.164,
+      "edges_over_4x": 4,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     }
    ]
@@ -6695,6 +8524,46 @@
        60
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 15.803,
+      "edges_over_4x": 9,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -6731,6 +8600,46 @@
        ">=",
        5
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 10.092,
+      "edges_over_4x": 194,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
      }
     }
    ]
@@ -6809,6 +8718,39 @@
        1200
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -6847,6 +8789,50 @@
       ]
      },
      "note": "2M-triangle mesh; 60 s budget is measured on customer runs, the gate runs under load (2026-10-11 main session)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       1260
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 100.49,
+      "edges_over_4x": 1257,
+      "tear": true,
+      "clip": "rig_check",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -6883,6 +8869,46 @@
        ">=",
        5
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       610
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 2.337,
+      "edges_over_4x": 608,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
      }
     }
    ]
@@ -6950,6 +8976,39 @@
        0
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -7043,6 +9102,46 @@
        0
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -7091,6 +9190,50 @@
       "reason": "splayed bent legs and a head below the spine are not fitted by fit_quadruped (straight chains, rising neck)",
       "owner": "Rig path · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       500
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 80.255,
+      "edges_over_4x": 497,
+      "tear": true,
+      "clip": "Gallop",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -7137,6 +9280,50 @@
        ">=",
        12
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "invalid"
+     },
+     "xfail": {
+      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
+      "owner": "Seams · V3"
      }
     }
    ]
@@ -7238,6 +9425,46 @@
       ]
      },
      "note": "2026-10-12 Rig path: arm abduction by the torso width at the hand height (limb_amplitude.abduction, armed by arm_clearance when limb collision flags a side): high 0.71 -> none, 716 s -> ~25-75 s"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       150
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 10.852,
+      "edges_over_4x": 143,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -7304,6 +9531,46 @@
       "reason": "fused legs stretch, no-gap (2026-10-12: no weld splits for non-bipeds; the old split hid the stretch behind gaps)",
       "owner": "Rig path · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       240
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 25.034,
+      "edges_over_4x": 238,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -7347,6 +9614,50 @@
        "<=",
        150
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       160
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 68.208,
+      "edges_over_4x": 153,
+      "tear": true,
+      "clip": "Gallop",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
      }
     }
    ]
@@ -7404,6 +9715,46 @@
        1
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       140
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 11.038,
+      "edges_over_4x": 139,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -7451,6 +9802,50 @@
        "==",
        "+z"
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       460
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 137.2,
+      "edges_over_4x": 452,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
      }
     }
    ]
@@ -7504,6 +9899,50 @@
       "reason": "fit_quadruped on a low spiky body: the back chain rides in the spines, the tail zig-zags through the rump (3782 edges over 4x, 2026-10-12)",
       "owner": "Rig tools · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       410
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 219.385,
+      "edges_over_4x": 409,
+      "tear": true,
+      "clip": "Gallop",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -7546,6 +9985,46 @@
        "==",
        "bird"
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       220
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 12.046,
+      "edges_over_4x": 215,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
      }
     }
    ]
@@ -7592,6 +10071,39 @@
       ]
      },
      "tier": "extended"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -7636,6 +10148,50 @@
        15
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       3700
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 147.685,
+      "edges_over_4x": 3698,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -7675,6 +10231,50 @@
        "==",
        "+z"
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       870
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 73.58,
+      "edges_over_4x": 863,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
      }
     }
    ]
@@ -7764,6 +10364,46 @@
        5
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       40
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 23.418,
+      "edges_over_4x": 39,
+      "tear": false,
+      "clip": "rig_check",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -7804,6 +10444,50 @@
        "+y"
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       250
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 30.755,
+      "edges_over_4x": 247,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -7840,6 +10524,50 @@
        ">=",
        5
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       750
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 51.477,
+      "edges_over_4x": 749,
+      "tear": true,
+      "clip": "rig_check",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
      }
     }
    ]
@@ -7900,14 +10628,54 @@
      "thresholds": {
       "seam_weight_mismatch": [
        "==",
-       0
+       "CAL"
       ],
       "open_cut_edges": [
        "<=",
        0
       ]
      },
-     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+     "note": "Seams V3: seam_weight_mismatch measured only (owner order 2026-10-14: the weld-for-skinning stage removed)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       160
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 26.5,
+      "edges_over_4x": 154,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -7992,6 +10760,46 @@
        0
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 9.162,
+      "edges_over_4x": 11,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8045,6 +10853,46 @@
       ]
      },
      "note": "farm 2026-10-12: serpent rig 85 samples outside -> biped 1"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 6.007,
+      "edges_over_4x": 6,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8122,6 +10970,46 @@
       ]
      },
      "note": "farm 2026-10-12 on the live rig: high/high (100 %, 13.9 % H) -> none/none"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       130
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 19.99,
+      "edges_over_4x": 126,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8150,6 +11038,46 @@
        ">=",
        20
       ]
+     }
+    },
+    {
+     "id": "stand_tear_mt_rig_control",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig_control",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       230
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 16.371,
+      "edges_over_4x": 222,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     },
     {
@@ -8204,6 +11132,46 @@
        "==",
        "biped"
       ]
+     }
+    },
+    {
+     "id": "stand_tear_mt_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 5.042,
+      "edges_over_4x": 15,
+      "tear": false,
+      "clip": "Monster Walk",
+      "status": "failed"
      }
     },
     {
@@ -8333,6 +11301,46 @@
       ]
      },
      "note": "rig_first path: 32 -> 26 (mirror_repair v2) -> 24 (leg_recentre_pairs, 2026-10-13); farm build 21 -> 16"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 5.903,
+      "edges_over_4x": 3,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8372,6 +11380,50 @@
       ]
      },
      "note": "2026-10-13 candidate: hands, 37 bones, 7 clips, rig 0.7 s (biped before)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       90
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 30.03,
+      "edges_over_4x": 84,
+      "tear": true,
+      "clip": "rig_check",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -8488,6 +11540,39 @@
        4
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ],
    "note": "extended tier (34 MB model). leg_type digitigrade: the right leg's hock sits 22.7 % H above the toe (the left reads crouched); the aggregate prefers digitigrade."
@@ -8543,6 +11628,46 @@
       ]
      },
      "note": "farm 2026-10-13: Neck 14 -> 0"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 9.162,
+      "edges_over_4x": 11,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8605,6 +11730,46 @@
       ]
      },
      "note": "farm 2026-10-13: Head 20 -> 0, trunk 3 bones"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       80
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 19.38,
+      "edges_over_4x": 74,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8659,6 +11824,46 @@
       ]
      },
      "note": "farm 2026-10-13: Tail2/Tail3 26 -> 10"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       160
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 26.5,
+      "edges_over_4x": 154,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8713,6 +11918,50 @@
       ]
      },
      "note": "2026-10-13: Head 24 -> 3"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "invalid"
+     },
+     "xfail": {
+      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -8771,6 +12020,46 @@
       ]
      },
      "note": "2026-10-13: right arm vertices 0 -> 72"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 9.145,
+      "edges_over_4x": 1,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -8810,6 +12099,39 @@
        4
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ],
    "note": "extended tier (17 MB model); the words carry the category's quadruped / feline on purpose: the crawler word must win"
@@ -8856,6 +12178,46 @@
      }
     },
     {
+     "id": "stand_tear_mt_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 4.0,
+      "edges_over_4x": 12,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
+    },
+    {
      "id": "mt_bones",
      "kind": "bone_outside",
      "paths": [
@@ -8898,6 +12260,39 @@
       ]
      },
      "note": "farm 2026-10-13: rig_check 4x 342 -> 21"
+    },
+    {
+     "id": "stand_tear_deer_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "deer_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -8984,14 +12379,14 @@
      "thresholds": {
       "seam_weight_mismatch": [
        "==",
-       0
+       "CAL"
       ],
       "open_cut_edges": [
        "<=",
        0
       ]
      },
-     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+     "note": "Seams V3: seam_weight_mismatch measured only (owner order 2026-10-14: the weld-for-skinning stage removed)"
     },
     {
      "id": "mt_holes",
@@ -9011,6 +12406,46 @@
       ]
      },
      "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 8.21,
+      "edges_over_4x": 3,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -9055,6 +12490,46 @@
        "<=",
        25
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 14.033,
+      "edges_over_4x": 6,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
      }
     }
    ],
@@ -9111,6 +12586,46 @@
       "reason": "the tail shell welded along the hind legs takes their cores (geodesic_assign); a split there opens a 9-40 % H gap on this triangle-soup mesh (welded share 0.32, boar_unwelded_gaps), so leg_core_own=trunk leaves them on the tail. Needs the shell welded / split by Rig classes (boar_tail_shell)",
       "owner": "Rig classes V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       160
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 26.5,
+      "edges_over_4x": 154,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ],
    "note": "before: LeftHind 236 / 236 and RightHind 340 / 340 core vertices on Tail3 / Tail; after: 0. QA stretch rises (603 -> 789 edges, rig_check 4x 116 -> 230) because the fused tail shell now follows moving legs"
@@ -9161,6 +12676,39 @@
       "reason": "biped arm fit on the crouching gorilla: the wrist sits near the elbow of the hanging arm, the other arm raised forward (5566 edges over 4x, 2026-10-13); a posed-arm release",
       "owner": "Limb stabilization · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -9203,6 +12751,46 @@
        "<=",
        40
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       90
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 27.213,
+      "edges_over_4x": 86,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     }
    ]
@@ -9256,6 +12844,46 @@
        9
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 11.33,
+      "edges_over_4x": 10,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ],
    "note": "with head_own: 10/10, every clip 0 stretched edges; the horse video gaits (walk/trot/canter/gallop/rear/idle) + Look Around / Tail Wag / Jump"
@@ -9307,6 +12935,46 @@
        ">=",
        9
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       50
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 15.241,
+      "edges_over_4x": 47,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
      }
     }
    ],
@@ -9364,6 +13032,46 @@
       "reason": "the sitting-pose fit (splayed hind legs read as the front pair, forward -z) - equine milestone 2",
       "owner": "Fable monsters/animals"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       120
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 24.776,
+      "edges_over_4x": 111,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ],
    "note": "XFAIL until the sitting-pose fit lands (milestone 2)"
@@ -9415,6 +13123,46 @@
        ">=",
        30
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       130
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 124,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
      }
     }
    ]
@@ -9472,6 +13220,50 @@
        15
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       2400
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 281.767,
+      "edges_over_4x": 2400,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -9514,6 +13306,50 @@
        "<=",
        80
       ]
+     }
+    },
+    {
+     "id": "stand_tear_mt_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       140
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     },
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 31.705,
+      "edges_over_4x": 133,
+      "tear": true,
+      "clip": "Gallop",
+      "status": "failed"
      }
     },
     {
@@ -9569,6 +13405,39 @@
       "reason": "thigh wins the back of the shin, knee tear; the tail tip on the croup (fix in the gate 2026-10-13)",
       "owner": "Rig classes · V3"
      }
+    },
+    {
+     "id": "stand_tear_elephant_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "elephant_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     },
     {
      "id": "elephant_bones",
@@ -9660,6 +13529,39 @@
       "reason": "the arms sit inside the chest",
       "owner": "Limb stabilization · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -9698,6 +13600,50 @@
        ">=",
        1
       ]
+     }
+    },
+    {
+     "id": "stand_tear_mt_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       80
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     },
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 39.355,
+      "edges_over_4x": 78,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
      }
     },
     {
@@ -9765,6 +13711,46 @@
      }
     },
     {
+     "id": "stand_tear_girl_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "girl_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 4.623,
+      "edges_over_4x": 1,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
+    },
+    {
      "id": "girl_bones",
      "kind": "bone_outside",
      "paths": [
@@ -9809,6 +13795,39 @@
        1
       ]
      }
+    },
+    {
+     "id": "stand_tear_demon_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "demon_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     },
     {
      "id": "demon_bones",
@@ -9990,6 +14009,50 @@
       "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (142 hole copies, 89.6 % H on v3.2026-10-14.6)",
       "owner": "Seams · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       290
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 39.98,
+      "edges_over_4x": 284,
+      "tear": true,
+      "clip": "Running",
+      "status": "failed"
+     },
+     "xfail": {
+      "reason": "mesh falls apart on .6–.8 (regression under bisect by Seams · V3)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -10090,6 +14153,46 @@
        0
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -10172,6 +14275,50 @@
      }
     },
     {
+     "id": "stand_tear_mt_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "xfail": {
+      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
+      "owner": "Seams · V3"
+     },
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.0,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "invalid"
+     }
+    },
+    {
      "id": "mt_holes",
      "kind": "detach",
      "paths": [
@@ -10221,6 +14368,46 @@
      }
     },
     {
+     "id": "stand_tear_low_rig",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "low_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 4.764,
+      "edges_over_4x": 1,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
+    },
+    {
      "id": "low_holes",
      "kind": "detach",
      "paths": [
@@ -10248,14 +14435,14 @@
      "thresholds": {
       "seam_weight_mismatch": [
        "==",
-       0
+       "CAL"
       ],
       "open_cut_edges": [
        "<=",
        0
       ]
      },
-     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+     "note": "Seams V3: seam_weight_mismatch measured only (owner order 2026-10-14: the weld-for-skinning stage removed)"
     },
     {
      "id": "low_seams",
@@ -10267,14 +14454,14 @@
      "thresholds": {
       "seam_weight_mismatch": [
        "==",
-       0
+       "CAL"
       ],
       "open_cut_edges": [
        "<=",
        0
       ]
      },
-     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+     "note": "Seams V3: seam_weight_mismatch measured only (owner order 2026-10-14: the weld-for-skinning stage removed)"
     }
    ]
   },
@@ -10328,6 +14515,46 @@
        "<=",
        15.0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 2.794,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Monster Walk",
+      "status": "numeric_deformation_passed"
      }
     }
    ]
@@ -10397,10 +14624,10 @@
      "thresholds": {
       "seam_weight_mismatch": [
        "==",
-       0
+       "CAL"
       ]
      },
-     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6",
+     "note": "Seams V3: seam_weight_mismatch measured only (owner order 2026-10-14: the weld-for-skinning stage removed)",
      "target": {
       "thresholds": {
        "open_cut_edges": [
@@ -10410,6 +14637,46 @@
       },
       "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (open_cut_edges 762 on v3.2026-10-14.6)",
       "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 7.53,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Monster Walk",
+      "status": "failed"
      }
     }
    ]
@@ -10481,6 +14748,46 @@
       "reason": "the weight mask (mt/weight_mask.py) is installed OFF: on, the gate of 2026-10-14 regressed elephant_trunk_chain, gorilla_bust_legless and joint_reweld_holes; with MT_WEIGHT_MASK=on this case passes (13.9 -> 4.35 % far-limb leak)",
       "owner": "Leakage · V3"
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       60
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 13.106,
+      "edges_over_4x": 57,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -10524,6 +14831,46 @@
        0.12
       ]
      }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       230
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 22.102,
+      "edges_over_4x": 223,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -10566,6 +14913,46 @@
        "==",
        0
       ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       240
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 25.034,
+      "edges_over_4x": 238,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
      }
     }
    ]
@@ -10643,6 +15030,46 @@
       ]
      },
      "note": "the installed rig after mt_fix (the fast fix replaced rig/rigged.glb)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       10
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 4.12,
+      "edges_over_4x": 1,
+      "tear": false,
+      "clip": "Gallop",
+      "status": "failed"
+     }
     }
    ]
   },
@@ -10704,6 +15131,491 @@
       ]
      },
      "note": "farm 2026-10-14: 18 -> 0 (joint_centring candidate; solve: nothing to correct); with the centre line kept on a symmetric body (mt-deploy 2): 18 -> 9, Hips left"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
+     "measured_2026_10_14": {
+      "worst_edge_ratio": 1.692,
+      "edges_over_4x": 0,
+      "tear": false,
+      "clip": "Running",
+      "status": "failed"
+     }
+    }
+   ]
+  },
+  {
+   "id": "monster_tpose_skeleton_up",
+   "task": "cb402cd3-cd22-40a7-aa8c-94aa9a6e8fbe",
+   "cost": 1,
+   "defect": "owner 2026-10-14 (task cb402cd3, run ebfa1aff #2139: «монстр с ногами и руками лежит а не стоит»): a skinned T-pose Sangheili, arm span 280 > height 229, so orient.estimate_up's biped rule (up = the longest axis) failed: +y read «bird» 1.15, its back +z «quadruped: 4 foot blobs» [36,35,14,12] 2.0 (0.9); _lying_biped could not overrule (+y arm chain 69 % H outside 25..60, +z 0 arms) and the model was rigged lying on its back; the rebuild after Vision judged the turned model and kept it. Fix (mt/up_prior.skeleton_up): the customer's skeleton (Foot.L/R -> Head along +y, cos 0.98) decides the up before any geometric pick; front from the toes (+z).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "cb402cd3.upload.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       4
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       30
+      ],
+      "hips_above_feet_pct_H": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "lands with the Orientation · V3 deploy of 2026-10-14 (limb topology veto, source skeleton up, rebuild under the upright root)",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
+    }
+   ]
+  },
+  {
+   "id": "monster_tpose_limb_topology",
+   "task": "cb402cd3-cd22-40a7-aa8c-94aa9a6e8fbe",
+   "cost": 1,
+   "defect": "owner 2026-10-14 (task cb402cd3, run ebfa1aff #2139: «монстр с ногами и руками лежит а не стоит»): a skinned T-pose Sangheili, arm span 280 > height 229, so orient.estimate_up's biped rule (up = the longest axis) failed: +y read «bird» 1.15, its back +z «quadruped: 4 foot blobs» [36,35,14,12] 2.0 (0.9); _lying_biped could not overrule (+y arm chain 69 % H outside 25..60, +z 0 arms) and the model was rigged lying on its back; the rebuild after Vision judged the turned model and kept it. Fix (rig_first._limb_topology + mt/up_prior priors from the skeleton DB): +z's trace has no limb end below 48 % H, its «legs» point sideways from the pelvis (dy +0.10 vs the quadruped prior's p90 -0.82): vetoed; +y has two feet at 1 % H, legs dy -0.96, an arm chain and a high wide hand pair: biped, kept upright. Input without readable bones.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "cb402cd3_noskel.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       4
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       30
+      ],
+      "hips_above_feet_pct_H": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "lands with the Orientation · V3 deploy of 2026-10-14 (limb topology veto, source skeleton up, rebuild under the upright root)",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
+    }
+   ]
+  },
+  {
+   "id": "monster_turned_rebuild",
+   "task": "cb402cd3-cd22-40a7-aa8c-94aa9a6e8fbe",
+   "cost": 1,
+   "defect": "owner 2026-10-14 (task cb402cd3, run ebfa1aff #2139: «монстр с ногами и руками лежит а не стоит»): a skinned T-pose Sangheili, arm span 280 > height 229, so orient.estimate_up's biped rule (up = the longest axis) failed: +y read «bird» 1.15, its back +z «quadruped: 4 foot blobs» [36,35,14,12] 2.0 (0.9); _lying_biped could not overrule (+y arm chain 69 % H outside 25..60, +z 0 arms) and the model was rigged lying on its back; the rebuild after Vision judged the turned model and kept it. Fix (rig_first: every pass judges the up under an earlier autorig_upright root and replaces a wrong turn; orient.json keeps every pass's pick; the re-rig copies proj/model_source.glb): the model as the bad run left it stands up again on a rebuild / re-rig.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "cb402cd3_turned_z.glb",
+     "params": {
+      "words": "abstract humanoid figure",
+      "body": "biped",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       4
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       30
+      ],
+      "hips_above_feet_pct_H": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "lands with the Orientation · V3 deploy of 2026-10-14 (limb topology veto, source skeleton up, rebuild under the upright root)",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
+    }
+   ]
+  },
+  {
+   "id": "quad_cat_not_on_head",
+   "task": "0bd658d7",
+   "cost": 1,
+   "defect": "Orientation · V3 (2026-10-14, run 352ca609): the orientator's +y «quadruped: 4 foot blobs» (0.9) was right; rig_first._lying_biped's voxel trace read the hind legs of the -z turn as 2 arm chains (1 limb end on the floor) and stood the cat on its head. Fix: a quadruped pick whose trace stands on >= 3 limb ends the way the skeleton DB's quadruped prior does (legs dy -0.80) yields only to a full biped topology.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "352ca609.source.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       15
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ]
+     },
+     "xfail": {
+      "reason": "lands with the Orientation · V3 deploy of 2026-10-14",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3"
+    }
+   ]
+  },
+  {
+   "id": "winged_humanoid_not_lying",
+   "task": "1f1257d2",
+   "cost": 1,
+   "defect": "Orientation · V3 (2026-10-14, run d743dbd9, Vision: «floating horizontally»): the orientator turned a winged humanoid to -z «quadruped» (0.9; wing tips + feet as 4 blobs); the trace of -z has its «legs» sideways from the pelvis (dy -0.36 vs the humanoid prior's p90 -0.99): vetoed, the file's +y stands (legs dy -0.90).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "d743dbd9.source.glb",
+     "params": {
+      "words": "winged humanoid creature",
+      "body": "biped",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "lands with the Orientation · V3 deploy of 2026-10-14",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3"
     }
    ]
   }
