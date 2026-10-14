@@ -31,9 +31,21 @@
             });
     }
 
+    // Gallery perf (2026-10-15): fetch the demo only when its card is on screen, and not on data saver.
+    function whenVisible() {
+        const video = document.getElementById('home-demo-video');
+        const conn = navigator.connection || {};
+        if (!video || conn.saveData || /(^|-)2g$/.test(String(conn.effectiveType || ''))) return;
+        if (!('IntersectionObserver' in window)) { startHomeDemoPreview(); return; }
+        const io = new IntersectionObserver((entries) => {
+            if (entries.some((e) => e.isIntersecting)) { io.disconnect(); startHomeDemoPreview(); }
+        }, { threshold: 0.25 });
+        io.observe(video);
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startHomeDemoPreview);
+        document.addEventListener('DOMContentLoaded', whenVisible);
     } else {
-        startHomeDemoPreview();
+        whenVisible();
     }
 })();
