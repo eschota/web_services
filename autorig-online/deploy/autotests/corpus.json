@@ -9091,10 +9091,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     },
     {
@@ -9107,10 +9103,6 @@
        ">=",
        9
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     }
    ],
@@ -9151,10 +9143,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     },
     {
@@ -9167,10 +9155,6 @@
        ">=",
        9
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     }
    ],
@@ -9211,10 +9195,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     },
     {
@@ -9581,6 +9561,25 @@
        4
       ]
      }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hole_copies": [
+       "<=",
+       0
+      ],
+      "slit_max_pct_H": [
+       "<=",
+       1.0
+      ]
+     },
+     "note": "Rig fixes V3 2026-10-14: the box arms stay welded at the torso contact (block_arm_split off) and arm bones own only the columns (block_arm_exclusive); split, they opened 92-97 hole copies, slit 74-150 % H"
     },
     {
      "id": "girl_rig",
@@ -10061,6 +10060,60 @@
       "slit_max_pct_H": [
        "<=",
        1.0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hands_on_thighs_monster",
+   "task": "39c0379f-05b9-4b4a-9ece-c1509a98068a",
+   "cost": 1,
+   "owner": "Rig fixes · V3",
+   "defect": "Rig fixes V3 (2026-10-14): «slender humanoid creature» with the hands hanging on the thighs. Since rig_first reads Vision's words, the monster stage triggers by the word «creature» and pins the legs; its pins also skipped the pose trace, so the hanging arms were never turned to A, the hands stayed fused to the thighs and the contact split opened RightHand | LeftLeg holes of 66.8 % H (116 hole copies, limb_contact_split_faces 421; 13.9 % H / 126 faces on the .6 rig built without words). Fix: rig_first traces / turns the arms when the monster pinned only legs -> 0 holes, 124 faces",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "39c0379f.model.glb",
+     "params": {
+      "words": "slender humanoid creature",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "slit_max_pct_H": [
+       "<=",
+       15.0
       ]
      }
     }

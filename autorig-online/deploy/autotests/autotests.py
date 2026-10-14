@@ -49,7 +49,8 @@ AGENT = "Autotests · V3"
 PROJECT = "AutoRig V3"
 DEV_SEND = "https://autorig.online/dev/api/send"
 PATHS = ("mt", "backend", "converter", "live")
-MT_SHARED_LINKS = ("animlib", "models", "texlib", "skeleton_db")      # read-only resources of the MT root
+MT_SHARED_LINKS = ("animlib", "models", "texlib", "skeleton_db",   # read-only resources of the MT root;
+                   "animal_motion_lib")                             # the video-made gaits (equine cases count them)
 MT_SHARED_COPIES = ("fast_registry.json", "live-stats.json")          # written by the code under test: copies
 
 
