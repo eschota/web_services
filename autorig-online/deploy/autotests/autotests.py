@@ -49,7 +49,8 @@ AGENT = "Autotests · V3"
 PROJECT = "AutoRig V3"
 DEV_SEND = "https://autorig.online/dev/api/send"
 PATHS = ("mt", "backend", "converter", "live")
-MT_SHARED_LINKS = ("animlib", "models", "texlib", "skeleton_db")      # read-only resources of the MT root
+MT_SHARED_LINKS = ("animlib", "models", "texlib", "skeleton_db",   # read-only resources of the MT root;
+                   "animal_motion_lib")                             # the video-made gaits (equine cases count them)
 MT_SHARED_COPIES = ("fast_registry.json", "live-stats.json")          # written by the code under test: copies
 
 
@@ -685,7 +686,9 @@ def main() -> int:
                 _t.sleep(10)
             # customer tasks first (owner 2026-10-11): a gate starts only when the VPS is not overloaded; on
             # 2026-10-12 17:10 four gates plus customer runs drove the load to 335 and OOM took the site down
-            cap = float(os.environ.get("AUTORIG_GATE_MAX_LOAD", str(os.cpu_count() or 8)))
+            # 2026-10-14: half the cores, not all of them: at load 24 on 24 cores the Trends service on this box
+            # timed out (its SQL took 56 s) and the kernel OOM-killed at 05:43 UTC
+            cap = float(os.environ.get("AUTORIG_GATE_MAX_LOAD", str(max(4, (os.cpu_count() or 8) // 2))))
             for _ in range(180):
                 if os.getloadavg()[0] <= cap:
                     break
