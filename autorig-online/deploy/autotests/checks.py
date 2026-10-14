@@ -876,6 +876,50 @@ def mt_arm_clearance(ctx):
     return out
 
 
+QUAD_FORWARD_YAW = {"+z": 0.0, "-z": 180.0, "+x": -90.0, "-x": 90.0}   # mt.fastrig.FORWARD_YAW
+
+
+def quad_leg_frame(run, rig) -> dict:
+    """Quad legs · V3 (2026-10-14): a quadruped rig's legs in its fit frame (rig.json forward_axis + proj/yaw.json, as
+    mt.fastrig.build turns it: +Z the head end, +Y up, +X the model's left), from rig.json alone:
+    quad_crossed_pairs  pairs whose Left knee or foot lies > 2 % H right of the Right one (0 on a right rig);
+    quad_front_knees_ahead  the front knees ahead of the hind knees, share of the body length (>= 0.12 on a standing
+                        animal; the short-leg column fit put all four knees mid-body: -0.56 .. +0.03);
+    quad_up_biped_trace 1 when proj/orient.json took the up from the biped voxel trace (the boars / wolves stood on
+                        their tails, 2026-10-14);
+    quad_legs_final_fail the failed leg checks fastrig recorded (rig.json quad_legs.final_fail; -1 without the record).
+    Empty for a rig without quadruped legs."""
+    import math
+    heads = {b["name"]: np.asarray(b["head"], float) for b in rig.get("bones") or [] if b.get("head")}
+    need = [f"{s_}{l}{k}" for s_ in ("Left", "Right") for l in ("Front", "Hind") for k in ("Leg", "Foot")]
+    if any(n not in heads for n in need) or "Hips" not in heads:
+        return {}
+    fa = str(rig.get("forward_axis") or "+z")
+    yp = pathlib.Path(run) / "proj" / "yaw.json"
+    yj = json.loads(yp.read_text()) if yp.is_file() else {}
+    chg = (rig.get("forward_check") or {}).get("changed")
+    yaw = yj.get("yaw_deg") if (yj.get("forward_axis") == fa and yj.get("yaw_deg") is not None and not chg) \
+        else QUAD_FORWARD_YAW.get(fa, 0.0)
+    a = math.radians(float(yaw))
+    Rc = np.array([[math.cos(a), 0, math.sin(a)], [0, 1, 0], [-math.sin(a), 0, math.cos(a)]])
+    J = {k: v @ Rc.T for k, v in heads.items()}
+    ys = np.array([v[1] for v in J.values()])
+    H = float(ys.max() - ys.min()) or 1.0
+    front = max(float(J[n][2]) for n in ("Nose_End", "Head", "Spine2", "Hips") if n in J)
+    back = min(float(J[n][2]) for n in ("Hips", "LeftHindFoot", "RightHindFoot", "LeftHindToe_End", "RightHindToe_End")
+               if n in J)
+    crossed = sum(1 for l in ("Front", "Hind")
+                  if min(float(J[f"Left{l}{k}"][0] - J[f"Right{l}{k}"][0]) for k in ("Leg", "Foot")) < -0.02 * H)
+    zf = (float(J["LeftFrontLeg"][2]) + float(J["RightFrontLeg"][2])) / 2
+    zh = (float(J["LeftHindLeg"][2]) + float(J["RightHindLeg"][2])) / 2
+    op = pathlib.Path(run) / "proj" / "orient.json"
+    oj = json.loads(op.read_text()) if op.is_file() else {}
+    ql = rig.get("quad_legs")
+    return {"quad_crossed_pairs": crossed, "quad_front_knees_ahead": round((zf - zh) / max(front - back, 1e-9), 3),
+            "quad_up_biped_trace": int(str(oj.get("plan")) == "biped" and "voxel trace" in str(oj.get("why"))),
+            "quad_legs_final_fail": len(ql.get("final_fail") or []) if isinstance(ql, dict) else -1}
+
+
 def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body=""):
     """The rig the viewer gets first (classic mirror + V3 conveyor): python -m mt.rig_first on the upload, like
     mt/classic_mirror.py does at upload time. forward_axis: the front the conveyor's projections / Vision know
@@ -928,7 +972,8 @@ def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, bod
                                 if str(k).startswith("t=") and isinstance(v, dict)),
             "rig_check_4x": sum(int(v.get("edges_over_4x") or 0) for k, v in
                                 ((rig.get("checks") or {}).get("rig_check_stretch") or {}).items()
-                                if str(k).startswith("t=") and isinstance(v, dict))}
+                                if str(k).startswith("t=") and isinstance(v, dict)),
+            **quad_leg_frame(run, rig)}                  # Quad legs · V3 (2026-10-14)
 
 
 def hand_rig(ctx):
@@ -996,10 +1041,12 @@ def hand_detect(ctx, input_name, words=""):
             "max_branches": max([g.get("branches") or 0 for g in d.get("groups") or []] or [0])}
 
 
-def mt_fast_analysis(ctx):
-    """The V3 fast analysis stage (mt.fast_analysis: bone_check, heel rules, symmetry, proportions, parts)."""
+def mt_fast_analysis(ctx, apply=False):
+    """The V3 fast analysis stage (mt.fast_analysis: bone_check, heel rules, symmetry, proportions, parts). apply=True
+    runs it as the conveyor does (--apply: the fast fix rebuilds and keeps the best candidate, Joint centring · V3);
+    applied_after = the bone samples outside the rig that ends up installed."""
     run = ctx["run"]
-    p, wall = _child([PY, "-P", "-m", "mt.fast_analysis", "--dir", str(run)], timeout=600)
+    p, wall = _child([PY, "-P", "-m", "mt.fast_analysis", "--dir", str(run)] + (["--apply"] if apply else []), timeout=600)
     if p.returncode != 0:
         raise RuntimeError(f"fast_analysis exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
     fa = json.loads((run / "analysis" / "fast.json").read_text())
@@ -1016,7 +1063,12 @@ def mt_fast_analysis(ctx):
             "leg_rules_failed": len((res.get("leg_joint_rules") or {}).get("failed") or []),   # Leg fit V3
             "leg_rule_codes": (res.get("leg_joint_rules") or {}).get("failed"),
             "warnings": len(fa.get("warnings") or []), "symmetry_worst_pct_H": (res.get("symmetry_check") or {}).get("worst_pct_H"),
-            "ops_total_s": (fa.get("timings") or {}).get("total")}
+            "ops_total_s": (fa.get("timings") or {}).get("total"),
+            **({"applied": int(bool((fa.get("applied") or {}).get("applied"))),
+                "applied_after": ((fa.get("applied") or {}).get("after") if (fa.get("applied") or {}).get("applied")
+                                  else bo.get("outside_before")),
+                "applied_candidate": (fa.get("applied") or {}).get("candidate"),
+                "joint_centring_proposal": (bo.get("joint_centring") or {}).get("official_after")} if apply else {})}
 
 
 def s_doc(path):
@@ -1344,6 +1396,35 @@ def rig_upright(ctx):
     return out
 
 
+def seam_weights(ctx):
+    """Seams · V3 (2026-10-14, docs/seams-spec-20261014.md): one weight per coincident copy, no open slit.
+    seam_weight_mismatch: the engine's own count in rig.json (coincident written pairs whose weights differ and that
+    are not its split copies of one welded vertex; -1 = the rig predates the check); open_cut_edges: recounted on the
+    final GLB (mt/cut_cap.open_cut_edges: boundary edges whose both ends are copies with other weights = holes);
+    diverging_copies: every copy whose weights differ from another copy of its position."""
+    from mt import cut_cap as CC, seam_policy as SP
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    c = rig.get("checks") or {}
+    data = (run / "rig" / "rigged.glb").read_bytes()
+    js, binary, prims = SP._parse(data)
+    div = 0
+    if prims:
+        import numpy as np
+        names, _parts = SP._part_names(js)
+        nb = max(len(names), int(max(r["J"].max(initial=0) for r in prims)) + 1)
+        P = np.concatenate([r["P"] for r in prims])
+        J = np.concatenate([r["J"] for r in prims])
+        W = np.concatenate([r["W"] for r in prims])
+        div = int(SP._diverging(P, J, W, nb)[1].sum())
+    sp = rig.get("seam_policy") or {}
+    m = c.get("seam_weight_mismatch")
+    return {"seam_weight_mismatch": -1 if m is None else int(m), "open_cut_edges": int(CC.open_cut_edges(data)),
+            "diverging_copies": div, "engine_open_hole_copies": c.get("seam_open_hole_copies"),
+            "policy": sp.get("policy"), "candidates": sp.get("candidates_n"), "kept": sp.get("kept"),
+            "welded": sp.get("welded"), "policy_seconds": sp.get("seconds")}
+
+
 def dup_gaps(glb_path, frames=12):
     """Rig path V3 (owner #1935, the boar falling apart): vertices that share a position (UV seams, a triangle soup)
     must move together. -> {diverging_dups: vertices whose weights differ from their position's mean (L1 > 0.05),
@@ -1463,7 +1544,7 @@ def monster_rig(ctx):
             "detect_s": mn.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
 
 
-def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512):
+def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512, on_run=None):
     """Anim stand · V3 (mt/anim_stand.py, owner 2026-10-14): the 4-view stand (1 s bind pose, then Running for a
     biped) of a corpus rig on the tree under test, in a child at the conveyor's size: its wall seconds, that the
     metrics and the mp4 / gif / sheet exist, the step length in H, the elbow width in shoulder widths, the stretch and
@@ -1471,8 +1552,12 @@ def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512):
     run = pathlib.Path(ctx["work"]) / "stand" / "a57a00000000000000d1"
     shutil.rmtree(run.parent, ignore_errors=True)
     (run / "rig").mkdir(parents=True)
-    shutil.copyfile(_input(rig_input), run / "rig" / "rigged.glb")
-    shutil.copyfile(_input(rig_json_input), run / "rig" / "rig.json")
+    if on_run is not None:                               # Weight mask · V3 (2026-10-14): the stand of this case's own
+        rig_src = (pathlib.Path(on_run) / "rig" / "rigged.glb", pathlib.Path(on_run) / "rig" / "rig.json")   # rig step
+    else:
+        rig_src = (_input(rig_input), _input(rig_json_input))
+    shutil.copyfile(rig_src[0], run / "rig" / "rigged.glb")
+    shutil.copyfile(rig_src[1], run / "rig" / "rig.json")
     p, wall = _child([PY, "-P", "-m", "mt.anim_stand", str(run), "--clip", clip, "--size", str(int(size))], timeout=300)
     if p.returncode != 0:
         raise RuntimeError(f"anim_stand exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
@@ -1488,7 +1573,9 @@ def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512):
             "step_length_H": m.get("step_length_H"), "stride_period_s": m.get("stride_period_s"),
             "elbow_width_sw_min": ew.get("min"), "elbow_width_sw_mean": ew.get("mean"),
             "worst_edge_ratio": (m.get("stretch") or {}).get("worst_edge_ratio"),
-            "leak_pct": (m.get("leak") or {}).get("share_pct"), "seconds_by_stage": m.get("seconds")}
+            "leak_pct": (m.get("leak") or {}).get("share_pct"), "seconds_by_stage": m.get("seconds"),
+            "leak_far_pct": (m.get("leak") or {}).get("far_share_pct"),
+            "edges_over_4x": (m.get("stretch") or {}).get("edges_over_4x")}
 
 
 # ------------------------------------------------------------------------------------------------ dispatch
@@ -1512,13 +1599,14 @@ def run_check(check: dict, ctx: dict) -> dict:
         return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False),
                             a.get("body", ""))
     if k == "mt_fast_analysis":
-        return mt_fast_analysis(ctx)
+        return mt_fast_analysis(ctx, bool(a.get("apply")))
     if k == "hand_rig":
         return hand_rig(ctx)
     if k == "monster_rig":
         return monster_rig(ctx)
     if k == "anim_stand":                                          # Anim stand · V3 (2026-10-14)
-        return anim_stand(ctx, a["rig"], a["rig_json"], a.get("clip", "auto"), a.get("size", 512))
+        return anim_stand(ctx, a.get("rig"), a.get("rig_json"), a.get("clip", "auto"), a.get("size", 512),
+                          ctx.get("run") if on else None)
     if k == "multilimb_rig":
         return multilimb_rig(ctx)
     if k == "hand_detect":
@@ -1615,6 +1703,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         _r = _dc.check(pathlib.Path(target).read_bytes(), frames=int(a.get("frames", 12)))
         return {k_: _r.get(k_) for k_ in ("cuts", "hole_copies", "slit_max_pct_H", "torn_copies",
                                           "detach_max_pct_H", "released_max_pct_H")}
+    if k == "seam_weights":                               # Seams · V3 (2026-10-14)
+        return seam_weights(ctx)
     if k == "dup_gaps":
         return dup_gaps(ctx["run"] / "rig" / "rigged.glb")
     if k == "rig_upright":

@@ -896,7 +896,7 @@
   "8601aa36.model.glb": {
    "source": "/srv/autorig/data/motion_transfer/runs/ccfc481c738464250131/proj/model.glb",
    "task": "8601aa36-e05e-4241-9319-0668b6ba0a5b",
-   "what": "muscular demon warrior, claw-toed boots (V3 run ccfc481c)",
+   "what": "demon, the right hand resting on the thigh (V3 run ccfc481c738464250131 proj/model.glb)",
    "sha256": "ee3c3a51da3bf99d1cb6bab453cc8caad8d7e2c161b0315971254a252781f506",
    "bytes": 3110668
   },
@@ -962,6 +962,34 @@
    "what": "slender humanoid creature (yellow skeleton), arms hanging with the hands on the thighs (V3 proj model)",
    "sha256": "a754afd2e38ebeee468fdada2acfebc9b43dc138b76db84be3168e85cff0b9b1",
    "bytes": 743832
+  },
+  "56fa7b00.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/a9ecd34e602e14be9091/proj/model.glb",
+   "task": "56fa7b00-d951-4af6-b616-9c5be5c6bbc1",
+   "what": "T-pose cartoon biped, forearms on the Head before the weight mask (Weight mask · V3, 2026-10-14)",
+   "sha256": "668436c99a7163f7a6ee2d3cfe7f9a6ee4657b56bb454da0f2213ce7e5808245",
+   "bytes": 630612
+  },
+  "8304926c.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9b9fb7271bc226062268/proj/model.glb",
+   "task": "8304926c-c076-42df-b6cc-f2eabc151cd4",
+   "what": "wild boar, a Z-up upload in mid-stride (V3 run 9b9fb727); Vision BODY: quadruped",
+   "sha256": "4986a3997761632ded2f864cbcd041b1094e7b7d1db0d5c2dfd39e345106d649",
+   "bytes": 5426512
+  },
+  "6df39fce.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/95cbe8fd652f7fd5972f/proj/model.glb",
+   "task": "6df39fce-5b64-4d5e-abb1-7f5695e64bd4",
+   "what": "Doberman Pinscher, docked tail stub, open mesh at the mouth (V3 run 95cbe8fd, triage bone_outside 2026-10-14)",
+   "sha256": "04a85f36892b5c66c3672e1b5905c7783cd63901d5de1e9d51ba449f29caec53",
+   "bytes": 98456
+  },
+  "3f17c22f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f514db35e15620d46f73/proj/model.glb",
+   "task": "3f17c22f-4e34-4e32-b1e0-6bfc5d59fc81",
+   "what": "low-poly anime character, 1130 vertices, big flat faces (V3 run f514db35, stand bone_outside)",
+   "sha256": "46bb72a9ea7bcf10aa67fccddc1270f0af7170154d67e1d0de5fa9215c615d50",
+   "bytes": 51428
   }
  },
  "profiles": {
@@ -1414,6 +1442,54 @@
       ]
      },
      "note": "cloth mode reports (off by default); the warrior has no clothing words - no layer expected"
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6",
+     "target": {
+      "thresholds": {
+       "open_cut_edges": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (open_cut_edges 74 on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {},
+     "target": {
+      "thresholds": {
+       "hole_copies": [
+        "<=",
+        0
+       ],
+       "slit_max_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (78 hole copies, 30.0 % H on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -2363,6 +2439,25 @@
        0
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
     }
    ]
   },
@@ -7794,6 +7889,25 @@
        0.5
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
     }
    ]
   },
@@ -8859,6 +8973,44 @@
        14
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hole_copies": [
+       "<=",
+       0
+      ],
+      "slit_max_pct_H": [
+       "<=",
+       1.0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
     }
    ]
   },
@@ -9091,10 +9243,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     },
     {
@@ -9107,10 +9255,6 @@
        ">=",
        9
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     }
    ],
@@ -9151,10 +9295,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     },
     {
@@ -9167,10 +9307,6 @@
        ">=",
        9
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     }
    ],
@@ -9211,10 +9347,6 @@
        ">=",
        8
       ]
-     },
-     "xfail": {
-      "reason": "equine library has 7 clips (the look take fails the gait gate: legs move); clips >= 8 waits for the regenerated library (2026-10-14)",
-      "owner": "Fable · equines"
      }
     },
     {
@@ -9583,6 +9715,25 @@
      }
     },
     {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hole_copies": [
+       "<=",
+       0
+      ],
+      "slit_max_pct_H": [
+       "<=",
+       1.0
+      ]
+     },
+     "note": "Rig fixes V3 2026-10-14: the box arms stay welded at the torso contact (block_arm_split off) and arm bones own only the columns (block_arm_exclusive); split, they opened 92-97 hole copies, slit 74-150 % H"
+    },
+    {
      "id": "girl_rig",
      "kind": "mt_rig_first",
      "paths": [
@@ -9816,6 +9967,29 @@
       ]
      },
      "note": "Voxel parts V3 2026-10-14: the sword mesh and its Prop bone survive the V3 FBX export (f1, Blender 5.1: 2 skinned meshes, model names body / sword / Prop)"
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {},
+     "target": {
+      "thresholds": {
+       "hole_copies": [
+        "<=",
+        0
+       ],
+       "slit_max_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (142 hole copies, 89.6 % H on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
     }
    ]
   },
@@ -10063,6 +10237,473 @@
        1.0
       ]
      }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+    },
+    {
+     "id": "low_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "low_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ],
+      "open_cut_edges": [
+       "<=",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6"
+    }
+   ]
+  },
+  {
+   "id": "hands_on_thighs_monster",
+   "task": "39c0379f-05b9-4b4a-9ece-c1509a98068a",
+   "cost": 1,
+   "owner": "Rig fixes · V3",
+   "defect": "Rig fixes V3 (2026-10-14): «slender humanoid creature» with the hands hanging on the thighs. Since rig_first reads Vision's words, the monster stage triggers by the word «creature» and pins the legs; its pins also skipped the pose trace, so the hanging arms were never turned to A, the hands stayed fused to the thighs and the contact split opened RightHand | LeftLeg holes of 66.8 % H (116 hole copies, limb_contact_split_faces 421; 13.9 % H / 126 faces on the .6 rig built without words). Fix: rig_first traces / turns the arms when the monster pinned only legs -> 0 holes, 124 faces",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "39c0379f.model.glb",
+     "params": {
+      "words": "slender humanoid creature",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "slit_max_pct_H": [
+       "<=",
+       15.0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "demon_hand_thigh",
+   "task": "8601aa36-e05e-4241-9319-0668b6ba0a5b",
+   "cost": 2,
+   "owner": "Seams · V3",
+   "defect": "Rig fixes V3 / Seams V3 (2026-10-14): the demon's right hand rests on its thigh; the contact split (RightUpLeg | RightArm) left 421 hole copies that gaped 31.8 % H in the clips (no lid). Seams V3: every split candidate is probed split / loop lid / partial weld / weld, never an open slit",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8601aa36.model.glb",
+     "params": {
+      "words": "demon"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {},
+     "target": {
+      "thresholds": {
+       "hole_copies": [
+        "<=",
+        0
+       ],
+       "slit_max_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (535 hole copies, 51.2 % H on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       0
+      ]
+     },
+     "note": "Seams V3 2026-10-14: one weight per coincident copy (weld_close, the proxy copy mean, the micro-edge weld; rig.json checks.seam_weight_mismatch); installed v3.2026-10-14.6",
+     "target": {
+      "thresholds": {
+       "open_cut_edges": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit: loop lids / partial / weld per candidate) is opt-in: on the 40 worst mesh_tear runs it closes every hole but the closed contacts stretch with today's lids (median edges over 4x 252 -> 779); the owner chooses on DEV. Until then the split's holes stay (open_cut_edges 762 on v3.2026-10-14.6)",
+      "owner": "Seams · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "weight_mask_leakage",
+   "task": "56fa7b00-d951-4af6-b616-9c5be5c6bbc1",
+   "cost": 1,
+   "defect": "Weight mask · V3 (2026-10-14, vertex_leakage = #2 defect of the stand analysis, docs/leakage-spec-20261014.md): a T-pose cartoon biped (a9ecd34e, 14.6k vertices) whose forearms and hands were hard-assigned to the Head (Running: RightForeArm -> HeadTop_End 705 vertices, LeftForeArm 569; stand far-limb leak 13.9 %). Fix: mt/weight_mask.py after the skin - the geometric home bone of every vertex through the voxel solid, a gate (reassign_ratio, mirror pairs, islands that heal), no weight beyond 2 skeleton steps from the home, a tapered rim. Old code 13.9 % / 57 edges over 4x / worst 13.1; new 4.3 % / 51 / 9.9.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "56fa7b00.model.glb",
+     "params": {
+      "words": "stylized cartoon character",
+      "body": "biped",
+      "forward_axis": "+x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "stand",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "clip": "auto",
+      "size": 256
+     },
+     "thresholds": {
+      "metrics_present": [
+       "==",
+       1
+      ],
+      "leak_far_pct": [
+       "<=",
+       8.0
+      ],
+      "edges_over_4x": [
+       "<=",
+       80
+      ],
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ]
+     },
+     "owner": "Leakage · V3",
+     "xfail": {
+      "reason": "the weight mask (mt/weight_mask.py) is installed OFF: on, the gate of 2026-10-14 regressed elephant_trunk_chain, gorilla_bust_legless and joint_reweld_holes; with MT_WEIGHT_MASK=on this case passes (13.9 -> 4.35 % far-limb leak)",
+      "owner": "Leakage · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "quad_up_vision_quadruped",
+   "task": "8304926c-c076-42df-b6cc-f2eabc151cd4",
+   "cost": 1,
+   "defect": "Quad legs · V3 (2026-10-14, triage legs_mixed 8304926c, d8a88a09, f731fcad; the boar fec0161f regressed the same way): rig_first._lying_biped read the upturned boar's front legs as two arm chains on the voxel trace and replaced the orientator's +z «quadruped: 4 foot blobs at the low end» (0.9) by +y «biped»: the boar stood on its tail, both leg pairs crossed (L-R knee/foot -24.8 / -13.3 % H), front knees 0.23 of the body length behind the hind ones, rig_check torn front|hind (803 cross-leg edges), stand worst edge 395x. Fix: Vision's body plan (category.json / the classify phase) agreeing with the orientator's quadruped pick keeps the pick. After: up +z, 0 crossed pairs, front knees ahead 0.44, worst edge 22x.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8304926c.model.glb",
+     "params": {
+      "words": "wild boar",
+      "body": "quadruped",
+      "forward_axis": "-x"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "quad_up_biped_trace": [
+       "==",
+       0
+      ],
+      "quad_crossed_pairs": [
+       "==",
+       0
+      ],
+      "quad_front_knees_ahead": [
+       ">=",
+       0.12
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "quad_short_leg_knees",
+   "task": "a982eb2f",
+   "cost": 1,
+   "defect": "Quad legs · V3 (2026-10-14, wrong_up_forward / legs_mixed on the short-legged quadrupeds a982eb2f, ccffe753, 6d2e65f4, 29d69e24, 0e32ccf1, d9fecb23, fec0161f): the side-view leg column of a short leg reached the belly below 0.3 H, where fit_quadruped does not look for the leg's widening, so all four knees met mid-body (front knees ahead of the hind ones by 0.004 of the body length) and the clips swung the pairs through each other (stand worst edge 132x). Fix: fastrig.fit_quadruped_checked - quad_legs_check in the body frame, a failed check re-fits the legs from their traced masks (named by their roots) or from columns capped where each leg widens into the trunk (options quad_legs*, quad_order_min, quad_trace_max_verts). After: 0.225, worst edge 25x.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "a982eb2f.model.glb",
+     "params": {
+      "words": "green armored quadruped",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "quad_crossed_pairs": [
+       "==",
+       0
+      ],
+      "quad_front_knees_ahead": [
+       ">=",
+       0.12
+      ],
+      "quad_legs_final_fail": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "bone_outside_doberman_tail_head",
+   "task": "6df39fce-5b64-4d5e-abb1-7f5695e64bd4",
+   "cost": 1,
+   "defect": "Joint centring V3 (2026-10-14, triage bone_outside 6df39fce): the quadruped fit left the docked tail chain (Tail1..Tail3) bunched behind the croup and the Head bone through the open mouth, 81 bone samples outside; the fast fix's bone_check.solve rebuilt to 68. Fix: mt/joint_centring.py as the fast fix's second candidate (each joint on its section's deepest point of the voxel solid, bones outside pulled in along the depth gradient; the rebuild that measures best is kept)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "6df39fce.model.glb",
+     "params": {
+      "words": "Doberman Pinscher",
+      "body": "quadruped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_fix",
+     "kind": "mt_fast_analysis",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "apply": true
+     },
+     "thresholds": {
+      "op_errors": [
+       "==",
+       0
+      ],
+      "applied_after": [
+       "<=",
+       24
+      ]
+     },
+     "note": "local / farm 2026-10-14: 81 -> solve 68 / joint_centring 14 (Head, Tail3 left)"
+    },
+    {
+     "id": "mt_bones",
+     "kind": "bone_outside",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "tail_outside_samples": [
+       "<=",
+       16
+      ]
+     },
+     "note": "the installed rig after mt_fix (the fast fix replaced rig/rigged.glb)"
+    }
+   ]
+  },
+  {
+   "id": "bone_outside_lowpoly_biped",
+   "task": "3f17c22f-4e34-4e32-b1e0-6bfc5d59fc81",
+   "cost": 1,
+   "defect": "Joint centring V3 (2026-10-14, stand bone_outside f514db35): a 1130-vertex anime character; its bones sit just outside big flat faces (18 samples), bone_check.solve proposed nothing. Fix: mt/joint_centring.py in the fast fix (S >= one cell deep counts as inside, so a sample cannot hide a cell outside a low-poly face)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "3f17c22f.model.glb",
+     "params": {
+      "words": "Low-poly anime character",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_fix",
+     "kind": "mt_fast_analysis",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "params": {
+      "apply": true
+     },
+     "thresholds": {
+      "op_errors": [
+       "==",
+       0
+      ],
+      "applied_after": [
+       "<=",
+       10
+      ]
+     },
+     "note": "farm 2026-10-14: 18 -> 0 (joint_centring candidate; solve: nothing to correct); with the centre line kept on a symmetric body (mt-deploy 2): 18 -> 9, Hips left"
     }
    ]
   }
