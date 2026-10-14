@@ -9559,10 +9559,6 @@
        ">=",
        1
       ]
-     },
-     "xfail": {
-      "reason": "block arms flush against the torso (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     },
     {
@@ -9577,10 +9573,6 @@
        "<=",
        4
       ]
-     },
-     "xfail": {
-      "reason": "block arms flush against the torso (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     },
     {
@@ -9612,10 +9604,6 @@
        ">=",
        1
       ]
-     },
-     "xfail": {
-      "reason": "Arm joint off the thin arm prism (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     },
     {
@@ -9630,10 +9618,6 @@
        "<=",
        36
       ]
-     },
-     "xfail": {
-      "reason": "Arm joint off the thin arm prism (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     },
     {
@@ -9666,10 +9650,6 @@
        ">=",
        1
       ]
-     },
-     "xfail": {
-      "reason": "toe between two claws (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     },
     {
@@ -9685,10 +9665,6 @@
        "<=",
        2
       ]
-     },
-     "xfail": {
-      "reason": "toe between two claws (fix in the gate 2026-10-13)",
-      "owner": "Rig classes · V3"
      }
     }
    ]
