@@ -63,6 +63,8 @@ class RenderPrompt(BaseModel):
     main_size_height: int = 0
     aspect_ratio: float = 0
     frame_count: int = 60
+    # Delivered frame rate of a video (templating $fps); 24 is the product default.
+    fps: int = 24
     noise_seed: int = 0
     steps: int = 0
     cfg: Optional[float] = None
@@ -102,6 +104,11 @@ class RenderPrompt(BaseModel):
     # The text behind node_signature (what the site hashed), kept so a later
     # "node changed" cancel can say what changed (journal), never compared.
     node_identity: str = ""
+
+    @field_validator("fps")
+    @classmethod
+    def _clamp_fps(cls, v: int) -> int:
+        return max(8, min(60, int(v or 24)))
 
     @field_validator("frame_count")
     @classmethod

@@ -2164,6 +2164,7 @@ class RenderQueue:
             output_prefix=task.id,
             workflow_type=prompt.type,
             frames=prompt.frame_count,
+            fps=int(getattr(prompt, "fps", 24) or 24),
             seed=prompt.noise_seed or None,
             checkpoint=model_eligibility.local_name(
                 server, "checkpoint", getattr(prompt, "checkpoint", "") or ""),

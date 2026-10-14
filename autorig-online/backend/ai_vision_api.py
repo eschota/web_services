@@ -2242,6 +2242,7 @@ class VideoRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="What should happen in the clip")
     system_prompt: Optional[str] = Field(None, max_length=12000, description="Used only when prompt is empty")
     frame_count: Optional[int] = Field(None, ge=8, le=400)
+    fps: Optional[int] = Field(None, ge=8, le=60, description="Delivered frame rate (default 24)")
     # Giving a last frame turns the clip into a journey between two pictures;
     # passing the first frame again is how a loop is made. Renderfin prunes the
     # guide node from the workflow when this is absent, so the plain animation
@@ -2425,6 +2426,8 @@ async def _uncached_api_video(body: VideoRequest):
                 rendered_prompt, model_payload, lora_stack, body.lora_trigger_text)
         if body.frame_count:
             payload["frame_count"] = int(body.frame_count)
+        if body.fps:
+            payload["fps"] = int(body.fps)
         payload.update(model_payload)
         quality = str(body.quality or "").strip().lower()
         import ai_model_catalogue
