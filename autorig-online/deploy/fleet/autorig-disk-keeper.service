@@ -1,0 +1,8 @@
+[Unit]
+Description=Disk keeper: videos already posted to civitai deleted; >= 50 GB free kept (oldest media first)
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 /srv/autorig/fleet/disk_keeper.py
