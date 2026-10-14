@@ -8,7 +8,7 @@ backend thumb_url_for() hands out /pw/<task>.webp?v=<mtime hex> once the file ex
 A newer V3 capture regenerates the small file. Runs niced from a timer, one batch per run, and stops when the
 box is busy (load above cores/2). Never deletes anything.
 """
-import io, json, os, sys, time, urllib.request
+import io, json, os, sys, time, urllib.error, urllib.request
 from pathlib import Path
 from PIL import Image
 
@@ -58,8 +58,20 @@ def make(task_id: str) -> bool:
     return True
 
 
+SKIP = OUT / ".skip.json"   # task -> unix time of a 404 (no poster at all); retried after 6 h
+
+
+def load_skip() -> dict:
+    try:
+        return json.loads(SKIP.read_text())
+    except Exception:
+        return {}
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    skip = load_skip()
+    now = time.time()
     if busy():
         print("busy, skip"); return 0
     done = failed = 0
@@ -68,12 +80,24 @@ def main() -> int:
             break
         if busy():
             print("load high, pause"); break
+        if now - skip.get(tid, 0) < 6 * 3600:
+            continue
         try:
             if make(tid):
                 done += 1
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                skip[tid] = now
+            else:
+                failed += 1
+                print(f"{tid}: HTTP {e.code}", file=sys.stderr)
         except Exception as e:  # keep going: one broken poster must not stop the batch
             failed += 1
             print(f"{tid}: {type(e).__name__}: {e}", file=sys.stderr)
+    try:
+        SKIP.write_text(json.dumps(skip))
+    except OSError:
+        pass
     print(f"made={done} failed={failed} total_files={len(list(OUT.glob('*.webp')))}")
     return 0
 
