@@ -1032,6 +1032,13 @@
    "what": "white blocky humanoid figure (MT run ec86a7d11e44351cb942)",
    "sha256": "f2420c9cbfdd561eb70ee1673471447f68d08e044bdfad77fcc1042ce8cd10ce",
    "bytes": 143352
+  },
+  "96e7637b.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/415bcd6ac676f4aa75b2/proj/model.glb",
+   "task": "96e7637b-ce06-4c2e-bbd2-fe0116847a17",
+   "what": "red-haired man in white shirt and black pants, loose sleeves, T-pose (MT run 415bcd6ac676f4aa75b2)",
+   "sha256": "cfe96f38ba37edba38098681d18944a7e35a21e5a24af5bd3de1aaa8598ce1ba",
+   "bytes": 1553748
   }
  },
  "profiles": {
@@ -15740,6 +15747,80 @@
      },
      "owner": "Anim stand · V3",
      "note": "before the fix the stretch was 'invalid' (bind_identity_failure) = 1.0x / tear False; stretch_valid == 1 pins that. Measured 2026-10-15 with seam_policy=auto: worst 6.4, 37 edges over 4x (Running)"
+    }
+   ]
+  },
+  {
+   "id": "arm_chain_loose_sleeve",
+   "task": "96e7637b-ce06-4c2e-bbd2-fe0116847a17",
+   "cost": 1,
+   "owner": "Joints · V3 / arm fit",
+   "defect": "Triage joints.proportion 2026-10-15 (task 96e7637b, run 415bcd6ac676f4aa75b2, rig v3.2026-10-14.11): a T-posed man in loose white sleeves. The silhouette armpit search stops when the run falls under 0.6 x reach, which on a sleeve's sloping underside is half way down it: the Arm joint sat 19.7 % H from the midline (the body edge is 11.2 %), the clavicle 14.6 % H = 5.4x the upper arm (2.7 % H), arm_to_height 0.133. The farm Vision judge scored 0.988 'all ok' (it checks no segment proportions) and its ForeArm move to the AI pose made it worse. Fix (mt/fastrig armpit_slope_follow): follow the underside down to the corner (shoulder 11.2 % H, upper 12.4, fore 10.5); QA: proportion_check carries arm_upper_to_fore / clavicle_to_upper / clavicle_to_height; the joint judge trusts the AI shoulder keypoint within 5 % H.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "96e7637b.model.glb",
+     "params": {
+      "words": "Red-haired man in white shirt and black pants",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       4
+      ]
+     }
+    },
+    {
+     "id": "mt_segments",
+     "kind": "arm_fit",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "arms_found": [
+       "==",
+       2
+      ],
+      "upper_to_fore": [
+       ">=",
+       0.5
+      ],
+      "clavicle_to_upper": [
+       "<=",
+       1.0
+      ],
+      "clavicle_pct_H": [
+       "<=",
+       15
+      ],
+      "upper_pct_H": [
+       ">=",
+       8
+      ],
+      "shoulder_x_pct_H": [
+       "<=",
+       16
+      ],
+      "elbow_above_shoulder": [
+       "==",
+       0
+      ]
+     },
+     "note": "v3.2026-10-14.11: clavicle_to_upper 5.4, upper_pct_H 2.7, shoulder_x 19.7; after armpit_slope_follow: 0.62 / 12.4 / 11.2"
     }
    ]
   }

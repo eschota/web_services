@@ -804,6 +804,25 @@ def arm_fit(ctx):
     out["hand_lateral_max_pct_H"] = round(max(hand_lat), 1) if hand_lat else 99.0
     out["elbow_above_shoulder"] = elbow_above
     out["arms_found"] = len(arm_y)
+    try:                                   # Arm segments (2026-10-15, 96e7637b): clavicle / upper arm / forearm, worst side
+        seg = []
+        for side in ("Left", "Right"):
+            sh, a, e, w = (bones.get(f"{side}Shoulder"), heads.get(f"{side}Arm"), heads.get(f"{side}ForeArm"),
+                           heads.get(f"{side}Hand"))
+            if sh is None or a is None or e is None or w is None:
+                continue
+            seg.append((float(np.linalg.norm(np.asarray(sh["tail"], float) - np.asarray(sh["head"], float))) / H,
+                        float(np.linalg.norm(e - a)) / H, float(np.linalg.norm(w - e)) / H))
+        if seg:
+            uf = [u / max(f, 1e-6) for _c, u, f in seg]
+            out["upper_to_fore"] = round(max(uf, key=lambda r: abs(np.log(max(r, 1e-6)))), 3)
+            out["clavicle_to_upper"] = round(max(c / max(u, 1e-6) for c, u, _f in seg), 3)
+            out["clavicle_pct_H"] = round(max(c for c, _u, _f in seg) * 100, 1)
+            out["upper_pct_H"] = round(min(u for _c, u, _f in seg) * 100, 1)
+            out["shoulder_x_pct_H"] = round(max(abs(float(heads[f"{sd}Arm"][0]) - x0) for sd in ("Left", "Right")
+                                                if f"{sd}Arm" in heads) / H * 100, 1)
+    except Exception as exc:                                   # noqa: BLE001
+        out["segments_error"] = f"{type(exc).__name__}: {exc}"[:120]
     out["proportions_sources"] = sum(1 for s in srcs if s == "proportions")
     out["mirror_sources"] = sum(1 for s in srcs if s == "mirror")
     out["suspect_sources"] = sum(1 for s in srcs if s == "suspect")
