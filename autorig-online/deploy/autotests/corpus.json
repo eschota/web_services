@@ -955,6 +955,13 @@
    "what": "low-poly stylized female humanoid, 482 verts (V3 proj model)",
    "sha256": "2b55555f0344fd5eee620157109ca8c2e7d4a8dabafbeae2a46963dbb13dd8e6",
    "bytes": 23252
+  },
+  "39c0379f.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/35ea05e5d9d6031fb16c/proj/model.glb",
+   "task": "39c0379f-05b9-4b4a-9ece-c1509a98068a",
+   "what": "slender humanoid creature (yellow skeleton), arms hanging with the hands on the thighs (V3 proj model)",
+   "sha256": "a754afd2e38ebeee468fdada2acfebc9b43dc138b76db84be3168e85cff0b9b1",
+   "bytes": 743832
   }
  },
  "profiles": {
