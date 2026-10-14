@@ -2850,6 +2850,8 @@ async def run_polling() -> None:
     try:                                             # Defect buttons on every task notice (owner 2026-10-14)
         import telegram_defects
         app.add_handler(CallbackQueryHandler(telegram_defects.on_callback, pattern=telegram_defects.CALLBACK_PATTERN))
+        app.add_handler(MessageHandler(filters.REPLY & (filters.TEXT | filters.CAPTION) & (~filters.COMMAND),
+                                       telegram_defects.on_reply), group=-2)   # a reply to a notice = a report
     except Exception as exc:                         # noqa: BLE001 - the bot works without it
         print(f"[Telegram] defect buttons unavailable: {exc}")
     app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=_APPROVE_PATTERN))

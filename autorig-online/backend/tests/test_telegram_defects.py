@@ -25,10 +25,12 @@ class Buttons(unittest.TestCase):
     def test_four_buttons_replace_collection_and_submit(self):
         rm = D.markup(TASK)
         rows = rm.inline_keyboard
-        self.assertEqual([r[0].text for r in rows], ["Неправильный трансформ модели", "Разрыв меша после скининга",
-                                                     "Слишком широкие локти", "Непонятная ошибка"])
-        for (kind, _label), row in zip(D.KINDS, rows):
-            data = row[0].callback_data
+        self.assertEqual([r[0].text for r in rows[:4]], ["Неправильный трансформ модели", "Разрыв меша после скининга",
+                                                         "Слишком широкие локти", "Непонятная ошибка"])
+        self.assertEqual([b.text for b in rows[4]], ["Новая категория", "Не та категория", "Не та сцена"])
+        buttons = [b for r in rows for b in r]
+        for (kind, _label), b in zip(D.KINDS + D.ROW2, buttons):
+            data = b.callback_data
             self.assertEqual(data, f"rd:{kind}:{TASK}")
             self.assertLessEqual(len(data.encode("utf-8")), 64)
             self.assertRegex(data, D.CALLBACK_PATTERN)
@@ -133,6 +135,44 @@ class Press(unittest.TestCase):
         self.assertEqual(rec["by"]["id"], 7)
 
 
+class Reply(unittest.TestCase):
+    def _update(self, text="локти слишком широкие", author=99, markup=True, caption="✅ Task completed"):
+        notice = SimpleNamespace(chat=SimpleNamespace(id=-100, type="supergroup"), message_id=55, caption=caption,
+                                 caption_html=caption, caption_entities=[], text=None, entities=[],
+                                 reply_markup=D.markup(TASK) if markup else None,
+                                 from_user=SimpleNamespace(id=author))
+        msg = SimpleNamespace(text=text, caption=None, message_id=77, reply_to_message=notice,
+                              from_user=SimpleNamespace(id=7, first_name="Owner", last_name="", username="own"))
+        ctx = SimpleNamespace(bot=SimpleNamespace(id=99, edit_message_caption=AsyncMock(), edit_message_text=AsyncMock(),
+                                                  edit_message_reply_markup=AsyncMock(), send_message=AsyncMock()))
+        return SimpleNamespace(message=msg), ctx
+
+    def test_reply_to_notice_is_a_text_report(self):
+        from telegram.ext import ApplicationHandlerStop
+        upd, ctx = self._update()
+        with patch.object(D, "_resolve_task", AsyncMock(return_value=(TASK, RUN))), \
+                patch.object(D, "record", AsyncMock(return_value="mt")) as rec:
+            with self.assertRaises(ApplicationHandlerStop):
+                asyncio.run(D.on_reply(upd, ctx))
+        a = rec.await_args
+        self.assertEqual((a.args[0], a.args[1], a.args[2], a.args[4], a.args[5]), (TASK, "text", RUN, -100, 55))
+        self.assertEqual((a.kwargs["text"], a.kwargs["comment_message_id"]), ("локти слишком широкие", 77))
+        self.assertIn("🔎 разбор: ваш комментарий · в работе", ctx.bot.edit_message_caption.call_args.kwargs["caption"])
+        self.assertEqual(ctx.bot.send_message.call_args.kwargs["reply_to_message_id"], 77)
+
+    def test_other_replies_pass_on(self):
+        for upd, ctx in (self._update(author=5), self._update(text="/start"),
+                         self._update(markup=False, caption="hello")):
+            with patch.object(D, "record", AsyncMock()) as rec:
+                asyncio.run(D.on_reply(upd, ctx))
+            rec.assert_not_awaited()
+
+    def test_notice_task_from_its_link(self):
+        n = SimpleNamespace(reply_markup=None, caption="✅ Task completed View Result",
+                            caption_entities=[SimpleNamespace(url=f"https://autorig.online/task?id={TASK}&t=1")])
+        self.assertEqual(D.notice_task_of(n), TASK)
+
+
 class DB:
     async def __aenter__(self):
         return self
@@ -180,7 +220,8 @@ class Notice(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("похожие", calls[999]["caption"])
             for kw in calls.values():
                 data = [r[0].callback_data for r in kw["reply_markup"].inline_keyboard]
-                self.assertEqual([x.split(":")[1] for x in data], ["transform", "tear", "elbows", "unknown"])
+                self.assertEqual([x.split(":")[1] for x in data], ["transform", "tear", "elbows", "unknown",
+                                                                   "new_category"])
                 self.assertFalse(any(re.match(r"^rf[gc]:", x) for x in data))
 
 

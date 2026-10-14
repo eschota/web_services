@@ -8,6 +8,9 @@
   defect-reports/<task>/<kind>/press, which starts the class checks), a toast, and the notice edited to show
   «🔎 разбор: <kind> · в работе». If MT does not answer, the report file is written here (checks start at the next
   GET /api/mt/defect-reports).
+* ``on_reply`` (owner 2026-10-14, 2nd order): a free-text REPLY to a notice is a report too, kind ``text``: the words
+  verbatim (note, evidence.owner_note), the same checks as ``unknown``, the ack «🔎 разбор: ваш комментарий · в
+  работе». The notice is found by its rd: buttons, its task link, or its task_done row in telegram_notifications.
 * ``similar_html(run_id)``: five lines «🔗 похожие: <score> <matched> · <task link>» from GET /api/mt/similar/<run>
   (the CLIP sheet and rest-pose embeddings), 3 s timeout, nothing on failure.
 """
@@ -29,8 +32,14 @@ KINDS = (
     ("elbows", "Слишком широкие локти"),
     ("unknown", "Непонятная ошибка"),
 )
-LABEL = dict(KINDS)
-CALLBACK_PATTERN = r"^rd:(transform|tear|elbows|unknown):([0-9a-fA-F-]{8,36})$"
+ROW2 = (                                   # owner 2026-10-14, 2nd order: one more row of three
+    ("new_category", "Новая категория"),
+    ("wrong_category", "Не та категория"),
+    ("wrong_scene", "Не та сцена"),
+)
+LABEL = dict(KINDS + ROW2 + (("text", "ваш комментарий"),))
+CALLBACK_PATTERN = (r"^rd:(transform|tear|elbows|unknown|new_category|wrong_category|wrong_scene)"
+                    r":([0-9a-fA-F-]{8,36})$")
 _RX = re.compile(CALLBACK_PATTERN)
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _RUN = re.compile(r"^[0-9a-f]{20}$")
@@ -44,11 +53,13 @@ def callback_data(kind: str, task_id: str) -> str:
 
 
 def markup(task_id: str, pressed=()):
-    """One button per row (the labels are long); a pressed kind is marked 🔎."""
+    """The four defect buttons one per row (the labels are long), then the three category / scene buttons in one
+    row; a pressed kind is marked 🔎."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    return InlineKeyboardMarkup([[InlineKeyboardButton(("🔎 " if kind in pressed else "") + label,
-                                                       callback_data=callback_data(kind, task_id))]
-                                 for kind, label in KINDS])
+
+    def b(kind, label):
+        return InlineKeyboardButton(("🔎 " if kind in pressed else "") + label, callback_data=callback_data(kind, task_id))
+    return InlineKeyboardMarkup([[b(k, lb)] for k, lb in KINDS] + [[b(k, lb) for k, lb in ROW2]])
 
 
 def run_id_of_task(task) -> str | None:
@@ -117,7 +128,8 @@ def with_lines(text: str, lines_html: str, limit: int = CAPTION_MAX) -> str:
 
 
 # ------------------------------------------------------------------------------------------------ the press
-def _fallback_report(task_id, kind, run_id, by, chat_id, message_id, chat_type) -> None:
+def _fallback_report(task_id, kind, run_id, by, chat_id, message_id, chat_type, text=None,
+                     comment_message_id=None) -> None:
     """MT did not answer: the same report file (autorig.mt.defect-report/1), checks pending until MT lists it."""
     path = REPORT_DIR / f"{task_id}.{kind}.json"
     now = time.time()
@@ -133,6 +145,15 @@ def _fallback_report(task_id, kind, run_id, by, chat_id, message_id, chat_type) 
                "at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), "message_id": message_id,
                "chat_id": chat_id, "chat_type": chat_type, "presses": [press], "evidence": {}, "notes": [],
                "replies": [], "links": {"task": f"{SITE}/task?id={task_id}"}}
+    if text:
+        c = {"at": round(now, 1), "by": by, "text": str(text)[:4000], "chat_id": chat_id,
+             "message_id": comment_message_id, "notice_message_id": message_id}
+        rec.setdefault("comments", []).append(c)
+        rec["note"] = c["text"]
+        rec.setdefault("notes", []).append({"at": c["at"], "by": by, "status": rec.get("status"), "note": c["text"]})
+        ev = rec.setdefault("evidence", {})
+        ev["owner_note"] = c["text"]
+        ev["owner_notes"] = [x["text"] for x in rec["comments"]]
     rec["checks"] = {"state": "pending_mt", "at": round(now, 1)}
     rec["updated_at"] = round(now, 1)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -176,12 +197,16 @@ def _pressed_kinds(message) -> set:
     return out
 
 
+def ack_line(kind: str) -> str:
+    return f"🔎 разбор: {LABEL['text'] if kind == 'text' else kind} · в работе"
+
+
 async def _mark_notice(bot, message, task_id: str, kind: str) -> bool:
     """The notice shows «🔎 разбор: <kind> · в работе» and the pressed button gets 🔎. -> False when it cannot be
     edited (then the caller replies in the chat instead)."""
     from telegram.constants import ParseMode
-    line = f"🔎 разбор: {kind} · в работе"
-    pressed = _pressed_kinds(message) | {kind}
+    line = ack_line(kind)
+    pressed = _pressed_kinds(message) | ({kind} if kind != "text" else set())
     rm = markup(task_id, pressed)
     is_caption = getattr(message, "caption", None) is not None
     body = (message.caption_html if is_caption else getattr(message, "text_html", None)) or ""
@@ -204,6 +229,35 @@ async def _mark_notice(bot, message, task_id: str, kind: str) -> bool:
     except Exception as exc:                                     # noqa: BLE001 - the report is written already
         print(f"[Telegram] defect notice edit failed for {task_id}/{kind}: {type(exc).__name__}: {str(exc)[:160]}")
         return False
+
+
+async def record(task_id, kind, run_id, by, chat_id, message_id, chat_type, text=None, comment_message_id=None):
+    """The report in MT (POST .../press, which starts the checks); the file itself when MT does not answer.
+    -> 'mt' | 'fallback' | None"""
+    payload = {"run_id": run_id, "by": by, "chat_id": chat_id, "message_id": message_id, "chat_type": chat_type}
+    if text:
+        payload.update(text=str(text)[:4000], comment_message_id=comment_message_id)
+    ok, started = False, None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(f"{MT_BASE}/api/mt/defect-reports/{task_id}/{kind}/press", json=payload)
+        ok = r.status_code == 200
+        if ok:
+            started = (r.json() or {}).get("started")
+        else:
+            print(f"[Telegram] defect press: MT answered {r.status_code} for {task_id}/{kind}")
+    except Exception as exc:                                     # noqa: BLE001
+        print(f"[Telegram] defect press: MT unavailable for {task_id}/{kind}: {type(exc).__name__}")
+    if not ok:
+        try:
+            _fallback_report(task_id, kind, run_id, by, chat_id, message_id, chat_type, text, comment_message_id)
+        except Exception as exc:                                 # noqa: BLE001
+            print(f"[Telegram] defect press: fallback report failed for {task_id}/{kind}: {exc}")
+            return None
+    print(f"[Telegram] defect report {task_id}/{kind} run={run_id} by={by.get('id')} chat={chat_id} "
+          f"mt={'ok' if ok else 'fallback'} checks={started}")
+    return "mt" if ok else "fallback"
 
 
 async def on_callback(update, context) -> None:
@@ -229,32 +283,98 @@ async def on_callback(update, context) -> None:
         await query.answer("Задача не найдена")
         return
     by = _who(getattr(query, "from_user", None))
-    payload = {"run_id": run_id, "by": by, "chat_id": chat_id, "message_id": message_id, "chat_type": chat_type}
-    ok, started = False, None
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(f"{MT_BASE}/api/mt/defect-reports/{task_id}/{kind}/press", json=payload)
-        ok = r.status_code == 200
-        if ok:
-            started = (r.json() or {}).get("started")
-        else:
-            print(f"[Telegram] defect press: MT answered {r.status_code} for {task_id}/{kind}")
-    except Exception as exc:                                     # noqa: BLE001
-        print(f"[Telegram] defect press: MT unavailable for {task_id}/{kind}: {type(exc).__name__}")
-    if not ok:
-        try:
-            _fallback_report(task_id, kind, run_id, by, chat_id, message_id, chat_type)
-        except Exception as exc:                                 # noqa: BLE001
-            print(f"[Telegram] defect press: fallback report failed for {task_id}/{kind}: {exc}")
-            await query.answer("Не удалось записать отчёт, попробуйте ещё раз")
-            return
-    print(f"[Telegram] defect report {task_id}/{kind} run={run_id} by={by.get('id')} chat={chat_id} "
-          f"mt={'ok' if ok else 'fallback'} checks={started}")
+    if await record(task_id, kind, run_id, by, chat_id, message_id, chat_type) is None:
+        await query.answer("Не удалось записать отчёт, попробуйте ещё раз")
+        return
     await query.answer(f"🔎 {LABEL[kind]}: принято, проверки запущены"[:190])
     if message is not None and not await _mark_notice(context.bot, message, task_id, kind):
         try:
-            await context.bot.send_message(chat_id=chat_id, text=f"🔎 разбор: {kind} · в работе",
+            await context.bot.send_message(chat_id=chat_id, text=ack_line(kind),
                                            reply_to_message_id=message_id, allow_sending_without_reply=True)
         except Exception as exc:                                 # noqa: BLE001
             print(f"[Telegram] defect ack reply failed for {task_id}/{kind}: {type(exc).__name__}")
+
+
+# ------------------------------------------------------------------------------------------------ a reply = a report
+_TASK_URL = re.compile(r"/task\?(?:[^\s\"'<>]*&)?id=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+
+
+def notice_task_of(message):
+    """The task of a notice message: its rd: buttons, else the task link in its caption / text entities."""
+    rm = getattr(message, "reply_markup", None)
+    for row in getattr(rm, "inline_keyboard", None) or []:
+        for b in row:
+            m = _RX.match(str(getattr(b, "callback_data", "") or ""))
+            if m and _UUID.match(m.group(2).lower()):
+                return m.group(2).lower()
+    for ents, txt in ((getattr(message, "caption_entities", None), getattr(message, "caption", None)),
+                      (getattr(message, "entities", None), getattr(message, "text", None))):
+        for e in ents or ():
+            m = _TASK_URL.search(str(getattr(e, "url", "") or ""))
+            if m:
+                return m.group(1)
+        m = _TASK_URL.search(str(txt or ""))
+        if m:
+            return m.group(1)
+    return None
+
+
+def _is_notice(message) -> bool:
+    body = str(getattr(message, "caption", None) or getattr(message, "text", None) or "")
+    return "Task completed" in body or "Task needs review" in body or any(
+        _RX.match(str(getattr(b, "callback_data", "") or ""))
+        for row in getattr(getattr(message, "reply_markup", None), "inline_keyboard", None) or [] for b in row)
+
+
+async def _task_of_stored_notice(chat_id, message_id):
+    """The task_done row of telegram_notifications that holds this message id (stored since 2026-10-14)."""
+    from sqlalchemy import select
+
+    from database import AsyncSessionLocal, TelegramNotification
+    async with AsyncSessionLocal() as db:
+        rec = await db.scalar(select(TelegramNotification).where(TelegramNotification.chat_id == chat_id)
+                              .where(TelegramNotification.event_type == "task_done")
+                              .where(TelegramNotification.message_id == message_id).limit(1))
+    return str(rec.event_key) if rec is not None and _UUID.match(str(rec.event_key or "")) else None
+
+
+async def on_reply(update, context) -> None:
+    """A text reply to an AutoRig task notice -> a defect report of kind «text» (the words verbatim), its checks, the
+    ack. Anything else passes on to the other handlers untouched."""
+    msg = getattr(update, "message", None)
+    notice = getattr(msg, "reply_to_message", None) if msg is not None else None
+    text = str(getattr(msg, "text", None) or getattr(msg, "caption", None) or "").strip() if msg is not None else ""
+    if notice is None or not text or text.startswith("/"):
+        return
+    author = getattr(notice, "from_user", None)
+    if author is None or getattr(author, "id", None) != getattr(context.bot, "id", None):
+        return
+    chat_id, notice_id = int(notice.chat.id), int(notice.message_id)
+    task_ref = notice_task_of(notice)
+    if task_ref is None and _is_notice(notice):
+        try:
+            task_ref = await _task_of_stored_notice(chat_id, notice_id)
+        except Exception as exc:                                 # noqa: BLE001
+            print(f"[Telegram] defect reply: notice lookup failed: {type(exc).__name__}")
+    if task_ref is None or not _is_notice(notice):
+        return
+    try:
+        task_id, run_id = await _resolve_task(task_ref)
+    except Exception as exc:                                     # noqa: BLE001
+        print(f"[Telegram] defect reply: task lookup failed for {task_ref}: {type(exc).__name__}")
+        task_id, run_id = task_ref, None
+    if not task_id:
+        return
+    by = _who(getattr(msg, "from_user", None))
+    how = await record(task_id, "text", run_id, by, chat_id, notice_id, str(getattr(notice.chat, "type", "") or ""),
+                       text=text, comment_message_id=int(msg.message_id))
+    if how is None:
+        return
+    await _mark_notice(context.bot, notice, task_id, "text")
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=ack_line("text"), reply_to_message_id=int(msg.message_id),
+                                       allow_sending_without_reply=True)
+    except Exception as exc:                                     # noqa: BLE001
+        print(f"[Telegram] defect reply ack failed for {task_id}: {type(exc).__name__}")
+    from telegram.ext import ApplicationHandlerStop
+    raise ApplicationHandlerStop                     # the comment is the report: not a support / admin message
