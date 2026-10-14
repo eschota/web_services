@@ -267,6 +267,27 @@ Owner rule, 2026-10-10:
   * worker-4090: the owner's PC, and its GPU is his first.
   * f5 is out of the fleet by the owner's order of 2026-10-08.
 
+## Quality First, Speed Under Control (owner order, 2026-10-14)
+
+> в приоритете теперь только качество рига, скорость второстепенна но под
+> жестким контролем с автоматическим разрешением на спавн субагента по
+> оптимизации именно этого процесса, если он только что добавлен в контракт
+> рига V3
+
+* Rig quality decides. A stage that makes the rig right stays in the V3
+  contract even when it breaks the 60 s budget (voxel part clustering, the
+  joint check, the stand tear check…).
+* Speed is measured, never assumed: every stage records its `seconds` in
+  `timings_s` and the stand/QA report shows it; the 60 s budget below is a
+  monitored target, not a reason to drop a quality stage.
+* **Automatic optimisation agent.** When a stage has just been added to the
+  V3 rig contract and its measured cost breaks the budget (or exceeds its own
+  stated target), the lead spawns a subagent at once, without asking the
+  owner, whose only job is to make that stage faster without changing its
+  result: a proxy mesh, the farm, a cache, a cheaper algorithm with the same
+  output on the corpus. The result is proven by the same metrics the stage
+  reports, before/after, on the regression corpus.
+
 ## Rig Within One Minute
 
 Owner rule, 2026-10-10:
@@ -525,6 +546,21 @@ Owner rule, 2026-10-10:
   2. «Разрыв меша после скининга» (`tear`)
   3. «Слишком широкие локти» (`elbows`)
   4. «Непонятная ошибка» (`unknown`)
+* A second row (owner, 2026-10-14) holds three more buttons:
+  * «Новая категория» (`new_category`): this kind of model is not in the
+    category registry (an eagle, say). The lead dispatches an Opus agent to
+    create the category, with validation.
+  * «Не та категория» (`wrong_category`): re-categorize and re-rig.
+  * «Не та сцена» (`wrong_scene`): the viewer picked the wrong environment
+    scene.
+  Their reports carry Vision's `what` / `body`, the current category and the
+  registry, or, for `wrong_scene`, the scene id from `scene/pick.json` and the
+  `scene/recipe.json` summary.
+* A free-text Telegram reply to a task notice is a report too, as if a
+  button were pressed. Its kind is `text`; the words are kept verbatim in
+  `note` and `evidence.owner_note`. It gets the checks of `unknown` and the ack
+  «🔎 разбор: ваш комментарий · в работе». The notice is found by its `rd:`
+  buttons, its task link, or the message id on its `task_done` row.
 * A press is a work order. It is recorded as a defect report
   (`GET /api/mt/defect-reports`, one record per task and button with the
   presser, the time and the run), acknowledged in the same chat, and the
@@ -550,7 +586,9 @@ Owner rule, 2026-10-10:
     (`mt/defect_reports.py`). On the VPS:
     `curl -s 'http://127.0.0.1:8251/api/mt/defect-reports?status=new&format=text'`.
     Move or close one with `POST /api/mt/defect-reports/<task>/<kind>`
-    `{status, note, by}`; `status` is `new`, `in_work`, `fixed`,
+    `{status, note, by}`. The kinds are `transform`, `tear`, `elbows`,
+    `unknown`, `new_category`, `wrong_category`, `wrong_scene` and `text`;
+    `status` is `new`, `in_work`, `fixed`,
     `not_a_defect`, `duplicate` or `closed`. The checks' numbers are in the
     report's `evidence`.
   * Reply: the DEV send API cannot reply into the AutoRig chats, so run
