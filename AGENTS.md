@@ -536,12 +536,29 @@ Owner rule, 2026-10-10:
   watcher) and dispatches each one to the agent of its class. The agent posts
   the investigation (cause, evidence, the pipeline stage) and the result (the
   fix, before/after numbers, which similar models it covers) as a reply in the
-  same Telegram chat, through the DEV send API with `reply_to` of the notice.
+  same Telegram chat, as a reply to the notice (`mt.defect_reply`, below).
   A fix is a pipeline fix for the category, never a hand repair of one model.
 * Below every task notice: links to the top 5 most similar 3D models by
   embedding (the analysis cache's CLIP sheet vector and the skeleton DB's
   pose vector), as `https://autorig.online/task?id=…` with the similarity
   score, so the owner can judge how the embeddings work.
+* How it is wired (2026-10-14):
+  * Buttons: `backend/telegram_defects.py`, callback `rd:<kind>:<task uuid>`;
+    the notice is built in `telegram_task_completion.py`, and its message id
+    is stored on the notice's `task_done` row of `telegram_notifications`.
+  * Reports: `/srv/autorig/data/var/rig_defects/<task>.<kind>.json`
+    (`mt/defect_reports.py`). On the VPS:
+    `curl -s 'http://127.0.0.1:8251/api/mt/defect-reports?status=new&format=text'`.
+    Move or close one with `POST /api/mt/defect-reports/<task>/<kind>`
+    `{status, note, by}`; `status` is `new`, `in_work`, `fixed`,
+    `not_a_defect`, `duplicate` or `closed`. The checks' numbers are in the
+    report's `evidence`.
+  * Reply: the DEV send API cannot reply into the AutoRig chats, so run
+    `cd /srv/autorig/data/motion_transfer && sudo -u autorig /srv/autorig/venv/bin/python3 -m mt.defect_reply <task> <kind> --text "…" [--file x.mp4] [--status fixed]`.
+    It posts through the AutoRig bot as a reply to the pressed notice.
+  * Similar models: `GET /api/mt/similar/<run>?k=5` (admin or local). The
+    lines appear in the operators' broadcast chats only, never in a
+    customer's private chat.
 
 ## One Handoff Per Rig Category (owner order, 2026-10-14)
 

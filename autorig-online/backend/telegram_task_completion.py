@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from database import AsyncSessionLocal, Task
 import telegram_bot as _api
+import telegram_defects as _defects
 GALLERY_POSTER_SCRIPT = os.getenv("AUTORIG_GALLERY_POSTER_SCRIPT", "/srv/autorig/gallery-poster/gallery_poster.py")
 V3_PREVIEW_VIDEO_DIR = os.getenv("AUTORIG_V3_PREVIEW_VIDEO_DIR", "/srv/autorig/data/static/previews-v3")
 V3_POSTER_DIR_TG = os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3")
@@ -125,6 +126,14 @@ async def _upgrade_to_v3_clip(bot, chat_id: int, message_id: int, task_id: str, 
             return
         await asyncio.sleep(15)
 
+async def _remember_notice(chat_id: int, task_id: str, sent) -> None:
+    """Defect buttons (owner 2026-10-14): the notice's message id on its task_done row, so a defect report, the lead
+    and the reply helper find the notice of a task."""
+    try:
+        await _api.attach_notification_message_id(chat_id, 'task_done', task_id, int(getattr(sent, 'message_id', 0) or 0))
+    except Exception as exc:
+        print(f'[Telegram] notice id not stored for chat={chat_id}, task={task_id}: {type(exc).__name__}')
+
 async def broadcast_task_error(task_id: str, *, duration_seconds: int | None=None, queue_wait_seconds: int | None=None, processing_time_seconds: int | None=None, progress_page: str | None=None) -> None:
     print(f'[Telegram] broadcast_task_error called for task {task_id}')
     token = _api._get_token()
@@ -205,6 +214,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
     collection_member_title = None
     collection_index = None
     collection_size = None
+    task_run_id = None
     resolved_progress = progress_page
     try:
         async with AsyncSessionLocal() as db:
@@ -212,6 +222,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
             task = result.scalar_one_or_none()
             if task:
                 task_state = getattr(task, 'status', None)
+                task_run_id = _defects.run_id_of_task(task)
                 if task.owner_type == 'user':
                     owner_email = task.owner_id
                 cr = getattr(task, 'content_rating', None)
@@ -275,15 +286,21 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
             return
         print(f'[Telegram] V3 preview for {task_id}: video={bool(v3_video)}')
     chat_ids = await _api.get_broadcast_chat_ids()
+    broadcast_ids = set(chat_ids)
     for private_id in await _api.private_chats_awaiting_task(task_id):
         if private_id not in chat_ids:
             chat_ids.append(private_id)
     if not chat_ids:
         print('[Telegram] No active chats, skipping done notification')
         return
+    # Defect buttons on every task notice (owner 2026-10-14): the top-5 similar models by embedding below the notice,
+    # in the operators' broadcast chats only (a customer's private chat never lists other people's tasks).
+    similar_lines = await _defects.similar_html(task_run_id)
+    owner_text = _defects.with_lines(text, similar_lines)
+    text_for = lambda cid: owner_text if cid in broadcast_ids else text
     print(f'[Telegram] Sending done notification to {len(chat_ids)} chat(s), video={video_path is not None} video_wait_seconds={video_wait_seconds} video_path={video_path} last_video_status={last_video_status}')
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    generate_markup = InlineKeyboardMarkup([[InlineKeyboardButton('🎨 Коллекция ×15', callback_data=f'rfg:{task_id}'), InlineKeyboardButton('📦 Сабмитить', callback_data=f'rfc:{task_id}')]])
+    generate_markup = _defects.markup(task_id)
     if not video_path:
 
         async def _one_text(chat_id: int):
@@ -295,19 +312,23 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
             if not reserved:
                 print(f'[Telegram] Skip duplicate done notification for chat={chat_id}, task={task_id}')
                 return None
-            if v3_photo and len(text) <= 1024:
+            chat_text = text_for(chat_id)
+            if v3_photo and len(chat_text) <= 1024:
 
                 async def _photo(cid=chat_id, rt=reply_to):
                     with open(v3_photo, 'rb') as fh:
-                        return await bot.send_photo(chat_id=cid, photo=fh, caption=text, parse_mode=ParseMode.HTML, reply_markup=generate_markup, reply_to_message_id=rt, allow_sending_without_reply=True)
+                        return await bot.send_photo(chat_id=cid, photo=fh, caption=chat_text, parse_mode=ParseMode.HTML, reply_markup=generate_markup, reply_to_message_id=rt, allow_sending_without_reply=True)
                 sent = await _api._send_with_retry(_photo, retry_network=False)
                 if sent is not None:
-                    asyncio.create_task(_upgrade_to_v3_clip(bot, chat_id, sent.message_id, task_id, text, generate_markup))
+                    await _remember_notice(chat_id, task_id, sent)
+                    asyncio.create_task(_upgrade_to_v3_clip(bot, chat_id, sent.message_id, task_id, chat_text, generate_markup))
                     return sent
                 print(f'[Telegram] V3 poster send failed for chat={chat_id}, task={task_id}; text fallback')
-            sent_text = await _api._send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML, disable_web_page_preview=True, reply_markup=generate_markup, reply_to_message_id=rt, allow_sending_without_reply=True), retry_network=False)
+            sent_text = await _api._send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(chat_id=cid, text=chat_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True, reply_markup=generate_markup, reply_to_message_id=rt, allow_sending_without_reply=True), retry_network=False)
+            if sent_text is not None:
+                await _remember_notice(chat_id, task_id, sent_text)
             if sent_text is not None and (not v3_photo):
-                asyncio.create_task(_late_v3_media(bot, chat_id, sent_text.message_id, task_id, text, generate_markup))
+                asyncio.create_task(_late_v3_media(bot, chat_id, sent_text.message_id, task_id, chat_text, generate_markup))
             return sent_text
         results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
         sent_count = sum((1 for r in results if r is not None))
@@ -335,7 +356,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
 
                 async def _inner():
                     try:
-                        return await bot.send_video(chat_id=chat_id, video=f, caption=caption, parse_mode=ParseMode.HTML, supports_streaming=True, reply_markup=generate_markup, reply_to_message_id=reply_to, allow_sending_without_reply=True)
+                        return await bot.send_video(chat_id=chat_id, video=f, caption=text_for(chat_id), parse_mode=ParseMode.HTML, supports_streaming=True, reply_markup=generate_markup, reply_to_message_id=reply_to, allow_sending_without_reply=True)
                     finally:
                         try:
                             f.close()
@@ -346,6 +367,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None=None
             if result is None:
                 print(f'[Telegram] send_video failed for chat={chat_id}, task={task_id}; video-only delivery remains pending')
                 return None
+            await _remember_notice(chat_id, task_id, result)
             return result
     results = await asyncio.gather(*[_one(cid) for cid in chat_ids])
     sent_count = sum((1 for r in results if r is not None))
