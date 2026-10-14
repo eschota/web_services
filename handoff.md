@@ -1,5 +1,24 @@
 # AutoRig development — start here after context compression
 
+## Voxel parts · V3 — 2026-10-14 (agent «Voxel parts · V3»)
+
+- Owner order: voxel part clustering at the rig start is mandatory; pieces not voxel-connected to the body are
+  out of the body fit / skin and rigged as their own objects; held props also from OBJ groups / MTL / glTF names.
+  Spec `R:/3d_video_motion_transfer/docs/voxel-parts-spec-20261014.md`; full rules, thresholds, numbers in MT
+  `docs/categories/biped/handoff.md` §3 (and quadruped §3), commit `76b6c8e` on MT main (also branch
+  `voxel-parts-20261014`).
+- Live: `mt/voxel_parts.py` + fastrig / rig_first / agent / rig_version patches installed by mt-deploy
+  20261013T235809Z (base suite 253 PASS), RIG_VERSION `v3.2026-10-14.1`, MT restarted via `autorig-mt-restart`.
+  Stage 0.13–5.4 s on 357 prod models (p50 0.27). Re-rig on open of 9a34e8c0 verified: `test_sword` → voxel
+  held_prop on RightHand. Agent tool `voxel_parts` is in /dev/tools.
+- Backend release `live-20261014a-voxelparts-intake` (gate backend 8/8 PASS): `v3_intake.obj_to_glb` keeps 2+ OBJ
+  `o`/`g` groups as meshes, names in `extras.autorig`; fewer groups byte-identical. Web commit `83b92caa`.
+- Corpus: new `obj_groups_sword`, `companion_animal` (synthetic, `deploy/autotests/make_voxparts_corpus.py`);
+  `checks.mt_rig_first` reports `voxel_*`, `prop_bones_root`, `split_duplicated`.
+- Open: a sword touching the hand stays one voxel component even at res 256 (only names / parts_cluster cut it);
+  544073b7's fist-held item is body now and limb_stabilize leaves it behind when turning the arm.
+  DEV class sheets 7368–7372 sent, verdicts pending (`/dev/api/inbox?agent=Voxel parts · V3`).
+
 ## Hair Lab + public handoff — 2026-10-12, current root session
 
 - **12:20 local checkpoint:** RealHair source33testsPASS; actualmanagedUnitycorot-r3 improvesstrain12.34→6.90%butslower75.87msp50andvisiblefirst-stepfacejump41.97degrees. DefaultnativeBurstr7unchanged, notpromoted. ExactUnitycache and540framesat`RealHair/validation/player/cd073-corot-r3`; DEV6778uid70c41fd59bf1 deliverednotapproved. SameCoreownerreplayingstartupcause. Source-corner-normaltransferimprovesstaticQEMappearance,hybridcardsrejected. Realbobnative512+SAMCPUfusion22/30hair16/16nonhair sparseanchors,Apply0/5. MTtools1ba0d33pushed; newownerprivateinspectorundersecurity/restartreview,notmounted. Continue namedowners and canonicalhair-lab sessionhandoff; no service/fleetchanges.
