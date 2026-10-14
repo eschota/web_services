@@ -729,16 +729,21 @@ def _obj_groups_glb(positions, uvs, normals, by_group, group_order) -> bytes:
 async def _normalize_with_converter(db, original_url: str) -> tuple[bytes, Dict[str, Any]]:
     from workers import get_configured_workers, send_fbx_to_glb
 
-    errors = []
+    errors, missing, tried = [], 0, 0
     for worker in await get_configured_workers(db):
+        tried += 1
         result = await send_fbx_to_glb(worker, original_url)
         if not result.success or not result.output_url:
+            if str(result.error).startswith("Worker returned HTTP 404"):
+                missing += 1                               # the route is gone from this converter build
             errors.append(f"{worker.split('//')[-1][:40]}: {str(result.error)[:120]}")
             continue
         data = await fetch_bytes(result.output_url)
         glb_facts(data)
         return data, {"method": "converter-worker:api-converter-glb-to-fbx", "worker": worker,
                       "output_url": result.output_url, "model_name": result.model_name}
+    if tried and missing == tried:                             # no converter has the endpoint: waiting cannot help
+        raise V3IntakeError("converter_route_missing", "the converters have no FBX->GLB route")
     raise V3IntakeError("normalization_failed", "; ".join(errors)[:600] or "no converter worker is configured")
 
 
@@ -762,6 +767,7 @@ async def _normalize_fbx(db, task, source_url: str, local: Optional[Path]) -> tu
     import v3_textures
 
     notes: list = []
+    farm_verdict = False
     now = datetime.utcnow().timestamp()
     if local is not None and v3_fbx_farm.available() and v3_fbx_farm.is_binary_fbx(local):
         v3 = dict((_settings(task).get("v3") or {}))
@@ -800,6 +806,7 @@ async def _normalize_fbx(db, task, source_url: str, local: Optional[Path]) -> tu
                          "job": info.get("job"), "blender": info.get("blender"), "textures": audit,
                          "meshes": info.get("meshes"), "verts": info.get("verts"), "bones": info.get("bones")}
         notes.append(f"farm Blender: {str(info.get('error') or info.get('code'))[:160]}")
+        farm_verdict = info.get("code") in ("import_failed", "export_failed")   # a verdict about the file, not the farm
     if local is not None:
         try:
             data, audit = await asyncio.to_thread(v3_textures.normalize_textured, local)
@@ -810,9 +817,13 @@ async def _normalize_fbx(db, task, source_url: str, local: Optional[Path]) -> tu
             glb_facts(data)
             return data, {**receipt, "method": "v3-intake:" + str(receipt.get("method") or "assimp"), "textures": audit}
         notes.append(f"assimp: {str(audit.get('assimp_error') or audit.get('error'))[:160]}")
+        if farm_verdict:                                       # Blender and assimp both read the file as broken: final
+            raise V3IntakeError("invalid_fbx", "the FBX could not be read: " + "; ".join(notes)[:500])
     try:
         return await _normalize_with_converter(db, source_url)
     except V3IntakeError as exc:
+        if exc.code == "converter_route_missing" and local is not None:
+            raise V3IntakeError("invalid_fbx", "the FBX could not be converted: " + "; ".join(notes)[:500]) from None
         raise V3IntakeError("normalization_failed", "; ".join(notes + [str(exc)])[:600]) from None
 
 
@@ -872,7 +883,7 @@ async def pump_v3_intake(session_factory) -> int:
                 waited = datetime.utcnow().timestamp() - started
                 # An unreachable converter is a wait, not a verdict; a broken
                 # source or a hard deadline ends the task explicitly.
-                final = isinstance(exc, V3IntakeError) and exc.code in ("invalid_glb", "invalid_obj", "source_size", "no_mesh") \
+                final = isinstance(exc, V3IntakeError) and exc.code in ("invalid_glb", "invalid_obj", "source_size", "no_mesh", "invalid_fbx") \
                     or waited >= NORMALIZE_DEADLINE_SECONDS
                 delay = NORMALIZE_RETRY_SECONDS[min(attempts - 1, len(NORMALIZE_RETRY_SECONDS) - 1)]
                 v3.update(normalize_attempts=attempts, normalize_started_at=started, error=str(exc)[:600],

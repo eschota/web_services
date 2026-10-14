@@ -27,7 +27,20 @@ from typing import Any, Dict
 
 ASSIMP = os.getenv("ASSIMP_EXE", "/usr/bin/assimp")
 TIMEOUT_S = float(os.getenv("AUTORIG_FBX_ASCII_TIMEOUT", "600"))
+MEMORY_LIMIT_MB = int(os.getenv("AUTORIG_ASSIMP_MEMORY_MB", "4096"))     # RLIMIT_AS of the assimp child
 _ARRAY_HEAD = re.compile(r"^\s*[A-Za-z_]\w*: \*\d+ \{\s*$")
+
+
+def limit_child():
+    """preexec_fn of the assimp child (V3 intake, 2026-10-15): nice 19 and an address-space cap, so a huge FBX cannot
+    take the backend's box down.  Not available on Windows (the unit tests there have no assimp anyway)."""
+    try:
+        import resource
+        os.nice(19)
+        cap = MEMORY_LIMIT_MB * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+    except Exception:                                            # noqa: BLE001 - never block the conversion itself
+        pass
 
 
 class FbxAsciiError(RuntimeError):
@@ -102,7 +115,8 @@ def fbx_to_glb(src: Path, dst: Path) -> Dict[str, Any]:
             shutil.copyfile(src, mid)
         try:
             run = subprocess.run([ASSIMP, "export", str(mid), str(out), "-f", "glb2"], capture_output=True,
-                                 text=True, timeout=TIMEOUT_S)
+                                 text=True, timeout=TIMEOUT_S,
+                                 preexec_fn=limit_child if os.name == "posix" else None)
         except subprocess.TimeoutExpired as exc:
             raise FbxAsciiError("assimp_timeout", f"no GLB within {int(TIMEOUT_S)} s") from exc
         if run.returncode or not out.is_file():

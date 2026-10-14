@@ -130,6 +130,41 @@ class FbxFarmTest(unittest.TestCase):
             asyncio.run(go())
         self.assertEqual(ctx.exception.code, "no_mesh")
 
+    def test_unreadable_fbx_is_final_once_blender_and_assimp_both_fail(self):
+        import v3_textures
+        orig = v3_textures.normalize_textured
+        v3_textures.normalize_textured = lambda path: (None, {"assimp_error": "FBX-Parser expected compound scope"})
+        try:
+            v3_fbx_farm.poll = lambda *a: ("failed", {"code": "import_failed", "error": "bad file"}, None)
+            task, fbx = Task("t3"), self.fbx()
+            task.viewer_settings = json.dumps({"v3": {"normalize_job": "job3", "normalize_job_at": 1.0}})
+            with self.assertRaises(v3_intake.V3IntakeError) as ctx:
+                asyncio.run(v3_intake._normalize_fbx(Db(), task, "x", fbx))
+        finally:
+            v3_textures.normalize_textured = orig
+        self.assertEqual(ctx.exception.code, "invalid_fbx")
+
+    def test_converter_without_the_route_is_not_waited_for(self):
+        import workers
+
+        class R:
+            success, output_url, error, model_name = False, None, "Worker returned HTTP 404: <!doctype html>", None
+
+        async def configured(db):
+            return ["https://converter-f1.example/api-converter-glb"]
+
+        async def send(worker, url):
+            return R()
+
+        orig = workers.get_configured_workers, workers.send_fbx_to_glb
+        workers.get_configured_workers, workers.send_fbx_to_glb = configured, send
+        try:
+            with self.assertRaises(v3_intake.V3IntakeError) as ctx:
+                asyncio.run(v3_intake._normalize_with_converter(Db(), "x"))
+        finally:
+            workers.get_configured_workers, workers.send_fbx_to_glb = orig
+        self.assertEqual(ctx.exception.code, "converter_route_missing")
+
 
 if __name__ == "__main__":
     unittest.main()
