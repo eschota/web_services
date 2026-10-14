@@ -662,9 +662,22 @@ def main() -> int:
             # the previous gate's case children (rig_first, numeric QA...) can outlive it after a timeout; wait for
             # them, or their load makes this gate's 60 s timing cases fail (2026-10-11)
             import subprocess, time as _t
+            def _leftover():
+                # only real case workers count: an agent's waiting shell (`until grep ... work/...`, `tail -f`)
+                # that merely names the work path must not hold every later gate for 10 min (2026-10-14)
+                out = []
+                for pid in subprocess.run(["pgrep", "-f", "/srv/autorig/data/autotests/work/"],
+                                          capture_output=True, text=True).stdout.split():
+                    try:
+                        cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode(errors="replace")
+                    except OSError:
+                        continue
+                    if any(w in cmd for w in ("grep ", "until ", "tail ", "sleep ", "ssh ", "cat ")):
+                        continue
+                    out.append(pid)
+                return out
             for _ in range(60):
-                busy = subprocess.run(["pgrep", "-f", "/srv/autorig/data/autotests/work/"],
-                                      capture_output=True, text=True).stdout.split()
+                busy = _leftover()
                 if not busy:
                     break
                 if _ == 0:
