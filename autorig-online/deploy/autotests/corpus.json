@@ -15238,10 +15238,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "lands with the Orientation · V3 deploy of 2026-10-14 (limb topology veto, source skeleton up, rebuild under the upright root)",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -15275,11 +15271,7 @@
       ]
      },
      "owner": "Anim stand · V3",
-     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
-     "xfail": {
-      "reason": "the rig lies on its back until the Orientation · V3 deploy of 2026-10-14 (stand worst edge 144x before, 1.63 after)",
-      "owner": "Orientation · V3"
-     }
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -15336,10 +15328,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "lands with the Orientation · V3 deploy of 2026-10-14 (limb topology veto, source skeleton up, rebuild under the upright root)",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -15373,11 +15361,7 @@
       ]
      },
      "owner": "Anim stand · V3",
-     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
-     "xfail": {
-      "reason": "the rig lies on its back until the Orientation · V3 deploy of 2026-10-14 (stand worst edge 144x before, 1.63 after)",
-      "owner": "Orientation · V3"
-     }
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -15437,10 +15421,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "lands with the Orientation · V3 deploy of 2026-10-14 (limb topology veto, source skeleton up, rebuild under the upright root)",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -15474,11 +15454,7 @@
       ]
      },
      "owner": "Anim stand · V3",
-     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
-     "xfail": {
-      "reason": "the rig lies on its back until the Orientation · V3 deploy of 2026-10-14 (stand worst edge 144x before, 1.63 after)",
-      "owner": "Orientation · V3"
-     }
+     "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)"
     }
    ]
   },
@@ -15522,10 +15498,6 @@
        "==",
        "+y"
       ]
-     },
-     "xfail": {
-      "reason": "lands with the Orientation · V3 deploy of 2026-10-14",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -15607,10 +15579,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "lands with the Orientation · V3 deploy of 2026-10-14",
-      "owner": "Orientation · V3"
      }
     },
     {
