@@ -934,6 +934,27 @@
    "what": "the mannequin 8a1b1cc5 subdivided to edges <= 2 % H with the horse 31cc3ff3 scaled to 30 % H standing beside its feet (make_voxparts_corpus.py)",
    "sha256": "bae1a41cc29ddc471b33f63d9dae910346152ef402a900ff828f1c07978ce390",
    "bytes": 1005828
+  },
+  "synthetic.voxparts_obj_groups_sword.rig.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/voxparts_obj_groups_sword.rig.glb",
+   "task": null,
+   "what": "the fast rig of synthetic.voxparts_obj_groups_sword.glb (RIG_VERSION v3.2026-10-14.1, mt-deploy 20261013T235809Z): body + sword meshes, the sword a rigid Prop on RightHand",
+   "sha256": "48cb308414fe23443bd64db7a635043e1a8b905510adc3aa04996bab367ee70c",
+   "bytes": 1912036
+  },
+  "726ccc27.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ad78f13716504fbb5742/proj/model.glb",
+   "task": "726ccc27-5bc9-4e2d-932e-e4843b6d2efc",
+   "what": "anthropomorphic tuxedo cat in a long coat (V3 proj model, 21k verts)",
+   "sha256": "6f21ca8291ed648f7e46dbe6d80b564efc49071eb2cb501b1d544b9f49ad49ec",
+   "bytes": 4499152
+  },
+  "bab425fe.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/74e3079bb40f23681f4a/proj/model.glb",
+   "task": "bab425fe-6f9e-4d7d-ab61-a0fc2539f260",
+   "what": "low-poly stylized female humanoid, 482 verts (V3 proj model)",
+   "sha256": "2b55555f0344fd5eee620157109ca8c2e7d4a8dabafbeae2a46963dbb13dd8e6",
+   "bytes": 23252
   }
  },
  "profiles": {
@@ -9776,6 +9797,42 @@
        0
       ]
      }
+    },
+    {
+     "id": "export_fbx",
+     "kind": "v3_export_fbx",
+     "paths": [
+      "mt",
+      "backend"
+     ],
+     "tier": "extended",
+     "input": "synthetic.voxparts_obj_groups_sword.rig.glb",
+     "params": {
+      "timeout": 300
+     },
+     "thresholds": {
+      "fbx_valid": [
+       "==",
+       1
+      ],
+      "verify_ok": [
+       "==",
+       1
+      ],
+      "skinned_meshes": [
+       ">=",
+       2
+      ],
+      "prop_bones_in_fbx": [
+       ">=",
+       1
+      ],
+      "takes": [
+       ">=",
+       8
+      ]
+     },
+     "note": "Voxel parts V3 2026-10-14: the sword mesh and its Prop bone survive the V3 FBX export (f1, Blender 5.1: 2 skinned meshes, model names body / sword / Prop)"
     }
    ]
   },
@@ -9874,6 +9931,153 @@
       "empty_limb_bones": [
        "==",
        0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "anim_stand_smoke",
+   "task": "7018c8b8-63f8-43b5-a275-9c8c654adf51",
+   "cost": 1,
+   "defect": "Anim stand · V3 smoke (owner 2026-10-14): the 4-view stand of a small V3 biped rig (5k vertices, its shoulders collapsed onto the spine: elbow width ~8 shoulder widths) renders, encodes and measures within the 60 s rig budget; Running's step length stays a human stride",
+   "checks": [
+    {
+     "id": "stand",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "params": {
+      "rig": "7018c8b8.mt-before.glb",
+      "rig_json": "7018c8b8.mt-before.rig.json",
+      "clip": "auto",
+      "size": 512
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "metrics_present": [
+       "==",
+       1
+      ],
+      "step_length_H": [
+       "between",
+       [
+        0.15,
+        0.9
+       ]
+      ]
+     },
+     "owner": "Anim stand · V3"
+    }
+   ]
+  },
+  {
+   "id": "joint_reweld_holes",
+   "task": "726ccc27-5bc9-4e2d-932e-e4843b6d2efc",
+   "cost": 1,
+   "owner": "Rig fixes · V3",
+   "defect": "Rig fixes V3 (2026-10-14): the weld split (fused_limbs=cap_split) cut the mesh at natural joints (thigh | hips, arm | neck, hand | chest) and left open holes that gaped in the clips: 726ccc27 60 hole copies, slit 25.6 % H (Jump); bab425fe 6 copies, 28.1 % H; also welded-back weights were dropped when a piece had hole rims but no lid. Fix: mt/cut_cap.py v4d joint reweld (fused_reweld_hops 4, the detach check picks with/without) -> 0 holes on both",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "726ccc27.model.glb",
+     "params": {
+      "words": "anthropomorphic tuxedo cat",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "hole_copies": [
+       "<=",
+       0
+      ],
+      "slit_max_pct_H": [
+       "<=",
+       1.0
+      ]
+     }
+    },
+    {
+     "id": "low_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "bab425fe.model.glb",
+     "params": {
+      "words": "stylized female humanoid character",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
+     }
+    },
+    {
+     "id": "low_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "low_rig",
+     "thresholds": {
+      "hole_copies": [
+       "<=",
+       0
+      ],
+      "slit_max_pct_H": [
+       "<=",
+       1.0
       ]
      }
     }

@@ -1189,7 +1189,14 @@ def v3_export_fbx(input_name, timeout=300, worker=None, spec=None):
     magic = {"fbx": head == b"Kaydara FBX Binary", "glb": head[:4] == b"glTF",
              "blend": head[:7] == b"BLENDER" or head[:4] == bytes.fromhex("28b52ffd")}[ext]
     report = job.get("report") or {}
-    return {"seconds": round(time.time() - t0, 1), "worker_online": int(online),
+    names = set()                                          # Voxel parts · V3: the FBX's model names (a held prop's
+    if ext == "fbx" and fbx.is_file():                     # mesh and its Prop bone must survive the export)
+        names = {m.group(1).decode("latin1") for m in re.finditer(rb"([A-Za-z0-9_:.\- ]{1,60})\x00\x01Model",
+                                                                    fbx.read_bytes())}
+    return {"skinned_meshes": int((report.get("verify") or {}).get("skinned_meshes") or 0),
+            "prop_bones_in_fbx": sum(1 for n in names if re.match(r"(mixamorig:)?Prop\d*$", n)),
+            "model_names": sorted(names)[:60],
+            "seconds": round(time.time() - t0, 1), "worker_online": int(online),
             "fbx_valid": int(magic), "bytes": fbx.stat().st_size if fbx.is_file() else 0,
             "verify_ok": int(bool((report.get("verify") or {}).get("ok"))),
             "takes": len(report.get("clips") or []), "worker": job.get("worker"),
@@ -1456,6 +1463,34 @@ def monster_rig(ctx):
             "detect_s": mn.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
 
 
+def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512):
+    """Anim stand · V3 (mt/anim_stand.py, owner 2026-10-14): the 4-view stand (1 s bind pose, then Running for a
+    biped) of a corpus rig on the tree under test, in a child at the conveyor's size: its wall seconds, that the
+    metrics and the mp4 / gif / sheet exist, the step length in H, the elbow width in shoulder widths, the stretch and
+    the leakage share."""
+    run = pathlib.Path(ctx["work"]) / "stand" / "a57a00000000000000d1"
+    shutil.rmtree(run.parent, ignore_errors=True)
+    (run / "rig").mkdir(parents=True)
+    shutil.copyfile(_input(rig_input), run / "rig" / "rigged.glb")
+    shutil.copyfile(_input(rig_json_input), run / "rig" / "rig.json")
+    p, wall = _child([PY, "-P", "-m", "mt.anim_stand", str(run), "--clip", clip, "--size", str(int(size))], timeout=300)
+    if p.returncode != 0:
+        raise RuntimeError(f"anim_stand exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    out = run / "rig" / "stand"
+    m = json.loads((out / "metrics.json").read_text())
+    files = m.get("files") or {}
+    present = all(files.get(k) and (out / files[k]).is_file() and (out / files[k]).stat().st_size > 0
+                  for k in ("mp4", "gif", "sheet", "metrics"))
+    ew = m.get("elbow_width_sw") or {}
+    return {"seconds": wall, "stand_s": (m.get("seconds") or {}).get("total"),
+            "metrics_present": int(bool(m.get("schema") == "autorig.mt.anim-stand/1" and present)),
+            "clip": (m.get("clip") or {}).get("name"), "frames": (m.get("clip") or {}).get("rendered_frames"),
+            "step_length_H": m.get("step_length_H"), "stride_period_s": m.get("stride_period_s"),
+            "elbow_width_sw_min": ew.get("min"), "elbow_width_sw_mean": ew.get("mean"),
+            "worst_edge_ratio": (m.get("stretch") or {}).get("worst_edge_ratio"),
+            "leak_pct": (m.get("leak") or {}).get("share_pct"), "seconds_by_stage": m.get("seconds")}
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1482,6 +1517,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return hand_rig(ctx)
     if k == "monster_rig":
         return monster_rig(ctx)
+    if k == "anim_stand":                                          # Anim stand · V3 (2026-10-14)
+        return anim_stand(ctx, a["rig"], a["rig_json"], a.get("clip", "auto"), a.get("size", 512))
     if k == "multilimb_rig":
         return multilimb_rig(ctx)
     if k == "hand_detect":
@@ -1573,6 +1610,11 @@ def run_check(check: dict, ctx: dict) -> dict:
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
+    if k == "detach":                                     # Rig fixes · V3 (2026-10-14): mt/detach_check.py on
+        from mt import detach_check as _dc                 # the rig: weld-split holes / torn pieces in the clips
+        _r = _dc.check(pathlib.Path(target).read_bytes(), frames=int(a.get("frames", 12)))
+        return {k_: _r.get(k_) for k_ in ("cuts", "hole_copies", "slit_max_pct_H", "torn_copies",
+                                          "detach_max_pct_H", "released_max_pct_H")}
     if k == "dup_gaps":
         return dup_gaps(ctx["run"] / "rig" / "rigged.glb")
     if k == "rig_upright":
