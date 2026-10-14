@@ -729,6 +729,12 @@ def params_for(service_id: str) -> List[Dict[str, object]]:
     return PARAMS.get(service_id) or []
 
 
+# Vehicle stages share this catalogue and the existing graph execution UI.
+from vehicle_generation.catalogue import install as _install_vehicle_catalogue
+import sys as _vehicle_catalogue_sys
+_install_vehicle_catalogue(_vehicle_catalogue_sys.modules[__name__])
+
+
 def service(service_id: str) -> Optional[Dict[str, object]]:
     for entry in SERVICES:
         if entry["id"] == service_id:

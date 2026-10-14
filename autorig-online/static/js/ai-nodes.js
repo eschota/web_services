@@ -624,6 +624,79 @@
     return id;
   }
 
+  async function addVehicleModelBranch(spec) {
+    const wanted = String((spec && spec.vehicleUrl) || '');
+    if (!wanted || !editor) return false;
+    const sameReceipt = value => {
+      try { return new URL(String(value || ''), location.origin).pathname === new URL(wanted, location.origin).pathname; }
+      catch (_) { return String(value || '') === wanted; }
+    };
+    let sourceId = '';
+    runState.forEach((record, id) => {
+      const item = meta(id);
+      if (!sourceId && item && String(item.service || '').startsWith('vehicle_') && sameReceipt(record && record.value)) sourceId=String(id);
+    });
+    if (!sourceId) return false;
+    const source=editor.getNodeFromId(sourceId);
+    const sourceMeta=meta(sourceId);
+    const outputIndex=(sourceMeta.outFields || []).indexOf('vehicle_url');
+    if (!source || outputIndex < 0) return false;
+    const id=addServiceNode('vehicle_model', Number(source.pos_x || 0) + 360, Number(source.pos_y || 0) + 80, {
+      part_ids:(spec.partIds || []).join(';'), provider:spec.provider || 'blender',
+      polygon_budget:Number(spec.polygonBudget) || 10000, mode:spec.mode || 'split'
+    });
+    const target=meta(id);
+    const inputIndex=((target && target.inFields) || []).indexOf('vehicle');
+    if (inputIndex < 0) { editor.removeNodeId('node-' + id); return false; }
+    editor.addConnection(sourceId,id,'output_' + (outputIndex + 1),'input_' + (inputIndex + 1));
+    if (nodeGroups) nodeGroups.selectIds([String(id)]);
+    await prepareGraphSnapshot();
+    await ensureSaved();
+    await runGraph(false);
+    return true;
+  }
+
+  async function startVehicleImageGraph(spec) {
+    if (!spec || !spec.file || !(window.AIVehicleNodes && window.AIVehicleNodes.vehicleTemplate)) return false;
+    resetCanvasExecutionState();
+    graphId=null; graphInstanceId=''; comparisonAnchorId='';
+    history.replaceState(null,'','/nodes');
+    const graph=window.AIVehicleNodes.vehicleTemplate();
+    if (spec.mode) {
+      const model=(graph.nodes || []).find(node=>node.service === 'vehicle_model');
+      if (model) model.params=Object.assign({},model.params,{mode:spec.mode});
+    }
+    loadGraph(graph);
+    let sourceId='';
+    nodeMeta.forEach((item,id)=>{ if(!sourceId && item.kind === KIND_INPUT && item.entityType === 'image') sourceId=String(id); });
+    const element=sourceId && nodeElement(sourceId);
+    if (!element || !element._acceptImage) throw new Error('Vehicle image input could not be created.');
+    await element._acceptImage(spec.file);
+    await prepareGraphSnapshot();
+    await ensureSaved();
+    await runGraph(false);
+    return true;
+  }
+
+  async function continueAcceptedVehicleReference(spec) {
+    const wanted=String((spec && spec.vehicleUrl) || '');
+    let prepareId='';
+    nodeMeta.forEach((item,id)=>{ if(!prepareId && item.service === 'vehicle_prepare') prepareId=String(id); });
+    if (!prepareId || !wanted) return false;
+    const outputs={vehicle_url:wanted};
+    if (spec.preparedImageUrl) outputs.prepared_image_url=spec.preparedImageUrl;
+    const result={status:'done',type:'vehicle',value:wanted,outputs};
+    recordResult(prepareId,result);
+    const element=nodeElement(prepareId);
+    if (element) {
+      const state=element.querySelector('.nstate');
+      if (state) { state.textContent='done'; state.className='nstate done'; }
+      showResult(element.querySelector('.nout'),result.type,result.value,result.outputs);
+    }
+    await runGraph(true);
+    return true;
+  }
+
   /** Turn every `model` parameter on a node into a picture dropdown. */
   function commitModelValue(hidden, value, notify) {
     if (!hidden) return;
@@ -1485,6 +1558,9 @@
   });
 
   function runnerFor(serviceId) {
+    const vehicleRunner = window.AIVehicleNodes && window.AIVehicleNodes.runnerFor
+      ? window.AIVehicleNodes.runnerFor(serviceId) : null;
+    if (vehicleRunner) return vehicleRunner;
     const runner = RUNNERS[serviceId];
     if (!runner) {
       throw new Error('This service was updated after this page loaded. Reload the page and try again.');
@@ -2014,7 +2090,9 @@
       const submitBody = Object.assign(
         bodyFor(node.service, resolved, params),
         budget ? {max_output_tokens:budget} : {});
-      const accepted = await submitJson(runner.api, submitBody, retry => {
+      const accepted = runner.submit
+        ? await runner.submit(submitBody)
+        : await submitJson(runner.api, submitBody, retry => {
         if (!executionIsCurrent(execution)) return;
         state.textContent = `queued by the site — retrying in ${Math.ceil(retry.delay / 1000)}s`;
         state.className = 'nstate running';
@@ -2195,7 +2273,14 @@
     link.className = 'nlink';
     // The preview itself opens full size; only an Avatar keeps a link, to
     // its profile page, which the preview cannot stand for.
-    link.textContent = type === 'avatar' ? 'open profile' : '';
+    link.textContent = type === 'avatar' ? 'open profile'
+      : type === 'vehicle' && window.AIVehicleNodes ? window.AIVehicleNodes.resultLinkText() : '';
+    if (type === 'vehicle' && window.AIVehicleNodes) {
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        window.AIVehicleNodes.openRun(value);
+      });
+    }
     if (link.textContent) host.appendChild(link);
   }
 
@@ -3301,6 +3386,10 @@
         getQuality: () => renderQuality});
     }
     if (window.AINodeLoraStack) window.AINodeLoraStack.install({canvas:document.getElementById('canvas'), getMeta:meta});
+    if (window.AIVehicleNodes && window.AIVehicleNodes.bindGraph) {
+      window.AIVehicleNodes.bindGraph({modelPart:addVehicleModelBranch,startImage:startVehicleImageGraph,
+        acceptReference:continueAcceptedVehicleReference});
+    }
     installWheelZoom();
     if (window.AINodePipelines && window.AIEntities) nodePipelines = window.AINodePipelines.install({
       editor, getMeta:meta, addServiceNode, getNodeElement:nodeElement, moveNode:moveNodeTo,
@@ -3431,6 +3520,14 @@
       });
       picker.appendChild(button);
     });
+    if (window.AIVehicleNodes && window.AIVehicleNodes.installGraphTemplate) {
+      window.AIVehicleNodes.installGraphTemplate({picker, loadGraph,
+        serverTemplatePresent:(templates.templates_array || []).some(item => item.id === 'VehicleFromImage'),
+        close:() => {
+        const drop = document.getElementById('compositions');
+        if (drop) drop.open = false;
+      }});
+    }
 
     const wanted = new URLSearchParams(location.search).get('g');
     const wantedAvatar = new URLSearchParams(location.search).get('avatar');

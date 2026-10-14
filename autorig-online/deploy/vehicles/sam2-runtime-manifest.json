@@ -1,0 +1,42 @@
+{
+  "schema_string": "autorig.vehicle.sam2-runtime/1",
+  "install_root_string": "/srv/autorig/data/vehicle-segmentation",
+  "python_string": "/usr/bin/python3.11",
+  "source_object": {
+    "repository_string": "https://github.com/facebookresearch/sam2.git",
+    "commit_string": "2b90b9f5ceec907a1c18123530e92e794ad901a4",
+    "license_string": "Apache-2.0"
+  },
+  "checkpoint_object": {
+    "url_string": "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt",
+    "sha256_string": "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
+    "bytes_int": 156008466
+  },
+  "packages_object": {
+    "setuptools_string": "75.8.0",
+    "wheel_string": "0.45.1",
+    "torch_string": "2.5.1+cpu",
+    "torchvision_string": "0.20.1+cpu",
+    "numpy_string": "2.2.6",
+    "opencv_python_headless_string": "4.10.0.84",
+    "pillow_string": "12.3.0",
+    "hydra_core_string": "1.3.2",
+    "omegaconf_string": "2.3.0",
+    "antlr4_python3_runtime_string": "4.9.3",
+    "iopath_string": "0.1.10",
+    "portalocker_string": "4.4.0",
+    "tqdm_string": "4.66.5"
+  },
+  "environment_object": {
+    "AUTORIG_VEHICLE_SAM_PYTHON": "/srv/autorig/data/vehicle-segmentation/venv/bin/python",
+    "AUTORIG_VEHICLE_SAM_SOURCE": "/srv/autorig/data/vehicle-segmentation/source",
+    "AUTORIG_VEHICLE_SAM_CHECKPOINT": "/srv/autorig/data/vehicle-segmentation/checkpoints/sam2.1_hiera_tiny.pt",
+    "CUDA_VISIBLE_DEVICES": ""
+  },
+  "constraints_array": [
+    "CPU-only PyTorch wheels",
+    "SAM2_BUILD_CUDA=0",
+    "no global or system Python package changes",
+    "no service restart"
+  ]
+}

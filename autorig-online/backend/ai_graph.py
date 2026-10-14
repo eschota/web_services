@@ -390,10 +390,12 @@ def _template_saved_avatar_wan_motion() -> Dict[str, object]:
 
 
 def templates() -> List[Dict[str, object]]:
+    from vehicle_generation.catalogue import graph_template as vehicle_graph_template
     return [
         _template_simple_text_to_video_by_vision(),
         _template_avatar_video_motion(),
         _template_saved_avatar_wan_motion(),
+        vehicle_graph_template(),
     ]
 
 

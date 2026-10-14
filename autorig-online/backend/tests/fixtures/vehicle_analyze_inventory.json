@@ -1,0 +1,123 @@
+{
+  "is_wheeled_vehicle_bool": true,
+  "category_string": "off-road combat vehicle",
+  "title_string": "Desert War Rig",
+  "working_side_string": "left",
+  "visible_wheel_count_int": 6,
+  "inferred_axle_count_int": 3,
+  "estimated_dimensions_m_object": {
+    "length_float": 4.5,
+    "width_float": 2.0,
+    "height_float": 2.2,
+    "confidence_float": 0.75,
+    "provenance_string": "vision_inferred_from_single_image_not_measured"
+  },
+  "objects_array": [
+    {
+      "semantic": "vehicle body",
+      "side": "left",
+      "visibility": "visible",
+      "confidence_float": 0.95,
+      "normalized_source_bbox": [
+        0.1,
+        0.3,
+        0.9,
+        0.9
+      ]
+    },
+    {
+      "semantic": "doors",
+      "side": "left",
+      "visibility": "partially visible",
+      "confidence_float": 0.6,
+      "normalized_source_bbox": [
+        0.35,
+        0.4,
+        0.6,
+        0.7
+      ]
+    },
+    {
+      "semantic": "hood",
+      "side": "left",
+      "visibility": "visible",
+      "confidence_float": 0.7,
+      "normalized_source_bbox": [
+        0.2,
+        0.3,
+        0.45,
+        0.5
+      ]
+    },
+    {
+      "semantic": "bumpers",
+      "side": "left",
+      "visibility": "visible",
+      "confidence_float": 0.8,
+      "normalized_source_bbox": [
+        0.15,
+        0.6,
+        0.9,
+        0.9
+      ]
+    },
+    {
+      "semantic": "lights",
+      "side": "left",
+      "visibility": "visible",
+      "confidence_float": 0.65,
+      "normalized_source_bbox": [
+        0.15,
+        0.4,
+        0.25,
+        0.5
+      ]
+    },
+    {
+      "semantic": "glass",
+      "side": "left",
+      "visibility": "visible",
+      "confidence_float": 0.5,
+      "normalized_source_bbox": [
+        0.5,
+        0.3,
+        0.7,
+        0.5
+      ]
+    },
+    {
+      "semantic": "weapons",
+      "side": "left",
+      "visibility": "visible",
+      "confidence_float": 0.7,
+      "normalized_source_bbox": [
+        0.7,
+        0.2,
+        0.9,
+        0.5
+      ]
+    },
+    {
+      "semantic": "spare wheels",
+      "side": "left",
+      "visibility": "not visible",
+      "confidence_float": 0.3,
+      "normalized_source_bbox": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "materials_array": [],
+  "uncertainties_array": [
+    "Exact dimensions are inferred from typical off-road vehicle proportions; terrain distortion may affect accuracy.",
+    "Some components (e.g., spare wheels, internal mechanisms) are obscured or not clearly visible.",
+    "Vehicle orientation and perspective may skew perceived proportions."
+  ],
+  "source_image_size_px_array": [
+    251,
+    148
+  ]
+}

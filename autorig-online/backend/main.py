@@ -1551,8 +1551,10 @@ from ai_avatar_from_image import build_avatar_from_image_router
 from ai_video_reference import router as ai_video_reference_router
 from ai_graph_edits import router as ai_graph_edits_router
 from ai_pipelines_api import router as ai_pipelines_router
+from vehicle_generation import build_vehicle_router
 
 app.include_router(build_avatar_router(get_avatar_owner))
+app.include_router(build_vehicle_router(get_avatar_owner))
 app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))

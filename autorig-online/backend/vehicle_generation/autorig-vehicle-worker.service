@@ -1,0 +1,32 @@
+[Unit]
+Description=AutoRig durable vehicle V3 pipeline worker
+After=network-online.target
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+WorkingDirectory=/srv/autorig/current/autorig-online/backend
+Environment=PYTHONPATH=/srv/autorig/current/autorig-online/backend:/srv/autorig/data/motion_transfer
+Environment=AUTORIG_VEHICLE_PIPELINE_DIR=/srv/autorig/data/var/vehicle-pipeline
+Environment=AUTORIG_VEHICLE_FARM_BASE_URL=https://autorig.online
+Environment=AUTORIG_VEHICLE_STAGE_TIMEOUT_SECONDS=1800
+Environment=AUTORIG_VEHICLE_SAM_PYTHON=/srv/autorig/data/vehicle-segmentation/venv/bin/python
+Environment=AUTORIG_VEHICLE_SAM_SOURCE=/srv/autorig/data/vehicle-segmentation/source
+Environment=AUTORIG_VEHICLE_SAM_CHECKPOINT=/srv/autorig/data/vehicle-segmentation/checkpoints/sam2.1_hiera_tiny.pt
+Environment=CUDA_VISIBLE_DEVICES=
+ExecStart=/srv/autorig/venv/bin/python3 -m vehicle_generation.worker
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+MemoryMax=4G
+MemorySwapMax=0
+CPUQuota=200%
+TasksMax=128
+TimeoutStopSec=15
+KillMode=control-group
+OOMPolicy=stop
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

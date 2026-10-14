@@ -1,0 +1,29 @@
+{
+  "schema_string": "autorig.vehicle.grounding-dino-runtime/1",
+  "install_root_string": "/srv/autorig/data/vehicle-segmentation/grounding-dino",
+  "model_repository_string": "IDEA-Research/grounding-dino-tiny",
+  "model_revision_string": "a2bb814dd30d776dcf7e30523b00659f4f141c71",
+  "official_source_repository_string": "https://github.com/IDEA-Research/GroundingDINO.git",
+  "official_source_commit_string": "856dde20aee659246248e20734ef9ba5214f5e44",
+  "license_string": "Apache-2.0",
+  "license_sha256_string": "b403c98ec1ffaccb0124632592a3d99642cddc3031ca412b402568e6c06c202a",
+  "checkpoint_sha256_string": "1a2412ef99bd74bcd3c2a246fa1e48581f8889a1300c9051974741314fc042f3",
+  "model_config_sha256_string": "eec82c5ab66e16df12a9a212e68ac011779927c2536cf9078658e35d85f0c67a",
+  "runtime_object": {
+    "python_string": "/srv/autorig/data/vehicle-segmentation/venv/bin/python",
+    "torch_string": "2.5.1+cpu",
+    "transformers_string": "4.46.3",
+    "huggingface_hub_string": "0.26.2",
+    "tokenizers_string": "0.20.3",
+    "safetensors_string": "0.4.5",
+    "device_string": "cpu",
+    "threads_int": 2,
+    "nice_int": 10
+  },
+  "constraints_array": [
+    "raw proposals are retained",
+    "automatic_accept_bool is always false",
+    "Qwen and geometry checks retain validation authority",
+    "no GPU, paid API or service restart"
+  ]
+}
