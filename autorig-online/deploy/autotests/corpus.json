@@ -1025,6 +1025,13 @@
    "what": "winged humanoid creature (+Y up in the file); rigged lying (-z «quadruped») on v3.2026-10-13.8",
    "sha256": "7e1a46d59eaa11ad264309cd11f8c41a497f2ae1ff6acd760c62e81b814cf17a",
    "bytes": 721184
+  },
+  "f527fb55.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ec86a7d11e44351cb942/proj/model.glb",
+   "task": "f527fb55-45e2-464f-84a4-91a5ab1ad4ba",
+   "what": "white blocky humanoid figure (MT run ec86a7d11e44351cb942)",
+   "sha256": "f2420c9cbfdd561eb70ee1673471447f68d08e044bdfad77fcc1042ce8cd10ce",
+   "bytes": 143352
   }
  },
  "profiles": {
@@ -14318,10 +14325,6 @@
      },
      "owner": "Anim stand · V3",
      "note": "owner 2026-10-14: every corpus rig shows and flags «mesh falls apart» (the stand's stretch on its clip rule: biped Running, quadruped gallop, monster walk)",
-     "xfail": {
-      "reason": "the rest pose does not reproduce the mesh (bind_identity_failure): the stretch cannot be measured",
-      "owner": "Seams · V3"
-     },
      "measured_2026_10_14": {
       "worst_edge_ratio": 1.0,
       "edges_over_4x": 0,
@@ -15497,8 +15500,17 @@
       "up": [
        "==",
        "+y"
+      ],
+      "body_plan": [
+       "==",
+       "quadruped"
       ]
-     }
+     },
+     "xfail": {
+      "reason": "body plan from the traced paws lands with Orientation · V3 .11 (no Vision answer: the rig-derived category said biped)",
+      "owner": "Orientation · V3"
+     },
+     "tier": "base"
     },
     {
      "id": "stand_tear",
@@ -15612,6 +15624,122 @@
       ]
      },
      "owner": "Anim stand · V3"
+    }
+   ]
+  },
+  {
+   "id": "tear_blocky_humanoid",
+   "task": "f527fb55-45e2-464f-84a4-91a5ab1ad4ba",
+   "cost": 2,
+   "owner": "Seams · V3",
+   "defect": "Telegram 'tear' report 2026-10-14 (run ec86a7d11e44351cb942, rig v3.2026-10-14.11): the blocky white humanoid's arms shred at the shoulders/elbows in the clips. Cause 1: the engine's contact splits left 198-213 hole copies (slit 35 % H, triage weld_split_gaps 217) because seam_policy defaulted to split (record only). Cause 2: mt/cut_cap wrote uint16 weights with a plain round() (rows 1 LSB off), the stand's bind-identity check read that as 'invalid' and answered worst edge 1.0, tear False. Fix: seam_policy=auto + seam_unify=surface, exact-sum quantisation, an invalid stretch is never reported as a pass",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "f527fb55.model.glb",
+     "params": {
+      "words": "white blocky humanoid figure",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_holes",
+     "kind": "detach",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {},
+     "note": "v3.2026-10-14.11 (split): 198 hole copies, slit_max_pct_H 35.1; seam_policy=auto (2026-10-15): 0 / 0.0",
+     "target": {
+      "thresholds": {
+       "hole_copies": [
+        "<=",
+        0
+       ],
+       "slit_max_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit) is opt-in per run: on the corpus it adds 48-300 edges over 4x on 20 cases (gate 2026-10-15), so the owner chooses the default on DEV. Until then the split's holes stay on this model (rig v3.2026-10-14.11: 198-213 hole copies, slit 35 % H); with seam_policy=auto: 0 / 0.0, worst edge 6.4, 37 edges over 4x. A tear report re-rigs with auto.",
+      "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "mt_seams",
+     "kind": "seam_weights",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "seam_weight_mismatch": [
+       "==",
+       "CAL"
+      ]
+     },
+     "target": {
+      "thresholds": {
+       "open_cut_edges": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "seam_policy=auto (never an open slit) is opt-in per run: on the corpus it adds 48-300 edges over 4x on 20 cases (gate 2026-10-15), so the owner chooses the default on DEV. Until then the split's holes stay on this model (rig v3.2026-10-14.11: 198-213 hole copies, slit 35 % H); with seam_policy=auto: 0 / 0.0, worst edge 6.4, 37 edges over 4x. A tear report re-rigs with auto.",
+      "owner": "Seams · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       20
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "before the fix the stretch was 'invalid' (bind_identity_failure) = 1.0x / tear False; stretch_valid == 1 pins that. Measured 2026-10-15 with seam_policy=auto: worst 6.4, 37 edges over 4x (Running)"
     }
    ]
   }
