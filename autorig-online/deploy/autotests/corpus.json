@@ -1039,6 +1039,34 @@
    "what": "red-haired man in white shirt and black pants, loose sleeves, T-pose (MT run 415bcd6ac676f4aa75b2)",
    "sha256": "cfe96f38ba37edba38098681d18944a7e35a21e5a24af5bd3de1aaa8598ce1ba",
    "bytes": 1553748
+  },
+  "ad78f137.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/ad78f13716504fbb5742/proj/model.glb",
+   "task": "726ccc27-5bc9-4e2d-932e-e4843b6d2efc",
+   "what": "anthropomorphic tuxedo cat with a long tail (V3 run ad78f137)",
+   "sha256": "6f21ca8291ed648f7e46dbe6d80b564efc49071eb2cb501b1d544b9f49ad49ec",
+   "bytes": 4499152
+  },
+  "0e88d8bb.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/0e88d8bb9ee752e034da/proj/model.glb",
+   "task": "b45999fa-35a7-4d65-ac30-dcb242beea67",
+   "what": "anthropomorphic rabbit with long ears, no tail (V3 run 0e88d8bb)",
+   "sha256": "8958e8a162677f94ec646aab87bf2f0a1f6d6639f2c43addf82440c4e8158e4e",
+   "bytes": 1521124
+  },
+  "8709c388.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/8709c38867faf6ad90b5/proj/model.glb",
+   "task": "332fb890-a089-48cd-8b9b-b6a102a9cd80",
+   "what": "angel in a long dress, T-pose arms, big feathered wings behind the back (Vision: Angelic figure with wings; no words from the caller); rigged with the wing tips as the hands (Wings V3, 2026-10-15)",
+   "sha256": "85060f4022521f817fc9f706b1f9dd1fd6cb7fc32350697563cd08ba3ea78ffe",
+   "bytes": 2016712
+  },
+  "9087b3b4.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/9087b3b4ce2c6a0ccd2f/proj/model.glb",
+   "task": "a094256c-4786-43fd-9679-cf2a4521d991",
+   "what": "blocky Roblox-style figure with feathered wings on the back; the front of the figure is a guess (the wings sit at +z); rigged with the wing tips as the hands (Wings V3, 2026-10-15)",
+   "sha256": "a5529cceba9e5cdace8178123592cd1bac26be68d06eea215768db16f0f9d6fd",
+   "bytes": 435644
   }
  },
  "profiles": {
@@ -15821,6 +15849,536 @@
       ]
      },
      "note": "v3.2026-10-14.11: clavicle_to_upper 5.4, upper_pct_H 2.7, shoulder_x 19.7; after armpit_slope_follow: 0.62 / 12.4 / 11.2"
+    }
+   ]
+  },
+  {
+   "id": "anthro_tuxedo_cat_tail",
+   "task": "726ccc27-5bc9-4e2d-932e-e4843b6d2efc",
+   "cost": 3,
+   "defect": "Anthro rig · V3 (2026-10-15, Telegram «Новая категория», task 51335965): an anthropomorphic cat (a tuxedo coat, a long tail, pointed ears) was a plain humanoid: the tail hung on the Hips / thigh weights (158 edges over 4x on the stand's Running clip, leak 4.4 %). Fix: category `anthro` (mt/anthro.py words rule), the tail traced along the mesh behind the hips (Tail..Tail3), ear chains, wider proportion ranges; tail wag in the clips",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "ad78f137.model.glb",
+     "params": {
+      "words": "anthropomorphic tuxedo cat",
+      "body": "biped"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       29
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_anthro",
+     "kind": "anthro",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "is_anthro": [
+       "==",
+       1
+      ],
+      "category_anthro": [
+       "==",
+       1
+      ],
+      "tail_bones": [
+       "==",
+       4
+      ],
+      "ear_bones": [
+       ">=",
+       2
+      ],
+      "tail_length_pct_H": [
+       ">=",
+       25
+      ]
+     },
+     "note": "farm 2026-10-15: tail 47.8 % H, radius 3.0 % H, 1130 vertices; one ear chain (RightCrest)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       110
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Categories · V3",
+     "note": "Anthro rig 2026-10-15: the tail / ears must not tear the mesh (the stand's Running clip)",
+     "measured_2026_10_15": {
+      "worst_edge_ratio": 19.25,
+      "edges_over_4x": 63,
+      "tear": false,
+      "clip": "Running",
+      "baseline_without_anthro": {
+       "edges_over_4x": 158,
+       "leak_pct": 4.44,
+       "leak_after_pct": 0.9
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "anthro_rabbit_ears",
+   "task": "b45999fa-35a7-4d65-ac30-dcb242beea67",
+   "cost": 2,
+   "defect": "Anthro rig · V3 (2026-10-15): an anthropomorphic rabbit with long ears and no visible tail: the ears rode the Head bone (91 edges over 4x, leak 2.9 %); category anthro gives the ears their own chain. Guards that no tail is invented on a tailless model (tail_bones == 0)",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "0e88d8bb.model.glb",
+     "params": {
+      "words": "anthropomorphic rabbit",
+      "body": "biped"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       27
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     }
+    },
+    {
+     "id": "mt_anthro",
+     "kind": "anthro",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "is_anthro": [
+       "==",
+       1
+      ],
+      "category_anthro": [
+       "==",
+       1
+      ],
+      "tail_bones": [
+       "==",
+       0
+      ],
+      "ear_bones": [
+       ">=",
+       2
+      ]
+     },
+     "note": "farm 2026-10-15: ear chain RightCrest 20.5 % H; the tail trace finds none"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       75
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Categories · V3",
+     "note": "Anthro rig 2026-10-15: the tail / ears must not tear the mesh (the stand's Running clip)",
+     "measured_2026_10_15": {
+      "worst_edge_ratio": 11.18,
+      "edges_over_4x": 53,
+      "tear": false,
+      "clip": "Running",
+      "baseline_without_anthro": {
+       "edges_over_4x": 91,
+       "leak_pct": 2.9,
+       "leak_after_pct": 0.77
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "anthro_words_rule",
+   "cost": 1,
+   "defect": "Anthro rig · V3 (2026-10-15): the category's words rule is strict. Anthros (anthropomorphic / furry, animal-like / -headed humanoid, animal + character) are anthro; a human with animal ears or a tail, a warrior with a lion mane, a soldier with dog tags, a furry MONSTER, a plain robot stay humanoid / monster",
+   "checks": [
+    {
+     "id": "words",
+     "kind": "anthro_words",
+     "paths": [
+      "mt"
+     ],
+     "params": {
+      "cases": {
+       "stylized cat-like humanoid": true,
+       "anthropomorphic fox officer": true,
+       "muscular anthropomorphic wolf": true,
+       "Horse-headed humanoid": true,
+       "cartoon bear character in a red and white shirt": true,
+       "Cute cartoon otter character": true,
+       "Purple anthropomorphic hedgehog": true,
+       "anime-style girl with cat ears": false,
+       "Anime-style girl with fox tail": false,
+       "chibi anime girl with fox ears": false,
+       "armored warrior with lion mane": false,
+       "soldier with dog tags": false,
+       "stylized furry monster": false,
+       "muscular man": false,
+       "robot with a cat logo": false,
+       "knight in plate armor": false
+      }
+     },
+     "thresholds": {
+      "mismatches": [
+       "==",
+       0
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "winged_angel_feathered",
+   "task": "332fb890-a089-48cd-8b9b-b6a102a9cd80",
+   "cost": 2,
+   "defect": "Wings V3 (owner order 2026-10-15, run 8709c388): a T-pose angel with big feathered wings got no wing bones and its Arm chain on the wing: multilimb's pelvis-rooted geodesic tree reached the feathers through the dress hem and called them a tail (counts.wings 0, tails 1), the caller passed no words, and fastrig.fit_biped took the arm tip from the farthest 25 silhouette points = the wing tips (hand joints at y 0.06 inside the wing, 6 of 8 arm joints in the wing's voxel region). Fix: multilimb.wing_probe (a sheet behind the trunk's back plane, one per side, grown over the thin cells that touch it) cut out of the solid before the limbs are traced, Vision's classify text as words, fastrig's arm reach search and the pose-skeleton / monster traces leave the wing vertices out: hands at the hands (arm_joints_on_wing 0), 2 wing chains of 4 bones. The dress / collar seams tear in the stand's Running clip once the arms are right (591 edges over 4x, was 183 with the arms on the wings): xfail, a skin defect of the arms, not of the wings",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "8709c388.model.glb",
+     "params": {
+      "words": "Angelic figure with wings",
+      "body": "biped",
+      "forward_axis": "+z",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       30
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "xfail": {
+      "reason": "Wings V3 not landed: the wings agent stopped on the Sonnet weekly limit (2026-10-15) before multilimb.wing_probe / the arm reach search reached production; the case blocked every MT release (lead, 2026-10-15)",
+      "owner": "Wings · V3"
+     }
+    },
+    {
+     "id": "mt_wings",
+     "kind": "multilimb_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "use": [
+       "==",
+       1
+      ],
+      "wings": [
+       "==",
+       2
+      ],
+      "wing_pairs": [
+       "==",
+       1
+      ],
+      "tails": [
+       "==",
+       0
+      ],
+      "extra_bones": [
+       ">=",
+       8
+      ],
+      "arm_joints_on_wing": [
+       "==",
+       0
+      ],
+      "wing_vertices_excluded": [
+       ">=",
+       1000
+      ],
+      "wing_probe_act": [
+       "==",
+       1
+      ],
+      "chains_without_vertices": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ]
+     },
+     "xfail": {
+      "reason": "Wings V3 not landed: the wings agent stopped on the Sonnet weekly limit (2026-10-15) before multilimb.wing_probe / the arm reach search reached production; the case blocked every MT release (lead, 2026-10-15)",
+      "owner": "Wings · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand V3",
+     "xfail": {
+      "reason": "with the arms at the shoulders (T-pose) the Running clip tears the dress / crotch seam: 49 worst ratio, 591 edges over 4x (the old rig had the arms on the wings and 183); a skin defect of the arms, not of the wings",
+      "owner": "Seams V3"
+     },
+     "measured_2026_10_15": {
+      "worst_edge_ratio": 49.05,
+      "edges_over_4x": 591,
+      "tear": true,
+      "clip": "Running"
+     }
+    }
+   ]
+  },
+  {
+   "id": "winged_blocky_figure",
+   "task": "a094256c-4786-43fd-9679-cf2a4521d991",
+   "cost": 2,
+   "defect": "Wings V3 (owner order 2026-10-15, run 9087b3b4): a blocky Roblox-style figure with feathered wings on its back; the tracer found ONE unpaired wing (counts.wings 1, wing_pairs 0, use false: no wing bones) and fastrig took the wing tips as the hands (hand tails at x +-2.8 on the wing, arms diagonal). The front of a symmetric blocky figure is a guess (the conveyor set +z, the wings sit at +z), so the probe tries both sides of the trunk. Fix: multilimb.wing_probe pairs the two sheets, the wings get 2 chains of 4 bones and leave the arm search: the box arms hang at the sides (arm_joints_on_wing 0). The collar seam between Head and Shoulder tears in the stand's Running clip (204 edges over 4x, was 47 with the arms on the wings): xfail, a skin defect of the arms",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "9087b3b4.model.glb",
+     "params": {
+      "words": "Stylized angelic humanoid figure, wings spread wide",
+      "body": "biped",
+      "forward_axis": "+z",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       30
+      ],
+      "clips": [
+       ">=",
+       8
+      ]
+     },
+     "xfail": {
+      "reason": "Wings V3 not landed: the wings agent stopped on the Sonnet weekly limit (2026-10-15) before multilimb.wing_probe / the arm reach search reached production; the case blocked every MT release (lead, 2026-10-15)",
+      "owner": "Wings · V3"
+     }
+    },
+    {
+     "id": "mt_wings",
+     "kind": "multilimb_rig",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "use": [
+       "==",
+       1
+      ],
+      "wings": [
+       "==",
+       2
+      ],
+      "wing_pairs": [
+       "==",
+       1
+      ],
+      "extra_bones": [
+       ">=",
+       8
+      ],
+      "arm_joints_on_wing": [
+       "==",
+       0
+      ],
+      "wing_vertices_excluded": [
+       ">=",
+       500
+      ],
+      "wing_probe_act": [
+       "==",
+       1
+      ],
+      "chains_without_vertices": [
+       "==",
+       0
+      ],
+      "unweighted": [
+       "==",
+       0
+      ]
+     },
+     "xfail": {
+      "reason": "Wings V3 not landed: the wings agent stopped on the Sonnet weekly limit (2026-10-15) before multilimb.wing_probe / the arm reach search reached production; the case blocked every MT release (lead, 2026-10-15)",
+      "owner": "Wings · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       100
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand V3",
+     "xfail": {
+      "reason": "with the box arms at the sides the Running clip tears the hair / collar seam (Head vs LeftShoulder weight 1.0 on neighbouring vertices): worst ratio 220, 204 edges over 4x (the old rig had the arms on the wings: 47); a skin defect of the arms, not of the wings",
+      "owner": "Seams V3"
+     },
+     "measured_2026_10_15": {
+      "worst_edge_ratio": 220.32,
+      "edges_over_4x": 204,
+      "tear": true,
+      "clip": "Running"
+     }
     }
    ]
   }
