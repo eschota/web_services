@@ -910,6 +910,16 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   * the results of every stage (explode picture, table, islands grid, upscaled grid) go to DEV for the owner's
     approval; Plan B runs beside the main conveyor (canon → cluster → cut → split → isolate → restore) and is compared
     with it on the same vehicles.
+* **Plan B acceptance and the Blender modelling test** (owner, 2026-10-16 ~11:50 UTC: «сначала разбиваем всё
+  классификацией на нужные объекты, потом берем и изолируем их с дорисовкой на основе промпта после анализа, чтобы за 1
+  рендер получить все необходимые детали, но с валидацией тем же классификатором чтобы сходилось до и после по
+  объектам. А потом в качестве теста отправь соннет 5.5 медиум агента замоделить с помощью вот этого скилла
+  https://autorig.online/dev/skills/blender-reference-modeling запчасти для тачки и саму тачку, пусть даже в одной
+  сцене чтобы разбить всё пообъектно и всё сошлось красиво»): Plan B is accepted only when the same classifier gives the
+  same per-kind counts on the input and on the exploded render (before | after | match table); and a Sonnet 5.5 agent
+  models the truck and its parts in Blender by the reference-modelling skill (one scene, one object per part, doors in
+  their apertures, wheels on hubs, procedural PBR, GLB per part + scene) as a «Plan V» test against the generated
+  (Hunyuan / Tripo) parts; results to DEV for the owner's verdict.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
