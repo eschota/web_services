@@ -728,6 +728,29 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   body and the suspension pictures as the check. The model stage generates each part as its own 3D object: Tripo
   (`gen_tripo`, `TRIPO_API_KEY` in `/srv/autorig/secrets/tripo.env`, only with the paid button) or the free gen3d
   queue. No Tripo integration or key existed before 2026-10-15; the key is the owner's to add.
+* **Segmentation is its own stage, confirmed or hand-painted in the viewer; every part can be ordered as a model**
+  (owner, 2026-10-15 ~15:30 UTC, on the Object-ID map of the monster truck): «вот это должно отображаться как отдельный
+  этап и заложи отдельного субагента для инструмента ручной дорисовки как в фотошопе чтобы можно было выбрать прям
+  иконку в 3д вьювере на этой картинке и сплайном добавить или вырезать с помощью шифта или контрала зажатого … чтобы
+  мождно было дверь обрисовать более точно и Диалог был - подтвердите что объекты правильно классифицированы, либо
+  дорисуйте маски вручную … после удачной сегментации надо давать возможность пользователю каждую запчасть заказать как
+  отдельную 3д модель в интерфейсе».
+  * The Object-ID / Material-ID segmentation (`mt/vehicle_seg.py`) is a conveyor stage of its own with its outputs
+    (`vehicle/seg/objects.json`, `materials.json`, the overlays) shown in the viewer.
+  * The viewer dialog asks «подтвердите, что объекты классифицированы правильно, либо дорисуйте маски вручную»: a
+    mask editor on the picture (parts as icons, spline / lasso, Shift adds, Ctrl subtracts, undo), masks saved per
+    part through the vehicle service with the previous version kept; hand-edited masks are recorded
+    (`vehicle/seg/manual.json`).
+  * After the confirmation every part has a button to order it as a separate 3D model (and «order all»); an order is
+    `vehicle/orders/<id>.json` and feeds the model stage.
+  * Known defect being worked: the door object covered only the lower panel and had no frame (truck, object 6).
+* **AutoRig tasks have priority on worker-4090** (owner, 2026-10-15 ~15:20 UTC: «приоритет авториг задач для 4090
+  должен быть отдан … я предупрежу очередь видео генератора, чтобы он не пугался что 4090 будет приоритетно считать
+  авториг задачи»): in renderfin, an AutoRig task (`priority_class: autorig` on the render prompt, set by the MT farm
+  client and the AutoRig backend paths; or an AutoRig `user_name`) is dispatched before everything else; while one
+  waits, worker-4090 takes no other work; and an AutoRig task that has waited `RENDERFIN_AUTORIG_PREEMPT_SECONDS`
+  with no free capable box takes the 4090 from a running non-AutoRig render, which is re-queued under its own id
+  (the owner warns the video generator's queue). Boxes: `RENDERFIN_AUTORIG_PRIORITY_BOXES` (default worker-4090).
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
