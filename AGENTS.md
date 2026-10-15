@@ -682,10 +682,14 @@ Owner rule, 2026-10-10:
   * Doors are cut from the body by the labels and hinged (`mt/vehicle.py`); the cabin is cut into the body and
     furnished from a kit (seat, steering wheel, three pedals, a manual H-pattern gear stick, dashboard); the sockets
     (seat, wheel grips, pedals, gear knob, their axes and travel) are the contract in `vehicle/interior.json`.
-  * The driver is a robot of the Humanoid Robots Model Pack (`R:\_KOS_obot_\HumanoidRobotsPack`, HR-01 first,
+  * The driver is a robot of the Humanoid Robots Model Pack (`R:\_KOS_
+obot_\HumanoidRobotsPack`, HR-01 first,
     `Exports/HR-01/HR-01.glb`, Humanoid skeleton, clips Idle / Walk / Turn / Wave / LiftCarry), seated by IK at the
     sockets, with driving clips made per car (steer, gas, brake, clutch + shift). Any rigged AutoRig biped can take
     the seat later: the sockets are the contract, not the robot.
+* **Wheels first, by a detector** (owner, 2026-10-15): «нам надо четко определять хотя бы колеса и камеру приводить к
+  ортогональному виду для моделирования 3д модели и вырезание колес»; the Detectron API that ran in Docker on
+  way.qwertystock.com (`/map`) is checked first for wheel masks; a result is validated by the owner in Telegram.
 * **Never humanoid.** A vehicle never enters fastrig, skinning, humanoid clips or the joints confirmation.
 * **Astra's vehicle work is discarded** (the uncommitted `mt/vehicle_image_pipeline.py`, `vehicle_multiview_*`,
   `backend/vehicle_generation/`, the Unity `vehicle-editor` build): none of it was on prod; none of it is used.
