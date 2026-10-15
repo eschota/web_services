@@ -760,6 +760,20 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   SAM2 look for wheels on the result; any wheel found is erased by raster and the picture goes back to Qwen with a
   fix instruction naming how many were drawn (`cut_attempts`, 3); after the last attempt the wheels stay erased and
   the stage is `review`. A result with a wheel on it never goes to modelling.
+* **Masks only through SAM, fast, on a GPU; a corpus of 10 vehicles** (owner, 2026-10-15 ~17:30 UTC: «давай
+  попробуем чтобы маски делались только через SAM, сколько они занимают времени на 4090 RTX?» and «скачивай все что
+  нужно для тестов, сразу делай чтобы мы могли сегментировать быстро и добавь в тесты 10 разных машин … сгенерируй
+  их по отдельности для качества и валидируй у меня, снег не надо рисовать на тачках, он будет процедурным потом»):
+  * the segmentation's geometry comes from GroundingDINO text queries + SAM2 masks (`paint_engine: sam`), the
+    Vision inventory names what to look for; Qwen Object-ID painting stays only as the comparison path;
+  * the masks run on a GPU: `deploy/vehicle/masks_service.py` (GDINO-tiny + SAM2.1-tiny kept loaded, HTTP
+    `/masks`) on worker-4090 under the ComfyUI python (`R:utorig\.runtimeehicle-seg`, reverse tunnel
+    `-R 19410:127.0.0.1:8989`), later on the farm ai-nodes; `mt/vehicle_v3.masks_detect` tries `VEHICLE_MASKS_URL`
+    first and falls back to the VPS CPU worker (GDINO 33 s per query there);
+  * model downloads for these tests are allowed by this order (GroundingDINO-tiny, SAM2.1, SAM3 when needed);
+  * the corpus `/srv/autorig/data/autotests/corpus/vehicles/` holds 10 vehicle pictures generated one by one on
+    the farm (sedan, wagon, pickup, minivan, motorhome, boat on a trailer, SUV, bus, semi tractor, tow truck), no
+    snow, validated by the owner in DEV; the segmentation is checked on all of them (`tests/vehicles_corpus.json`).
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
