@@ -690,6 +690,15 @@ obot_\HumanoidRobotsPack`, HR-01 first,
 * **Wheels first, by a detector** (owner, 2026-10-15): «нам надо четко определять хотя бы колеса и камеру приводить к
   ортогональному виду для моделирования 3д модели и вырезание колес»; the Detectron API that ran in Docker on
   way.qwertystock.com (`/map`) is checked first for wheel masks; a result is validated by the owner in Telegram.
+* **Every vehicle Qwen-edit call carries its own technical system prompt** (`mt.vehicle_v3.VEHICLE_SYSTEM`; owner
+  2026-10-15: «там не должно быть языков и женщин»). The site's `/api/qwen-image` applies its standing remix
+  instruction («give every face one vivid, playful expression … her tongue out», `QWEN_SYSTEM_PROMPT_DEFAULT` in
+  `backend/ai_qwen_image_api.py`) whenever two or more pictures are wired in: it drew a woman's face into a truck's
+  window and a tongue on a wheel. A vehicle prompt names the camera literally (orthographic, no convergence), what to
+  cut, what to segment, and forbids people, faces, characters and text.
+* **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
+  «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
+  Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
 * **Never humanoid.** A vehicle never enters fastrig, skinning, humanoid clips or the joints confirmation.
 * **Astra's vehicle work is discarded** (the uncommitted `mt/vehicle_image_pipeline.py`, `vehicle_multiview_*`,
   `backend/vehicle_generation/`, the Unity `vehicle-editor` build): none of it was on prod; none of it is used.

@@ -1,0 +1,22 @@
+[Unit]
+Description=AutoRig vehicle conveyor (/api/mt/vehicle: the ISO 45/45 picture, confirmations, the stages of mt/vehicle_v3.py)
+After=network-online.target autorig-storage.service
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/data/motion_transfer
+Environment="PYTHONUNBUFFERED=1" "OMP_NUM_THREADS=2" "OPENBLAS_NUM_THREADS=2"
+ExecStart=/srv/autorig/venv/bin/python3 -m uvicorn mt.vehicle_v3_service:app --host 127.0.0.1 --port 8284 --workers 1 --no-access-log
+Restart=always
+RestartSec=5
+Nice=10
+NoNewPrivileges=true
+MemoryMax=4G
+
+[Install]
+WantedBy=multi-user.target
