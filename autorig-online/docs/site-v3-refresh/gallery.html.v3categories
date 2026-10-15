@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rigged 3D Model Gallery: Real Results | AutoRig</title>
+    <meta name="description" content="Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.">
+    <meta name="keywords" content="rigged 3D models gallery, auto rig gallery, AutoRig examples, rigged character gallery, animal rig examples, 3D model animation examples, AutoRig V3">
+    <link rel="canonical" href="https://autorig.online/gallery">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Rigged 3D Model Gallery: Real Results | AutoRig">
+    <meta property="og:description" content="Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/gallery">
+    <meta property="og:image" content="https://autorig.online/static/images/og/gallery.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Gallery of 3D models rigged by AutoRig V3: a horse, a car, a bird, a hand, a wolf, a character, a monster and a spider">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Rigged 3D Model Gallery: Real Results | AutoRig">
+    <meta name="twitter:description" content="Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/gallery.jpg">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+    <style>
+        .gallery-about { padding-bottom: 3rem; }
+        .gallery-about-card { padding: 2rem; }
+        .gallery-about-card h2 { margin: 0 0 0.75rem; font-size: clamp(1.3rem, 2.6vw, 1.8rem); }
+        .gallery-about-card p { margin: 0.6rem 0 0; max-width: 860px; color: var(--text-secondary); line-height: 1.65; }
+        .gallery-about-links { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.25rem; }
+        .gallery-about-links a { display: inline-flex; align-items: center; min-height: 40px; padding: 0.4rem 0.85rem; border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-weight: 600; text-decoration: none; }
+        .gallery-about-links a:hover { border-color: var(--accent); }
+        @media (max-width: 700px) { .gallery-about-card { padding: 1.25rem; } }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "@id": "https://autorig.online/gallery#webpage",
+        "name": "Rigged 3D Model Gallery: Real Results | AutoRig",
+        "url": "https://autorig.online/gallery",
+        "description": "Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.",
+        "inLanguage": "en",
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "AutoRig.online",
+            "url": "https://autorig.online/"
+        },
+        "primaryImageOfPage": {
+            "@type": "ImageObject",
+            "url": "https://autorig.online/static/images/og/gallery.jpg",
+            "width": 1200,
+            "height": 630
+        },
+        "breadcrumb": {
+            "@id": "https://autorig.online/gallery#breadcrumb"
+        },
+        "about": [
+            "rigged 3D models",
+            "auto rigging results",
+            "animal rigging",
+            "character rigging"
+        ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "@id": "https://autorig.online/gallery#breadcrumb",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "AutoRig.online",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Gallery",
+                "item": "https://autorig.online/gallery"
+            }
+        ]
+    }
+    </script>
+</head>
+<body data-layout-free3d-init="none">
+    <div id="site-header"></div>
+
+    <main>
+        <section class="hero">
+        <div class="container">
+                <h1 class="text-gradient" data-i18n="gallery_page_title">Gallery of rigged 3D models</h1>
+                <p class="hero-subtitle" data-i18n="gallery_page_subtitle">Real public tasks rigged by AutoRig V3: characters, animals, hands and cars. Newest first; open one to watch it move in the viewer.</p>
+            </div>
+        </section>
+
+        <section class="container mt-4">
+            <div class="card" style="padding: 2rem;">
+                <div class="gallery-controls">
+                    <div>
+                        <div style="font-weight: 700; font-size: 1.1rem;" data-i18n="gallery_all_works">All works</div>
+                        <div id="gallery-total" style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem;">—</div>
+                    </div>
+                    <div style="display:flex; gap: 0.75rem; align-items:center; flex-wrap: wrap; justify-content:flex-end;">
+                        <label style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="gallery_rig_type_label">Rig type:</label>
+                        <select id="gallery-rig-type" class="form-select" style="width: 220px;">
+                            <option value="all" data-i18n="gallery_rig_type_all">All rig types</option>
+                            <option value="humanoid" data-i18n="gallery_rig_type_humanoid">Humanoid</option>
+                            <option value="quadruped" data-i18n="gallery_rig_type_quadruped">Quadruped</option>
+                            <option value="equine" data-i18n="gallery_rig_type_equine">Equine (horse, deer)</option>
+                            <option value="bird" data-i18n="gallery_rig_type_bird">Bird</option>
+                            <option value="serpent" data-i18n="gallery_rig_type_serpent">Serpent</option>
+                            <option value="monster" data-i18n="gallery_rig_type_monster">Monster</option>
+                            <option value="multilimb" data-i18n="gallery_rig_type_multilimb">Multilimb</option>
+                            <option value="hands" data-i18n="gallery_rig_type_hands">Hands</option>
+                            <option value="vehicle" data-i18n="gallery_rig_type_vehicle">Vehicle</option>
+                            <option value="dog" data-i18n="gallery_rig_type_dog">Dog</option>
+                            <option value="bear" data-i18n="gallery_rig_type_bear">Bear</option>
+                            <option value="cat" data-i18n="gallery_rig_type_cat">Cat</option>
+                            <option value="cow" data-i18n="gallery_rig_type_cow">Cow</option>
+                            <option value="deer" data-i18n="gallery_rig_type_deer">Deer</option>
+                            <option value="elephant" data-i18n="gallery_rig_type_elephant">Elephant</option>
+                            <option value="giraffe" data-i18n="gallery_rig_type_giraffe">Giraffe</option>
+                            <option value="horse" data-i18n="gallery_rig_type_horse">Horse</option>
+                            <option value="mouse" data-i18n="gallery_rig_type_mouse">Mouse</option>
+                            <option value="pig" data-i18n="gallery_rig_type_pig">Pig</option>
+                            <option value="rabbit" data-i18n="gallery_rig_type_rabbit">Rabbit</option>
+                            <option value="turtle" data-i18n="gallery_rig_type_turtle">Turtle</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="gallery-grid" class="gallery-grid-dyn">
+                    <div class="card" style="padding: 1rem; color: var(--text-muted);">Loading…</div>
+                </div>
+
+                <div class="gallery-pagination">
+                    <button class="btn btn-secondary" id="gallery-prev" data-i18n="gallery_prev">Prev</button>
+                    <div id="gallery-page" style="color: var(--text-secondary); font-size: 0.9rem;">Page 1</div>
+                    <button class="btn btn-secondary" id="gallery-next" data-i18n="gallery_next">Next</button>
+            </div>
+        </div>
+    </section>
+        <section class="container mt-4 gallery-about" aria-labelledby="gallery-about-title">
+            <div class="card gallery-about-card">
+                <h2 id="gallery-about-title" data-i18n="gallery_about_title">About these results</h2>
+                <p data-i18n="gallery_about_p1">Every card is a real public task. AutoRig V3 rigged it from one upload, retargeted the animation clips and checked the result in the background of the viewer. Hover a card to preview the animation; open it to watch the model move in the Unity viewer.</p>
+                <p data-i18n="gallery_about_p2">Results are sorted by date, newest first, and the rig type filter narrows the list to one preset. Every task is one viewer with an agent chat, and you can download GLB, FBX, USDZ, a ZIP, a Unity package or a Blender file.</p>
+                <p data-i18n="gallery_about_p3">Want the same for your model? Drop it on the home page; the target is a rigged, animated model within one minute from pickup.</p>
+                <nav class="gallery-about-links" aria-label="Related pages" data-i18n-aria-label="gallery_about_nav">
+                    <a href="/" data-i18n="gallery_about_upload">Rig your own model</a>
+                    <a href="/animal-rig" data-i18n="gallery_about_animals">Animal rigging</a>
+                    <a href="/how-it-works" data-i18n="gallery_about_how">How it works</a>
+                    <a href="/guides" data-i18n="gallery_about_guides">Rigging guides</a>
+                    <a href="/faq" data-i18n="gallery_about_faq">FAQ</a>
+                </nav>
+            </div>
+        </section>
+    </main>
+    <div id="site-footer"></div>
+
+    <!-- Scripts -->
+        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/rig-icons.js?v=rigicons1"></script>
+    <script src="/static/js/task-card.js?v=gallery-stats-rigtypes-1"></script>
+    <script src="/static/js/app.js?v=gallery-rigtype-filter-1"></script>
+    <script>
+        const GalleryPage = {
+            page: 1,
+            perPage: 24,
+            sort: 'date',
+            rigType: (() => {
+                const value = new URLSearchParams(window.location.search).get('rig_type') || 'all';
+                const allowed = ['all', 'humanoid', 'quadruped', 'equine', 'bird', 'serpent', 'monster', 'multilimb', 'hands', 'vehicle', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+                return allowed.includes(value) ? value : 'all';
+            })(),
+            loading: false,
+
+            async load() {
+                if (this.loading) return;
+                this.loading = true;
+
+                const grid = document.getElementById('gallery-grid');
+                const totalEl = document.getElementById('gallery-total');
+                const pageEl = document.getElementById('gallery-page');
+                const prevBtn = document.getElementById('gallery-prev');
+                const nextBtn = document.getElementById('gallery-next');
+
+                try {
+                    // keep the server-rendered cards on screen until the live ones arrive
+                    if (!grid.querySelector('.gallery-card')) grid.innerHTML = `<div class="card" style="padding: 1rem; color: var(--text-muted);">${(typeof window.t === 'function') ? t('gallery_loading') : 'Loading…'}</div>`;
+
+                    const params = new URLSearchParams({
+                        page: String(this.page),
+                        per_page: String(this.perPage),
+                        sort: this.sort,
+                        rig_type: this.rigType
+                    });
+                    const resp = await fetch(`/api/gallery?${params.toString()}`);
+                    const data = await resp.json();
+
+                    const items = (data && data.items) ? data.items : [];
+                    const total = (data && typeof data.total === 'number') ? data.total : 0;
+                    const hasMore = !!(data && data.has_more);
+
+                    totalEl.textContent = (typeof window.t === 'function')
+                        ? t('gallery_total', { count: total })
+                        : `Total: ${total}`;
+                    pageEl.textContent = (typeof window.t === 'function')
+                        ? t('gallery_page', { page: this.page })
+                        : `Page ${this.page}`;
+                    prevBtn.disabled = this.page <= 1;
+                    nextBtn.disabled = !hasMore;
+
+                    if (!items.length) {
+                        grid.innerHTML = `<div class="card" style="padding: 1rem; color: var(--text-muted);">${(typeof window.t === 'function') ? t('gallery_empty') : '—'}</div>`;
+                        return;
+                    }
+
+                    grid.innerHTML = items.map((it, idx) => {
+                        const modelUrl = `/task?id=${encodeURIComponent(it.task_id)}`;
+                        const thumbUrl = it.thumbnail_url || `/thumb/${it.task_id}`;
+                        const videoUrl = it.video_url || `/api/video/${it.task_id}`;
+                        const timeAgo = it.time_ago || '';
+                        const openLabel = (typeof window.t === 'function') ? t('gallery_open') : 'Open';
+                        const rigKey = (typeof it.rig_icon_key === 'string' && it.rig_icon_key) ? it.rig_icon_key : 'humanoid';
+                        const rigSrc = (typeof resolveRigIconUrl === 'function')
+                            ? resolveRigIconUrl(rigKey)
+                            : `/static/Icons_png/${rigKey === 'humanoid' ? 'Human' : (rigKey.charAt(0).toUpperCase() + rigKey.slice(1))}.png?v=rigicons1`;
+                        const rigBadge = `<span class="gallery-rig-icon" title="Rig type"><img src="${rigSrc}" alt="" width="64" height="64" loading="lazy" decoding="async" aria-hidden="true"></span>`;
+                        return `
+                            <a href="${modelUrl}" class="gallery-card" data-task-id="${it.task_id}" data-video-url="${videoUrl}" style="text-decoration:none;">
+                                <div class="gallery-card-media">
+                                    <img src="${thumbUrl}" ${idx < 2 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"'} decoding="async" width="270" height="480" alt="">
+                                    ${rigBadge}
+                                </div>
+                                <div class="gallery-card-meta">
+                                    <span class="gallery-time">${timeAgo}</span>
+                                    <span class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">${openLabel}</span>
+                                </div>
+                            </a>
+                        `;
+                    }).join('');
+
+                    // lazy fade-in
+                    grid.querySelectorAll('img[loading=\"lazy\"]').forEach(img => {
+                        const markLoaded = () => img.classList.add('loaded');
+                        img.addEventListener('load', markLoaded, { once: true });
+                        img.addEventListener('error', markLoaded, { once: true });
+                        if (img.complete) markLoaded();
+                    });
+
+                    // Video playback on hover/visibility
+                    grid.querySelectorAll('a[data-video-url]').forEach(card => {
+                        const media = card.querySelector('.gallery-card-media');
+                        const thumb = media?.querySelector('img');
+                        const videoUrl = card.getAttribute('data-video-url');
+
+                        const startVideo = () => {
+                            if (!media || !videoUrl) return;
+                            if (media.querySelector('video')) return;
+                            const v = document.createElement('video');
+                            v.src = videoUrl;
+                            v.muted = true;
+                            v.playsInline = true;
+                            v.loop = true;
+                            v.preload = 'metadata';
+                            v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;';
+                            media.appendChild(v);
+                            if (thumb) { thumb.style.transition = 'opacity 0.15s'; thumb.style.opacity = '1'; }
+                            v.addEventListener('playing', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
+                            v.play().catch(() => {});
+                        };
+
+                        const stopVideo = () => {
+                            const v = media?.querySelector('video');
+                            if (!v) return;
+                            try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {}
+                            v.remove();
+                            if (thumb) thumb.style.opacity = '1';
+                        };
+
+                        card.addEventListener('mouseenter', startVideo);
+                        card.addEventListener('mouseleave', stopVideo);
+                    });
+
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            init() {
+                const rigTypeEl = document.getElementById('gallery-rig-type');
+                const prevBtn = document.getElementById('gallery-prev');
+                const nextBtn = document.getElementById('gallery-next');
+
+                if (rigTypeEl) {
+                    rigTypeEl.value = this.rigType;
+                    rigTypeEl.addEventListener('change', () => {
+                        this.rigType = rigTypeEl.value || 'all';
+                        this.page = 1;
+                        const url = new URL(window.location.href);
+                        if (this.rigType === 'all') {
+                            url.searchParams.delete('rig_type');
+                        } else {
+                            url.searchParams.set('rig_type', this.rigType);
+                        }
+                        window.history.replaceState({}, '', url);
+                        this.load();
+                    });
+                }
+
+                prevBtn?.addEventListener('click', () => {
+                    if (this.page > 1) {
+                        this.page -= 1;
+                        this.load();
+                    }
+                });
+
+                nextBtn?.addEventListener('click', () => {
+                    this.page += 1;
+                    this.load();
+                });
+
+                // Re-render text on language change.
+                window.addEventListener('languageChanged', () => {
+                    this.load();
+                });
+
+                this.load();
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => GalleryPage.init());
+    </script>
+</body>
+</html>
