@@ -802,6 +802,23 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   * the vehicle rig contract (`vehicle/rig.json`, `autorig.mt.rig/vehicle-1`, and `wheels/rig.json`) lists the
     openables with their masks, hinge (axis, side, travel) and status, as `vehicle_doors.py` builds them; the corpus
     tables, the triage list, the fleet / autotest statistics and the category handoff count them per kind.
+* **Every part is isolated and validated in the viewer before any modelling** (owner, 2026-10-15 ~23:45 UTC: «запускай
+  остальные тачки тоже по пайплайну до принятия решения о моделинге, мы должны получить все изолированные рендеры каждой
+  отдельной запчасти найденной сегментатором с помощью квен имейдж и валидировать их в интерфейсе вьювера … скинешь
+  ссылку на все таски чтобы я лично проверил то как это выглядит в интерфейсе»):
+  * the conveyor runs canon → cluster → cut → split → **isolate** and stops there; `model` waits for the person's
+    decision. The isolate stage makes one Qwen-image render per part the segmenter found (doors, windows, hood, trunk,
+    hatches, lights, bumpers, mirrors, guns, cargo…: `vehicle/isolated/<part>.png`, `isolated.json`, `sheet.png`),
+    besides the split tiles body / suspension / wheel;
+  * the task viewer shows the segmentation overlay and every isolated render in the «Запчасти» panel with
+    ✅ accept / 🔁 redraw / 🧩 order-as-3D per part (`GET /api/mt/vehicle/runs/{run}/parts`, `vehicle/review.json`);
+  * the corpus of 10 vehicles exists as real tasks on autorig.online («Vehicle corpus · <name>»), and the owner checks
+    them in the interface by their links;
+  * split rules from the truck verdict of 2026-10-15 («снизу так и осталось пятно какое-то от корпуса, и рама не в тех
+    же пропорциях, и колесо как-то странно выглядит»): the suspension masks are found on the original picture, clipped to
+    the wheel band; the frame region and the cut's leftovers under the body are erased before the shell completion; the
+    suspension comes from the wheels-erased original by removing the body (`split_susp_mode: remove_body`) and must span
+    the axles (`_span_check`, `split_span_tolerance` 0.25); the wheel crop is the largest SAM component, never upscaled.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
