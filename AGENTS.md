@@ -616,6 +616,84 @@ Owner rule, 2026-10-10:
   category's handoff in the same change, with the date and the numbers. The
   general `HANDOFF.md` only points to them.
 
+## Reference Leg Rule for an Asymmetric Pose (owner order, 2026-10-15)
+
+> если одна нога находится на поверхности, то её длина должна быть эталонной и
+> её топология и длина суставов и костей должна быть таргетинговой для другой
+> ноги, вторая нога даже если она находится в другом положении должна
+> ригаться корректно, но лучше вообще проверь почему модель пришла в такой
+> позе, может быть надо просто использовать анимацию из файла?
+
+* **The standing leg is the reference.** When a biped's feet do not stand side
+  by side (a step, a raised leg: `fastrig.biped_leg_masks`), the leg whose foot
+  is on the floor sets the topology and the lengths: hip -> knee, knee ->
+  ankle, ankle -> toe. The other leg is traced on its own points (its own
+  centreline), but its joints are placed at the reference lengths along that
+  centreline, so both chains have the same bone lengths and the same joint
+  order, whatever the pose. The rig never shortens or stretches one leg to
+  fit a pose.
+* **Ask the file first.** Before fitting a posed model, check why it is posed:
+  a source skeleton or an animation in the GLB / FBX means the pose is a baked
+  frame. Then the file's own rest pose (bind pose) or its animation is used
+  (`mt.stabilization`, the source skeleton's bind pose), not a fit of the
+  posed mesh. The rig.json records which path was taken.
+* **Symmetry follows the voxels.** The voxel solid's mirror IoU
+  (`bone_inside.mirror_symmetry`, threshold `symmetric_min_iou` 0.65) decides
+  whether the blueprint opens with the symmetry on; an asymmetric model keeps
+  its own bones in both legs. The corpus case is `asymmetric_pose_biped`
+  (Vegeta 1ceccd8a).
+
+## Vehicles V3: Cars Are Rigged Too (owner orders, 2026-10-15)
+
+> 1. Кластеризация в первую очередь. 2. Вырезание всего лишнего кроме корпуса авто и отправка их на моделирование, с
+> экономией на колесах по возможности — используя платный апи только после подтверждения пользователем. 3. Камера
+> фиксирована в изометрической ортогональной позиции, совпадающей с инпут изображением, которое должно доводиться до
+> этого состояния перед 3д моделированием в обязательном порядке, все 3д модели и все инпуты всегда 45 45 градусов,
+> чтобы габариты всегда были корректными, без подтверждения этому соответствию ни одна 3д модель не должна быть
+> отправлена на генерацию. 4. Всё что сделала Астра — просто выбрось … нужно чтобы авториг умел ригать и коней и тачки.
+
+* **One frame.** Every vehicle input picture and every vehicle model lives in the ISO 45/45 orthographic camera (yaw
+  45°, elevation 45°). A picture that is not there is redrawn there by Qwen-edit before anything is modelled; the
+  camera is *measured* (the wheels' ellipses, `mt/vehicle_v3.camera_from_wheels`), never only judged by a VLM. The
+  person confirms the canonical picture; without the confirmation nothing is generated. The viewer opens a vehicle
+  in that fixed camera with the input picture beside it.
+* **Clustering first, by Qwen, from the analysis** (owner, 2026-10-15, second and third orders):
+  > кластеризовать должна квен, на основе того что мы уже знаем из анализа, анализ должен уже на этом этапе знать
+  > сколько тут уникальных объектов которые нам нужны, показывай маску обжект айди и материал айди для валидации …
+  > это должен делать квен едит по маске рендера и глубины сделай граф, который будет делать отдельно материал айди,
+  > обджект айди по глубине и по рендеру … и из этого автоматически строилась таблица объектов и материалов авто,
+  > только после этого можно переходить к этапу раздельного моделирования объектов типа колес, корпуса, пушек
+  * The analysis (Vision) first lists how many unique objects and materials the vehicle has (4 wheels, body, 2 guns,
+    a rack, 2 pipes; rusty steel, rubber, glass…). That list drives the painting.
+  * A graph (the /nodes graph system) makes two maps separately, each from the render AND the depth map:
+    **Object-ID** (one flat colour per object instance) and **Material-ID** (one per material). Qwen-edit paints by
+    mask; the maps are snapped to the palette and shown to the owner for validation (DEV, with the overlays).
+  * From the maps the table of the vehicle's objects and materials is built automatically (id, colour, pixels, bbox,
+    depth). Only then does the separate modelling start: wheels, body, guns, cargo, each its own object.
+  * The segmentation must also find the doors (every door panel, the hood, the trunk lid / tailgate), the wheels and
+    every extra mounted on the body. A map without the doors is a review, not a result.
+* **Body only to modelling; wheels by economy; paid only by the button.** The body without wheels and extras goes
+  to the free farm (gen3d queue). Wheels are one asset instanced (the picture's wheel disc on a cylinder, or one
+  generated wheel). The paid cloud is called only after the person presses the paid button (`paid_confirm.json`).
+* **Doors, interior and the driver** (owner, 2026-10-15):
+  > основная задача научиться делать двери и интерьер авто таким образом чтобы туда можно было посадить персонажа с
+  > готовым ригом за руль, чтобы он прямо держался за руль и мог давить педали газа и тормоза, а так же чтобы мог
+  > коробку передач дергать механическую и управлять авто, нужно просто взять готовый риг из Humanoid Robots Model Pack
+  * Doors are cut from the body by the labels and hinged (`mt/vehicle.py`); the cabin is cut into the body and
+    furnished from a kit (seat, steering wheel, three pedals, a manual H-pattern gear stick, dashboard); the sockets
+    (seat, wheel grips, pedals, gear knob, their axes and travel) are the contract in `vehicle/interior.json`.
+  * The driver is a robot of the Humanoid Robots Model Pack (`R:\_KOS_obot_\HumanoidRobotsPack`, HR-01 first,
+    `Exports/HR-01/HR-01.glb`, Humanoid skeleton, clips Idle / Walk / Turn / Wave / LiftCarry), seated by IK at the
+    sockets, with driving clips made per car (steer, gas, brake, clutch + shift). Any rigged AutoRig biped can take
+    the seat later: the sockets are the contract, not the robot.
+* **Never humanoid.** A vehicle never enters fastrig, skinning, humanoid clips or the joints confirmation.
+* **Astra's vehicle work is discarded** (the uncommitted `mt/vehicle_image_pipeline.py`, `vehicle_multiview_*`,
+  `backend/vehicle_generation/`, the Unity `vehicle-editor` build): none of it was on prod; none of it is used.
+* **Subagents run on Claude Opus 5.5** for this work (owner, 2026-10-15: «используй для работы субагентов на опус
+  5.5»); the lead writes the spec (`docs/vehicle-conveyor-spec-20261015.md` in the MT repo) and they code to it.
+* Where: `mt/vehicle_v3.py` (stages canon → cluster → cut → model → assemble → doors → interior → driver), the
+  category handoff `docs/categories/vehicle/handoff.md`, the chat handoff `2026-10-15_autorig-v3-cars.md`.
+
 ## Customer Tasks First (owner order, 2026-10-11)
 
 > давай ка приоритет на авториг задачи сделаем … чо там всё висит то, компов же
