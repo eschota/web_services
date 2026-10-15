@@ -836,6 +836,15 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   * the sheet shows fragment → restored per part, and the viewer's «Запчасти» panel shows the restored render (the
     fragment on hover) so the person accepts the whole object, never a bitten fragment; only restored parts go to
     modelling.
+* **FLUX 3 Image Klein is evaluated for the edit speed** (owner, 2026-10-16 ~03:40 UTC, forwarding the release note
+  «FLUX 3 Image Klein … в опенсорс … 8 Гб … редактирует фото … до 4K … на RTX 4070 меньше 9 секунд»: «СРОЧНО ОТПРАВЬ
+  СУБАГЕНТА НА ОПУС 5.5 ЧТОБЫ ОН ПРОВЕРИЛ ТАК ЛИ ЭТО И ЕСЛИ ЭТО ТАК ТО СТАВИМ К НАМ НА ФЛОТ, ЭТО ТО ЧТО НУЖНО ДЛЯ
+  СКОРОСТИ! НО НУЖНО ПРОВЕСТИ ТЕСТИРОВАНИЕ»): the «Flux out» verdict above was about FLUX.2 klein; FLUX 3 Klein is a
+  fresh evaluation, decided by tests, not by the release note. The agent verifies the claim (open weights, license for a
+  public site, VRAM, ComfyUI support, real EDIT capability), installs it on one farm box first (download once per site,
+  then LAN), and runs the same inputs through the same checks as Qwen (the truck cut, the wheel restore, a corpus
+  sedan: seconds, VRAM, the fast wheel finder, the wheel ellipse fill). Downloads for this test are allowed by this
+  order. It replaces Qwen in the vehicle conveyor only if it passes those checks with the owner's ✅ on the sheets.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
