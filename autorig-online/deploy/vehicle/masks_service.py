@@ -1,4 +1,4 @@
-"""GroundingDINO-tiny + SAM2.1-tiny mask service on a GPU box (owner 2026-10-15: «сразу делай чтобы мы могли
+r"""GroundingDINO-tiny + SAM2.1-tiny mask service on a GPU box (owner 2026-10-15: «сразу делай чтобы мы могли
 сегментировать быстро»). The same logic as mt/vehicle_masks_worker.py, kept loaded on CUDA behind HTTP, so a vehicle
 picture is segmented in about a second instead of minutes on the VPS CPU.
 
@@ -12,7 +12,12 @@ VEHICLE_MASKS_URL first and falls back to the CPU worker.
                    "wheel_threshold": 0.4, "text_threshold": 0.25, "nms_iou": 0.5, "max_share": 0.35}
               ->  the masks.json document (objects with box, scores, pixels, centre, ellipse) plus
                   "masks": {"<kind>_<i>.png": <png b64, 0/255>} and "seconds" {dino, sam, total}
-    GET  /health  {"ok": true, "device": "cuda", "gpu": "...", "loaded": true}
+    GET  /health  {"ok": true, "device": "cuda", "gpu": "...", "loaded": true, "box": "f12", "requests": 3,
+                   "inflight": 0, "last_seconds": 1.8, "vram_mb": 2210, "idle_unload_s": 600}
+
+Farm boxes (2026-10-15, «разнести на флот»): `--idle-unload S` frees the GPU after S idle seconds (renders and Hunyuan
+share the card) and the next /masks loads again (a few seconds); 0 (the default, worker-4090) keeps them loaded.
+`<root>/pylib` (hydra, iopath, portalocker for a python that lacks them) is appended to sys.path.
 """
 from __future__ import annotations
 
@@ -29,7 +34,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 
-STATE = {"loaded": False, "device": "cpu", "gpu": "", "lock": threading.Lock()}
+STATE = {"loaded": False, "device": "cpu", "gpu": "", "lock": threading.Lock(), "root": "", "want_device": "cuda",
+         "box": os.environ.get("VEHICLE_MASKS_BOX") or os.environ.get("COMPUTERNAME", ""), "requests": 0, "errors": 0,
+         "inflight": 0, "last_seconds": None, "last_used": 0.0, "idle_unload_s": 0, "loads": 0, "load_error": ""}
 
 
 def _iou(a, b):
@@ -42,7 +49,11 @@ def _iou(a, b):
 def load(root, device):
     import torch
     from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
-    sys.path.insert(0, root)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    pylib = os.path.join(root, "pylib")
+    if os.path.isdir(pylib) and pylib not in sys.path:
+        sys.path.append(pylib)
     from sam2.build_sam import build_sam2
     from sam2.sam2_image_predictor import SAM2ImagePredictor
     t0 = time.perf_counter()
@@ -54,7 +65,57 @@ def load(root, device):
     STATE["device"] = device
     STATE["gpu"] = torch.cuda.get_device_name(0) if device == "cuda" and torch.cuda.is_available() else ""
     STATE["loaded"] = True
+    STATE["loads"] += 1
+    STATE["last_used"] = time.time()
     print(json.dumps({"loaded_s": round(time.perf_counter() - t0, 2), "device": device, "gpu": STATE["gpu"]}), flush=True)
+
+
+def _load_safe():
+    with STATE["lock"]:
+        if STATE["loaded"]:
+            return
+        try:
+            load(STATE["root"], STATE["want_device"])
+            STATE["load_error"] = ""
+        except Exception as exc:                   # noqa: BLE001
+            STATE["load_error"] = f"{type(exc).__name__}: {exc}"[:300]
+            print(json.dumps({"load_error": STATE["load_error"]}), flush=True)
+
+
+def unload():
+    """Free the GPU (called under STATE['lock'] when idle)."""
+    for k in ("proc", "gd", "sam"):
+        STATE.pop(k, None)
+    STATE["loaded"] = False
+    try:
+        import gc
+        gc.collect()
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:                              # noqa: BLE001
+        pass
+    print(json.dumps({"unloaded": True, "idle_s": round(time.time() - STATE["last_used"], 1)}), flush=True)
+
+
+def _idle_watch():
+    while True:
+        time.sleep(15)
+        lim = STATE["idle_unload_s"]
+        if lim > 0 and STATE["loaded"] and not STATE["inflight"] and time.time() - STATE["last_used"] > lim:
+            with STATE["lock"]:
+                if STATE["loaded"] and not STATE["inflight"] and time.time() - STATE["last_used"] > lim:
+                    unload()
+
+
+def _vram_mb():
+    try:
+        import torch
+        if STATE["device"] == "cuda" and torch.cuda.is_available():
+            return round(torch.cuda.memory_reserved() / 2 ** 20)
+    except Exception:                              # noqa: BLE001
+        pass
+    return None
 
 
 def segment(img_bgr, queries, box_threshold=0.3, wheel_threshold=0.4, text_threshold=0.25, nms_iou=0.5, max_share=0.35):
@@ -146,11 +207,18 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def log_message(self, fmt, *args):            # one line per request, no client noise
+        if args and "/health" in str(args[0]):    # the fleet API and the client poll it; keep the log for /masks
+            return
         print(f"[masks] {self.address_string()} {fmt % args}", flush=True)
 
     def do_GET(self):
         if self.path.startswith("/health"):
-            return self._send(200, {"ok": True, "loaded": STATE["loaded"], "device": STATE["device"], "gpu": STATE["gpu"]})
+            return self._send(200, {"ok": not STATE["load_error"], "loaded": STATE["loaded"], "device": STATE["device"],
+                                    "gpu": STATE["gpu"], "box": STATE["box"], "requests": STATE["requests"],
+                                    "errors": STATE["errors"], "inflight": STATE["inflight"],
+                                    "last_seconds": STATE["last_seconds"], "vram_mb": _vram_mb(),
+                                    "idle_unload_s": STATE["idle_unload_s"], "loads": STATE["loads"],
+                                    "load_error": STATE["load_error"]})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -163,14 +231,31 @@ class H(BaseHTTPRequestHandler):
             img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
             if img is None:
                 return self._send(400, {"error": "not an image"})
-            if not STATE["loaded"]:
-                return self._send(503, {"error": "models not loaded yet"})
-            with STATE["lock"]:
-                doc = segment(img, body.get("queries") or {"wheel": "wheel,tire"},
-                              float(body.get("box_threshold", 0.3)), float(body.get("wheel_threshold", 0.4)),
-                              float(body.get("text_threshold", 0.25)), float(body.get("nms_iou", 0.5)), float(body.get("max_share", 0.35)))
+            STATE["inflight"] += 1
+            STATE["requests"] += 1
+            try:
+                t0 = time.perf_counter()
+                if not STATE["loaded"]:
+                    _load_safe()                   # idle-unloaded (or still loading): load now, a few seconds
+                if not STATE["loaded"]:
+                    STATE["errors"] += 1
+                    return self._send(503, {"error": "models not loaded: " + (STATE["load_error"] or "loading")})
+                with STATE["lock"]:
+                    if not STATE["loaded"]:
+                        STATE["errors"] += 1
+                        return self._send(503, {"error": "models unloaded"})
+                    doc = segment(img, body.get("queries") or {"wheel": "wheel,tire"},
+                                  float(body.get("box_threshold", 0.3)), float(body.get("wheel_threshold", 0.4)),
+                                  float(body.get("text_threshold", 0.25)), float(body.get("nms_iou", 0.5)), float(body.get("max_share", 0.35)))
+                    STATE["last_used"] = time.time()
+                doc["box_name"] = STATE["box"]
+                doc["seconds"]["request"] = round(time.perf_counter() - t0, 3)
+                STATE["last_seconds"] = doc["seconds"]["request"]
+            finally:
+                STATE["inflight"] -= 1
             self._send(200, doc)
         except Exception as exc:                   # noqa: BLE001
+            STATE["errors"] += 1
             self._send(500, {"error": str(exc)[:400]})
 
 
@@ -180,9 +265,16 @@ def main():
     ap.add_argument("--port", type=int, default=int(os.environ.get("VEHICLE_MASKS_PORT", "8989")))
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--idle-unload", type=float, default=float(os.environ.get("VEHICLE_MASKS_IDLE_UNLOAD", "0")),
+                    help="free the GPU after this many idle seconds (0 = keep loaded)")
+    ap.add_argument("--box", default="", help="box name reported in /health and masks.json")
     a = ap.parse_args()
+    STATE.update(root=a.root, want_device=a.device, idle_unload_s=max(0.0, a.idle_unload))
+    if a.box:
+        STATE["box"] = a.box
     srv = ThreadingHTTPServer((a.host, a.port), H)
-    threading.Thread(target=load, args=(a.root, a.device), daemon=True).start()
+    threading.Thread(target=_load_safe, daemon=True).start()
+    threading.Thread(target=_idle_watch, daemon=True).start()
     print(json.dumps({"listening": f"http://{a.host}:{a.port}", "root": a.root}), flush=True)
     srv.serve_forever()
 

@@ -100,7 +100,27 @@ VPS_UNITS = [
     "autorig-storage", "autorig-storage-renderfin", "autorig-mt", "autorig-storage-telegram",
     "autorig-admin-bot", "autorig-devbot", "autorig-storage-tunnels",
     "autorig-storage-raptor-tunnel", "autorig-ai-node-tunnels", "autorig-fleet", "nginx",
+    "autorig-masks-tunnels", "autorig-masks-raptor-tunnel",
 ]
+
+# The vehicle mask service (deploy/vehicle/masks_service.py, GroundingDINO-tiny + SAM2.1-tiny on the box GPU), one
+# VPS-local URL per box through its tunnel (owner 2026-10-15: «нужно разнести это всё на флот, чтобы не один только 4090
+# участвовал в тестировании»). The client is mt/vehicle_v3.masks_detect (VEHICLE_MASKS_URLS).
+MASKS_SECONDS = 20.0
+MASKS_URLS: Dict[str, str] = {
+    "worker-4090": "http://127.0.0.1:19411",   # reverse tunnel, deploy/vehicle/masks-4090.ps1
+    "raptor": "http://127.0.0.1:19818",        # autorig-masks-raptor-tunnel.service
+    "f12": "http://127.0.0.1:19812",           # reverse tunnel, task «AutoRig F12 Masks Tunnel»
+    "f13": "http://127.0.0.1:19813",           # autorig-masks-tunnels.service
+    "f1": "http://127.0.0.1:19801",
+    "f2": "http://127.0.0.1:19802",
+    "f5": "http://127.0.0.1:19805",
+}
+MASKS_NOT_SERVING: Dict[str, str] = {
+    "f7": "installed, task disabled 2026-10-15: the ai-node LLM holds the 1080 Ti (149 s per picture)",
+    "f15": "not installed: no shell (SSH 48588 times out, LAN port 22 closed)",
+    "f11": "not installed: GPU Code 43",
+}
 
 # The physical boxes. Names in the sources differ (renderfin "Raptor", the
 # registry "raptor"/"raptor-ai", LoRA sync "Raptor"); this table joins them.
@@ -505,6 +525,23 @@ class Collector:
             pass
         self._store("vps", entry)
 
+    # -- vehicle mask services (deploy/vehicle/masks_service.py) -------------
+    def _probe_masks(self, bid: str, url: str) -> None:
+        status, body, error, elapsed = _http_json(url + "/health", timeout=5.0)
+        entry: Dict[str, Any] = {"checked_at": _now(), "url": url, "http_status": status, "error": error,
+                                 "elapsed": round(elapsed, 3),
+                                 "ok": status == 200 and isinstance(body, dict) and body.get("ok", True) is not False}
+        previous = self._get("masks:" + bid)
+        if entry["ok"]:
+            entry["health"] = {k: body.get(k) for k in ("loaded", "device", "gpu", "box", "requests", "errors",
+                                                        "inflight", "last_seconds", "vram_mb", "idle_unload_s",
+                                                        "loads", "load_error")}
+            entry["last_ok_at"] = entry["checked_at"]
+        else:
+            entry["last_ok_at"] = previous.get("last_ok_at")
+            entry["health"] = previous.get("health") or {}
+        self._store("masks:" + bid, entry)
+
     # -- refresh loop ---------------------------------------------------------
     def refresh(self) -> None:
         futures = []
@@ -537,6 +574,9 @@ class Collector:
             futures.append(self.pool.submit(self._probe_mt))
         if self._is_due("vps", VPS_SECONDS):
             futures.append(self.pool.submit(self._probe_vps))
+        if self._is_due("masks", MASKS_SECONDS):
+            for bid, murl in MASKS_URLS.items():
+                futures.append(self.pool.submit(self._probe_masks, bid, murl))
         for future in futures:
             try:
                 future.result(timeout=20)
@@ -776,6 +816,23 @@ def _age(ts: Optional[float]) -> Optional[int]:
     if not ts:
         return None
     return max(0, int(_now() - float(ts)))
+
+
+RUNNER_FILE = os.environ.get("FLEET_FARM_RUNNER", "/srv/autorig/farmjobs/farm_runner.py")
+
+
+def _runner_bytes() -> bytes:
+    try:
+        with open(RUNNER_FILE, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return b""
+
+
+def _runner_sha() -> str:
+    import hashlib as _h
+    data = _runner_bytes()
+    return _h.sha256(data).hexdigest() if data else ""
 
 
 def _agent_report(box_id: str) -> Dict[str, Any]:
@@ -1357,8 +1414,41 @@ def compose(col: Collector) -> Dict[str, Any]:
             b.setdefault("services_object", {})["farm_runner"] = {
                 "seen_age_seconds": fr.get("seen_age_seconds"), "yielding_to": fr.get("busy") or "",
                 "running": fr.get("running") or [], "done": fr.get("done"), "failed": fr.get("failed"),
+                "down_mbps_float": (fr.get("bw") or {}).get("down_mbps"),
+                "up_mbps_float": (fr.get("bw") or {}).get("up_mbps"),
+                "bandwidth_age_seconds_int": (fr.get("bw") or {}).get("age_seconds"),
                 "state": ("working" if fr.get("running") else ("yielding" if fr.get("busy") else "waiting"))
-                if (fr.get("seen_age_seconds") or 9999) < 120 else "offline"}
+                if (fr.get("seen_age_seconds") if fr.get("seen_age_seconds") is not None else 9999) < 120
+                else "offline"}
+    # the vehicle mask service on the box (deploy/vehicle/masks_service.py, health through the VPS-side tunnel URL)
+    for b in boxes_out:
+        if b["id"] in MASKS_URLS:
+            m = col._get("masks:" + b["id"])
+            h = m.get("health") or {}
+            b.setdefault("services_object", {})["masks"] = {
+                "url_string": MASKS_URLS[b["id"]], "ok_bool": bool(m.get("ok")), "loaded_bool": bool(h.get("loaded")),
+                "gpu_string": h.get("gpu") or "", "last_seconds_float": h.get("last_seconds"),
+                "vram_mb_int": h.get("vram_mb"), "inflight_int": h.get("inflight"), "requests_int": h.get("requests"),
+                "errors_int": h.get("errors"), "idle_unload_s_float": h.get("idle_unload_s"),
+                "load_error_string": h.get("load_error") or "", "error_string": m.get("error") or "",
+                "checked_age_seconds_int": _age(m.get("checked_at")), "last_ok_age_seconds_int": _age(m.get("last_ok_at")),
+                "state_string": ("down" if not m.get("ok") else ("loaded" if h.get("loaded") else "idle (frees the GPU, loads on the next call)")),
+            }
+        elif b["id"] in MASKS_NOT_SERVING:
+            b.setdefault("services_object", {})["masks"] = {"ok_bool": False, "state_string": "off",
+                                                            "note_string": MASKS_NOT_SERVING[b["id"]]}
+    # the farm runner file each box runs (box agent: sha256-checked self-update between jobs, 2026-10-13)
+    latest_runner = _runner_sha()
+    for b in boxes_out:
+        ar = _agent_report(b["id"]).get("farm_runner") or {}
+        if ar.get("sha256") or ar.get("path") or ar.get("error"):
+            sv = b.setdefault("services_object", {}).setdefault("farm_runner", {})
+            sv.update(version_string=ar.get("version", ""), sha256_string=ar.get("sha256", ""),
+                      latest_sha256_string=latest_runner, path_string=ar.get("path", ""),
+                      matches_latest_bool=bool(latest_runner and ar.get("sha256") == latest_runner),
+                      update_pending_bool=bool(ar.get("pending")), update_action_string=ar.get("action", ""),
+                      update_error_string=ar.get("error", ""), runner_log_tail_string=ar.get("log_tail", ""),
+                      work_dirs_mb_object=ar.get("dirs_mb") or {}, runner_drive_free_gb_float=ar.get("free_gb"))
     # viewer_saver.exe on the box (2026-10-12): the version it runs, from gallery-poster/viewer_saver_box.py --collect
     try:
         saver = json.loads(open("/srv/autorig/data/viewer-saver/boxes.json", encoding="utf-8").read())
@@ -1409,6 +1499,7 @@ def compose(col: Collector) -> Dict[str, Any]:
         "v3_target_note": str(target.get("note") or "")[:300],
         "low_disk_array": sorted({b["id"] for b in in_fleet
                                   for w in b["blockers_array"] + b["warnings_array"] if w.startswith("disk ")}),
+        "masks_ready_array": [b["id"] for b in in_fleet if ((b.get("services_object") or {}).get("masks") or {}).get("ok_bool")],
     }
     def worker_box(worker_api: Any) -> str:
         match = re.search(r"converter-(f\d+)\.", str(worker_api or ""))
@@ -1489,7 +1580,8 @@ def render_text(snapshot: Dict[str, Any]) -> str:
                  f"(dispatch on: {','.join(s.get('autorig_dispatch_enabled_array') or []) or '-'})  "
                  f"hunyuan: {','.join(s.get('hunyuan_ready_array') or []) or '-'}  "
                  f"ai: {','.join(s.get('ai_ready_array') or []) or '-'}  "
-                 f"V3 ready: {','.join(s.get('v3_ready_array') or []) or '-'}")
+                 f"V3 ready: {','.join(s.get('v3_ready_array') or []) or '-'}"
+                 f"  masks: {','.join(s.get('masks_ready_array') or []) or '-'}")
     lines.append("")
     for box in snapshot.get("boxes_array") or []:
         gpu = box.get("gpu_object") or {}
@@ -1508,6 +1600,13 @@ def render_text(snapshot: Dict[str, Any]) -> str:
             disks += f"  farmjobs={fr.get('state')}" + (f"({fr.get('yielding_to')})" if fr.get("yielding_to") else "")
         if box.get("viewer_saver_object"):
             disks += f"  saver={box['viewer_saver_object'].get('current_string') or '-'}"
+        mk = (box.get("services_object") or {}).get("masks")
+        if mk:
+            if mk.get("url_string"):
+                disks += ("  masks=" + ("down" if not mk.get("ok_bool") else ("loaded" if mk.get("loaded_bool") else "idle"))
+                          + (f"(last {mk.get('last_seconds_float')}s)" if mk.get("last_seconds_float") else ""))
+            else:
+                disks += "  masks=off"
         busy = "; ".join(
             f"{b.get('service')}:{b.get('what')}" + (f"[{b.get('stage')}]" if b.get("stage") else "")
             for b in box.get("busy_with_array") or [])
@@ -1612,8 +1711,17 @@ def _clean_report(bid: str, body: Dict[str, Any]) -> Dict[str, Any]:
                "installs": [{"path": str(b.get("path") or "")[:260], "version": str(b.get("version") or "")[:20],
                              "build_hash": str(b.get("build_hash") or "")[:20]}
                             for b in (blender_in.get("installs") or [])[:8] if isinstance(b, dict)]}
+    fr_in = body.get("farm_runner") if isinstance(body.get("farm_runner"), dict) else {}
+    farm_runner = {k: str(fr_in.get(k) or "")[:260] for k in ("path", "sha256", "version", "found_via", "action", "error",
+                                                              "task_state", "log_tail")}
+    farm_runner["pending"] = bool(fr_in.get("pending"))
+    dm = fr_in.get("dirs_mb") if isinstance(fr_in.get("dirs_mb"), dict) else {}
+    farm_runner["dirs_mb"] = {str(k)[:20]: num(v) for k, v in list(dm.items())[:6] if isinstance(v, (int, float))}
+    farm_runner["free_gb"] = num(fr_in.get("free_gb"))
+    dv_in = body.get("directive") if isinstance(body.get("directive"), dict) else {}
+    directive = {k: str(dv_in.get(k) or "")[:200] for k in ("id", "action", "result")} if dv_in else {}
     return {
-        "box": bid, "received_at": _now(),
+        "box": bid, "received_at": _now(), "farm_runner": farm_runner, "directive": directive,
         "agent_version": str(body.get("agent_version") or "")[:40],
         "host": str(body.get("host") or "")[:60],
         "boot_utc": str(body.get("boot_utc") or "")[:40],
@@ -1682,6 +1790,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200 if snapshot and age is not None and age < 30 else 503,
                               {"success_bool": bool(snapshot), "snapshot_age_seconds": age,
                                "build_error": COLLECTOR.last_build_error[-300:]})
+        if path.startswith("/api/fleet/directives/"):
+            box = path.rsplit("/", 1)[-1]
+            if not re.fullmatch(r"[a-z0-9-]{1,24}", box):
+                return self._json(404, {"success_bool": False, "error_string": "not_found"})
+            doc = _read_json(os.path.join(STATE_DIR, "directives", f"{box}.json"), {"directives": []})
+            return self._json(200, doc if isinstance(doc, dict) else {"directives": []})
+        if path in ("/api/fleet/farm_runner.py", "/api/fleet/farm_runner.py.sha256"):
+            data = _runner_bytes()
+            if not data:
+                return self._json(404, {"success_bool": False, "error_string": "runner_not_deployed"})
+            if path.endswith(".sha256"):
+                return self._send(200, _runner_sha().encode(), "text/plain; charset=utf-8")
+            return self._send(200, data, "text/plain; charset=utf-8", {"X-Sha256": _runner_sha()})
         if path == "/api/fleet/agent.ps1":
             try:
                 with open(AGENT_SCRIPT, "rb") as handle:

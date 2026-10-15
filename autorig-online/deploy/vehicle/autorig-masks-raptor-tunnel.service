@@ -1,0 +1,29 @@
+# deploy/vehicle/autorig-masks-raptor-tunnel.service (2026-10-15, «разнести на флот»): the same farm-tunnels.sh as the converter /
+# Hunyuan tunnels, its own conf and unit, so adding a mask port never restarts the converter tunnels.
+#   conf /srv/autorig/secrets/masks-raptor-tunnel.conf: <name> <ssh_port> <local_port> <remote_port>
+[Unit]
+Description=AutoRig vehicle mask service SSH tunnel to Raptor
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+Environment="HOME=/srv/autorig/home"
+Environment="FARM_TUNNELS_CONF=/srv/autorig/secrets/masks-raptor-tunnel.conf"
+Environment="FARM_TUNNELS_KEY=/srv/autorig/secrets/ssh/renderfin_farm_tunnel"
+Environment="FARM_TUNNELS_USER=Администратор"
+ExecStart=/srv/autorig/current/autorig-online/deploy/renderfin-farm-tunnels/farm-tunnels.sh
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/home
+
+[Install]
+WantedBy=multi-user.target

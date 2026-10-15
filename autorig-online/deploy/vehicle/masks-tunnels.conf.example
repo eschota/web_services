@@ -1,0 +1,11 @@
+# /srv/autorig/secrets/masks-tunnels.conf (autorig-masks-tunnels.service, ssh user "user" at 5.129.157.224)
+# <name> <ssh_port> <local_port on the VPS> <remote_port on the box>
+f1   45132 19801 8989
+f2   45279 19802 8989
+f5   48488 19805 8989
+# f7 45131 19807 8989   # disabled 2026-10-15: the ai-node LLM holds the 1080 Ti, 149 s per picture
+f13  45267 19813 8989
+# /srv/autorig/secrets/masks-raptor-tunnel.conf (autorig-masks-raptor-tunnel.service, user Администратор):
+# raptor 48288 19818 8989
+# f12 (home LAN) opens its own reverse tunnel: task «AutoRig F12 Masks Tunnel» -> VPS 127.0.0.1:19812
+# worker-4090: masks-4090.ps1 -> VPS 127.0.0.1:19411
