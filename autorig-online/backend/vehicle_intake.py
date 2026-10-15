@@ -155,8 +155,28 @@ def _run_state(run: str) -> Optional[Dict[str, Any]]:
             "waiting_for": vs.get("waiting_for"), "error": vs.get("error"), "done": files}
 
 
+async def _pipeline(run: str) -> Optional[Dict[str, Any]]:
+    """The vehicle service's one line of where the run stands (mt/vehicle_parts.py `pipeline`): stage key, progress
+    0..1, accepted / total parts, running redraws. None when the service does not answer (the row stays as it is)."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{VEHICLE_URL}/api/mt/vehicle/runs/{run}/parts")
+        doc = r.json() if r.status_code == 200 else None
+    except Exception:                                            # noqa: BLE001
+        return None
+    pipe = (doc or {}).get("pipeline")
+    return pipe if isinstance(pipe, dict) and pipe.get("stage") else None
+
+
 async def sync_vehicle_tasks(db) -> int:
-    """Mirror each vehicle run's stage into its Task row (the task page reads only the row)."""
+    """Mirror each vehicle run's stage into its Task row (the task page reads only the row).
+
+    The page shows `vehicle:<stage>` as «Тачка · <stage>» (i18n v3_stage_vehicle / v3_sub_<stage>: segmentation,
+    wheels_cut, parts_split, isolate_parts, restore_parts, redraw_parts, parts_review, model_decision) with its progress;
+    the task stays `processing` until the person decides the modelling (owner 2026-10-16: «я нажал и должен видеть
+    прогресс»)."""
     from sqlalchemy import select
 
     from database import Task
@@ -170,10 +190,15 @@ async def sync_vehicle_tasks(db) -> int:
         run = str(((v3.get("vehicle") or {}).get("run")) or "")
         if not _RUN.fullmatch(run):
             continue
+        pipe = await _pipeline(run)
         rs = _run_state(run)
         if rs is None:
             continue
-        if rs["review"] or rs["failed"]:
+        if pipe is not None:
+            new = {"state": "processing", "stage": f"vehicle:{pipe['stage']}",
+                   "progress": round(float(pipe.get("progress") or 0), 3), "qa": None,
+                   "detail": (f"{pipe.get('accepted')}/{pipe.get('total')}" if pipe.get("total") else None)}
+        elif rs["review"] or rs["failed"]:
             reasons = ["vehicle: check the parts in the viewer and decide the modelling"]
             if rs["failed"]:
                 reasons.append(f"vehicle stage failed: {', '.join(rs['failed'])} {str(rs.get('error') or '')[:160]}")
