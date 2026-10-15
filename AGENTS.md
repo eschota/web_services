@@ -780,6 +780,14 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   with its suspension floating on the plain backdrop, and after every repaint the fast finder looks for wheels AND
   jack stands (`stands_left`), erases them and sends the fix instruction. Speed comes from Qwen quantizations / turbo
   LoRAs (the bench on worker-4090), never from another editor.
+* **The mask service and the tests run across the fleet, not only on the 4090** (owner, 2026-10-15 ~22:30 UTC: «нужно
+  разнести это всё на флот, чтобы не один только 4090 участвовал в тестировании»): `deploy/vehicle/masks_service.py`
+  is installed on every GPU box that can hold it (f12, Raptor, f15, f5 first, then the 1080 Ti converters) as the
+  scheduled task «AutoRig Masks Service» on port 8989 under the box's ComfyUI python; the weights come to a site once
+  and spread over the LAN (the fleet LAN rule). The VPS reaches each box's service through its tunnel; `mt/vehicle_v3.
+  masks_detect` holds the list `VEHICLE_MASKS_URLS`, checks health, and spreads requests over the boxes (least busy
+  first, the 4090 one of many); the fleet API shows `masks` per box in `services_object`. Corpus runs and benches are
+  spread over the boxes and the report names the box per picture.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
