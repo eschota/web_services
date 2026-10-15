@@ -2036,5 +2036,13 @@
   "payment_unlock_signin": "با همان حسابی که برای پرداخت استفاده کردید وارد شوید و سپس به این صفحه برگردید.",
   "payment_unlock_processing": "اعتبار هنوز در حال پردازش است. موجودی فعلی: {balance} اعتبار؛ این بازکردن قفل به {required} اعتبار نیاز دارد.",
   "payment_unlock_still": "هنوز در حال بررسی اعتبار شما…",
-  "payment_unlock_refresh": "اعتبار هنوز در حال پردازش است. یک دقیقه بعد صفحه را تازه‌سازی کنید یا پس از به‌روز شدن موجودی تسک خود را باز کنید."
+  "payment_unlock_refresh": "اعتبار هنوز در حال پردازش است. یک دقیقه بعد صفحه را تازه‌سازی کنید یا پس از به‌روز شدن موجودی تسک خود را باز کنید.",
+  "gallery_rig_type_quadruped": "چهارپایان",
+  "gallery_rig_type_equine": "اسب‌سانان (اسب، گوزن)",
+  "gallery_rig_type_bird": "پرنده",
+  "gallery_rig_type_serpent": "مار",
+  "gallery_rig_type_monster": "هیولا",
+  "gallery_rig_type_multilimb": "چنداندامی",
+  "gallery_rig_type_hands": "دست",
+  "gallery_rig_type_vehicle": "خودرو"
 }

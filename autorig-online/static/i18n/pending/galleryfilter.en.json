@@ -1,0 +1,10 @@
+{
+  "gallery_rig_type_quadruped": "Quadruped",
+  "gallery_rig_type_equine": "Equine (horse, deer)",
+  "gallery_rig_type_bird": "Bird",
+  "gallery_rig_type_serpent": "Serpent",
+  "gallery_rig_type_monster": "Monster",
+  "gallery_rig_type_multilimb": "Multilimb",
+  "gallery_rig_type_hands": "Hands",
+  "gallery_rig_type_vehicle": "Vehicle"
+}

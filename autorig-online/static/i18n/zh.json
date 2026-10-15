@@ -2038,5 +2038,13 @@
   "payment_unlock_signin": "请登录结账时使用的同一账号，然后返回此页面。",
   "payment_unlock_processing": "积分仍在处理中。当前余额：{balance} 积分；此次解锁需要 {required} 积分。",
   "payment_unlock_still": "仍在检查你的积分…",
-  "payment_unlock_refresh": "积分仍在处理中。请一分钟后刷新此页面，或在余额更新后打开你的任务。"
+  "payment_unlock_refresh": "积分仍在处理中。请一分钟后刷新此页面，或在余额更新后打开你的任务。",
+  "gallery_rig_type_quadruped": "四足动物",
+  "gallery_rig_type_equine": "马科（马、鹿）",
+  "gallery_rig_type_bird": "鸟类",
+  "gallery_rig_type_serpent": "蛇形",
+  "gallery_rig_type_monster": "怪物",
+  "gallery_rig_type_multilimb": "多肢体",
+  "gallery_rig_type_hands": "手部",
+  "gallery_rig_type_vehicle": "车辆"
 }

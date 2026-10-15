@@ -1,0 +1,10 @@
+{
+  "gallery_rig_type_quadruped": "Четвероногие",
+  "gallery_rig_type_equine": "Лошадиные (лошадь, олень)",
+  "gallery_rig_type_bird": "Птица",
+  "gallery_rig_type_serpent": "Змея",
+  "gallery_rig_type_monster": "Монстр",
+  "gallery_rig_type_multilimb": "Многоконечные",
+  "gallery_rig_type_hands": "Кисти рук",
+  "gallery_rig_type_vehicle": "Транспорт"
+}

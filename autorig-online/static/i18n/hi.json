@@ -2038,5 +2038,13 @@
   "payment_unlock_signin": "चेकआउट में इस्तेमाल किए गए उसी खाते से साइन इन करें, फिर इस पेज पर लौटें।",
   "payment_unlock_processing": "क्रेडिट अभी प्रोसेस हो रहे हैं। मौजूदा बैलेंस: {balance} क्रेडिट; इस अनलॉक के लिए {required} क्रेडिट चाहिए।",
   "payment_unlock_still": "क्रेडिट की जाँच अभी जारी है…",
-  "payment_unlock_refresh": "क्रेडिट अभी प्रोसेस हो रहे हैं। एक मिनट बाद पेज रीफ़्रेश करें, या बैलेंस अपडेट होने के बाद अपना टास्क खोलें।"
+  "payment_unlock_refresh": "क्रेडिट अभी प्रोसेस हो रहे हैं। एक मिनट बाद पेज रीफ़्रेश करें, या बैलेंस अपडेट होने के बाद अपना टास्क खोलें।",
+  "gallery_rig_type_quadruped": "चौपाए",
+  "gallery_rig_type_equine": "अश्व श्रेणी (घोड़ा, हिरण)",
+  "gallery_rig_type_bird": "पक्षी",
+  "gallery_rig_type_serpent": "सर्प",
+  "gallery_rig_type_monster": "राक्षस",
+  "gallery_rig_type_multilimb": "बहु-अंग",
+  "gallery_rig_type_hands": "हाथ",
+  "gallery_rig_type_vehicle": "वाहन"
 }

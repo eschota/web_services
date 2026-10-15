@@ -2056,5 +2056,13 @@
   "payment_unlock_signin": "Войдите в тот же аккаунт, с которого оплачивали, и вернитесь на эту страницу.",
   "payment_unlock_processing": "Кредиты ещё зачисляются. Текущий баланс: {balance} кредитов; для разблокировки нужно {required}.",
   "payment_unlock_still": "Всё ещё проверяем кредиты...",
-  "payment_unlock_refresh": "Кредиты ещё зачисляются. Обновите страницу через минуту или откройте задачу после обновления баланса."
+  "payment_unlock_refresh": "Кредиты ещё зачисляются. Обновите страницу через минуту или откройте задачу после обновления баланса.",
+  "gallery_rig_type_quadruped": "Четвероногие",
+  "gallery_rig_type_equine": "Лошадиные (лошадь, олень)",
+  "gallery_rig_type_bird": "Птица",
+  "gallery_rig_type_serpent": "Змея",
+  "gallery_rig_type_monster": "Монстр",
+  "gallery_rig_type_multilimb": "Многоконечные",
+  "gallery_rig_type_hands": "Кисти рук",
+  "gallery_rig_type_vehicle": "Транспорт"
 }

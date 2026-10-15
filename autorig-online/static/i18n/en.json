@@ -2056,5 +2056,13 @@
   "payment_unlock_signin": "Sign in to the same account used for checkout, then return to this page.",
   "payment_unlock_processing": "Credits are still processing. Current balance: {balance} credits; this unlock needs {required} credits.",
   "payment_unlock_still": "Still checking your credits...",
-  "payment_unlock_refresh": "Credits are still processing. Refresh this page in a minute, or open your task after the balance updates."
+  "payment_unlock_refresh": "Credits are still processing. Refresh this page in a minute, or open your task after the balance updates.",
+  "gallery_rig_type_quadruped": "Quadruped",
+  "gallery_rig_type_equine": "Equine (horse, deer)",
+  "gallery_rig_type_bird": "Bird",
+  "gallery_rig_type_serpent": "Serpent",
+  "gallery_rig_type_monster": "Monster",
+  "gallery_rig_type_multilimb": "Multilimb",
+  "gallery_rig_type_hands": "Hands",
+  "gallery_rig_type_vehicle": "Vehicle"
 }
