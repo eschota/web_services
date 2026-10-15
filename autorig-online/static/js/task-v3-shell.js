@@ -98,7 +98,11 @@ function viewerUrl(viewer) {
 }
 
 function agentLang() {
-  const lang = (window.I18n && window.I18n.currentLang) || document.documentElement.lang || uiLang();
+  // the viewer's UI language = the language this page is rendered in (owner 2026-10-16: «у пользователя по дефолту
+  // должен быть английский язык, а не русский»): the server's <html lang> first, then the i18n module, then the
+  // browser; never a Russian default
+  const htmlLang = String(document.documentElement.lang || '').slice(0, 2).toLowerCase();
+  const lang = (/^[a-z]{2}$/.test(htmlLang) && htmlLang) || (window.I18n && window.I18n.currentLang) || uiLang();
   return String(lang || 'en').slice(0, 2).toLowerCase();
 }
 
@@ -317,6 +321,16 @@ async function mergeLive(state) {
   } catch (e) { /* the clock-based progress stays */ } finally { clearTimeout(abort); }
 }
 
+// A failed poll backs off 2 s -> 60 s (Vehicles V3, 2026-10-16: a vehicle task answered 404 here and the page hammered
+// the backend); «not found» only when the task itself is gone, never while /api/task/<id> answers.
+let failStreak = 0;
+async function taskExists() {
+  try {
+    const r = await fetch(`/api/task/${encodeURIComponent(taskId)}`, { credentials: 'same-origin', cache: 'no-store' });
+    return r.ok;
+  } catch (e) { return true; }
+}
+
 async function poll() {
   clearTimeout(timer);
   if (!UUID.test(taskId)) { showMissing(); return; }
@@ -324,15 +338,17 @@ async function poll() {
     const response = await fetch(`/api/task/${encodeURIComponent(taskId)}/v3-view`, {
       credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' },
     });
-    if (response.status === 404) { showMissing(); return; }
+    if (response.status === 404 && !(await taskExists())) { showMissing(); return; }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const doc = await response.json();
+    failStreak = 0;
     await mergeLive(doc);
     const next = render(doc);
     if (next > 0) timer = setTimeout(poll, next);
   } catch (error) {
+    failStreak += 1;
     els.line.textContent = tr('taskv3_offline');
-    timer = setTimeout(poll, 6000);
+    timer = setTimeout(poll, Math.min(60000, 2000 * 2 ** Math.min(5, failStreak - 1)));
   }
 }
 
