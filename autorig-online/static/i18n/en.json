@@ -644,7 +644,7 @@
   "hero_generate_note": "New: generate a character from an image - the 3D model and its rig arrive in one task.",
   "tab_image": "Image -> Character",
   "image_gen_title": "Drop a character image here",
-  "image_gen_subtitle": "PNG, JPG or WEBP. A T-pose or A-pose character comes back rigged; anything else still comes back as a 3D model. Included with Unlimited Monthly.",
+  "image_gen_subtitle": "PNG, JPG or WEBP. The picture becomes a 3D model that is rigged and animated. Included with Unlimited Monthly.",
   "image_gen_button": "Generate character",
   "img2rig_h1": "Turn one T-pose picture into a rigged 3D character",
   "img2rig_subtitle": "Drop a single image of a character on the AutoRig home page. If it reads as a T-pose or A-pose with limbs clear of the body, you get a 3D model, a skeleton, retargeted animations and every export format back as one task.",
@@ -1147,7 +1147,7 @@
   "error_download_not_ready": "The rig of this task is not ready yet.",
   "error_download_unknown_format": "This file format is not available for this task.",
   "error_download_rig_changed": "The rig was just updated. Please try again.",
-  "error_classic_pipeline_off": "Classic conversion is closed. Upload the model again: it goes through the new pipeline.",
+  "error_classic_pipeline_off": "This model was processed by a retired pipeline. Upload it again: it will be rigged on the V3 conveyor.",
   "render_resumed_after_restart": "resumed after a server restart",
   "render_restart_resume_exhausted": "stopped: the server restarted too many times during this render",
   "adult_gate_title": "18+ · Adult content",
@@ -2047,5 +2047,14 @@
   "chrome_footer_dev_api": "Developer API",
   "chrome_footer_any_pose": "Rigging in any pose",
   "chrome_footer_obj_guide": "OBJ rigging guide",
-  "chrome_footer_buy": "Buy credits"
+  "chrome_footer_buy": "Buy credits",
+  "payment_unlock_title": "Finish unlocking your task",
+  "payment_unlock_checking": "Checking your credit balance...",
+  "payment_unlock_return": "Return to unlock this task",
+  "payment_unlock_desc": "Payment successful. We are checking your credit balance so you can return and confirm your task unlock.",
+  "payment_unlock_ready": "Your credits are available. Return to confirm the {required}-credit task unlock. Current balance: {balance} credits.",
+  "payment_unlock_signin": "Sign in to the same account used for checkout, then return to this page.",
+  "payment_unlock_processing": "Credits are still processing. Current balance: {balance} credits; this unlock needs {required} credits.",
+  "payment_unlock_still": "Still checking your credits...",
+  "payment_unlock_refresh": "Credits are still processing. Refresh this page in a minute, or open your task after the balance updates."
 }

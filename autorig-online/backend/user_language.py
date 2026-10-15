@@ -68,8 +68,10 @@ ADVERTISED_PATHS: Dict[str, str] = {
     "/faq": "faq",
     "/animal-rig": "animal",
     "/blender-plugin": "plugin",
+    "/guides": "guides",
+    "/t-pose-rig": "tpose",
 }
-SEO_KEYS: Dict[str, str] = {**ADVERTISED_PATHS, "/guides": "guides"}
+SEO_KEYS: Dict[str, str] = {**ADVERTISED_PATHS}
 
 LANGUAGE_NAMES: Dict[str, Tuple[str, str]] = {
     "en": ("English", "English"),
