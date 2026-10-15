@@ -934,7 +934,7 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   and D (Hunyuan part path) on the motorhome within a small credit budget, maps every part to our segmentation
   (`parts_map.json`), and the assembler places every part over the picture. The owner gets two consolidated sheets
   from the lead: A/B first, then C/D, with cost, time, faces and placement metrics.
-* **Plan C: only the wheels come off, the body stays whole, A/B/C on the motorhome** (owner, 2026-10-16 ~06:20 UTC,
+* **Plan C: only the wheels come off, the body stays whole, A/B/C on the motorhome** (owner, 2026-10-15 ~23:20 UTC,
   on the A/B sheet of the shell-split assemblies: «я вижу тут провал полный, переходим к плану С: отделяем только
   колеса, оставляем корпус целиком и делаем модель АБС сравнение. приступай на автодоме»): the shell split (body
   without openables, glass and suspension, every part its own model) is dropped as the main path. Plan C: the cut
