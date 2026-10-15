@@ -28,3 +28,25 @@ No uncaught exception and no failed script/CSS/image on any page. Only messages:
 
 ## Files changed
 `static/blender-plugin.html`, `static/js/header.js`, `static/js/footer.js`, `static/i18n/pending/chromejs.{en,ru,zh,hi,fa}.json` (new; `py -3.11 tools/i18n_merge.py --page chromejs --write` merges them). Deploy: header.js/footer.js/blender-plugin.html with `live_static.py put`.
+
+## Update: header overflow fixed in `static/css/styles.css` (finding 4)
+**Measured cause** (natural widths with the container unlocked, ru): logo 120 + six links 722 + actions 590 (signed in: 673) + gaps = about 1495 (1578 signed in) px, in a container that is at most 1152 px wide. So the bar was never one clean line: flex squeezed it, "Free conversions left" and "Sign in with Google" wrapped onto three lines at 1440 (en), and at <= 1280 px, or signed in at any width up to 1600 (long name, ru), the actions ran past the viewport. The nav gap (2rem) plus link padding (1rem) was 64 px between link texts.
+
+**Change** (one block, 11 lines + comment, inserted before the `@media (max-width: 1080px)` header block; breakpoint, phone rules and rtl.css untouched):
+```css
+@media (min-width: 1081px) {
+    .header-inner { flex-wrap: wrap; gap: 0.25rem 1rem; }
+    .nav { gap: 0.25rem; }
+    .nav-link { padding: 0.4rem 0.75rem; white-space: nowrap; }
+    .credits-badge, .btn-google, .header-actions .user-name { white-space: nowrap; }
+    .header-actions { gap: 0.75rem; margin-inline-start: auto; }
+}
+```
+Labels stay on one line, the gaps are tighter, and a bar that still does not fit (long Russian labels, signed-in user) puts the actions on a second row under the links instead of overflowing. `margin-inline-start` keeps Persian (rtl) correct. Only `styles.css` defines these classes (grep over all css/html). `git diff --stat`: 12 insertions.
+
+**Proof**, headless Chrome (`--hide-scrollbars`, so `innerWidth` is the layout width) on the LIVE pages with exactly this block injected (`final.css`, extracted from the file), `document.scrollingElement.scrollWidth === innerWidth`:
+* widths 1024, 1100, 1200, 1280, 1366, 1440, 1600 x pages `/`, `/gallery`, `/faq`, `/buy-credits`, `/animal-rig` x languages en, ru, zh, hi, fa signed out (175 checks) + en, ru signed in with a 26-character name (70 checks): **245/245 OK**. Before (same method, faq only): 4/16 failed signed out (ru 1100/1200/1280, en 1100) and 4/5 signed in ru (1100-1600).
+* Header height: one row (89 px) in en from 1200 px up, fa/zh/hi everywhere; ru and signed-in ru use two rows (143 / 133 px) at every desktop width, en at 1100 too. That is the fallback working as designed; a one-row ru header would need a wider container or shorter labels (a design decision).
+* Mobile toggle (click opens: `mobile-nav-open`, `aria-expanded=true`, nav `flex`, no overflow; second click closes), pages `/`, `/faq`, `/gallery`, `/animal-rig`: OK at 375, 768, 1079, 1080 px; at 1081 px the toggle is hidden and the inline nav shows, scrollWidth == innerWidth.
+* Screenshots checked by eye: en 1440 (clean single row), ru 1440 (links row + actions row), ru signed in 1200.
+Deploy: `live_static.py put css/styles.css`; the page `?v=` stamps follow the file content.

@@ -3053,6 +3053,18 @@ body.rig-detect-modal-open .convert-form-card {
 /* =============================================================================
    Responsive
    ============================================================================= */
+/* Desktop header (above 1080px). The full bar (logo, six links, credits badge, language, theme, sign-in or the
+   signed-in user) is wider than the 1200px container in most languages: the squeezed labels wrapped onto three
+   lines and, between 1081px and the container width or with a signed-in user, the actions ran past the viewport.
+   Labels stay on one line, gaps are tighter, and when the bar still does not fit the actions wrap below the links. */
+@media (min-width: 1081px) {
+    .header-inner { flex-wrap: wrap; gap: 0.25rem 1rem; }
+    .nav { gap: 0.25rem; }
+    .nav-link { padding: 0.4rem 0.75rem; white-space: nowrap; }
+    .credits-badge, .btn-google, .header-actions .user-name { white-space: nowrap; }
+    .header-actions { gap: 0.75rem; margin-inline-start: auto; }
+}
+
 @media (max-width: 1080px) {
     .header-inner {
         position: relative;
