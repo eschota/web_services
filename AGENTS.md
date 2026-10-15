@@ -862,6 +862,21 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   * the check is the composite: the model rendered over the picture from that camera (silhouette IoU, wheel-centre
     error in px) goes to DEV; the viewer opens the task in that camera with the picture behind the model and a
     picture/scene toggle; the person then accepts or sends the 3D result back (✅ / 🔁 on the result).
+* **The body shell is drawn without its moving parts and without glass** (owner, 2026-10-16 ~07:00 UTC, URGENT, after
+  Eugene Cyclone showed a one-prompt Qwen edit of the monster truck without doors, wheels and hood in 1.5 min: «надо
+  срочно делать правку, евгений прав, надо еще снимать все двигающиеся части с кузова, и кузов без стекл отдельно
+  рисовать чтобы потом стекла к раме приклеивались корректно»):
+  * the split's `body` is the bare shell: every openable (doors, hood, trunk lid / tailgate, side hatches, roof hatch)
+    and every glass pane are taken off it; the openings stay empty (door apertures, the engine bay open, window
+    frames empty), the sills, pillars and the roof remain; the openables' and glass masks come from the segmentation
+    (the openables contract) and are erased by raster before the Qwen completion, and the instruction names what is
+    gone (the one-prompt wording that worked: «redraw without the doors, hood, trunk lid, glass and the wheels»);
+  * the check: inside every erased openable / glass region the result must differ from the original (changed share
+    ≥ 0.5 of the region), no wheel, no door drawn back (the openables detector on the result finds none); otherwise
+    a fix attempt, then review;
+  * every openable and every glass pane is its own part (isolate + restore), modelled separately, and attached to
+    the shell at its aperture by the hinge contract (`vehicle/rig.json` openables, `vehicle_doors.py`), glass glued
+    into its frame; the assembled model shows the shell + parts in their places, so doors and hatches can open.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
