@@ -35,6 +35,18 @@
                 linear-gradient(180deg, #10111d 0%, #151629 48%, #0f101c 100%);
             color: var(--text-primary);
         }
+        /* the page is always dark: keep its content on the dark palette in the light theme too (layout pass 2026-10-16) */
+        .plugin-page main {
+            --text-primary: #f0f0f5;
+            --text-secondary: #a0a0b0;
+            --text-muted: #8b8b9e;
+            --bg-card: rgba(26, 26, 36, 0.75);
+            --bg-card-hover: rgba(34, 34, 46, 0.85);
+            --bg-input: rgba(22, 22, 30, 0.8);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --border: #2a2a3a;
+            color: var(--text-primary);
+        }
         .plugin-hero {
             position: relative;
             min-height: clamp(560px, 76vh, 820px);
