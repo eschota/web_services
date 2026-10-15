@@ -1551,8 +1551,10 @@ from ai_avatar_from_image import build_avatar_from_image_router
 from ai_video_reference import router as ai_video_reference_router
 from ai_graph_edits import router as ai_graph_edits_router
 from ai_pipelines_api import router as ai_pipelines_router
+from vehicle_generation import build_vehicle_router
 
 app.include_router(build_avatar_router(get_avatar_owner))
+app.include_router(build_vehicle_router(get_avatar_owner))
 app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))
@@ -11906,31 +11908,31 @@ RIG_ARTICLE_EXAMPLE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
 
 RIG_ARTICLE_STATIC_EXAMPLES: Dict[str, Dict[str, str]] = {
     "cat": {
-        "title": "Cat V2 animal rig animation example",
-        "image": "/static/videos/animal-rig/cat-v2-rig-poster-20260516.png",
+        "title": "Quadruped rig: cat family animation example",
+        "image": "/static/images/animal-rig/cat-quadruped.jpg",
         "url": "/animal-rig#examples",
     },
     "horse": {
-        "title": "Quadruped animal rig animation example",
-        "image": "/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png",
+        "title": "Equine rig: horse gallop animation example",
+        "image": "/static/images/animal-rig/cat-equine.jpg",
         "url": "/animal-rig#examples",
     },
     "rabbit": {
-        "title": "Rabbit V2 animal rig animation example",
-        "image": "/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png",
+        "title": "Quadruped rig: small animal animation example",
+        "image": "/static/images/animal-rig/cat-quadruped.jpg",
         "url": "/animal-rig#examples",
     },
     "turtle": {
-        "title": "Turtle V2 low-body rig animation example",
-        "image": "/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png",
+        "title": "Low-body quadruped rig animation example",
+        "image": "/static/images/animal-rig/g-bear.jpg",
         "url": "/animal-rig#examples",
     },
 }
 
 DEFAULT_RIG_ARTICLE_STATIC_EXAMPLE: Dict[str, str] = {
-    "title": "AutoRig V2 animal rig presentation",
-    "image": "/static/videos/animal-rig/after-poster-20260516.png",
-    "url": "/animal-rig#presentation",
+    "title": "AutoRig V3 animal rig categories",
+    "image": "/static/images/animal-rig/cat-quadruped.jpg",
+    "url": "/animal-rig#examples",
 }
 
 
@@ -12282,7 +12284,7 @@ def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> st
                             <img src="{html.escape(static_example["image"], quote=True)}" alt="{static_title}" loading="lazy" width="640" height="360">
                         </span>
                         <span class="rig-article-example-title">{static_title}</span>
-                        <span class="rig-article-example-link">Open V2 animal rig examples</span>
+                        <span class="rig-article-example-link">Open animal rig examples</span>
                     </a>"""
 
     faq_html = "\n".join(

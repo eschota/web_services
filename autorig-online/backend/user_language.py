@@ -55,7 +55,9 @@ RTL_LANGUAGES = frozenset({"fa", "ar", "he", "ur", "ps", "ckb", "sd", "ug", "yi"
 
 # Pages whose main content is translated through data-i18n: the whole page follows the language direction.
 FULL_PAGE_PATHS = frozenset({"/", "/gallery", "/buy-credits", "/how-it-works", "/dashboard", "/payment/success",
-                             "/developers", "/guides"})
+                             "/developers", "/guides",
+                             # Site refresh to V3 (owner 2026-10-16): these pages are translated through data-i18n too
+                             "/faq", "/animal-rig", "/blender-plugin", "/t-pose-rig"})
 # Pages offered in every advertised language (hreflang cluster) and their SEO key prefix.
 ADVERTISED_PATHS: Dict[str, str] = {
     "/": "home",
@@ -63,6 +65,9 @@ ADVERTISED_PATHS: Dict[str, str] = {
     "/buy-credits": "buy",
     "/how-it-works": "hiw",
     "/developers": "developers",
+    "/faq": "faq",
+    "/animal-rig": "animal",
+    "/blender-plugin": "plugin",
 }
 SEO_KEYS: Dict[str, str] = {**ADVERTISED_PATHS, "/guides": "guides"}
 

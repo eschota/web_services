@@ -3,61 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unity के लिए GLB character auto rig guide</title>
-    <meta name="description" content="GLB character तैयार करें, AutoRig में automatic rig बनाएं और Unity Mecanim animations के लिए result import करें।">
-    <meta name="keywords" content="rig GLB for unity, unity GLB rigging, GLB to unity, unity character import, unity humanoid rig, unity animation import">
+    <title>Unity के लिए GLB कैरेक्टर रिग: सेकंडों में ऑटो रिग</title>
+    <meta name="description" content="Unity के लिए GLB कैरेक्टर ऑनलाइन रिग करें: सेकंडों में एनिमेटेड रिग्ड मॉडल पाएँ, FBX या Unity पैकेज डाउनलोड करें और Humanoid के रूप में इम्पोर्ट करें।">
+    <meta name="keywords" content="Unity के लिए GLB रिग, Unity GLB रिगिंग, GLB से Unity, Unity कैरेक्टर इम्पोर्ट, Unity Humanoid रिग, Unity एनिमेशन इम्पोर्ट, रिग्ड FBX">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorig.online/rig-glb-unity-hi">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/rig-glb-unity">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/rig-glb-unity-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/rig-glb-unity-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/rig-glb-unity-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/rig-glb-unity">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Unity के लिए GLB character auto rig guide">
-    <meta property="og:description" content="GLB preparation, AutoRig rigging और Unity import का compact workflow.">
+    <meta property="og:title" content="Unity के लिए GLB कैरेक्टर रिग: सेकंडों में ऑटो रिग">
+    <meta property="og:description" content="GLB अपलोड करें, सेकंडों में रिग और एनिमेशन क्लिप पाएँ, Unity एक्सपोर्ट डाउनलोड करें और Mecanim में सेट करें। T-पोज़ की तैयारी ज़रूरी नहीं।">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/rig-glb-unity-hi">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/rig-glb-unity.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AutoRig से रिग किए गए ह्यूमनॉइड कैरेक्टर के स्किन वेट और हड्डियाँ, सामने और बगल का दृश्य">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="hi_IN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Unity के लिए GLB कैरेक्टर रिग: सेकंडों में ऑटो रिग">
+    <meta name="twitter:description" content="GLB अपलोड करें, सेकंडों में रिग और एनिमेशन क्लिप पाएँ, Unity एक्सपोर्ट डाउनलोड करें और Mecanim में सेट करें। T-पोज़ की तैयारी ज़रूरी नहीं।">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/rig-glb-unity.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "Article",
-        "headline": "Unity के लिए GLB character auto rig guide",
-        "description": "GLB character तैयार करके AutoRig में automatic rig बनाएं और Unity में import करें।",
+        "headline": "Unity के लिए GLB कैरेक्टर रिग: सेकंडों में ऑटो रिग",
+        "description": "Unity के लिए GLB कैरेक्टर ऑनलाइन रिग करें: सेकंडों में एनिमेटेड रिग्ड मॉडल पाएँ, FBX या Unity पैकेज डाउनलोड करें और Humanoid के रूप में इम्पोर्ट करें।",
+        "image": "https://autorig.online/static/images/og/rig-glb-unity.jpg",
+        "inLanguage": "hi",
         "author": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+            }
         },
         "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
+        "dateModified": "2026-10-16",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://autorig.online/rig-glb-unity-hi"
         },
-        "articleSection": "Tutorials",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "होम",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "GLB Unity Guide",
-                    "item": "https://autorig.online/rig-glb-unity-hi"
-                }
-            ]
-        }
+        "articleSection": "Tutorials"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "होम",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "गाइड",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "Unity के लिए GLB कैरेक्टर रिग",
+                "item": "https://autorig.online/rig-glb-unity-hi"
+            }
+        ]
     }
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .article-figure { margin: 1.75rem 0; }
+        .article-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: #1a1a20; }
+        .article-figure figcaption { margin-top: .6rem; color: var(--text-secondary); font-size: .9rem; line-height: 1.5; }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,25 +117,25 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>Unity के लिए GLB character auto rig guide</h1>
-                <p class="hero-subtitle">GLB model तैयार करें, AutoRig में rig बनाएं और Unity Mecanim animations के लिए result import करें।</p>
+                <h1>Unity के लिए GLB कैरेक्टर कैसे रिग करें</h1>
+                <p class="hero-subtitle">GLB अपलोड करें, सेकंडों में एनिमेशन क्लिप वाला रिग पाएँ और उसे Unity Mecanim में सेट करें। T-पोज़ की तैयारी ज़रूरी नहीं।</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <img src="/static/images/icons/tools.svg" alt="इंजन" class="feature-icon" width="96" height="96">
                         <span>Unity Mecanim</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
-                        <span>Fast workflow</span>
+                        <img src="/static/images/icons/fast.svg" alt="तेज़" class="feature-icon" width="96" height="96">
+                        <span>सेकंडों में रिग</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
-                        <span>Animation ready</span>
+                        <img src="/static/images/icons/animations.svg" alt="एनिमेशन" class="feature-icon" width="96" height="96">
+                        <span>क्लिप शामिल</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">GLB rigging शुरू करें</a>
+                <a href="/" class="cta-button">GLB Unity रिगिंग शुरू करें</a>
             </div>
         </div>
     </section>
@@ -102,48 +144,55 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <p>GLB (glTF binary) is a great format for sharing characters, but many Unity pipelines still prefer rigged FBX for animation workflows. The usual goal is simple: take a GLB character in T-pose, auto-rig it, and import the animated result into Unity with minimal setup.</p>
+                <p>GLB (glTF binary) कैरेक्टर साझा करने के लिए बढ़िया फ़ॉर्मैट है, लेकिन कई Unity पाइपलाइन एनिमेशन के लिए अब भी रिग्ड FBX को पसंद करती हैं। लक्ष्य सीधा है: GLB कैरेक्टर लें, उसे ऑटो-रिग करें और एनिमेटेड नतीजे को कम से कम सेटअप में Unity में इम्पोर्ट करें। AutoRig रिग को मॉडल की अपनी ज्यामिति से बनाता है, इसलिए कैरेक्टर का T-पोज़ में खड़ा होना ज़रूरी नहीं।</p>
 
-                <h2>Step 1: Prepare your GLB (T-pose checklist)</h2>
+                <h2>चरण 1: अपना GLB तैयार करें (T-पोज़ ज़रूरी नहीं)</h2>
+                <p>स्केलेटन किसी भी पोज़ में ज्यामिति पर फ़िट होता है। अगर किसी द्विपाद कैरेक्टर के पैर अलग-अलग स्थिति में हैं, तो ज़मीन पर टिका पैर हड्डियों की लंबाई तय करता है, और अगर GLB में पहले से स्केलेटन या एनिमेशन है, तो उसी का रेस्ट पोज़ इस्तेमाल होता है। फिर भी ये बातें मदद करती हैं:</p>
                 <ul>
-                    <li><strong>T-pose</strong>: arms straight out, legs straight, neutral stance</li>
-                    <li><strong>Centered model</strong>: character near origin, not 100 meters away</li>
-                    <li><strong>Apply transforms</strong>: avoid weird rotation/scale values</li>
-                    <li><strong>Clean mesh</strong>: fix flipped normals and non-manifold geometry if possible</li>
+                    <li><strong>मॉडल केंद्र में</strong>: कैरेक्टर origin के पास हो, 100 मीटर दूर नहीं</li>
+                    <li><strong>ट्रांसफ़ॉर्म अप्लाई करें</strong>: अजीब रोटेशन या स्केल मान न रखें</li>
+                    <li><strong>साफ़ मेश</strong>: हो सके तो उलटे नॉर्मल और non-manifold ज्यामिति ठीक करें</li>
+                    <li><strong>टेक्सचर</strong>: उन्हें GLB में ही रखें। मॉडल के अपने टेक्सचर कभी नहीं खोते, और बिना टेक्सचर वाले मॉडल को अपने-आप PBR टेक्सचर मिलते हैं</li>
                 </ul>
 
-                <h2>Step 2: Auto-rig the GLB online</h2>
-                <p>On <strong>autorig.online</strong> you can upload a GLB file or paste a direct URL. The service creates a rig and provides Unity-friendly exports. Once the task completes, download the Unity export (usually FBX) plus any additional formats you need.</p>
+                <h2>चरण 2: GLB को ऑनलाइन ऑटो-रिग करें</h2>
+                <p><strong>autorig.online</strong> पर GLB फ़ाइल को अपलोड ज़ोन में डालें। टास्क तुरंत 3D व्यूअर में खुलता है। तेज़ रिग सेकंडों में स्केलेटन और स्किन बनाता है, मॉडल की श्रेणी की लाइब्रेरी की एनिमेशन क्लिप उस पर लागू होती हैं, और गुणवत्ता जाँच (जोड़ों की जगह, स्किन फटना, अंगों की टकराहट) बैकग्राउंड में चलती रहती है। व्यूअर में स्केलेटन की पुष्टि करना वैकल्पिक है: एनिमेशन उसका इंतज़ार नहीं करता।</p>
+                <figure class="article-figure">
+                    <img src="/static/images/articles/rig-glb-unity-weights.jpg" alt="AutoRig से रिग किए गए ह्यूमनॉइड कैरेक्टर के स्किन वेट और हड्डियाँ, सामने और बगल का दृश्य" width="800" height="400" loading="lazy" decoding="async">
+                    <figcaption>V3 रन का रिग: हर हड्डी के स्किन वेट और स्केलेटन, सामने और बगल से।</figcaption>
+                </figure>
+                <p><a href="/"><strong>Unity के लिए GLB रिग करना शुरू करें</strong></a></p>
 
-                <p><a href="/"><strong>Start rigging a GLB for Unity</strong></a></p>
+                <h2>चरण 3: Unity एक्सपोर्ट डाउनलोड करें</h2>
+                <p>टास्क पूरा होने पर Unity एक्सपोर्ट (आमतौर पर FBX) डाउनलोड करें, साथ में ज़रूरी अतिरिक्त फ़ॉर्मैट भी: GLB, USDZ, ZIP या Unity पैकेज।</p>
 
-                <h2>Step 3: Import into Unity</h2>
-                <p>In Unity, import the resulting FBX. Then:</p>
+                <h2>चरण 4: Unity में इम्पोर्ट करें</h2>
+                <p>Unity में मिला हुआ FBX इम्पोर्ट करें। फिर:</p>
                 <ol>
-                    <li>Select the FBX in the Project panel.</li>
-                    <li>Open the <strong>Rig</strong> tab in the Inspector.</li>
-                    <li>Set <strong>Animation Type</strong> to <strong>Humanoid</strong> (for humanoid characters).</li>
-                    <li>Click <strong>Apply</strong>.</li>
-                    <li>Open <strong>Configure</strong> and check the avatar mapping (Unity will show you if bones are missing).</li>
+                    <li>Project पैनल में FBX चुनें।</li>
+                    <li>Inspector में <strong>Rig</strong> टैब खोलें।</li>
+                    <li><strong>Animation Type</strong> को <strong>Humanoid</strong> पर सेट करें (ह्यूमनॉइड कैरेक्टर के लिए)।</li>
+                    <li><strong>Apply</strong> पर क्लिक करें।</li>
+                    <li><strong>Configure</strong> खोलकर अवतार मैपिंग जाँचें (अगर हड्डियाँ कम होंगी तो Unity बता देगा)।</li>
                 </ol>
 
-                <h2>Step 4: Test animations</h2>
-                <p>If your download includes multiple animations or an animation pack, import those clips and retarget them to your character's avatar. In Unity, Humanoid retargeting is usually the easiest way to reuse animations across characters.</p>
+                <h2>चरण 5: एनिमेशन टेस्ट करें</h2>
+                <p>अगर आपके डाउनलोड में रिग पर लागू की गई एनिमेशन क्लिप शामिल हैं, तो उन्हें इम्पोर्ट करें, या दूसरे एनिमेशन पैक को कैरेक्टर के अवतार पर रीटारगेट करें। Unity में कैरेक्टरों के बीच एनिमेशन दोबारा इस्तेमाल करने का सबसे आसान तरीक़ा आमतौर पर Humanoid रीटारगेटिंग है। जानवरों, पक्षियों और अन्य नॉन-ह्यूमनॉइड मॉडल के लिए <strong>Generic</strong> बेहतर रहता है।</p>
 
-                <h2>Common Unity import problems</h2>
-                <h3>Character is rotated or lying down</h3>
-                <p>This is usually a coordinate system mismatch. Check the FBX import settings, or rotate the root in your prefab. Keeping consistent forward axis in exports reduces this.</p>
+                <h2>Unity इम्पोर्ट की आम समस्याएँ</h2>
 
-                <h3>Animations look broken</h3>
-                <p>Most often caused by a bad starting pose (not a real T-pose) or extreme proportions. Fix pose, re-export, and re-run the rig.</p>
+                <h3>कैरेक्टर घूमा हुआ है या लेटा हुआ है</h3>
+                <p>यह आमतौर पर कोऑर्डिनेट सिस्टम के बेमेल होने से होता है। FBX इम्पोर्ट सेटिंग जाँचें, या प्रीफ़ैब में रूट को घुमाएँ। एक्सपोर्ट में आगे की दिशा की एक जैसी धुरी रखने से यह कम होता है।</p>
 
-                <h3>Textures missing</h3>
-                <p>GLB textures can import differently than FBX materials. If you need perfect materials, you may have to reassign textures in Unity or export a Unity-ready package if your pipeline supports it.</p>
+                <h3>एनिमेशन टूटे हुए दिखते हैं</h3>
+                <p>सबसे आम कारण Avatar (Configure) में हड्डियों की अधूरी मैपिंग या अत्यधिक अनुपात हैं। टास्क को व्यूअर में खोलें, स्केलेटन जाँचें (Blueprint मोड, कुंजी B), हड्डियाँ ठीक करें और दोबारा रिग करें, फिर फिर से एक्सपोर्ट करें।</p>
 
-                <h2>Best practice: keep the "rigged Unity FBX" as your source of truth</h2>
-                <p>Once you have a clean rigged FBX that Unity likes, use it as the baseline for animations and prefab setup. GLB is still great for distribution, but Unity workflows often behave best with FBX.</p>
+                <h3>टेक्सचर गायब हैं</h3>
+                <p>GLB टेक्सचर FBX मटीरियल से अलग तरह इम्पोर्ट हो सकते हैं। अगर परफ़ेक्ट मटीरियल चाहिए, तो Unity में टेक्सचर दोबारा असाइन करने पड़ सकते हैं, या आपकी पाइपलाइन सपोर्ट करे तो Unity-रेडी पैकेज एक्सपोर्ट करें।</p>
 
-                <p><strong>Next step:</strong> read <a href="/t-pose-rig">T-pose checklist</a> or try <a href="/">rigging your GLB now</a>.</p>
+                <h2>सर्वोत्तम अभ्यास: "रिग्ड Unity FBX" को अपना मुख्य स्रोत रखें</h2>
+                <p>जब आपके पास साफ़ रिग्ड FBX हो जो Unity को पसंद आता हो, तो उसे एनिमेशन और प्रीफ़ैब सेटअप का आधार बनाएँ। GLB वितरण के लिए अब भी बढ़िया है, लेकिन Unity वर्कफ़्लो में अक्सर FBX सबसे अच्छा चलता है।</p>
+                <p><strong>अगला क़दम:</strong> <a href="/t-pose-rig">पोज़ गाइड</a> पढ़ें, <a href="/glb-vs-fbx-hi">GLB और FBX</a> की तुलना देखें या <a href="/">अभी अपना GLB रिग करें</a>।</p>
             </article>
         </div>
     </section>
@@ -152,12 +201,14 @@
     <section class="related-section">
         <div class="container">
             <h2>संबंधित गाइड</h2>
-            <p>Learn more about Unity rigging and workflows:</p>
+            <p>Unity रिगिंग और वर्कफ़्लो के बारे में और जानें:</p>
             <div class="related-links">
-                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
-                <a href="/rig-fbx-unreal-hi" class="related-link">FBX Unreal Guide</a>
-                <a href="/t-pose-rig" class="related-link">T-Pose Guide</a>
-                <a href="/how-it-works" class="related-link">कैसे काम करता है</a>
+                <a href="/glb-auto-rig" class="related-link">GLB ऑटो रिग</a>
+                <a href="/rig-fbx-unreal-hi" class="related-link">FBX से Unreal गाइड</a>
+                <a href="/t-pose-rig" class="related-link">पोज़ गाइड</a>
+                <a href="/glb-vs-fbx-hi" class="related-link">GLB बनाम FBX</a>
+                <a href="/animal-rig" class="related-link">जानवरों की रिगिंग</a>
+                <a href="/how-it-works" class="related-link">यह कैसे काम करता है</a>
                 <a href="/faq" class="related-link">FAQ</a>
             </div>
         </div>
@@ -166,17 +217,17 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Rig GLB for Unity?</h2>
-            <p>Get your GLB character rigged and ready for Unity Mecanim. Professional results in minutes.</p>
-            <a href="/" class="cta-button">Start Unity GLB Rigging</a>
+            <h2>Unity के लिए GLB रिग करने को तैयार हैं?</h2>
+            <p>अपना GLB कैरेक्टर रिग और एनिमेट कराएँ, Unity Mecanim के लिए तैयार।</p>
+            <a href="/" class="cta-button">Unity GLB रिगिंग शुरू करें</a>
         </div>
     </section>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <div id="site-footer"></div>
 </body>

@@ -3,61 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unity GLB 角色自动绑定流程</title>
-    <meta name="description" content="学习如何准备 GLB 角色，在 AutoRig 中自动绑定，并将结果导入 Unity，用于 Mecanim 动画和游戏管线。">
-    <meta name="keywords" content="rig GLB for unity, unity GLB rigging, GLB to unity, unity character import, unity humanoid rig, unity animation import">
+    <title>为 Unity 绑定 GLB 角色：几秒自动绑定</title>
+    <meta name="description" content="在线为 Unity 绑定 GLB 角色：上传后几秒得到带动画的绑定模型，下载 FBX 或 Unity 包，并按 Humanoid 导入。">
+    <meta name="keywords" content="GLB 绑定 Unity, Unity GLB 自动绑定, GLB 转 Unity, Unity 角色导入, Unity Humanoid 骨架, Unity 动画导入, 带骨架的 FBX">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorig.online/rig-glb-unity-zh">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/rig-glb-unity">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/rig-glb-unity-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/rig-glb-unity-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/rig-glb-unity-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/rig-glb-unity">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Unity GLB 角色自动绑定流程">
-    <meta property="og:description" content="准备 GLB、自动绑定并导入 Unity 的简明流程。">
+    <meta property="og:title" content="为 Unity 绑定 GLB 角色：几秒自动绑定">
+    <meta property="og:description" content="上传 GLB，几秒内得到骨架和动画片段，下载 Unity 导出文件并在 Mecanim 中设置。无需准备 T 姿势。">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/rig-glb-unity-zh">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/rig-glb-unity.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AutoRig 绑定的人形角色的蒙皮权重与骨骼，正面和侧面视图">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="为 Unity 绑定 GLB 角色：几秒自动绑定">
+    <meta name="twitter:description" content="上传 GLB，几秒内得到骨架和动画片段，下载 Unity 导出文件并在 Mecanim 中设置。无需准备 T 姿势。">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/rig-glb-unity.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "Article",
-        "headline": "Unity GLB 角色自动绑定流程",
-        "description": "准备 GLB 角色，在 AutoRig 中自动绑定，并将结果导入 Unity 的流程。",
+        "headline": "为 Unity 绑定 GLB 角色：几秒自动绑定",
+        "description": "在线为 Unity 绑定 GLB 角色：上传后几秒得到带动画的绑定模型，下载 FBX 或 Unity 包，并按 Humanoid 导入。",
+        "image": "https://autorig.online/static/images/og/rig-glb-unity.jpg",
+        "inLanguage": "zh",
         "author": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+            }
         },
         "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
+        "dateModified": "2026-10-16",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://autorig.online/rig-glb-unity-zh"
         },
-        "articleSection": "Tutorials",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "首页",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "GLB Unity Guide",
-                    "item": "https://autorig.online/rig-glb-unity-zh"
-                }
-            ]
-        }
+        "articleSection": "Tutorials"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "首页",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "指南",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "为 Unity 绑定 GLB 角色",
+                "item": "https://autorig.online/rig-glb-unity-zh"
+            }
+        ]
     }
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .article-figure { margin: 1.75rem 0; }
+        .article-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: #1a1a20; }
+        .article-figure figcaption { margin-top: .6rem; color: var(--text-secondary); font-size: .9rem; line-height: 1.5; }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,25 +117,25 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>Unity GLB 角色自动绑定流程</h1>
-                <p class="hero-subtitle">准备 GLB 角色，在 AutoRig 中自动生成 rig，并将结果导入 Unity 用于 Mecanim 动画。</p>
+                <h1>如何为 Unity 绑定 GLB 角色</h1>
+                <p class="hero-subtitle">上传 GLB，几秒内得到带动画片段的骨架，再在 Unity Mecanim 中设置。无需准备 T 姿势。</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <img src="/static/images/icons/tools.svg" alt="引擎" class="feature-icon" width="96" height="96">
                         <span>Unity Mecanim</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
-                        <span>Fast workflow</span>
+                        <img src="/static/images/icons/fast.svg" alt="快速" class="feature-icon" width="96" height="96">
+                        <span>几秒完成绑定</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
-                        <span>Animation ready</span>
+                        <img src="/static/images/icons/animations.svg" alt="动画" class="feature-icon" width="96" height="96">
+                        <span>含动画片段</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">开始绑定 GLB 角色</a>
+                <a href="/" class="cta-button">开始 GLB Unity 绑定</a>
             </div>
         </div>
     </section>
@@ -102,48 +144,55 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <p>GLB (glTF binary) is a great format for sharing characters, but many Unity pipelines still prefer rigged FBX for animation workflows. The usual goal is simple: take a GLB character in T-pose, auto-rig it, and import the animated result into Unity with minimal setup.</p>
+                <p>GLB（glTF 二进制）非常适合分享角色，但许多 Unity 流程在做动画时仍然偏好带骨架的 FBX。目标很简单：拿一个 GLB 角色，自动绑定，然后以最少的设置把带动画的结果导入 Unity。AutoRig 根据模型自身的几何形状生成骨架，所以角色不必摆成 T 姿势。</p>
 
-                <h2>Step 1: Prepare your GLB (T-pose checklist)</h2>
+                <h2>第 1 步：准备 GLB（无需 T 姿势）</h2>
+                <p>骨架会按任意姿势贴合几何形状。如果双足角色的两条腿站姿不同，以站立的腿决定骨骼长度；如果 GLB 本身已有骨架或动画，则使用它自带的静止姿势。以下做法仍然有帮助：</p>
                 <ul>
-                    <li><strong>T-pose</strong>: arms straight out, legs straight, neutral stance</li>
-                    <li><strong>Centered model</strong>: character near origin, not 100 meters away</li>
-                    <li><strong>Apply transforms</strong>: avoid weird rotation/scale values</li>
-                    <li><strong>Clean mesh</strong>: fix flipped normals and non-manifold geometry if possible</li>
+                    <li><strong>模型居中</strong>：角色靠近原点，而不是在 100 米之外</li>
+                    <li><strong>应用变换</strong>：避免奇怪的旋转或缩放值</li>
+                    <li><strong>干净的网格</strong>：尽量修复翻转的法线和非流形几何</li>
+                    <li><strong>贴图</strong>：保留在 GLB 中。模型自带的贴图不会丢失，没有贴图的模型会自动生成 PBR 贴图</li>
                 </ul>
 
-                <h2>Step 2: Auto-rig the GLB online</h2>
-                <p>On <strong>autorig.online</strong> you can upload a GLB file or paste a direct URL. The service creates a rig and provides Unity-friendly exports. Once the task completes, download the Unity export (usually FBX) plus any additional formats you need.</p>
+                <h2>第 2 步：在线自动绑定 GLB</h2>
+                <p>在 <strong>autorig.online</strong> 把 GLB 文件拖入上传区。任务会立即在 3D 查看器中打开。快速绑定几秒内生成骨架和蒙皮，模型所属类别动画库中的片段会重定向到骨架上，质量检查（关节位置、蒙皮撕裂、肢体穿插）在后台持续进行。在查看器中确认骨架是可选的：动画不会等待这一步。</p>
+                <figure class="article-figure">
+                    <img src="/static/images/articles/rig-glb-unity-weights.jpg" alt="AutoRig 绑定的人形角色的蒙皮权重与骨骼，正面和侧面视图" width="800" height="400" loading="lazy" decoding="async">
+                    <figcaption>来自 V3 运行的绑定结果：每根骨骼的蒙皮权重和骨架，正面与侧面。</figcaption>
+                </figure>
+                <p><a href="/"><strong>开始为 Unity 绑定 GLB</strong></a></p>
 
-                <p><a href="/"><strong>Start rigging a GLB for Unity</strong></a></p>
+                <h2>第 3 步：下载 Unity 导出文件</h2>
+                <p>任务完成后，下载 Unity 导出文件（通常是 FBX），以及你需要的其他格式：GLB、USDZ、ZIP 或 Unity 包。</p>
 
-                <h2>Step 3: Import into Unity</h2>
-                <p>In Unity, import the resulting FBX. Then:</p>
+                <h2>第 4 步：导入 Unity</h2>
+                <p>在 Unity 中导入得到的 FBX，然后：</p>
                 <ol>
-                    <li>Select the FBX in the Project panel.</li>
-                    <li>Open the <strong>Rig</strong> tab in the Inspector.</li>
-                    <li>Set <strong>Animation Type</strong> to <strong>Humanoid</strong> (for humanoid characters).</li>
-                    <li>Click <strong>Apply</strong>.</li>
-                    <li>Open <strong>Configure</strong> and check the avatar mapping (Unity will show you if bones are missing).</li>
+                    <li>在 Project 面板中选择该 FBX。</li>
+                    <li>在 Inspector 中打开 <strong>Rig</strong> 标签页。</li>
+                    <li>将 <strong>Animation Type</strong> 设为 <strong>Humanoid</strong>（适用于人形角色）。</li>
+                    <li>点击 <strong>Apply</strong>。</li>
+                    <li>打开 <strong>Configure</strong> 检查骨骼映射（如果缺少骨骼，Unity 会提示）。</li>
                 </ol>
 
-                <h2>Step 4: Test animations</h2>
-                <p>If your download includes multiple animations or an animation pack, import those clips and retarget them to your character's avatar. In Unity, Humanoid retargeting is usually the easiest way to reuse animations across characters.</p>
+                <h2>第 5 步：测试动画</h2>
+                <p>如果下载内容包含已重定向到你的骨架上的动画片段，请导入它们，或把其他动画包重定向到角色的 Avatar。在 Unity 中，Humanoid 重定向通常是在不同角色之间复用动画的最简单方式。动物、鸟类等非人形模型更适合设为 <strong>Generic</strong>。</p>
 
-                <h2>Common Unity import problems</h2>
-                <h3>Character is rotated or lying down</h3>
-                <p>This is usually a coordinate system mismatch. Check the FBX import settings, or rotate the root in your prefab. Keeping consistent forward axis in exports reduces this.</p>
+                <h2>Unity 导入常见问题</h2>
 
-                <h3>Animations look broken</h3>
-                <p>Most often caused by a bad starting pose (not a real T-pose) or extreme proportions. Fix pose, re-export, and re-run the rig.</p>
+                <h3>角色被旋转或躺倒</h3>
+                <p>通常是坐标系不一致。检查 FBX 导入设置，或在预制体中旋转根节点。导出时保持一致的前向轴可以减少这类问题。</p>
 
-                <h3>Textures missing</h3>
-                <p>GLB textures can import differently than FBX materials. If you need perfect materials, you may have to reassign textures in Unity or export a Unity-ready package if your pipeline supports it.</p>
+                <h3>动画看起来不对</h3>
+                <p>最常见的原因是 Avatar（Configure）中的骨骼映射不完整，或比例过于极端。在查看器中打开任务，检查骨架（Blueprint 模式，按 B 键），修正骨骼并重新绑定，然后再次导出。</p>
 
-                <h2>Best practice: keep the "rigged Unity FBX" as your source of truth</h2>
-                <p>Once you have a clean rigged FBX that Unity likes, use it as the baseline for animations and prefab setup. GLB is still great for distribution, but Unity workflows often behave best with FBX.</p>
+                <h3>贴图丢失</h3>
+                <p>GLB 贴图的导入方式可能与 FBX 材质不同。如果需要完美的材质，可能要在 Unity 中重新指定贴图，或者在你的流程支持时导出可直接用于 Unity 的包。</p>
 
-                <p><strong>Next step:</strong> read <a href="/t-pose-rig">T-pose checklist</a> or try <a href="/">rigging your GLB now</a>.</p>
+                <h2>最佳实践：把“带骨架的 Unity FBX”作为唯一基准</h2>
+                <p>一旦得到 Unity 能顺利使用的干净 FBX，就把它作为动画和预制体设置的基础。GLB 仍然适合分发，但 Unity 工作流通常与 FBX 配合得最好。</p>
+                <p><strong>下一步：</strong>阅读<a href="/t-pose-rig">姿势指南</a>，对比 <a href="/glb-vs-fbx-zh">GLB 与 FBX</a>，或<a href="/">立即绑定你的 GLB</a>。</p>
             </article>
         </div>
     </section>
@@ -152,13 +201,15 @@
     <section class="related-section">
         <div class="container">
             <h2>相关指南</h2>
-            <p>Learn more about Unity rigging and workflows:</p>
+            <p>进一步了解 Unity 绑定与工作流：</p>
             <div class="related-links">
-                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
-                <a href="/rig-fbx-unreal-zh" class="related-link">FBX Unreal Guide</a>
-                <a href="/t-pose-rig" class="related-link">T-Pose Guide</a>
-                <a href="/how-it-works" class="related-link">如何工作</a>
-                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/glb-auto-rig" class="related-link">GLB 自动绑定</a>
+                <a href="/rig-fbx-unreal-zh" class="related-link">FBX 导入 Unreal 指南</a>
+                <a href="/t-pose-rig" class="related-link">姿势指南</a>
+                <a href="/glb-vs-fbx-zh" class="related-link">GLB 与 FBX</a>
+                <a href="/animal-rig" class="related-link">动物绑定</a>
+                <a href="/how-it-works" class="related-link">工作原理</a>
+                <a href="/faq" class="related-link">常见问题</a>
             </div>
         </div>
     </section>
@@ -166,17 +217,17 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Rig GLB for Unity?</h2>
-            <p>Get your GLB character rigged and ready for Unity Mecanim. Professional results in minutes.</p>
-            <a href="/" class="cta-button">Start Unity GLB Rigging</a>
+            <h2>准备好为 Unity 绑定 GLB 了吗？</h2>
+            <p>让你的 GLB 角色完成绑定并带上动画，直接用于 Unity Mecanim。</p>
+            <a href="/" class="cta-button">开始 Unity GLB 绑定</a>
         </div>
     </section>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <div id="site-footer"></div>
 </body>

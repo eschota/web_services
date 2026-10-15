@@ -32,7 +32,8 @@
     // follows the language direction. Elsewhere only the shared chrome does.
     // /task is chrome-only until the V3 task page declares data-i18n-scope="page".
     var FULL_PAGE_PATHS = ['/', '/gallery', '/buy-credits', '/how-it-works', '/dashboard',
-        '/payment/success', '/developers', '/guides'];
+        '/payment/success', '/developers', '/guides',
+        '/faq', '/animal-rig', '/blender-plugin', '/t-pose-rig'];   // site refresh to V3 (owner 2026-10-16)
     var STORAGE_KEY = 'autorig_lang';
     var COOKIE_KEY = 'autorig_lang';
     var RTL_CSS_HREF = '/static/css/rtl.css?v=72f3adeba2';

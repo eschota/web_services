@@ -3,15 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto Rig Gallery — Real Results</title>
-    <meta name="description" content="Browse real rigging results from AutoRig.Online. Explore newest gallery files by rig type with pagination.">
+    <title>Rigged 3D Model Gallery: Real Results | AutoRig</title>
+    <meta name="description" content="Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.">
+    <meta name="keywords" content="rigged 3D models gallery, auto rig gallery, AutoRig examples, rigged character gallery, animal rig examples, 3D model animation examples, AutoRig V3">
+    <link rel="canonical" href="https://autorig.online/gallery">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="AutoRig Gallery - Real Results">
-    <meta property="og:description" content="Browse real auto-rigged tasks by rig type and paginate through the newest results.">
+    <meta property="og:title" content="Rigged 3D Model Gallery: Real Results | AutoRig">
+    <meta property="og:description" content="Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online/gallery">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/gallery.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Gallery of 3D models rigged by AutoRig V3: a horse, a car, a bird, a hand, a wolf, a character, a monster and a spider">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Rigged 3D Model Gallery: Real Results | AutoRig">
+    <meta name="twitter:description" content="Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/gallery.jpg">
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
@@ -24,6 +33,68 @@
         gtag('js', new Date());
         gtag('config', 'G-T4E781EHE4');
     </script>
+    <style>
+        .gallery-about { padding-bottom: 3rem; }
+        .gallery-about-card { padding: 2rem; }
+        .gallery-about-card h2 { margin: 0 0 0.75rem; font-size: clamp(1.3rem, 2.6vw, 1.8rem); }
+        .gallery-about-card p { margin: 0.6rem 0 0; max-width: 860px; color: var(--text-secondary); line-height: 1.65; }
+        .gallery-about-links { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.25rem; }
+        .gallery-about-links a { display: inline-flex; align-items: center; min-height: 40px; padding: 0.4rem 0.85rem; border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-weight: 600; text-decoration: none; }
+        .gallery-about-links a:hover { border-color: var(--accent); }
+        @media (max-width: 700px) { .gallery-about-card { padding: 1.25rem; } }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "@id": "https://autorig.online/gallery#webpage",
+        "name": "Rigged 3D Model Gallery: Real Results | AutoRig",
+        "url": "https://autorig.online/gallery",
+        "description": "Browse real 3D models rigged and animated by AutoRig V3: characters, animals, hands and cars. Newest first, filter by rig type, open any in the viewer.",
+        "inLanguage": "en",
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "AutoRig.online",
+            "url": "https://autorig.online/"
+        },
+        "primaryImageOfPage": {
+            "@type": "ImageObject",
+            "url": "https://autorig.online/static/images/og/gallery.jpg",
+            "width": 1200,
+            "height": 630
+        },
+        "breadcrumb": {
+            "@id": "https://autorig.online/gallery#breadcrumb"
+        },
+        "about": [
+            "rigged 3D models",
+            "auto rigging results",
+            "animal rigging",
+            "character rigging"
+        ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "@id": "https://autorig.online/gallery#breadcrumb",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "AutoRig.online",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Gallery",
+                "item": "https://autorig.online/gallery"
+            }
+        ]
+    }
+    </script>
 </head>
 <body data-layout-free3d-init="none">
     <div id="site-header"></div>
@@ -31,8 +102,8 @@
     <main>
         <section class="hero">
         <div class="container">
-                <h1 class="text-gradient" data-i18n="gallery_page_title">Gallery</h1>
-                <p class="hero-subtitle" data-i18n="gallery_page_subtitle">Real completed tasks. Browse newest results by rig type.</p>
+                <h1 class="text-gradient" data-i18n="gallery_page_title">Gallery of rigged 3D models</h1>
+                <p class="hero-subtitle" data-i18n="gallery_page_subtitle">Real public tasks rigged by AutoRig V3: characters, animals, hands and cars. Newest first; open one to watch it move in the viewer.</p>
             </div>
         </section>
 
@@ -75,6 +146,21 @@
             </div>
         </div>
     </section>
+        <section class="container mt-4 gallery-about" aria-labelledby="gallery-about-title">
+            <div class="card gallery-about-card">
+                <h2 id="gallery-about-title" data-i18n="gallery_about_title">About these results</h2>
+                <p data-i18n="gallery_about_p1">Every card is a real public task. AutoRig V3 rigged it from one upload, retargeted the animation clips and checked the result in the background of the viewer. Hover a card to preview the animation; open it to watch the model move in the Unity viewer.</p>
+                <p data-i18n="gallery_about_p2">Results are sorted by date, newest first, and the rig type filter narrows the list to one preset. Every task is one viewer with an agent chat, and you can download GLB, FBX, USDZ, a ZIP, a Unity package or a Blender file.</p>
+                <p data-i18n="gallery_about_p3">Want the same for your model? Drop it on the home page; the target is a rigged, animated model within one minute from pickup.</p>
+                <nav class="gallery-about-links" aria-label="Related pages" data-i18n-aria-label="gallery_about_nav">
+                    <a href="/" data-i18n="gallery_about_upload">Rig your own model</a>
+                    <a href="/animal-rig" data-i18n="gallery_about_animals">Animal rigging</a>
+                    <a href="/how-it-works" data-i18n="gallery_about_how">How it works</a>
+                    <a href="/guides" data-i18n="gallery_about_guides">Rigging guides</a>
+                    <a href="/faq" data-i18n="gallery_about_faq">FAQ</a>
+                </nav>
+            </div>
+        </section>
     </main>
     <div id="site-footer"></div>
 

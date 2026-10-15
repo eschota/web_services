@@ -25,7 +25,7 @@ PAGE = """<!DOCTYPE html>
 <div id="site-header" data-server-rendered="1">
 <a href="/" class="logo">Logo</a>
 <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
-<a href="/faq">FAQ</a>
+<a href="/terms">FAQ</a>
 <button class="lang-btn"><span data-lang-current>EN</span></button>
 </div>
 <main>
@@ -138,7 +138,7 @@ class Pages(Base):
         self.assertIn('href="/fa/gallery"', out)
         self.assertIn('href="/fa/"', out)
         self.assertIn('href="/fa/how-it-works"', out)
-        self.assertIn('href="/faq"', out)                                         # not advertised: unchanged
+        self.assertIn('href="/terms"', out)                                         # not advertised: unchanged
         self.assertIn('"source": "url"', out)
 
     def test_english_page_keeps_text(self):
@@ -150,13 +150,13 @@ class Pages(Base):
         self.assertNotIn("rtl.css", out)
 
     def test_unadvertised_prefix_is_noindex(self):
-        token = ul._REQUEST_LANG.set(ul.resolve_language(url_lang="zh", path="/faq"))
+        token = ul._REQUEST_LANG.set(ul.resolve_language(url_lang="zh", path="/terms"))
         try:
-            out = ul.localize_page(PAGE, "/faq")
+            out = ul.localize_page(PAGE, "/terms")
         finally:
             ul._REQUEST_LANG.reset(token)
         self.assertIn('name="robots" content="noindex, follow"', out)
-        self.assertIn('rel="canonical" href="https://autorig.online/faq"', out)
+        self.assertIn('rel="canonical" href="https://autorig.online/terms"', out)
 
     def test_all_five_languages_advertised(self):
         out = self.render(ul.resolve_language(url_lang="zh", path="/"))
@@ -165,9 +165,9 @@ class Pages(Base):
         self.assertIn('rel="canonical" href="https://autorig.online/zh/"', out)
 
     def test_chrome_scope_page(self):
-        token = ul._REQUEST_LANG.set(ul.resolve_language(explicit="fa", path="/faq"))
+        token = ul._REQUEST_LANG.set(ul.resolve_language(explicit="fa", path="/terms"))
         try:
-            out = ul.localize_page(PAGE, "/faq")
+            out = ul.localize_page(PAGE, "/terms")
         finally:
             ul._REQUEST_LANG.reset(token)
         self.assertIn('data-i18n-scope="chrome"', out)

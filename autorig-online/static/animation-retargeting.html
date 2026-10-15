@@ -3,61 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Animation Retargeting for Auto-Rigged Characters</title>
-    <meta name="description" content="Retarget AutoRig animations in Unity and Unreal Engine. Learn a compact pipeline for auto-rigged characters, previews and production exports.">
-    <meta name="keywords" content="animation retargeting unity unreal, unity mecaim retargeting, unreal animation retargeting, character animation transfer, rig retargeting guide">
+    <title>Animation Retargeting for Auto-Rigged Models | AutoRig</title>
+    <meta name="description" content="AutoRig retargets animation clips onto every new rig at once: a clip library per category, numeric QA per clip, custom clips in the viewer, GLB and FBX exports.">
+    <meta name="keywords" content="animation retargeting, auto retarget animation, animation clip library, retarget animals, horse gallop animation, unity humanoid retargeting, unreal ik retargeter, rig animation export">
+    <link rel="canonical" href="https://autorig.online/animation-retargeting">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/animation-retargeting">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/animation-retargeting-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/animation-retargeting-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/animation-retargeting-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/animation-retargeting">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Animation Retargeting for Auto-Rigged Characters">
-    <meta property="og:description" content="Complete guide to animation retargeting for auto-rigged characters in Unity and Unreal Engine with step-by-step workflows.">
+    <meta property="og:title" content="Animation Retargeting for Auto-Rigged Models | AutoRig">
+    <meta property="og:description" content="AutoRig retargets animation clips onto every new rig at once: a clip library per category, numeric QA per clip, custom clips in the viewer, GLB and FBX exports.">
     <meta property="og:type" content="article">
+    <meta property="og:site_name" content="AutoRig.online">
     <meta property="og:url" content="https://autorig.online/animation-retargeting">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/animation-retargeting.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Animation retargeting: a zebra, a wolf, a monster, a hand and a motorhome rigged on AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Animation Retargeting for Auto-Rigged Models | AutoRig">
+    <meta name="twitter:description" content="AutoRig retargets animation clips onto every new rig at once: a clip library per category, numeric QA per clip, custom clips in the viewer, GLB and FBX exports.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/animation-retargeting.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "Article",
-        "headline": "Animation Retargeting for Auto-Rigged Characters",
-        "description": "Complete guide to animation retargeting workflows for auto-rigged characters in Unity Mecanim and Unreal Engine",
+        "headline": "Animation retargeting for auto-rigged models",
+        "description": "How AutoRig retargets animation clips automatically: a clip library per rig category made from generated reference videos, numeric QA on every clip, custom clips in the viewer and exports for Unity, Unreal and Blender.",
+        "inLanguage": "en",
+        "image": "https://autorig.online/static/images/og/animation-retargeting.jpg",
         "author": {
             "@type": "Organization",
             "name": "AutoRig Online"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         },
         "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
+        "dateModified": "2026-10-16",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://autorig.online/animation-retargeting"
-        },
-        "articleSection": "Guides",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "Home",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "Animation Retargeting",
-                    "item": "https://autorig.online/animation-retargeting"
-                }
-            ]
         }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Home",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Guides",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "Animation retargeting",
+                "item": "https://autorig.online/animation-retargeting"
+            }
+        ]
     }
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .art-lead { font-size: 1.1rem; line-height: 1.75; }
+        .art-figs { display: grid; gap: 1rem; margin: 1.5rem 0; }
+        .art-figs-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .art-figs-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .art-fig { margin: 1.5rem 0; background: var(--bg-card); border: 1px solid var(--glass-border); border-radius: 14px; overflow: hidden; }
+        .art-figs .art-fig { margin: 0; }
+        .art-fig img { display: block; width: 100%; height: auto; }
+        .art-fig figcaption { padding: 0.7rem 0.95rem 0.85rem; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary); }
+        .art-fig-small { max-width: 420px; }
+        .art-callout { margin: 1.5rem 0; padding: 1rem 1.25rem; border-inline-start: 4px solid var(--accent); border-radius: 10px; background: rgba(99, 102, 241, 0.08); }
+        .art-callout p { margin: 0; }
+        .art-cats { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem 1.25rem; }
+        .art-cats li { padding: 0.5rem 0.9rem; border: 1px solid var(--glass-border); border-radius: 10px; background: var(--bg-card); }
+        @media (max-width: 768px) { .art-figs-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .art-cats { grid-template-columns: 1fr; } }
+        @media (max-width: 480px) { .art-figs-2 { grid-template-columns: 1fr; } }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,21 +117,21 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>Animation retargeting for auto-rigged characters</h1>
-                <p class="hero-subtitle">Complete guide to animation retargeting for auto-rigged characters. Learn Unity Mecanim and Unreal Engine workflows for professional results.</p>
+                <h1>Animation retargeting for auto-rigged models</h1>
+                <p class="hero-subtitle">One clip library per rig category, retargeted onto every new rig at once, with a numeric check on every clip. Custom clips and exports included.</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
-                        <span>Unity & Unreal</span>
-                    </div>
-                    <div class="feature">
                         <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
-                        <span>Animation transfer</span>
+                        <span>Clip library per category</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Settings" class="feature-icon" width="96" height="96">
-                        <span>Pipeline guide</span>
+                        <img src="/static/images/icons/target.svg" alt="Quality" class="feature-icon" width="96" height="96">
+                        <span>Numeric QA per clip</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Engines" class="feature-icon" width="96" height="96">
+                        <span>Unity, Unreal, Blender</span>
                     </div>
                 </div>
 
@@ -102,41 +144,90 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <p>Retargeting is the process of applying an animation from one character to another. If your character is auto-rigged, you usually want to reuse existing animation packs (walk/run/idle/combat) without reanimating everything from scratch.</p>
+                <p class="art-lead">Retargeting applies an animation made for one skeleton to another. Normally that means buying an animation pack, fixing proportions and re-checking every clip in your engine. AutoRig does it for you: clips are retargeted onto every new rig at once, and each clip is checked by numbers.</p>
 
-                <h2>Why retargeting sometimes looks bad</h2>
-                <p>Most retargeting problems come from:</p>
-                <ul>
-                    <li>different base poses (T-pose vs A-pose)</li>
-                    <li>different proportions (very long arms/short legs)</li>
-                    <li>twisted joint orientations</li>
-                    <li>bad skin weights around shoulders/hips</li>
-                </ul>
+                <h2>A clip library for every category</h2>
 
-                <h2>Unity retargeting (Humanoid)</h2>
-                <p>Unity's Humanoid system can retarget animations between characters if the avatar mapping is correct.</p>
+                <p>Each rig category has its own library of clips. For animals that means, for example, walk, trot, canter, gallop, idle, rear, look around and attack. The reference videos for a category are generated and quality-checked once, and the motion is extracted from them once. After that the clips are reusable: every new model of the category gets them by automatic retargeting onto its own skeleton. Nobody animates a single model by hand.</p>
+
+                <div class="art-callout"><p>Procedural clips are only the fallback, used when the library has no clip for the category.</p></div>
+
+                <p>Equine models (horses, deer, zebras) get planted-hoof gaits: walk, trot and gallop with the hooves staying on the ground. Birds get wing clips, and hands get hand clips with per-finger joints.</p>
+
+                <h2>Automatic retarget with numeric QA</h2>
+
                 <ol>
-                    <li>Import your rigged character FBX.</li>
-                    <li>Set Rig → Animation Type → <strong>Humanoid</strong>.</li>
-                    <li>Configure avatar mapping and fix missing bones if needed.</li>
-                    <li>Import animation clips and set them to Humanoid.</li>
-                    <li>Apply clips to your character Animator Controller.</li>
+                    <li><strong>Fit.</strong> The rig is fitted to your model first: its own proportions and its own joint placement.</li>
+                    <li><strong>Retarget.</strong> The motion of the library clip is transferred onto that skeleton.</li>
+                    <li><strong>Check.</strong> Every clip passes a numeric deformation check. Joint placement, skin tears and limb collisions are measured in the background of the viewer.</li>
+                    <li><strong>Show.</strong> The clips play in the viewer straight after the rig, and the target is a rigged, animated model within one minute from pickup.</li>
                 </ol>
 
-                <h2>Unreal retargeting</h2>
-                <p>In Unreal, retargeting uses skeleton/IK rigs depending on engine version and workflow. The core idea is similar: define a mapping and reuse animations across compatible rigs.</p>
+                <h2>Why retargeting often looks bad, and what AutoRig does about it</h2>
 
-                <h2>Best practice for predictable retargeting</h2>
                 <ul>
-                    <li>Use a consistent T-pose for all characters</li>
-                    <li>Keep scale and proportions within reasonable bounds</li>
-                    <li>Avoid extreme shoulder/hip offsets in the base mesh</li>
-                    <li>If needed, polish weights on shoulders and hips</li>
+                    <li><strong>Different proportions.</strong> The rig is fitted to your model before any clip is applied, so a long-armed or short-legged model gets its own bone lengths.</li>
+                    <li><strong>Different base poses.</strong> You do not need a T-pose. The rig follows the model as it is. When the legs do not stand side by side, the standing leg is the reference for both.</li>
+                    <li><strong>Twisted joints and bad weights.</strong> Joint placement and skin tears around shoulders and hips are measured, not judged by eye.</li>
+                    <li><strong>Sliding feet.</strong> Equine gaits keep the hooves planted.</li>
                 </ul>
 
-                <p>If you're building a character pipeline, the fastest path is: auto-rig in T-pose, export engine-friendly FBX, then retarget animations inside the engine.</p>
+                <div class="art-figs art-figs-2">
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-horse-clip.gif" width="300" height="307" loading="lazy" alt="A horse rig playing an animation clip in the AutoRig stand">
+                        <figcaption>A horse rig playing a clip.</figcaption>
+                    </figure>
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-horse-gait.jpg" width="768" height="572" loading="lazy" alt="Frames of a gallop clip on a horse rig, front, side and top views">
+                        <figcaption>Frames of a gallop clip, in front, side and top views.</figcaption>
+                    </figure>
+                </div>
 
-                <p><a href="/"><strong>Auto-rig your character and start retargeting</strong></a></p>
+                <div class="art-figs art-figs-2">
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-hand-clips.jpg" width="768" height="572" loading="lazy" alt="Frames of a hand clip on a rigged hand with per-finger joints">
+                        <figcaption>A hand clip with per-finger joints.</figcaption>
+                    </figure>
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-bird-clips.jpg" width="768" height="572" loading="lazy" alt="Frames of wing clips on a rigged bird, front, side and top views">
+                        <figcaption>A bird: the wings are rigged as wings, never as arms.</figcaption>
+                    </figure>
+                </div>
+
+                <h2>Custom clips in the viewer</h2>
+
+                <p>The viewer has a clip set for every task. Add your own clips to it next to the library clips and play them on the same rig. Edit the bones in blueprint mode (B) if a joint needs help: the viewer re-rigs 15 seconds after your last edit, or at once with the button. The skeleton confirmation is offered and never required, so the animation does not wait for it.</p>
+
+                <h2>Exports</h2>
+
+                <p>Download the rig and the clips as GLB, FBX, USDZ, a ZIP, a Unity package or for Blender. The guides cover <a href="/rig-glb-unity">GLB in Unity</a>, <a href="/rig-fbx-unreal">FBX in Unreal</a> and <a href="/glb-vs-fbx">GLB vs FBX</a>, and the <a href="/blender-plugin">Blender plugin</a> brings the same workflow into Blender.</p>
+
+                <h2>Using the clips and your own animation packs in an engine</h2>
+
+                <p>If you want to retarget your own animation packs inside the engine, the exported rig works as a normal skeleton.</p>
+
+                <ul>
+                    <li><strong>Unity (humanoid models).</strong> Import the rigged FBX, set Rig, Animation Type to Humanoid, check the avatar mapping, import the clips as Humanoid and apply them in your Animator Controller.</li>
+                    <li><strong>Unreal.</strong> Retargeting uses skeletons and IK rigs depending on the engine version. The idea is the same: define a mapping once, then reuse animations across compatible rigs.</li>
+                </ul>
+
+                <h2>FAQ</h2>
+
+                <h3>Do I need a T-pose?</h3>
+
+                <p>No. The rig is fitted to the model in any pose, and the clips are retargeted onto that rig.</p>
+
+                <h3>Can I use animation packs I already have?</h3>
+
+                <p>Yes. Export the rig and retarget your packs in your engine, or add them as custom clips in the viewer.</p>
+
+                <h3>Which categories have clips?</h3>
+
+                <p>Each of the nine categories has its own clip library: biped, quadruped, equine, bird, serpent, monster, multilimb, hands and vehicle. Where a category has no library clip yet, procedural clips are the fallback.</p>
+
+                <h3>How long does it take?</h3>
+
+                <p>The fast rig takes seconds and the clips are retargeted at once. The target is a rigged, animated model within one minute from pickup.</p>
             </article>
         </div>
     </section>
@@ -147,10 +238,15 @@
             <h2>Related Guides</h2>
             <p>Learn more about animation and engine workflows:</p>
             <div class="related-links">
+                <a href="/how-it-works" class="related-link">How It Works</a>
+                <a href="/mixamo-alternative" class="related-link">Mixamo Alternative</a>
+                <a href="/animal-rig" class="related-link">Animal Rigging</a>
+                <a href="/horse-auto-rig" class="related-link">Horse Auto Rig</a>
                 <a href="/rig-glb-unity" class="related-link">Unity GLB Guide</a>
                 <a href="/rig-fbx-unreal" class="related-link">Unreal FBX Guide</a>
                 <a href="/glb-vs-fbx" class="related-link">GLB vs FBX</a>
-                <a href="/how-it-works" class="related-link">How It Works</a>
+                <a href="/t-pose-rig" class="related-link">Pose Guide</a>
+                <a href="/gallery" class="related-link">Gallery</a>
                 <a href="/faq" class="related-link">FAQ</a>
             </div>
         </div>
@@ -159,8 +255,8 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Master Animation Retargeting?</h2>
-            <p>Get auto-rigged characters ready for professional animation retargeting workflows.</p>
+            <h2>Ready to retarget animation the easy way?</h2>
+            <p>Drop a model, a picture or a picture of a car and get a rig with clips in seconds.</p>
             <a href="/" class="cta-button">Start Auto Rigging</a>
         </div>
     </section>

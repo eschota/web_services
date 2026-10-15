@@ -3,61 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unreal Engine के लिए FBX auto rig guide</title>
-    <meta name="description" content="FBX character तैयार करें, AutoRig में automatic rig बनाएं और Unreal Engine में skeletal mesh import करें।">
-    <meta name="keywords" content="rig FBX for unreal, unreal FBX rigging, FBX to unreal, unreal skeletal mesh, unreal animation blueprint, unreal character import">
+    <title>Unreal Engine के लिए FBX कैरेक्टर रिग (Skeletal Mesh)</title>
+    <meta name="description" content="Unreal Engine के लिए FBX कैरेक्टर ऑनलाइन रिग करें: सेकंडों में एनिमेटेड रिग्ड मॉडल पाएँ, FBX डाउनलोड करें और Skeletal Mesh के रूप में इम्पोर्ट करें।">
+    <meta name="keywords" content="Unreal के लिए FBX रिग, Unreal Engine FBX रिगिंग, FBX Skeletal Mesh, ऑटो रिग FBX, Unreal कैरेक्टर इम्पोर्ट, Unreal रीटारगेटिंग">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorig.online/rig-fbx-unreal-hi">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/rig-fbx-unreal">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/rig-fbx-unreal-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/rig-fbx-unreal-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/rig-fbx-unreal-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/rig-fbx-unreal">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Unreal Engine के लिए FBX auto rig guide">
-    <meta property="og:description" content="FBX preparation, AutoRig rigging और Unreal import का compact workflow.">
+    <meta property="og:title" content="Unreal Engine के लिए FBX कैरेक्टर रिग (Skeletal Mesh)">
+    <meta property="og:description" content="FBX अपलोड करें, सेकंडों में रिग और एनिमेशन क्लिप पाएँ, Unreal-फ्रेंडली FBX डाउनलोड करें और Skeletal Mesh के रूप में इम्पोर्ट करें। T-पोज़ की तैयारी ज़रूरी नहीं।">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/rig-fbx-unreal-hi">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/rig-fbx-unreal.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AutoRig से रिग किए गए घोड़े पर गैलप क्लिप के फ़्रेम: सामने, बगल और ऊपर से">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="hi_IN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Unreal Engine के लिए FBX कैरेक्टर रिग (Skeletal Mesh)">
+    <meta name="twitter:description" content="FBX अपलोड करें, सेकंडों में रिग और एनिमेशन क्लिप पाएँ, Unreal-फ्रेंडली FBX डाउनलोड करें और Skeletal Mesh के रूप में इम्पोर्ट करें। T-पोज़ की तैयारी ज़रूरी नहीं।">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/rig-fbx-unreal.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "Article",
-        "headline": "Unreal Engine के लिए FBX auto rig guide",
-        "description": "FBX character तैयार करके AutoRig में automatic rig बनाएं और Unreal Engine में import करें।",
+        "headline": "Unreal Engine के लिए FBX कैरेक्टर रिग (Skeletal Mesh)",
+        "description": "Unreal Engine के लिए FBX कैरेक्टर ऑनलाइन रिग करें: सेकंडों में एनिमेटेड रिग्ड मॉडल पाएँ, FBX डाउनलोड करें और Skeletal Mesh के रूप में इम्पोर्ट करें।",
+        "image": "https://autorig.online/static/images/og/rig-fbx-unreal.jpg",
+        "inLanguage": "hi",
         "author": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+            }
         },
         "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
+        "dateModified": "2026-10-16",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://autorig.online/rig-fbx-unreal-hi"
         },
-        "articleSection": "Tutorials",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "होम",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "FBX Unreal Guide",
-                    "item": "https://autorig.online/rig-fbx-unreal-hi"
-                }
-            ]
-        }
+        "articleSection": "Tutorials"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "होम",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "गाइड",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "Unreal Engine के लिए FBX कैरेक्टर रिग",
+                "item": "https://autorig.online/rig-fbx-unreal-hi"
+            }
+        ]
     }
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .article-figure { margin: 1.75rem 0; }
+        .article-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: #1a1a20; }
+        .article-figure figcaption { margin-top: .6rem; color: var(--text-secondary); font-size: .9rem; line-height: 1.5; }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,25 +117,25 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>Unreal Engine के लिए FBX auto rig guide</h1>
-                <p class="hero-subtitle">FBX model तैयार करें, AutoRig में rig बनाएं और Unreal Engine skeletal mesh workflow में import करें।</p>
+                <h1>Unreal Engine के लिए FBX कैरेक्टर कैसे रिग करें</h1>
+                <p class="hero-subtitle">FBX अपलोड करें, सेकंडों में एनिमेशन क्लिप वाला रिग पाएँ और उसे Unreal Engine में Skeletal Mesh के रूप में इम्पोर्ट करें। T-पोज़ की तैयारी ज़रूरी नहीं।</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <img src="/static/images/icons/tools.svg" alt="इंजन" class="feature-icon" width="96" height="96">
                         <span>Unreal Engine</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
+                        <img src="/static/images/icons/fast.svg" alt="तेज़" class="feature-icon" width="96" height="96">
                         <span>Skeletal Mesh</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
+                        <img src="/static/images/icons/animations.svg" alt="एनिमेशन" class="feature-icon" width="96" height="96">
                         <span>Animation Blueprint</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">FBX rigging शुरू करें</a>
+                <a href="/" class="cta-button">FBX Unreal रिगिंग शुरू करें</a>
             </div>
         </div>
     </section>
@@ -102,44 +144,48 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <p>Unreal Engine pipelines often rely on FBX for skeletal meshes and animation imports. If you have a static FBX character (no skeleton), the fastest route is: make sure it's in a correct T-pose, run auto-rigging, then import the resulting skeletal FBX into Unreal as a Skeletal Mesh.</p>
+                <p>Unreal Engine पाइपलाइन अक्सर स्केलेटल मेश और एनिमेशन इम्पोर्ट के लिए FBX पर निर्भर करती हैं। अगर आपके पास स्थिर FBX कैरेक्टर (बिना स्केलेटन) है, तो सबसे तेज़ रास्ता यह है: ऑटो-रिगिंग चलाएँ, फिर मिले हुए स्केलेटन वाले FBX को Unreal में Skeletal Mesh के रूप में इम्पोर्ट करें। AutoRig रिग को मॉडल की अपनी ज्यामिति से बनाता है, इसलिए कैरेक्टर का T-पोज़ में खड़ा होना ज़रूरी नहीं।</p>
 
-                <h2>Step 1: Make sure your FBX is in a clean T-pose</h2>
+                <h2>चरण 1: अपना FBX तैयार करें (T-पोज़ ज़रूरी नहीं)</h2>
+                <p>स्केलेटन किसी भी पोज़ में ज्यामिति पर फ़िट होता है। अगर किसी द्विपाद कैरेक्टर के पैर अलग-अलग स्थिति में हैं, तो ज़मीन पर टिका पैर हड्डियों की लंबाई तय करता है, और अगर FBX में पहले से स्केलेटन या एनिमेशन है, तो उसी का रेस्ट पोज़ इस्तेमाल होता है। फिर भी ये बातें मदद करती हैं:</p>
                 <ul>
-                    <li>arms straight out horizontally (not "almost T")</li>
-                    <li>legs straight, feet flat</li>
-                    <li>no extreme twists in shoulders/wrists</li>
-                    <li>apply transforms in your DCC if possible</li>
+                    <li>हो सके तो अपने DCC में ट्रांसफ़ॉर्म अप्लाई करें</li>
+                    <li>रिगिंग से पहले स्केल और यूनिट सामान्य करें</li>
+                    <li>उलटे नॉर्मल या non-manifold ज्यामिति न हो</li>
+                    <li>टेक्सचर मॉडल के साथ रखें: मॉडल के अपने टेक्सचर कभी नहीं खोते, और बिना टेक्सचर वाले मॉडल को अपने-आप PBR टेक्सचर मिलते हैं</li>
                 </ul>
 
-                <h2>Step 2: Auto-rig the FBX online</h2>
-                <p>Upload your FBX (or provide a direct link) on <strong>autorig.online</strong> and run the rig. After the task completes, download the Unreal-friendly FBX export.</p>
+                <h2>चरण 2: FBX को ऑनलाइन ऑटो-रिग करें</h2>
+                <p><strong>autorig.online</strong> पर अपना FBX अपलोड ज़ोन में डालें। टास्क तुरंत 3D व्यूअर में खुलता है। तेज़ रिग सेकंडों में स्केलेटन और स्किन बनाता है, मॉडल की श्रेणी की लाइब्रेरी की एनिमेशन क्लिप उस पर लागू होती हैं, और गुणवत्ता जाँच (जोड़ों की जगह, स्किन फटना, अंगों की टकराहट) बैकग्राउंड में चलती रहती है। टास्क पूरा होने पर Unreal-फ्रेंडली FBX एक्सपोर्ट डाउनलोड करें; GLB, USDZ, ZIP और Unity पैकेज भी उपलब्ध हैं।</p>
+                <figure class="article-figure">
+                    <img src="/static/images/articles/rig-fbx-unreal-gallop.jpg" alt="AutoRig से रिग किए गए घोड़े पर गैलप क्लिप के फ़्रेम: सामने, बगल और ऊपर से" width="768" height="572" loading="lazy" decoding="async">
+                    <figcaption>V3 रन के रिग पर एक क्लिप: रिग्ड घोड़े के गैलप फ़्रेम, सामने, बगल और ऊपर से।</figcaption>
+                </figure>
+                <p><a href="/"><strong>Unreal के लिए FBX रिग करें</strong></a></p>
 
-                <p><a href="/"><strong>Rig an FBX for Unreal</strong></a></p>
-
-                <h2>Step 3: Import into Unreal</h2>
+                <h2>चरण 3: Unreal में इम्पोर्ट करें</h2>
                 <ol>
-                    <li>In Unreal, go to Content Browser → Import.</li>
-                    <li>Select the rigged FBX export.</li>
-                    <li>Choose <strong>Skeletal Mesh</strong> (not Static Mesh).</li>
-                    <li>If there are animations included, enable <strong>Import Animations</strong>.</li>
-                    <li>Import and open the Skeletal Mesh asset to preview.</li>
+                    <li>Unreal में Content Browser → Import पर जाएँ।</li>
+                    <li>रिग्ड FBX एक्सपोर्ट चुनें।</li>
+                    <li><strong>Skeletal Mesh</strong> चुनें (Static Mesh नहीं)।</li>
+                    <li>अगर एनिमेशन शामिल हैं, तो <strong>Import Animations</strong> चालू करें।</li>
+                    <li>इम्पोर्ट करें और प्रीव्यू के लिए Skeletal Mesh ऐसेट खोलें।</li>
                 </ol>
 
-                <h2>Step 4: Retargeting (optional)</h2>
-                <p>If you want to reuse animations from another character, Unreal's retargeting tools can map animations between skeletons. The better your base pose and proportions, the smoother retargeting will be.</p>
+                <h2>चरण 4: रीटारगेटिंग (वैकल्पिक)</h2>
+                <p>अगर आप किसी दूसरे कैरेक्टर के एनिमेशन दोबारा इस्तेमाल करना चाहते हैं, तो Unreal के रीटारगेटिंग टूल एनिमेशन को स्केलेटनों के बीच मैप कर सकते हैं। आपका रिग और अनुपात जितने साफ़ होंगे, रीटारगेटिंग उतनी ही सहज होगी।</p>
 
-                <h2>Common Unreal issues</h2>
-                <h3>Mesh is scaled wrong</h3>
-                <p>Scale mismatches come from inconsistent units. If you can, normalize the scale in your DCC before rigging.</p>
+                <h2>Unreal की आम समस्याएँ</h2>
 
-                <h3>Skinning artifacts</h3>
-                <p>Auto skinning is a best-effort process. Heavy clothing, armor, or unusual topology can create deformations. For hero characters, use the auto-rig as a baseline and polish weights manually.</p>
+                <h3>मेश का स्केल ग़लत है</h3>
+                <p>स्केल का बेमेल होना असंगत यूनिट से आता है। हो सके तो रिगिंग से पहले अपने DCC में स्केल सामान्य करें।</p>
 
-                <h3>Bone orientation warnings</h3>
-                <p>Unreal is picky about skeleton consistency. Use one consistent export path (same tool) for all your characters to avoid unexpected bone axis behavior.</p>
+                <h3>स्किनिंग आर्टिफ़ैक्ट</h3>
+                <p>ऑटो स्किनिंग अपनी पूरी कोशिश वाली प्रक्रिया है, और हर रिग पर बैकग्राउंड में संख्यात्मक डिफ़ॉर्मेशन जाँच चलती है। भारी कपड़े, कवच या असामान्य टोपोलॉजी फिर भी विकृतियाँ पैदा कर सकते हैं। मुख्य किरदारों के लिए ऑटो-रिग को आधार मानें और वेट हाथ से सुधारें।</p>
 
-                <p><strong>Tip:</strong> If you're seeing consistent issues, try improving the starting pose first. Pose quality matters more than people expect.</p>
+                <h3>बोन ओरिएंटेशन की चेतावनियाँ</h3>
+                <p>Unreal स्केलेटन की एकरूपता को लेकर सख़्त है। अनपेक्षित बोन एक्सिस व्यवहार से बचने के लिए अपने सभी कैरेक्टरों के लिए एक ही एक्सपोर्ट रास्ता (एक ही टूल) इस्तेमाल करें।</p>
+                <p><strong>सुझाव:</strong> अगर वही समस्या बार-बार दिखे, तो टास्क को व्यूअर में खोलें, स्केलेटन जाँचें (Blueprint मोड, कुंजी B), हड्डियाँ ठीक करें और दोबारा रिग करें। और जानने के लिए <a href="/t-pose-rig">पोज़ गाइड</a>, <a href="/glb-vs-fbx-hi">GLB और FBX</a> और <a href="/animation-retargeting-hi">एनिमेशन रीटारगेटिंग</a> देखें।</p>
             </article>
         </div>
     </section>
@@ -148,12 +194,14 @@
     <section class="related-section">
         <div class="container">
             <h2>संबंधित गाइड</h2>
-            <p>Learn more about Unreal rigging and workflows:</p>
+            <p>Unreal रिगिंग और वर्कफ़्लो के बारे में और जानें:</p>
             <div class="related-links">
-                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
-                <a href="/rig-glb-unity-hi" class="related-link">GLB Unity Guide</a>
-                <a href="/t-pose-rig" class="related-link">T-Pose Guide</a>
-                <a href="/how-it-works" class="related-link">कैसे काम करता है</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX ऑटो रिग</a>
+                <a href="/rig-glb-unity-hi" class="related-link">GLB से Unity गाइड</a>
+                <a href="/t-pose-rig" class="related-link">पोज़ गाइड</a>
+                <a href="/animation-retargeting-hi" class="related-link">एनिमेशन रीटारगेटिंग</a>
+                <a href="/animal-rig" class="related-link">जानवरों की रिगिंग</a>
+                <a href="/how-it-works" class="related-link">यह कैसे काम करता है</a>
                 <a href="/faq" class="related-link">FAQ</a>
             </div>
         </div>
@@ -162,17 +210,17 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Rig FBX for Unreal?</h2>
-            <p>Get your FBX character rigged and ready for Unreal Engine. Professional Skeletal Mesh setup.</p>
-            <a href="/" class="cta-button">Start Unreal FBX Rigging</a>
+            <h2>Unreal के लिए FBX रिग करने को तैयार हैं?</h2>
+            <p>अपना FBX कैरेक्टर रिग और एनिमेट कराएँ, Unreal Engine में Skeletal Mesh के रूप में इस्तेमाल के लिए तैयार।</p>
+            <a href="/" class="cta-button">Unreal FBX रिगिंग शुरू करें</a>
         </div>
     </section>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <div id="site-footer"></div>
 </body>

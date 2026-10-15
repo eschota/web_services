@@ -3,61 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ऑटो रिगिंग OBJ Characters: What Works (and What Breaks)</title>
-    <meta name="description" content="Complete guide to auto rigging OBJ characters. Learn what works, what breaks, and how to prepare OBJ models for successful rigging results.">
-    <meta name="keywords" content="auto rig obj, obj character rigging, obj rigging guide, obj to rigged model, obj rigging problems, obj rigging workflow">
+    <title>OBJ ऑटो रिगिंग गाइड: क्या चलता है, क्या टूटता है | AutoRig</title>
+    <meta name="description" content="V3 में OBJ मॉडल कैसे ऑटो-रिग होते हैं: OBJ को MTL और टेक्सचर के साथ ZIP में अपलोड करें, कोई भी पोज़ चलता है, छूटी फ़ाइलें इनटेक पर माँगी जाती हैं।">
+    <meta name="keywords" content="obj ऑटो रिग, obj किरदार रिगिंग, obj रिगिंग गाइड, obj से रिग्ड मॉडल, obj रिगिंग समस्याएँ, obj glb fbx">
+    <link rel="canonical" href="https://autorig.online/auto-rig-obj-hi">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/auto-rig-obj">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/auto-rig-obj-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/auto-rig-obj-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/auto-rig-obj-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/auto-rig-obj">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="ऑटो रिगिंग OBJ Characters: What Works (and What Breaks)">
-    <meta property="og:description" content="Complete guide to auto rigging OBJ characters. Learn preparation tips, common problems, and successful workflows for OBJ rigging.">
+    <meta property="og:title" content="OBJ ऑटो रिगिंग गाइड: क्या चलता है, क्या टूटता है | AutoRig">
+    <meta property="og:description" content="V3 में OBJ मॉडल कैसे ऑटो-रिग होते हैं: OBJ को MTL और टेक्सचर के साथ ZIP में अपलोड करें, कोई भी पोज़ चलता है, छूटी फ़ाइलें इनटेक पर माँगी जाती हैं।">
     <meta property="og:type" content="article">
-    <meta property="og:url" content="https://autorig.online/auto-rig-obj">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:url" content="https://autorig.online/auto-rig-obj-hi">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:image" content="https://autorig.online/static/images/og/format-obj.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="OBJ किरदारों की ऑटो रिगिंग: AutoRig व्यूअर में रिग किए किरदार, जानवर और कारें">
+    <meta property="og:locale" content="hi_IN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="OBJ ऑटो रिगिंग गाइड: क्या चलता है, क्या टूटता है | AutoRig">
+    <meta name="twitter:description" content="V3 में OBJ मॉडल कैसे ऑटो-रिग होते हैं: OBJ को MTL और टेक्सचर के साथ ZIP में अपलोड करें, कोई भी पोज़ चलता है, छूटी फ़ाइलें इनटेक पर माँगी जाती हैं।">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/format-obj.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
     {
-        "@context": "https://schema.org",
-        "@type": "Article",
-        "headline": "ऑटो रिगिंग OBJ Characters: What Works (and What Breaks)",
-        "description": "Complete guide to auto rigging OBJ characters including preparation tips, common problems, and successful workflows",
-        "author": {
-            "@type": "Organization",
-            "name": "AutoRig Online"
-        },
-        "publisher": {
-            "@type": "Organization",
-            "name": "AutoRig Online"
-        },
-        "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://autorig.online/auto-rig-obj"
-        },
-        "articleSection": "गाइड",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "होम",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "OBJ Auto Rig Guide",
-                    "item": "https://autorig.online/auto-rig-obj"
-                }
-            ]
+      "@type": "Article",
+      "@id": "https://autorig.online/auto-rig-obj-hi#article",
+      "headline": "OBJ किरदारों की ऑटो रिगिंग: क्या चलता है (और क्या टूटता है)",
+      "description": "V3 में OBJ मॉडल कैसे ऑटो-रिग होते हैं: OBJ को MTL और टेक्सचर के साथ ZIP में अपलोड करें, कोई भी पोज़ चलता है, छूटी फ़ाइलें इनटेक पर माँगी जाती हैं।",
+      "inLanguage": "hi",
+      "image": "https://autorig.online/static/images/og/format-obj.jpg",
+      "url": "https://autorig.online/auto-rig-obj-hi",
+      "author": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online/",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://autorig.online/static/images/logo/autorig-logo.png"
         }
+      },
+      "datePublished": "2024-12-20",
+      "dateModified": "2026-10-16",
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://autorig.online/auto-rig-obj-hi"
+      },
+      "articleSection": "Guides",
+      "breadcrumb": {
+        "@id": "https://autorig.online/auto-rig-obj-hi#breadcrumb"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://autorig.online/auto-rig-obj-hi#breadcrumb",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "होम",
+          "item": "https://autorig.online/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "OBJ ऑटो रिग गाइड",
+          "item": "https://autorig.online/auto-rig-obj-hi"
+        }
+      ]
     }
+  ]
+}
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        /* format articles (V3 refresh, 2026-10-16): page-local blocks */
+        .fmt-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1rem;margin-top:1rem}
+        .fmt-step{border:1px solid var(--border);border-radius:14px;padding:1rem;background:var(--bg-card)}
+        .fmt-step .n{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;margin-bottom:.4rem}
+        .fmt-step h4{margin:.2rem 0 .3rem}
+        .fmt-step p{margin:0;color:var(--text-secondary);line-height:1.5}
+        .fmt-cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;margin-top:1rem}
+        .fmt-cmp>div{border:1px solid var(--border);border-radius:14px;padding:1rem 1.2rem;background:var(--bg-card)}
+        .content-section article{max-width:820px;margin:0 auto}
+        .content-section article h2{margin:2.2rem 0 .6rem}
+        .content-section article h3{margin:1.5rem 0 .4rem}
+        .content-section article p,.content-section article li{line-height:1.65}
+        .content-section article ul,.content-section article ol{padding-left:1.4rem;margin:.5rem 0}
+        .content-section article .fmt-cmp{margin:1.5rem 0}
+        .content-section article .fmt-cmp h3{margin-top:0}
+        .fmt-block{margin-top:2.5rem}
+        .fmt-block>h2{margin-top:0}
+        .fmt-fig{margin:2rem auto 0;max-width:760px}
+        .fmt-fig img{display:block;width:100%;height:auto;border-radius:14px;border:1px solid var(--border)}
+        .fmt-fig figcaption{margin-top:.5rem;font-size:.9rem;color:var(--text-secondary);text-align:center}
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,69 +130,74 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>ऑटो रिगिंग OBJ Characters: What Works (and What Breaks)</h1>
-                <p class="hero-subtitle">Complete guide to auto rigging OBJ characters. Learn what works, what breaks, and how to prepare OBJ models for successful rigging results.</p>
+                <h1>OBJ किरदारों की ऑटो रिगिंग: क्या चलता है (और क्या टूटता है)</h1>
+                <p class="hero-subtitle">OBJ मॉडल की ऑटो रिगिंग की व्यावहारिक गाइड: क्या अपलोड करें, AutoRig उसके साथ क्या करता है और किन समस्याओं से बचें।</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <div class="feature-icon">📋</div>
-                        <span>Preparation tips</span>
+                        📋
+                        <span>तैयारी के सुझाव</span>
                     </div>
                     <div class="feature">
-                        <div class="feature-icon">⚠️</div>
-                        <span>Common problems</span>
+                        ⚠️
+                        <span>आम समस्याएँ</span>
                     </div>
                     <div class="feature">
-                        <div class="feature-icon">✅</div>
-                        <span>Success strategies</span>
+                        ✅
+                        <span>AutoRig क्या करता है</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">Start OBJ ऑटो रिगिंग</a>
+                <a href="/" class="cta-button">OBJ ऑटो रिगिंग शुरू करें</a>
             </div>
         </div>
     </section>
 
-    <!-- Article Content -->
+    <!-- Content Section -->
     <section class="content-section">
         <div class="container">
             <article>
-                <p>OBJ is a simple geometry format. It's common in asset libraries, but it often arrives without a skeleton, without animation, and sometimes without clean material setup. The good news: if the mesh represents a humanoid character in a clean T-pose, auto-rigging can work very well.</p>
-
-                <h2>What an OBJ usually lacks</h2>
-                <ul>
-                    <li>No skeleton</li>
-                    <li>No skin weights</li>
-                    <li>No animations</li>
-                    <li>Materials may be incomplete (depends on MTL and texture paths)</li>
-                </ul>
-
-                <h2>Best practices before auto-rigging</h2>
-                <ul>
-                    <li>Ensure a real <strong>T-pose</strong></li>
-                    <li>Fix obvious topology issues (non-manifold, flipped normals)</li>
-                    <li>Remove extra scene objects if possible</li>
-                    <li>Keep a reasonable scale (human-sized)</li>
-                </ul>
-
-                <h2>Auto-rig workflow</h2>
-                <ol>
-                    <li>Upload OBJ or paste a direct download link</li>
-                    <li>Run the rigging task</li>
-                    <li>Download the rigged exports (GLB/FBX depending on pipeline)</li>
-                </ol>
-
-                <p><a href="/"><strong>Auto-rig an OBJ character</strong></a></p>
-
-                <h2>Common OBJ problems</h2>
-                <h3>Separate parts / multiple meshes</h3>
-                <p>Some OBJs are made of many pieces. Auto-rigging can still work, but if parts are floating or not aligned, results may degrade. If you can merge meshes in a DCC tool, it often helps.</p>
-
-                <h3>Bad symmetry</h3>
-                <p>If left/right arms are positioned differently, the fitter may mis-detect joints. Make the pose symmetrical if possible.</p>
-
-                <h3>No textures</h3>
-                <p>That's normal for OBJ in many cases. Rigging focuses on skeleton and weights; texture setup may come later in your engine.</p>
+                <p>OBJ एक सरल ज्यामिति फ़ॉर्मैट है। यह एसेट लाइब्रेरी में आम है, पर आमतौर पर बिना skeleton, बिना एनिमेशन और अलग .mtl फ़ाइल व इमेज फ़ाइलों में बँटे मटेरियल के साथ आता है। AutoRig इसे GLB और FBX वाले ही V3 कन्वेयर में लेता है: skeleton और skin कुछ सेकंड में बनते हैं, एनिमेशन क्लिप तुरंत रिटारगेट होते हैं और नतीजा व्यूअर में खुलता है।</p>
+                <h2>OBJ में आमतौर पर क्या नहीं होता</h2>
+<ul>
+    <li>कोई skeleton नहीं</li>
+    <li>कोई स्किन वेट्स नहीं</li>
+    <li>कोई एनिमेशन नहीं</li>
+    <li>मटेरियल अलग .mtl फ़ाइल और इमेज फ़ाइलों में रहते हैं, जिन्हें OBJ के साथ आना चाहिए</li>
+</ul>
+                <h2>AutoRig OBJ के साथ क्या करता है</h2>
+<ul>
+    <li>आकार से रिग की श्रेणी चुनता है: द्विपाद, चौपाया, अश्व-वर्ग, पक्षी, सर्प, मॉन्स्टर, बहु-अंग, हाथ, प्राइमेट या वाहन</li>
+    <li>उस श्रेणी के लिए skeleton और skin बनाता है और उसके एनिमेशन क्लिप रिटारगेट करता है</li>
+    <li>आपके टेक्सचर बनाए रखता है; बिना टेक्सचर वाले मॉडल को PBR टेक्सचर अपने-आप मिलते हैं</li>
+    <li>क्वालिटी जाँचें व्यूअर के बैकग्राउंड में चलाता है</li>
+    <li>व्यूअर में skeleton की पुष्टि का सुझाव देता है; एनिमेशन उसका इंतज़ार किए बिना बन जाता है</li>
+</ul>
+                <h2>ऑटो रिगिंग से पहले की सर्वोत्तम प्रथाएँ</h2>
+<ul>
+    <li>OBJ, .mtl और इमेज का ZIP अपलोड करें, ताकि टेक्सचर मॉडल के साथ रहें</li>
+    <li>कोई भी पोज़ चलता है: T-पोज़ ज़रूरी नहीं</li>
+    <li>साफ़ दिखने वाली टोपोलॉजी की समस्याएँ ठीक करें (non-manifold edges, उलटे normals)</li>
+    <li>हो सके तो सीन के अतिरिक्त ऑब्जेक्ट हटाएँ</li>
+    <li>उचित स्केल रखें (किरदार के लिए इंसान के आकार का)</li>
+</ul>
+                <h2>ऑटो रिग का क्रम</h2>
+<ol>
+    <li>OBJ (या MTL और टेक्सचर वाला ZIP) अपलोड करें, या सीधा डाउनलोड लिंक चिपकाएँ</li>
+    <li>टास्क व्यूअर में खुलता है, और रिग व क्लिप लगभग एक मिनट में दिख जाते हैं</li>
+    <li>चाहें तो Blueprint मोड में हड्डियाँ एडिट करें, फिर GLB, FBX, USDZ, ZIP, Unity पैकेज या Blender फ़ाइल डाउनलोड करें</li>
+</ol>
+                <p><a href="/"><strong>OBJ किरदार को ऑटो रिग करें</strong></a></p>
+                <h2>OBJ की आम समस्याएँ</h2>
+                <h3>.mtl या इमेज का न होना</h3>
+                <p>अगर OBJ बिना .mtl या बिना इमेज के आए, तो AutoRig इनटेक पर यह पकड़ लेता है और आपसे फ़ाइलें (या ZIP) माँगता है। इनके बिना मॉडल अपना रूप खो देगा।</p>
+                <h3>अलग हिस्से / कई मेश</h3>
+                <p>कुछ OBJ कई टुकड़ों से बने होते हैं। ऑटो रिगिंग फिर भी काम कर सकती है, पर अगर हिस्से हवा में तैरते हों या ठीक से जुड़े न हों तो नतीजा बिगड़ सकता है। DCC टूल में मेश मर्ज करना अक्सर मदद करता है।</p>
+                <h3>असममित मॉडल और पोज़</h3>
+                <p>बाएँ और दाएँ का एक जैसा होना ज़रूरी नहीं। अगर मॉडल सममित नहीं है, तो रिग दोनों तरफ़ अपनी-अपनी हड्डियाँ रखता है। जब द्विपाद का एक पैर ज़मीन पर टिका हो, तो वह दूसरे पैर की हड्डियों की संदर्भ लंबाई तय करता है।</p>
+                <h3>टेक्सचर का न होना</h3>
+                <p>OBJ के लिए यह सामान्य है। बिना टेक्सचर वाले, या केवल सपाट डिफ़ॉल्ट मटेरियल वाले मॉडल को PBR टेक्सचर (albedo, roughness, metallic, normal और emissive) अपने-आप मिलते हैं। मूल मॉडल बना रहता है।</p>
+                <figure class="fmt-fig"><img src="/static/images/articles/format-obj-rider-weights.webp" alt="रिग किए द्विपाद किरदार के स्किन वेट्स और skeleton, सामने और बगल का दृश्य" width="800" height="400" loading="lazy" decoding="async"><figcaption>रिग किए द्विपाद किरदार का skeleton और स्किन वेट्स, व्यूअर में जाँचे हुए।</figcaption></figure>
             </article>
         </div>
     </section>
@@ -146,12 +206,13 @@
     <section class="related-section">
         <div class="container">
             <h2>संबंधित गाइड</h2>
-            <p>Learn more about OBJ rigging and formats:</p>
+            <p>OBJ रिगिंग और फ़ॉर्मैट के बारे में और जानें:</p>
             <div class="related-links">
-                <a href="/obj-auto-rig" class="related-link">OBJ Auto Rig</a>
-                <a href="/glb-vs-fbx-hi" class="related-link">GLB vs FBX</a>
-                <a href="/t-pose-rig" class="related-link">T-Pose Guide</a>
-                <a href="/how-it-works" class="related-link">कैसे काम करता है</a>
+                <a href="/obj-auto-rig" class="related-link">OBJ ऑटो रिग</a>
+                <a href="/glb-vs-fbx-hi" class="related-link">GLB बनाम FBX</a>
+                <a href="/t-pose-rig" class="related-link">कोई भी पोज़, सिर्फ़ T-पोज़ नहीं</a>
+                <a href="/image-to-rigged-3d-character-hi" class="related-link">तस्वीर से रिग्ड किरदार</a>
+                <a href="/how-it-works" class="related-link">यह कैसे काम करता है</a>
                 <a href="/faq" class="related-link">FAQ</a>
             </div>
         </div>
@@ -160,17 +221,17 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Auto Rig Your OBJ Character?</h2>
-            <p>Get professional rigging results for OBJ models. Free to try!</p>
-            <a href="/" class="cta-button">Start OBJ ऑटो रिगिंग</a>
+            <h2>क्या आप अपने OBJ किरदार को ऑटो रिग करने के लिए तैयार हैं?</h2>
+            <p>OBJ अपलोड करें और रिग किया हुआ एनिमेटेड मॉडल पाएँ। मुफ़्त में आज़माएँ!</p>
+            <a href="/" class="cta-button">OBJ ऑटो रिगिंग शुरू करें</a>
         </div>
     </section>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <div id="site-footer"></div>
 </body>

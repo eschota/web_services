@@ -3,61 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自动绑定角色的动画重定向指南</title>
-    <meta name="description" content="将 AutoRig 动画重定向到 Unity 和 Unreal Engine。了解适用于自动绑定角色、预览和生产导出的简洁流程。">
-    <meta name="keywords" content="animation retargeting unity unreal, unity mecaim retargeting, unreal animation retargeting, character animation transfer, rig retargeting guide">
+    <title>自动绑定模型的动画重定向指南 | AutoRig</title>
+    <meta name="description" content="AutoRig 会把动画片段立即重定向到每个新绑定上：按类别提供动画库，每个片段都有数值质检，查看器支持自定义片段，并可导出 GLB 和 FBX。">
+    <meta name="keywords" content="动画重定向, 自动重定向动画, 动画片段库, 动物动画重定向, 马飞奔动画, unity humanoid 重定向, unreal ik retargeter, 绑定动画导出">
+    <link rel="canonical" href="https://autorig.online/animation-retargeting-zh">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/animation-retargeting">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/animation-retargeting-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/animation-retargeting-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/animation-retargeting-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/animation-retargeting">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="自动绑定角色的动画重定向指南">
-    <meta property="og:description" content="AutoRig 动画在 Unity 和 Unreal Engine 中的重定向流程。">
+    <meta property="og:title" content="自动绑定模型的动画重定向指南 | AutoRig">
+    <meta property="og:description" content="AutoRig 会把动画片段立即重定向到每个新绑定上：按类别提供动画库，每个片段都有数值质检，查看器支持自定义片段，并可导出 GLB 和 FBX。">
     <meta property="og:type" content="article">
+    <meta property="og:site_name" content="AutoRig.online">
     <meta property="og:url" content="https://autorig.online/animation-retargeting-zh">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/animation-retargeting-zh.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="动画重定向：在 AutoRig.online 上完成绑定的斑马、狼、怪物、手部和房车">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="自动绑定模型的动画重定向指南 | AutoRig">
+    <meta name="twitter:description" content="AutoRig 会把动画片段立即重定向到每个新绑定上：按类别提供动画库，每个片段都有数值质检，查看器支持自定义片段，并可导出 GLB 和 FBX。">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/animation-retargeting-zh.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "Article",
-        "headline": "自动绑定角色的动画重定向指南",
-        "description": "AutoRig 动画在 Unity 和 Unreal Engine 中的重定向流程",
+        "headline": "自动绑定模型的动画重定向",
+        "description": "AutoRig 如何自动重定向动画片段：每个绑定类别都有由生成的参考视频制作的动画库，每个片段都有数值质检，查看器支持自定义片段，并可导出到 Unity、Unreal 和 Blender。",
+        "inLanguage": "zh",
+        "image": "https://autorig.online/static/images/og/animation-retargeting-zh.jpg",
         "author": {
             "@type": "Organization",
             "name": "AutoRig Online"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         },
         "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
+        "dateModified": "2026-10-16",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://autorig.online/animation-retargeting-zh"
-        },
-        "articleSection": "指南",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "首页",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "Animation Retargeting",
-                    "item": "https://autorig.online/animation-retargeting-zh"
-                }
-            ]
         }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "首页",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "指南",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "动画重定向",
+                "item": "https://autorig.online/animation-retargeting-zh"
+            }
+        ]
     }
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .art-lead { font-size: 1.1rem; line-height: 1.75; }
+        .art-figs { display: grid; gap: 1rem; margin: 1.5rem 0; }
+        .art-figs-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .art-figs-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .art-fig { margin: 1.5rem 0; background: var(--bg-card); border: 1px solid var(--glass-border); border-radius: 14px; overflow: hidden; }
+        .art-figs .art-fig { margin: 0; }
+        .art-fig img { display: block; width: 100%; height: auto; }
+        .art-fig figcaption { padding: 0.7rem 0.95rem 0.85rem; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary); }
+        .art-fig-small { max-width: 420px; }
+        .art-callout { margin: 1.5rem 0; padding: 1rem 1.25rem; border-inline-start: 4px solid var(--accent); border-radius: 10px; background: rgba(99, 102, 241, 0.08); }
+        .art-callout p { margin: 0; }
+        .art-cats { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem 1.25rem; }
+        .art-cats li { padding: 0.5rem 0.9rem; border: 1px solid var(--glass-border); border-radius: 10px; background: var(--bg-card); }
+        @media (max-width: 768px) { .art-figs-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .art-cats { grid-template-columns: 1fr; } }
+        @media (max-width: 480px) { .art-figs-2 { grid-template-columns: 1fr; } }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,25 +117,25 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>自动绑定角色的动画重定向</h1>
-                <p class="hero-subtitle">了解 AutoRig 动画在 Unity Mecanim 和 Unreal Engine 中的重定向流程。</p>
+                <h1>自动绑定模型的动画重定向</h1>
+                <p class="hero-subtitle">每个绑定类别一套动画库，立即重定向到每个新绑定上，每个片段都经过数值检查。包含自定义片段和导出。</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
-                        <span>Unity & Unreal</span>
+                        <img src="/static/images/icons/animations.svg" alt="动画" class="feature-icon" width="96" height="96">
+                        <span>按类别的动画库</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
-                        <span>Animation transfer</span>
+                        <img src="/static/images/icons/target.svg" alt="质量" class="feature-icon" width="96" height="96">
+                        <span>每个片段的数值质检</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Settings" class="feature-icon" width="96" height="96">
-                        <span>Pipeline guide</span>
+                        <img src="/static/images/icons/tools.svg" alt="引擎" class="feature-icon" width="96" height="96">
+                        <span>Unity、Unreal、Blender</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">Start 自动绑定</a>
+                <a href="/" class="cta-button">开始自动绑定</a>
             </div>
         </div>
     </section>
@@ -102,41 +144,90 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <p>Retargeting is the process of applying an animation from one character to another. If your character is auto-rigged, you usually want to reuse existing animation packs (walk/run/idle/combat) without reanimating everything from scratch.</p>
+                <p class="art-lead">重定向就是把为一套骨架制作的动画应用到另一套骨架上。通常这意味着购买动画包、调整比例，并在引擎里重新检查每个片段。AutoRig 替你完成这些：片段会立即重定向到每个新绑定上，并且每个片段都用数值检查。</p>
 
-                <h2>Why retargeting sometimes looks bad</h2>
-                <p>Most retargeting problems come from:</p>
-                <ul>
-                    <li>different base poses (T-pose vs A-pose)</li>
-                    <li>different proportions (very long arms/short legs)</li>
-                    <li>twisted joint orientations</li>
-                    <li>bad skin weights around shoulders/hips</li>
-                </ul>
+                <h2>每个类别一套动画库</h2>
 
-                <h2>Unity retargeting (Humanoid)</h2>
-                <p>Unity's Humanoid system can retarget animations between characters if the avatar mapping is correct.</p>
+                <p>每个绑定类别都有自己的动画片段库。以动物为例，包括行走、小跑、慢跑、飞奔、待机、直立、环顾和攻击等。某个类别的参考视频只需生成并做一次质量检查，动作也只需从中提取一次。之后这些片段就可以重复使用：该类别的每个新模型都通过自动重定向把它们应用到自己的骨架上。没有人需要为某一个模型手工制作动画。</p>
+
+                <div class="art-callout"><p>程序化片段只是兜底方案，仅在动画库中没有该类别的片段时使用。</p></div>
+
+                <p>马科模型（马、鹿、斑马）使用蹄子踩稳地面的步态：行走、小跑和飞奔时蹄子始终不离地。鸟类有翅膀片段，手部有带每根手指关节的手部片段。</p>
+
+                <h2>带数值质检的自动重定向</h2>
+
                 <ol>
-                    <li>Import your rigged character FBX.</li>
-                    <li>Set Rig → Animation Type → <strong>Humanoid</strong>.</li>
-                    <li>Configure avatar mapping and fix missing bones if needed.</li>
-                    <li>Import animation clips and set them to Humanoid.</li>
-                    <li>Apply clips to your character Animator Controller.</li>
+                    <li><strong>拟合。</strong>首先让绑定贴合你的模型：使用它自己的比例和关节位置。</li>
+                    <li><strong>重定向。</strong>把动画库片段的动作转移到这套骨架上。</li>
+                    <li><strong>检查。</strong>每个片段都要通过数值形变检查。关节位置、蒙皮撕裂和肢体碰撞会在查看器后台测量。</li>
+                    <li><strong>展示。</strong>绑定完成后片段立即在查看器中播放，目标是在开始处理后一分钟内得到已绑定并带动画的模型。</li>
                 </ol>
 
-                <h2>Unreal retargeting</h2>
-                <p>In Unreal, retargeting uses skeleton/IK rigs depending on engine version and workflow. The core idea is similar: define a mapping and reuse animations across compatible rigs.</p>
+                <h2>重定向为什么常常效果不好，AutoRig 怎么处理</h2>
 
-                <h2>Best practice for predictable retargeting</h2>
                 <ul>
-                    <li>Use a consistent T-pose for all characters</li>
-                    <li>Keep scale and proportions within reasonable bounds</li>
-                    <li>Avoid extreme shoulder/hip offsets in the base mesh</li>
-                    <li>If needed, polish weights on shoulders and hips</li>
+                    <li><strong>比例不同。</strong>在应用任何片段之前，绑定会先贴合你的模型，所以手臂很长或腿很短的模型都有自己的骨骼长度。</li>
+                    <li><strong>基础姿势不同。</strong>你不需要 T 姿势，绑定会按模型当前的样子生成。当双腿没有并排站立时，支撑腿是两条腿共同的参照。</li>
+                    <li><strong>关节扭曲和权重不佳。</strong>肩部和髋部附近的关节位置与蒙皮撕裂是测量出来的，而不是凭肉眼判断。</li>
+                    <li><strong>脚底打滑。</strong>马科的步态让蹄子始终踩稳地面。</li>
                 </ul>
 
-                <p>If you're building a character pipeline, the fastest path is: auto-rig in T-pose, export engine-friendly FBX, then retarget animations inside the engine.</p>
+                <div class="art-figs art-figs-2">
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-horse-clip.gif" width="300" height="307" loading="lazy" alt="马的绑定在 AutoRig 测试台上播放动画片段">
+                        <figcaption>马的绑定正在播放一个片段。</figcaption>
+                    </figure>
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-horse-gait.jpg" width="768" height="572" loading="lazy" alt="马的绑定上飞奔片段的帧，正面、侧面和俯视视角">
+                        <figcaption>飞奔片段的帧，正面、侧面和俯视视角。</figcaption>
+                    </figure>
+                </div>
 
-                <p><a href="/"><strong>Auto-rig your character and start retargeting</strong></a></p>
+                <div class="art-figs art-figs-2">
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-hand-clips.jpg" width="768" height="572" loading="lazy" alt="带每根手指关节的手部绑定上的手部片段帧">
+                        <figcaption>带每根手指关节的手部片段。</figcaption>
+                    </figure>
+                    <figure class="art-fig">
+                        <img src="/static/images/articles/retarget-bird-clips.jpg" width="768" height="572" loading="lazy" alt="已绑定鸟类上翅膀片段的帧，正面、侧面和俯视视角">
+                        <figcaption>鸟类：翅膀按翅膀绑定，绝不当作手臂。</figcaption>
+                    </figure>
+                </div>
+
+                <h2>查看器中的自定义片段</h2>
+
+                <p>每个任务在查看器中都有一个片段集。你可以把自己的片段加进去，与动画库片段并列，并在同一套绑定上播放。如果某个关节需要调整，可以在蓝图模式（B）中编辑骨骼：最后一次编辑 15 秒后，查看器会重新绑定，也可以点按钮立即重新绑定。骨架确认只是提供，绝不强制，所以动画不会等待它。</p>
+
+                <h2>导出</h2>
+
+                <p>可以把绑定和动画片段下载为 GLB、FBX、USDZ、ZIP、Unity 包，或用于 Blender 的文件。指南涵盖 <a href="/rig-glb-unity-zh">Unity 中的 GLB</a>、<a href="/rig-fbx-unreal-zh">Unreal 中的 FBX</a> 和 <a href="/glb-vs-fbx-zh">GLB 与 FBX 对比</a>，<a href="/blender-plugin">Blender 插件</a>则把同样的流程带进 Blender。</p>
+
+                <h2>在引擎中使用这些片段和你自己的动画包</h2>
+
+                <p>如果你想在引擎内重定向自己的动画包，导出的绑定可以当作普通骨架使用。</p>
+
+                <ul>
+                    <li><strong>Unity（人形模型）。</strong>导入带绑定的 FBX，把 Rig 的 Animation Type 设为 Humanoid，检查 Avatar 映射，把片段导入为 Humanoid，然后在 Animator Controller 中使用。</li>
+                    <li><strong>Unreal。</strong>重定向会根据引擎版本使用骨架和 IK 绑定。思路相同：先定义一次映射，再在兼容的绑定之间复用动画。</li>
+                </ul>
+
+                <h2>常见问题</h2>
+
+                <h3>需要 T 姿势吗？</h3>
+
+                <p>不需要。绑定会按模型在任意姿势下拟合，片段再重定向到这套绑定上。</p>
+
+                <h3>可以用我已有的动画包吗？</h3>
+
+                <p>可以。导出绑定后在你的引擎中重定向动画包，或在查看器中把它们添加为自定义片段。</p>
+
+                <h3>哪些类别有动画片段？</h3>
+
+                <p>九个类别各有自己的动画库：双足、四足、马科、鸟类、蛇形、怪物、多肢体、手部和车辆。如果某个类别的动画库里暂时没有对应片段，就使用程序化片段兜底。</p>
+
+                <h3>需要多长时间？</h3>
+
+                <p>快速绑定只需几秒，片段会立即重定向。目标是在开始处理后一分钟内得到已绑定并带动画的模型。</p>
             </article>
         </div>
     </section>
@@ -145,13 +236,18 @@
     <section class="related-section">
         <div class="container">
             <h2>相关指南</h2>
-            <p>Learn more about animation and engine workflows:</p>
+            <p>了解更多动画与引擎工作流：</p>
             <div class="related-links">
-                <a href="/rig-glb-unity-zh" class="related-link">Unity GLB Guide</a>
-                <a href="/rig-fbx-unreal-zh" class="related-link">Unreal FBX Guide</a>
-                <a href="/glb-vs-fbx-zh" class="related-link">GLB vs FBX</a>
-                <a href="/how-it-works" class="related-link">如何工作</a>
-                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/how-it-works" class="related-link">工作原理</a>
+                <a href="/mixamo-alternative-zh" class="related-link">Mixamo 替代方案</a>
+                <a href="/animal-rig" class="related-link">动物绑定</a>
+                <a href="/horse-auto-rig" class="related-link">马的自动绑定</a>
+                <a href="/rig-glb-unity-zh" class="related-link">Unity 中的 GLB</a>
+                <a href="/rig-fbx-unreal-zh" class="related-link">Unreal 中的 FBX</a>
+                <a href="/glb-vs-fbx-zh" class="related-link">GLB 与 FBX</a>
+                <a href="/t-pose-rig" class="related-link">姿势指南</a>
+                <a href="/gallery" class="related-link">图库</a>
+                <a href="/faq" class="related-link">常见问题</a>
             </div>
         </div>
     </section>
@@ -159,9 +255,9 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Master Animation Retargeting?</h2>
-            <p>Get auto-rigged characters ready for professional animation retargeting workflows.</p>
-            <a href="/" class="cta-button">Start 自动绑定</a>
+            <h2>准备好轻松完成动画重定向了吗？</h2>
+            <p>放入模型、图片或汽车图片，几秒内获得带动画片段的绑定。</p>
+            <a href="/" class="cta-button">开始自动绑定</a>
         </div>
     </section>
 

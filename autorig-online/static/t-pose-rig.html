@@ -3,67 +3,215 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>T-Pose Rigging Checklist — Prepare Your Character for Auto-Rig</title>
-    <meta name="description" content="Simple checklist to prepare GLB/FBX/OBJ models for auto rigging: pose, scale, mesh issues, textures, and common errors.">
-    <meta name="keywords" content="t pose rig, t-pose rigging, character t-pose, t pose skeleton, animation ready t-pose, professional rigging t-pose">
+    <title>T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed</title>
+    <meta name="description" content="T-pose rig without the T-pose: AutoRig rigs a model in any pose, uses the file&#x27;s bind pose first and offers the skeleton for confirmation in the viewer.">
+    <meta name="keywords" content="T-pose rig, t pose rig, T-pose rigging, rig any pose, auto rig without T-pose, A-pose rig, bind pose rig, asymmetric pose rig, reference leg, blueprint skeleton, AutoRig">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorig.online/t-pose-rig">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="T-Pose Rigging Online - Professional Character Setup">
-    <meta property="og:description" content="Get your 3D characters rigged in perfect T-pose for professional animation. Unity, Unreal, and game engine ready.">
-    <meta property="og:type" content="website">
+    <meta property="og:title" content="T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed">
+    <meta property="og:description" content="T-pose rig without the T-pose: AutoRig rigs a model in any pose, uses the file&#x27;s bind pose first and offers the skeleton for confirmation in the viewer.">
+    <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/t-pose-rig">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/t-pose-rig.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="A biped, a bird and a horse rigged by AutoRig V3, shown with skeletons and skin weights">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed">
+    <meta name="twitter:description" content="T-pose rig without the T-pose: AutoRig rigs a model in any pose, uses the file&#x27;s bind pose first and offers the skeleton for confirmation in the viewer.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/t-pose-rig.jpg">
+    <meta name="twitter:image:alt" content="A biped, a bird and a horse rigged by AutoRig V3, shown with skeletons and skin weights">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
     {
-        "@context": "https://schema.org",
-        "@type": "WebPage",
-        "name": "T-Pose Rigging Online",
-        "description": "Professional T-pose rigging service for 3D characters. Get perfectly posed skeletons ready for animation in Unity, Unreal Engine, and game development.",
-        "url": "https://autorig.online/t-pose-rig",
-        "mainEntity": {
-            "@type": "Service",
-            "name": "T-Pose Character Rigging",
-            "description": "Professional T-pose setup for 3D character animation",
-            "serviceType": "3D Animation Service",
-            "areaServed": "Worldwide",
-            "offers": {
-                "@type": "Offer",
-                "price": "0",
-                "priceCurrency": "USD"
-            },
-            "featureList": [
-                "Professional T-pose setup",
-                "Animation ready skeletons",
-                "Unity Mecanim compatible",
-                "Unreal Engine ready",
-                "IK bone structure",
-                "Industry standard posing"
-            ]
-        },
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "Home",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "T-Pose Rig",
-                    "item": "https://autorig.online/t-pose-rig"
-                }
-            ]
+      "@type": "Article",
+      "@id": "https://autorig.online/t-pose-rig#article",
+      "headline": "T-pose rig: any pose works",
+      "description": "T-pose rig without the T-pose: AutoRig rigs a model in any pose, uses the file's bind pose first and offers the skeleton for confirmation in the viewer.",
+      "url": "https://autorig.online/t-pose-rig",
+      "mainEntityOfPage": "https://autorig.online/t-pose-rig",
+      "inLanguage": "en",
+      "dateModified": "2026-10-16",
+      "image": [
+        "https://autorig.online/static/images/og/t-pose-rig.jpg"
+      ],
+      "about": [
+        "T-pose rig",
+        "Auto rigging any pose",
+        "Bind pose",
+        "Reference leg"
+      ],
+      "author": {
+        "@type": "Organization",
+        "name": "AutoRig.online",
+        "url": "https://autorig.online/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "AutoRig.online",
+        "url": "https://autorig.online/",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://autorig.online/static/images/logo/autorig-logo@2x.png"
         }
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://autorig.online/t-pose-rig#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Do I need a T-pose to auto rig a character?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Any pose is accepted. A T-pose or an A-pose is a fine input, but not a requirement."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What if my file already has a skeleton or an animation?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "AutoRig checks for that first. When a source skeleton or an animation is there, the pose in the file is a baked frame, and the file's own bind pose is used instead of a fit to the posed mesh."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "My character takes a step or stands on one leg. Will the legs match?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The leg on the floor is the reference. The other leg is traced along its own points, with its joints at the same bone lengths and in the same order."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I have to confirm the skeleton before I get the animation?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. The viewer offers the skeleton for confirmation in blueprint mode, but the animation is made without waiting for it."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How long does a rig take?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The fast rig builds in seconds. The target is a rigged, animated model within one minute from pickup, while the quality checks continue in the background of the viewer."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is a T-pose or an A-pose better?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Neither is required. The T-pose vs A-pose guide explains what each pose changes."
+          }
+        }
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://autorig.online/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Guides",
+          "item": "https://autorig.online/guides"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "T-Pose Rig",
+          "item": "https://autorig.online/t-pose-rig"
+        }
+      ]
     }
+  ]
+}
     </script>
 
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <link rel="stylesheet" href="/static/css/styles.css?v=82cbb3210d">
+    <style>
+        /* t-pose-rig page (V3 refresh 2026-10-16): page-local styles, logical properties so RTL works */
+        .tp-main { overflow-x: clip; }
+        .tp-wrap { max-width: 1040px; margin: 0 auto; }
+        .tp-section { padding: 2.5rem 0; }
+        .tp-section h2 { margin: 0 0 1rem; font-size: 1.9rem; line-height: 1.25; text-align: start; }
+        .tp-section p { color: var(--text-secondary); line-height: 1.7; margin: 0 0 1rem; max-width: 80ch; }
+        .tp-hero-actions { display: flex; flex-wrap: wrap; justify-content: center; margin-top: 1.5rem; }
+        .tp-feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0.75rem; margin: 2rem auto 0;
+            max-width: 900px; padding: 0; list-style: none; }
+        .tp-feats li { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 1rem; border: 1px solid var(--glass-border);
+            border-radius: var(--radius); background: var(--bg-card); color: var(--text-primary); font-weight: 600; line-height: 1.35; text-align: start; }
+        .tp-feats img { flex: none; width: 36px; height: 36px; object-fit: contain; }
+        .tp-cases, .tp-steps { display: grid; gap: 1rem; padding: 0; margin: 1.25rem 0 0; list-style: none; counter-reset: tp; }
+        .tp-cases { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        .tp-cases .tp-case { grid-column: span 2; }
+        .tp-cases .tp-case:nth-child(n + 4) { grid-column: span 3; }
+        .tp-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .tp-case, .tp-step { position: relative; counter-increment: tp; padding: 1.1rem 1.15rem 1.2rem; padding-inline-start: 3.6rem;
+            border: 1px solid var(--glass-border); border-radius: var(--radius); background: var(--bg-card); min-width: 0; }
+        .tp-case::before, .tp-step::before { content: counter(tp); position: absolute; inset-inline-start: 1rem; top: 1.05rem; display: flex;
+            align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: var(--accent);
+            color: #fff; font-weight: 700; font-size: 0.95rem; }
+        .tp-case h3, .tp-step h3 { margin: 0 0 0.4rem; font-size: 1.05rem; line-height: 1.3; }
+        .tp-case p, .tp-step p { margin: 0; font-size: 0.97rem; line-height: 1.55; }
+        .tp-split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 2rem; align-items: start; }
+        .tp-diagram { margin: 0; padding: 1rem; border: 1px solid var(--glass-border); border-radius: var(--radius); background: var(--bg-card); }
+        .tp-leg-svg { display: block; width: 100%; height: auto; direction: ltr; }
+        .tp-leg-svg .tp-floor { stroke: var(--text-muted); stroke-width: 2; }
+        .tp-leg-svg .tp-spine, .tp-leg-svg .tp-pelvis { stroke: var(--text-muted); stroke-width: 4; stroke-linecap: round; }
+        .tp-leg-svg .tp-head { fill: none; stroke: var(--text-muted); stroke-width: 3; }
+        .tp-leg-svg .tp-ref, .tp-leg-svg .tp-tr { fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+        .tp-leg-svg .tp-ref { stroke: var(--accent); }
+        .tp-leg-svg .tp-tr { stroke: var(--success); }
+        .tp-leg-svg .tp-trace-path { fill: none; stroke: var(--text-muted); stroke-width: 2.5; stroke-dasharray: 6 5; opacity: 0.9; }
+        .tp-leg-svg .tp-j-ref, .tp-leg-svg .tp-j-tr { fill: var(--bg-primary); stroke-width: 3; }
+        .tp-leg-svg .tp-j-ref { stroke: var(--accent); }
+        .tp-leg-svg .tp-j-tr { stroke: var(--success); }
+        .tp-leg-svg .tp-lab text { fill: var(--text-primary); font-size: 13px; font-weight: 700; }
+        .tp-legend { margin: 0.75rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.45rem; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.45; }
+        .tp-legend li { display: flex; gap: 0.6rem; align-items: baseline; }
+        .tp-legend i { flex: none; width: 1.4rem; height: 0.35rem; border-radius: 3px; transform: translateY(-0.1rem); }
+        .tp-legend .tp-k-ref { background: var(--accent); }
+        .tp-legend .tp-k-tr { background: var(--success); }
+        .tp-legend .tp-note { color: var(--text-muted); font-size: 0.85rem; }
+        .tp-figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; margin-top: 1.25rem; }
+        .tp-fig { margin: 0; overflow: hidden; border: 1px solid var(--glass-border); border-radius: var(--radius); background: var(--bg-card); }
+        .tp-fig img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; background: #12121a; }
+        .tp-fig figcaption { padding: 0.8rem 1rem 1rem; color: var(--text-secondary); font-size: 0.93rem; line-height: 1.5; }
+        .tp-faq { display: grid; gap: 0.75rem; margin-top: 1rem; }
+        .tp-faq-item { border: 1px solid var(--glass-border); border-radius: var(--radius); background: var(--bg-card); padding: 0 1.1rem; }
+        .tp-faq-item summary { cursor: pointer; padding: 1rem 0; font-weight: 600; line-height: 1.4; color: var(--text-primary); }
+        .tp-faq-item p { margin: 0 0 1rem; }
+        .tp-links { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1rem; }
+        .tp-cta { padding: 3rem 0; text-align: center; }
+        .tp-cta h2 { margin: 0 0 0.75rem; }
+        .tp-cta p { margin: 0 auto 1.5rem; max-width: 60ch; color: var(--text-secondary); }
+        @media (max-width: 820px) { .tp-split { grid-template-columns: minmax(0, 1fr); } .tp-section h2 { font-size: 1.5rem; }
+            .tp-hero-actions .cta-button { width: 100%; }
+            .tp-cases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .tp-cases .tp-case, .tp-cases .tp-case:nth-child(n + 4) { grid-column: span 1; }
+            .tp-cases .tp-case:last-child { grid-column: 1 / -1; } }
+        @media (max-width: 600px) { .tp-cases, .tp-steps, .tp-figs { grid-template-columns: minmax(0, 1fr); }
+            .tp-cases .tp-case:last-child { grid-column: auto; } }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -77,133 +225,210 @@
 <body data-layout-free3d-init="none">
     <div id="site-header"></div>
 
+    <main class="tp-main" id="tp-main">
     <!-- Hero Section -->
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>T-Pose Rigging Checklist</h1>
-                <p class="hero-subtitle">Get your 3D characters rigged in perfect T-pose for professional animation. Industry-standard setup for Unity, Unreal Engine, and modern game development.</p>
-
-                <div class="hero-features">
-                    <div class="feature">
-                        <img src="/static/images/icons/target.svg" alt="T-Pose" class="feature-icon" width="96" height="96">
-                        <span>Perfect T-pose</span>
-                    </div>
-                    <div class="feature">
-                        <div class="feature-icon">🎭</div>
-                        <span>Animation ready</span>
-                    </div>
-                    <div class="feature">
-                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
-                        <span>Industry standard</span>
-                    </div>
+                <h1 data-i18n="tpose_h1">T-pose rig: any pose works</h1>
+                <p class="hero-subtitle" data-i18n="tpose_lead">You do not have to put a model into a T-pose before you upload it. AutoRig rigs the pose you give it, in seconds, and offers the skeleton for confirmation in the viewer.</p>
+                <ul class="tp-feats">
+                    <li><img src="/static/images/icons/target.svg" alt="" width="36" height="36"><span data-i18n="tpose_f1">Any pose accepted</span></li>
+                    <li><img src="/static/images/icons/formats.svg" alt="" width="36" height="36"><span data-i18n="tpose_f2">Bind pose from the file first</span></li>
+                    <li><img src="/static/images/icons/fast.svg" alt="" width="36" height="36"><span data-i18n="tpose_f3">Skeleton confirmation never blocks</span></li>
+                </ul>
+                <div class="tp-hero-actions">
+                    <a href="/" class="cta-button" data-i18n="tpose_cta">Rig a model in any pose</a>
                 </div>
-
-                <a href="/" class="cta-button">Start T-Pose Rigging</a>
             </div>
         </div>
     </section>
 
-    <!-- Content Section -->
-    <section class="content-section">
-        <div class="container">
-            <div class="content-grid">
-                <div class="content-block">
-                    <h2>Why T-Pose Rigging Matters</h2>
-                    <p>The T-pose (standing position with arms extended horizontally) is the industry standard for character rigging and animation. It provides the optimal pose for:</p>
+    <!-- The short answer -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <h2 data-i18n="tpose_answer_h2">Do you need a T-pose to rig a character?</h2>
+            <p data-i18n="tpose_answer_p1">No. A T-pose is a fine input, but AutoRig does not require it. A model in an A-pose, a relaxed stance, a step or with a raised leg is accepted as it is.</p>
+            <p data-i18n="tpose_answer_p2">The fast rig builds the skeleton and the skin from the geometry in seconds, and the animation clips are retargeted at once. The target is a rigged, animated model within one minute from pickup.</p>
+        </div>
+    </section>
 
-                    <h3>Animation Benefits:</h3>
-                    <ul>
-                        <li><strong>Retargeting:</strong> Easy animation transfer between characters</li>
-                        <li><strong>IK Setup:</strong> Perfect for inverse kinematics</li>
-                        <li><strong>Mocap Data:</strong> Compatible with motion capture systems</li>
-                        <li><strong>Game Engines:</strong> Optimized for Unity and Unreal workflows</li>
+    <!-- What happens to each pose -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <h2 data-i18n="tpose_cases_h2">What AutoRig does with each pose</h2>
+            <ol class="tp-cases">
+                    <li class="tp-case">
+                        <h3 data-i18n="tpose_c1_t">T-pose or A-pose</h3>
+                        <p data-i18n="tpose_c1_d">The skeleton is fitted straight to the geometry.</p>
+                    </li>
+                    <li class="tp-case">
+                        <h3 data-i18n="tpose_c2_t">Any other standing pose</h3>
+                        <p data-i18n="tpose_c2_d">A relaxed stance or arms down: the skeleton is traced from the posed geometry, with no pose-correcting step first.</p>
+                    </li>
+                    <li class="tp-case">
+                        <h3 data-i18n="tpose_c3_t">A skeleton or an animation inside the file</h3>
+                        <p data-i18n="tpose_c3_d">The pose is a baked frame, so the file's own rest pose (its bind pose) is used instead of a fit to the posed mesh.</p>
+                    </li>
+                    <li class="tp-case">
+                        <h3 data-i18n="tpose_c4_t">Feet that do not stand side by side</h3>
+                        <p data-i18n="tpose_c4_d">A step or a raised leg: the leg on the floor is the reference for the other leg.</p>
+                    </li>
+                    <li class="tp-case">
+                        <h3 data-i18n="tpose_c5_t">Not a biped at all</h3>
+                        <p data-i18n="tpose_c5_d">A horse, a bird, a hand or a car has no T-pose to match. Each category has its own skeleton template.</p>
+                    </li>
+            </ol>
+        </div>
+    </section>
+
+    <!-- How a posed model is rigged -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <h2 data-i18n="tpose_how_h2">How a posed model is rigged</h2>
+            <ol class="tp-steps">
+                    <li class="tp-step">
+                        <h3 data-i18n="tpose_s1_t">The file is checked first</h3>
+                        <p data-i18n="tpose_s1_d">AutoRig looks for a source skeleton or an animation. If it finds one, the pose is a baked frame and the file's bind pose is used, not a fit of the posed mesh.</p>
+                    </li>
+                    <li class="tp-step">
+                        <h3 data-i18n="tpose_s2_t">The fast rig is built</h3>
+                        <p data-i18n="tpose_s2_d">With no skeleton in the file, the skeleton and the skin are built from the geometry in seconds, and the animation clips are retargeted at once.</p>
+                    </li>
+                    <li class="tp-step">
+                        <h3 data-i18n="tpose_s3_t">Uneven legs use a reference leg</h3>
+                        <p data-i18n="tpose_s3_d">When the feet are not side by side, the standing leg sets the bone lengths and the joint order for the other leg.</p>
+                    </li>
+                    <li class="tp-step">
+                        <h3 data-i18n="tpose_s4_t">The skeleton is offered, not demanded</h3>
+                        <p data-i18n="tpose_s4_d">The viewer offers the skeleton for confirmation in blueprint mode. The animation is made without waiting for it, and the quality checks run in the background.</p>
+                    </li>
+            </ol>
+        </div>
+    </section>
+
+    <!-- Reference leg -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <div class="tp-split">
+                <div>
+                    <h2 data-i18n="tpose_leg_h2">The standing leg is the reference</h2>
+                    <p data-i18n="tpose_leg_p1">When a biped's feet do not stand side by side, the leg whose foot is on the floor sets the topology and the lengths: hip to knee, knee to ankle, ankle to toe.</p>
+                    <p data-i18n="tpose_leg_p2">The other leg is traced along its own points, but its joints are placed at the reference lengths. Both legs get the same bone lengths and the same joint order, whatever the pose. The rig never shortens or stretches one leg to fit a pose.</p>
+                    <p data-i18n="tpose_leg_p3">Symmetry follows the voxels. The mirror overlap of the model's solid decides whether the blueprint opens with symmetry on; an asymmetric model keeps its own bones in both legs.</p>
+                </div>
+                <figure class="tp-diagram">
+                    <svg class="tp-leg-svg" viewBox="0 0 360 280" role="img" aria-labelledby="tp-leg-title" xmlns="http://www.w3.org/2000/svg">
+                            <title id="tp-leg-title" data-i18n="tpose_leg_svg_title">Schematic of two legs: the reference leg stands on the floor, the traced leg is raised, and both have their joints at the lengths L1, L2 and L3.</title>
+                            <line class="tp-floor" x1="20" y1="248" x2="340" y2="248"/>
+                            <line class="tp-spine" x1="180" y1="70" x2="180" y2="22"/>
+                            <circle class="tp-head" cx="180" cy="14" r="8"/>
+                            <line class="tp-pelvis" x1="140" y1="70" x2="220" y2="70"/>
+                            <polyline class="tp-ref" points="140.0 70.0 140.0 150.0 140.0 230.0 172.0 241.0"/>
+                            <path class="tp-trace-path" d="M 220.0 70.0 Q 260.5 79.1 290.6 107.6 Q 270.3 143.7 271.3 185.2 Q 289.9 182.8 303.6 195.7"/>
+                            <polyline class="tp-tr" points="220.0 70.0 290.6 107.6 271.3 185.2 303.6 195.7"/>
+                            <g class="tp-joints">
+                                <circle class="tp-j-ref" cx="140" cy="70" r="5"/><circle class="tp-j-ref" cx="140" cy="150" r="5"/>
+                                <circle class="tp-j-ref" cx="140" cy="230" r="5"/><circle class="tp-j-ref" cx="172.0" cy="241.0" r="5"/>
+                                <circle class="tp-j-tr" cx="220" cy="70" r="5"/><circle class="tp-j-tr" cx="290.6" cy="107.6" r="5"/>
+                                <circle class="tp-j-tr" cx="271.3" cy="185.2" r="5"/><circle class="tp-j-tr" cx="303.6" cy="195.7" r="5"/>
+                            </g>
+                            <g class="tp-lab">
+                                <text x="120.0" y="114.0" text-anchor="middle">L1</text>
+                                <text x="120.0" y="194.0" text-anchor="middle">L2</text>
+                                <text x="158.0" y="224.0" text-anchor="middle">L3</text>
+                                <text x="262.0" y="78.0" text-anchor="middle">L1</text>
+                                <text x="304.0" y="154.0" text-anchor="middle">L2</text>
+                                <text x="293.0" y="216.0" text-anchor="middle">L3</text>
+                            </g>
+                        </svg>
+                    <ul class="tp-legend">
+                        <li><i class="tp-k-ref" aria-hidden="true"></i><span data-i18n="tpose_leg_ref">Reference leg: its foot is on the floor</span></li>
+                        <li><i class="tp-k-tr" aria-hidden="true"></i><span data-i18n="tpose_leg_traced">Traced leg: its own path, joints at the reference lengths</span></li>
+                        <li><span data-i18n="tpose_leg_lengths">L1 hip to knee · L2 knee to ankle · L3 ankle to toe</span></li>
+                        <li class="tp-note"><span data-i18n="tpose_leg_note">Schematic, not to scale.</span></li>
                     </ul>
-                </div>
-
-                <div class="content-block">
-                    <h2>T-Pose Rigging Features</h2>
-                    <div class="features-list">
-                        <div class="feature-item">
-                            <h4>Perfect Alignment</h4>
-                            <p>Mathematically precise T-pose with perfect symmetry</p>
-                        </div>
-                        <div class="feature-item">
-                            <h4>Industry Standard</h4>
-                            <p>Follows AAA game development rigging conventions</p>
-                        </div>
-                        <div class="feature-item">
-                            <h4>IK Ready</h4>
-                            <p>Inverse kinematics bones properly positioned</p>
-                        </div>
-                        <div class="feature-item">
-                            <h4>Animation Compatible</h4>
-                            <p>Works with all major animation packages</p>
-                        </div>
-                    </div>
-                </div>
+                </figure>
             </div>
+        </div>
+    </section>
 
-            <!-- T-Pose vs A-Pose -->
-            <div class="comparison-section">
-                <h2>T-Pose vs A-Pose: Which is Right for You?</h2>
-                <div class="comparison-grid">
-                    <div class="comparison-item">
-                        <h3>T-Pose (Recommended)</h3>
-                        <ul>
-                            <li>✅ Industry standard</li>
-                            <li>✅ Perfect for IK rigging</li>
-                            <li>✅ Unity Mecanim compatible</li>
-                            <li>✅ Motion capture ready</li>
-                            <li>✅ Animation retargeting</li>
-                        </ul>
-                    </div>
-                    <div class="comparison-item">
-                        <h3>A-Pose (Relaxed)</h3>
-                        <ul>
-                            <li>✅ More natural appearance</li>
-                            <li>✅ Better for static poses</li>
-                            <li>✅ Some animation workflows</li>
-                            <li>❌ Less IK friendly</li>
-                            <li>❌ Limited retargeting</li>
-                        </ul>
-                    </div>
-                </div>
+    <!-- Blueprint -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <h2 data-i18n="tpose_bp_h2">Check and edit the skeleton in blueprint mode</h2>
+            <p data-i18n="tpose_bp_p">Press B in the viewer to open blueprint mode and move bones with symmetry. The model is re-rigged 15 seconds after your last edit, or at once with the button. You can also leave the skeleton as it is: the confirmation is offered, never required.</p>
+        </div>
+    </section>
+
+    <!-- Real results -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <h2 data-i18n="tpose_media_h2">Rigged results from V3</h2>
+            <div class="tp-figs">
+                    <figure class="tp-fig">
+                        <img src="/static/images/t-pose-rig/rider-weights.jpg" alt="A biped in a T-pose with its skeleton drawn in white and the skin weight of every bone in colour" width="640" height="480" loading="lazy">
+                        <figcaption data-i18n="tpose_cap1">A biped with its skeleton and the skin weight of every bone.</figcaption>
+                    </figure>
+                    <figure class="tp-fig">
+                        <img src="/static/images/t-pose-rig/bird-sheet.jpg" alt="Rig check sheet of a bird of prey with spread wings: rest pose and clip frames in front, side and top views" width="640" height="480" loading="lazy">
+                        <figcaption data-i18n="tpose_cap2">A bird: the wings are rigged as wings. Rest pose and clip frames from the rig check sheet.</figcaption>
+                    </figure>
+                    <figure class="tp-fig">
+                        <img src="/static/images/t-pose-rig/horse-sheet.jpg" alt="Rig check sheet of a white horse: rest pose and gallop frames in front, side and top views" width="640" height="480" loading="lazy">
+                        <figcaption data-i18n="tpose_cap3">A horse has no T-pose to match: it gets an equine skeleton and clips that pass numeric QA. The sheet shows the gallop.</figcaption>
+                    </figure>
+                    <figure class="tp-fig">
+                        <img src="/static/images/t-pose-rig/hand-sheet.jpg" alt="Rig check sheet of a low-poly hand: rest pose and hand clip frames in front, side and top views" width="640" height="480" loading="lazy">
+                        <figcaption data-i18n="tpose_cap4">A single hand has no T-pose either: it gets per-finger joints and hand clips.</figcaption>
+                    </figure>
             </div>
+        </div>
+    </section>
 
-            <!-- Technical Details -->
-            <div class="technical-section">
-                <h2>Technical Specifications</h2>
-                <div class="specs-grid">
-                    <div class="spec-item">
-                        <h4>Bone Structure</h4>
-                        <ul>
-                            <li>Hip (Root)</li>
-                            <li>Spine (3-5 vertebrae)</li>
-                            <li>Neck & Head</li>
-                            <li>Arms & Legs (3 bones each)</li>
-                            <li>Hands & Feet</li>
-                        </ul>
-                    </div>
-                    <div class="spec-item">
-                        <h4>IK Setup</h4>
-                        <ul>
-                            <li>Foot IK bones</li>
-                            <li>Hand IK bones</li>
-                            <li>Knee/Elbow poles</li>
-                            <li>Head look-at target</li>
-                        </ul>
-                    </div>
-                    <div class="spec-item">
-                        <h4>Compatibility</h4>
-                        <ul>
-                            <li>Unity Humanoid</li>
-                            <li>Unreal Mannequin</li>
-                            <li>Maya HumanIK</li>
-                            <li>Blender Rigify</li>
-                        </ul>
-                    </div>
-                </div>
+    <!-- Not everything has a T-pose -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <h2 data-i18n="tpose_other_h2">Not everything has a T-pose</h2>
+            <p data-i18n="tpose_other_p">Quadrupeds, horses, birds, hands and cars are rigged with templates of their own. Read the animal rigging page or the guides index to pick your category.</p>
+            <div class="tp-links">
+                    <a href="/animal-rig" class="related-link" data-i18n="footer_animal_rig">Animal Rigging</a>
+                    <a href="/horse-auto-rig" class="related-link" data-i18n="guides_card_horse_title">Horse auto rig</a>
+                    <a href="/dog-auto-rig" class="related-link" data-i18n="guides_card_dog_title">Dog auto rig</a>
+                    <a href="/guides" class="related-link" data-i18n="nav_guides">Guides</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="tp-section">
+        <div class="container tp-wrap">
+            <h2 data-i18n="tpose_faq_h2">Questions about poses</h2>
+            <div class="tp-faq">
+                <details class="tp-faq-item">
+                    <summary data-i18n="tpose_q1">Do I need a T-pose to auto rig a character?</summary>
+                    <p data-i18n="tpose_a1">No. Any pose is accepted. A T-pose or an A-pose is a fine input, but not a requirement.</p>
+                </details>
+                <details class="tp-faq-item">
+                    <summary data-i18n="tpose_q2">What if my file already has a skeleton or an animation?</summary>
+                    <p data-i18n="tpose_a2">AutoRig checks for that first. When a source skeleton or an animation is there, the pose in the file is a baked frame, and the file's own bind pose is used instead of a fit to the posed mesh.</p>
+                </details>
+                <details class="tp-faq-item">
+                    <summary data-i18n="tpose_q3">My character takes a step or stands on one leg. Will the legs match?</summary>
+                    <p data-i18n="tpose_a3">Yes. The leg on the floor is the reference. The other leg is traced along its own points, with its joints at the same bone lengths and in the same order.</p>
+                </details>
+                <details class="tp-faq-item">
+                    <summary data-i18n="tpose_q4">Do I have to confirm the skeleton before I get the animation?</summary>
+                    <p data-i18n="tpose_a4">No. The viewer offers the skeleton for confirmation in blueprint mode, but the animation is made without waiting for it.</p>
+                </details>
+                <details class="tp-faq-item">
+                    <summary data-i18n="tpose_q5">How long does a rig take?</summary>
+                    <p data-i18n="tpose_a5">The fast rig builds in seconds. The target is a rigged, animated model within one minute from pickup, while the quality checks continue in the background of the viewer.</p>
+                </details>
+                <details class="tp-faq-item">
+                    <summary data-i18n="tpose_q6">Is a T-pose or an A-pose better?</summary>
+                    <p data-i18n="tpose_a6">Neither is required. The T-pose vs A-pose guide explains what each pose changes.</p>
+                </details>
             </div>
         </div>
     </section>
@@ -211,34 +436,55 @@
     <!-- Related Pages -->
     <section class="related-section">
         <div class="container">
-            <h2>Related Pages</h2>
-            <p>Explore rigging formats and learn more about our service:</p>
-            <div class="related-links">
-                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
-                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
-                <a href="/obj-auto-rig" class="related-link">OBJ Auto Rig</a>
-                <a href="/how-it-works" class="related-link">How It Works</a>
-                <a href="/faq" class="related-link">FAQ</a>
-                <a href="/gallery" class="related-link">Gallery</a>
-            </div>
+            <h2 data-i18n="tpose_related_h2">Related pages</h2>
+            <p data-i18n="tpose_related_p">Guides, the animal rigging page, the format pages and the gallery of real results.</p>
+            <nav class="related-links" aria-label="Related pages" data-i18n-aria-label="tpose_related_h2">
+                <a href="/guides" class="related-link" data-i18n="nav_guides">Guides</a>
+                <a href="/t-pose-vs-a-pose" class="related-link" data-i18n="footer_tpose">T-Pose vs A-Pose</a>
+                <a href="/how-it-works" class="related-link" data-i18n="footer_how_it_works">How It Works</a>
+                <a href="/animal-rig" class="related-link" data-i18n="footer_animal_rig">Animal Rigging</a>
+                <a href="/horse-auto-rig" class="related-link" data-i18n="guides_card_horse_title">Horse auto rig</a>
+                <a href="/dog-auto-rig" class="related-link" data-i18n="guides_card_dog_title">Dog auto rig</a>
+                <a href="/glb-auto-rig" class="related-link" data-i18n="footer_glb_rig">GLB Auto Rigging</a>
+                <a href="/fbx-auto-rig" class="related-link" data-i18n="footer_fbx_rig">FBX Auto Rigging</a>
+                <a href="/obj-auto-rig" class="related-link" data-i18n="footer_obj_rig">OBJ Auto Rigging</a>
+                <a href="/faq" class="related-link" data-i18n="footer_faq">FAQ</a>
+                <a href="/gallery" class="related-link" data-i18n="nav_gallery">Gallery</a>
+            </nav>
         </div>
     </section>
 
     <!-- CTA Section -->
-    <section class="cta-section">
+    <section class="tp-cta">
         <div class="container">
-            <h2>Get Professional T-Pose Rigging</h2>
-            <p>Industry-standard character rigging with perfect T-pose setup. Ready for professional animation pipelines.</p>
-            <a href="/" class="cta-button">Start T-Pose Rigging Now</a>
+            <h2 data-i18n="tpose_cta_h2">Rig a model in any pose</h2>
+            <p data-i18n="tpose_cta_p">Drop a 3D model, a picture, a picture of a car, or anything on the home page. The rig and the animation appear in the viewer.</p>
+            <a href="/" class="cta-button" data-i18n="tpose_cta_btn">Start rigging</a>
         </div>
     </section>
+    </main>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
-    <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
-    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/header.js?v=a9a8e79430"></script>
+    <script src="/static/js/footer.js?v=196f33f358"></script>
+    <script src="/static/js/site-layout.js?v=3e1bd08078"></script>
+    <script src="/static/js/i18n.js?v=69ee643b37"></script>
+    <script src="/static/js/app.js?v=98bf1dd4b2"></script>
+    <script>
+        // /t-pose-rig keeps the chrome-only direction scope: this page sets the direction of its own content
+        (function () {
+            var main = document.getElementById('tp-main');
+            if (!main) return;
+            function apply(lang) {
+                lang = lang || 'en';
+                main.setAttribute('lang', lang);
+                main.setAttribute('dir', lang === 'fa' ? 'rtl' : 'ltr');
+            }
+            var boot = window.__AUTORIG_LANG__;
+            apply(boot && boot.lang);
+            window.addEventListener('languageChanged', function (e) { apply(e && e.detail && e.detail.lang); });
+        })();
+    </script>
     <div id="site-footer"></div>
 </body>
 </html>

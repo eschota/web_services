@@ -3,61 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GLB vs FBX：3D 角色格式对比</title>
-    <meta name="description" content="比较 GLB 和 FBX 在 3D 角色自动绑定、Unity、Unreal Engine、网页预览和 production export 中的使用场景。">
-    <meta name="keywords" content="glb vs fbx, GLB FBX comparison, character formats, 3d file formats, unity formats, unreal formats, rigging formats">
+    <title>角色用 GLB 还是 FBX：该选哪种格式 | AutoRig</title>
+    <meta name="description" content="3D 角色该用 GLB 还是 FBX：分享、Unity、Unreal 和 Blender 各适合哪种。AutoRig 可绑定任一格式并导出两者，还支持 USDZ、ZIP 和 Unity 包。">
+    <meta name="keywords" content="GLB 与 FBX, GLB FBX 对比, 角色格式, 3D 文件格式, Unity 格式, Unreal 格式, 绑定格式">
+    <link rel="canonical" href="https://autorig.online/glb-vs-fbx-zh">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/glb-vs-fbx">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/glb-vs-fbx-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/glb-vs-fbx-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/glb-vs-fbx-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/glb-vs-fbx">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="GLB vs FBX：3D 角色格式对比">
-    <meta property="og:description" content="为 rigging、Unity、Unreal 和 web preview 选择合适格式。">
+    <meta property="og:title" content="角色用 GLB 还是 FBX：该选哪种格式 | AutoRig">
+    <meta property="og:description" content="3D 角色该用 GLB 还是 FBX：分享、Unity、Unreal 和 Blender 各适合哪种。AutoRig 可绑定任一格式并导出两者，还支持 USDZ、ZIP 和 Unity 包。">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/glb-vs-fbx-zh">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:image" content="https://autorig.online/static/images/og/format-glb-vs-fbx.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="GLB 与 FBX：AutoRig 查看器中的已绑定角色">
+    <meta property="og:locale" content="zh_CN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="角色用 GLB 还是 FBX：该选哪种格式 | AutoRig">
+    <meta name="twitter:description" content="3D 角色该用 GLB 还是 FBX：分享、Unity、Unreal 和 Blender 各适合哪种。AutoRig 可绑定任一格式并导出两者，还支持 USDZ、ZIP 和 Unity 包。">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/format-glb-vs-fbx.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
     {
-        "@context": "https://schema.org",
-        "@type": "Article",
-        "headline": "GLB vs FBX：3D 角色格式对比",
-        "description": "比较 GLB 和 FBX 在 3D 角色自动绑定、Unity、Unreal Engine 和网页预览中的使用场景。",
-        "author": {
-            "@type": "Organization",
-            "name": "AutoRig Online"
-        },
-        "publisher": {
-            "@type": "Organization",
-            "name": "AutoRig Online"
-        },
-        "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
-        "mainEntityOfPage": {
-            "@type": "WebPage",
-            "@id": "https://autorig.online/glb-vs-fbx-zh"
-        },
-        "articleSection": "指南",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "首页",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "GLB vs FBX",
-                    "item": "https://autorig.online/glb-vs-fbx-zh"
-                }
-            ]
+      "@type": "Article",
+      "@id": "https://autorig.online/glb-vs-fbx-zh#article",
+      "headline": "角色用 GLB 还是 FBX：该选哪种格式？",
+      "description": "3D 角色该用 GLB 还是 FBX：分享、Unity、Unreal 和 Blender 各适合哪种。AutoRig 可绑定任一格式并导出两者，还支持 USDZ、ZIP 和 Unity 包。",
+      "inLanguage": "zh",
+      "image": "https://autorig.online/static/images/og/format-glb-vs-fbx.jpg",
+      "url": "https://autorig.online/glb-vs-fbx-zh",
+      "author": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online/",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://autorig.online/static/images/logo/autorig-logo.png"
         }
+      },
+      "datePublished": "2024-12-20",
+      "dateModified": "2026-10-16",
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://autorig.online/glb-vs-fbx-zh"
+      },
+      "articleSection": "Guides",
+      "breadcrumb": {
+        "@id": "https://autorig.online/glb-vs-fbx-zh#breadcrumb"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://autorig.online/glb-vs-fbx-zh#breadcrumb",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "首页",
+          "item": "https://autorig.online/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "GLB 与 FBX",
+          "item": "https://autorig.online/glb-vs-fbx-zh"
+        }
+      ]
     }
+  ]
+}
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        /* format articles (V3 refresh, 2026-10-16): page-local blocks */
+        .fmt-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1rem;margin-top:1rem}
+        .fmt-step{border:1px solid var(--border);border-radius:14px;padding:1rem;background:var(--bg-card)}
+        .fmt-step .n{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;margin-bottom:.4rem}
+        .fmt-step h4{margin:.2rem 0 .3rem}
+        .fmt-step p{margin:0;color:var(--text-secondary);line-height:1.5}
+        .fmt-cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;margin-top:1rem}
+        .fmt-cmp>div{border:1px solid var(--border);border-radius:14px;padding:1rem 1.2rem;background:var(--bg-card)}
+        .content-section article{max-width:820px;margin:0 auto}
+        .content-section article h2{margin:2.2rem 0 .6rem}
+        .content-section article h3{margin:1.5rem 0 .4rem}
+        .content-section article p,.content-section article li{line-height:1.65}
+        .content-section article ul,.content-section article ol{padding-left:1.4rem;margin:.5rem 0}
+        .content-section article .fmt-cmp{margin:1.5rem 0}
+        .content-section article .fmt-cmp h3{margin-top:0}
+        .fmt-block{margin-top:2.5rem}
+        .fmt-block>h2{margin-top:0}
+        .fmt-fig{margin:2rem auto 0;max-width:760px}
+        .fmt-fig img{display:block;width:100%;height:auto;border-radius:14px;border:1px solid var(--border)}
+        .fmt-fig figcaption{margin-top:.5rem;font-size:.9rem;color:var(--text-secondary);text-align:center}
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,68 +130,64 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>GLB vs FBX：3D 角色格式对比</h1>
-                <p class="hero-subtitle">比较 GLB 和 FBX 在自动绑定、Unity、Unreal Engine、网页预览和 export 中的差异。</p>
+                <h1>角色用 GLB 还是 FBX：该选哪种格式？</h1>
+                <p class="hero-subtitle">对比 GLB 和 FBX 在已绑定 3D 角色上的实际用途，以及 AutoRig 如何同时支持两者。</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <div class="feature-icon">📊</div>
-                        <span>Format comparison</span>
+                        📊
+                        <span>格式对比</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
-                        <span>Engine compatibility</span>
+                        <img src="/static/images/icons/tools.svg" alt="引擎" class="feature-icon" width="96" height="96">
+                        <span>引擎兼容性</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Settings" class="feature-icon" width="96" height="96">
-                        <span>Workflow guide</span>
+                        <img src="/static/images/icons/target.svg" alt="流程" class="feature-icon" width="96" height="96">
+                        <span>流程指南</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">Start 自动绑定</a>
+                <a href="/" class="cta-button">开始自动绑定</a>
             </div>
         </div>
     </section>
 
-    <!-- Article Content -->
+    <!-- Content Section -->
     <section class="content-section">
         <div class="container">
             <article>
-                <p>GLB and FBX are both common character formats, but they're optimized for different parts of the pipeline. If your goal is to rig, animate, and move characters between tools, it helps to understand where each format shines.</p>
-
-                <h2>GLB (glTF binary): best for sharing and web workflows</h2>
-                <ul>
-                    <li>Compact and portable</li>
-                    <li>Great for web previews and sharing</li>
-                    <li>Often includes textures in a single package</li>
-                </ul>
-
-                <h2>FBX: best for DCC tools and game engine pipelines</h2>
-                <ul>
-                    <li>Widely used for skeletal animation workflows</li>
-                    <li>Works reliably with Unity/Unreal importers</li>
-                    <li>Common interchange format for rigged assets</li>
-                </ul>
-
-                <h2>Which one is better for auto-rigging?</h2>
-                <p>Auto-rigging depends more on your <strong>pose and topology</strong> than on file format. However, many production pipelines prefer the final output as FBX because that's what engines and animation tools expect.</p>
-
-                <h2>Recommended practical pipeline</h2>
-                <ol>
-                    <li>Start with GLB (easy to share) or FBX (engine-friendly), whichever you have.</li>
-                    <li>Auto-rig in T-pose.</li>
-                    <li>Download engine-friendly exports (Unity/Unreal FBX) for production.</li>
-                    <li>Keep GLB as a distribution format if needed.</li>
-                </ol>
-
-                <h2>Common issues when converting</h2>
-                <h3>Materials don't match</h3>
-                <p>Materials can differ across formats. GLB often keeps textures packaged, while FBX can require external texture paths or engine-side material setup.</p>
-
-                <h3>Axis/rotation differences</h3>
-                <p>Coordinate systems vary. A consistent export toolchain reduces surprises.</p>
-
-                <p><a href="/">Auto-rig your character now</a></p>
+                <p>GLB 和 FBX 都是常见的角色格式，但各自针对流水线的不同环节做了优化。如果你的目标是绑定、制作动画并在工具之间传递角色，了解两种格式各自的长处会很有帮助。</p>
+<div class="fmt-cmp">
+    <div><h3>GLB（glTF 二进制）：分享与网页</h3>
+<ul>
+    <li>体积小，便于携带</li>
+    <li>非常适合网页预览和分享</li>
+    <li>通常把纹理打包在同一个文件中</li>
+    <li>可在 Blender、three.js 和其他网页查看器中打开</li>
+</ul></div>
+    <div><h3>FBX：DCC 工具与游戏引擎</h3>
+<ul>
+    <li>广泛用于骨骼动画流程</li>
+    <li>在 Unity 和 Unreal 导入器中表现可靠：Unity 中为人形，Unreal 中为骨骼网格体</li>
+    <li>已绑定资产常用的交换格式</li>
+</ul></div>
+</div>
+                <h2>哪种更适合自动绑定？</h2>
+                <p>都一样。两者进入同一条 V3 流水线，绑定效果取决于模型的形状，而不是文件格式。姿势不必是 T 姿势；如果文件本身已有骨骼或动画，会优先使用其自带的静止姿势。最终都会在查看器中得到同样的已绑定、带动画的模型。</p>
+                <h2>推荐的实用流程</h2>
+<ol>
+    <li>从手头现有的格式开始：GLB（便于分享）或 FBX（对引擎友好）。OBJ 也可以：把它连同 MTL 和纹理打成 ZIP 上传。</li>
+    <li>自动绑定：大约一分钟内，绑定和动画片段就会出现在查看器中。</li>
+    <li>下载流水线所需的导出：Unity 和 Unreal 用 FBX，网页和 Blender 用 GLB，也可选 USDZ、ZIP、Unity 包或 Blender 文件。</li>
+    <li>如有需要，保留 GLB 作为发布格式。</li>
+</ol>
+                <h2>转换时的常见问题</h2>
+                <h3>材质不一致</h3>
+                <p>不同格式的材质可能有差异。GLB 通常把纹理打包在内，而 FBX 可能需要外部纹理路径或在引擎中重新设置材质。AutoRig 在绑定过程中会保留你自己的纹理，没有纹理的模型会自动获得 PBR 纹理。</p>
+                <h3>坐标轴与旋转差异</h3>
+                <p>各工具的坐标系并不相同。使用统一的导出工具链可以减少意外。</p>
+                <p><a href="/">立即自动绑定你的角色</a></p>
             </article>
         </div>
     </section>
@@ -145,14 +196,15 @@
     <section class="related-section">
         <div class="container">
             <h2>相关指南</h2>
-            <p>Learn more about formats and rigging:</p>
+            <p>进一步了解格式与绑定：</p>
             <div class="related-links">
-                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
-                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
-                <a href="/rig-glb-unity-zh" class="related-link">Unity GLB Guide</a>
-                <a href="/rig-fbx-unreal-zh" class="related-link">Unreal FBX Guide</a>
-                <a href="/how-it-works" class="related-link">如何工作</a>
-                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/glb-auto-rig" class="related-link">GLB 自动绑定</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX 自动绑定</a>
+                <a href="/obj-auto-rig" class="related-link">OBJ 自动绑定</a>
+                <a href="/rig-glb-unity-zh" class="related-link">Unity GLB 指南</a>
+                <a href="/rig-fbx-unreal-zh" class="related-link">Unreal FBX 指南</a>
+                <a href="/how-it-works" class="related-link">工作原理</a>
+                <a href="/faq" class="related-link">常见问题</a>
             </div>
         </div>
     </section>
@@ -160,17 +212,17 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Choose the Right Format?</h2>
-            <p>Get professional auto rigging for GLB or FBX characters. Works with both formats!</p>
-            <a href="/" class="cta-button">Start 自动绑定</a>
+            <h2>准备好选择合适的格式了吗？</h2>
+            <p>为 GLB、FBX 或 OBJ 角色提供自动绑定，三种格式都支持！</p>
+            <a href="/" class="cta-button">开始自动绑定</a>
         </div>
     </section>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <div id="site-footer"></div>
 </body>
