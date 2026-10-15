@@ -877,6 +877,17 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   * every openable and every glass pane is its own part (isolate + restore), modelled separately, and attached to
     the shell at its aperture by the hinge contract (`vehicle/rig.json` openables, `vehicle_doors.py`), glass glued
     into its frame; the assembled model shows the shell + parts in their places, so doors and hatches can open.
+* **Paid comparison on the motorhome: Tripo cheapest with textures, low-poly, and the paid Hunyuan cloud, both**
+  (owner, 2026-10-16 ~08:40 UTC: «замодель в трипо в самом дешевом варианте с текстурами сразу в лоуполи, за деньги,
+  там еще есть хуньянь платный, сразу заказывай и там и там для сравнения, покажешь мне в итоге 2 сборки на одной
+  тачке, я хочу чтобы ты начал с дома на колесах»): this is the owner's explicit paid confirmation for the vehicle
+  corpus (`vehicle/paid_confirm.json` records his words, the date and the run). Order: `rv_motorhome` first; every
+  part of its shell split (shell body, suspension, wheel, each door / hood / hatch / glass) is generated twice: by
+  Tripo (the cheapest tier that returns textures and a low-poly mesh; key only in `/srv/autorig/secrets/tripo.env`,
+  which the owner fills himself) and by the Tencent Hunyuan 3D cloud (`mt/hunyuan3d_cloud.py`, routing
+  `cloud.enabled` on with the daily credit cap, caller owner, LowPoly + PBR textures); each job's cost is written to
+  its ledger and reported; two assemblies A (Tripo) / B (Hunyuan) are built over the picture and shown side by side
+  in DEV and as an A/B toggle in the task viewer. The free farm stays the default for everything else.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
