@@ -708,6 +708,12 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   `backend/ai_qwen_image_api.py`) whenever two or more pictures are wired in: it drew a woman's face into a truck's
   window and a tongue on a wheel. A vehicle prompt names the camera literally (orthographic, no convergence), what to
   cut, what to segment, and forbids people, faces, characters and text.
+* **The cut is a Qwen edit by mask** (owner, 2026-10-15 14:00: «перевеоди пайплайн на вот этот способ детектирования
+  колес и вырезай их подавая маску в квен, следующий этап валидация корпуса без колес и пушек с содержимым багажника»):
+  the GroundingDINO + SAM2 masks of the wheels, weapons and cargo are painted a marker colour, Qwen fills only those
+  regions, the original pixels come back everywhere else (a feathered composite), the wheels are re-detected on the
+  result as the check, and the body without wheels, weapons and cargo goes to DEV for the owner's validation before
+  any modelling (`mt/vehicle_v3.cut`, `mt/vehicle_masks_worker.py`).
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
