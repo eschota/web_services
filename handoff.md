@@ -1,5 +1,13 @@
 # AutoRig development — start here after context compression
 
+## 2026-10-16 01:25 · чат 2026-10-15_horse-joints-and-segment-tracking · Upload V3 + Вегета через свой скин
+- Главная: одна зона загрузки (модель/картинка/картинка авто), Ctrl+V и drop по всей странице, вторая вкладка убрана (`index.html`, `js/app.js` `setupPasteDrop`, i18n ×5). Страница задачи: кнопка Upload рядом с Download (`task-v3.html`, `js/task-v3-upload.js`). Релиз `live-20261015T141800Z-229639`, коммит `67646738`.
+- MT `limb_stabilize.py` (73362c8 в MT main): старт из node-позы файла, когда intake запёк скин. Вегета 1ceccd8a попытка 2: разрыв нет, рёбер >4× 193→14, утечка 6.1→0.33 %.
+
+## Vehicle image conveyor · V3 — 2026-10-15
+
+Active universal vehicle pipeline, nodes UX, source-bound masks/colour voxels and wheel/suspension editor: see `autorig-online/projects/vehicles/handoff.md`. Payment deferred. Production promotion and actual driving evidence are pending; preserve the agent ownership and live-file merge rules there.
+
 ## Voxel parts · V3 — 2026-10-14 (agent «Voxel parts · V3»)
 
 - Owner order: voxel part clustering at the rig start is mandatory; pieces not voxel-connected to the body are
