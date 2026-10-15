@@ -30,19 +30,25 @@ switch ($Mode) {
             Write-Output "masks service started pid $($p.Id)"
         } else { Write-Output "masks service already running" }
         if (-not (Get-Proc $TunPidFile)) {
-            $t = Start-Process -FilePath "ssh" -ArgumentList @("-N", "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes", "-R", "${Tunnel}:127.0.0.1:${Port}", "autorig-vps") `
-                -WindowStyle Hidden -PassThru
+            # a watchdog loop, not one ssh: the VPS drops ssh sessions several times an hour (2026-10-15 the tunnel died
+            # and the split stage fell back to the CPU worker, 119 s instead of 2 s), so ssh is restarted 5 s after it exits
+            $loop = "while (`$true) { ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -R ${Tunnel}:127.0.0.1:${Port} autorig-vps; Start-Sleep 5 }"
+            $t = Start-Process -FilePath "powershell" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $loop) -WindowStyle Hidden -PassThru
             $t.Id | Set-Content $TunPidFile
-            Write-Output "tunnel started pid $($t.Id) (VPS 127.0.0.1:$Tunnel -> local $Port)"
+            Write-Output "tunnel watchdog started pid $($t.Id) (VPS 127.0.0.1:$Tunnel -> local $Port)"
         } else { Write-Output "tunnel already running" }
     }
     "Stop" {
+        $tw = Get-Proc $TunPidFile
+        if ($tw) { Get-CimInstance Win32_Process -Filter "ParentProcessId = $($tw.Id)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
         foreach ($f in @($TunPidFile, $PidFile)) { $pr = Get-Proc $f; if ($pr) { Stop-Process -Id $pr.Id -Force; Write-Output "stopped $($pr.Id)" }; Remove-Item $f -ErrorAction SilentlyContinue }
     }
     "Status" {
         $pr = Get-Proc $PidFile; $t = Get-Proc $TunPidFile
         Write-Output ("service: " + $(if ($pr) { "running pid $($pr.Id)" } else { "stopped" }))
-        Write-Output ("tunnel:  " + $(if ($t) { "running pid $($t.Id)" } else { "stopped" }))
+        $sshUp = $false
+        if ($t) { $sshUp = [bool](Get-CimInstance Win32_Process -Filter "ParentProcessId = $($t.Id) and Name = 'ssh.exe'") }
+        Write-Output ("tunnel:  " + $(if ($t) { "watchdog pid $($t.Id), ssh " + $(if ($sshUp) { "up" } else { "reconnecting" }) } else { "stopped" }))
         try { Write-Output ("health:  " + (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/health" -TimeoutSec 3).Content) } catch { Write-Output "health:  no answer" }
     }
 }
