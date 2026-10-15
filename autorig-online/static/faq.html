@@ -3,24 +3,67 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoRig FAQ — AI Agent, Auto-Rigging, Animation and 3D Generation</title>
-    <meta name="description" content="How to use AutoRig: talk to the AI agent, auto-rig and inspect bones and skinning, retarget animations, edit materials, generate 3D characters from images, text or video, and export GLB or FBX.">
-    <meta name="keywords" content="autorig faq, ai 3d agent, auto rigging, skinning, animation retargeting, 3d character generation, image to 3d, glb fbx export">
+    <title>AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars</title>
+    <meta name="description" content="Answers about AutoRig: upload a 3D model, a picture or a car, get a rigged, animated model in about a minute, edit it in the viewer, export GLB or FBX.">
+    <meta name="keywords" content="autorig faq, auto rigging, 3d model rigging, animal rig, horse rig, bird wings rig, car rigging, hand rig, skinning, animation retargeting, image to 3d, glb fbx export, ai 3d agent">
     <link rel="canonical" href="https://autorig.online/faq">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/faq">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq">
+    <link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/faq">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="AutoRig FAQ — AI agent, auto-rigging, animation and 3D generation">
-    <meta property="og:description" content="How to use AutoRig: talk to the AI agent, auto-rig and inspect bones and skinning, retarget animations, edit materials, generate 3D characters from images, text or video, and export GLB or FBX.">
+    <meta property="og:title" content="AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars">
+    <meta property="og:description" content="Answers about AutoRig: upload a 3D model, a picture or a car, get a rigged, animated model in about a minute, edit it in the viewer, export GLB or FBX.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online/faq">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:image" content="https://autorig.online/static/images/og/faq.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AutoRig FAQ: rigged characters, animals and cars in the AutoRig viewer">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta property="og:locale:alternate" content="fa_IR">
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars">
+    <meta name="twitter:description" content="Answers about AutoRig: upload a 3D model, a picture or a car, get a rigged, animated model in about a minute, edit it in the viewer, export GLB or FBX.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/faq.jpg">
 
-    <!-- Schema.org: FAQPage + breadcrumbs -->
+    <!-- Schema.org: WebPage + FAQPage (every question below) + breadcrumbs -->
     <script type="application/ld+json">
 {
  "@context": "https://schema.org",
  "@graph": [
+  {
+   "@type": "WebPage",
+   "@id": "https://autorig.online/faq#webpage",
+   "url": "https://autorig.online/faq",
+   "name": "AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars",
+   "description": "Answers about AutoRig: upload a 3D model, a picture or a car, get a rigged, animated model in about a minute, edit it in the viewer, export GLB or FBX.",
+   "inLanguage": "en",
+   "isPartOf": {
+    "@type": "WebSite",
+    "name": "AutoRig.online",
+    "url": "https://autorig.online/"
+   },
+   "primaryImageOfPage": {
+    "@type": "ImageObject",
+    "url": "https://autorig.online/static/images/og/faq.jpg",
+    "width": 1200,
+    "height": 630
+   },
+   "breadcrumb": {
+    "@id": "https://autorig.online/faq#breadcrumb"
+   },
+   "mainEntity": {
+    "@id": "https://autorig.online/faq#faq"
+   }
+  },
   {
    "@type": "FAQPage",
    "@id": "https://autorig.online/faq#faq",
@@ -30,10 +73,34 @@
    "mainEntity": [
     {
      "@type": "Question",
+     "name": "What can I upload?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "One upload zone on the home page takes a 3D model (GLB, FBX, OBJ or a ZIP with textures), a picture, a picture of a car, or a text description. Every task gets its own page: one task, one viewer, with the agent chat."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How fast is the rig?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "The fast rig builds the skeleton and skin from the geometry in seconds, and the animation clips are retargeted at once. The target is a rigged, animated model within one minute from pickup. The quality checks run in the background of the viewer."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Do I have to confirm the skeleton?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "No. The viewer offers to confirm the skeleton in the blueprint, but nothing waits for it: the animation is made at once. Confirm or edit the bones only if you want to."
+     }
+    },
+    {
+     "@type": "Question",
      "name": "What happens after I upload a model?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Every task opens in its own 3D viewer. The model appears in a lit scene, the auto-rig runs, and the AI agent joins in the corner. Icons at the top show progress; when the rig is ready, the animations play from the bar at the bottom."
+      "text": "Every task opens in its own Unity WebGL viewer. It starts on a black scene at once and plays the stages (voxels, erosion, bones, rig) while the mesh loads, then loads the chosen environment scene. When the rig is ready, the animations play from the bar at the bottom, and the AI agent chat sits in the corner."
      }
     },
     {
@@ -41,7 +108,15 @@
      "name": "How do I move the camera?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Drag with the left mouse button to orbit, with the right button or Shift + left to pan. The wheel changes the lens, Ctrl + wheel moves closer. F frames the model, F11 goes full screen, F12 saves a screenshot and F1 lists every key. On a phone, drag with one finger and pinch with two."
+      "text": "The right mouse button pans and the middle button orbits; left-drag also orbits, and Shift + left pans. The wheel changes the lens, Ctrl + wheel moves closer. F frames the model, F11 goes full screen, F12 saves a screenshot and F1 lists every key. On a phone, drag with one finger and pinch with two."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Are there camera presets and hotkeys?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. Camera presets frame the face, elbows, hands, knees, feet and heels, so you can check the joints up close. Every control shows its hotkey as a badge, and F1 lists all keys."
      }
     },
     {
@@ -49,7 +124,15 @@
      "name": "What are the icons around the viewer?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Left: model, rig, bones, joint editor, voxels, framing, auto camera and the outliner. Right: the look of the scene. A click switches an icon to its next preset, the last step turns it off, and holding the icon opens its detailed settings. Bottom left: the channels, keys 1–0. A right click opens a menu with this FAQ."
+      "text": "Left: model, rig, bones, blueprint, voxels, framing, auto camera and the outliner. Right: the look of the scene. A click switches an icon to its next preset, the last step turns it off, and holding the icon opens its detailed settings. Bottom left: the channels, keys 1–0. A right click opens a menu with this FAQ."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Which environment scenes are there?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "The viewer loads only the scene it needs, after the rig presentation: for example a cathedral, Sponza, a river glade or jungle ruins. Scenes come with baked lighting, reflection and light probes, and colliders."
      }
     },
     {
@@ -86,10 +169,106 @@
     },
     {
      "@type": "Question",
+     "name": "Is the agent shared with other visitors?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. Each task has one agent chat shared by everyone who opens it, not a separate session per visitor. The agent speaks the language of the person who created the task."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Which kinds of models are rigged?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Biped (humanoid), quadruped, equine, bird, serpent, monster, multilimb, hands, primate and vehicle. Each category has its own skeleton template, fit and skin rules, clip library and quality checks."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How is the category chosen?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "AutoRig picks it automatically from the shape of the model and what a vision check sees, so you do not choose it. If a model lands in the wrong category, report it with the defect button in the Telegram notice."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How are horses and other four-legged animals rigged?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Quadrupeds (dogs, cats, bears, cows, pigs) get a quadruped skeleton. Equines (horses, deer, zebras) get a richer one with scapula, elbow, mid-neck and leg profile joints, and planted-hoof gaits: walk, trot and gallop."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How are birds and wings rigged?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Wings are rigged as wings, never as arms. A bird gets its own skeleton and its own clip library."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Can I rig a single hand, gloves or FPS arms?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. The hands category rigs a single hand, gloves or first-person arms with per-finger joints and has hand clips of its own."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "What if the model is not in a T-pose?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Any pose works. When a biped stands on one leg or steps, the leg on the floor sets the bone lengths for the other, so both legs get the same lengths. If the file already has a skeleton or an animation, its own rest pose is used first."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Can AutoRig rig a car from a picture?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. Drop a picture of a car on the home page. The vehicle conveyor segments it into body, wheels, doors, hood, trunk, hatches, glass, lights and bumpers, models each part as its own 3D object and assembles a rigged car."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How do I review the parts of a car?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Every part is isolated and restored as a whole object, and the viewer lists them in the Parts panel. For each part you accept it, redraw it or order it as a 3D model. The body is drawn as a bare shell without doors, hood and glass, so those parts open and move on their own."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How are wheels, body and doors made correct?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Each wheel is normalised to a cylinder collider that matches its own shape. The body is corrected to left–right symmetry with a free-form deformation (FFD) lattice, and the doors are hinged."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Is there an interior and a driver?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. The cabin has a seat, a steering wheel, pedals and a gear stick, and a rigged driver is seated at them by IK."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Are paid 3D services used for cars?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "The free farm is the default. Paid 3D clouds (Tripo and Hunyuan cloud) run only when you press their explicit button."
+     }
+    },
+    {
+     "@type": "Question",
      "name": "How does auto-rigging work?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "AutoRig reads the body plan of the model, places a skeleton inside the mesh, binds the skin to the bones and tests the deformation on real motions. Humanoids get a standard humanoid skeleton that animation tools and game engines understand."
+      "text": "The fast rig builds the skeleton and skin from the model's geometry in seconds, using the template of its category, and the animation clips are retargeted at once. Quality checks (joint placement, skin tears, limb collisions, numeric deformation QA) run in the background of the viewer. Humanoids get a standard humanoid skeleton that animation tools and game engines understand."
      }
     },
     {
@@ -105,7 +284,15 @@
      "name": "A joint is in the wrong place. Can I fix it?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Yes. Open the joint editor in T- or A-pose, move or rotate the hand or foot handle and save. The correction goes into every animation, including ones added later. You can also ask the agent to check and repair the feet, the knees or a single frame."
+      "text": "Yes. Press B for Blueprint mode and move the bones; symmetry mirrors your edit to the other side. The rig is rebuilt 15 seconds after your last edit, or at once with the re-rig button, and the correction goes into every animation. You can also ask the agent to check the feet, the knees or a single frame."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How is the rig quality kept up?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Every model that once broke a rig becomes a regression test, and every engine release has to pass these autotests before it goes live. Rig quality comes before speed."
      }
     },
     {
@@ -113,7 +300,7 @@
      "name": "Which models can be rigged?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Humanoid characters work best: people, stylised and anime characters, heroes in armour. Animals and creatures are rigged with skeletons of their own. Upload GLB, FBX or OBJ, or generate a character."
+      "text": "People, stylised and anime characters, animals, birds, creatures, hands and cars. Upload GLB, FBX, OBJ or a ZIP with textures, or generate a model from a picture or text."
      }
     },
     {
@@ -121,7 +308,15 @@
      "name": "Which animations do I get?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "A rigged character comes with ready motions such as idle, walk, run, jump, wave, dance, punch and look around. They play from the bar at the bottom of the viewer, and the agent can add more on request."
+      "text": "A rigged character comes with ready motions such as idle, walk, run, jump, wave, dance, punch and look around; every other category has its own clip library, for example walk, trot and gallop for a horse. They play from the bar at the bottom of the viewer, and the agent can add more on request."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Where do the clips come from?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "For each category, reference videos of the gaits and actions are generated and the motion is extracted once. The clips are then retargeted automatically onto every new rig, with a numeric QA check on each clip. Procedural clips are the fallback."
      }
     },
     {
@@ -138,6 +333,14 @@
      "acceptedAnswer": {
       "@type": "Answer",
       "text": "Yes. Press Space to stop the clip, find the frame on the slider and press the wrench: the frame is smoothed with its neighbours and flips in the clip are repaired."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Can I add my own clips?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. Custom clips can be added in the viewer to the task's clip set, and they are retargeted onto your rig like the built-in ones."
      }
     },
     {
@@ -169,7 +372,7 @@
      "name": "Can I make a 3D character from a picture?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Yes. Upload an image of a character: AutoRig builds a 3D model from it, rigs it and opens it in the viewer with animations."
+      "text": "Yes. Upload a picture: AutoRig builds a 3D model from it, rigs it and opens it in the viewer with animations. A picture of a car goes through the vehicle conveyor instead."
      }
     },
     {
@@ -217,7 +420,15 @@
      "name": "Are my textures kept?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Yes. Materials, textures and UVs are kept through rigging, and the PBR maps (base colour, normal, metal-roughness and emission) show up in the channels."
+      "text": "Yes. A model's own textures are never lost: materials, textures and UVs are kept through rigging, and the PBR maps (base colour, normal, metal-roughness and emission) show up in the channels."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "What if my model has no textures?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "It gets PBR textures automatically (albedo, roughness, metallic, normal and emissive), made from the model's own projections. The textured model is what the vision checks and the previews use."
      }
     },
     {
@@ -225,7 +436,7 @@
      "name": "Which formats can I download?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "The rigged, animated character downloads as GLB and FBX. Static copies are available as OBJ and USDZ."
+      "text": "The rigged, animated model downloads as GLB and FBX. USDZ, a ZIP bundle, a Unity package and a Blender file are offered too, and static copies are available as OBJ."
      }
     },
     {
@@ -233,7 +444,7 @@
      "name": "Does it work in Unity, Unreal and Blender?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Yes. The FBX imports as a humanoid in Unity and as a skeletal mesh in Unreal, and the GLB opens in Blender, three.js and other web viewers."
+      "text": "Yes. The FBX imports as a humanoid in Unity and as a skeletal mesh in Unreal, and the GLB opens in Blender, three.js and other web viewers. A ready Unity package and a Blender file come from the same task."
      }
     },
     {
@@ -251,11 +462,28 @@
       "@type": "Answer",
       "text": "Yes. Tasks can be created, tracked and downloaded through the API; the developer page has the details."
      }
+    },
+    {
+     "@type": "Question",
+     "name": "Which languages are supported?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "The site is available in English, Russian, Chinese, Hindi and Persian (right to left). English pages have no prefix; the others live under /ru/, /zh/, /hi/ and /fa/."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How do I report a bad rig?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "The Telegram notice of a finished task has defect buttons, for example a wrong model transform, a torn mesh after skinning or elbows that are too wide, and you can reply with text too. A report is recorded and checked, and the fix goes into the engine for the whole category, not into one model."
+     }
     }
    ]
   },
   {
    "@type": "BreadcrumbList",
+   "@id": "https://autorig.online/faq#breadcrumb",
    "itemListElement": [
     {
      "@type": "ListItem",
@@ -351,6 +579,16 @@
         @media (max-width:640px){.faqx-hero{padding-top:2rem}.faqx-sec{margin-top:1.9rem}.faqx-q summary{padding:.8rem .9rem}.faqx-q p{padding:0 .9rem .9rem}}
         @media (prefers-reduced-motion:reduce){.faqx *{animation:none!important;transition:none!important}}
 
+        /* V3 refresh (2026-10-16): real V3 media, model categories, scenes */
+        .faqx-cats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem;margin:0 0 1rem}
+        .faqx-cat,.faqx-shot{margin:0;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--bg-card)}
+        .faqx-cat img,.faqx-shot img{display:block;width:100%;height:auto}
+        .faqx-cat figcaption,.faqx-shot figcaption{padding:.5rem .8rem;font-size:.86rem;line-height:1.4;color:var(--text-secondary)}
+        .faqx-cat figcaption{font-weight:600;color:var(--text-primary)}
+        .faqx-figs{display:grid;gap:.8rem;margin:0 0 1rem}
+        .faqx-scenes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.6rem;margin:1rem 0 0}
+        .faqx-nav{max-width:1040px}
+        @media (max-width:640px){.faqx-cats,.faqx-scenes{grid-template-columns:repeat(2,minmax(0,1fr))}}
     </style>
 
     <!-- Google Analytics -->
@@ -368,35 +606,72 @@
     <main class="faqx">
         <section class="faqx-hero container">
             <span class="faqx-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2"/><g class="fq-q"><path d="M9.4 9.3a2.7 2.7 0 1 1 3.8 2.5c-.8.3-1.2 1-1.2 1.8v.5"/><path d="M12 17.3h.01" stroke-width="2.6"/></g></svg></span>
-            <h1 data-i18n="faq_title">AutoRig FAQ: AI agent, auto-rigging and 3D generation</h1>
-            <p data-i18n="faq_lead">Short answers on working with the AI agent, rigging and skinning, animation, model editing, generation and export.</p>
+            <h1 data-i18n="faq_title">AutoRig FAQ: rig, animate and export any 3D model</h1>
+            <p data-i18n="faq_lead">Short answers about uploading, the viewer and the AI agent, rigging for characters, animals, hands and cars, animation, textures and export.</p>
             <nav class="faqx-nav" aria-label="FAQ sections" data-i18n-aria-label="faq_nav_label">
+                <a class="faqx-chip" href="#start"><svg class="fq-i fq-start" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3"/><g class="fq-l1"><path d="M12 15.5v-11M7.5 9l4.5-4.5L16.5 9"/></g></svg><span data-i18n="faq_sec_start">Upload and speed</span></a>
                 <a class="faqx-chip" href="#viewer"><svg class="fq-i fq-viewer" viewBox="0 0 24 24" aria-hidden="true"><path class="fq-c" d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><g class="fq-w"><path d="M12 7.6l4 2.3v4.4l-4 2.3-4-2.3V9.9z"/><path d="M12 12l4-2.1M12 12v4.6M12 12L8 9.9"/></g></svg><span data-i18n="faq_sec_viewer">The viewer</span></a>
                 <a class="faqx-chip" href="#agent"><svg class="fq-i fq-agent" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14a2 2 0 0 1 2 2V15a2 2 0 0 1-2 2h-7l-4.5 3.5V17H5a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2z"/><circle class="fq-d" cx="8.5" cy="10.8" r="1.1" fill="currentColor" stroke="none"/><circle class="fq-d" style="animation-delay:.15s" cx="12" cy="10.8" r="1.1" fill="currentColor" stroke="none"/><circle class="fq-d" style="animation-delay:.3s" cx="15.5" cy="10.8" r="1.1" fill="currentColor" stroke="none"/></svg><span data-i18n="faq_sec_agent">The AI agent</span></a>
+                <a class="faqx-chip" href="#categories"><svg class="fq-i fq-categories" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect class="fq-big" x="13.5" y="4" width="6.5" height="6.5" rx="1.6" fill="currentColor" fill-opacity=".16"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect class="fq-w" x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/></svg><span data-i18n="faq_sec_categories">Model categories</span></a>
+                <a class="faqx-chip" href="#vehicles"><svg class="fq-i fq-vehicles" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15.4v-3.2l2.2-4.3h8.2l3.7 3.9 3.4.9v2.7z"/><path d="M9.4 7.9v4M5.3 12h12"/><g class="fq-w"><circle cx="7.6" cy="16.6" r="2" fill="currentColor" fill-opacity=".18"/><path d="M7.6 15.2v2.8"/></g><g class="fq-w"><circle cx="16.8" cy="16.6" r="2" fill="currentColor" fill-opacity=".18"/><path d="M16.8 15.2v2.8"/></g></svg><span data-i18n="faq_sec_vehicles">Cars and vehicles</span></a>
                 <a class="faqx-chip" href="#rig"><svg class="fq-i fq-rig" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.6" r="2"/><path d="M12 6.6v6.6M12 13.2l-3.4 7M12 13.2l3.4 7M12 9H7.4"/><g class="fq-arm"><path d="M12 9h4.6"/></g><circle cx="12" cy="9" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="13.2" r="1" fill="currentColor" stroke="none"/></svg><span data-i18n="faq_sec_rig">Rig and skinning</span></a>
                 <a class="faqx-chip" href="#animation"><svg class="fq-i fq-animation" viewBox="0 0 24 24" aria-hidden="true"><circle cx="14.6" cy="4.4" r="1.9"/><path d="M13.6 7.3l-2.1 5.1 3.1 2.7-.9 5.1M11.5 12.4l-3.4 1.4-1.9 3.3M12.9 9.1l3.3 1.9 2.6-1.5"/><path class="fq-m" d="M2.5 8.5h4.5M3.5 12h3"/></svg><span data-i18n="faq_sec_animation">Animation and retargeting</span></a>
                 <a class="faqx-chip" href="#editing"><svg class="fq-i fq-editing" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.3l5 2.9v5.7l-5 2.9-5-2.9V9.2z"/><path d="M9.5 12.1l5-2.9M9.5 12.1v5.7M9.5 12.1L4.5 9.2"/><g class="fq-pen"><path d="M15.2 15.6l5.1-5.1a1.4 1.4 0 0 0-2-2l-5.1 5.1-.6 2.6z" fill="currentColor" fill-opacity=".18"/></g></svg><span data-i18n="faq_sec_editing">Modeling and editing</span></a>
                 <a class="faqx-chip" href="#generation"><svg class="fq-i fq-generation" viewBox="0 0 24 24" aria-hidden="true"><path class="fq-big" d="M10 3.5l1.8 5.7 5.7 1.8-5.7 1.8L10 18.5l-1.8-5.7L2.5 11l5.7-1.8z" fill="currentColor" fill-opacity=".16"/><path class="fq-sm" d="M18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/><path class="fq-sm" style="animation-delay:-.7s" d="M18 3.3l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/></svg><span data-i18n="faq_sec_generation">Generation</span></a>
                 <a class="faqx-chip" href="#channels"><svg class="fq-i fq-channels" viewBox="0 0 24 24" aria-hidden="true"><path class="fq-l1" d="M12 3.5l8.5 4.3L12 12 3.5 7.8z" fill="currentColor" fill-opacity=".16"/><path d="M3.5 12l8.5 4.3 8.5-4.3"/><path class="fq-l3" d="M3.5 16.2l8.5 4.3 8.5-4.3"/></svg><span data-i18n="faq_sec_channels">Textures and channels</span></a>
                 <a class="faqx-chip" href="#export"><svg class="fq-i fq-export" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3"/><g class="fq-dn"><path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5"/></g></svg><span data-i18n="faq_sec_export">Export</span></a>
+                <a class="faqx-chip" href="#site"><svg class="fq-i fq-site" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M3.5 12h17"/><g class="fq-w"><path d="M12 3.4c2.6 2.4 3.8 5.3 3.8 8.6s-1.2 6.2-3.8 8.6c-2.6-2.4-3.8-5.3-3.8-8.6S9.4 5.8 12 3.4z"/></g></svg><span data-i18n="faq_sec_site">Languages and reports</span></a>
             </nav>
         </section>
 
+        <section class="faqx-sec container" id="start" aria-labelledby="start-h">
+            <header><span class="faqx-ico"><svg class="fq-i fq-start" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3"/><g class="fq-l1"><path d="M12 15.5v-11M7.5 9l4.5-4.5L16.5 9"/></g></svg></span><h2 id="start-h" data-i18n="faq_sec_start">Upload and speed</h2></header>
+            <div class="faqx-list">
+                <details class="faqx-q" id="start-inputs">
+                    <summary data-i18n="faq_q_start_inputs">What can I upload?</summary>
+                    <p data-i18n="faq_a_start_inputs">One upload zone on the home page takes a 3D model (GLB, FBX, OBJ or a ZIP with textures), a picture, a picture of a car, or a text description. Every task gets its own page: one task, one viewer, with the agent chat.</p>
+                    <a class="faqx-more" href="/"><span data-i18n="faq_link_upload">Open the upload zone</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                </details>
+                <details class="faqx-q" id="start-speed">
+                    <summary data-i18n="faq_q_start_speed">How fast is the rig?</summary>
+                    <p data-i18n="faq_a_start_speed">The fast rig builds the skeleton and skin from the geometry in seconds, and the animation clips are retargeted at once. The target is a rigged, animated model within one minute from pickup. The quality checks run in the background of the viewer.</p>
+                    <a class="faqx-more" href="/how-it-works"><span data-i18n="faq_link_how">How it works</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                </details>
+                <details class="faqx-q" id="start-confirm">
+                    <summary data-i18n="faq_q_start_confirm">Do I have to confirm the skeleton?</summary>
+                    <p data-i18n="faq_a_start_confirm">No. The viewer offers to confirm the skeleton in the blueprint, but nothing waits for it: the animation is made at once. Confirm or edit the bones only if you want to.</p>
+                </details>
+            </div>
+        </section>
         <section class="faqx-sec container" id="viewer" aria-labelledby="viewer-h">
             <header><span class="faqx-ico"><svg class="fq-i fq-viewer" viewBox="0 0 24 24" aria-hidden="true"><path class="fq-c" d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><g class="fq-w"><path d="M12 7.6l4 2.3v4.4l-4 2.3-4-2.3V9.9z"/><path d="M12 12l4-2.1M12 12v4.6M12 12L8 9.9"/></g></svg></span><h2 id="viewer-h" data-i18n="faq_sec_viewer">The viewer</h2></header>
             <div class="faqx-list">
                 <details class="faqx-q" id="viewer-open">
                     <summary data-i18n="faq_q_viewer_open">What happens after I upload a model?</summary>
-                    <p data-i18n="faq_a_viewer_open">Every task opens in its own 3D viewer. The model appears in a lit scene, the auto-rig runs, and the AI agent joins in the corner. Icons at the top show progress; when the rig is ready, the animations play from the bar at the bottom.</p>
+                    <p data-i18n="faq_a_viewer_open">Every task opens in its own Unity WebGL viewer. It starts on a black scene at once and plays the stages (voxels, erosion, bones, rig) while the mesh loads, then loads the chosen environment scene. When the rig is ready, the animations play from the bar at the bottom, and the AI agent chat sits in the corner.</p>
                 </details>
                 <details class="faqx-q" id="viewer-camera">
                     <summary data-i18n="faq_q_viewer_camera">How do I move the camera?</summary>
-                    <p data-i18n="faq_a_viewer_camera">Drag with the left mouse button to orbit, with the right button or <code>Shift</code> + left to pan. The wheel changes the lens, <code>Ctrl</code> + wheel moves closer. <code>F</code> frames the model, <code>F11</code> goes full screen, <code>F12</code> saves a screenshot and <code>F1</code> lists every key. On a phone, drag with one finger and pinch with two.</p>
+                    <p data-i18n="faq_a_viewer_camera">The right mouse button pans and the middle button orbits; left-drag also orbits, and <code>Shift</code> + left pans. The wheel changes the lens, <code>Ctrl</code> + wheel moves closer. <code>F</code> frames the model, <code>F11</code> goes full screen, <code>F12</code> saves a screenshot and <code>F1</code> lists every key. On a phone, drag with one finger and pinch with two.</p>
+                </details>
+                <details class="faqx-q" id="viewer-presets">
+                    <summary data-i18n="faq_q_viewer_presets">Are there camera presets and hotkeys?</summary>
+                    <p data-i18n="faq_a_viewer_presets">Yes. Camera presets frame the face, elbows, hands, knees, feet and heels, so you can check the joints up close. Every control shows its hotkey as a badge, and <code>F1</code> lists all keys.</p>
                 </details>
                 <details class="faqx-q" id="viewer-tools">
                     <summary data-i18n="faq_q_viewer_tools">What are the icons around the viewer?</summary>
-                    <p data-i18n="faq_a_viewer_tools">Left: model, rig, bones, joint editor, voxels, framing, auto camera and the outliner. Right: the look of the scene. A click switches an icon to its next preset, the last step turns it off, and holding the icon opens its detailed settings. Bottom left: the channels, keys <code>1</code>–<code>0</code>. A right click opens a menu with this FAQ.</p>
+                    <p data-i18n="faq_a_viewer_tools">Left: model, rig, bones, blueprint, voxels, framing, auto camera and the outliner. Right: the look of the scene. A click switches an icon to its next preset, the last step turns it off, and holding the icon opens its detailed settings. Bottom left: the channels, keys <code>1</code>–<code>0</code>. A right click opens a menu with this FAQ.</p>
                 </details>
+                <details class="faqx-q" id="viewer-scenes">
+                    <summary data-i18n="faq_q_viewer_scenes">Which environment scenes are there?</summary>
+                    <p data-i18n="faq_a_viewer_scenes">The viewer loads only the scene it needs, after the rig presentation: for example a cathedral, Sponza, a river glade or jungle ruins. Scenes come with baked lighting, reflection and light probes, and colliders.</p>
+                </details>
+            </div>
+            <div class="faqx-scenes">
+            <figure class="faqx-shot"><img src="/static/images/faq/scene-cathedral.jpg" alt="The cathedral environment scene in the AutoRig viewer" data-i18n-alt="faq_alt_cathedral" width="640" height="360" loading="lazy" decoding="async"><figcaption data-i18n="faq_fig_cathedral">Cathedral</figcaption></figure>
+            <figure class="faqx-shot"><img src="/static/images/faq/scene-sponza.jpg" alt="The Sponza environment scene in the AutoRig viewer" data-i18n-alt="faq_alt_sponza" width="640" height="360" loading="lazy" decoding="async"><figcaption data-i18n="faq_fig_sponza">Sponza</figcaption></figure>
+            <figure class="faqx-shot"><img src="/static/images/faq/scene-river-glade.jpg" alt="The river glade environment scene in the AutoRig viewer" data-i18n-alt="faq_alt_river" width="640" height="360" loading="lazy" decoding="async"><figcaption data-i18n="faq_fig_river">River glade</figcaption></figure>
+            <figure class="faqx-shot"><img src="/static/images/faq/scene-jungle-ruins.jpg" alt="The jungle ruins environment scene in the AutoRig viewer" data-i18n-alt="faq_alt_jungle" width="640" height="360" loading="lazy" decoding="async"><figcaption data-i18n="faq_fig_jungle">Jungle ruins</figcaption></figure>
             </div>
         </section>
         <section class="faqx-sec container" id="agent" aria-labelledby="agent-h">
@@ -418,6 +693,79 @@
                     <summary data-i18n="faq_q_agent_original">Will the agent change my original file?</summary>
                     <p data-i18n="faq_a_agent_original">No. Your upload stays as it is. Edits are saved as new versions on top of it, and material changes can be undone.</p>
                 </details>
+                <details class="faqx-q" id="agent-shared">
+                    <summary data-i18n="faq_q_agent_shared">Is the agent shared with other visitors?</summary>
+                    <p data-i18n="faq_a_agent_shared">Yes. Each task has one agent chat shared by everyone who opens it, not a separate session per visitor. The agent speaks the language of the person who created the task.</p>
+                </details>
+            </div>
+        </section>
+        <section class="faqx-sec container" id="categories" aria-labelledby="categories-h">
+            <header><span class="faqx-ico"><svg class="fq-i fq-categories" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect class="fq-big" x="13.5" y="4" width="6.5" height="6.5" rx="1.6" fill="currentColor" fill-opacity=".16"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect class="fq-w" x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/></svg></span><h2 id="categories-h" data-i18n="faq_sec_categories">Model categories</h2></header>
+            <div class="faqx-cats">
+                <figure class="faqx-cat"><img src="/static/images/faq/cat-biped.webp" alt="Biped character with its skeleton and skin weights" data-i18n-alt="faq_alt_biped" width="320" height="320" loading="lazy" decoding="async"><figcaption data-i18n="faq_cat_biped">Biped</figcaption></figure>
+                <figure class="faqx-cat"><img src="/static/images/faq/cat-quadruped.webp" alt="A rigged wolf, a quadruped" data-i18n-alt="faq_alt_quadruped" width="320" height="320" loading="lazy" decoding="async"><figcaption data-i18n="faq_cat_quadruped">Quadruped</figcaption></figure>
+                <figure class="faqx-cat"><img src="/static/images/faq/cat-equine.webp" alt="A horse: skeleton and skin weights in four views" data-i18n-alt="faq_alt_equine" width="320" height="320" loading="lazy" decoding="async"><figcaption data-i18n="faq_cat_equine">Equine</figcaption></figure>
+                <figure class="faqx-cat"><img src="/static/images/faq/cat-bird.webp" alt="A bird of prey with rigged wings and skin weights" data-i18n-alt="faq_alt_bird" width="320" height="320" loading="lazy" decoding="async"><figcaption data-i18n="faq_cat_bird">Bird</figcaption></figure>
+                <figure class="faqx-cat"><img src="/static/images/faq/cat-hands.webp" alt="A hand with a per-finger skeleton" data-i18n-alt="faq_alt_hands" width="320" height="320" loading="lazy" decoding="async"><figcaption data-i18n="faq_cat_hands">Hands</figcaption></figure>
+                <figure class="faqx-cat"><img src="/static/images/faq/cat-vehicle.webp" alt="A motorhome picture, the input of the vehicle conveyor" data-i18n-alt="faq_alt_vehicle" width="320" height="320" loading="lazy" decoding="async"><figcaption data-i18n="faq_cat_vehicle">Vehicle</figcaption></figure>
+                </div>
+            <div class="faqx-list">
+                <details class="faqx-q" id="cat-which">
+                    <summary data-i18n="faq_q_cat_which">Which kinds of models are rigged?</summary>
+                    <p data-i18n="faq_a_cat_which">Biped (humanoid), quadruped, equine, bird, serpent, monster, multilimb, hands, primate and vehicle. Each category has its own skeleton template, fit and skin rules, clip library and quality checks.</p>
+                </details>
+                <details class="faqx-q" id="cat-detect">
+                    <summary data-i18n="faq_q_cat_detect">How is the category chosen?</summary>
+                    <p data-i18n="faq_a_cat_detect">AutoRig picks it automatically from the shape of the model and what a vision check sees, so you do not choose it. If a model lands in the wrong category, report it with the defect button in the Telegram notice.</p>
+                </details>
+                <details class="faqx-q" id="cat-equine">
+                    <summary data-i18n="faq_q_cat_equine">How are horses and other four-legged animals rigged?</summary>
+                    <p data-i18n="faq_a_cat_equine">Quadrupeds (dogs, cats, bears, cows, pigs) get a quadruped skeleton. Equines (horses, deer, zebras) get a richer one with scapula, elbow, mid-neck and leg profile joints, and planted-hoof gaits: walk, trot and gallop.</p>
+                    <a class="faqx-more" href="/animal-rig"><span data-i18n="faq_link_animals">Animal rigging</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                </details>
+                <details class="faqx-q" id="cat-bird">
+                    <summary data-i18n="faq_q_cat_bird">How are birds and wings rigged?</summary>
+                    <p data-i18n="faq_a_cat_bird">Wings are rigged as wings, never as arms. A bird gets its own skeleton and its own clip library.</p>
+                </details>
+                <details class="faqx-q" id="cat-hands">
+                    <summary data-i18n="faq_q_cat_hands">Can I rig a single hand, gloves or FPS arms?</summary>
+                    <p data-i18n="faq_a_cat_hands">Yes. The hands category rigs a single hand, gloves or first-person arms with per-finger joints and has hand clips of its own.</p>
+                </details>
+                <details class="faqx-q" id="cat-pose">
+                    <summary data-i18n="faq_q_cat_pose">What if the model is not in a T-pose?</summary>
+                    <p data-i18n="faq_a_cat_pose">Any pose works. When a biped stands on one leg or steps, the leg on the floor sets the bone lengths for the other, so both legs get the same lengths. If the file already has a skeleton or an animation, its own rest pose is used first.</p>
+                    <a class="faqx-more" href="/t-pose-rig"><span data-i18n="faq_link_tpose">Any pose, not only a T-pose</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                </details>
+            </div>
+        </section>
+        <section class="faqx-sec container" id="vehicles" aria-labelledby="vehicles-h">
+            <header><span class="faqx-ico"><svg class="fq-i fq-vehicles" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15.4v-3.2l2.2-4.3h8.2l3.7 3.9 3.4.9v2.7z"/><path d="M9.4 7.9v4M5.3 12h12"/><g class="fq-w"><circle cx="7.6" cy="16.6" r="2" fill="currentColor" fill-opacity=".18"/><path d="M7.6 15.2v2.8"/></g><g class="fq-w"><circle cx="16.8" cy="16.6" r="2" fill="currentColor" fill-opacity=".18"/><path d="M16.8 15.2v2.8"/></g></svg></span><h2 id="vehicles-h" data-i18n="faq_sec_vehicles">Cars and vehicles</h2></header>
+            <div class="faqx-figs">
+                <figure class="faqx-shot"><img src="/static/images/faq/veh-input-shell.jpg" alt="A motorhome picture next to its bare body shell" data-i18n-alt="faq_alt_veh_shell" width="1200" height="450" loading="lazy" decoding="async"><figcaption data-i18n="faq_fig_veh_shell">The input picture and the bare shell without wheels, doors, hood and glass</figcaption></figure>
+                <figure class="faqx-shot"><img src="/static/images/faq/veh-parts-sheet.jpg" alt="Parts review sheet of a motorhome: body, suspension, wheel, door, hood, glass, lights, pipe and bumper" data-i18n-alt="faq_alt_veh_parts" width="1200" height="431" loading="lazy" decoding="async"><figcaption data-i18n="faq_fig_veh_parts">A motorhome split into body, suspension and wheel, and its isolated and restored parts</figcaption></figure>
+            </div>
+            <div class="faqx-list">
+                <details class="faqx-q" id="veh-what">
+                    <summary data-i18n="faq_q_veh_what">Can AutoRig rig a car from a picture?</summary>
+                    <p data-i18n="faq_a_veh_what">Yes. Drop a picture of a car on the home page. The vehicle conveyor segments it into body, wheels, doors, hood, trunk, hatches, glass, lights and bumpers, models each part as its own 3D object and assembles a rigged car.</p>
+                    <a class="faqx-more" href="/gallery"><span data-i18n="faq_link_gallery">See rigged models in the gallery</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                </details>
+                <details class="faqx-q" id="veh-parts">
+                    <summary data-i18n="faq_q_veh_parts">How do I review the parts of a car?</summary>
+                    <p data-i18n="faq_a_veh_parts">Every part is isolated and restored as a whole object, and the viewer lists them in the Parts panel. For each part you accept it, redraw it or order it as a 3D model. The body is drawn as a bare shell without doors, hood and glass, so those parts open and move on their own.</p>
+                </details>
+                <details class="faqx-q" id="veh-wheels">
+                    <summary data-i18n="faq_q_veh_wheels">How are wheels, body and doors made correct?</summary>
+                    <p data-i18n="faq_a_veh_wheels">Each wheel is normalised to a cylinder collider that matches its own shape. The body is corrected to left–right symmetry with a free-form deformation (FFD) lattice, and the doors are hinged.</p>
+                </details>
+                <details class="faqx-q" id="veh-driver">
+                    <summary data-i18n="faq_q_veh_driver">Is there an interior and a driver?</summary>
+                    <p data-i18n="faq_a_veh_driver">Yes. The cabin has a seat, a steering wheel, pedals and a gear stick, and a rigged driver is seated at them by IK.</p>
+                </details>
+                <details class="faqx-q" id="veh-paid">
+                    <summary data-i18n="faq_q_veh_paid">Are paid 3D services used for cars?</summary>
+                    <p data-i18n="faq_a_veh_paid">The free farm is the default. Paid 3D clouds (Tripo and Hunyuan cloud) run only when you press their explicit button.</p>
+                </details>
             </div>
         </section>
         <section class="faqx-sec container" id="rig" aria-labelledby="rig-h">
@@ -425,7 +773,7 @@
             <div class="faqx-list">
                 <details class="faqx-q" id="rig-how">
                     <summary data-i18n="faq_q_rig_how">How does auto-rigging work?</summary>
-                    <p data-i18n="faq_a_rig_how">AutoRig reads the body plan of the model, places a skeleton inside the mesh, binds the skin to the bones and tests the deformation on real motions. Humanoids get a standard humanoid skeleton that animation tools and game engines understand.</p>
+                    <p data-i18n="faq_a_rig_how">The fast rig builds the skeleton and skin from the model's geometry in seconds, using the template of its category, and the animation clips are retargeted at once. Quality checks (joint placement, skin tears, limb collisions, numeric deformation QA) run in the background of the viewer. Humanoids get a standard humanoid skeleton that animation tools and game engines understand.</p>
                 </details>
                 <details class="faqx-q" id="rig-inspect">
                     <summary data-i18n="faq_q_rig_inspect">How do I inspect the bones and the skinning?</summary>
@@ -433,11 +781,15 @@
                 </details>
                 <details class="faqx-q" id="rig-fix">
                     <summary data-i18n="faq_q_rig_fix">A joint is in the wrong place. Can I fix it?</summary>
-                    <p data-i18n="faq_a_rig_fix">Yes. Open the joint editor in T- or A-pose, move or rotate the hand or foot handle and save. The correction goes into every animation, including ones added later. You can also ask the agent to check and repair the feet, the knees or a single frame.</p>
+                    <p data-i18n="faq_a_rig_fix">Yes. Press <code>B</code> for Blueprint mode and move the bones; symmetry mirrors your edit to the other side. The rig is rebuilt 15 seconds after your last edit, or at once with the re-rig button, and the correction goes into every animation. You can also ask the agent to check the feet, the knees or a single frame.</p>
+                </details>
+                <details class="faqx-q" id="rig-quality">
+                    <summary data-i18n="faq_q_rig_quality">How is the rig quality kept up?</summary>
+                    <p data-i18n="faq_a_rig_quality">Every model that once broke a rig becomes a regression test, and every engine release has to pass these autotests before it goes live. Rig quality comes before speed.</p>
                 </details>
                 <details class="faqx-q" id="rig-models">
                     <summary data-i18n="faq_q_rig_models">Which models can be rigged?</summary>
-                    <p data-i18n="faq_a_rig_models">Humanoid characters work best: people, stylised and anime characters, heroes in armour. Animals and creatures are rigged with skeletons of their own. Upload GLB, FBX or OBJ, or generate a character.</p>
+                    <p data-i18n="faq_a_rig_models">People, stylised and anime characters, animals, birds, creatures, hands and cars. Upload GLB, FBX, OBJ or a ZIP with textures, or generate a model from a picture or text.</p>
                 </details>
             </div>
         </section>
@@ -446,7 +798,11 @@
             <div class="faqx-list">
                 <details class="faqx-q" id="anim-which">
                     <summary data-i18n="faq_q_anim_which">Which animations do I get?</summary>
-                    <p data-i18n="faq_a_anim_which">A rigged character comes with ready motions such as idle, walk, run, jump, wave, dance, punch and look around. They play from the bar at the bottom of the viewer, and the agent can add more on request.</p>
+                    <p data-i18n="faq_a_anim_which">A rigged character comes with ready motions such as idle, walk, run, jump, wave, dance, punch and look around; every other category has its own clip library, for example walk, trot and gallop for a horse. They play from the bar at the bottom of the viewer, and the agent can add more on request.</p>
+                </details>
+                <details class="faqx-q" id="anim-library">
+                    <summary data-i18n="faq_q_anim_library">Where do the clips come from?</summary>
+                    <p data-i18n="faq_a_anim_library">For each category, reference videos of the gaits and actions are generated and the motion is extracted once. The clips are then retargeted automatically onto every new rig, with a numeric QA check on each clip. Procedural clips are the fallback.</p>
                 </details>
                 <details class="faqx-q" id="anim-retarget">
                     <summary data-i18n="faq_q_anim_retarget">What is retargeting?</summary>
@@ -455,6 +811,10 @@
                 <details class="faqx-q" id="anim-frame">
                     <summary data-i18n="faq_q_anim_frame">Can I fix one bad frame?</summary>
                     <p data-i18n="faq_a_anim_frame">Yes. Press <code>Space</code> to stop the clip, find the frame on the slider and press the wrench: the frame is smoothed with its neighbours and flips in the clip are repaired.</p>
+                </details>
+                <details class="faqx-q" id="anim-custom">
+                    <summary data-i18n="faq_q_anim_custom">Can I add my own clips?</summary>
+                    <p data-i18n="faq_a_anim_custom">Yes. Custom clips can be added in the viewer to the task's clip set, and they are retargeted onto your rig like the built-in ones.</p>
                 </details>
             </div>
         </section>
@@ -480,7 +840,7 @@
             <div class="faqx-list">
                 <details class="faqx-q" id="gen-image">
                     <summary data-i18n="faq_q_gen_image">Can I make a 3D character from a picture?</summary>
-                    <p data-i18n="faq_a_gen_image">Yes. Upload an image of a character: AutoRig builds a 3D model from it, rigs it and opens it in the viewer with animations.</p>
+                    <p data-i18n="faq_a_gen_image">Yes. Upload a picture: AutoRig builds a 3D model from it, rigs it and opens it in the viewer with animations. A picture of a car goes through the vehicle conveyor instead.</p>
                 </details>
                 <details class="faqx-q" id="gen-text">
                     <summary data-i18n="faq_q_gen_text">Can I describe a character in words?</summary>
@@ -509,7 +869,11 @@
                 </details>
                 <details class="faqx-q" id="ch-kept">
                     <summary data-i18n="faq_q_ch_kept">Are my textures kept?</summary>
-                    <p data-i18n="faq_a_ch_kept">Yes. Materials, textures and UVs are kept through rigging, and the PBR maps (base colour, normal, metal-roughness and emission) show up in the channels.</p>
+                    <p data-i18n="faq_a_ch_kept">Yes. A model's own textures are never lost: materials, textures and UVs are kept through rigging, and the PBR maps (base colour, normal, metal-roughness and emission) show up in the channels.</p>
+                </details>
+                <details class="faqx-q" id="ch-auto">
+                    <summary data-i18n="faq_q_ch_auto">What if my model has no textures?</summary>
+                    <p data-i18n="faq_a_ch_auto">It gets PBR textures automatically (albedo, roughness, metallic, normal and emissive), made from the model's own projections. The textured model is what the vision checks and the previews use.</p>
                 </details>
             </div>
         </section>
@@ -518,11 +882,12 @@
             <div class="faqx-list">
                 <details class="faqx-q" id="export-formats">
                     <summary data-i18n="faq_q_export_formats">Which formats can I download?</summary>
-                    <p data-i18n="faq_a_export_formats">The rigged, animated character downloads as GLB and FBX. Static copies are available as OBJ and USDZ.</p>
+                    <p data-i18n="faq_a_export_formats">The rigged, animated model downloads as GLB and FBX. USDZ, a ZIP bundle, a Unity package and a Blender file are offered too, and static copies are available as OBJ.</p>
                 </details>
                 <details class="faqx-q" id="export-engines">
                     <summary data-i18n="faq_q_export_engines">Does it work in Unity, Unreal and Blender?</summary>
-                    <p data-i18n="faq_a_export_engines">Yes. The FBX imports as a humanoid in Unity and as a skeletal mesh in Unreal, and the GLB opens in Blender, three.js and other web viewers.</p>
+                    <p data-i18n="faq_a_export_engines">Yes. The FBX imports as a humanoid in Unity and as a skeletal mesh in Unreal, and the GLB opens in Blender, three.js and other web viewers. A ready Unity package and a Blender file come from the same task.</p>
+                    <a class="faqx-more" href="/blender-plugin"><span data-i18n="faq_link_blender">Blender plugin</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
                 </details>
                 <details class="faqx-q" id="export-rights">
                     <summary data-i18n="faq_q_export_rights">Can I use the result commercially?</summary>
@@ -532,6 +897,19 @@
                     <summary data-i18n="faq_q_export_api">Is there an API?</summary>
                     <p data-i18n="faq_a_export_api">Yes. Tasks can be created, tracked and downloaded through the API; the developer page has the details.</p>
                     <a class="faqx-more" href="/developers"><span data-i18n="faq_link_developers">Developer API</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                </details>
+            </div>
+        </section>
+        <section class="faqx-sec container" id="site" aria-labelledby="site-h">
+            <header><span class="faqx-ico"><svg class="fq-i fq-site" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M3.5 12h17"/><g class="fq-w"><path d="M12 3.4c2.6 2.4 3.8 5.3 3.8 8.6s-1.2 6.2-3.8 8.6c-2.6-2.4-3.8-5.3-3.8-8.6S9.4 5.8 12 3.4z"/></g></svg></span><h2 id="site-h" data-i18n="faq_sec_site">Languages and reports</h2></header>
+            <div class="faqx-list">
+                <details class="faqx-q" id="site-lang">
+                    <summary data-i18n="faq_q_site_lang">Which languages are supported?</summary>
+                    <p data-i18n="faq_a_site_lang">The site is available in English, Russian, Chinese, Hindi and Persian (right to left). English pages have no prefix; the others live under <code>/ru/</code>, <code>/zh/</code>, <code>/hi/</code> and <code>/fa/</code>.</p>
+                </details>
+                <details class="faqx-q" id="site-report">
+                    <summary data-i18n="faq_q_site_report">How do I report a bad rig?</summary>
+                    <p data-i18n="faq_a_site_report">The Telegram notice of a finished task has defect buttons, for example a wrong model transform, a torn mesh after skinning or elbows that are too wide, and you can reply with text too. A report is recorded and checked, and the fix goes into the engine for the whole category, not into one model.</p>
                 </details>
             </div>
         </section>
@@ -550,7 +928,10 @@
                 <a href="/animation-retargeting" class="faqx-rel" data-i18n="footer_retargeting">Animation Retargeting</a>
                 <a href="/image-to-rigged-3d-character" class="faqx-rel" data-i18n="footer_image_to_rig">Image to Rigged Character</a>
                 <a href="/how-it-works" class="faqx-rel" data-i18n="footer_how_it_works">How It Works</a>
+                <a href="/guides" class="faqx-rel" data-i18n="nav_guides">Guides</a>
                 <a href="/gallery" class="faqx-rel" data-i18n="nav_gallery">Gallery</a>
+                <a href="/blender-plugin" class="faqx-rel" data-i18n="nav_blender_plugin">Blender Plugin</a>
+                <a href="/buy-credits" class="faqx-rel" data-i18n="nav_buy">Buy</a>
                 <a href="/developers" class="faqx-rel" data-i18n="nav_api">API</a>
             </nav>
         </section>
@@ -566,6 +947,27 @@
         }
         window.addEventListener('hashchange', openHash);
         openHash();
+        // picture alt texts follow the language (the server translates text, not attributes of images)
+        function alts() {
+            var T = window.I18n;
+            document.querySelectorAll('img[data-i18n-alt]').forEach(function (img) {
+                var k = img.getAttribute('data-i18n-alt');
+                try { if (T && T.has && T.has(k)) img.alt = T.t(k); } catch (e) {}
+            });
+        }
+        // the page text follows the reading direction (Persian) even where the page scope is chrome-only
+        function direction(d) {
+            var main = document.querySelector('main.faqx');
+            var L = window.__AUTORIG_LANG__;
+            d = d || (L && L.dir);
+            if (!main) return;
+            if (d === 'rtl') main.setAttribute('dir', 'rtl'); else main.removeAttribute('dir');
+        }
+        window.addEventListener('languageChanged', function (e) {
+            setTimeout(alts, 0);
+            direction(e && e.detail && e.detail.dir);
+        });
+        window.addEventListener('load', function () { alts(); direction(); });
     })();
     </script>
     <script src="/static/js/header.js?v=7af49a0b78"></script>

@@ -3,22 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Auto Rigging for Characters, Animals & 3D Models | AutoRig</title>
-    <meta name="description" content="AI-assisted rigging for humanoid, animal and non-humanoid 3D models. Upload GLB, FBX or OBJ and export animation-ready results for Unity, Unreal, Blender and web.">
-    <meta name="keywords" content="AI auto rigging, AI character rigging, AI animal rigging, non-humanoid rigging, auto rig online, automatic 3D rigging, AI rigged 3D models, rig FBX online, rig GLB online, OBJ auto rigging, Blender plugin rigging, 3D character rigging AI, AI animation rigging, online character rigger, Mixamo alternative, Unity character rigging, Unreal Engine character rigging, Blender auto rigging, humanoid rigging, animal rigging V2, rigged FBX, rigged GLB, auto skinning 3D model">
+    <title>AutoRig: AI Auto Rigging for Any 3D Model, Animals, Cars</title>
+    <meta name="description" content="Auto rig any 3D model online: characters, animals, horses, birds, hands and cars. Rigged and animated in seconds, in a 3D viewer with an AI agent.">
+    <meta name="keywords" content="AI auto rigging, auto rig online, automatic 3D rigging, 3D model rigging, rig GLB online, rig FBX online, rig OBJ online, animal rigging, horse rigging, bird rigging, hand rigging, car rigging from a picture, image to rigged 3D model, auto skinning, animation retargeting, Blender rigging plugin, Unity character rigging, Unreal Engine character rigging, Mixamo alternative, 3D viewer with AI agent">
+    <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://autorig.online/">
-    
+    <link rel="alternate" hreflang="en" href="https://autorig.online/">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/ru/">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/zh/">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/hi/">
+    <link rel="alternate" hreflang="fa" href="https://autorig.online/fa/">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/">
+
     <!-- Open Graph -->
-    <meta property="og:title" content="AI Auto Rigging for Characters, Animals & 3D Models">
-    <meta property="og:description" content="Upload GLB, FBX, or OBJ models and get AI-assisted rigs for humanoid characters, animals, non-humanoid assets, Blender, Unity, and Unreal Engine.">
+    <meta property="og:title" content="AutoRig: AI Auto Rigging for Any 3D Model, Animals, Cars">
+    <meta property="og:description" content="Auto rig any 3D model online: characters, animals, horses, birds, hands and cars. Rigged and animated in seconds, in a 3D viewer with an AI agent.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online/">
-    <meta property="og:image" content="https://autorig.online/og/site.jpg">
-    <meta property="og:image:secure_url" content="https://autorig.online/og/site.jpg">
+    <meta property="og:image" content="https://autorig.online/static/images/og/home.jpg">
+    <meta property="og:image:secure_url" content="https://autorig.online/static/images/og/home.jpg">
     <meta property="og:image:type" content="image/jpeg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Rigged 3D models made on AutoRig.online">
+    <meta property="og:image:alt" content="AutoRig: a wolf, a horse and a character rigged and animated in the AutoRig viewer">
     <meta property="og:video" content="https://autorig.online/static/videos/home/rigging-demo-preview.mp4">
     <meta property="og:video:secure_url" content="https://autorig.online/static/videos/home/rigging-demo-preview.mp4">
     <meta property="og:video:type" content="video/mp4">
@@ -28,17 +35,80 @@
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="AI Auto Rigging for Characters, Animals & 3D Models">
-    <meta name="twitter:description" content="AI-assisted rigging for humanoid, animal, and non-humanoid 3D models with web and Blender plugin workflows.">
-    <meta name="twitter:image" content="https://autorig.online/og/site.jpg">
-    <meta name="twitter:image:alt" content="Rigged 3D models made on AutoRig.online">
-    
+    <meta name="twitter:title" content="AutoRig: AI Auto Rigging for Any 3D Model, Animals, Cars">
+    <meta name="twitter:description" content="Auto rig any 3D model online: characters, animals, horses, birds, hands and cars. Rigged and animated in seconds, in a 3D viewer with an AI agent.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/home.jpg">
+    <meta name="twitter:image:alt" content="AutoRig: a wolf, a horse and a character rigged and animated in the AutoRig viewer">
+
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="alternate icon" href="/static/images/logo/favicon.svg">
     
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=site-orientation-20260622-1">
+
+    <!-- Page-local styles of the V3 home sections (the shared stylesheet is not touched) -->
+    <style>
+        .hv3-section { margin-top: 2.5rem; }
+        .hv3-panel { padding: clamp(1.25rem, 3vw, 2.25rem); }
+        .hv3-kicker { margin: 0 0 .6rem; color: var(--accent); font-size: .78rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+        .hv3-h2 { margin: 0; max-width: 880px; font-size: clamp(1.6rem, 3.4vw, 2.4rem); line-height: 1.15; }
+        .hv3-h3 { margin: 0; font-size: 1.06rem; line-height: 1.25; }
+        .hv3-lead { max-width: 860px; margin: 1rem 0 0; color: var(--text-secondary); font-size: 1.03rem; line-height: 1.65; }
+        .hv3-text { margin: .6rem 0 0; color: var(--text-secondary); font-size: .94rem; line-height: 1.55; }
+        .hv3-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin: 1.5rem 0 0; padding: 0; list-style: none; counter-reset: hv3step; }
+        .hv3-step { position: relative; min-width: 0; padding: 1.1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); counter-increment: hv3step; }
+        .hv3-step::before { content: counter(hv3step); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-bottom: .7rem; border-radius: 50%; background: var(--accent); color: #fff; font-size: .85rem; font-weight: 800; }
+        .hv3-feats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1.25rem; }
+        .hv3-feat { min-width: 0; padding: 1.1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); }
+        .hv3-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 1rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+        .hv3-cat { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-secondary); scroll-margin-top: 90px; }
+        .hv3-cat-media { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; object-fit: cover; background: var(--media-bg, #1a1a20); }
+        .hv3-cat-media.is-contain { object-fit: contain; }
+        .hv3-cat-body { padding: 1rem 1.1rem 1.15rem; }
+        .hv3-cat-body .hv3-text { margin-top: .45rem; }
+        .hv3-more { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.25rem; }
+        .hv3-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 1.75rem; align-items: start; }
+        .hv3-list { margin: 1.1rem 0 0; padding-inline-start: 1.25rem; color: var(--text-secondary); font-size: .96rem; line-height: 1.55; }
+        .hv3-list li { margin: 0 0 .55rem; padding-inline-start: .25rem; }
+        .hv3-note { margin: 1rem 0 0; padding: .75rem .9rem; border: 1px solid var(--border); border-inline-start: 3px solid var(--accent); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-secondary); font-size: .92rem; line-height: 1.5; }
+        .hv3-figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }
+        .hv3-fig { position: relative; margin: 0; min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); }
+        .hv3-fig img { display: block; width: 100%; height: auto; }
+        .hv3-fig figcaption { padding: .5rem .7rem; color: var(--text-secondary); font-size: .82rem; line-height: 1.35; }
+        .hv3-fig.is-wide { grid-column: 1 / -1; }
+        .hv3-scenes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }
+        .hv3-scene { position: relative; margin: 0; overflow: hidden; border-radius: var(--radius-sm); border: 1px solid var(--border); background: #0a0a0f; }
+        .hv3-scene img { display: block; width: 100%; height: auto; }
+        .hv3-scene figcaption { position: absolute; inset-inline: 0; bottom: 0; padding: 1.4rem .8rem .55rem; background: linear-gradient(to top, rgba(0, 0, 0, .78), transparent); color: #fff; font-size: .85rem; font-weight: 700; }
+        .hv3-links { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.1rem; }
+        .hv3-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; margin: 1.1rem 0 0; padding: 0; list-style: none; }
+        .hv3-chips a { display: inline-flex; align-items: center; min-height: 34px; padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-secondary); color: var(--text-secondary); font-size: .86rem; font-weight: 700; text-decoration: none; }
+        .hv3-chips a:hover, .hv3-chips a:focus-visible { border-color: var(--accent); color: var(--text-primary); }
+        .hv3-faq { margin-top: 1.25rem; display: grid; gap: .6rem; }
+        .hv3-faq details { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); }
+        .hv3-faq summary { display: flex; align-items: center; gap: .75rem; padding: .9rem 1.1rem; cursor: pointer; font-weight: 700; line-height: 1.35; list-style: none; }
+        .hv3-faq summary::-webkit-details-marker { display: none; }
+        .hv3-faq summary::after { content: "+"; margin-inline-start: auto; color: var(--accent); font-size: 1.3rem; line-height: 1; }
+        .hv3-faq details[open] summary::after { content: "\2212"; }
+        .hv3-faq summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .hv3-faq p { margin: 0; padding: 0 1.1rem 1.1rem; color: var(--text-secondary); line-height: 1.6; }
+        @media (max-width: 960px) {
+            .hv3-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .hv3-feats { grid-template-columns: 1fr; }
+            .hv3-split { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 560px) {
+            .hv3-section { margin-top: 1.75rem; }
+            .hv3-steps { grid-template-columns: 1fr; }
+            .hv3-cats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+            .hv3-cat-body { padding: .75rem .8rem .9rem; }
+            .hv3-cat-body .hv3-h3 { font-size: .95rem; }
+            .hv3-cat-body .hv3-text { font-size: .85rem; }
+            .hv3-figs, .hv3-scenes { gap: .6rem; }
+            .hv3-chips { justify-content: flex-start; }
+        }
+    </style>
 
     <script type="importmap">
     {
@@ -48,25 +118,59 @@
     }
     </script>
     
-    <!-- Schema.org SoftwareApplication markup -->
+    <!-- Schema.org markup of the V3 home page -->
     <script type="application/ld+json">
-    {
+{
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "@id": "https://autorig.online/#webpage",
+        "url": "https://autorig.online/",
+        "name": "AutoRig: AI Auto Rigging for Any 3D Model, Animals, Cars",
+        "description": "Auto rig any 3D model online: characters, animals, horses, birds, hands and cars. Rigged and animated in seconds, in a 3D viewer with an AI agent.",
+        "inLanguage": "en",
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "AutoRig.online",
+            "url": "https://autorig.online/"
+        },
+        "primaryImageOfPage": {
+            "@type": "ImageObject",
+            "url": "https://autorig.online/static/images/og/home.jpg",
+            "width": 1200,
+            "height": 630
+        },
+        "about": {
+            "@type": "SoftwareApplication",
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
+        }
+    }
+    </script>
+    <script type="application/ld+json">
+{
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "AutoRig Online",
-        "description": "AI-assisted automatic 3D model rigging service for humanoid characters, animal models, and non-humanoid assets. Upload GLB, FBX, or OBJ files and export rigged, animation-ready results for games, Blender, Unity, Unreal Engine, and web previews.",
-        "url": "https://autorig.online",
-        "applicationCategory": "DeveloperApplication",
+        "description": "AutoRig takes a 3D model, a picture or a picture of a car through one conveyor: a fast rig of the skeleton and skin, animation clips retargeted at once, quality checks in the background, all in a 3D viewer with an AI agent.",
+        "url": "https://autorig.online/",
+        "applicationCategory": "DesignApplication",
         "operatingSystem": "Web Browser",
-        "keywords": "AI auto rigging, AI character rigging, AI animal rigging, non-humanoid rigging, automatic 3D rigging, rig FBX online, rig GLB online, OBJ auto rigging, AI rigged 3D models, game character rigging, animal rigging V2, Blender plugin rigging, Unity character rigging, Unreal Engine character rigging, Blender auto rigging, Mixamo alternative",
+        "inLanguage": [
+            "en",
+            "ru",
+            "zh",
+            "hi",
+            "fa"
+        ],
+        "keywords": "AI auto rigging, auto rig online, automatic 3D rigging, 3D model rigging, rig GLB online, rig FBX online, rig OBJ online, animal rigging, horse rigging, bird rigging, hand rigging, car rigging from a picture, image to rigged 3D model, auto skinning, animation retargeting, Blender rigging plugin, Unity character rigging, Unreal Engine character rigging, Mixamo alternative, 3D viewer with AI agent",
         "about": [
-            "AI character rigging",
-            "animal 3D model rigging",
-            "non-humanoid rigging",
             "automatic 3D model rigging",
-            "online FBX rigging",
-            "GLB animation workflow",
-            "Blender rigging plugin workflow"
+            "humanoid and primate rigging",
+            "quadruped, horse and bird rigging",
+            "hand rigging",
+            "vehicle rigging from a picture",
+            "animation retargeting",
+            "PBR texturing of untextured models"
         ],
         "offers": {
             "@type": "OfferCatalog",
@@ -77,7 +181,7 @@
                     "name": "AutoRig web rigging credits",
                     "url": "https://autorig.online/buy-credits",
                     "priceCurrency": "USD",
-                    "description": "Credits for web-based humanoid, animal, and non-humanoid rigging tasks"
+                    "description": "Credits for web rigging tasks"
                 },
                 {
                     "@type": "Offer",
@@ -89,28 +193,22 @@
             ]
         },
         "featureList": [
-            "AI-assisted humanoid character rigging",
-            "V2 animal and non-humanoid rigging workflows",
-            "Automatic skeleton and skin weight generation",
-            "Built-in animation exports",
-            "GLB, FBX, OBJ support",
-            "Unity and Unreal Engine compatible",
-            "Blender-compatible rigged exports",
-            "Native Blender plugin workflow",
-            "Web-based task preview and downloads",
-            "Browser-based upload workflow"
+            "One upload zone for 3D models, pictures and pictures of cars",
+            "Fast rig of skeleton and skin in seconds",
+            "Animation clips retargeted at once, with numeric QA per clip",
+            "Categories: humanoids, quadrupeds, horses and deer, birds with wings, hands, monsters, serpents, multi-limb creatures, vehicles",
+            "Vehicle conveyor: body, wheels, doors, interior and driver from one picture",
+            "Automatic PBR textures for models without textures",
+            "Unity WebGL viewer with a shared AI agent chat for every task",
+            "Downloads: GLB, FBX, USDZ, ZIP, Unity package, Blender",
+            "Blender plugin and API"
         ],
-        "screenshot": "https://autorig.online/static/images/screenshot.png",
+        "screenshot": "https://autorig.online/static/images/home/scene-cathedral.jpg",
+        "image": "https://autorig.online/static/images/og/home.jpg",
         "author": {
             "@type": "Organization",
-            "name": "AutoRig Online"
-        },
-        "aggregateRating": {
-            "@type": "AggregateRating",
-            "ratingValue": "4.8",
-            "ratingCount": "150",
-            "bestRating": "5",
-            "worstRating": "1"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         }
     }
     </script>
@@ -138,34 +236,74 @@
     }
     </script>
 
-    <!-- FAQ markup for AI rigging search intents -->
+    <!-- FAQ markup: the same questions are visible in the FAQ section -->
     <script type="application/ld+json">
-    {
+{
         "@context": "https://schema.org",
         "@type": "FAQPage",
         "mainEntity": [
             {
                 "@type": "Question",
-                "name": "Can I auto rig characters, animals, and non-humanoid 3D models online?",
+                "name": "Which files can I upload?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Yes. AutoRig.online uses AI-assisted automatic rigging for humanoid characters plus V2 animal and supported non-humanoid model workflows. Upload GLB, FBX, or OBJ files and export animation-ready results."
+                    "text": "A 3D model (GLB, glTF, FBX, OBJ with MTL, or a ZIP with textures), a picture (PNG, JPG, WEBP) or a picture of a car. Files are up to 100 MB. One upload zone takes all of them."
                 }
             },
             {
                 "@type": "Question",
-                "name": "Which 3D formats can I rig with AutoRig.online?",
+                "name": "How long does rigging take?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "You can upload GLB, FBX, or OBJ models for supported humanoid, animal, and non-humanoid rigging workflows and download rigged results for common 3D and game development pipelines."
+                    "text": "The fast rig builds the skeleton and skin in seconds, and the target is a rigged, animated model within one minute from pickup. Quality checks keep running in the background of the viewer, and rig quality comes before speed."
                 }
             },
             {
                 "@type": "Question",
-                "name": "Does AutoRig.online include a Blender workflow?",
+                "name": "Does my model need to be in a T-pose?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Yes. AutoRig.online supports a browser-based upload and preview workflow and also offers a native Blender plugin for creators who want to run the rigging pipeline from inside Blender."
+                    "text": "No. The rig is built from the geometry, in any pose. For a biped with an asymmetric pose, the standing leg sets the bone lengths. If the file already has a skeleton or an animation, its own rest pose is used."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Can AutoRig rig animals, birds, hands and cars?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. Each category has its own skeleton template, skin rules, clip library and quality checks: humanoids and primates, quadrupeds, horses and deer, birds with wings, hands, monsters, serpents, multi-limb creatures and vehicles."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How is a car rigged from a picture?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The picture is segmented into body, wheels, doors, hood, trunk, glass and more. Each part is isolated, restored and modelled as its own 3D object. Wheels become cylinder colliders, doors are hinged and the interior gets a seat, wheel, pedals and gear stick. You review the parts in the viewer. Paid 3D clouds are used only if you press their button."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What can I download?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "GLB, FBX, USDZ, a ZIP, a Unity package and a Blender file. A model's own textures are kept, and a model without textures gets PBR textures automatically."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is there a Blender plugin?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. The native Blender plugin runs the AutoRig workflow from inside Blender, and the API lets you call AutoRig from your own pipeline. The web app needs no installation."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is AutoRig free?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "You get free conversions before you pay, and signing in with Google gives more. Further conversions are sold as credits on the Buy credits page."
                 }
             }
         ]
@@ -191,9 +329,9 @@
             <div class="home-convert-grid">
                 <div class="card convert-form-card">
                 <h1 class="home-convert-title">
-                    <span class="text-gradient" data-i18n="hero_title">Automatic 3D Rigging and Character Generation</span>
+                    <span class="text-gradient" data-i18n="home_hero_title">Auto rig any 3D model in seconds</span>
                 </h1>
-                <p class="home-convert-subtitle" data-i18n="hero_subtitle">Upload a GLB, FBX or OBJ model and get it rigged with animations in minutes - or upload a picture of a character and get a ready 3D model with a full rig for 3 credits.</p>
+                <p class="home-convert-subtitle" data-i18n="home_hero_subtitle">Drop a 3D model, a picture or a picture of a car. AutoRig builds the skeleton and skin, retargets animation clips at once and opens the result in a 3D viewer with an AI agent.</p>
                 <form id="convert-form">
                     <!-- Tabs -->
                     <!-- Upload V3 (owner 2026-10-16): one zone takes everything - a 3D model, a picture, a car picture;
@@ -209,8 +347,8 @@
                         <div class="upload-row">
                             <div class="upload-zone" id="upload-zone">
                                 <img src="/static/images/icons/upload.svg" alt="Upload" class="upload-zone-icon" width="64" height="64">
-                                <div class="upload-zone-title" data-i18n="upload_title">Paste a 3D model, a picture, a car picture or anything</div>
-                                <div class="upload-zone-subtitle" data-i18n="upload_subtitle">drop it here, press Ctrl+V or click to browse: GLB, FBX, OBJ with MTL, glTF, ZIP, PNG / JPG / WEBP · up to 100 MB</div>
+                                <div class="upload-zone-title" data-i18n="home_upload_title">Drop a 3D model, a picture, a picture of a car, or anything</div>
+                                <div class="upload-zone-subtitle" data-i18n="home_upload_subtitle">or press Ctrl+V, or click to browse: GLB, FBX, OBJ with MTL, glTF, ZIP with textures, PNG / JPG / WEBP · up to 100 MB</div>
 
                                 <div class="upload-zone-file hidden" id="file-info">
                                     <span>📄</span>
@@ -259,7 +397,7 @@
                     
                     <!-- T-Pose Notice -->
                     <div class="alert alert-info mt-3">
-                        <span data-i18n="tpose_notice">Models must be in T-Pose for best results</span>
+                        <span data-i18n="home_pose_notice">Any pose works. The rig is built from the geometry of your model, so a T-pose is not required.</span>
                     </div>
                     
                     <!-- Login Hint -->
@@ -272,6 +410,14 @@
                         <span data-i18n="btn_start">Start Rigging</span>
                     </button>
                 </form>
+                <ul class="hv3-chips" aria-label="Rig categories" data-i18n-aria-label="home_chip_label">
+                    <li><a href="#home-cat-biped" data-i18n="home_chip_biped">Humanoids</a></li>
+                    <li><a href="#home-cat-quadruped" data-i18n="home_chip_animals">Animals</a></li>
+                    <li><a href="#home-cat-equine" data-i18n="home_chip_horses">Horses</a></li>
+                    <li><a href="#home-cat-bird" data-i18n="home_chip_birds">Birds</a></li>
+                    <li><a href="#home-cat-hands" data-i18n="home_chip_hands">Hands</a></li>
+                    <li><a href="#home-vehicles" data-i18n="home_chip_vehicles">Cars</a></li>
+                </ul>
                 <div id="convert-form-busy" class="form-busy-overlay hidden" role="status" aria-live="polite" aria-busy="false">
                     <div class="form-busy-inner">
                         <p class="form-busy-text" id="convert-form-busy-text" data-i18n="upload_progress_uploading">Uploading your model…</p>
@@ -284,7 +430,7 @@
                                     <div class="rig-detect-viewer-frame">
                                         <div id="rig-detect-viewer-host" class="rig-detect-viewer-host" aria-hidden="false"></div>
                                         <div id="rig-detect-orientation" class="rig-detect-orientation hidden" aria-label="Model orientation">
-                                            <div class="rig-detect-orientation-copy">Выставите 3д модель лицом к камере, если автоматически этого не произошло</div>
+                                            <div class="rig-detect-orientation-copy" data-i18n="home_orient_copy">Turn the model to face the camera if that did not happen automatically</div>
                                             <div class="rig-detect-orientation-buttons" role="toolbar" aria-label="Rotate model">
                                                 <button type="button" class="rig-detect-orientation-btn" data-rig-rotate-axis="x">X +90</button>
                                                 <button type="button" class="rig-detect-orientation-btn" data-rig-rotate-axis="y">Y +90</button>
@@ -314,10 +460,10 @@
                         <div class="form-busy-tips" id="convert-form-busy-tips">
                             <p class="form-busy-tips-title" data-i18n="upload_busy_tips_title">While you wait</p>
                             <ul class="form-busy-tips-list">
-                                <li data-i18n="upload_busy_tip_1">Characters should have arms at shoulder height, extended to the sides (T-pose).</li>
-                                <li data-i18n="upload_busy_tip_2">Legs should stand about shoulder-width apart.</li>
-                                <li data-i18n="upload_busy_tip_3">Mesh topology should be sufficient for bending at animation hotspots: elbows, knees, fingers, and similar areas.</li>
-                                <li data-i18n="upload_busy_tip_4">Rigging usually takes from about 5 minutes depending on model complexity. Please be patient and relax—the rest runs automatically.</li>
+                                <li data-i18n="home_busy_tip_1">Your task opens in the 3D viewer at once. Voxels, bones and the rig play while the model loads.</li>
+                                <li data-i18n="home_busy_tip_2">The fast rig takes seconds. Animation clips are retargeted onto it right after.</li>
+                                <li data-i18n="home_busy_tip_3">Quality checks of joints, skin tears and limb collisions run in the background of the viewer.</li>
+                                <li data-i18n="home_busy_tip_4">You can confirm or edit the skeleton in the viewer. The animation does not wait for it.</li>
                             </ul>
                         </div>
                     </div>
@@ -368,8 +514,8 @@
             <div class="card" style="padding: 2rem;">
                 <div class="card-header" style="padding: 0; margin-bottom: 1rem; display:flex; align-items:flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
                     <div>
-                        <h3 class="card-title" style="margin: 0;" data-i18n="gallery_title">🎬 Recent Rigged Models</h3>
-                        <p id="gallery-preview-subtitle" style="margin: 0.5rem 0 0 0; color: var(--text-secondary);" data-i18n="gallery_subtitle">7,124+ rigs completed. Loading last 24 hours...</p>
+                        <h2 class="card-title" style="margin: 0;" data-i18n="home_gallery_title">Recently rigged and animated models</h2>
+                        <p id="gallery-preview-subtitle" style="margin: 0.5rem 0 0 0; color: var(--text-secondary);" data-i18n="home_gallery_subtitle">Fresh results from the last 24 hours.</p>
                     </div>
                     <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.75rem; flex-wrap:wrap;">
                         <label for="gallery-preview-rig-type" style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="gallery_rig_type_label">Rig type:</label>
@@ -440,34 +586,228 @@
             </div>
         </section>
 
-        <!-- Pipeline Content -->
-        <section class="container home-pipeline" aria-labelledby="ai-rigging-title">
-            <div class="card home-pipeline-panel">
-                <p class="home-pipeline-kicker" data-i18n="home_pipeline_kicker">V2 rigging pipeline</p>
-                <h2 id="ai-rigging-title" class="home-pipeline-title" data-i18n="home_pipeline_title">AI auto rigging for characters, animals, and non-humanoid 3D models</h2>
-                <p class="home-pipeline-lead" data-i18n="home_pipeline_lead">
-                    AutoRig.online is an AI-assisted rigging pipeline for humanoid characters, animal models, and non-humanoid assets. Upload GLB, FBX, or OBJ files, preview the result online, and export rigged, animation-ready models for Unity, Unreal Engine, Blender, web viewers, and production workflows.
-                </p>
-                <div class="home-pipeline-tags" aria-label="Supported AutoRig.online workflows">
-                    <span data-i18n="home_pipeline_tag_humanoid">Humanoid characters</span>
-                    <span data-i18n="home_pipeline_tag_animals">Animal V2 rigging</span>
-                    <span data-i18n="home_pipeline_tag_nonhumanoid">Non-humanoid models</span>
-                    <span data-i18n="home_pipeline_tag_blender">Blender plugin workflow</span>
+        <!-- V3 conveyor: one input, rig in seconds, clips at once, checks in the background -->
+        <section class="container home-pipeline hv3-section" aria-labelledby="ai-rigging-title">
+            <div class="card hv3-panel">
+                <p class="hv3-kicker" data-i18n="home_v3_kicker">One conveyor, any input</p>
+                <h2 id="ai-rigging-title" class="hv3-h2" data-i18n="home_v3_title">Rigged and animated in seconds, for any kind of 3D model</h2>
+                <p class="hv3-lead" data-i18n="home_v3_lead">AutoRig takes a 3D model, a picture or a picture of a car through one conveyor. The fast rig builds the skeleton and skin from the geometry, animation clips are retargeted at once, and quality checks run in the background while you look at the result.</p>
+                <ol class="hv3-steps" aria-label="Pipeline steps" data-i18n-aria-label="home_step_label">
+                    <li class="hv3-step">
+                        <h3 class="hv3-h3" data-i18n="home_step_1_title">Drop anything</h3>
+                        <p class="hv3-text" data-i18n="home_step_1_desc">A model (GLB, FBX, OBJ, ZIP), a picture or a picture of a car. One upload zone, one task, one viewer.</p>
+                    </li>
+                    <li class="hv3-step">
+                        <h3 class="hv3-h3" data-i18n="home_step_2_title">Fast rig</h3>
+                        <p class="hv3-text" data-i18n="home_step_2_desc">The skeleton and skin are built from the geometry in seconds. The target is a rigged model within one minute from pickup.</p>
+                    </li>
+                    <li class="hv3-step">
+                        <h3 class="hv3-h3" data-i18n="home_step_3_title">Animated at once</h3>
+                        <p class="hv3-text" data-i18n="home_step_3_desc">Clips from the animation library of your model category are retargeted onto the rig, with a numeric check for every clip.</p>
+                    </li>
+                    <li class="hv3-step">
+                        <h3 class="hv3-h3" data-i18n="home_step_4_title">Checked while you look</h3>
+                        <p class="hv3-text" data-i18n="home_step_4_desc">Joint placement, skin tears and limb collisions are checked in the background of the viewer. Rig quality comes before speed.</p>
+                    </li>
+                </ol>
+                <div class="hv3-feats">
+                    <article class="hv3-feat">
+                        <h3 class="hv3-h3" data-i18n="home_feat_1_title">Any pose, no T-pose step</h3>
+                        <p class="hv3-text" data-i18n="home_feat_1_desc">When the legs of a biped stand apart, the standing leg sets the bone lengths. If the file already holds a skeleton or an animation, its own rest pose is used.</p>
+                    </article>
+                    <article class="hv3-feat">
+                        <h3 class="hv3-h3" data-i18n="home_feat_2_title">Textures stay with the model</h3>
+                        <p class="hv3-text" data-i18n="home_feat_2_desc">A model&#x27;s own textures are never lost. A model without textures gets PBR textures automatically: albedo, roughness, metallic, normal and emissive.</p>
+                    </article>
+                    <article class="hv3-feat">
+                        <h3 class="hv3-h3" data-i18n="home_feat_3_title">Web, Blender plugin and API</h3>
+                        <p class="hv3-text" data-i18n="home_feat_3_desc">Work in the browser, run the AutoRig workflow from inside Blender with the plugin, or call it from your own pipeline through the API.</p>
+                    </article>
                 </div>
-                <div class="home-pipeline-grid">
-                    <article class="home-pipeline-feature">
-                        <h3 data-i18n="home_pipeline_feature_1_title">Humanoid and animal rigging</h3>
-                        <p data-i18n="home_pipeline_feature_1_desc">Generate skeletons, skin weights, and animation-ready rigs for characters, quadrupeds, creatures, and supported animal presets without manual bone placement.</p>
-                    </article>
-                    <article class="home-pipeline-feature">
-                        <h3 data-i18n="home_pipeline_feature_2_title">GLB, FBX, and OBJ workflow</h3>
-                        <p data-i18n="home_pipeline_feature_2_desc">Process common 3D formats online, preview rigging results in the browser, and export files for Unity, Unreal Engine, Blender, and web viewers.</p>
-                    </article>
-                    <article class="home-pipeline-feature">
-                        <h3 data-i18n="home_pipeline_feature_3_title">Blender plugin and built-in animations</h3>
-                        <p data-i18n="home_pipeline_feature_3_desc">Use the web app for uploads and task previews, or move the AutoRig workflow into Blender with the native plugin, presets, and animation-focused exports.</p>
-                    </article>
+            </div>
+        </section>
+
+        <!-- Categories -->
+        <section class="container hv3-section" id="home-categories" aria-labelledby="home-cat-title">
+            <div class="card hv3-panel">
+                <h2 id="home-cat-title" class="hv3-h2" data-i18n="home_cat_title">Every category has its own rig</h2>
+                <p class="hv3-lead" data-i18n="home_cat_lead">AutoRig detects the category and applies its skeleton template, fit rules, skin rules, clip library and quality checks.</p>
+                <ul class="hv3-cats">
+                    <li class="hv3-cat" id="home-cat-biped">
+                        <img class="hv3-cat-media" src="/static/images/home/cat-biped.jpg" alt="A humanoid character in a T-pose, rigged on AutoRig" width="400" height="500" loading="lazy" decoding="async">
+                        <div class="hv3-cat-body">
+                            <h3 class="hv3-h3" data-i18n="home_cat_biped_title">Humanoids and primates</h3>
+                            <p class="hv3-text" data-i18n="home_cat_biped_desc">A full skeleton with fingers, for any pose. Animation clips are retargeted onto it at once.</p>
+                        </div>
+                    </li>
+                    <li class="hv3-cat" id="home-cat-quadruped">
+                        <img class="hv3-cat-media" src="/static/images/home/cat-quadruped.jpg" alt="A wolf rigged and animated on AutoRig" width="400" height="500" loading="lazy" decoding="async">
+                        <div class="hv3-cat-body">
+                            <h3 class="hv3-h3" data-i18n="home_cat_quadruped_title">Quadrupeds</h3>
+                            <p class="hv3-text" data-i18n="home_cat_quadruped_desc">Dogs, cats, bears, cows, pigs and similar animals, with their own clip library.</p>
+                        </div>
+                    </li>
+                    <li class="hv3-cat" id="home-cat-equine">
+                        <img class="hv3-cat-media is-contain" style="--media-bg:#1a1a20" src="/static/images/home/cat-equine.gif" alt="Gallop clip frames of a rigged horse: front, side and top views" width="300" height="307" loading="lazy" decoding="async">
+                        <div class="hv3-cat-body">
+                            <h3 class="hv3-h3" data-i18n="home_cat_equine_title">Horses, deer and zebras</h3>
+                            <p class="hv3-text" data-i18n="home_cat_equine_desc">Scapula, elbow, mid-neck and leg-profile joints, with planted-hoof walk, trot and gallop.</p>
+                        </div>
+                    </li>
+                    <li class="hv3-cat" id="home-cat-bird">
+                        <img class="hv3-cat-media is-contain" style="--media-bg:#1a1a20" src="/static/images/home/cat-bird.gif" alt="Wing clip frames of a rigged bird of prey: front, side and top views" width="300" height="307" loading="lazy" decoding="async">
+                        <div class="hv3-cat-body">
+                            <h3 class="hv3-h3" data-i18n="home_cat_bird_title">Birds and wings</h3>
+                            <p class="hv3-text" data-i18n="home_cat_bird_desc">Wings are rigged as wings, never as arms.</p>
+                        </div>
+                    </li>
+                    <li class="hv3-cat" id="home-cat-hands">
+                        <img class="hv3-cat-media is-contain" style="--media-bg:#1a1a20" src="/static/images/home/cat-hands.gif" alt="Finger clip frames of a rigged human hand: front, side and top views" width="300" height="307" loading="lazy" decoding="async">
+                        <div class="hv3-cat-body">
+                            <h3 class="hv3-h3" data-i18n="home_cat_hands_title">Hands and gloves</h3>
+                            <p class="hv3-text" data-i18n="home_cat_hands_desc">A single hand, a glove or FPS arms: per-finger joints and hand clips.</p>
+                        </div>
+                    </li>
+                    <li class="hv3-cat" id="home-vehicles-card">
+                        <img class="hv3-cat-media is-contain" style="--media-bg:#e3e3e3" src="/static/images/home/cat-vehicle.jpg" alt="A motorhome shell with the wheels and openables removed, made by the vehicle conveyor" width="400" height="300" loading="lazy" decoding="async">
+                        <div class="hv3-cat-body">
+                            <h3 class="hv3-h3" data-i18n="home_cat_vehicle_title">Cars and vehicles</h3>
+                            <p class="hv3-text" data-i18n="home_cat_vehicle_desc">From one picture: the body, wheels, doors and interior become separate rigged parts.</p>
+                        </div>
+                    </li>
+                    <li class="hv3-cat" id="home-cat-monster">
+                        <img class="hv3-cat-media" src="/static/images/home/cat-monster.jpg" alt="A monster creature rigged on AutoRig" width="400" height="500" loading="lazy" decoding="async">
+                        <div class="hv3-cat-body">
+                            <h3 class="hv3-h3" data-i18n="home_cat_monster_title">Monsters, serpents, multi-limb</h3>
+                            <p class="hv3-text" data-i18n="home_cat_monster_desc">Their own templates for bodies that are not a person or a horse.</p>
+                        </div>
+                    </li>
+                </ul>
+                <div class="hv3-more">
+                    <a class="btn btn-ghost" href="/animal-rig" data-i18n="footer_animal_rig">Animal Rigging</a>
+                    <a class="btn btn-ghost" href="/how-it-works" data-i18n="footer_how_it_works">How It Works</a>
                 </div>
+            </div>
+        </section>
+
+        <!-- Vehicles -->
+        <section class="container hv3-section" id="home-vehicles" aria-labelledby="home-veh-title">
+            <div class="card hv3-panel">
+                <div class="hv3-split">
+                    <div>
+                        <p class="hv3-kicker" data-i18n="home_veh_kicker">Cars are rigged too</p>
+                        <h2 id="home-veh-title" class="hv3-h2" data-i18n="home_veh_title">Rig a car from one picture</h2>
+                        <p class="hv3-lead" data-i18n="home_veh_lead">The vehicle conveyor splits a picture of a car into parts, models every part as its own 3D object and assembles a rigged car.</p>
+                        <ol class="hv3-list">
+                        <li data-i18n="home_veh_1">Segmentation finds the body, wheels, doors, hood, trunk, hatches, glass, lights and bumpers.</li>
+                        <li data-i18n="home_veh_2">Every part is isolated and restored as a whole object. The body shell is drawn without doors and glass.</li>
+                        <li data-i18n="home_veh_3">You review the parts in the viewer: accept, redraw or order a part as a 3D model.</li>
+                        <li data-i18n="home_veh_4">Wheels become cylinder colliders that match their shape, and the body is corrected to left-right symmetry.</li>
+                        <li data-i18n="home_veh_5">Doors are hinged. The interior has a seat, a steering wheel, pedals and a gear stick.</li>
+                        <li data-i18n="home_veh_6">A rigged driver is seated at the wheel by inverse kinematics.</li>
+                        </ol>
+                        <p class="hv3-note" data-i18n="home_veh_note">The free farm is the default. A paid 3D cloud (Tripo, Hunyuan cloud) is used only when you press its button.</p>
+                    </div>
+                    <div class="hv3-figs">
+                        <figure class="hv3-fig">
+                            <img src="/static/images/home/vehicle-input.jpg" alt="Input picture of a motorhome for the vehicle conveyor" width="800" height="600" loading="lazy" decoding="async">
+                            <figcaption data-i18n="home_veh_fig_1">The input picture</figcaption>
+                        </figure>
+                        <figure class="hv3-fig">
+                            <img src="/static/images/home/vehicle-parts-map.jpg" alt="Object segmentation map of the motorhome, one colour per object" width="800" height="600" loading="lazy" decoding="async">
+                            <figcaption data-i18n="home_veh_fig_2">Segmentation: one colour per object</figcaption>
+                        </figure>
+                        <figure class="hv3-fig is-wide">
+                            <img src="/static/images/home/vehicle-isolated-sheet.jpg" alt="The motorhome body, suspension, wheel and isolated parts: door, hood, glass, light, pipe, bumper" width="1200" height="431" loading="lazy" decoding="async">
+                            <figcaption data-i18n="home_veh_fig_3">Body, suspension, wheel and the isolated parts</figcaption>
+                        </figure>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Viewer -->
+        <section class="container hv3-section" id="home-viewer" aria-labelledby="home-view-title">
+            <div class="card hv3-panel">
+                <div class="hv3-split">
+                    <div>
+                        <h2 id="home-view-title" class="hv3-h2" data-i18n="home_view_title">One task, one viewer</h2>
+                        <p class="hv3-lead" data-i18n="home_view_lead">Every task opens in the Unity WebGL viewer with an AI agent chat. It opens on a black scene at once, plays the stages while the model loads, then loads the environment scene.</p>
+                        <ul class="hv3-list">
+                        <li data-i18n="home_view_1">Blueprint mode (B) edits bones with symmetry. The rig is rebuilt 15 s after the last edit, or by the button.</li>
+                        <li data-i18n="home_view_2">Camera presets for face, elbows, hands, knees, feet and heels. Right mouse pans, middle mouse orbits.</li>
+                        <li data-i18n="home_view_3">One shared agent chat per task, answering in the language of the person who created the task.</li>
+                        <li data-i18n="home_view_4">Downloads: GLB, FBX, USDZ, ZIP, Unity package and Blender.</li>
+                        </ul>
+                    </div>
+                    <div class="hv3-scenes" role="group" aria-label="Environment scenes of the viewer" data-i18n-aria-label="home_scene_label">
+                    <figure class="hv3-scene">
+                        <img src="/static/images/home/scene-cathedral.jpg" alt="The Cathedral environment scene of the AutoRig viewer" width="800" height="450" loading="lazy" decoding="async">
+                        <figcaption data-i18n="home_scene_cathedral">Cathedral</figcaption>
+                    </figure>
+                    <figure class="hv3-scene">
+                        <img src="/static/images/home/scene-sponza.jpg" alt="The Sponza environment scene of the AutoRig viewer" width="800" height="450" loading="lazy" decoding="async">
+                        <figcaption data-i18n="home_scene_sponza">Sponza</figcaption>
+                    </figure>
+                    <figure class="hv3-scene">
+                        <img src="/static/images/home/scene-river-glade.jpg" alt="The river glade environment scene of the AutoRig viewer" width="800" height="450" loading="lazy" decoding="async">
+                        <figcaption data-i18n="home_scene_river">River glade</figcaption>
+                    </figure>
+                    <figure class="hv3-scene">
+                        <img src="/static/images/home/scene-jungle-ruins.jpg" alt="The jungle ruins environment scene of the AutoRig viewer" width="800" height="450" loading="lazy" decoding="async">
+                        <figcaption data-i18n="home_scene_jungle">Jungle ruins</figcaption>
+                    </figure>
+                    </div>
+                </div>
+                <div class="hv3-links">
+                    <a class="btn btn-ghost" href="/how-it-works" data-i18n="footer_how_it_works">How It Works</a>
+                    <a class="btn btn-ghost" href="/animal-rig" data-i18n="footer_animal_rig">Animal Rigging</a>
+                    <a class="btn btn-ghost" href="/guides" data-i18n="nav_guides">Guides</a>
+                    <a class="btn btn-ghost" href="/gallery" data-i18n="nav_gallery">Gallery</a>
+                    <a class="btn btn-ghost" href="/blender-plugin" data-i18n="nav_blender_plugin">Blender Plugin</a>
+                    <a class="btn btn-ghost" href="/developers" data-i18n="nav_api">API</a>
+                    <a class="btn btn-ghost" href="/faq" data-i18n="footer_faq">FAQ</a>
+                    <a class="btn btn-ghost" href="/buy-credits" data-i18n="nav_buy">Buy</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAQ (the same questions are in the FAQPage JSON-LD) -->
+        <section class="container-sm hv3-section" id="home-faq" aria-labelledby="home-faq-title">
+            <h2 id="home-faq-title" class="hv3-h2" data-i18n="home_faq_title">Questions and answers</h2>
+            <div class="hv3-faq">
+                    <details>
+                        <summary data-i18n="home_faq_1_q">Which files can I upload?</summary>
+                        <p data-i18n="home_faq_1_a">A 3D model (GLB, glTF, FBX, OBJ with MTL, or a ZIP with textures), a picture (PNG, JPG, WEBP) or a picture of a car. Files are up to 100 MB. One upload zone takes all of them.</p>
+                    </details>
+                    <details>
+                        <summary data-i18n="home_faq_2_q">How long does rigging take?</summary>
+                        <p data-i18n="home_faq_2_a">The fast rig builds the skeleton and skin in seconds, and the target is a rigged, animated model within one minute from pickup. Quality checks keep running in the background of the viewer, and rig quality comes before speed.</p>
+                    </details>
+                    <details>
+                        <summary data-i18n="home_faq_3_q">Does my model need to be in a T-pose?</summary>
+                        <p data-i18n="home_faq_3_a">No. The rig is built from the geometry, in any pose. For a biped with an asymmetric pose, the standing leg sets the bone lengths. If the file already has a skeleton or an animation, its own rest pose is used.</p>
+                    </details>
+                    <details>
+                        <summary data-i18n="home_faq_4_q">Can AutoRig rig animals, birds, hands and cars?</summary>
+                        <p data-i18n="home_faq_4_a">Yes. Each category has its own skeleton template, skin rules, clip library and quality checks: humanoids and primates, quadrupeds, horses and deer, birds with wings, hands, monsters, serpents, multi-limb creatures and vehicles.</p>
+                    </details>
+                    <details>
+                        <summary data-i18n="home_faq_5_q">How is a car rigged from a picture?</summary>
+                        <p data-i18n="home_faq_5_a">The picture is segmented into body, wheels, doors, hood, trunk, glass and more. Each part is isolated, restored and modelled as its own 3D object. Wheels become cylinder colliders, doors are hinged and the interior gets a seat, wheel, pedals and gear stick. You review the parts in the viewer. Paid 3D clouds are used only if you press their button.</p>
+                    </details>
+                    <details>
+                        <summary data-i18n="home_faq_6_q">What can I download?</summary>
+                        <p data-i18n="home_faq_6_a">GLB, FBX, USDZ, a ZIP, a Unity package and a Blender file. A model&#x27;s own textures are kept, and a model without textures gets PBR textures automatically.</p>
+                    </details>
+                    <details>
+                        <summary data-i18n="home_faq_7_q">Is there a Blender plugin?</summary>
+                        <p data-i18n="home_faq_7_a">Yes. The native Blender plugin runs the AutoRig workflow from inside Blender, and the API lets you call AutoRig from your own pipeline. The web app needs no installation.</p>
+                    </details>
+                    <details>
+                        <summary data-i18n="home_faq_8_q">Is AutoRig free?</summary>
+                        <p data-i18n="home_faq_8_a">You get free conversions before you pay, and signing in with Google gives more. Further conversions are sold as credits on the Buy credits page.</p>
+                    </details>
             </div>
         </section>
     </main>
