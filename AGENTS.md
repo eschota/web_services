@@ -788,6 +788,20 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   masks_detect` holds the list `VEHICLE_MASKS_URLS`, checks health, and spreads requests over the boxes (least busy
   first, the 4090 one of many); the fleet API shows `masks` per box in `services_object`. Corpus runs and benches are
   spread over the boxes and the report names the box per picture.
+* **Openables are a contract class under special control** (owner, 2026-10-15 ~22:50 UTC: «сделай чтобы сегментатор
+  анализатор отдельно искал еще кроме дверей и стекол капоты и дверцы как у автобусов сбоку открывающиеся. чтобы все
+  эти элементы были на особом контроле, добавляй эти элементы в контракт рига автомобилей, чтобы они были везде в
+  статистике и всё такое»):
+  * the kinds: `door` (every passenger door), `window` (glass), `hood` (bonnet / engine cover), `trunk` (trunk lid /
+    tailgate / rear hatch), `hatch` (a side hatch that opens: bus luggage bays, service panels, cargo doors), plus
+    `roof_hatch` when present; the Vision inventory counts each kind first, the segmentation (SAM / hybrid) looks for
+    each one by name and places every instance (left/right, front/rear, 1..n);
+  * every stage reports them: `objects.json` rows carry `openable: true` and `kind`; `seg.json` / `parts.json` hold
+    `openables {kind: {expected, found, missing, iou_sam}}`; the DEV caption of every segmentation says «двери 2/2,
+    стёкла 4/4, капот 1/1, багажник 1/1, люки 0/0»; a missing or unconfirmed openable sends the run to review;
+  * the vehicle rig contract (`vehicle/rig.json`, `autorig.mt.rig/vehicle-1`, and `wheels/rig.json`) lists the
+    openables with their masks, hinge (axis, side, travel) and status, as `vehicle_doors.py` builds them; the corpus
+    tables, the triage list, the fleet / autotest statistics and the category handoff count them per kind.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
