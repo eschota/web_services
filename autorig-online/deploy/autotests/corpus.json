@@ -16571,10 +16571,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -16597,10 +16593,6 @@
        ">=",
        10
       ]
-     },
-     "xfail": {
-      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -16633,11 +16625,7 @@
        1
       ]
      },
-     "owner": "Anim stand · V3",
-     "xfail": {
-      "reason": "Orientation V3 fix is in the gate queue; the stand runs on the rig as production builds it until it installs",
-      "owner": "Orientation · V3"
-     }
+     "owner": "Anim stand · V3"
     }
    ]
   },
@@ -16667,10 +16655,6 @@
        ">=",
        20
       ]
-     },
-     "xfail": {
-      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -16693,10 +16677,6 @@
        ">=",
        5
       ]
-     },
-     "xfail": {
-      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
-      "owner": "Orientation · V3"
      }
     },
     {
@@ -16751,11 +16731,7 @@
        1
       ]
      },
-     "owner": "Anim stand · V3",
-     "xfail": {
-      "reason": "Orientation V3 fix is in the gate queue; the stand runs on the rig as production builds it until it installs",
-      "owner": "Orientation · V3"
-     }
+     "owner": "Anim stand · V3"
     }
    ]
   },
