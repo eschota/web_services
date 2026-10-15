@@ -888,6 +888,28 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   `cloud.enabled` on with the daily credit cap, caller owner, LowPoly + PBR textures); each job's cost is written to
   its ledger and reported; two assemblies A (Tripo) / B (Hunyuan) are built over the picture and shown side by side
   in DEV and as an A/B toggle in the task viewer. The free farm stays the default for everything else.
+* **Plan B: one exploded-parts edit, the GPU analyser counts the islands, each island isolated, checked and
+  upscaled, then shown for approval** (owner, 2026-10-16 ~09:50 UTC, with his exploded-parts prompt for the rusty
+  monster pickup: «используй этот промпт на первом входном изображении авто, дай мне результаты каждого, на аутпут
+  повесь гпу быстрый анализатор, который отличает объекты, чтобы нашёл все колеса, двери, капоты, корпуса бамперы,
+  короче всё для машины и посчитал и выдал в таблицу и в промпт, сразу на основе первого изображения а для
+  редактирования использовать как базу этот промпт, то есть задача получить за 1 эдит изображения - все нужные объекты
+  для генерации, потом обязательно надо изолировать каждую и проверить что она действительно изолирована и апскейлить
+  всё в 2 раза минимум с файном деталей, а потом сразу показывать мне на утверждение это будет альтернативный план
+  работы конвеера тачек под названием План Б»):
+  * `mt/vehicle_plan_b.py`, stages `inventory → explode → analyse → islands → upscale → sheet`; the base prompt is
+    the owner's text (kept verbatim in `docs/vehicle-plan-b-prompt.md`), parameterised only by what the GPU analyser
+    (GroundingDINO + SAM2 on the mask service) counted on the FIRST input picture: the vehicle's identity line, the
+    number of doors, hoods, equipment assemblies, wheels and axles, so the prompt names exactly the islands to draw;
+  * one Qwen-image edit on the original input picture, tall 3:4 canvas, grey studio background; the analyser runs on
+    the output and returns the table (kind, count, bbox, score) against the expected island list; a miscount feeds a
+    fix instruction back into the prompt (bounded attempts);
+  * every island = one connected non-background component; the isolation check: a clear background moat around it,
+    one component per crop, nothing touching; each island is classified by the analyser and saved as its own picture;
+  * every island is upscaled at least 2× with detail refinement on the farm (the installed image stack; no paid API);
+  * the results of every stage (explode picture, table, islands grid, upscaled grid) go to DEV for the owner's
+    approval; Plan B runs beside the main conveyor (canon → cluster → cut → split → isolate → restore) and is compared
+    with it on the same vehicles.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
