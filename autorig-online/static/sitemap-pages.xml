@@ -31,21 +31,6 @@
   </url>
 
   <url>
-    <loc>https://autorig.online/animal-rig</loc>
-    <lastmod>2026-10-16</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.88</priority>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/guides</loc>
-    <lastmod>2026-10-16</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-
-  <url>
     <loc>https://autorig.online/buy-credits</loc>
     <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
@@ -56,22 +41,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/buy-credits"/>
     <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/buy-credits"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/buy-credits"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/blender-plugin</loc>
-    <lastmod>2026-10-16</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/developers</loc>
-    <lastmod>2026-10-16</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.65</priority>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
   </url>
 
   <url>
@@ -94,8 +63,6 @@
     <changefreq>monthly</changefreq>
     <priority>0.55</priority>
   </url>
-
-  <!-- How It Works -->
   <url>
     <loc>https://autorig.online/how-it-works</loc>
     <lastmod>2026-10-16</lastmod>
@@ -107,13 +74,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/how-it-works"/>
     <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/how-it-works"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/faq</loc>
-    <lastmod>2026-10-16</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
   </url>
 
   <url>
@@ -129,8 +89,6 @@
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
-
-  <!-- Format-specific landing pages -->
   <url>
     <loc>https://autorig.online/glb-auto-rig</loc>
     <lastmod>2026-10-16</lastmod>
@@ -151,15 +109,6 @@
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <url>
-    <loc>https://autorig.online/t-pose-rig</loc>
-    <lastmod>2026-10-16</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-
-  <!-- Mixamo Alternative (4 languages) -->
   <url>
     <loc>https://autorig.online/mixamo-alternative</loc>
     <lastmod>2025-01-03</lastmod>
@@ -207,8 +156,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/mixamo-alternative-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/mixamo-alternative"/>
   </url>
-
-  <!-- Rig GLB for Unity (4 languages) -->
   <url>
     <loc>https://autorig.online/rig-glb-unity</loc>
     <lastmod>2026-01-01</lastmod>
@@ -256,8 +203,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/rig-glb-unity-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rig-glb-unity"/>
   </url>
-
-  <!-- Rig FBX for Unreal (4 languages) -->
   <url>
     <loc>https://autorig.online/rig-fbx-unreal</loc>
     <lastmod>2026-01-01</lastmod>
@@ -305,8 +250,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/rig-fbx-unreal-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rig-fbx-unreal"/>
   </url>
-
-  <!-- GLB vs FBX Comparison (4 languages) -->
   <url>
     <loc>https://autorig.online/glb-vs-fbx</loc>
     <lastmod>2026-01-03</lastmod>
@@ -354,8 +297,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/glb-vs-fbx-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/glb-vs-fbx"/>
   </url>
-
-  <!-- T-pose vs A-pose Comparison (4 languages) -->
   <url>
     <loc>https://autorig.online/t-pose-vs-a-pose</loc>
     <lastmod>2026-01-01</lastmod>
@@ -403,8 +344,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/t-pose-vs-a-pose-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-vs-a-pose"/>
   </url>
-
-  <!-- Animation Retargeting (4 languages) -->
   <url>
     <loc>https://autorig.online/animation-retargeting</loc>
     <lastmod>2026-01-01</lastmod>
@@ -452,8 +391,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/animation-retargeting-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animation-retargeting"/>
   </url>
-
-  <!-- Face rig & animation guide (4 languages) -->
   <url>
     <loc>https://autorig.online/face-rig-animation</loc>
     <lastmod>2026-03-24</lastmod>
@@ -501,8 +438,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation"/>
   </url>
-
-  <!-- Auto-rig OBJ (4 languages) -->
   <url>
     <loc>https://autorig.online/auto-rig-obj</loc>
     <lastmod>2026-01-01</lastmod>
@@ -550,8 +485,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/auto-rig-obj-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/auto-rig-obj"/>
   </url>
-
-  <!-- Rig type SEO landing pages -->
   <url>
     <loc>https://autorig.online/humanoid-auto-rig</loc>
     <lastmod>2026-05-16</lastmod>
@@ -668,8 +601,6 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/turtle-auto-rig"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/turtle-auto-rig"/>
   </url>
-
-  <!-- Image to rigged 3D character article (4 languages) -->
   <url>
     <loc>https://autorig.online/image-to-rigged-3d-character</loc>
     <lastmod>2026-08-06</lastmod>
@@ -753,8 +684,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character"/>
   </url>
-
-  <!-- Localized interface pages (ru, zh, hi, fa) -->
   <url>
     <loc>https://autorig.online/ru/</loc>
     <lastmod>2026-10-16</lastmod>
@@ -946,6 +875,366 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/how-it-works"/>
     <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/how-it-works"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/zh/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/hi/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/zh/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/hi/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/zh/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/hi/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/blender-plugin</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/blender-plugin</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/zh/blender-plugin</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/hi/blender-plugin</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/blender-plugin</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/blender-plugin"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/guides</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/guides"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/guides"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/guides"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/guides"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/guides"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/guides"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/guides</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/guides"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/guides"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/guides"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/guides"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/guides"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/guides"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/zh/guides</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/guides"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/guides"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/guides"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/guides"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/guides"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/guides"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/hi/guides</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/guides"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/guides"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/guides"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/guides"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/guides"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/guides"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/guides</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/guides"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/guides"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/guides"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/guides"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/guides"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/guides"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/t-pose-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/ru/t-pose-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/zh/t-pose-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/hi/t-pose-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-rig"/>
+  </url>
+  <url>
+    <loc>https://autorig.online/fa/t-pose-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/t-pose-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-rig"/>
   </url>
 
 </urlset>

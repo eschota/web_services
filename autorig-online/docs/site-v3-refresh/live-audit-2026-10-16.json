@@ -76,94 +76,6 @@
    "in_sitemap": true
   },
   {
-   "url": "https://autorig.online/animal-rig",
-   "path": "/animal-rig",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/animal-rig is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "",
-   "advertised": true,
-   "title": "AI Animal Rigging Online: Horse, Dog, Bird | AutoRig",
-   "title_len": 52,
-   "desc_len": 150,
-   "canonical": "https://autorig.online/animal-rig",
-   "robots": "-",
-   "hreflang": {
-    "en": "https://autorig.online/animal-rig",
-    "ru": "https://autorig.online/ru/animal-rig",
-    "zh": "https://autorig.online/zh/animal-rig",
-    "hi": "https://autorig.online/hi/animal-rig",
-    "fa": "https://autorig.online/fa/animal-rig",
-    "x-default": "https://autorig.online/animal-rig"
-   },
-   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 3,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "in_sitemap": true
-  },
-  {
-   "url": "https://autorig.online/guides",
-   "path": "/guides",
-   "status": 200,
-   "issues": [],
-   "pending": [],
-   "info": {
-    "html_lang": "en",
-    "dir": "ltr",
-    "scope": "page",
-    "page_lang": ""
-   },
-   "type": "html",
-   "url_lang": "",
-   "advertised": true,
-   "title": "AutoRig Guides: Rig Characters, Animals, Hands, Cars",
-   "title_len": 52,
-   "desc_len": 154,
-   "canonical": "https://autorig.online/guides",
-   "robots": "index, follow, max-image-preview:large",
-   "hreflang": {},
-   "og_image": "https://autorig.online/static/images/og/guides.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 1,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "in_sitemap": true
-  },
-  {
    "url": "https://autorig.online/buy-credits",
    "path": "/buy-credits",
    "status": 200,
@@ -201,105 +113,6 @@
    "in_sitemap": true
   },
   {
-   "url": "https://autorig.online/blender-plugin",
-   "path": "/blender-plugin",
-   "status": 200,
-   "issues": [],
-   "pending": [],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "",
-   "advertised": true,
-   "title": "AutoRig Blender Plugin: Auto Rig Add-on for Blender",
-   "title_len": 51,
-   "desc_len": 141,
-   "canonical": "https://autorig.online/blender-plugin",
-   "robots": "index, follow, max-image-preview:large",
-   "hreflang": {},
-   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 2,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "in_sitemap": true
-  },
-  {
-   "url": "https://autorig.online/developers",
-   "path": "/developers",
-   "status": 200,
-   "issues": [
-    {
-     "kind": "chrome_missing",
-     "severity": "hard",
-     "detail": "#site-header is empty or absent (no backend injection at all: served as a raw file, nginx alias?)"
-    },
-    {
-     "kind": "chrome_missing",
-     "severity": "hard",
-     "detail": "#site-footer is empty or absent (no backend injection at all: served as a raw file, nginx alias?)"
-    }
-   ],
-   "pending": [
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/developers answers 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/developers answers 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/developers answers 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/developers answers 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "",
-    "page_lang": ""
-   },
-   "type": "html",
-   "url_lang": "",
-   "advertised": true,
-   "title": "AutoRig Developer API: Rig and Animate 3D Models by REST",
-   "title_len": 56,
-   "desc_len": 160,
-   "canonical": "https://autorig.online/developers",
-   "robots": "-",
-   "hreflang": {
-    "en": "https://autorig.online/developers",
-    "ru": "https://autorig.online/ru/developers",
-    "zh": "https://autorig.online/zh/developers",
-    "hi": "https://autorig.online/hi/developers",
-    "fa": "https://autorig.online/fa/developers",
-    "x-default": "https://autorig.online/developers"
-   },
-   "og_image": "https://autorig.online/static/images/og/developers.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 1,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": false,
-   "in_sitemap": true
-  },
-  {
    "url": "https://autorig.online/skill.md",
    "path": "/skill.md",
    "status": 200,
@@ -307,7 +120,7 @@
    "pending": [],
    "info": {
     "content_type": "text/markdown; charset=utf-8; charset=utf-8",
-    "bytes": 6280
+    "bytes": 11422
    },
    "type": "text",
    "in_sitemap": true
@@ -320,7 +133,7 @@
    "pending": [],
    "info": {
     "content_type": "text/plain; charset=utf-8; charset=utf-8",
-    "bytes": 914
+    "bytes": 1194
    },
    "type": "text",
    "in_sitemap": true
@@ -333,7 +146,7 @@
    "pending": [],
    "info": {
     "content_type": "text/plain; charset=utf-8; charset=utf-8",
-    "bytes": 1555
+    "bytes": 3404
    },
    "type": "text",
    "in_sitemap": true
@@ -369,64 +182,6 @@
    "og_image": "https://autorig.online/static/images/og/how-it-works.jpg",
    "og_size": "1200x630",
    "ld_blocks": 2,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "in_sitemap": true
-  },
-  {
-   "url": "https://autorig.online/faq",
-   "path": "/faq",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/faq is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "",
-   "advertised": true,
-   "title": "AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars",
-   "title_len": 55,
-   "desc_len": 151,
-   "canonical": "https://autorig.online/faq",
-   "robots": "-",
-   "hreflang": {
-    "en": "https://autorig.online/faq",
-    "ru": "https://autorig.online/ru/faq",
-    "zh": "https://autorig.online/zh/faq",
-    "hi": "https://autorig.online/hi/faq",
-    "fa": "https://autorig.online/fa/faq",
-    "x-default": "https://autorig.online/faq"
-   },
-   "og_image": "https://autorig.online/static/images/og/faq.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 1,
    "h1": 1,
    "banned": [],
    "broken_static": [],
@@ -575,36 +330,6 @@
    "robots": "-",
    "hreflang": {},
    "og_image": "https://autorig.online/static/images/og/format-obj.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 1,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "in_sitemap": true
-  },
-  {
-   "url": "https://autorig.online/t-pose-rig",
-   "path": "/t-pose-rig",
-   "status": 200,
-   "issues": [],
-   "pending": [],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "",
-   "advertised": true,
-   "title": "T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed",
-   "title_len": 51,
-   "desc_len": 152,
-   "canonical": "https://autorig.online/t-pose-rig",
-   "robots": "index, follow, max-image-preview:large",
-   "hreflang": {},
-   "og_image": "https://autorig.online/static/images/og/t-pose-rig.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
    "h1": 1,
@@ -1795,11 +1520,6 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
-     "severity": "soft",
-     "detail": "177 chars"
-    },
-    {
      "kind": "og_small",
      "severity": "soft",
      "detail": "https://autorig.online/thumb/ed08f6f5-5a20-4a87-8394-db0608cf4202 is 720x1280"
@@ -1817,7 +1537,7 @@
    "advertised": true,
    "title": "Humanoid Character AI auto rigging online | AutoRig.online",
    "title_len": 58,
-   "desc_len": 177,
+   "desc_len": 154,
    "canonical": "https://autorig.online/humanoid-auto-rig",
    "robots": "index,follow",
    "hreflang": {
@@ -1839,11 +1559,6 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
-     "severity": "soft",
-     "detail": "171 chars"
-    },
-    {
      "kind": "og_small",
      "severity": "soft",
      "detail": "https://autorig.online/thumb/50a9139d-3016-47e5-8734-bca71b4abd54 is 720x1280"
@@ -1861,7 +1576,7 @@
    "advertised": true,
    "title": "Dog And Wolf AI auto rigging online | AutoRig.online",
    "title_len": 52,
-   "desc_len": 171,
+   "desc_len": 148,
    "canonical": "https://autorig.online/dog-auto-rig",
    "robots": "index,follow",
    "hreflang": {
@@ -1883,14 +1598,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
+     "kind": "og_small",
      "severity": "soft",
-     "detail": "163 chars"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …hed from the live gallery data. AutoRig V2 animal rig presentation AutoRig V2 anim…"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -1905,20 +1615,18 @@
    "advertised": true,
    "title": "Bear AI auto rigging online | AutoRig.online",
    "title_len": 44,
-   "desc_len": 163,
+   "desc_len": 140,
    "canonical": "https://autorig.online/bear-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/bear-auto-rig",
     "x-default": "https://autorig.online/bear-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-   "og_size": "1220x922",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -1928,11 +1636,6 @@
    "path": "/cat-auto-rig",
    "status": 200,
    "issues": [
-    {
-     "kind": "desc_long",
-     "severity": "soft",
-     "detail": "162 chars"
-    },
     {
      "kind": "og_small",
      "severity": "soft",
@@ -1951,7 +1654,7 @@
    "advertised": true,
    "title": "Cat AI auto rigging online | AutoRig.online",
    "title_len": 43,
-   "desc_len": 162,
+   "desc_len": 139,
    "canonical": "https://autorig.online/cat-auto-rig",
    "robots": "index,follow",
    "hreflang": {
@@ -1973,14 +1676,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
+     "kind": "og_small",
      "severity": "soft",
-     "detail": "162 chars"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …hed from the live gallery data. AutoRig V2 animal rig presentation AutoRig V2 anim…"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -1995,20 +1693,18 @@
    "advertised": true,
    "title": "Cow AI auto rigging online | AutoRig.online",
    "title_len": 43,
-   "desc_len": 162,
+   "desc_len": 139,
    "canonical": "https://autorig.online/cow-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/cow-auto-rig",
     "x-default": "https://autorig.online/cow-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-   "og_size": "1220x922",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2019,14 +1715,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
+     "kind": "og_small",
      "severity": "soft",
-     "detail": "163 chars"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …hed from the live gallery data. AutoRig V2 animal rig presentation AutoRig V2 anim…"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -2041,20 +1732,18 @@
    "advertised": true,
    "title": "Deer AI auto rigging online | AutoRig.online",
    "title_len": 44,
-   "desc_len": 163,
+   "desc_len": 140,
    "canonical": "https://autorig.online/deer-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/deer-auto-rig",
     "x-default": "https://autorig.online/deer-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-   "og_size": "1220x922",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2065,14 +1754,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
+     "kind": "og_small",
      "severity": "soft",
-     "detail": "167 chars"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …hed from the live gallery data. AutoRig V2 animal rig presentation AutoRig V2 anim…"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -2087,20 +1771,18 @@
    "advertised": true,
    "title": "Elephant AI auto rigging online | AutoRig.online",
    "title_len": 48,
-   "desc_len": 167,
+   "desc_len": 144,
    "canonical": "https://autorig.online/elephant-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/elephant-auto-rig",
     "x-default": "https://autorig.online/elephant-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-   "og_size": "1220x922",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2111,14 +1793,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
+     "kind": "og_small",
      "severity": "soft",
-     "detail": "166 chars"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …hed from the live gallery data. AutoRig V2 animal rig presentation AutoRig V2 anim…"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -2133,20 +1810,18 @@
    "advertised": true,
    "title": "Giraffe AI auto rigging online | AutoRig.online",
    "title_len": 47,
-   "desc_len": 166,
+   "desc_len": 143,
    "canonical": "https://autorig.online/giraffe-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/giraffe-auto-rig",
     "x-default": "https://autorig.online/giraffe-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-   "og_size": "1220x922",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2157,19 +1832,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
-     "severity": "soft",
-     "detail": "164 chars"
-    },
-    {
      "kind": "og_small",
      "severity": "soft",
-     "detail": "https://autorig.online/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png is 920x860"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …ruped animal rig animation example Open V2 animal rig examples FAQ Can I auto rig …"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-equine.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -2184,20 +1849,18 @@
    "advertised": true,
    "title": "Horse AI auto rigging online | AutoRig.online",
    "title_len": 45,
-   "desc_len": 164,
+   "desc_len": 141,
    "canonical": "https://autorig.online/horse-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/horse-auto-rig",
     "x-default": "https://autorig.online/horse-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png",
-   "og_size": "920x860",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-equine.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2208,14 +1871,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
+     "kind": "og_small",
      "severity": "soft",
-     "detail": "164 chars"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …hed from the live gallery data. AutoRig V2 animal rig presentation AutoRig V2 anim…"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -2230,20 +1888,18 @@
    "advertised": true,
    "title": "Mouse AI auto rigging online | AutoRig.online",
    "title_len": 45,
-   "desc_len": 164,
+   "desc_len": 141,
    "canonical": "https://autorig.online/mouse-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/mouse-auto-rig",
     "x-default": "https://autorig.online/mouse-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-   "og_size": "1220x922",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2254,14 +1910,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
+     "kind": "og_small",
      "severity": "soft",
-     "detail": "162 chars"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …hed from the live gallery data. AutoRig V2 animal rig presentation AutoRig V2 anim…"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -2276,20 +1927,18 @@
    "advertised": true,
    "title": "Pig AI auto rigging online | AutoRig.online",
    "title_len": 43,
-   "desc_len": 162,
+   "desc_len": 139,
    "canonical": "https://autorig.online/pig-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/pig-auto-rig",
     "x-default": "https://autorig.online/pig-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-   "og_size": "1220x922",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2300,19 +1949,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
-     "severity": "soft",
-     "detail": "165 chars"
-    },
-    {
      "kind": "og_small",
      "severity": "soft",
-     "detail": "https://autorig.online/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png is 842x674"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …shed from the live gallery data. Rabbit V2 animal rig animation example Rabbit V2 …"
+     "detail": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg is 640x480"
     }
    ],
    "pending": [],
@@ -2327,20 +1966,18 @@
    "advertised": true,
    "title": "Rabbit AI auto rigging online | AutoRig.online",
    "title_len": 46,
-   "desc_len": 165,
+   "desc_len": 142,
    "canonical": "https://autorig.online/rabbit-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/rabbit-auto-rig",
     "x-default": "https://autorig.online/rabbit-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png",
-   "og_size": "842x674",
+   "og_image": "https://autorig.online/static/images/animal-rig/cat-quadruped.jpg",
+   "og_size": "640x480",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -2351,19 +1988,9 @@
    "status": 200,
    "issues": [
     {
-     "kind": "desc_long",
-     "severity": "soft",
-     "detail": "165 chars"
-    },
-    {
      "kind": "og_small",
      "severity": "soft",
-     "detail": "https://autorig.online/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png is 980x632"
-    },
-    {
-     "kind": "banned_text",
-     "severity": "hard",
-     "detail": "V2: …shed from the live gallery data. Turtle V2 low-body rig animation example Turtle V…"
+     "detail": "https://autorig.online/static/images/animal-rig/g-bear.jpg is 400x500"
     }
    ],
    "pending": [],
@@ -2378,20 +2005,18 @@
    "advertised": true,
    "title": "Turtle AI auto rigging online | AutoRig.online",
    "title_len": 46,
-   "desc_len": 165,
+   "desc_len": 142,
    "canonical": "https://autorig.online/turtle-auto-rig",
    "robots": "index,follow",
    "hreflang": {
     "en": "https://autorig.online/turtle-auto-rig",
     "x-default": "https://autorig.online/turtle-auto-rig"
    },
-   "og_image": "https://autorig.online/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png",
-   "og_size": "980x632",
+   "og_image": "https://autorig.online/static/images/animal-rig/g-bear.jpg",
+   "og_size": "400x500",
    "ld_blocks": 4,
    "h1": 1,
-   "banned": [
-    "V2"
-   ],
+   "banned": [],
    "broken_static": [],
    "chrome": true,
    "in_sitemap": true
@@ -3157,85 +2782,48 @@
    "in_sitemap": true
   },
   {
-   "url": "https://autorig.online/ru/developers",
-   "path": "/ru/developers",
-   "status": 404,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "status",
-     "severity": "hard",
-     "detail": "HTTP 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    }
-   ],
-   "info": {},
-   "type": "html",
-   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/zh/developers",
-   "path": "/zh/developers",
-   "status": 404,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "status",
-     "severity": "hard",
-     "detail": "HTTP 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    }
-   ],
-   "info": {},
-   "type": "html",
-   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/hi/developers",
-   "path": "/hi/developers",
-   "status": 404,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "status",
-     "severity": "hard",
-     "detail": "HTTP 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    }
-   ],
-   "info": {},
-   "type": "html",
-   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/fa/developers",
-   "path": "/fa/developers",
-   "status": 404,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "status",
-     "severity": "hard",
-     "detail": "HTTP 404 | pending: backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers"
-    }
-   ],
-   "info": {},
-   "type": "html",
-   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/ru/guides",
-   "path": "/ru/guides",
+   "url": "https://autorig.online/animal-rig",
+   "path": "/animal-rig",
    "status": 200,
    "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
+   "pending": [],
+   "info": {
+    "html_lang": "en",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "",
+   "advertised": true,
+   "title": "AI Animal Rigging Online: Horse, Dog, Bird | AutoRig",
+   "title_len": 52,
+   "desc_len": 150,
+   "canonical": "https://autorig.online/animal-rig",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/animal-rig",
+    "ru": "https://autorig.online/ru/animal-rig",
+    "zh": "https://autorig.online/zh/animal-rig",
+    "hi": "https://autorig.online/hi/animal-rig",
+    "fa": "https://autorig.online/fa/animal-rig",
+    "x-default": "https://autorig.online/animal-rig"
+   },
+   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 3,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/ru/animal-rig",
+   "path": "/ru/animal-rig",
+   "status": 200,
+   "issues": [],
+   "pending": [],
    "info": {
     "html_lang": "ru",
     "dir": "ltr",
@@ -3244,13 +2832,745 @@
    },
    "type": "html",
    "url_lang": "ru",
-   "advertised": false,
-   "title": "Гайды AutoRig: риг персонажей, животных, рук, машин",
+   "advertised": true,
+   "title": "ИИ-риггинг животных онлайн: лошадь, собака, птица | AutoRig",
+   "title_len": 59,
+   "desc_len": 151,
+   "canonical": "https://autorig.online/ru/animal-rig",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/animal-rig",
+    "ru": "https://autorig.online/ru/animal-rig",
+    "zh": "https://autorig.online/zh/animal-rig",
+    "hi": "https://autorig.online/hi/animal-rig",
+    "fa": "https://autorig.online/fa/animal-rig",
+    "x-default": "https://autorig.online/animal-rig"
+   },
+   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 3,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/zh/animal-rig",
+   "path": "/zh/animal-rig",
+   "status": 200,
+   "issues": [
+    {
+     "kind": "desc_short",
+     "severity": "soft",
+     "detail": "59 chars"
+    }
+   ],
+   "pending": [],
+   "info": {
+    "html_lang": "zh",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "zh",
+   "advertised": true,
+   "title": "AI 动物绑定在线：马、狗、鸟 | AutoRig",
+   "title_len": 25,
+   "desc_len": 59,
+   "canonical": "https://autorig.online/zh/animal-rig",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/animal-rig",
+    "ru": "https://autorig.online/ru/animal-rig",
+    "zh": "https://autorig.online/zh/animal-rig",
+    "hi": "https://autorig.online/hi/animal-rig",
+    "fa": "https://autorig.online/fa/animal-rig",
+    "x-default": "https://autorig.online/animal-rig"
+   },
+   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 3,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/hi/animal-rig",
+   "path": "/hi/animal-rig",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "hi",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "hi",
+   "advertised": true,
+   "title": "AI एनिमल रिगिंग ऑनलाइन: घोड़ा, कुत्ता, पक्षी | AutoRig",
+   "title_len": 54,
+   "desc_len": 146,
+   "canonical": "https://autorig.online/hi/animal-rig",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/animal-rig",
+    "ru": "https://autorig.online/ru/animal-rig",
+    "zh": "https://autorig.online/zh/animal-rig",
+    "hi": "https://autorig.online/hi/animal-rig",
+    "fa": "https://autorig.online/fa/animal-rig",
+    "x-default": "https://autorig.online/animal-rig"
+   },
+   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 3,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/fa/animal-rig",
+   "path": "/fa/animal-rig",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "fa",
+    "dir": "rtl",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "fa",
+   "advertised": true,
+   "title": "ریگ هوش مصنوعی حیوانات آنلاین: اسب، سگ، پرنده | AutoRig",
+   "title_len": 55,
+   "desc_len": 148,
+   "canonical": "https://autorig.online/fa/animal-rig",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/animal-rig",
+    "ru": "https://autorig.online/ru/animal-rig",
+    "zh": "https://autorig.online/zh/animal-rig",
+    "hi": "https://autorig.online/hi/animal-rig",
+    "fa": "https://autorig.online/fa/animal-rig",
+    "x-default": "https://autorig.online/animal-rig"
+   },
+   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 3,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/faq",
+   "path": "/faq",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "en",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "",
+   "advertised": true,
+   "title": "AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars",
+   "title_len": 55,
+   "desc_len": 151,
+   "canonical": "https://autorig.online/faq",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/faq",
+    "ru": "https://autorig.online/ru/faq",
+    "zh": "https://autorig.online/zh/faq",
+    "hi": "https://autorig.online/hi/faq",
+    "fa": "https://autorig.online/fa/faq",
+    "x-default": "https://autorig.online/faq"
+   },
+   "og_image": "https://autorig.online/static/images/og/faq.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/ru/faq",
+   "path": "/ru/faq",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "ru",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "ru",
+   "advertised": true,
+   "title": "AutoRig FAQ: авториг персонажей, животных и машин",
+   "title_len": 49,
+   "desc_len": 145,
+   "canonical": "https://autorig.online/ru/faq",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/faq",
+    "ru": "https://autorig.online/ru/faq",
+    "zh": "https://autorig.online/zh/faq",
+    "hi": "https://autorig.online/hi/faq",
+    "fa": "https://autorig.online/fa/faq",
+    "x-default": "https://autorig.online/faq"
+   },
+   "og_image": "https://autorig.online/static/images/og/faq.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/zh/faq",
+   "path": "/zh/faq",
+   "status": 200,
+   "issues": [
+    {
+     "kind": "desc_short",
+     "severity": "soft",
+     "detail": "66 chars"
+    }
+   ],
+   "pending": [],
+   "info": {
+    "html_lang": "zh",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "zh",
+   "advertised": true,
+   "title": "AutoRig 常见问题：角色、动物与汽车自动绑定",
+   "title_len": 25,
+   "desc_len": 66,
+   "canonical": "https://autorig.online/zh/faq",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/faq",
+    "ru": "https://autorig.online/ru/faq",
+    "zh": "https://autorig.online/zh/faq",
+    "hi": "https://autorig.online/hi/faq",
+    "fa": "https://autorig.online/fa/faq",
+    "x-default": "https://autorig.online/faq"
+   },
+   "og_image": "https://autorig.online/static/images/og/faq.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/hi/faq",
+   "path": "/hi/faq",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "hi",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "hi",
+   "advertised": true,
+   "title": "AutoRig FAQ: किरदार, जानवर और कार की ऑटो-रिगिंग",
+   "title_len": 47,
+   "desc_len": 146,
+   "canonical": "https://autorig.online/hi/faq",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/faq",
+    "ru": "https://autorig.online/ru/faq",
+    "zh": "https://autorig.online/zh/faq",
+    "hi": "https://autorig.online/hi/faq",
+    "fa": "https://autorig.online/fa/faq",
+    "x-default": "https://autorig.online/faq"
+   },
+   "og_image": "https://autorig.online/static/images/og/faq.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/fa/faq",
+   "path": "/fa/faq",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "fa",
+    "dir": "rtl",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "fa",
+   "advertised": true,
+   "title": "پرسش‌های متداول AutoRig: ریگ خودکار شخصیت، حیوان و خودرو",
+   "title_len": 56,
+   "desc_len": 153,
+   "canonical": "https://autorig.online/fa/faq",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/faq",
+    "ru": "https://autorig.online/ru/faq",
+    "zh": "https://autorig.online/zh/faq",
+    "hi": "https://autorig.online/hi/faq",
+    "fa": "https://autorig.online/fa/faq",
+    "x-default": "https://autorig.online/faq"
+   },
+   "og_image": "https://autorig.online/static/images/og/faq.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/developers",
+   "path": "/developers",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "en",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "",
+   "advertised": true,
+   "title": "AutoRig Developer API: Rig and Animate 3D Models by REST",
+   "title_len": 56,
+   "desc_len": 160,
+   "canonical": "https://autorig.online/developers",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/developers",
+    "ru": "https://autorig.online/ru/developers",
+    "zh": "https://autorig.online/zh/developers",
+    "hi": "https://autorig.online/hi/developers",
+    "fa": "https://autorig.online/fa/developers",
+    "x-default": "https://autorig.online/developers"
+   },
+   "og_image": "https://autorig.online/static/images/og/developers.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/ru/developers",
+   "path": "/ru/developers",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "ru",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "ru",
+   "advertised": true,
+   "title": "API для разработчиков AutoRig: риг и анимация по REST",
+   "title_len": 53,
+   "desc_len": 154,
+   "canonical": "https://autorig.online/ru/developers",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/developers",
+    "ru": "https://autorig.online/ru/developers",
+    "zh": "https://autorig.online/zh/developers",
+    "hi": "https://autorig.online/hi/developers",
+    "fa": "https://autorig.online/fa/developers",
+    "x-default": "https://autorig.online/developers"
+   },
+   "og_image": "https://autorig.online/static/images/og/developers.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/zh/developers",
+   "path": "/zh/developers",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "zh",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "zh",
+   "advertised": true,
+   "title": "AutoRig 开发者 API：通过 REST 绑定并制作 3D 模型动画",
+   "title_len": 37,
+   "desc_len": 76,
+   "canonical": "https://autorig.online/zh/developers",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/developers",
+    "ru": "https://autorig.online/ru/developers",
+    "zh": "https://autorig.online/zh/developers",
+    "hi": "https://autorig.online/hi/developers",
+    "fa": "https://autorig.online/fa/developers",
+    "x-default": "https://autorig.online/developers"
+   },
+   "og_image": "https://autorig.online/static/images/og/developers.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/hi/developers",
+   "path": "/hi/developers",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "hi",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "hi",
+   "advertised": true,
+   "title": "AutoRig डेवलपर API: REST से 3D मॉडल रिग और एनिमेट करें",
+   "title_len": 54,
+   "desc_len": 151,
+   "canonical": "https://autorig.online/hi/developers",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/developers",
+    "ru": "https://autorig.online/ru/developers",
+    "zh": "https://autorig.online/zh/developers",
+    "hi": "https://autorig.online/hi/developers",
+    "fa": "https://autorig.online/fa/developers",
+    "x-default": "https://autorig.online/developers"
+   },
+   "og_image": "https://autorig.online/static/images/og/developers.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/fa/developers",
+   "path": "/fa/developers",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "fa",
+    "dir": "rtl",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "fa",
+   "advertised": true,
+   "title": "API توسعه‌دهندگان AutoRig: ریگ و انیمیشن مدل سه‌بعدی با REST",
+   "title_len": 60,
+   "desc_len": 142,
+   "canonical": "https://autorig.online/fa/developers",
+   "robots": "-",
+   "hreflang": {
+    "en": "https://autorig.online/developers",
+    "ru": "https://autorig.online/ru/developers",
+    "zh": "https://autorig.online/zh/developers",
+    "hi": "https://autorig.online/hi/developers",
+    "fa": "https://autorig.online/fa/developers",
+    "x-default": "https://autorig.online/developers"
+   },
+   "og_image": "https://autorig.online/static/images/og/developers.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "pending_reason": "backend release: '/dev' in LanguageMiddleware._NO_PREFIX swallows /developers",
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/blender-plugin",
+   "path": "/blender-plugin",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "en",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "",
+   "advertised": true,
+   "title": "AutoRig Blender Plugin: Auto Rig Add-on for Blender",
    "title_len": 51,
-   "desc_len": 140,
+   "desc_len": 141,
+   "canonical": "https://autorig.online/blender-plugin",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/blender-plugin",
+    "ru": "https://autorig.online/ru/blender-plugin",
+    "zh": "https://autorig.online/zh/blender-plugin",
+    "hi": "https://autorig.online/hi/blender-plugin",
+    "fa": "https://autorig.online/fa/blender-plugin",
+    "x-default": "https://autorig.online/blender-plugin"
+   },
+   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 2,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/ru/blender-plugin",
+   "path": "/ru/blender-plugin",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "ru",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "ru",
+   "advertised": true,
+   "title": "Плагин AutoRig для Blender: авториг прямо в Blender",
+   "title_len": 51,
+   "desc_len": 138,
+   "canonical": "https://autorig.online/ru/blender-plugin",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/blender-plugin",
+    "ru": "https://autorig.online/ru/blender-plugin",
+    "zh": "https://autorig.online/zh/blender-plugin",
+    "hi": "https://autorig.online/hi/blender-plugin",
+    "fa": "https://autorig.online/fa/blender-plugin",
+    "x-default": "https://autorig.online/blender-plugin"
+   },
+   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 2,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/zh/blender-plugin",
+   "path": "/zh/blender-plugin",
+   "status": 200,
+   "issues": [
+    {
+     "kind": "desc_short",
+     "severity": "soft",
+     "detail": "67 chars"
+    }
+   ],
+   "pending": [],
+   "info": {
+    "html_lang": "zh",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "zh",
+   "advertised": true,
+   "title": "AutoRig Blender 插件：在 Blender 中自动绑定",
+   "title_len": 34,
+   "desc_len": 67,
+   "canonical": "https://autorig.online/zh/blender-plugin",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/blender-plugin",
+    "ru": "https://autorig.online/ru/blender-plugin",
+    "zh": "https://autorig.online/zh/blender-plugin",
+    "hi": "https://autorig.online/hi/blender-plugin",
+    "fa": "https://autorig.online/fa/blender-plugin",
+    "x-default": "https://autorig.online/blender-plugin"
+   },
+   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 2,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/hi/blender-plugin",
+   "path": "/hi/blender-plugin",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "hi",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "hi",
+   "advertised": true,
+   "title": "AutoRig Blender प्लगइन: Blender में ऑटो रिगिंग ऐड-ऑन",
+   "title_len": 52,
+   "desc_len": 144,
+   "canonical": "https://autorig.online/hi/blender-plugin",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/blender-plugin",
+    "ru": "https://autorig.online/ru/blender-plugin",
+    "zh": "https://autorig.online/zh/blender-plugin",
+    "hi": "https://autorig.online/hi/blender-plugin",
+    "fa": "https://autorig.online/fa/blender-plugin",
+    "x-default": "https://autorig.online/blender-plugin"
+   },
+   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 2,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/fa/blender-plugin",
+   "path": "/fa/blender-plugin",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "fa",
+    "dir": "rtl",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "fa",
+   "advertised": true,
+   "title": "افزونهٔ AutoRig برای Blender: ریگ خودکار داخل Blender",
+   "title_len": 53,
+   "desc_len": 135,
+   "canonical": "https://autorig.online/fa/blender-plugin",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/blender-plugin",
+    "ru": "https://autorig.online/ru/blender-plugin",
+    "zh": "https://autorig.online/zh/blender-plugin",
+    "hi": "https://autorig.online/hi/blender-plugin",
+    "fa": "https://autorig.online/fa/blender-plugin",
+    "x-default": "https://autorig.online/blender-plugin"
+   },
+   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 2,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/guides",
+   "path": "/guides",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "en",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "",
+   "advertised": true,
+   "title": "AutoRig Guides: Rig Characters, Animals, Hands, Cars",
+   "title_len": 52,
+   "desc_len": 154,
    "canonical": "https://autorig.online/guides",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/guides",
+    "ru": "https://autorig.online/ru/guides",
+    "zh": "https://autorig.online/zh/guides",
+    "hi": "https://autorig.online/hi/guides",
+    "fa": "https://autorig.online/fa/guides",
+    "x-default": "https://autorig.online/guides"
+   },
    "og_image": "https://autorig.online/static/images/og/guides.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -3258,8 +3578,44 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
+  },
+  {
+   "url": "https://autorig.online/ru/guides",
+   "path": "/ru/guides",
+   "status": 200,
+   "issues": [],
+   "pending": [],
+   "info": {
+    "html_lang": "ru",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
+   },
+   "type": "html",
+   "url_lang": "ru",
+   "advertised": true,
+   "title": "Гайды AutoRig: риг персонажей, животных, рук, машин",
+   "title_len": 51,
+   "desc_len": 140,
+   "canonical": "https://autorig.online/ru/guides",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/guides",
+    "ru": "https://autorig.online/ru/guides",
+    "zh": "https://autorig.online/zh/guides",
+    "hi": "https://autorig.online/hi/guides",
+    "fa": "https://autorig.online/fa/guides",
+    "x-default": "https://autorig.online/guides"
+   },
+   "og_image": "https://autorig.online/static/images/og/guides.jpg",
+   "og_size": "1200x630",
+   "ld_blocks": 1,
+   "h1": 1,
+   "banned": [],
+   "broken_static": [],
+   "chrome": true,
+   "in_sitemap": true
   },
   {
    "url": "https://autorig.online/zh/guides",
@@ -3272,13 +3628,7 @@
      "detail": "67 chars"
     }
    ],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
+   "pending": [],
    "info": {
     "html_lang": "zh",
     "dir": "ltr",
@@ -3287,13 +3637,20 @@
    },
    "type": "html",
    "url_lang": "zh",
-   "advertised": false,
+   "advertised": true,
    "title": "AutoRig 指南：角色、动物、手部与汽车绑定",
    "title_len": 24,
    "desc_len": 67,
-   "canonical": "https://autorig.online/guides",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "canonical": "https://autorig.online/zh/guides",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/guides",
+    "ru": "https://autorig.online/ru/guides",
+    "zh": "https://autorig.online/zh/guides",
+    "hi": "https://autorig.online/hi/guides",
+    "fa": "https://autorig.online/fa/guides",
+    "x-default": "https://autorig.online/guides"
+   },
    "og_image": "https://autorig.online/static/images/og/guides.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -3301,20 +3658,14 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "in_sitemap": false
+   "in_sitemap": true
   },
   {
    "url": "https://autorig.online/hi/guides",
    "path": "/hi/guides",
    "status": 200,
    "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
+   "pending": [],
    "info": {
     "html_lang": "hi",
     "dir": "ltr",
@@ -3323,13 +3674,20 @@
    },
    "type": "html",
    "url_lang": "hi",
-   "advertised": false,
+   "advertised": true,
    "title": "AutoRig गाइड: किरदार, जानवर, हाथ और कार रिग करें",
    "title_len": 48,
    "desc_len": 133,
-   "canonical": "https://autorig.online/guides",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "canonical": "https://autorig.online/hi/guides",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/guides",
+    "ru": "https://autorig.online/ru/guides",
+    "zh": "https://autorig.online/zh/guides",
+    "hi": "https://autorig.online/hi/guides",
+    "fa": "https://autorig.online/fa/guides",
+    "x-default": "https://autorig.online/guides"
+   },
    "og_image": "https://autorig.online/static/images/og/guides.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -3337,21 +3695,14 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
   },
   {
    "url": "https://autorig.online/fa/guides",
    "path": "/fa/guides",
    "status": 200,
    "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
+   "pending": [],
    "info": {
     "html_lang": "fa",
     "dir": "rtl",
@@ -3360,13 +3711,20 @@
    },
    "type": "html",
    "url_lang": "fa",
-   "advertised": false,
+   "advertised": true,
    "title": "راهنماهای AutoRig: ریگ کاراکتر، حیوان، دست و خودرو",
    "title_len": 50,
    "desc_len": 136,
-   "canonical": "https://autorig.online/guides",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "canonical": "https://autorig.online/fa/guides",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/guides",
+    "ru": "https://autorig.online/ru/guides",
+    "zh": "https://autorig.online/zh/guides",
+    "hi": "https://autorig.online/hi/guides",
+    "fa": "https://autorig.online/fa/guides",
+    "x-default": "https://autorig.online/guides"
+   },
    "og_image": "https://autorig.online/static/images/og/guides.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -3374,696 +3732,73 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
   },
   {
-   "url": "https://autorig.online/ru/faq",
-   "path": "/ru/faq",
+   "url": "https://autorig.online/t-pose-rig",
+   "path": "/t-pose-rig",
    "status": 200,
    "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/faq is a noindex copy until the language-path release"
-    }
-   ],
+   "pending": [],
    "info": {
     "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
    },
    "type": "html",
-   "url_lang": "ru",
-   "advertised": false,
-   "title": "AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars",
-   "title_len": 55,
-   "desc_len": 151,
-   "canonical": "https://autorig.online/faq",
-   "robots": "noindex, follow",
+   "url_lang": "",
+   "advertised": true,
+   "title": "T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed",
+   "title_len": 51,
+   "desc_len": 152,
+   "canonical": "https://autorig.online/t-pose-rig",
+   "robots": "index, follow, max-image-preview:large",
    "hreflang": {
-    "en": "https://autorig.online/faq",
-    "ru": "https://autorig.online/ru/faq",
-    "zh": "https://autorig.online/zh/faq",
-    "hi": "https://autorig.online/hi/faq",
-    "fa": "https://autorig.online/fa/faq",
-    "x-default": "https://autorig.online/faq"
+    "en": "https://autorig.online/t-pose-rig",
+    "ru": "https://autorig.online/ru/t-pose-rig",
+    "zh": "https://autorig.online/zh/t-pose-rig",
+    "hi": "https://autorig.online/hi/t-pose-rig",
+    "fa": "https://autorig.online/fa/t-pose-rig",
+    "x-default": "https://autorig.online/t-pose-rig"
    },
-   "og_image": "https://autorig.online/static/images/og/faq.jpg",
+   "og_image": "https://autorig.online/static/images/og/t-pose-rig.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
    "h1": 1,
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/zh/faq",
-   "path": "/zh/faq",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/faq is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "zh",
-   "advertised": false,
-   "title": "AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars",
-   "title_len": 55,
-   "desc_len": 151,
-   "canonical": "https://autorig.online/faq",
-   "robots": "noindex, follow",
-   "hreflang": {
-    "en": "https://autorig.online/faq",
-    "ru": "https://autorig.online/ru/faq",
-    "zh": "https://autorig.online/zh/faq",
-    "hi": "https://autorig.online/hi/faq",
-    "fa": "https://autorig.online/fa/faq",
-    "x-default": "https://autorig.online/faq"
-   },
-   "og_image": "https://autorig.online/static/images/og/faq.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 1,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/hi/faq",
-   "path": "/hi/faq",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/faq is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "hi",
-   "advertised": false,
-   "title": "AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars",
-   "title_len": 55,
-   "desc_len": 151,
-   "canonical": "https://autorig.online/faq",
-   "robots": "noindex, follow",
-   "hreflang": {
-    "en": "https://autorig.online/faq",
-    "ru": "https://autorig.online/ru/faq",
-    "zh": "https://autorig.online/zh/faq",
-    "hi": "https://autorig.online/hi/faq",
-    "fa": "https://autorig.online/fa/faq",
-    "x-default": "https://autorig.online/faq"
-   },
-   "og_image": "https://autorig.online/static/images/og/faq.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 1,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/fa/faq",
-   "path": "/fa/faq",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/faq is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/faq is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "fa",
-   "advertised": false,
-   "title": "AutoRig FAQ: Auto-Rigging for Characters, Animals, Cars",
-   "title_len": 55,
-   "desc_len": 151,
-   "canonical": "https://autorig.online/faq",
-   "robots": "noindex, follow",
-   "hreflang": {
-    "en": "https://autorig.online/faq",
-    "ru": "https://autorig.online/ru/faq",
-    "zh": "https://autorig.online/zh/faq",
-    "hi": "https://autorig.online/hi/faq",
-    "fa": "https://autorig.online/fa/faq",
-    "x-default": "https://autorig.online/faq"
-   },
-   "og_image": "https://autorig.online/static/images/og/faq.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 1,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/ru/animal-rig",
-   "path": "/ru/animal-rig",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/animal-rig is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "ru",
-   "advertised": false,
-   "title": "AI Animal Rigging Online: Horse, Dog, Bird | AutoRig",
-   "title_len": 52,
-   "desc_len": 150,
-   "canonical": "https://autorig.online/animal-rig",
-   "robots": "noindex, follow",
-   "hreflang": {
-    "en": "https://autorig.online/animal-rig",
-    "ru": "https://autorig.online/ru/animal-rig",
-    "zh": "https://autorig.online/zh/animal-rig",
-    "hi": "https://autorig.online/hi/animal-rig",
-    "fa": "https://autorig.online/fa/animal-rig",
-    "x-default": "https://autorig.online/animal-rig"
-   },
-   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 3,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/zh/animal-rig",
-   "path": "/zh/animal-rig",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/animal-rig is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "zh",
-   "advertised": false,
-   "title": "AI Animal Rigging Online: Horse, Dog, Bird | AutoRig",
-   "title_len": 52,
-   "desc_len": 150,
-   "canonical": "https://autorig.online/animal-rig",
-   "robots": "noindex, follow",
-   "hreflang": {
-    "en": "https://autorig.online/animal-rig",
-    "ru": "https://autorig.online/ru/animal-rig",
-    "zh": "https://autorig.online/zh/animal-rig",
-    "hi": "https://autorig.online/hi/animal-rig",
-    "fa": "https://autorig.online/fa/animal-rig",
-    "x-default": "https://autorig.online/animal-rig"
-   },
-   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 3,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/hi/animal-rig",
-   "path": "/hi/animal-rig",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/animal-rig is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "hi",
-   "advertised": false,
-   "title": "AI Animal Rigging Online: Horse, Dog, Bird | AutoRig",
-   "title_len": 52,
-   "desc_len": 150,
-   "canonical": "https://autorig.online/animal-rig",
-   "robots": "noindex, follow",
-   "hreflang": {
-    "en": "https://autorig.online/animal-rig",
-    "ru": "https://autorig.online/ru/animal-rig",
-    "zh": "https://autorig.online/zh/animal-rig",
-    "hi": "https://autorig.online/hi/animal-rig",
-    "fa": "https://autorig.online/fa/animal-rig",
-    "x-default": "https://autorig.online/animal-rig"
-   },
-   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 3,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/fa/animal-rig",
-   "path": "/fa/animal-rig",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "ru -> https://autorig.online/ru/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "zh -> https://autorig.online/zh/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "hi -> https://autorig.online/hi/animal-rig is a noindex copy until the language-path release"
-    },
-    {
-     "kind": "hreflang_target",
-     "severity": "hard",
-     "detail": "fa -> https://autorig.online/fa/animal-rig is a noindex copy until the language-path release"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "fa",
-   "advertised": false,
-   "title": "AI Animal Rigging Online: Horse, Dog, Bird | AutoRig",
-   "title_len": 52,
-   "desc_len": 150,
-   "canonical": "https://autorig.online/animal-rig",
-   "robots": "noindex, follow",
-   "hreflang": {
-    "en": "https://autorig.online/animal-rig",
-    "ru": "https://autorig.online/ru/animal-rig",
-    "zh": "https://autorig.online/zh/animal-rig",
-    "hi": "https://autorig.online/hi/animal-rig",
-    "fa": "https://autorig.online/fa/animal-rig",
-    "x-default": "https://autorig.online/animal-rig"
-   },
-   "og_image": "https://autorig.online/static/images/og/animal-rig.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 3,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/ru/blender-plugin",
-   "path": "/ru/blender-plugin",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "ru",
-   "advertised": false,
-   "title": "AutoRig Blender Plugin: Auto Rig Add-on for Blender",
-   "title_len": 51,
-   "desc_len": 141,
-   "canonical": "https://autorig.online/blender-plugin",
-   "robots": "noindex, follow",
-   "hreflang": {},
-   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 2,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/zh/blender-plugin",
-   "path": "/zh/blender-plugin",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "zh",
-   "advertised": false,
-   "title": "AutoRig Blender Plugin: Auto Rig Add-on for Blender",
-   "title_len": 51,
-   "desc_len": 141,
-   "canonical": "https://autorig.online/blender-plugin",
-   "robots": "noindex, follow",
-   "hreflang": {},
-   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 2,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/hi/blender-plugin",
-   "path": "/hi/blender-plugin",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "hi",
-   "advertised": false,
-   "title": "AutoRig Blender Plugin: Auto Rig Add-on for Blender",
-   "title_len": 51,
-   "desc_len": 141,
-   "canonical": "https://autorig.online/blender-plugin",
-   "robots": "noindex, follow",
-   "hreflang": {},
-   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 2,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
-  },
-  {
-   "url": "https://autorig.online/fa/blender-plugin",
-   "path": "/fa/blender-plugin",
-   "status": 200,
-   "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
-   "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
-   },
-   "type": "html",
-   "url_lang": "fa",
-   "advertised": false,
-   "title": "AutoRig Blender Plugin: Auto Rig Add-on for Blender",
-   "title_len": 51,
-   "desc_len": 141,
-   "canonical": "https://autorig.online/blender-plugin",
-   "robots": "noindex, follow",
-   "hreflang": {},
-   "og_image": "https://autorig.online/static/images/og/blender-plugin.jpg",
-   "og_size": "1200x630",
-   "ld_blocks": 2,
-   "h1": 1,
-   "banned": [],
-   "broken_static": [],
-   "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
   },
   {
    "url": "https://autorig.online/ru/t-pose-rig",
    "path": "/ru/t-pose-rig",
    "status": 200,
    "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
+   "pending": [],
    "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
+    "html_lang": "ru",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
    },
    "type": "html",
    "url_lang": "ru",
-   "advertised": false,
-   "title": "T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed",
-   "title_len": 51,
-   "desc_len": 152,
-   "canonical": "https://autorig.online/t-pose-rig",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "advertised": true,
+   "title": "T-pose риг: AutoRig ригует любую позу без T-pose",
+   "title_len": 48,
+   "desc_len": 135,
+   "canonical": "https://autorig.online/ru/t-pose-rig",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/t-pose-rig",
+    "ru": "https://autorig.online/ru/t-pose-rig",
+    "zh": "https://autorig.online/zh/t-pose-rig",
+    "hi": "https://autorig.online/hi/t-pose-rig",
+    "fa": "https://autorig.online/fa/t-pose-rig",
+    "x-default": "https://autorig.online/t-pose-rig"
+   },
    "og_image": "https://autorig.online/static/images/og/t-pose-rig.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -4071,36 +3806,42 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
   },
   {
    "url": "https://autorig.online/zh/t-pose-rig",
    "path": "/zh/t-pose-rig",
    "status": 200,
-   "issues": [],
-   "pending": [
+   "issues": [
     {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
+     "kind": "desc_short",
+     "severity": "soft",
+     "detail": "66 chars"
     }
    ],
+   "pending": [],
    "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
+    "html_lang": "zh",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
    },
    "type": "html",
    "url_lang": "zh",
-   "advertised": false,
-   "title": "T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed",
-   "title_len": 51,
-   "desc_len": 152,
-   "canonical": "https://autorig.online/t-pose-rig",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "advertised": true,
+   "title": "T-pose 绑定：AutoRig 支持任意姿势，无需 T-pose",
+   "title_len": 34,
+   "desc_len": 66,
+   "canonical": "https://autorig.online/zh/t-pose-rig",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/t-pose-rig",
+    "ru": "https://autorig.online/ru/t-pose-rig",
+    "zh": "https://autorig.online/zh/t-pose-rig",
+    "hi": "https://autorig.online/hi/t-pose-rig",
+    "fa": "https://autorig.online/fa/t-pose-rig",
+    "x-default": "https://autorig.online/t-pose-rig"
+   },
    "og_image": "https://autorig.online/static/images/og/t-pose-rig.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -4108,36 +3849,36 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
   },
   {
    "url": "https://autorig.online/hi/t-pose-rig",
    "path": "/hi/t-pose-rig",
    "status": 200,
    "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
+   "pending": [],
    "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
+    "html_lang": "hi",
+    "dir": "ltr",
+    "scope": "page",
+    "page_lang": ""
    },
    "type": "html",
    "url_lang": "hi",
-   "advertised": false,
-   "title": "T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed",
-   "title_len": 51,
-   "desc_len": 152,
-   "canonical": "https://autorig.online/t-pose-rig",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "advertised": true,
+   "title": "T-pose रिग: AutoRig किसी भी पोज़ को रिग करता है",
+   "title_len": 47,
+   "desc_len": 157,
+   "canonical": "https://autorig.online/hi/t-pose-rig",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/t-pose-rig",
+    "ru": "https://autorig.online/ru/t-pose-rig",
+    "zh": "https://autorig.online/zh/t-pose-rig",
+    "hi": "https://autorig.online/hi/t-pose-rig",
+    "fa": "https://autorig.online/fa/t-pose-rig",
+    "x-default": "https://autorig.online/t-pose-rig"
+   },
    "og_image": "https://autorig.online/static/images/og/t-pose-rig.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -4145,36 +3886,36 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
   },
   {
    "url": "https://autorig.online/fa/t-pose-rig",
    "path": "/fa/t-pose-rig",
    "status": 200,
    "issues": [],
-   "pending": [
-    {
-     "kind": "robots_noindex",
-     "severity": "hard",
-     "detail": "robots=noindex, follow"
-    }
-   ],
+   "pending": [],
    "info": {
-    "html_lang": "en",
-    "dir": "",
-    "scope": "chrome",
-    "page_lang": "en"
+    "html_lang": "fa",
+    "dir": "rtl",
+    "scope": "page",
+    "page_lang": ""
    },
    "type": "html",
    "url_lang": "fa",
-   "advertised": false,
-   "title": "T-Pose Rig: AutoRig Rigs Any Pose, No T-Pose Needed",
-   "title_len": 51,
-   "desc_len": 152,
-   "canonical": "https://autorig.online/t-pose-rig",
-   "robots": "noindex, follow",
-   "hreflang": {},
+   "advertised": true,
+   "title": "ریگ تی‌پوز: AutoRig هر حالتی را ریگ می‌کند",
+   "title_len": 42,
+   "desc_len": 153,
+   "canonical": "https://autorig.online/fa/t-pose-rig",
+   "robots": "index, follow, max-image-preview:large",
+   "hreflang": {
+    "en": "https://autorig.online/t-pose-rig",
+    "ru": "https://autorig.online/ru/t-pose-rig",
+    "zh": "https://autorig.online/zh/t-pose-rig",
+    "hi": "https://autorig.online/hi/t-pose-rig",
+    "fa": "https://autorig.online/fa/t-pose-rig",
+    "x-default": "https://autorig.online/t-pose-rig"
+   },
    "og_image": "https://autorig.online/static/images/og/t-pose-rig.jpg",
    "og_size": "1200x630",
    "ld_blocks": 1,
@@ -4182,28 +3923,20 @@
    "banned": [],
    "broken_static": [],
    "chrome": true,
-   "pending_reason": "language variant not advertised yet (backend release pending)",
-   "in_sitemap": false
+   "in_sitemap": true
   }
  ],
  "summary": {
   "pages": 107,
-  "hard_failures": 12,
-  "soft_warnings": 28,
-  "pages_with_hard_failures": 11,
-  "pending_pages": 26,
+  "hard_failures": 0,
+  "soft_warnings": 26,
+  "pages_with_hard_failures": 0,
+  "pending_pages": 0,
   "by_kind": {
-   "banned_text": 10,
-   "chrome_missing": 2,
-   "desc_long": 13,
-   "desc_short": 9,
-   "og_small": 6
+   "desc_short": 13,
+   "og_small": 13
   },
-  "pending_by_kind": {
-   "hreflang_target": 44,
-   "robots_noindex": 20,
-   "status": 4
-  }
+  "pending_by_kind": {}
  },
- "generated": "2026-10-15 21:36 UTC"
+ "generated": "2026-10-15 22:44 UTC"
 }
