@@ -719,6 +719,15 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   ЛИШНИХ ПРЕДМЕТОВ, ЧТОБЫ ОНА КОРРЕКТНО ДОРИСОВАЛА КОРПУС БЕЗ КОЛЕС»): the mask pixels are subtracted (filled with
   the backdrop colour), Qwen-edit gets that picture and completes the body (empty wheel wells, closed panels); the
   marker-colour variant is kept only as an option (`cut_mode`), Qwen ignored the green regions (14 % left).
+* **Three objects: body, suspension, wheel; then Tripo** (owner, 2026-10-15 ~15:00 UTC, on the cut result with the
+  wheels detached: «вроде колесья отделены … щас это подам на квен для разделения корпуса от подвески, и уже это в
+  трипо: корпус, подвеска и колесо»): the `split` stage divides the cut picture into three part pictures by the same
+  method (GDINO + SAM2 masks `wheel` / `suspension`, raster erase, Qwen completion): `parts/body.png` (the shell,
+  nothing under it), `parts/suspension.png` (axles and suspension alone, bare hubs) and `parts/wheel.png` (one
+  wheel disc). The sheet body | suspension | wheel goes to DEV for validation; the wheels are re-detected on the
+  body and the suspension pictures as the check. The model stage generates each part as its own 3D object: Tripo
+  (`gen_tripo`, `TRIPO_API_KEY` in `/srv/autorig/secrets/tripo.env`, only with the paid button) or the free gen3d
+  queue. No Tripo integration or key existed before 2026-10-15; the key is the owner's to add.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
