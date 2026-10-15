@@ -42,6 +42,7 @@ const App = {
             this.setupTabs();
         this.setupImageGeneration();
             this.setupUploadZone();
+            this.setupPasteDrop();
             this.setupForm();
         }
 
@@ -1460,10 +1461,50 @@ const App = {
         });
     },
     
+    setupPasteDrop() {
+        // Upload V3 (owner 2026-10-16): Ctrl+V with a picture or a file in the clipboard is an upload too, and a drop
+        // anywhere on the page lands in the one zone (the browser never opens the file instead of the site)
+        if (window.__autorigPasteDrop) return;
+        window.__autorigPasteDrop = true;
+        const zone = document.getElementById('upload-zone');
+        if (!zone) return;
+        const flash = () => { zone.classList.add('dragover'); setTimeout(() => zone.classList.remove('dragover'), 600); };
+        document.addEventListener('paste', (e) => {
+            const tag = (e.target && e.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+            const dt = e.clipboardData;
+            if (!dt) return;
+            let files = Array.from(dt.files || []);
+            if (!files.length && dt.items) {
+                files = Array.from(dt.items).filter((it) => it.kind === 'file').map((it) => it.getAsFile()).filter(Boolean);
+            }
+            if (!files.length || this.state.taskSubmitInProgress) return;
+            e.preventDefault();
+            files = files.map((f, i) => (f.name && f.name !== 'image.png') ? f
+                : new File([f], `pasted-${Date.now()}-${i + 1}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type }));
+            flash();
+            this.handleFilesSelected(files);
+        });
+        window.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (!(e.target && e.target.closest && e.target.closest('#upload-zone, #image-zone'))) zone.classList.add('dragover');
+        });
+        window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) zone.classList.remove('dragover'); });
+        window.addEventListener('drop', (e) => {
+            if (e.target && e.target.closest && e.target.closest('#upload-zone, #image-zone')) return;   // the zone's own handler
+            e.preventDefault();
+            zone.classList.remove('dragover');
+            if (this.state.taskSubmitInProgress) return;
+            const files = e.dataTransfer && e.dataTransfer.files;
+            if (files && files.length) this.handleFilesSelected(files);
+        });
+    },
+
     routeImageToGeneration(fileOrFiles) {
         const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
         const file = files[0];
-        document.querySelector('.tab[data-tab="image"]')?.click();
+        // Upload V3 (owner 2026-10-16): no second panel - the picture goes to generation from the one zone, its
+        // status (#image-gen-status) sits under that zone
         const input = document.getElementById('image-input');
         if (input) {
             try {
@@ -1476,7 +1517,7 @@ const App = {
                 // can still pick the file through the panel's own input.
             }
         }
-        document.getElementById('image-panel')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        document.getElementById('upload-zone')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     },
 
     /**
