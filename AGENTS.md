@@ -694,7 +694,8 @@ Owner rule, 2026-10-10:
   * Doors are cut from the body by the labels and hinged (`mt/vehicle.py`); the cabin is cut into the body and
     furnished from a kit (seat, steering wheel, three pedals, a manual H-pattern gear stick, dashboard); the sockets
     (seat, wheel grips, pedals, gear knob, their axes and travel) are the contract in `vehicle/interior.json`.
-  * The driver is a robot of the Humanoid Robots Model Pack (`R:\_KOS_obot_\HumanoidRobotsPack`, HR-01 first,
+  * The driver is a robot of the Humanoid Robots Model Pack (`R:\_KOS_
+obot_\HumanoidRobotsPack`, HR-01 first,
     `Exports/HR-01/HR-01.glb`, Humanoid skeleton, clips Idle / Walk / Turn / Wave / LiftCarry), seated by IK at the
     sockets, with driving clips made per car (steer, gas, brake, clutch + shift). Any rigged AutoRig biped can take
     the seat later: the sockets are the contract, not the robot.
@@ -767,7 +768,7 @@ Owner rule, 2026-10-10:
     Vision inventory names what to look for; Qwen Object-ID painting stays only as the comparison path;
   * the masks run on a GPU: `deploy/vehicle/masks_service.py` (GDINO-tiny + SAM2.1-tiny kept loaded, HTTP
     `/masks`) on worker-4090 under the ComfyUI python (`R:utorig\.runtimeehicle-seg`, reverse tunnel
-    `-R 19410:127.0.0.1:8989`), later on the farm ai-nodes; `mt/vehicle_v3.masks_detect` tries `VEHICLE_MASKS_URL`
+    `-R 19411:127.0.0.1:8989`), later on the farm ai-nodes; `mt/vehicle_v3.masks_detect` tries `VEHICLE_MASKS_URL`
     first and falls back to the VPS CPU worker (GDINO 33 s per query there);
   * model downloads for these tests are allowed by this order (GroundingDINO-tiny, SAM2.1, SAM3 when needed);
   * the corpus `/srv/autorig/data/autotests/corpus/vehicles/` holds 10 vehicle pictures generated one by one on

@@ -5,7 +5,7 @@ picture is segmented in about a second instead of minutes on the VPS CPU.
     python masks_service.py --root R:\autorig\.runtime\vehicle-seg --port 8989 [--device cuda]
 
 Runs under the ComfyUI python on worker-4090 (torch CUDA, transformers, sam2, hydra are there). The VPS reaches it
-through a reverse tunnel (`ssh -R 19410:127.0.0.1:8989 autorig-vps`); mt/vehicle_v3.masks_detect tries
+through a reverse tunnel (`ssh -R 19411:127.0.0.1:8989 autorig-vps`); mt/vehicle_v3.masks_detect tries
 VEHICLE_MASKS_URL first and falls back to the CPU worker.
 
     POST /masks   {"image_b64": <png/jpg>, "queries": {"wheel": "wheel,tire", ...}, "box_threshold": 0.3,
