@@ -3,61 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>T-Pose vs A-Pose：自动绑定姿势指南</title>
-    <meta name="description" content="比较 T-pose 和 A-pose 对自动绑定、骨骼生成、skin weights、Unity Mecanim 与 Unreal Engine 的影响。">
-    <meta name="keywords" content="t pose vs a pose, character rigging pose, t-pose rigging, a-pose rigging, unity mecaim pose, rigging pose comparison, auto rigging pose">
+    <title>T-Pose 与 A-Pose：自动绑定该选哪种姿势？</title>
+    <meta name="description" content="T-pose 与 A-pose 用于自动绑定：每种姿势对骨架意味着什么，以及为什么 AutoRig 接受任意姿势，你无需转换模型。">
+    <meta name="keywords" content="T-pose 与 A-pose, A-pose 与 T-pose 绑定, 角色绑定姿势, 自动绑定姿势, 绑定姿势, 任意姿势绑定, 无需 T 姿势">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorig.online/t-pose-vs-a-pose-zh">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/t-pose-vs-a-pose">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/t-pose-vs-a-pose-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/t-pose-vs-a-pose-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/t-pose-vs-a-pose-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-vs-a-pose">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="T-Pose vs A-Pose：自动绑定姿势指南">
-    <meta property="og:description" content="为自动骨骼、skin weights 和游戏引擎选择合适初始姿势。">
+    <meta property="og:title" content="T-Pose 与 A-Pose：自动绑定该选哪种姿势？">
+    <meta property="og:description" content="T-pose 和 A-pose 对骨架意味着什么，以及为什么无需转换：AutoRig 会让骨架贴合任意姿势，并在查看器中供你确认。">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/t-pose-vs-a-pose-zh">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/t-pose-vs-a-pose.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AutoRig 绑定的两个角色：T-pose 的赛车手和 A-pose 的角色">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="T-Pose 与 A-Pose：自动绑定该选哪种姿势？">
+    <meta name="twitter:description" content="T-pose 和 A-pose 对骨架意味着什么，以及为什么无需转换：AutoRig 会让骨架贴合任意姿势，并在查看器中供你确认。">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/t-pose-vs-a-pose.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "Article",
-        "headline": "T-Pose vs A-Pose：自动绑定姿势指南",
-        "description": "比较 T-pose 和 A-pose 对自动绑定、skin weights、Unity Mecanim 与 Unreal Engine 的影响。",
+        "headline": "T-Pose 与 A-Pose：自动绑定该选哪种姿势？",
+        "description": "T-pose 与 A-pose 用于自动绑定：每种姿势对骨架意味着什么，以及为什么 AutoRig 接受任意姿势，你无需转换模型。",
+        "image": "https://autorig.online/static/images/og/t-pose-vs-a-pose.jpg",
+        "inLanguage": "zh",
         "author": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+            }
         },
         "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
+        "dateModified": "2026-10-16",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://autorig.online/t-pose-vs-a-pose-zh"
         },
-        "articleSection": "指南",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "首页",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "T-Pose vs A-Pose",
-                    "item": "https://autorig.online/t-pose-vs-a-pose-zh"
-                }
-            ]
-        }
+        "articleSection": "Guides"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "首页",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "指南",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "T-Pose 与 A-Pose",
+                "item": "https://autorig.online/t-pose-vs-a-pose-zh"
+            }
+        ]
     }
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .article-figure { margin: 1.75rem 0; }
+        .article-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: #1a1a20; }
+        .article-figure figcaption { margin-top: .6rem; color: var(--text-secondary); font-size: .9rem; line-height: 1.5; }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,25 +117,25 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>T-Pose vs A-Pose：自动绑定姿势指南</h1>
-                <p class="hero-subtitle">了解哪种初始姿势更适合自动骨骼、skin weights、Unity Mecanim 与 Unreal Engine。</p>
+                <h1>T-Pose 与 A-Pose：对自动绑定意味着什么</h1>
+                <p class="hero-subtitle">T-pose 和 A-pose 对骨架意味着什么，以及为什么无需转换：AutoRig 会让骨架贴合模型本来的姿势。</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <img src="/static/images/icons/target.svg" alt="T-Pose" class="feature-icon" width="96" height="96">
-                        <span>Pose comparison</span>
+                        <img src="/static/images/icons/target.svg" alt="姿势" class="feature-icon" width="96" height="96">
+                        <span>姿势对比</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/target.svg" alt="Target" class="feature-icon" width="96" height="96">
-                        <span>Auto-rigging tips</span>
+                        <img src="/static/images/icons/target.svg" alt="目标" class="feature-icon" width="96" height="96">
+                        <span>接受任意姿势</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
-                        <span>Engine compatibility</span>
+                        <img src="/static/images/icons/tools.svg" alt="引擎" class="feature-icon" width="96" height="96">
+                        <span>引擎兼容性</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">Start 自动绑定</a>
+                <a href="/" class="cta-button">开始自动绑定</a>
             </div>
         </div>
     </section>
@@ -102,43 +144,37 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <p>If you've ever tried auto-rigging and got weird shoulders, broken elbows, or twisted wrists, the starting pose is often the reason. The two most common bind poses are <strong>T-pose</strong> and <strong>A-pose</strong>. Both can work, but they behave differently for automatic skeleton fitting and skinning.</p>
+                <p>如果你曾手动绑定模型却得到奇怪的肩膀、折断的手肘或扭曲的手腕，起始姿势往往就是原因。最常见的两种绑定姿势是 <strong>T-pose</strong> 和 <strong>A-pose</strong>。两者都可行，只是对骨架拟合和蒙皮的影响不同。在 AutoRig 中，两者都不是必需的。</p>
 
-                <h2>What is a T-pose?</h2>
-                <p>A T-pose is the classic: arms straight out horizontally, forming a "T" shape. This pose makes limb lengths and joint directions very clear to algorithms because arms are fully extended and symmetrical.</p>
+                <h2>什么是 T-pose？</h2>
+                <p>T-pose 是最经典的姿势：双臂水平伸直，呈“T”字形。双臂完全伸展且对称，因此无论是人还是算法，都很容易读出肢体长度和关节方向。</p>
 
-                <h2>What is an A-pose?</h2>
-                <p>An A-pose keeps arms angled down (usually 30-45 degrees). Many manual rigs prefer A-pose because it can produce nicer shoulder deformation for certain characters.</p>
+                <h2>什么是 A-pose？</h2>
+                <p>A-pose 让双臂向下倾斜，通常为 30–45 度。许多手工绑定更偏好它，因为它更接近实际工作姿势，对某些角色还能得到更好的肩部变形。</p>
 
-                <h2>Why many auto-riggers prefer T-pose</h2>
+                <h2>每种姿势对骨架意味着什么</h2>
                 <ul>
-                    <li><strong>Clear joint positions:</strong> shoulders, elbows, wrists are easier to detect</li>
-                    <li><strong>Symmetry:</strong> both arms align cleanly for left/right matching</li>
-                    <li><strong>Less ambiguity:</strong> fewer "almost" positions that confuse fitting</li>
+                    <li><strong>T-pose：</strong>肩、肘、腕容易定位，左右手臂很容易对称匹配，但肩膀处于极限位置，手臂放下时肩部蒙皮需要多加留意</li>
+                    <li><strong>A-pose：</strong>肩膀一开始就更接近动画中的常见位置，对肩部有厚重衣物或盔甲的角色有帮助，不过手臂方向对拟合算法来说稍不明显</li>
+                    <li><strong>两者都没有错：</strong>关键在于骨架要贴合网格实际所处的姿势</li>
                 </ul>
 
-                <h2>When A-pose can be better</h2>
+                <h2>无需转换你的模型</h2>
+                <p>AutoRig 根据模型的几何形状在任意姿势下生成骨架：T-pose、A-pose、放松站姿或动作姿势都可以。如果文件本身已有骨架或动画，会优先使用它自带的绑定姿势。如果双足角色的两条腿站姿不同，以站立的腿决定骨骼长度，另一条腿沿自己的中心线按相同长度放置，因此无论什么姿势，两条腿都有相同的骨骼。</p>
+                <figure class="article-figure">
+                    <img src="/static/images/articles/pose-t-vs-a.jpg" alt="AutoRig 绑定的两个角色：T-pose 的赛车手和 A-pose 的角色" width="800" height="500" loading="lazy" decoding="async">
+                    <figcaption>两种姿势走同一条流水线：T-pose（左）和 A-pose（右），来自 AutoRig 查看器的渲染图。</figcaption>
+                </figure>
+                <p>骨架会在查看器中供你确认，使用 Blueprint 模式（按 B 键）可以对称地编辑骨骼；最后一次编辑 15 秒后或点击按钮即可重新绑定。动画不会等待这一确认。</p>
+
+                <h2>姿势何时仍然重要</h2>
                 <ul>
-                    <li>high shoulder realism is more important than speed</li>
-                    <li>your character has heavy clothing or armor around shoulders</li>
-                    <li>you plan to manually polish weights anyway</li>
+                    <li>干净的姿势对任何绑定都有帮助：手肘伸直、手部自然、模型居中且缩放正确</li>
+                    <li>对于姿势很夸张的模型（坐着、蹲着、抱臂），结果取决于几何形状，因此请在查看器中打开任务并检查骨架</li>
+                    <li>如果网格与源骨架不一致，应以文件自带的绑定姿势为准</li>
                 </ul>
-
-                <h2>The practical rule</h2>
-                <p>If the tool expects T-pose, use T-pose. If you feed an A-pose into a system tuned for T-pose, you often get incorrect shoulder orientation, weird arm twist, or uneven skinning.</p>
-
-                <h2>Quick checklist for a "good T-pose"</h2>
-                <ul>
-                    <li>Arms at ~90° from torso (horizontal)</li>
-                    <li>Elbows straight (not hyper-bent)</li>
-                    <li>Hands neutral (not extreme claw)</li>
-                    <li>Feet flat, legs straight</li>
-                    <li>Model centered and scaled correctly</li>
-                </ul>
-
-                <p>If you're targeting fast auto-rigging and predictable exports, start with T-pose and keep geometry clean.</p>
-
-                <p><a href="/">Try auto-rigging a T-pose character</a></p>
+                <p>想要可预期的导出结果，就保持几何干净。你不必先给角色重新摆姿势：<a href="/">直接上传模型的现有姿势</a>，看看结果即可。</p>
+                <p><strong>下一步：</strong>阅读<a href="/t-pose-rig">姿势指南</a>，在 <a href="/rig-glb-unity-zh">GLB 导入 Unity</a> 和 <a href="/rig-fbx-unreal-zh">FBX 导入 Unreal</a> 中了解骨架如何进入引擎，或查看<a href="/animation-retargeting-zh">动画重定向</a>。</p>
             </article>
         </div>
     </section>
@@ -147,13 +183,15 @@
     <section class="related-section">
         <div class="container">
             <h2>相关指南</h2>
-            <p>Learn more about rigging poses and techniques:</p>
+            <p>进一步了解绑定姿势与技巧：</p>
             <div class="related-links">
-                <a href="/t-pose-rig" class="related-link">T-Pose Checklist</a>
-                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
-                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
-                <a href="/how-it-works" class="related-link">如何工作</a>
-                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/t-pose-rig" class="related-link">姿势指南</a>
+                <a href="/glb-auto-rig" class="related-link">GLB 自动绑定</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX 自动绑定</a>
+                <a href="/rig-glb-unity-zh" class="related-link">GLB 导入 Unity</a>
+                <a href="/rig-fbx-unreal-zh" class="related-link">FBX 导入 Unreal</a>
+                <a href="/how-it-works" class="related-link">工作原理</a>
+                <a href="/faq" class="related-link">常见问题</a>
             </div>
         </div>
     </section>
@@ -161,17 +199,17 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Choose the Right Pose?</h2>
-            <p>Get professional auto rigging results with the right starting pose. Free to try!</p>
-            <a href="/" class="cta-button">Start 自动绑定</a>
+            <h2>准备好以任意姿势绑定你的模型了吗？</h2>
+            <p>直接上传模型本来的姿势。AutoRig 会让骨架贴合它，并在查看器中供你确认。</p>
+            <a href="/" class="cta-button">开始自动绑定</a>
         </div>
     </section>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <div id="site-footer"></div>
 </body>

@@ -3,35 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face rig и анимация лица | AutoRig</title>
-    <meta name="description" content="Как AutoRig строит мягкие маски лица, 2D-лендмарки и оценку зон по фронтальному изображению головы для мимики и липсинка.">
-    <meta name="keywords" content="face rig, риг лица, мимика, лендмарки лица, липсинк, блендшейпы, морфы, риг персонажа, анализ головы, Unity мимика, Unreal мимика, AutoRig">
+    <title>Face rig и анимация: маски и лендмарки головы | AutoRig</title>
+    <meta name="description" content="Что AutoRig делает для лица: анализ головы с мягкими масками, 2D-лендмарками и оценкой зон, с живым демо. Риг тела включает голову и шею.">
+    <meta name="keywords" content="face rig, маски лица, лендмарки лица, анализ головы, мягкие маски, уверенность по зонам, риггинг персонажей, AutoRig">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="AutoRig Online">
     <link rel="canonical" href="https://autorig.online/face-rig-animation-ru">
     <link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation">
-    <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
-    <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
-    <link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi">
     <link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation">
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="AutoRig Online">
     <meta property="og:locale" content="ru_RU">
-    <meta property="og:title" content="Face rig и анимация лица | AutoRig">
-    <meta property="og:description" content="Анализ головы, мягкие маски, лендмарки и оценка зон для лицевой анимации.">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta property="og:title" content="Face rig и анимация: маски и лендмарки головы | AutoRig">
+    <meta property="og:description" content="Фронтальный рендер головы на входе, мягкие маски лица, 2D-лендмарки и оценка зон на выходе. Инструмент анализа головы с живым демо; риг тела включает голову и шею.">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/face-rig-animation-ru">
-    <meta property="og:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
-    <meta property="og:image:width" content="259">
-    <meta property="og:image:height" content="194">
-    <meta property="og:image:alt" content="Пример фронтального рендера головы для анализа масок">
+    <meta property="og:image" content="https://autorig.online/static/images/og/face-rig-animation.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Фронтальный 3D-рендер головы, использованный как пример для анализа головы">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Face rig и анимация лица | AutoRig">
-    <meta name="twitter:description" content="Мягкие маски, лендмарки и оценка зон для лицевой анимации.">
-    <meta name="twitter:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
+    <meta name="twitter:title" content="Face rig и анимация: маски и лендмарки головы | AutoRig">
+    <meta name="twitter:description" content="Фронтальный рендер головы на входе, мягкие маски лица, 2D-лендмарки и оценка зон на выходе. Инструмент анализа головы с живым демо; риг тела включает голову и шею.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/face-rig-animation.jpg">
 
     <script type="application/ld+json">
     {
@@ -42,7 +46,9 @@
                 "@id": "https://autorig.online/#website",
                 "name": "AutoRig Online",
                 "url": "https://autorig.online",
-                "publisher": { "@id": "https://autorig.online/#organization" }
+                "publisher": {
+                    "@id": "https://autorig.online/#organization"
+                }
             },
             {
                 "@type": "Organization",
@@ -58,15 +64,19 @@
                 "@type": "WebPage",
                 "@id": "https://autorig.online/face-rig-animation-ru#webpage",
                 "url": "https://autorig.online/face-rig-animation-ru",
-                "name": "Face rig и анимация — мягкие маски, лендмарки и липсинк",
-                "description": "Как AutoRig по фронтальному рендеру головы строит мягкие маски и лендмарки для мимики и липсинка, с живым демо API.",
-                "inLanguage": "ru-RU",
-                "isPartOf": { "@id": "https://autorig.online/#website" },
+                "name": "Face rig и анимация: маски и лендмарки головы | AutoRig",
+                "description": "Что AutoRig делает для лица: анализ головы с мягкими масками, 2D-лендмарками и оценкой зон, с живым демо. Риг тела включает голову и шею.",
+                "inLanguage": "ru",
+                "isPartOf": {
+                    "@id": "https://autorig.online/#website"
+                },
                 "primaryImageOfPage": {
                     "@type": "ImageObject",
-                    "url": "https://autorig.online/static/images/guides/face-rig-demo-head.png"
+                    "url": "https://autorig.online/static/images/og/face-rig-animation.jpg"
                 },
-                "breadcrumb": { "@id": "https://autorig.online/face-rig-animation-ru#breadcrumb" }
+                "breadcrumb": {
+                    "@id": "https://autorig.online/face-rig-animation-ru#breadcrumb"
+                }
             },
             {
                 "@type": "BreadcrumbList",
@@ -94,16 +104,35 @@
             },
             {
                 "@type": "Article",
-                "headline": "Face rig и анимация лица",
-                "description": "Руководство по анализу лица в AutoRig: confidence зон, 2D-лендмарки и мягкие маски для лицевой анимации.",
-                "author": { "@type": "Organization", "name": "AutoRig Online" },
-                "publisher": { "@id": "https://autorig.online/#organization" },
-                "image": ["https://autorig.online/static/images/guides/face-rig-demo-head.png"],
+                "headline": "Face rig и анимация",
+                "description": "Что AutoRig делает для лица: анализ головы с мягкими масками, 2D-лендмарками и оценкой зон, с живым демо. Риг тела включает голову и шею.",
+                "inLanguage": "ru",
+                "author": {
+                    "@type": "Organization",
+                    "name": "AutoRig Online"
+                },
+                "publisher": {
+                    "@id": "https://autorig.online/#organization"
+                },
+                "image": [
+                    "https://autorig.online/static/images/og/face-rig-animation.jpg"
+                ],
                 "datePublished": "2026-03-24",
-                "dateModified": "2026-03-24",
-                "mainEntityOfPage": { "@id": "https://autorig.online/face-rig-animation-ru#webpage" },
+                "dateModified": "2026-10-16",
+                "mainEntityOfPage": {
+                    "@id": "https://autorig.online/face-rig-animation-ru#webpage"
+                },
                 "articleSection": "Guides",
-                "keywords": ["face rig", "мимика", "маски лица", "лендмарки", "липсинк", "риг персонажа", "анализ головы"]
+                "keywords": [
+                    "face rig",
+                    "маски лица",
+                    "лендмарки лица",
+                    "анализ головы",
+                    "мягкие маски",
+                    "уверенность по зонам",
+                    "риггинг персонажей",
+                    "AutoRig"
+                ]
             }
         ]
     }
@@ -585,11 +614,11 @@
                         </ol>
                     </nav>
                     <h1>Face rig и анимация</h1>
-                    <p class="hero-subtitle">Фронтальный рендер головы → мягкие маски лица, 2D-лендмарки и оценка зон для липсинка и выражений в пайплайне AutoRig.</p>
+                    <p class="hero-subtitle">На вход идёт фронтальный рендер головы, на выходе мягкие маски лица, 2D-лендмарки и оценка зон. Это инструмент анализа головы с живым демо, а не генератор лицевой анимации.</p>
                     <div class="fr-chips" aria-hidden="true">
-                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt=""> Анализ головы</span>
-                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt=""> Мягкие маски</span>
-                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt=""> Лендмарки</span>
+                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt="Анализ головы" width="16" height="16"> Анализ головы</span>
+                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt="Мягкие маски" width="16" height="16"> Мягкие маски</span>
+                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt="Лендмарки" width="16" height="16"> Лендмарки</span>
                     </div>
                 </div>
                 <div class="fr-hero-aside">
@@ -612,13 +641,13 @@
                 <div class="fr-insight">
                     <h2>Зачем маски</h2>
                     <p>
-                        Маски задают, где на меше допустимы деформация и речевые движения. Чистое разделение зон помогает не смешивать речь, моргание и эмоции.
+                        Маски показывают, где на голове глаза, рот и брови. Лицевой риг нуждается в такой карте, чтобы деформация шла в нужных зонах. AutoRig возвращает маски; он не создаёт blendshapes и не снимает лицевую игру.
                     </p>
                 </div>
                 <div class="fr-insight">
                     <h2>В AutoRig</h2>
                     <p>
-                        После рига тела воркер может проанализировать голову — без ручной раскраски весов по зонам. Демо вызывает <code>POST …/api/face-rig/analyze-head</code> на боевом воркере.
+                        Риг тела V3 включает голову и шею в свой скелет. Анализ головы — отдельный инструмент: он читает фронтальный рендер головы и возвращает маски, лендмарки и оценку зон. Демо вызывает <code>POST …/api/face-rig/analyze-head</code> на боевом воркере.
                     </p>
                 </div>
             </div>
@@ -635,7 +664,7 @@
                                 <span style="font-size: 1.25rem; opacity: 0.85;">🖼</span>
                                 <p class="fr-drop-hint">Перетащите или нажмите, чтобы выбрать изображение</p>
                                 <input type="file" id="fr-file" accept="image/*" style="display:none" aria-hidden="true">
-                                <img id="fr-preview" class="fr-preview" alt="Preview" src="/static/images/guides/face-rig-demo-head.png">
+                                <img id="fr-preview" class="fr-preview" alt="Фронтальный 3D-рендер головы — входное изображение демо" width="259" height="194" src="/static/images/guides/face-rig-demo-head.png">
                             </div>
                             <p class="fr-meta" id="fr-file-label"></p>
                             <button type="button" class="btn btn-primary fr-run" id="fr-run">Запустить анализ</button>
@@ -653,9 +682,9 @@
             </div>
 
             <div class="fr-next">
-                <h2>Дальше</h2>
+                <h2>Что делает и чего не делает этот инструмент</h2>
                 <p>
-                    Сюда можно добавить заметки под движок (Unity blendshapes, Unreal), советы по съёмке фронтала и разбор низкой уверенности. Лучше всего ровный свет и центрированное лицо.
+                    Инструмент анализирует изображение головы. Он не создаёт blendshapes и morph targets, не снимает лицо с видео и сам по себе не управляет липсинком. Лучшая уверенность достигается на ровно освещённых фронтальных лицах по центру кадра.
                 </p>
                 <p style="margin-bottom: 0;"><a href="/"><strong>Полный пайплайн auto-rig для персонажа →</strong></a></p>
             </div>
@@ -670,6 +699,8 @@
                 <a href="/animation-retargeting-ru" class="related-link">Ретаргетинг анимаций</a>
                 <a href="/how-it-works" class="related-link">Как это работает</a>
                 <a href="/guides" class="related-link">Все руководства</a>
+                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/gallery" class="related-link">Галерея</a>
             </div>
         </div>
     </section>

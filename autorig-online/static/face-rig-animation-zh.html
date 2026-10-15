@@ -3,35 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>面部绑定与动画指南 — 软蒙版、关键点与口型同步 | AutoRig Online</title>
-    <meta name="description" content="AutoRig 如何将正面头部图像转为面部软蒙版、2D 关键点与分区置信度，用于游戏面部动画。流程说明与线上 analyze-head 演示（与生产环境相同 API）。">
-    <meta name="keywords" content="面部绑定, 面部动画, 面部蒙版, 面部关键点, 口型同步, 混合形状, 角色绑定, 头部分析, Unity 面部, Unreal 面部, AutoRig">
+    <title>Face Rig 面部绑定：头部蒙版与关键点 | AutoRig</title>
+    <meta name="description" content="AutoRig 为面部做什么：头部分析，输出柔和蒙版、2D 关键点和区域评分，并提供在线演示。身体绑定包含头部和颈部。">
+    <meta name="keywords" content="face rig, 面部蒙版, 面部关键点, 头部分析, 柔和蒙版, 区域置信度, 角色绑定, AutoRig">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="AutoRig Online">
     <link rel="canonical" href="https://autorig.online/face-rig-animation-zh">
     <link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation">
-    <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
-    <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
-    <link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi">
     <link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation">
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="AutoRig Online">
     <meta property="og:locale" content="zh_CN">
-    <meta property="og:title" content="面部绑定与动画 — 软蒙版与关键点 | AutoRig Online">
-    <meta property="og:description" content="交互式指南：正面头部分析、软蒙版、关键点与分区评分。在线演示调用生产环境 face-rig API。">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta property="og:title" content="Face Rig 面部绑定：头部蒙版与关键点 | AutoRig">
+    <meta property="og:description" content="输入正面头部渲染图，输出柔和面部蒙版、2D 关键点和区域评分。这是带在线演示的头部分析工具；身体绑定包含头部和颈部。">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/face-rig-animation-zh">
-    <meta property="og:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
-    <meta property="og:image:width" content="259">
-    <meta property="og:image:height" content="194">
-    <meta property="og:image:alt" content="用于面部分析蒙版演示的正面头部渲染示例">
+    <meta property="og:image" content="https://autorig.online/static/images/og/face-rig-animation.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="用作头部分析示例的正面 3D 头部渲染图">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="面部绑定与动画指南 | AutoRig Online">
-    <meta name="twitter:description" content="面部软蒙版、关键点与 analyze-head 在线演示 — 与 AutoRig 生产管线一致。">
-    <meta name="twitter:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
+    <meta name="twitter:title" content="Face Rig 面部绑定：头部蒙版与关键点 | AutoRig">
+    <meta name="twitter:description" content="输入正面头部渲染图，输出柔和面部蒙版、2D 关键点和区域评分。这是带在线演示的头部分析工具；身体绑定包含头部和颈部。">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/face-rig-animation.jpg">
 
     <script type="application/ld+json">
     {
@@ -42,7 +46,9 @@
                 "@id": "https://autorig.online/#website",
                 "name": "AutoRig Online",
                 "url": "https://autorig.online",
-                "publisher": { "@id": "https://autorig.online/#organization" }
+                "publisher": {
+                    "@id": "https://autorig.online/#organization"
+                }
             },
             {
                 "@type": "Organization",
@@ -58,15 +64,19 @@
                 "@type": "WebPage",
                 "@id": "https://autorig.online/face-rig-animation-zh#webpage",
                 "url": "https://autorig.online/face-rig-animation-zh",
-                "name": "面部绑定与动画 — 软蒙版、关键点与口型同步",
-                "description": "AutoRig 如何将正面头部渲染解析为面部软蒙版与关键点，用于动画与口型同步，并提供在线 API 演示。",
-                "inLanguage": "zh-CN",
-                "isPartOf": { "@id": "https://autorig.online/#website" },
+                "name": "Face Rig 面部绑定：头部蒙版与关键点 | AutoRig",
+                "description": "AutoRig 为面部做什么：头部分析，输出柔和蒙版、2D 关键点和区域评分，并提供在线演示。身体绑定包含头部和颈部。",
+                "inLanguage": "zh",
+                "isPartOf": {
+                    "@id": "https://autorig.online/#website"
+                },
                 "primaryImageOfPage": {
                     "@type": "ImageObject",
-                    "url": "https://autorig.online/static/images/guides/face-rig-demo-head.png"
+                    "url": "https://autorig.online/static/images/og/face-rig-animation.jpg"
                 },
-                "breadcrumb": { "@id": "https://autorig.online/face-rig-animation-zh#breadcrumb" }
+                "breadcrumb": {
+                    "@id": "https://autorig.online/face-rig-animation-zh#breadcrumb"
+                }
             },
             {
                 "@type": "BreadcrumbList",
@@ -94,16 +104,35 @@
             },
             {
                 "@type": "Article",
-                "headline": "面部绑定与动画 — 软蒙版、关键点与口型同步",
-                "description": "AutoRig 面部分析指南：RGB、合成深度/Alpha、分区置信度、2D 关键点与用于面部动画的软蒙版。",
-                "author": { "@type": "Organization", "name": "AutoRig Online" },
-                "publisher": { "@id": "https://autorig.online/#organization" },
-                "image": ["https://autorig.online/static/images/guides/face-rig-demo-head.png"],
+                "headline": "面部绑定与动画",
+                "description": "AutoRig 为面部做什么：头部分析，输出柔和蒙版、2D 关键点和区域评分，并提供在线演示。身体绑定包含头部和颈部。",
+                "inLanguage": "zh",
+                "author": {
+                    "@type": "Organization",
+                    "name": "AutoRig Online"
+                },
+                "publisher": {
+                    "@id": "https://autorig.online/#organization"
+                },
+                "image": [
+                    "https://autorig.online/static/images/og/face-rig-animation.jpg"
+                ],
                 "datePublished": "2026-03-24",
-                "dateModified": "2026-03-24",
-                "mainEntityOfPage": { "@id": "https://autorig.online/face-rig-animation-zh#webpage" },
+                "dateModified": "2026-10-16",
+                "mainEntityOfPage": {
+                    "@id": "https://autorig.online/face-rig-animation-zh#webpage"
+                },
                 "articleSection": "Guides",
-                "keywords": ["面部绑定", "面部动画", "蒙版", "关键点", "口型同步", "角色绑定", "头部分析"]
+                "keywords": [
+                    "face rig",
+                    "面部蒙版",
+                    "面部关键点",
+                    "头部分析",
+                    "柔和蒙版",
+                    "区域置信度",
+                    "角色绑定",
+                    "AutoRig"
+                ]
             }
         ]
     }
@@ -585,11 +614,11 @@
                         </ol>
                     </nav>
                     <h1>面部绑定与动画</h1>
-                    <p class="hero-subtitle">正面头部渲染 → 面部软蒙版、2D 关键点与分区评分，用于 AutoRig 管线中的口型与表情。</p>
+                    <p class="hero-subtitle">输入一张正面头部渲染图，输出柔和面部蒙版、2D 关键点和区域评分。这是一个带在线演示的头部分析工具，不是面部动画生成器。</p>
                     <div class="fr-chips" aria-hidden="true">
-                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt=""> 头部分析</span>
-                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt=""> 软蒙版</span>
-                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt=""> 关键点</span>
+                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt="头部分析" width="16" height="16"> 头部分析</span>
+                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt="软蒙版" width="16" height="16"> 软蒙版</span>
+                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt="关键点" width="16" height="16"> 关键点</span>
                     </div>
                 </div>
                 <div class="fr-hero-aside">
@@ -612,13 +641,13 @@
                 <div class="fr-insight">
                     <h2>为何需要蒙版</h2>
                     <p>
-                        蒙版限定网格变形与语音运动的范围。清晰分区让说话、眨眼与情绪层在运行时互不干扰。
+                        蒙版标出头部上眼睛、嘴巴和眉毛的位置。面部设置需要这样一张图，才能把形变限制在正确的区域。AutoRig 返回蒙版；它不会生成 blendshape，也不会捕捉面部表演。
                     </p>
                 </div>
                 <div class="fr-insight">
                     <h2>在 AutoRig 中</h2>
                     <p>
-                        身体绑定后，worker 可分析头部，省去逐区手绘权重。演示在正式 worker 上调用 <code>POST …/api/face-rig/analyze-head</code>。
+                        V3 的身体绑定把头部和颈部包含在骨架中。头部分析是一个独立工具：它读取正面头部渲染图，返回蒙版、关键点和区域评分。演示会在线上 worker 上调用 <code>POST …/api/face-rig/analyze-head</code>。
                     </p>
                 </div>
             </div>
@@ -635,7 +664,7 @@
                                 <span style="font-size: 1.25rem; opacity: 0.85;">🖼</span>
                                 <p class="fr-drop-hint">拖放或点击选择图片</p>
                                 <input type="file" id="fr-file" accept="image/*" style="display:none" aria-hidden="true">
-                                <img id="fr-preview" class="fr-preview" alt="Preview" src="/static/images/guides/face-rig-demo-head.png">
+                                <img id="fr-preview" class="fr-preview" alt="用作演示输入的正面 3D 头部渲染图" width="259" height="194" src="/static/images/guides/face-rig-demo-head.png">
                             </div>
                             <p class="fr-meta" id="fr-file-label"></p>
                             <button type="button" class="btn btn-primary fr-run" id="fr-run">运行分析</button>
@@ -653,11 +682,11 @@
             </div>
 
             <div class="fr-next">
-                <h2>下一步</h2>
+                <h2>这个工具能做什么、不能做什么</h2>
                 <p>
-                    可在此补充引擎相关说明（Unity blendshape、Unreal）、正面布光与低置信度排查。正面、光线均匀效果最好。
+                    该工具分析的是头部图像。它不会创建 blendshape 或形态目标，不会从视频中捕捉面部，也不会单独驱动口型同步。光线均匀、居中的正面人脸能获得最高的置信度。
                 </p>
-                <p style="margin-bottom: 0;"><a href="/"><strong>为角色运行完整 auto-rig 流程 →</strong></a></p>
+                <p style="margin-bottom: 0;"><a href="/"><strong>对角色运行完整的自动绑定流程 →</strong></a></p>
             </div>
         </div>
     </section>
@@ -670,6 +699,8 @@
                 <a href="/animation-retargeting-zh" class="related-link">动画重定向</a>
                 <a href="/how-it-works" class="related-link">工作原理</a>
                 <a href="/guides" class="related-link">全部指南</a>
+                <a href="/faq" class="related-link">常见问题</a>
+                <a href="/gallery" class="related-link">作品展示</a>
             </div>
         </div>
     </section>

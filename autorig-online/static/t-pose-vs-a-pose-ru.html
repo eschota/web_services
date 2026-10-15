@@ -3,61 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>T-Pose vs A-Pose для auto rigging</title>
-    <meta name="description" content="Сравнение T-pose и A-pose для auto rigging: что лучше для автоматического скелета, skin weights, Unity Mecanim и Unreal Engine.">
-    <meta name="keywords" content="t pose vs a pose, character rigging pose, t-pose rigging, a-pose rigging, unity mecaim pose, rigging pose comparison, auto rigging pose">
+    <title>T-Pose или A-Pose: какая поза для авториггинга?</title>
+    <meta name="description" content="T-pose или A-pose для авториггинга: что каждая поза значит для рига и почему AutoRig принимает любую позу, так что конвертировать модель не нужно.">
+    <meta name="keywords" content="T-pose или A-pose, A-pose и T-pose для рига, поза персонажа для риггинга, авториг поза, bind pose, риг в любой позе, T-поза не нужна">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorig.online/t-pose-vs-a-pose-ru">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/t-pose-vs-a-pose">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/t-pose-vs-a-pose-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/t-pose-vs-a-pose-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/t-pose-vs-a-pose-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/t-pose-vs-a-pose">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="T-Pose vs A-Pose для auto rigging">
-    <meta property="og:description" content="Какая поза лучше для автоматического скелета, skin weights и игровых движков.">
+    <meta property="og:title" content="T-Pose или A-Pose: какая поза для авториггинга?">
+    <meta property="og:description" content="Что T-поза и A-поза значат для рига и почему конвертировать не нужно: AutoRig подгоняет скелет под любую позу и предлагает подтвердить его во вьювере.">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/t-pose-vs-a-pose-ru">
-    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/t-pose-vs-a-pose.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Два персонажа, заригенных в AutoRig: гонщик в T-позе и персонаж в A-позе">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="T-Pose или A-Pose: какая поза для авториггинга?">
+    <meta name="twitter:description" content="Что T-поза и A-поза значат для рига и почему конвертировать не нужно: AutoRig подгоняет скелет под любую позу и предлагает подтвердить его во вьювере.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/t-pose-vs-a-pose.jpg">
 
     <!-- Schema.org markup -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "Article",
-        "headline": "T-Pose vs A-Pose для auto rigging",
-        "description": "Сравнение T-pose и A-pose для auto rigging, skin weights, Unity Mecanim и Unreal Engine.",
+        "headline": "T-Pose или A-Pose: какая поза для авториггинга?",
+        "description": "T-pose или A-pose для авториггинга: что каждая поза значит для рига и почему AutoRig принимает любую позу, так что конвертировать модель не нужно.",
+        "image": "https://autorig.online/static/images/og/t-pose-vs-a-pose.jpg",
+        "inLanguage": "ru",
         "author": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
         },
         "publisher": {
             "@type": "Organization",
-            "name": "AutoRig Online"
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/",
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+            }
         },
         "datePublished": "2024-12-20",
-        "dateModified": "2024-12-20",
+        "dateModified": "2026-10-16",
         "mainEntityOfPage": {
             "@type": "WebPage",
             "@id": "https://autorig.online/t-pose-vs-a-pose-ru"
         },
-        "articleSection": "Руководства",
-        "breadcrumb": {
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "Главная",
-                    "item": "https://autorig.online"
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "T-Pose vs A-Pose",
-                    "item": "https://autorig.online/t-pose-vs-a-pose-ru"
-                }
-            ]
-        }
+        "articleSection": "Guides"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Главная",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Гиды",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "T-Pose или A-Pose",
+                "item": "https://autorig.online/t-pose-vs-a-pose-ru"
+            }
+        ]
     }
     </script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .article-figure { margin: 1.75rem 0; }
+        .article-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; background: #1a1a20; }
+        .article-figure figcaption { margin-top: .6rem; color: var(--text-secondary); font-size: .9rem; line-height: 1.5; }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -75,25 +117,25 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>T-Pose vs A-Pose для auto rigging</h1>
-                <p class="hero-subtitle">Какая стартовая поза лучше для автоматического скелета, skin weights, Unity Mecanim и Unreal Engine.</p>
+                <h1>T-Pose или A-Pose: что это значит для авториггинга</h1>
+                <p class="hero-subtitle">Что T-поза и A-поза значат для рига и почему конвертировать не нужно: AutoRig подгоняет скелет под ту позу, в которой уже находится ваша модель.</p>
 
                 <div class="hero-features">
                     <div class="feature">
-                        <img src="/static/images/icons/target.svg" alt="T-Pose" class="feature-icon" width="96" height="96">
-                        <span>Pose comparison</span>
+                        <img src="/static/images/icons/target.svg" alt="Позы" class="feature-icon" width="96" height="96">
+                        <span>Сравнение поз</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/target.svg" alt="Target" class="feature-icon" width="96" height="96">
-                        <span>Auto-rigging tips</span>
+                        <img src="/static/images/icons/target.svg" alt="Цель" class="feature-icon" width="96" height="96">
+                        <span>Любая поза принимается</span>
                     </div>
                     <div class="feature">
-                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
-                        <span>Engine compatibility</span>
+                        <img src="/static/images/icons/tools.svg" alt="Движок" class="feature-icon" width="96" height="96">
+                        <span>Совместимость с движками</span>
                     </div>
                 </div>
 
-                <a href="/" class="cta-button">Start Автоматический риггинг</a>
+                <a href="/" class="cta-button">Начать авториггинг</a>
             </div>
         </div>
     </section>
@@ -102,43 +144,37 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <p>If you've ever tried auto-rigging and got weird shoulders, broken elbows, or twisted wrists, the starting pose is often the reason. The two most common bind poses are <strong>T-pose</strong> and <strong>A-pose</strong>. Both can work, but they behave differently for automatic skeleton fitting and skinning.</p>
+                <p>Если вы когда-нибудь вручную ригали модель и получали странные плечи, сломанные локти или скрученные запястья, причиной часто была исходная поза. Две самые распространённые bind-позы — <strong>T-поза</strong> и <strong>A-поза</strong>. Обе допустимы, но по-разному влияют на подгонку скелета и скиннинг. В AutoRig не требуется ни та, ни другая.</p>
 
-                <h2>What is a T-pose?</h2>
-                <p>A T-pose is the classic: arms straight out horizontally, forming a "T" shape. This pose makes limb lengths and joint directions very clear to algorithms because arms are fully extended and symmetrical.</p>
+                <h2>Что такое T-поза?</h2>
+                <p>T-поза — классика: руки вытянуты горизонтально в стороны и образуют букву «T». Руки полностью выпрямлены и симметричны, поэтому длины конечностей и направления суставов легко считываются и человеком, и алгоритмом.</p>
 
-                <h2>What is an A-pose?</h2>
-                <p>An A-pose keeps arms angled down (usually 30-45 degrees). Many manual rigs prefer A-pose because it can produce nicer shoulder deformation for certain characters.</p>
+                <h2>Что такое A-поза?</h2>
+                <p>В A-позе руки опущены вниз, обычно на 30–45 градусов. Многие ригеры, работающие вручную, предпочитают её: она ближе к рабочей позе и для некоторых персонажей даёт более аккуратную деформацию плеч.</p>
 
-                <h2>Why many auto-riggers prefer T-pose</h2>
+                <h2>Что каждая поза значит для рига</h2>
                 <ul>
-                    <li><strong>Clear joint positions:</strong> shoulders, elbows, wrists are easier to detect</li>
-                    <li><strong>Symmetry:</strong> both arms align cleanly for left/right matching</li>
-                    <li><strong>Less ambiguity:</strong> fewer "almost" positions that confuse fitting</li>
+                    <li><strong>T-поза:</strong> плечи, локти и запястья легко расставить, обе руки чётко совпадают слева и справа, но плечи стоят в крайнем положении, поэтому скиннинг вокруг них требует внимания, когда руки опускаются</li>
+                    <li><strong>A-поза:</strong> плечи изначально ближе к положению, в котором их держит анимация, что помогает при плотной одежде или броне на плечах, но направление руки алгоритму подгонки видно чуть менее явно</li>
+                    <li><strong>Ни одна не «неправильная»:</strong> важно, чтобы риг соответствовал той позе, которая действительно есть у меша</li>
                 </ul>
 
-                <h2>When A-pose can be better</h2>
+                <h2>Конвертировать модель не нужно</h2>
+                <p>AutoRig строит риг по геометрии модели в любой позе: T-поза, A-поза, расслабленная стойка или экшен-поза. Если в файле уже есть скелет или анимация, в первую очередь используется его собственная bind-поза. Если ноги гуманоида стоят неодинаково, длины костей задаёт опорная нога, а другая нога размещается с теми же длинами вдоль собственной осевой линии, поэтому в любой позе обе ноги получают одинаковые кости.</p>
+                <figure class="article-figure">
+                    <img src="/static/images/articles/pose-t-vs-a.jpg" alt="Два персонажа, заригенных в AutoRig: гонщик в T-позе и персонаж в A-позе" width="800" height="500" loading="lazy" decoding="async">
+                    <figcaption>Обе позы проходят через один конвейер: T-поза (слева) и A-поза (справа), как они видны в рендерах вьювера AutoRig.</figcaption>
+                </figure>
+                <p>Скелет предлагается подтвердить во вьювере, в режиме Blueprint (клавиша B): там кости можно править с симметрией, а риг пересобирается через 15 с после последней правки или по кнопке. Анимация подтверждения не ждёт.</p>
+
+                <h2>Когда поза всё же важна</h2>
                 <ul>
-                    <li>high shoulder realism is more important than speed</li>
-                    <li>your character has heavy clothing or armor around shoulders</li>
-                    <li>you plan to manually polish weights anyway</li>
+                    <li>чистая поза помогает любому ригу: выпрямленные локти, нейтральные кисти, модель в центре и в правильном масштабе</li>
+                    <li>для сильно «позированной» модели (сидит, присела, скрещённые руки) результат зависит от геометрии, поэтому откройте задачу во вьювере и проверьте скелет</li>
+                    <li>если меш и исходный скелет расходятся, доверять стоит собственной bind-позе файла</li>
                 </ul>
-
-                <h2>The practical rule</h2>
-                <p>If the tool expects T-pose, use T-pose. If you feed an A-pose into a system tuned for T-pose, you often get incorrect shoulder orientation, weird arm twist, or uneven skinning.</p>
-
-                <h2>Quick checklist for a "good T-pose"</h2>
-                <ul>
-                    <li>Arms at ~90° from torso (horizontal)</li>
-                    <li>Elbows straight (not hyper-bent)</li>
-                    <li>Hands neutral (not extreme claw)</li>
-                    <li>Feet flat, legs straight</li>
-                    <li>Model centered and scaled correctly</li>
-                </ul>
-
-                <p>If you're targeting fast auto-rigging and predictable exports, start with T-pose and keep geometry clean.</p>
-
-                <p><a href="/">Try auto-rigging a T-pose character</a></p>
+                <p>Если нужны предсказуемые экспорты, держите геометрию чистой. Переставлять персонажа заранее не нужно: <a href="/">загрузите модель в той позе, что есть</a>, и посмотрите на результат.</p>
+                <p><strong>Дальше:</strong> прочитайте <a href="/t-pose-rig">гид по позам</a>, посмотрите, как риг попадает в движок, в статьях <a href="/rig-glb-unity-ru">GLB для Unity</a> и <a href="/rig-fbx-unreal-ru">FBX для Unreal</a>, или изучите <a href="/animation-retargeting-ru">ретаргетинг анимации</a>.</p>
             </article>
         </div>
     </section>
@@ -146,13 +182,15 @@
     <!-- Related Pages -->
     <section class="related-section">
         <div class="container">
-            <h2>Связанные руководства</h2>
-            <p>Learn more about rigging poses and techniques:</p>
+            <h2>Связанные гиды</h2>
+            <p>Подробнее о позах и приёмах риггинга:</p>
             <div class="related-links">
-                <a href="/t-pose-rig" class="related-link">T-Pose Checklist</a>
-                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
-                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
-                <a href="/how-it-works" class="related-link">Как работает</a>
+                <a href="/t-pose-rig" class="related-link">Гид по позам</a>
+                <a href="/glb-auto-rig" class="related-link">Авториг GLB</a>
+                <a href="/fbx-auto-rig" class="related-link">Авториг FBX</a>
+                <a href="/rig-glb-unity-ru" class="related-link">GLB для Unity</a>
+                <a href="/rig-fbx-unreal-ru" class="related-link">FBX для Unreal</a>
+                <a href="/how-it-works" class="related-link">Как это работает</a>
                 <a href="/faq" class="related-link">FAQ</a>
             </div>
         </div>
@@ -161,17 +199,17 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Choose the Right Pose?</h2>
-            <p>Get professional auto rigging results with the right starting pose. Free to try!</p>
-            <a href="/" class="cta-button">Start Автоматический риггинг</a>
+            <h2>Готовы заригать модель в любой позе?</h2>
+            <p>Загрузите модель в той позе, которая у неё есть. AutoRig подгонит под неё скелет и предложит подтвердить его во вьювере.</p>
+            <a href="/" class="cta-button">Начать авториггинг</a>
         </div>
     </section>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
-<script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <div id="site-footer"></div>
 </body>

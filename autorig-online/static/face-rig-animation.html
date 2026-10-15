@@ -3,35 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face Rig &amp; Facial Animation Guide | AutoRig</title>
-    <meta name="description" content="How AutoRig builds soft facial masks, 2D landmarks and region confidence from a frontal head image for lip sync and game-ready facial animation.">
-    <meta name="keywords" content="face rig, facial animation, face masks, facial landmarks, lip sync, blendshapes, morph targets, 3D character rigging, head analysis, Unity facial animation, Unreal facial animation, AutoRig">
+    <title>Face Rig Animation: Head Masks &amp; Landmarks | AutoRig</title>
+    <meta name="description" content="What AutoRig does for the face: a head analysis that returns soft masks, 2D landmarks and region scores, with a live demo. The body rig includes head and neck.">
+    <meta name="keywords" content="face rig, face masks, facial landmarks, head analysis, soft masks, region confidence, character rigging, AutoRig">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="AutoRig Online">
     <link rel="canonical" href="https://autorig.online/face-rig-animation">
     <link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation">
-    <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
-    <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
-    <link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi">
     <link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation">
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="AutoRig Online">
     <meta property="og:locale" content="en_US">
-    <meta property="og:title" content="Face Rig &amp; Facial Animation Guide | AutoRig">
-    <meta property="og:description" content="Frontal head analysis, soft masks, landmarks and region scores for facial animation.">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta property="og:title" content="Face Rig Animation: Head Masks &amp; Landmarks | AutoRig">
+    <meta property="og:description" content="A frontal head render in, soft facial masks, 2D landmarks and region scores out. A head analysis tool with a live demo; the body rig includes head and neck.">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/face-rig-animation">
-    <meta property="og:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
-    <meta property="og:image:width" content="259">
-    <meta property="og:image:height" content="194">
-    <meta property="og:image:alt" content="Frontal 3D head render sample for face rig mask analysis">
+    <meta property="og:image" content="https://autorig.online/static/images/og/face-rig-animation.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Frontal 3D head render used as the face rig head analysis sample">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Face Rig &amp; Facial Animation Guide | AutoRig">
-    <meta name="twitter:description" content="Soft facial masks, landmarks and region scores for facial animation.">
-    <meta name="twitter:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
+    <meta name="twitter:title" content="Face Rig Animation: Head Masks &amp; Landmarks | AutoRig">
+    <meta name="twitter:description" content="A frontal head render in, soft facial masks, 2D landmarks and region scores out. A head analysis tool with a live demo; the body rig includes head and neck.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/face-rig-animation.jpg">
 
     <script type="application/ld+json">
     {
@@ -42,7 +46,9 @@
                 "@id": "https://autorig.online/#website",
                 "name": "AutoRig Online",
                 "url": "https://autorig.online",
-                "publisher": { "@id": "https://autorig.online/#organization" }
+                "publisher": {
+                    "@id": "https://autorig.online/#organization"
+                }
             },
             {
                 "@type": "Organization",
@@ -58,15 +64,19 @@
                 "@type": "WebPage",
                 "@id": "https://autorig.online/face-rig-animation#webpage",
                 "url": "https://autorig.online/face-rig-animation",
-                "name": "Face Rig & Facial Animation Guide — Soft Masks, Landmarks & Lip Sync",
-                "description": "How AutoRig analyzes a frontal head render into soft facial masks and landmarks for animation and lip sync, with a live API demo.",
-                "inLanguage": "en-US",
-                "isPartOf": { "@id": "https://autorig.online/#website" },
+                "name": "Face Rig Animation: Head Masks & Landmarks | AutoRig",
+                "description": "What AutoRig does for the face: a head analysis that returns soft masks, 2D landmarks and region scores, with a live demo. The body rig includes head and neck.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://autorig.online/#website"
+                },
                 "primaryImageOfPage": {
                     "@type": "ImageObject",
-                    "url": "https://autorig.online/static/images/guides/face-rig-demo-head.png"
+                    "url": "https://autorig.online/static/images/og/face-rig-animation.jpg"
                 },
-                "breadcrumb": { "@id": "https://autorig.online/face-rig-animation#breadcrumb" }
+                "breadcrumb": {
+                    "@id": "https://autorig.online/face-rig-animation#breadcrumb"
+                }
             },
             {
                 "@type": "BreadcrumbList",
@@ -94,16 +104,35 @@
             },
             {
                 "@type": "Article",
-                "headline": "Face Rig & Facial Animation Guide",
-                "description": "Guide to AutoRig face analysis: region confidence, 2D landmarks and soft masks for facial animation.",
-                "author": { "@type": "Organization", "name": "AutoRig Online" },
-                "publisher": { "@id": "https://autorig.online/#organization" },
-                "image": ["https://autorig.online/static/images/guides/face-rig-demo-head.png"],
+                "headline": "Face Rig & Animation",
+                "description": "What AutoRig does for the face: a head analysis that returns soft masks, 2D landmarks and region scores, with a live demo. The body rig includes head and neck.",
+                "inLanguage": "en",
+                "author": {
+                    "@type": "Organization",
+                    "name": "AutoRig Online"
+                },
+                "publisher": {
+                    "@id": "https://autorig.online/#organization"
+                },
+                "image": [
+                    "https://autorig.online/static/images/og/face-rig-animation.jpg"
+                ],
                 "datePublished": "2026-03-24",
-                "dateModified": "2026-03-24",
-                "mainEntityOfPage": { "@id": "https://autorig.online/face-rig-animation#webpage" },
+                "dateModified": "2026-10-16",
+                "mainEntityOfPage": {
+                    "@id": "https://autorig.online/face-rig-animation#webpage"
+                },
                 "articleSection": "Guides",
-                "keywords": ["face rig", "facial animation", "face masks", "landmarks", "lip sync", "character rigging", "3D head analysis"]
+                "keywords": [
+                    "face rig",
+                    "face masks",
+                    "facial landmarks",
+                    "head analysis",
+                    "soft masks",
+                    "region confidence",
+                    "character rigging",
+                    "AutoRig"
+                ]
             }
         ]
     }
@@ -585,11 +614,11 @@
                         </ol>
                     </nav>
                     <h1>Face Rig &amp; Animation</h1>
-                    <p class="hero-subtitle">Frontal head render → soft facial masks, 2D landmarks, and region scores for lip sync and expression in the AutoRig pipeline.</p>
+                    <p class="hero-subtitle">A frontal head render goes in; soft facial masks, 2D landmarks and region scores come out. This is a head analysis tool with a live demo, not a facial animation generator.</p>
                     <div class="fr-chips" aria-hidden="true">
-                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt=""> Head analysis</span>
-                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt=""> Soft masks</span>
-                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt=""> Landmarks</span>
+                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt="Head analysis" width="16" height="16"> Head analysis</span>
+                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt="Soft masks" width="16" height="16"> Soft masks</span>
+                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt="Landmarks" width="16" height="16"> Landmarks</span>
                     </div>
                 </div>
                 <div class="fr-hero-aside">
@@ -614,15 +643,13 @@
                 <div class="fr-insight">
                     <h2>Why masks</h2>
                     <p>
-                        Masks delimit where mesh deformation and speech motion apply. Clean separation keeps
-                        talking, blinking, and emotion layers from fighting each other at runtime.
+                        Masks show where the eyes, mouth and brows are on the head. A facial setup needs that map to keep deformation in the right regions. AutoRig returns the masks; it does not generate blendshapes and does not capture a facial performance.
                     </p>
                 </div>
                 <div class="fr-insight">
                     <h2>In AutoRig</h2>
                     <p>
-                        After body rigging, the worker can analyze the head so you skip hand-painted weights per zone.
-                        Demo uses <code>POST …/api/face-rig/analyze-head</code> on the live worker.
+                        The V3 body rig includes the head and neck in its skeleton. The head analysis is a separate tool: it reads a frontal head render and returns masks, landmarks and region scores. The demo calls <code>POST …/api/face-rig/analyze-head</code> on the live worker.
                     </p>
                 </div>
             </div>
@@ -639,7 +666,7 @@
                                 <span style="font-size: 1.25rem; opacity: 0.85;">🖼</span>
                                 <p class="fr-drop-hint">Drop or click to choose image</p>
                                 <input type="file" id="fr-file" accept="image/*" style="display:none" aria-hidden="true">
-                                <img id="fr-preview" class="fr-preview" alt="Preview" src="/static/images/guides/face-rig-demo-head.png">
+                                <img id="fr-preview" class="fr-preview" alt="Frontal 3D head render used as the demo input" width="259" height="194" src="/static/images/guides/face-rig-demo-head.png">
                             </div>
                             <p class="fr-meta" id="fr-file-label"></p>
                             <button type="button" class="btn btn-primary fr-run" id="fr-run">Run analysis</button>
@@ -657,10 +684,9 @@
             </div>
 
             <div class="fr-next">
-                <h2>Next steps</h2>
+                <h2>What this tool is and is not</h2>
                 <p>
-                    Add engine-specific notes (Unity blendshapes, Unreal poses), capture tips for stable front lighting,
-                    or troubleshooting when confidence is low. Well-lit, centered faces work best.
+                    The tool analyzes a head image. It does not create blendshapes or morph targets, does not capture a face from video and does not drive lip sync on its own. Well-lit, centered frontal faces give the best confidence.
                 </p>
                 <p style="margin-bottom: 0;"><a href="/"><strong>Run the full auto-rig pipeline on a character →</strong></a></p>
             </div>
@@ -675,6 +701,8 @@
                 <a href="/animation-retargeting" class="related-link">Animation Retargeting</a>
                 <a href="/how-it-works" class="related-link">How It Works</a>
                 <a href="/guides" class="related-link">All guides</a>
+                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/gallery" class="related-link">Gallery</a>
             </div>
         </div>
     </section>
