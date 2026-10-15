@@ -774,6 +774,12 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   * the corpus `/srv/autorig/data/autotests/corpus/vehicles/` holds 10 vehicle pictures generated one by one on
     the farm (sedan, wagon, pickup, minivan, motorhome, boat on a trailer, SUV, bus, semi tractor, tow truck), no
     snow, validated by the owner in DEV; the segmentation is checked on all of them (`tests/vehicles_corpus.json`).
+* **Qwen only; the body with its suspension, no wheels, no stands** (owner, 2026-10-15 ~22:00 UTC: «Flux выбрасываем он
+  вообще не годится. оставляем квен, но убираем стенды из промпта пусть дорисовывает корпус с подвеской и всё, главное
+  чтобы колес не было и стендов»): FLUX.2 klein is not used for vehicle edits; the cut wording asks Qwen for the body
+  with its suspension floating on the plain backdrop, and after every repaint the fast finder looks for wheels AND
+  jack stands (`stands_left`), erases them and sends the fix instruction. Speed comes from Qwen quantizations / turbo
+  LoRAs (the bench on worker-4090), never from another editor.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
