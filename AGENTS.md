@@ -657,6 +657,18 @@ Owner rule, 2026-10-10:
   camera is *measured* (the wheels' ellipses, `mt/vehicle_v3.camera_from_wheels`), never only judged by a VLM. The
   person confirms the canonical picture; without the confirmation nothing is generated. The viewer opens a vehicle
   in that fixed camera with the input picture beside it.
+* **No orthographic canon step** (owner, 2026-10-15, 13:40 UTC, it replaces point 3 above and the ISO 45/45 gate):
+  > ЛАДНО ДАВАЙ БЕЗ ОРТО КАМЕРЫ, МОДЕЛИРОВАТЬ КОРПУС И ДЕТАЛИ, КОЛЕСА, ГЛАВНОЕ ПОТОМ СДЕЛАТЬ НОРМАЛИЗАЦИЮ КОЛЕС ДО
+  > ЦИЛИНДРА ФИЗИЧЕСКОГО КОЛЛАЙДЕРА КОЛЕСА ПО ЕГО ФОРМЕ, ПРОЦЕДУРНО И АВТОМАТИЧЕСКИ ПОЛНОСТЬЮ, И КОРПУС ПОТОМ ТОЖЕ
+  > КОРРЕКТИРОВАТЬ ДО СИММЕТРИЧНОСТИ, ПУТЯМ КОРРЕКЦИИ С ПОМОЩЬЮ ИНСТРУМЕНТОВ РАСТЯГИВАНИЯ 3Д МОДЕЛЕЙ ТИПА ФФД БОКС
+  * The input picture is modelled as it is (segmentation first, then the body, the parts and the wheels, each its
+    own object). No Qwen redraw to 45/45, no camera confirmation; the camera measure stays as information only.
+  * **Wheel normalisation is mandatory and automatic:** every wheel (generated or found in a mesh) is fitted by a
+    cylinder (axis, centre, radius, width from its own shape) and becomes that cylinder: the physical wheel
+    collider and the visual wheel coincide; the contract is `wheels/rig.json` (`autorig.motion-transfer.wheels/1`).
+  * **Body symmetry is corrected procedurally:** the body is deformed to left/right symmetry about its lateral
+    mid-plane with free-form deformation (an FFD lattice box, mirror-averaged control points), as a tool with
+    options and before/after metrics (mirror IoU, max deviation), never by hand.
 * **Clustering first, by Qwen, from the analysis** (owner, 2026-10-15, second and third orders):
   > кластеризовать должна квен, на основе того что мы уже знаем из анализа, анализ должен уже на этом этапе знать
   > сколько тут уникальных объектов которые нам нужны, показывай маску обжект айди и материал айди для валидации …
