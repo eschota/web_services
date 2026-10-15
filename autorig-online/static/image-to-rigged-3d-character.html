@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image to Rigged 3D Character: Generate and Rig from One T-Pose Picture | AutoRig.online</title>
-    <meta name="description" content="Drop one T-pose or A-pose picture and get a rigged, animated 3D character back: GLB, Unity FBX with animations, an HDRP unitypackage, Blender files and a preview video, all in one task.">
-    <meta name="keywords" content="image to 3d character, image to rigged model, t-pose image to 3d, ai character generator rigged, picture to 3d character, generate rigged character from image, single image 3d character, auto rig from image, image to glb rigged, ai 3d character animation">
+    <title>Image to Rigged 3D Character: From One Picture | AutoRig</title>
+    <meta name="description" content="Drop one picture: it becomes a 3D model, gets textures, a fast rig and animation clips, and opens in one viewer. Pictures of cars use the vehicle conveyor.">
+    <meta name="keywords" content="image to rigged 3d character, image to 3d character, picture to rigged model, ai character generator rigged, generate rigged character from image, image to glb rigged, single image 3d character, auto rig from image, picture of a car to 3d model">
     <link rel="canonical" href="https://autorig.online/image-to-rigged-3d-character">
     <link rel="alternate" hreflang="en" href="https://autorig.online/image-to-rigged-3d-character">
     <link rel="alternate" hreflang="ru" href="https://autorig.online/image-to-rigged-3d-character-ru">
@@ -14,32 +14,26 @@
     <link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Image to Rigged 3D Character: Generate and Rig from One T-Pose Picture">
-    <meta property="og:description" content="Drop one T-pose or A-pose picture and get a rigged, animated 3D character back: GLB, Unity FBX with animations, an HDRP unitypackage, Blender files and a preview video, all in one task.">
+    <meta property="og:title" content="Image to Rigged 3D Character: From One Picture | AutoRig">
+    <meta property="og:description" content="Drop one picture: it becomes a 3D model, gets textures, a fast rig and animation clips, and opens in one viewer. Pictures of cars use the vehicle conveyor.">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://autorig.online/image-to-rigged-3d-character">
     <meta property="og:site_name" content="AutoRig.online">
-    <meta property="og:locale" content="en_US">
-    <meta property="og:image" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
-    <meta property="og:image:secure_url" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
+    <meta property="og:image" content="https://autorig.online/static/images/og/image-to-rigged-3d-character.jpg">
+    <meta property="og:image:secure_url" content="https://autorig.online/static/images/og/image-to-rigged-3d-character.jpg">
     <meta property="og:image:type" content="image/jpeg">
-    <meta property="og:image:width" content="1080">
-    <meta property="og:image:height" content="1920">
-    <meta property="og:image:alt" content="Rigged pink creature character generated from a single uploaded image, playing a walk animation">
-    <meta property="og:video" content="https://autorig.online/static/videos/image-to-rig/pink-creature.mp4">
-    <meta property="og:video:secure_url" content="https://autorig.online/static/videos/image-to-rig/pink-creature.mp4">
-    <meta property="og:video:type" content="video/mp4">
-    <meta property="og:video:width" content="540">
-    <meta property="og:video:height" content="960">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="From one picture to a rigged 3D character: a pink creature, a dwarf, a parrot, a wolf and a motorhome on AutoRig.online">
     <meta property="article:published_time" content="2026-08-06">
-    <meta property="article:modified_time" content="2026-08-06">
+    <meta property="article:modified_time" content="2026-10-16">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Image to Rigged 3D Character: Generate and Rig from One T-Pose Picture">
-    <meta name="twitter:description" content="Drop one T-pose or A-pose picture and get a rigged, animated 3D character back: GLB, Unity FBX with animations, an HDRP unitypackage, Blender files and a preview video, all in one task.">
-    <meta name="twitter:image" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
-    <meta name="twitter:image:alt" content="Rigged pink creature character generated from a single uploaded image, playing a walk animation">
+    <meta name="twitter:title" content="Image to Rigged 3D Character: From One Picture | AutoRig">
+    <meta name="twitter:description" content="Drop one picture: it becomes a 3D model, gets textures, a fast rig and animation clips, and opens in one viewer. Pictures of cars use the vehicle conveyor.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/image-to-rigged-3d-character.jpg">
+    <meta name="twitter:image:alt" content="From one picture to a rigged 3D character: a pink creature, a dwarf, a parrot, a wolf and a motorhome on AutoRig.online">
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
@@ -75,6 +69,13 @@
         .img2rig-body { counter-reset: img2rig-step; }
         .img2rig-checklist { margin: 1rem 0 0; padding-left: 1.25rem; line-height: 1.8; }
         .img2rig-note { color: var(--text-secondary); margin-top: 1.5rem; }
+        .art-figs { display: grid; gap: 1rem; margin: 1.5rem 0; }
+        .art-figs-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .art-fig { margin: 1.5rem 0; background: var(--bg-card); border: 1px solid var(--glass-border); border-radius: 14px; overflow: hidden; }
+        .art-figs .art-fig { margin: 0; }
+        .art-fig img { display: block; width: 100%; height: auto; }
+        .art-fig figcaption { padding: 0.6rem 0.85rem 0.75rem; font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary); }
+        @media (max-width: 768px) { .art-figs-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     </style>
 
     <!-- Structured data -->
@@ -82,8 +83,8 @@
 {
     "@context": "https://schema.org",
     "@type": "TechArticle",
-    "headline": "Image to Rigged 3D Character: Generate and Rig from One T-Pose Picture",
-    "description": "Drop one T-pose or A-pose picture and get a rigged, animated 3D character back: GLB, Unity FBX with animations, an HDRP unitypackage, Blender files and a preview video, all in one task.",
+    "headline": "Image to rigged 3D character: from one picture to a rigged, animated model",
+    "description": "Drop one picture: it becomes a 3D model, gets textures, a fast rig and animation clips, and opens in one viewer. Pictures of cars use the vehicle conveyor.",
     "inLanguage": "en",
     "url": "https://autorig.online/image-to-rigged-3d-character",
     "mainEntityOfPage": {
@@ -91,7 +92,7 @@
         "@id": "https://autorig.online/image-to-rigged-3d-character"
     },
     "image": [
-        "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg"
+        "https://autorig.online/static/images/og/image-to-rigged-3d-character.jpg"
     ],
     "author": {
         "@type": "Organization",
@@ -108,66 +109,49 @@
         }
     },
     "datePublished": "2026-08-06",
-    "dateModified": "2026-08-06",
+    "dateModified": "2026-10-16",
     "articleSection": "Guides",
-    "keywords": "image to 3d character, image to rigged model, t-pose image to 3d, ai character generator rigged, picture to 3d character, generate rigged character from image, single image 3d character, auto rig from image, image to glb rigged, ai 3d character animation",
-    "about": [
+    "keywords": "image to rigged 3d character, image to 3d character, picture to rigged model, ai character generator rigged, generate rigged character from image, image to glb rigged, single image 3d character, auto rig from image, picture of a car to 3d model"
+}
+    </script>
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
         {
-            "@type": "Thing",
-            "name": "image to 3D character generation"
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://autorig.online/"
         },
         {
-            "@type": "Thing",
-            "name": "automatic character rigging"
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Guides",
+            "item": "https://autorig.online/guides"
         },
         {
-            "@type": "Thing",
-            "name": "animation retargeting"
+            "@type": "ListItem",
+            "position": 3,
+            "name": "Image to rigged 3D character",
+            "item": "https://autorig.online/image-to-rigged-3d-character"
         }
-    ],
-    "breadcrumb": {
-        "@type": "BreadcrumbList",
-        "itemListElement": [
-            {
-                "@type": "ListItem",
-                "position": 1,
-                "name": "Home",
-                "item": "https://autorig.online/"
-            },
-            {
-                "@type": "ListItem",
-                "position": 2,
-                "name": "Guides",
-                "item": "https://autorig.online/guides"
-            },
-            {
-                "@type": "ListItem",
-                "position": 3,
-                "name": "Image to Rigged 3D Character: Generate and Rig from One T-Pose Picture",
-                "item": "https://autorig.online/image-to-rigged-3d-character"
-            }
-        ]
-    }
+    ]
 }
     </script>
     <script type="application/ld+json">
 {
     "@context": "https://schema.org",
     "@type": "HowTo",
-    "name": "Turn one T-pose picture into a rigged 3D character",
-    "description": "Drop a single image of a character on the AutoRig home page. If it reads as a T-pose or A-pose with limbs clear of the body, you get a 3D model, a skeleton, retargeted animations and every export format back as one task.",
+    "name": "Turn one picture into a rigged 3D character",
+    "description": "Drop a single picture on the AutoRig home page: it becomes a 3D model, gets textures, a fast rig and animation clips, and opens in one viewer.",
     "inLanguage": "en",
-    "totalTime": "PT45M",
-    "image": "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg",
-    "estimatedCost": {
-        "@type": "MonetaryAmount",
-        "currency": "USD",
-        "value": "0.30"
-    },
+    "image": "https://autorig.online/static/images/og/image-to-rigged-3d-character.jpg",
     "supply": [
         {
             "@type": "HowToSupply",
-            "name": "One PNG, JPG or WEBP image of a character in a T-pose or A-pose"
+            "name": "One PNG, JPG or WEBP picture of a character, an animal, a creature or a car"
         }
     ],
     "tool": [
@@ -182,29 +166,36 @@
             "@type": "HowToStep",
             "position": 1,
             "name": "Drop the picture",
-            "text": "Open the AutoRig home page and drop a PNG, JPG or WEBP file on the upload zone. One image is one character. You need to be signed in, because generation is charged to an account.",
+            "text": "Open the AutoRig home page and drop a PNG, JPG or WEBP file on the upload zone. One image is one task. You need to be signed in, because generation is linked to your account and your plan.",
             "url": "https://autorig.online/image-to-rigged-3d-character#step-1"
         },
         {
             "@type": "HowToStep",
             "position": 2,
-            "name": "The site decides what it is looking at",
-            "text": "Detection checks whether the image shows a character in a T-pose or A-pose with limbs clear of the torso. This decides the route only: riggable pictures go to generation plus rigging, everything else goes to generation alone.",
+            "name": "The route is chosen",
+            "text": "A picture of a car goes to the vehicle conveyor. Every other picture goes to image-to-3D generation and then to the rig. Nothing is rejected: the route only decides what is built from the picture.",
             "url": "https://autorig.online/image-to-rigged-3d-character#step-2"
         },
         {
             "@type": "HowToStep",
             "position": 3,
             "name": "The 3D model is generated",
-            "text": "The picture goes to the GPU farm and comes back as a textured mesh with PBR materials, retopologised into usable geometry rather than a raw scan-like surface.",
+            "text": "The picture goes to the AutoRig fleet and comes back as a 3D model. The free fleet is the default. The paid cloud generators (Tripo, Hunyuan cloud) run only when you press their button.",
             "url": "https://autorig.online/image-to-rigged-3d-character#step-3"
         },
         {
             "@type": "HowToStep",
             "position": 4,
-            "name": "The model is rigged and animated",
-            "text": "A skeleton is fitted, skin weights are solved, and the animation library is retargeted onto the new character. The task then publishes GLB, Unity FBX, the HDRP unitypackage, Blender files and a preview video.",
+            "name": "Textures",
+            "text": "A model's own textures are kept. A model that comes back without them gets PBR textures automatically (albedo, roughness, metallic, normal, emissive), and the textured model is what the vision checks use.",
             "url": "https://autorig.online/image-to-rigged-3d-character#step-4"
+        },
+        {
+            "@type": "HowToStep",
+            "position": 5,
+            "name": "Rig, clips and viewer",
+            "text": "The fast rig builds the skeleton and the skin from the geometry in seconds and fits itself to the model as it is. Clips from the library of the model's category are retargeted at once, and the checks run in the background of the viewer. Everything opens in one viewer with blueprint mode, environment scenes and the session agent chat.",
+            "url": "https://autorig.online/image-to-rigged-3d-character#step-5"
         }
     ]
 }
@@ -250,44 +241,6 @@
                 "name": "AutoRig Online",
                 "url": "https://autorig.online"
             }
-        },
-        {
-            "@type": "VideoObject",
-            "name": "Armored Knight with Spiked Shoulder Pads and Mask",
-            "description": "Rigged armored knight character created from a single T-pose image, playing retargeted animation",
-            "thumbnailUrl": [
-                "https://autorig.online/static/videos/image-to-rig/knight-poster.jpg"
-            ],
-            "uploadDate": "2026-08-06",
-            "duration": "PT20S",
-            "contentUrl": "https://autorig.online/static/videos/image-to-rig/knight.mp4",
-            "embedUrl": "https://autorig.online/image-to-rigged-3d-character#examples",
-            "isFamilyFriendly": true,
-            "inLanguage": "en",
-            "publisher": {
-                "@type": "Organization",
-                "name": "AutoRig Online",
-                "url": "https://autorig.online"
-            }
-        },
-        {
-            "@type": "VideoObject",
-            "name": "Mystical Bear Shaman with Staff and Orbs",
-            "description": "Rigged bear shaman character generated from an image, animated with a retargeted animation set",
-            "thumbnailUrl": [
-                "https://autorig.online/static/videos/image-to-rig/bear-shaman-poster.jpg"
-            ],
-            "uploadDate": "2026-08-06",
-            "duration": "PT20S",
-            "contentUrl": "https://autorig.online/static/videos/image-to-rig/bear-shaman.mp4",
-            "embedUrl": "https://autorig.online/image-to-rigged-3d-character#examples",
-            "isFamilyFriendly": true,
-            "inLanguage": "en",
-            "publisher": {
-                "@type": "Organization",
-                "name": "AutoRig Online",
-                "url": "https://autorig.online"
-            }
         }
     ]
 }
@@ -308,10 +261,10 @@
         },
         {
             "@type": "Question",
-            "name": "Does the character have to be in a T-pose?",
+            "name": "Do I need a T-pose picture?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "A T-pose or an A-pose both work, as long as the limbs are clear of the body. The pose decides whether rigging is attempted; it never decides whether you get a model."
+                "text": "No. A T-pose or an A-pose gives the cleanest model, but the rig is fitted to the generated model as it is, in any pose."
             }
         },
         {
@@ -319,15 +272,31 @@
             "name": "How long does it take?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "The examples on this page took roughly 20 to 50 minutes end to end, including time spent waiting in the farm queue. The task page shows live progress, and you can close the tab - the task keeps running."
+                "text": "The 3D model is generated on the AutoRig fleet, so the time depends on the queue and there is no fixed number. The task page shows live progress, and you can close the tab: the task keeps running. Once the model exists, the rig is built from its geometry in seconds and the clips are retargeted at once."
             }
         },
         {
             "@type": "Question",
-            "name": "What if I upload something that is not a character?",
+            "name": "What if the picture is not a character?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "You get a textured PBR 3D model of whatever it was. Detection routes the job, it does not reject it."
+                "text": "A picture of a car goes to the vehicle conveyor. Any other picture still gives a textured 3D model, and it is rigged when it fits one of the rig categories."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Can it rig animals, birds or hands?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. Quadrupeds, equines, birds, serpents, monsters, multilimb creatures and hands each have their own category, next to bipeds and vehicles."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Is the 3D model made by a paid AI service?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "No, not by default. It is generated on the AutoRig fleet. The paid cloud generators (Tripo, Hunyuan cloud) run only when you press their button."
             }
         },
         {
@@ -343,7 +312,7 @@
             "name": "Do I need an account?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "For generating a character from a picture, yes - credits live on accounts. For uploading a 3D model you already have and running the rig, no."
+                "text": "For generating a character from a picture, yes - Unlimited Monthly is linked to your account. Uploading an existing 3D model for rigging remains available without a subscription."
             }
         }
     ]
@@ -365,12 +334,12 @@
     <section class="hero">
         <div class="container">
             <div class="hero-content">
-                <h1>Turn one T-pose picture into a rigged 3D character</h1>
-                <p class="hero-subtitle">Drop a single image of a character on the AutoRig home page. If it reads as a T-pose or A-pose with limbs clear of the body, you get a 3D model, a skeleton, retargeted animations and every export format back as one task.</p>
+                <h1>Turn one picture into a rigged 3D character</h1>
+                <p class="hero-subtitle">Drop a single picture on the AutoRig home page. It becomes a 3D model, gets textures, a fast rig and animation clips, and opens in one viewer. A picture of a car goes to the vehicle conveyor.</p>
                 <div class="hero-features">
-                    <div class="feature"><span>Automatic pose detection</span></div>
-                    <div class="feature"><span>Model, rig and animations in one task</span></div>
-                    <div class="feature"><span>GLB, Unity FBX, HDRP package, Blender</span></div>
+                    <div class="feature"><span>Picture to 3D model on the fleet</span></div>
+                    <div class="feature"><span>Textures, rig and clips in one task</span></div>
+                    <div class="feature"><span>One viewer and every export</span></div>
                 </div>
                 <a href="/" class="cta-button">Upload a picture</a>
             </div>
@@ -380,9 +349,9 @@
     <section class="content-section">
         <div class="container">
             <article>
-                <h2>One picture in, a whole character out</h2>
-                <p>Most image-to-3D tools stop at a mesh. You get a static model, and rigging it is still your evening. AutoRig treats the picture as the start of the whole pipeline: the image becomes a textured 3D model, the model gets a skeleton and skin weights, and an animation library is retargeted onto it. All of it arrives as a single task with a single progress page.</p>
-                <p>The routing decision is made once, right after upload. The site looks at your picture and decides whether it shows a character that can carry a skeleton. If it does, you get generation plus rigging. If it does not — a vehicle, a prop, a building, a character whose limbs are fused into the body — you still get a proper PBR 3D model, because the model is what you paid for either way.</p>
+                <h2>One picture in, a rigged, animated model out</h2>
+                <p>Most image-to-3D tools stop at a mesh. You get a static model, and rigging it is still your evening. AutoRig treats the picture as the start of the whole conveyor: the picture becomes a 3D model on the AutoRig fleet, the model gets textures, the fast rig builds the skeleton and the skin, animation clips are retargeted at once, and everything opens in one viewer.</p>
+                <p>The route is decided once, right after upload. A picture of a car goes to the vehicle conveyor, which cuts it into body, wheels and doors instead of rigging it like a character. Any other picture goes through image to 3D model, textures and the rig. Whatever the picture shows, you get a textured PBR 3D model, and the rig is built in the category that fits it: biped, quadruped, equine, bird, serpent, monster, multilimb or hands.</p>
             </article>
         </div>
     </section>
@@ -418,32 +387,7 @@
                         <a class="guide-link" href="/task?id=94fa594c-9100-4d07-ba9c-0747d1de7030">Open the task</a>
                     </figcaption>
                 </figure>
-                <figure class="guide-card">
-                    <video class="img2rig-video" controls preload="none" playsinline muted loop
-                           width="540" height="960"
-                           poster="/static/videos/image-to-rig/knight-poster.jpg"
-                           aria-label="Rigged armored knight character created from a single T-pose image, playing retargeted animation">
-                        <source src="/static/videos/image-to-rig/knight.mp4" type="video/mp4">
-                    </video>
-                    <figcaption>
-                        <h3>Armored Knight with Spiked Shoulder Pads and Mask</h3>
-                        <p>9 files delivered</p>
-                        <a class="guide-link" href="/task?id=b8c36298-5387-442f-83c9-6b1a05d1b8aa">Open the task</a>
-                    </figcaption>
-                </figure>
-                <figure class="guide-card">
-                    <video class="img2rig-video" controls preload="none" playsinline muted loop
-                           width="540" height="960"
-                           poster="/static/videos/image-to-rig/bear-shaman-poster.jpg"
-                           aria-label="Rigged bear shaman character generated from an image, animated with a retargeted animation set">
-                        <source src="/static/videos/image-to-rig/bear-shaman.mp4" type="video/mp4">
-                    </video>
-                    <figcaption>
-                        <h3>Mystical Bear Shaman with Staff and Orbs</h3>
-                        <p>9 files delivered</p>
-                        <a class="guide-link" href="/task?id=214a6dc1-b400-4ed1-b604-8adb109cb5c1">Open the task</a>
-                    </figcaption>
-                </figure>
+
             </div>
             <p class="img2rig-note">The clips are the preview videos the pipeline renders for every finished task. They show the generated character actually playing back retargeted animation, not a turntable of a static mesh.</p>
         </div>
@@ -452,23 +396,27 @@
     <section class="content-section" id="how-it-works">
         <div class="container">
             <h2>How it works, step by step</h2>
-            <p>Four stages run without you touching anything after the upload.</p>
+            <p>Five stages run without you touching anything after the upload.</p>
             <ol class="features-list img2rig-steps">
                 <li class="feature-item" id="step-1">
                     <h3>Drop the picture</h3>
-                    <p>Open the AutoRig home page and drop a PNG, JPG or WEBP file on the upload zone. One image is one character. You need to be signed in, because generation is charged to an account.</p>
+                    <p>Open the AutoRig home page and drop a PNG, JPG or WEBP file on the upload zone. One image is one task. You need to be signed in, because generation is linked to your account and your plan.</p>
                 </li>
                 <li class="feature-item" id="step-2">
-                    <h3>The site decides what it is looking at</h3>
-                    <p>Detection checks whether the image shows a character in a T-pose or A-pose with limbs clear of the torso. This decides the route only: riggable pictures go to generation plus rigging, everything else goes to generation alone.</p>
+                    <h3>The route is chosen</h3>
+                    <p>A picture of a car goes to the vehicle conveyor. Every other picture goes to image-to-3D generation and then to the rig. Nothing is rejected: the route only decides what is built from the picture.</p>
                 </li>
                 <li class="feature-item" id="step-3">
                     <h3>The 3D model is generated</h3>
-                    <p>The picture goes to the GPU farm and comes back as a textured mesh with PBR materials, retopologised into usable geometry rather than a raw scan-like surface.</p>
+                    <p>The picture goes to the AutoRig fleet and comes back as a 3D model. The free fleet is the default. The paid cloud generators (Tripo, Hunyuan cloud) run only when you press their button.</p>
                 </li>
                 <li class="feature-item" id="step-4">
-                    <h3>The model is rigged and animated</h3>
-                    <p>A skeleton is fitted, skin weights are solved, and the animation library is retargeted onto the new character. The task then publishes GLB, Unity FBX, the HDRP unitypackage, Blender files and a preview video.</p>
+                    <h3>Textures</h3>
+                    <p>A model's own textures are kept. A model that comes back without them gets PBR textures automatically (albedo, roughness, metallic, normal, emissive), and the textured model is what the vision checks use.</p>
+                </li>
+                <li class="feature-item" id="step-5">
+                    <h3>Rig, clips and viewer</h3>
+                    <p>The fast rig builds the skeleton and the skin from the geometry in seconds and fits itself to the model as it is. Clips from the library of the model's category are retargeted at once, and the checks run in the background of the viewer. Everything opens in one viewer with blueprint mode, environment scenes and the session agent chat.</p>
                 </li>
             </ol>
         </div>
@@ -476,28 +424,32 @@
 
     <section class="content-section" id="deliverables">
         <div class="container">
-            <h2>What lands in the task when it finishes</h2>
-            <p>A finished character task publishes a full delivery set, not a single file. The examples on this page shipped between 9 and 17 artifacts each.</p>
+            <h2>What you can download</h2>
+            <p>A finished task offers the whole set from the same viewer page.</p>
             <div class="features-list">
                 <div class="feature-item">
                     <h3>Rigged GLB</h3>
-                    <p>The web-native format. It plays in the browser viewer on the task page and drops straight into three.js, Babylon, Godot or any glTF pipeline.</p>
+                    <p>The web-native format. It plays in the viewer on the task page and drops into three.js, Babylon, Godot or any glTF pipeline.</p>
                 </div>
                 <div class="feature-item">
-                    <h3>Unity FBX with animations</h3>
-                    <p>The skeletal mesh with the retargeted animation set baked in, ready for Mecanim.</p>
+                    <h3>FBX with clips</h3>
+                    <p>The skeletal mesh with the retargeted clips, ready for Unity and Unreal.</p>
                 </div>
                 <div class="feature-item">
-                    <h3>HDRP unitypackage</h3>
-                    <p>A Unity package with materials wired for the High Definition Render Pipeline, so the character is not pink on import.</p>
+                    <h3>USDZ</h3>
+                    <p>For Apple devices and AR viewers.</p>
                 </div>
                 <div class="feature-item">
-                    <h3>Blender files</h3>
-                    <p>The scene as Blender sees it, for weight painting, retopology touch-ups, or exporting to something the list above does not cover.</p>
+                    <h3>Unity package</h3>
+                    <p>A package for importing the character into a Unity project.</p>
                 </div>
                 <div class="feature-item">
-                    <h3>Preview video</h3>
-                    <p>A rendered clip of the character playing its animations - the same videos embedded on this page.</p>
+                    <h3>Blender file</h3>
+                    <p>For weight painting, touch-ups, or export to something the list does not cover.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>ZIP</h3>
+                    <p>Everything in one archive.</p>
                 </div>
             </div>
         </div>
@@ -505,17 +457,54 @@
 
     <section class="content-section" id="riggable">
         <div class="container">
-            <h2>What makes a picture riggable</h2>
-            <p>The detector is looking for a readable body, not for art quality. A rough sketch in a clean T-pose beats a beautiful render of a character folded into a dramatic action pose.</p>
+            <h2>What makes a good picture</h2>
+            <p>The conveyor needs a readable subject, not art quality. A rough sketch with a clear silhouette beats a beautiful render where the limbs are hidden or fused into the body.</p>
             <ul class="img2rig-checklist">
-                    <li>The character faces the camera, standing upright and roughly centred.</li>
-                    <li>Arms are away from the torso - straight out for a T-pose, or angled down for an A-pose.</li>
-                    <li>Legs are separated, with a visible gap between them.</li>
-                    <li>The whole body is in frame, including hands and feet.</li>
+                    <li>The whole subject is in frame, including hands, feet, paws or wheels.</li>
+                    <li>The subject is seen clearly from the front or at a slight angle, with the limbs visible.</li>
+                    <li>Limbs are separated from the body, with a gap between the legs. A T-pose or an A-pose gives the cleanest model, but it is not required.</li>
                     <li>The background is plain, or at least does not blend into the silhouette.</li>
+                    <li>One subject per picture.</li>
             </ul>
-            <h3>And when the picture is not a character</h3>
-            <p>Nothing is rejected. A picture that cannot carry a skeleton still produces a textured PBR 3D model - you simply get the model without the skeleton and the animations. That is a routing decision made per picture, never a failure message.</p>
+            <h3>Animals, birds, hands and creatures</h3>
+            <p>The engine picks the rig category from the model, so you do not choose a template. Quadrupeds, horses and deer, birds, serpents, monsters, multilimb creatures and single hands each have their own skeleton, skin rules and clip library. Wings are rigged as wings, never as arms. See <a href="/animal-rig">animal rigging</a> and <a href="/animation-retargeting">animation retargeting</a>.</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="car">
+        <div class="container">
+            <h2>A picture of a car</h2>
+            <p>A car is not rigged like a character. The vehicle conveyor starts from your picture and ends as a set of 3D parts that move:</p>
+            <ul class="img2rig-checklist">
+                    <li>Segmentation into the body, wheels, doors, hood, trunk, hatches, glass, lights and bumpers.</li>
+                    <li>Every part is isolated and restored as a whole object; the body is drawn as a bare shell.</li>
+                    <li>You review the parts in the viewer and accept, redraw or order each one as 3D.</li>
+                    <li>Each part becomes its own 3D object. The free fleet is the default; the paid 3D clouds run only on your button.</li>
+                    <li>Wheels become cylinder colliders, the body is corrected to symmetry, doors get hinges, and the cabin gets a seat, a steering wheel, pedals, a gear stick and a rigged driver.</li>
+            </ul>
+            <div class="art-figs art-figs-4">
+                    <figure class="art-fig">
+                    <img src="/static/images/articles/i2c-car-input.jpg" width="640" height="480" loading="lazy" alt="The input picture of a motorhome">
+                    <figcaption>The input picture</figcaption>
+                </figure>
+                    <figure class="art-fig">
+                    <img src="/static/images/articles/i2c-car-map.jpg" width="640" height="480" loading="lazy" alt="The segmentation map of the motorhome, one colour per object">
+                    <figcaption>Segmentation: one colour per object</figcaption>
+                </figure>
+                    <figure class="art-fig">
+                    <img src="/static/images/articles/i2c-car-cut.jpg" width="640" height="480" loading="lazy" alt="The motorhome with the wheels cut out and the body completed">
+                    <figcaption>Wheels cut, body completed</figcaption>
+                </figure>
+                    <figure class="art-fig">
+                    <img src="/static/images/articles/i2c-car-shell.jpg" width="640" height="480" loading="lazy" alt="The bare body shell of the motorhome">
+                    <figcaption>The bare shell</figcaption>
+                </figure>
+            </div>
+                <figure class="art-fig">
+                    <img src="/static/images/articles/i2c-car-parts.jpg" width="1200" height="431" loading="lazy" alt="Body, suspension and wheel, plus the isolated door, hood, glass, light, pipe and bumper of the motorhome">
+                    <figcaption>Body, suspension, wheel and every isolated part.</figcaption>
+                </figure>
+            <p>Read the <a href="/how-it-works#vehicles">vehicle conveyor step by step</a>.</p>
         </div>
     </section>
 
@@ -536,12 +525,12 @@
                 </div>
                 <div class="feature-item">
                     <h3>Paid</h3>
-                    <p>Two things spend credits. Generating a character from a picture costs 3 credits, charged when the task is created, because it books GPU time on the farm. Unlocking a finished task's downloads costs 10 credits and releases the whole delivery set: the ZIP, the protected files, animal variants and custom animation downloads. A single extra animation is 1 credit.</p>
+                    <p>Unlimited Monthly covers model generation from pictures and the complete model workflow without a per-model limit. Existing credit balances remain valid and can still be used until they are exhausted.</p>
                 </div>
             </div>
-            <p>Credits are sold in packs: 30 for $3, 100 for $10, 500 for $50 and 1000 for $100 - a flat $0.10 per credit at every tier, with roughly 20% off when paying with crypto. At that rate one task unlock is $1 and one image-to-character generation is $0.30.</p>
-            <p>If the pipeline breaks rather than the picture, the 3 credits go back to your balance automatically.</p>
-            <p>One thing to be straight about: there is no automatic free credit allowance at the moment. New accounts start at zero, so the first generation or the first download needs a credit pack. Everything described as free above stays free without one.</p>
+            <p>The single paid web plan is $20 per month and renews automatically until cancelled. It includes unlimited model creation, private models, and controls to remove or restore your models in the public gallery.</p>
+            <p>A pipeline retry does not create a second charge or a second subscription event.</p>
+            <p>An account is required so the subscription and privacy controls stay linked to the correct owner. Existing purchased credits are preserved.</p>
         </div>
     </section>
 
@@ -554,16 +543,24 @@
                     <p>No. That is the point of this page - a single picture is enough. If you already have a GLB, FBX or OBJ, upload it directly instead and skip generation entirely.</p>
                 </div>
                 <div class="feature-item">
-                    <h3>Does the character have to be in a T-pose?</h3>
-                    <p>A T-pose or an A-pose both work, as long as the limbs are clear of the body. The pose decides whether rigging is attempted; it never decides whether you get a model.</p>
+                    <h3>Do I need a T-pose picture?</h3>
+                    <p>No. A T-pose or an A-pose gives the cleanest model, but the rig is fitted to the generated model as it is, in any pose.</p>
                 </div>
                 <div class="feature-item">
                     <h3>How long does it take?</h3>
-                    <p>The examples on this page took roughly 20 to 50 minutes end to end, including time spent waiting in the farm queue. The task page shows live progress, and you can close the tab - the task keeps running.</p>
+                    <p>The 3D model is generated on the AutoRig fleet, so the time depends on the queue and there is no fixed number. The task page shows live progress, and you can close the tab: the task keeps running. Once the model exists, the rig is built from its geometry in seconds and the clips are retargeted at once.</p>
                 </div>
                 <div class="feature-item">
-                    <h3>What if I upload something that is not a character?</h3>
-                    <p>You get a textured PBR 3D model of whatever it was. Detection routes the job, it does not reject it.</p>
+                    <h3>What if the picture is not a character?</h3>
+                    <p>A picture of a car goes to the vehicle conveyor. Any other picture still gives a textured 3D model, and it is rigged when it fits one of the rig categories.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Can it rig animals, birds or hands?</h3>
+                    <p>Yes. Quadrupeds, equines, birds, serpents, monsters, multilimb creatures and hands each have their own category, next to bipeds and vehicles.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Is the 3D model made by a paid AI service?</h3>
+                    <p>No, not by default. It is generated on the AutoRig fleet. The paid cloud generators (Tripo, Hunyuan cloud) run only when you press their button.</p>
                 </div>
                 <div class="feature-item">
                     <h3>Can I rig several characters at once?</h3>
@@ -571,7 +568,7 @@
                 </div>
                 <div class="feature-item">
                     <h3>Do I need an account?</h3>
-                    <p>For generating a character from a picture, yes - credits live on accounts. For uploading a 3D model you already have and running the rig, no.</p>
+                    <p>For generating a character from a picture, yes - Unlimited Monthly is linked to your account. Uploading an existing 3D model for rigging remains available without a subscription.</p>
                 </div>
             </div>
         </div>
@@ -580,16 +577,18 @@
     <section class="related-section">
         <div class="container">
             <h2>Related guides</h2>
-            <p>More on poses, formats, and what happens after the rig:</p>
+            <p>More on the viewer, formats and what happens after the rig:</p>
             <div class="related-links">
-                <a href="/t-pose-vs-a-pose" class="related-link">T-Pose vs A-Pose</a>
+                <a href="/how-it-works" class="related-link">How It Works</a>
+                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/guides" class="related-link">All Guides</a>
+                <a href="/gallery" class="related-link">Gallery</a>
+                <a href="/animation-retargeting" class="related-link">Animation Retargeting</a>
+                <a href="/mixamo-alternative" class="related-link">Mixamo Alternative</a>
+                <a href="/animal-rig" class="related-link">Animal Rigging</a>
                 <a href="/glb-auto-rig" class="related-link">GLB Auto Rigging</a>
                 <a href="/fbx-auto-rig" class="related-link">FBX Auto Rigging</a>
-                <a href="/animation-retargeting" class="related-link">Animation Retargeting</a>
-                <a href="/how-it-works" class="related-link">How It Works</a>
-                <a href="/gallery" class="related-link">Gallery</a>
-                <a href="/buy-credits" class="related-link">Buy Credits</a>
-                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/buy-credits" class="related-link">Unlimited Monthly</a>
             </div>
         </div>
     </section>
@@ -597,7 +596,7 @@
     <section class="cta-section">
         <div class="container">
             <h2>Try it with one picture</h2>
-            <p>Open the home page, drop an image of a character, and watch it come back rigged.</p>
+            <p>Open the home page, drop a picture, and watch it come back rigged.</p>
             <a href="/" class="cta-button">Upload a picture</a>
         </div>
     </section>
