@@ -1,0 +1,22 @@
+{
+  "developers_page_title": "AutoRig 开发者 API：通过 REST 绑定并制作 3D 模型动画",
+  "seo_developers_title": "AutoRig 开发者 API：通过 REST 绑定并制作 3D 模型动画",
+  "seo_developers_description": "AutoRig REST API：通过链接或上传创建任务、轮询状态、下载已绑定的 GLB、FBX 和动画文件。含 API 密钥、接口与 curl 示例。",
+  "developers_intro": "通过 AutoRig HTTP API，可从链接或上传创建任务，轮询直到完成，然后通过固定 URL 下载已绑定的模型、动画文件及相关文件。这里的任务与网站上的 V3 任务完全相同，结果是带动画片段和导出功能的 V3 查看器。",
+  "dev_v3_title": "V3 中任务的工作方式",
+  "dev_v3_input": "任务可从任意输入开始：3D 模型（GLB、FBX、OBJ，或带纹理的 ZIP）、图片、汽车图片或文字。下面的调用通过链接或上传创建任务，示例使用的是模型链接。",
+  "dev_v3_rig": "V3 流水线会在几秒内根据几何体生成骨骼和蒙皮，并立即重定向动画片段。质量检查在后台运行。",
+  "dev_v3_viewer": "结果是任务页面 <code>https://autorig.online/task?id=TASK_ID</code>：带动画片段和 AI 助手聊天的 V3 查看器。",
+  "dev_v3_files": "查看器提供 GLB、FBX、USDZ、ZIP、Unity 包和 Blender 文件下载。下面的接口使用固定 URL，<code>cached-files</code> 会列出任务的所有文件及其下载 URL。",
+  "dev_flow_title": "典型流程",
+  "dev_flow_1": "使用链接调用 <code>POST /api/task/create</code>（带 <code>input_url</code> 的 JSON，或带 <code>input_url</code> 或文件的 multipart）。",
+  "dev_flow_2": "轮询 <code>GET /api/task/{id}</code>，直到状态为 <code>done</code> 或 <code>error</code>。",
+  "dev_flow_3": "调用 <code>GET /api/task/{id}/cached-files</code> 获取文件列表。",
+  "dev_flow_4": "用 <code>GET</code> 下载 <code>prepared.glb</code>、<code>animations.glb</code>、<code>animations.fbx</code> 或 <code>model.glb</code>。",
+  "dev_revoked": "（已撤销）",
+  "dev_u3d_title": "U3D YouTube 提供方",
+  "dev_u3d_body": "U3D 上传使用专用的提供方密钥和独立的 OAuth 凭据，既不需要也不接受 AutoRig 管理员 API 密钥。打开提供方页面可查看现成的 curl 示例、实时就绪状态、仅管理员可用的密钥复制按钮以及智能体技能。",
+  "dev_u3d_open": "打开 U3D YouTube API",
+  "dev_u3d_skill": "智能体 skill.md",
+  "dev_related_title": "相关页面"
+}

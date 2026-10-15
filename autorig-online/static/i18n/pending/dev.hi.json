@@ -1,0 +1,22 @@
+{
+  "developers_page_title": "AutoRig डेवलपर API: REST से 3D मॉडल रिग और एनिमेट करें",
+  "seo_developers_title": "AutoRig डेवलपर API: REST से 3D मॉडल रिग और एनिमेट करें",
+  "seo_developers_description": "AutoRig REST API: लिंक या अपलोड से टास्क बनाएँ, स्थिति पोल करें, रिग किया GLB, FBX और एनिमेशन फ़ाइलें डाउनलोड करें। API कुंजी, एंडपॉइंट और curl उदाहरण।",
+  "developers_intro": "AutoRig HTTP API से लिंक या अपलोड से टास्क बनाएँ, पूरा होने तक पोल करें, फिर रिग किया मॉडल, एनिमेशन फ़ाइलें और अन्य फ़ाइलें स्थिर URL से डाउनलोड करें। यहाँ टास्क वही V3 टास्क है जो साइट पर है, और उसका नतीजा एनिमेशन क्लिप और एक्सपोर्ट वाला V3 व्यूअर है।",
+  "dev_v3_title": "V3 में टास्क कैसे काम करता है",
+  "dev_v3_input": "टास्क किसी भी इनपुट से शुरू होता है: 3D मॉडल (GLB, FBX, OBJ या टेक्सचर वाला ZIP), तस्वीर, कार की तस्वीर या टेक्स्ट। नीचे की कॉल लिंक या अपलोड से टास्क बनाती हैं; उदाहरणों में मॉडल का लिंक इस्तेमाल हुआ है।",
+  "dev_v3_rig": "V3 कन्वेयर ज्यामिति से कुछ ही सेकंड में skeleton और skin बनाता है और एनिमेशन क्लिप तुरंत रिटारगेट करता है। क्वालिटी जाँचें बैकग्राउंड में चलती हैं।",
+  "dev_v3_viewer": "नतीजा टास्क पेज <code>https://autorig.online/task?id=TASK_ID</code> है: क्लिप और AI एजेंट चैट वाला V3 व्यूअर।",
+  "dev_v3_files": "व्यूअर GLB, FBX, USDZ, ZIP, Unity पैकेज और Blender डाउनलोड देता है। नीचे के एंडपॉइंट के URL स्थिर हैं, और <code>cached-files</code> टास्क की हर फ़ाइल को उसके डाउनलोड URL के साथ सूचीबद्ध करता है।",
+  "dev_flow_title": "सामान्य क्रम",
+  "dev_flow_1": "<code>POST /api/task/create</code> लिंक के साथ (<code>input_url</code> वाला JSON, या <code>input_url</code> अथवा फ़ाइल वाला multipart)।",
+  "dev_flow_2": "<code>GET /api/task/{id}</code> तब तक, जब तक स्थिति <code>done</code> या <code>error</code> न हो जाए।",
+  "dev_flow_3": "फ़ाइलों की सूची के लिए <code>GET /api/task/{id}/cached-files</code>।",
+  "dev_flow_4": "<code>prepared.glb</code>, <code>animations.glb</code>, <code>animations.fbx</code> या <code>model.glb</code> को <code>GET</code> से डाउनलोड करें।",
+  "dev_revoked": "(रद्द)",
+  "dev_u3d_title": "U3D YouTube प्रोवाइडर",
+  "dev_u3d_body": "U3D अपलोड एक समर्पित प्रोवाइडर कुंजी और अलग OAuth क्रेडेंशियल इस्तेमाल करते हैं। AutoRig की एडमिन API कुंजी न ज़रूरी है और न स्वीकार की जाती है। तैयार curl उदाहरण, लाइव तैयारी स्थिति, सिर्फ़ एडमिन के लिए कुंजी कॉपी बटन और एजेंट स्किल के लिए प्रोवाइडर पेज खोलें।",
+  "dev_u3d_open": "U3D YouTube API खोलें",
+  "dev_u3d_skill": "एजेंट skill.md",
+  "dev_related_title": "संबंधित पेज"
+}

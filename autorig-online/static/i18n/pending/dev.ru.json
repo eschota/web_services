@@ -1,0 +1,22 @@
+{
+  "developers_page_title": "AutoRig API для разработчиков: риг и анимация 3D-моделей по REST",
+  "seo_developers_title": "AutoRig API для разработчиков: риг и анимация 3D-моделей по REST",
+  "seo_developers_description": "REST API AutoRig: создайте задачу по ссылке или загрузке, опрашивайте статус, скачивайте зариганный GLB, FBX и файлы анимаций. API-ключи, эндпоинты и примеры curl.",
+  "developers_intro": "HTTP API AutoRig создаёт задачи по ссылке или загрузке; опрашивайте статус до завершения, затем скачивайте зариганную модель, файлы анимаций и другие файлы по стабильным URL. Задача — та же V3-задача, что и на сайте, а её результат — вьювер V3 с клипами анимации и экспортом.",
+  "dev_v3_title": "Как работает задача в V3",
+  "dev_v3_input": "Задача начинается с любого входа: 3D-модели (GLB, FBX, OBJ или ZIP с текстурами), картинки, картинки автомобиля или текста. Вызовы ниже создают задачу по ссылке или загрузке; в примерах используется ссылка на модель.",
+  "dev_v3_rig": "Конвейер V3 строит скелет и скин по геометрии за секунды и сразу переносит клипы анимации. Проверки качества идут в фоне.",
+  "dev_v3_viewer": "Результат — страница задачи <code>https://autorig.online/task?id=TASK_ID</code>: вьювер V3 с клипами и чатом ИИ-агента.",
+  "dev_v3_files": "Вьювер предлагает скачивание в GLB, FBX, USDZ, ZIP, пакетом Unity и файлом Blender. У эндпоинтов ниже стабильные URL, а <code>cached-files</code> перечисляет все файлы задачи с URL скачивания.",
+  "dev_flow_title": "Типичный порядок работы",
+  "dev_flow_1": "<code>POST /api/task/create</code> со ссылкой (JSON с <code>input_url</code> или multipart с <code>input_url</code> либо файлом).",
+  "dev_flow_2": "<code>GET /api/task/{id}</code>, пока статус не станет <code>done</code> или <code>error</code>.",
+  "dev_flow_3": "<code>GET /api/task/{id}/cached-files</code> — список файлов.",
+  "dev_flow_4": "Скачайте через <code>GET</code> файлы <code>prepared.glb</code>, <code>animations.glb</code>, <code>animations.fbx</code> или <code>model.glb</code>.",
+  "dev_revoked": "(отозван)",
+  "dev_u3d_title": "Провайдер U3D YouTube",
+  "dev_u3d_body": "Загрузки U3D используют отдельный ключ провайдера и изолированные учётные данные OAuth. Админский API-ключ AutoRig не нужен и не принимается. Откройте страницу провайдера: там готовый пример curl, живой статус готовности, кнопка копирования ключа только для админа и скилл агента.",
+  "dev_u3d_open": "Открыть U3D YouTube API",
+  "dev_u3d_skill": "skill.md для агента",
+  "dev_related_title": "Связанные страницы"
+}

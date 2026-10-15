@@ -3,20 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoRig.online Blender Plugin | AI Auto Rigging Add-on</title>
-    <meta name="description" content="Native Blender add-on for AutoRig.online: automatic character, animal and non-humanoid rigging with presets, animation workflow and Gumroad purchase.">
-    <meta name="keywords" content="Blender auto rig plugin, Blender auto rigging add-on, AI rigging Blender, AutoRig.online Blender plugin, animal rigging Blender, non-humanoid rigging Blender, Blender rig presets">
+    <title>AutoRig Blender Plugin: Auto Rig Add-on for Blender</title>
+    <meta name="description" content="Native Blender add-on for AutoRig: auto rig humanoid and non-humanoid models with 13 unique presets, tune the rig and animate inside Blender.">
+    <meta name="keywords" content="Blender auto rig plugin, Blender auto rigging add-on, AI rigging Blender, AutoRig.online Blender plugin, animal rigging Blender, non-humanoid rigging Blender, Blender rig presets, auto rig Blender add-on, Blender character rigging plugin, Gumroad Blender add-on">
+    <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://autorig.online/blender-plugin">
-    <meta property="og:title" content="AutoRig.online Blender Plugin">
-    <meta property="og:description" content="Native Blender add-on for AutoRig.online automatic rigging, presets, animation workflow, animal and non-humanoid models.">
+    <meta property="og:title" content="AutoRig Blender Plugin: Auto Rig Add-on for Blender">
+    <meta property="og:description" content="Native Blender add-on for AutoRig: auto rig humanoid and non-humanoid models with 13 unique presets, tune the rig and animate inside Blender.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online/blender-plugin">
-    <meta property="og:image" content="https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp">
+    <meta property="og:image" content="https://autorig.online/static/images/og/blender-plugin.jpg">
+    <meta property="og:image:secure_url" content="https://autorig.online/static/images/og/blender-plugin.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AutoRig Blender plugin panel inside Blender with a rigged animal">
     <meta property="og:site_name" content="AutoRig.online">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="AutoRig.online Blender Plugin">
-    <meta name="twitter:description" content="Automatic rigging inside Blender with AutoRig.online presets and V2 rigging workflow.">
-    <meta name="twitter:image" content="https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp">
+    <meta name="twitter:title" content="AutoRig Blender Plugin: Auto Rig Add-on for Blender">
+    <meta name="twitter:description" content="Native Blender add-on for AutoRig: auto rig humanoid and non-humanoid models with 13 unique presets, tune the rig and animate inside Blender.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/blender-plugin.jpg">
+    <meta name="twitter:image:alt" content="AutoRig Blender plugin panel inside Blender with a rigged animal">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="preload" as="image" href="/static/images/plugin/blender-plugin-screenshot-20260516.webp">
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
@@ -341,6 +348,92 @@
                 grid-template-columns: 1fr;
             }
         }
+        .plugin-result-grid {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 0.8rem;
+        }
+        .plugin-result-card {
+            grid-column: span 2;
+            margin: 0;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.045);
+        }
+        .plugin-result-card.is-wide {
+            grid-column: span 3;
+        }
+        .plugin-result-card img {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: #1a1a20;
+        }
+        .plugin-result-card figcaption {
+            padding: 0.7rem 0.85rem;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+        .plugin-conv-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .plugin-faq {
+            display: grid;
+            gap: 0.6rem;
+            max-width: 900px;
+        }
+        .plugin-faq details {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.045);
+        }
+        .plugin-faq summary {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.9rem 1.1rem;
+            cursor: pointer;
+            font-weight: 700;
+            line-height: 1.35;
+            list-style: none;
+        }
+        .plugin-faq summary::-webkit-details-marker { display: none; }
+        .plugin-faq summary::after {
+            content: "+";
+            margin-inline-start: auto;
+            color: #ffb45c;
+            font-size: 1.3rem;
+            line-height: 1;
+        }
+        .plugin-faq details[open] summary::after { content: "\2212"; }
+        .plugin-faq summary:focus-visible { outline: 2px solid #ffb45c; outline-offset: 2px; }
+        .plugin-faq p {
+            margin: 0;
+            padding: 0 1.1rem 1.1rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .plugin-link-card strong { min-width: 0; }
+        [dir="rtl"] .plugin-hero {
+            background:
+                linear-gradient(270deg, rgba(11, 12, 22, 0.98) 0%, rgba(11, 12, 22, 0.9) 38%, rgba(11, 12, 22, 0.34) 72%, rgba(11, 12, 22, 0.2) 100%),
+                url("/static/images/plugin/blender-plugin-screenshot-20260516.webp") center left / cover no-repeat;
+        }
+        @media (max-width: 1100px) {
+            .plugin-result-card,
+            .plugin-result-card.is-wide { grid-column: span 3; }
+        }
+        @media (max-width: 760px) {
+            .plugin-result-grid { grid-template-columns: 1fr; }
+            .plugin-result-card,
+            .plugin-result-card.is-wide { grid-column: auto; }
+        }
     </style>
     <script type="application/ld+json">
     {
@@ -349,11 +442,26 @@
         "name": "AutoRig.online Blender Plugin",
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "Blender",
+        "softwareRequirements": "Blender",
         "url": "https://autorig.online/blender-plugin",
         "downloadUrl": "https://autorig.online/blender-plugin/checkout",
-        "image": "https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp",
+        "image": "https://autorig.online/static/images/og/blender-plugin.jpg",
         "screenshot": "https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp",
-        "description": "Native Blender plugin for AutoRig.online automatic 3D character, animal and non-humanoid rigging.",
+        "inLanguage": [
+            "en",
+            "ru",
+            "zh",
+            "hi",
+            "fa"
+        ],
+        "description": "Native Blender add-on, the Blender-side client of the AutoRig conveyor: automatic rigging of humanoid and non-humanoid models with 13 unique presets, rig settings and an animation workflow inside Blender.",
+        "featureList": [
+            "Blender-native panel",
+            "13 unique presets for humanoid and non-humanoid models",
+            "Automatic rig generation with adjustable branch, smoothing and rig parameters",
+            "Animation preview and export for Blender, Unity and Unreal pipelines",
+            "Hard-surface and organic models"
+        ],
         "offers": {
             "@type": "Offer",
             "url": "https://autorig.online/blender-plugin/checkout",
@@ -362,8 +470,49 @@
         },
         "author": {
             "@type": "Organization",
-            "name": "AutoRig.online"
+            "name": "AutoRig.online",
+            "url": "https://autorig.online/"
         }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "What is the AutoRig.online Blender plugin?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "It is a native Blender add-on with its own panel. It brings the AutoRig automatic rigging workflow into your Blender scene, with presets for humanoid and non-humanoid models."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How many presets does it have?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The plugin has 13 unique presets for humanoid and non-humanoid models, including animals and creatures."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How much does it cost and where do I buy it?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "You buy the plugin on Gumroad through the checkout button on this page. The checkout asks you to sign in, and your assigned test price is shown on the page and at checkout."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Can I use AutoRig without the plugin?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. The website takes a 3D model, a picture or a picture of a car, opens every task in a 3D viewer with an AI agent, and offers downloads for GLB, FBX, USDZ, ZIP, a Unity package and Blender."
+                }
+            }
+        ]
     }
     </script>
 </head>
@@ -376,23 +525,20 @@
                 <div class="plugin-hero-copy">
                     <div class="plugin-kicker">
                         <img src="/static/images/icons/blender_logo.png" alt="" width="28" height="28">
-                        Native Blender Add-on
+                        <span data-i18n="plugin_kicker">Native Blender Add-on</span>
                     </div>
-                    <h1 id="plugin-title"><span class="plugin-gradient-text">Auto rig directly in Blender</span> with AutoRig.online.</h1>
-                    <p class="plugin-lead">
-                        The AutoRig.online Blender plugin brings the V2 rigging workflow into your Blender scene:
-                        generate rigs, use presets, work with humanoid and non-humanoid models, and prepare animation-ready characters without switching tools.
-                    </p>
+                    <h1 id="plugin-title"><span class="plugin-gradient-text" data-i18n="plugin_h1_a">Auto rig directly in Blender</span> <span data-i18n="plugin_h1_b">with AutoRig.online.</span></h1>
+                    <p class="plugin-lead" data-i18n="plugin_lead">The AutoRig.online Blender plugin is the Blender-side client of the AutoRig conveyor. It brings the automatic rigging workflow into your Blender scene: generate rigs, use presets, work with humanoid and non-humanoid models, and prepare animation-ready characters without switching tools.</p>
                     <div class="plugin-actions">
-                        <a href="/blender-plugin/checkout?source=blender_plugin_page" class="btn btn-primary plugin-buy-link">Buy Blender Plugin</a>
-                        <a href="https://www.youtube.com/shorts/vEn7laZijOI" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">Watch presentation</a>
-                        <span class="plugin-offer-note" id="plugin-offer-price">Assigned test price loads at checkout.</span>
+                        <a href="/blender-plugin/checkout?source=blender_plugin_page" class="btn btn-primary plugin-buy-link" data-plugin-price="1" data-i18n="plugin_buy">Buy Blender Plugin</a>
+                        <a href="https://www.youtube.com/shorts/vEn7laZijOI" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" data-i18n="plugin_watch">Watch presentation</a>
+                        <span class="plugin-offer-note" id="plugin-offer-price" data-i18n="plugin_price_pending">Assigned test price loads at checkout.</span>
                     </div>
-                    <div class="plugin-proof-row" aria-label="Plugin highlights">
-                        <span class="plugin-pill">Blender-native panel</span>
-                        <span class="plugin-pill">13 unique presets</span>
-                        <span class="plugin-pill">Humanoid and non-humanoid</span>
-                        <span class="plugin-pill">Animation workflow</span>
+                    <div class="plugin-proof-row" aria-label="Plugin highlights" data-i18n-aria-label="plugin_highlights_label">
+                        <span class="plugin-pill" data-i18n="plugin_pill_panel">Blender-native panel</span>
+                        <span class="plugin-pill" data-i18n="plugin_pill_presets">13 unique presets</span>
+                        <span class="plugin-pill" data-i18n="plugin_pill_types">Humanoid and non-humanoid</span>
+                        <span class="plugin-pill" data-i18n="plugin_pill_anim">Animation workflow</span>
                     </div>
                 </div>
             </div>
@@ -401,142 +547,160 @@
         <div class="container plugin-main">
             <section class="plugin-section" aria-labelledby="plugin-ui-title">
                 <div class="plugin-section-header">
-                    <h2 id="plugin-ui-title">A real Blender plugin UI, not just a web checkout.</h2>
-                    <p>The Gumroad screenshot is cached locally on AutoRig.online and shows the add-on inside Blender with animal models, generated control shapes, preset options and rig parameters.</p>
+                    <h2 id="plugin-ui-title" data-i18n="plugin_ui_title">A real Blender plugin UI, not just a web checkout.</h2>
+                    <p data-i18n="plugin_ui_desc">The Gumroad screenshot is cached locally on AutoRig.online and shows the add-on inside Blender with animal models, generated control shapes, preset options and rig parameters.</p>
                 </div>
                 <figure class="plugin-screenshot-panel">
                     <img src="/static/images/plugin/blender-plugin-screenshot-20260516.webp" alt="AutoRig.online Blender plugin panel with animal rigs and rigging settings inside Blender" width="1280" height="684" loading="eager">
                     <figcaption class="plugin-screenshot-caption">
-                        <strong>AutoRig.online add-on inside Blender</strong>
-                        <span>Rig controls, presets, animal models and Blender scene workflow in one screen.</span>
+                        <strong data-i18n="plugin_ui_caption_title">AutoRig.online add-on inside Blender</strong>
+                        <span data-i18n="plugin_ui_caption">Rig controls, presets, animal models and Blender scene workflow in one screen.</span>
                     </figcaption>
                 </figure>
             </section>
 
             <section class="plugin-section" aria-labelledby="plugin-features-title">
                 <div class="plugin-section-header">
-                    <h2 id="plugin-features-title">What the plugin workflow is built around</h2>
-                    <p>The presentation emphasizes automatic rigging, broad model support, hard-surface cases, Blender/Unity/Unreal use, and presets for both humanoid and non-humanoid characters.</p>
+                    <h2 id="plugin-features-title" data-i18n="plugin_feat_title">What the plugin workflow is built around</h2>
+                    <p data-i18n="plugin_feat_desc">Automatic rigging, broad model support, hard-surface cases, Blender, Unity and Unreal use, and presets for both humanoid and non-humanoid characters.</p>
                 </div>
                 <div class="plugin-feature-grid">
                     <article class="plugin-feature">
-                        <h3>Full auto rig and animation</h3>
-                        <p>Generate a rigging result and move directly into animation preview and export decisions.</p>
+                        <h3 data-i18n="plugin_feat_1_title">Full auto rig and animation</h3>
+                        <p data-i18n="plugin_feat_1_desc">Generate a rigging result and move directly into animation preview and export decisions.</p>
                     </article>
                     <article class="plugin-feature">
-                        <h3>Any 3D model direction</h3>
-                        <p>Use the same AutoRig direction for animals, stylized creatures, humanoids and non-humanoid shapes.</p>
+                        <h3 data-i18n="plugin_feat_2_title">Any 3D model direction</h3>
+                        <p data-i18n="plugin_feat_2_desc">Use the same AutoRig direction for animals, stylized creatures, humanoids and non-humanoid shapes.</p>
                     </article>
                     <article class="plugin-feature">
-                        <h3>Hard-surface support</h3>
-                        <p>The V2 presentation includes mechanical and hard-surface models, not only organic characters.</p>
+                        <h3 data-i18n="plugin_feat_3_title">Hard-surface support</h3>
+                        <p data-i18n="plugin_feat_3_desc">Mechanical and hard-surface models are covered too, not only organic characters.</p>
                     </article>
                     <article class="plugin-feature">
-                        <h3>Blender / Unity / Unreal</h3>
-                        <p>Prepare rigs in Blender and use the result in common game and animation pipelines.</p>
+                        <h3 data-i18n="plugin_feat_4_title">Blender / Unity / Unreal</h3>
+                        <p data-i18n="plugin_feat_4_desc">Prepare rigs in Blender and use the result in common game and animation pipelines.</p>
                     </article>
                 </div>
             </section>
 
-            <section class="plugin-section" aria-labelledby="plugin-presentation-title">
+            <section class="plugin-section" aria-labelledby="plugin-conveyor-title">
                 <div class="plugin-section-header">
-                    <h2 id="plugin-presentation-title">Presentation frames from the V2 rigging demo</h2>
-                    <p>Ten cached frames from the one-minute Shorts presentation, with the on-video labels transcribed into captions for scanning and SEO.</p>
+                    <h2 id="plugin-conveyor-title" data-i18n="plugin_conv_title">One conveyor behind the plugin and the website</h2>
+                    <p data-i18n="plugin_conv_desc">AutoRig builds the skeleton and skin from the geometry in seconds, retargets animation clips at once and keeps checking quality in the background. Every category has its own skeleton template, skin rules and clip library: humanoids, quadrupeds, horses and deer, birds with wings, hands, monsters, serpents, multi-limb creatures and vehicles.</p>
+                    <p data-i18n="plugin_conv_web">On the website every task opens in a 3D viewer with an AI agent, and you can download GLB, FBX, USDZ, ZIP, a Unity package or a Blender file.</p>
+                    <div class="plugin-conv-links">
+                    <a class="btn btn-ghost" href="/how-it-works" data-i18n="footer_how_it_works">How It Works</a>
+                    <a class="btn btn-ghost" href="/" data-i18n="plugin_link_home">Rig a model on the website</a>
+                    <a class="btn btn-ghost" href="/guides" data-i18n="nav_guides">Guides</a>
+                    <a class="btn btn-ghost" href="/gallery" data-i18n="nav_gallery">Gallery</a>
+                    <a class="btn btn-ghost" href="/developers" data-i18n="nav_api">API</a>
+                    <a class="btn btn-ghost" href="/faq" data-i18n="footer_faq">FAQ</a>
+                    <a class="btn btn-ghost" href="/buy-credits" data-i18n="nav_buy">Buy</a>
+                    </div>
                 </div>
-                <div class="plugin-frame-grid">
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-01.webp" alt="Erosion volumetric bone detector frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>Erosion volumetric bone detector</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-02.webp" alt="Full auto rig and animation frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>Full auto rig and animation</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-03.webp" alt="Works on any 3D model type frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>Works on any 3D model type</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-04.webp" alt="Hard surface frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>Hard surface</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-05.webp" alt="Blender Unity Unreal frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>Blender / Unity / Unreal</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-06.webp" alt="Available online frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>Available online</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-07.webp" alt="13 unique presets frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>13 unique presets</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-08.webp" alt="Humanoid characters frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>Humanoid characters</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-09.webp" alt="And not humanoid frame from AutoRig presentation" width="405" height="720" loading="lazy">
-                        <p>And not humanoid</p>
-                    </article>
-                    <article class="plugin-frame-card">
-                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-10.webp" alt="AutoRig.online presentation frame with horse model" width="405" height="720" loading="lazy">
-                        <p>AutoRig.online workflow</p>
-                    </article>
+                <div class="plugin-section-header">
+                    <h3 id="plugin-results-title" style="margin:0;font-size:1.35rem" data-i18n="plugin_res_title">Results of the conveyor</h3>
+                    <p data-i18n="plugin_res_desc">Real checks from AutoRig runs: skin weights per bone and clip frames from front, side and top views.</p>
+                </div>
+                <div class="plugin-result-grid" role="group" aria-labelledby="plugin-results-title">
+                    <figure class="plugin-result-card is-wide">
+                        <img src="/static/images/plugin/v3-rider-weights.jpg" alt="Skin weights and bones of a humanoid character, front and side view" width="800" height="400" loading="lazy" decoding="async">
+                        <figcaption data-i18n="plugin_res_1">Skin weights and bones of a humanoid</figcaption>
+                    </figure>
+                    <figure class="plugin-result-card is-wide">
+                        <img src="/static/images/plugin/v3-bird-weights.jpg" alt="Skin weights and bones of a bird with spread wings, front and side view" width="800" height="400" loading="lazy" decoding="async">
+                        <figcaption data-i18n="plugin_res_2">Skin weights and bones of a bird: wings rigged as wings</figcaption>
+                    </figure>
+                    <figure class="plugin-result-card">
+                        <img src="/static/images/plugin/v3-horse-gallop.gif" alt="Gallop clip frames of a rigged horse: front, side and top views" width="300" height="307" loading="lazy" decoding="async">
+                        <figcaption data-i18n="plugin_res_3">Gallop clip on a rigged horse</figcaption>
+                    </figure>
+                    <figure class="plugin-result-card">
+                        <img src="/static/images/plugin/v3-bird-wings.gif" alt="Wing clip frames of a rigged bird of prey: front, side and top views" width="300" height="307" loading="lazy" decoding="async">
+                        <figcaption data-i18n="plugin_res_4">Wing clip on a rigged bird of prey</figcaption>
+                    </figure>
+                    <figure class="plugin-result-card">
+                        <img src="/static/images/plugin/v3-hand-fingers.gif" alt="Finger clip frames of a rigged human hand: front, side and top views" width="300" height="307" loading="lazy" decoding="async">
+                        <figcaption data-i18n="plugin_res_5">Finger clip on a rigged hand</figcaption>
+                    </figure>
                 </div>
             </section>
 
             <section class="plugin-section" aria-labelledby="plugin-steps-title">
                 <div class="plugin-section-header">
-                    <h2 id="plugin-steps-title">Blender-first rigging flow</h2>
-                    <p>The plugin is for artists who want the AutoRig workflow inside Blender while keeping the online service available for browser uploads.</p>
+                    <h2 id="plugin-steps-title" data-i18n="plugin_steps_title">Blender-first rigging flow</h2>
+                    <p data-i18n="plugin_steps_desc">The plugin is for artists who want the AutoRig workflow inside Blender while keeping the online service available for browser uploads.</p>
                 </div>
                 <div class="plugin-step-grid">
                     <article class="plugin-step">
                         <span class="plugin-step-number">1</span>
-                        <h3>Open the add-on panel</h3>
-                        <p>Work from Blender with the AutoRig panel visible next to your model and scene.</p>
+                        <h3 data-i18n="plugin_step_1_title">Open the add-on panel</h3>
+                        <p data-i18n="plugin_step_1_desc">Work from Blender with the AutoRig panel visible next to your model and scene.</p>
                     </article>
                     <article class="plugin-step">
                         <span class="plugin-step-number">2</span>
-                        <h3>Select a preset</h3>
-                        <p>Use the V2 preset direction for humanoids, animals, creatures or other model types.</p>
+                        <h3 data-i18n="plugin_step_2_title">Select a preset</h3>
+                        <p data-i18n="plugin_step_2_desc">Use the presets for humanoids, animals, creatures or other model types.</p>
                     </article>
                     <article class="plugin-step">
                         <span class="plugin-step-number">3</span>
-                        <h3>Generate the rig</h3>
-                        <p>Run automatic rig generation and keep the result in your Blender project context.</p>
+                        <h3 data-i18n="plugin_step_3_title">Generate the rig</h3>
+                        <p data-i18n="plugin_step_3_desc">Run automatic rig generation: the model goes through the AutoRig conveyor and the result stays in your Blender project context.</p>
                     </article>
                     <article class="plugin-step">
                         <span class="plugin-step-number">4</span>
-                        <h3>Tune rig settings</h3>
-                        <p>Adjust branch, smoothing and rig parameters instead of accepting a black-box result.</p>
+                        <h3 data-i18n="plugin_step_4_title">Tune rig settings</h3>
+                        <p data-i18n="plugin_step_4_desc">Adjust branch, smoothing and rig parameters instead of accepting a black-box result.</p>
                     </article>
                     <article class="plugin-step">
                         <span class="plugin-step-number">5</span>
-                        <h3>Animate and export</h3>
-                        <p>Move into animation preview, Blender cleanup, Unity, Unreal or your own production pipeline.</p>
+                        <h3 data-i18n="plugin_step_5_title">Animate and export</h3>
+                        <p data-i18n="plugin_step_5_desc">Move into animation preview, Blender cleanup, Unity, Unreal or your own production pipeline.</p>
                     </article>
                 </div>
             </section>
 
-            <section class="plugin-section plugin-cta-band" aria-label="Buy Blender plugin">
+            <section class="plugin-section plugin-cta-band" aria-labelledby="plugin-cta-title">
                 <div>
-                    <h2>Buy the native Blender plugin</h2>
-                    <p>Use AutoRig.online in the browser, or buy the Blender add-on when you want the rigging workflow inside Blender.</p>
+                    <h2 id="plugin-cta-title" data-i18n="plugin_cta_title">Buy the native Blender plugin</h2>
+                    <p data-i18n="plugin_cta_desc">Use AutoRig.online in the browser, or buy the Blender add-on when you want the rigging workflow inside Blender.</p>
                 </div>
-                <a href="/blender-plugin/checkout?source=blender_plugin_page_cta" class="btn btn-primary plugin-buy-link">Buy on Gumroad</a>
+                <a href="/blender-plugin/checkout?source=blender_plugin_page_cta" class="btn btn-primary plugin-buy-link" data-i18n="plugin_cta_btn">Buy on Gumroad</a>
             </section>
 
-            <section class="plugin-section plugin-link-grid" aria-label="External links">
+            <section class="plugin-section" aria-labelledby="plugin-faq-title">
+                <div class="plugin-section-header">
+                    <h2 id="plugin-faq-title" data-i18n="plugin_faq_title">Questions and answers</h2>
+                </div>
+                <div class="plugin-faq">
+                <details>
+                    <summary data-i18n="plugin_faq_1_q">What is the AutoRig.online Blender plugin?</summary>
+                    <p data-i18n="plugin_faq_1_a">It is a native Blender add-on with its own panel. It brings the AutoRig automatic rigging workflow into your Blender scene, with presets for humanoid and non-humanoid models.</p>
+                </details>
+                <details>
+                    <summary data-i18n="plugin_faq_2_q">How many presets does it have?</summary>
+                    <p data-i18n="plugin_faq_2_a">The plugin has 13 unique presets for humanoid and non-humanoid models, including animals and creatures.</p>
+                </details>
+                <details>
+                    <summary data-i18n="plugin_faq_3_q">How much does it cost and where do I buy it?</summary>
+                    <p data-i18n="plugin_faq_3_a">You buy the plugin on Gumroad through the checkout button on this page. The checkout asks you to sign in, and your assigned test price is shown on the page and at checkout.</p>
+                </details>
+                <details>
+                    <summary data-i18n="plugin_faq_4_q">Can I use AutoRig without the plugin?</summary>
+                    <p data-i18n="plugin_faq_4_a">Yes. The website takes a 3D model, a picture or a picture of a car, opens every task in a 3D viewer with an AI agent, and offers downloads for GLB, FBX, USDZ, ZIP, a Unity package and Blender.</p>
+                </details>
+                </div>
+            </section>
+
+            <section class="plugin-section plugin-link-grid" aria-label="Related pages and external links" data-i18n-aria-label="plugin_links_label">
                 <a class="plugin-link-card" href="https://www.youtube.com/shorts/vEn7laZijOI" target="_blank" rel="noopener noreferrer">
-                    <strong>Watch the Shorts presentation</strong>
-                    <span>1-minute V2 demo</span>
+                    <strong data-i18n="plugin_link_video">Watch the Shorts presentation</strong>
+                    <span data-i18n="plugin_link_video_meta">1-minute presentation video</span>
                 </a>
                 <a class="plugin-link-card" href="https://www.producthunt.com/products/autorig-online?launch=autorig-online" target="_blank" rel="noopener noreferrer">
-                    <strong>AutoRig.online on Product Hunt</strong>
-                    <span>Launch page</span>
+                    <strong data-i18n="plugin_link_ph">AutoRig.online on Product Hunt</strong>
+                    <span data-i18n="plugin_link_ph_meta">Launch page</span>
                 </a>
             </section>
         </div>
@@ -549,26 +713,51 @@
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>
     <script>
+        // The assigned price is shown with the i18n texts of this page: it is rendered again after the
+        // translations load and after every language change, so a translation never wipes it.
         document.addEventListener('DOMContentLoaded', () => {
-            const updateLinks = (offer) => {
-                const displayPrice = offer && offer.display_price;
+            let displayPrice = null;
+            const tr = (key, fallback, params) => {
+                try {
+                    if (window.I18n && I18n.has(key)) return I18n.t(key, params);
+                } catch (e) {}
+                return Object.keys(params || {}).reduce((s, k) => s.split('{' + k + '}').join(params[k]), fallback);
+            };
+            const render = () => {
                 const priceEl = document.getElementById('plugin-offer-price');
+                document.querySelectorAll('.plugin-buy-link[data-plugin-price]').forEach((link) => {
+                    link.textContent = displayPrice
+                        ? tr('plugin_buy_with_price', 'Buy Blender Plugin {price}', { price: displayPrice })
+                        : tr('plugin_buy', 'Buy Blender Plugin');
+                });
+                if (priceEl) {
+                    priceEl.textContent = displayPrice
+                        ? tr('plugin_price_assigned', 'Your assigned test price: {price}', { price: displayPrice })
+                        : tr('plugin_price_pending', 'Assigned test price loads at checkout.');
+                }
+            };
+            const tagLinks = () => {
                 document.querySelectorAll('.plugin-buy-link').forEach((link) => {
                     const base = link.getAttribute('href') || '/blender-plugin/checkout';
                     const separator = base.includes('?') ? '&' : '?';
                     link.href = `${base}${separator}page_url=${encodeURIComponent(window.location.href)}`;
-                    if (displayPrice && link.textContent.includes('Blender Plugin')) {
-                        link.textContent = `Buy Blender Plugin ${displayPrice}`;
-                    }
                 });
-                if (priceEl && displayPrice) {
-                    priceEl.textContent = `Your assigned test price: ${displayPrice}`;
-                }
             };
+            const afterI18n = () => {
+                const ready = window.I18n && I18n._initPromise;
+                if (ready && ready.then) ready.then(render, render);
+            };
+            window.addEventListener('languageChanged', render);
+            afterI18n();
             fetch('/api/blender-plugin/offer')
                 .then((resp) => resp.ok ? resp.json() : null)
-                .then(updateLinks)
-                .catch(() => updateLinks(null));
+                .catch(() => null)
+                .then((offer) => {
+                    displayPrice = (offer && offer.display_price) || null;
+                    tagLinks();
+                    if (displayPrice) render();
+                    afterI18n();
+                });
         });
     </script>
 </body>

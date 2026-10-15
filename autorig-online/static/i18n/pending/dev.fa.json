@@ -1,0 +1,22 @@
+{
+  "developers_page_title": "API توسعه‌دهندگان AutoRig: ریگ و انیمیشن مدل سه‌بعدی با REST",
+  "seo_developers_title": "API توسعه‌دهندگان AutoRig: ریگ و انیمیشن مدل سه‌بعدی با REST",
+  "seo_developers_description": "REST API سرویس AutoRig: از روی لینک یا آپلود تسک بسازید، وضعیت را بررسی کنید و GLB ریگ‌شده، FBX و فایل‌های انیمیشن را دانلود کنید. کلید API، اندپوینت‌ها و نمونه‌های curl.",
+  "developers_intro": "با HTTP API سرویس AutoRig از روی لینک یا آپلود تسک بسازید، تا پایان کار وضعیت را بررسی کنید و سپس مدل ریگ‌شده، فایل‌های انیمیشن و فایل‌های مرتبط را از نشانی‌های پایدار دانلود کنید. تسک همان تسک V3 سایت است و نتیجه‌اش ویوئر V3 با کلیپ‌های انیمیشن و خروجی‌هاست.",
+  "dev_v3_title": "تسک در V3 چطور کار می‌کند",
+  "dev_v3_input": "تسک از هر ورودی‌ای شروع می‌شود: مدل سه‌بعدی (GLB، FBX، OBJ یا ZIP همراه تکسچر)، تصویر، تصویر خودرو یا متن. فراخوانی‌های زیر تسک را از روی لینک یا آپلود می‌سازند؛ نمونه‌ها از لینک مدل استفاده می‌کنند.",
+  "dev_v3_rig": "خط تولید V3 در چند ثانیه اسکلت و اسکین را از روی هندسه می‌سازد و کلیپ‌های انیمیشن را بلافاصله ریتارگت می‌کند. بررسی‌های کیفیت در پس‌زمینه اجرا می‌شوند.",
+  "dev_v3_viewer": "نتیجه صفحه تسک <code>https://autorig.online/task?id=TASK_ID</code> است: ویوئر V3 با کلیپ‌ها و چت عامل هوش مصنوعی.",
+  "dev_v3_files": "ویوئر دانلود GLB، FBX، USDZ، ZIP، پکیج Unity و فایل Blender را ارائه می‌دهد. اندپوینت‌های زیر نشانی پایدار دارند و <code>cached-files</code> همه فایل‌های تسک را با نشانی دانلودشان فهرست می‌کند.",
+  "dev_flow_title": "روند معمول",
+  "dev_flow_1": "<code>POST /api/task/create</code> با یک لینک (JSON با <code>input_url</code> یا multipart با <code>input_url</code> یا فایل).",
+  "dev_flow_2": "<code>GET /api/task/{id}</code> تا وقتی وضعیت <code>done</code> یا <code>error</code> شود.",
+  "dev_flow_3": "<code>GET /api/task/{id}/cached-files</code> برای فهرست فایل‌ها.",
+  "dev_flow_4": "با <code>GET</code> فایل <code>prepared.glb</code>، <code>animations.glb</code>، <code>animations.fbx</code> یا <code>model.glb</code> را دانلود کنید.",
+  "dev_revoked": "(باطل‌شده)",
+  "dev_u3d_title": "ارائه‌دهنده U3D YouTube",
+  "dev_u3d_body": "آپلودهای U3D از یک کلید اختصاصی ارائه‌دهنده و اعتبارنامه‌های OAuth جداگانه استفاده می‌کنند. کلید API ادمین AutoRig نه لازم است و نه پذیرفته می‌شود. صفحه ارائه‌دهنده را باز کنید: نمونه آماده curl، وضعیت زنده آمادگی، دکمه کپی کلید ویژه ادمین و مهارت (skill) عامل آنجاست.",
+  "dev_u3d_open": "باز کردن U3D YouTube API",
+  "dev_u3d_skill": "skill.md عامل",
+  "dev_related_title": "صفحه‌های مرتبط"
+}

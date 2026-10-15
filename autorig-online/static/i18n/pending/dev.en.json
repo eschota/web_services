@@ -1,0 +1,22 @@
+{
+  "developers_page_title": "AutoRig Developer API: Rig and Animate 3D Models by REST",
+  "seo_developers_title": "AutoRig Developer API: Rig and Animate 3D Models by REST",
+  "seo_developers_description": "AutoRig REST API: create a task from a link or upload, poll its status, download the rigged GLB, FBX and animation files. API keys, endpoints and curl examples.",
+  "developers_intro": "Use the AutoRig HTTP API to create tasks from a link or an upload, poll until the task is done, then download the rigged model, animation files and related files via stable URLs. A task is the same V3 task as on the site, and its result is the V3 viewer with animation clips and exports.",
+  "dev_v3_title": "How a task works in V3",
+  "dev_v3_input": "A task starts from any input: a 3D model (GLB, FBX, OBJ or a ZIP with textures), a picture, a picture of a car, or text. The calls below create a task from a link or an upload; the examples use a model link.",
+  "dev_v3_rig": "The V3 conveyor builds the skeleton and skin from the geometry in seconds and retargets the animation clips at once. Quality checks run in the background.",
+  "dev_v3_viewer": "The result is the task page <code>https://autorig.online/task?id=TASK_ID</code>: the V3 viewer with the clips and the AI agent chat.",
+  "dev_v3_files": "The viewer offers GLB, FBX, USDZ, ZIP, Unity package and Blender downloads. The endpoints below have stable URLs, and <code>cached-files</code> lists every file the task has with its download URL.",
+  "dev_flow_title": "Typical flow",
+  "dev_flow_1": "<code>POST /api/task/create</code> with a link (JSON with <code>input_url</code>, or multipart with <code>input_url</code> or a file).",
+  "dev_flow_2": "<code>GET /api/task/{id}</code> until the status is <code>done</code> or <code>error</code>.",
+  "dev_flow_3": "<code>GET /api/task/{id}/cached-files</code> for the list of files.",
+  "dev_flow_4": "Download with <code>GET</code> on <code>prepared.glb</code>, <code>animations.glb</code>, <code>animations.fbx</code> or <code>model.glb</code>.",
+  "dev_revoked": "(revoked)",
+  "dev_u3d_title": "U3D YouTube provider",
+  "dev_u3d_body": "U3D uploads use a dedicated provider key and isolated OAuth credentials. An AutoRig admin API key is neither required nor accepted. Open the provider page for the ready curl example, live readiness status, admin-only key copy button, and agent skill.",
+  "dev_u3d_open": "Open U3D YouTube API",
+  "dev_u3d_skill": "Agent skill.md",
+  "dev_related_title": "Related pages"
+}

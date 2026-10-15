@@ -3,23 +3,92 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title data-i18n="developers_page_title">Developers API | AutoRig.online</title>
-    <meta name="description" content="AutoRig REST API: authentication, create tasks, poll status, download GLB and animation files.">
+    <title data-i18n="developers_page_title">AutoRig Developer API: Rig and Animate 3D Models by REST</title>
+    <meta name="description" content="AutoRig REST API: create a task from a link or upload, poll its status, download the rigged GLB, FBX and animation files. API keys, endpoints and curl examples.">
+    <meta name="keywords" content="autorig api, 3d rigging api, auto rig api, rigging rest api, animation api, glb fbx api, 3d model api, task api, api keys, curl examples">
     <link rel="canonical" href="https://autorig.online/developers">
-    <meta property="og:title" content="AutoRig.online — Developer API">
-    <meta property="og:description" content="REST API for automatic 3D rigging: keys, task creation, polling, downloads.">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/developers">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers">
+    <link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/developers">
+    <meta property="og:title" content="AutoRig Developer API: Rig and Animate 3D Models by REST">
+    <meta property="og:description" content="AutoRig REST API: create a task from a link or upload, poll its status, download the rigged GLB, FBX and animation files. API keys, endpoints and curl examples.">
     <meta property="og:url" content="https://autorig.online/developers">
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="AutoRig.online — Developer API">
-    <meta name="twitter:description" content="REST API for automatic 3D rigging.">
+    <meta name="twitter:title" content="AutoRig Developer API: Rig and Animate 3D Models by REST">
+    <meta name="twitter:description" content="AutoRig REST API: create a task from a link or upload, poll its status, download the rigged GLB, FBX and animation files. API keys, endpoints and curl examples.">
     <meta property="og:site_name" content="AutoRig.online">
-    <meta property="og:image" content="https://autorig.online/og/site.jpg">
+    <meta property="og:image" content="https://autorig.online/static/images/og/developers.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Rigged 3D models made on AutoRig.online">
+    <meta property="og:image:alt" content="AutoRig Developer API: a curl request and rigged characters, animals and cars">
     <meta property="og:locale" content="en_US">
-    <meta name="twitter:image" content="https://autorig.online/og/site.jpg">
+    <meta property="og:locale:alternate" content="ru_RU">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:locale:alternate" content="hi_IN">
+    <meta property="og:locale:alternate" content="fa_IR">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/developers.jpg">
+    <script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "TechArticle",
+   "@id": "https://autorig.online/developers#article",
+   "url": "https://autorig.online/developers",
+   "mainEntityOfPage": "https://autorig.online/developers",
+   "headline": "AutoRig Developer API: Rig and Animate 3D Models by REST",
+   "description": "AutoRig REST API: create a task from a link or upload, poll its status, download the rigged GLB, FBX and animation files. API keys, endpoints and curl examples.",
+   "inLanguage": "en",
+   "dateModified": "2026-10-16",
+   "image": "https://autorig.online/static/images/og/developers.jpg",
+   "articleSection": "API reference",
+   "about": [
+    "REST API",
+    "3D auto rigging",
+    "animation",
+    "GLB",
+    "FBX"
+   ],
+   "author": {
+    "@type": "Organization",
+    "name": "AutoRig.online",
+    "url": "https://autorig.online/"
+   },
+   "publisher": {
+    "@type": "Organization",
+    "name": "AutoRig.online",
+    "url": "https://autorig.online/",
+    "logo": {
+     "@type": "ImageObject",
+     "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+    }
+   }
+  },
+  {
+   "@type": "BreadcrumbList",
+   "@id": "https://autorig.online/developers#breadcrumb",
+   "itemListElement": [
+    {
+     "@type": "ListItem",
+     "position": 1,
+     "name": "Home",
+     "item": "https://autorig.online/"
+    },
+    {
+     "@type": "ListItem",
+     "position": 2,
+     "name": "Developer API",
+     "item": "https://autorig.online/developers"
+    }
+   ]
+  }
+ ]
+}
+    </script>
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
 </head>
 <body data-layout-free3d-init="none">
@@ -30,23 +99,33 @@
             <div class="card" style="padding: 2rem;">
                 <h1 style="margin-top: 0;" data-i18n="developers_heading">Developer API</h1>
                 <p style="color: var(--text-secondary); line-height: 1.6;" data-i18n="developers_intro">
-                    Use the AutoRig HTTP API to create rigging jobs from a link or upload, poll until completion, then download prepared GLB, animation packs, and related files via stable URLs.
+                    Use the AutoRig HTTP API to create tasks from a link or an upload, poll until the task is done, then download the rigged model, animation files and related files via stable URLs. A task is the same V3 task as on the site, and its result is the V3 viewer with animation clips and exports.
                 </p>
                 <p style="color: var(--text-muted); font-size: 0.95rem;">
-                    <span data-i18n="developers_base_url_label">Base URL:</span>
+                    <span data-i18n="developers_base_url_label">Base URL</span>:
                     <code id="api-base-url">https://autorig.online</code>
                 </p>
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="dev_v3_title">How a task works in V3</h2>
+                <ul style="color: var(--text-secondary); line-height: 1.6; padding-left: 1.2rem; margin: 0;">
+                    <li data-i18n="dev_v3_input">A task starts from any input: a 3D model (GLB, FBX, OBJ or a ZIP with textures), a picture, a picture of a car, or text. The calls below create a task from a link or an upload; the examples use a model link.</li>
+                    <li data-i18n="dev_v3_rig">The V3 conveyor builds the skeleton and skin from the geometry in seconds and retargets the animation clips at once. Quality checks run in the background.</li>
+                    <li data-i18n="dev_v3_viewer">The result is the task page <code>https://autorig.online/task?id=TASK_ID</code>: the V3 viewer with the clips and the AI agent chat.</li>
+                    <li data-i18n="dev_v3_files">The viewer offers GLB, FBX, USDZ, ZIP, Unity package and Blender downloads. The endpoints below have stable URLs, and <code>cached-files</code> lists every file the task has with its download URL.</li>
+                </ul>
+            </div>
+
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
                 <h2 style="margin-top: 0;" data-i18n="developers_auth_title">Authentication</h2>
                 <p style="color: var(--text-secondary); line-height: 1.6;" data-i18n="developers_auth_body">
-                    Send your secret key on every request using either header: Authorization: Bearer &lt;key&gt; or X-API-Key: &lt;key&gt;. Keys look like ar_&lt;prefix&gt;_&lt;secret&gt;. Logged-in users and anonymous visitors (browser session cookie) can create keys from this page.
+                    Send your secret key on every request using either header: Authorization: Bearer &lt;key&gt; or X-API-Key: &lt;key&gt;. Keys look like ar_&lt;prefix&gt;_&lt;secret&gt;. Signed-in users and anonymous visitors (with a browser session cookie) can create keys from this page or Buy credits.
                 </p>
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;" data-i18n="api_access_title">API keys</h2>
+                <h2 style="margin-top: 0;" data-i18n="api_access_title">API Access</h2>
                 <p style="color: var(--text-secondary);" data-i18n="api_access_desc">
                     Generate an API key to use AutoRig REST API from external tools.
                 </p>
@@ -97,6 +176,16 @@
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="dev_flow_title">Typical flow</h2>
+                <ol style="color: var(--text-secondary); line-height: 1.7; padding-left: 1.4rem; margin: 0;">
+                    <li data-i18n="dev_flow_1"><code>POST /api/task/create</code> with a link (JSON with <code>input_url</code>, or multipart with <code>input_url</code> or a file).</li>
+                    <li data-i18n="dev_flow_2"><code>GET /api/task/{id}</code> until the status is <code>done</code> or <code>error</code>.</li>
+                    <li data-i18n="dev_flow_3"><code>GET /api/task/{id}/cached-files</code> for the list of files.</li>
+                    <li data-i18n="dev_flow_4">Download with <code>GET</code> on <code>prepared.glb</code>, <code>animations.glb</code>, <code>animations.fbx</code> or <code>model.glb</code>.</li>
+                </ol>
+            </div>
+
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
                 <h2 style="margin-top: 0;" data-i18n="developers_examples_title">Examples</h2>
                 <p style="color: var(--text-muted); font-size: 0.9rem;" data-i18n="developers_examples_note">Replace TASK_ID and YOUR_API_KEY. For link-based input, use a publicly reachable URL to your GLB/FBX/OBJ.</p>
                 <pre style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5;"><code>curl -X POST "$BASE/api/task/create" \
@@ -114,13 +203,26 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;">U3D YouTube provider</h2>
-                <p style="color: var(--text-secondary); line-height: 1.6;">U3D uploads use a dedicated provider key and isolated OAuth credentials. An AutoRig admin API key is neither required nor accepted. Open the provider page for the ready curl example, live readiness status, admin-only key copy button, and agent skill.</p>
-                <p><a class="btn btn-secondary" href="/dev/youtube">Open U3D YouTube API</a> <a class="btn btn-ghost" href="/dev/youtube/skill.md">Agent skill.md</a></p>
+                <h2 style="margin-top: 0;" data-i18n="dev_u3d_title">U3D YouTube provider</h2>
+                <p style="color: var(--text-secondary); line-height: 1.6;" data-i18n="dev_u3d_body">U3D uploads use a dedicated provider key and isolated OAuth credentials. An AutoRig admin API key is neither required nor accepted. Open the provider page for the ready curl example, live readiness status, admin-only key copy button, and agent skill.</p>
+                <p><a class="btn btn-secondary" href="/dev/youtube" data-i18n="dev_u3d_open">Open U3D YouTube API</a> <a class="btn btn-ghost" href="/dev/youtube/skill.md" data-i18n="dev_u3d_skill">Agent skill.md</a></p>
             </div>
 
+            <nav class="card" style="padding: 2rem; margin-top: 1rem;" aria-labelledby="dev-related-h">
+                <h2 style="margin-top: 0;" id="dev-related-h" data-i18n="dev_related_title">Related pages</h2>
+                <div style="display:flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <a href="/how-it-works" class="btn btn-ghost" data-i18n="footer_how_it_works">How It Works</a>
+                    <a href="/faq" class="btn btn-ghost" data-i18n="footer_faq">FAQ</a>
+                    <a href="/guides" class="btn btn-ghost" data-i18n="nav_guides">Guides</a>
+                    <a href="/gallery" class="btn btn-ghost" data-i18n="nav_gallery">Gallery</a>
+                    <a href="/animal-rig" class="btn btn-ghost" data-i18n="footer_animal_rig">Animal Rigging</a>
+                    <a href="/blender-plugin" class="btn btn-ghost" data-i18n="nav_blender_plugin">Blender Plugin</a>
+                    <a href="/buy-credits" class="btn btn-ghost" data-i18n="nav_buy">Buy</a>
+                </div>
+            </nav>
+
             <div class="sr-only visually-hidden" aria-hidden="true" style="position:absolute;left:-10000px; width:1px;height:1px;overflow:hidden;">
-                <p data-i18n="developers_agent_hint">Machine-readable API brief for agents is embedded as JSON below.</p>
+                <p data-i18n="developers_agent_hint">Machine-readable API brief for agents is embedded as JSON at the end of this page.</p>
             </div>
         </div>
     </main>
@@ -233,7 +335,7 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                 return;
             }
             listEl.innerHTML = data.keys.map(k => {
-                const revoked = k.revoked_at ? ' (revoked)' : '';
+                const revoked = k.revoked_at ? ' ' + t('dev_revoked') : '';
                 return `
                     <div style="display:flex; align-items:center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
                         <div>

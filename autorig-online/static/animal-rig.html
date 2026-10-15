@@ -3,87 +3,130 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Animal Rigging for Non-Humanoid 3D Models | AutoRig</title>
-    <meta name="description" content="AutoRig V2 rigs animal, creature and non-humanoid models online. Watch beaver, cat, rabbit, turtle and spider robot animation examples.">
-    <meta name="keywords" content="AI animal rigging, non-humanoid rigging, auto rig animals, creature rigging, quadruped rigging, animal animation, AutoRig V2 Animal RIG">
+    <title>AI Animal Rigging Online: Horse, Dog, Bird | AutoRig</title>
+    <meta name="description" content="AutoRig V3 rigs animals and creatures from one upload: quadruped, equine, bird, serpent, monster, multilimb. Skeleton, skin and gait clips in seconds.">
+    <meta name="keywords" content="AI animal rigging, auto rig animals, quadruped rigging, horse rig, equine rig, bird rig wings, serpent rig, creature rigging, multilimb rig, animal animation clips, AutoRig V3">
     <link rel="canonical" href="https://autorig.online/animal-rig">
-    <meta property="og:title" content="AI Animal Rigging for Non-Humanoid 3D Models">
-    <meta property="og:description" content="New AutoRig V2 Animal RIG for animals, creatures and non-humanoid 3D models. Watch before/after rigging and animation examples.">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig">
+    <link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig">
+    <meta property="og:title" content="AI Animal Rigging Online: Horse, Dog, Bird | AutoRig">
+    <meta property="og:description" content="AutoRig V3 rigs animals and creatures from one upload: quadruped, equine, bird, serpent, monster, multilimb. Skeleton, skin and gait clips in seconds.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online/animal-rig">
-    <meta property="og:image" content="https://autorig.online/static/videos/animal-rig/after-poster-20260516.png">
+    <meta property="og:image" content="https://autorig.online/static/images/og/animal-rig.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AutoRig V3 animal rigging: a wolf, a horse, a bird and a monster rigged by the conveyor">
     <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="en_US">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="AI Animal Rigging Online | AutoRig.online">
-    <meta name="twitter:description" content="AutoRig V2 animal rigging and animation examples for non-humanoid 3D models.">
-    <meta name="twitter:image" content="https://autorig.online/static/videos/animal-rig/after-poster-20260516.png">
+    <meta name="twitter:title" content="AI Animal Rigging Online: Horse, Dog, Bird | AutoRig">
+    <meta name="twitter:description" content="AutoRig V3 rigs animals and creatures from one upload: quadruped, equine, bird, serpent, monster, multilimb. Skeleton, skin and gait clips in seconds.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og/animal-rig.jpg">
+    <meta name="twitter:image:alt" content="AutoRig V3 animal rigging: a wolf, a horse, a bird and a monster rigged by the conveyor">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <link rel="stylesheet" href="/static/css/styles.css?v=82cbb3210d">
     <style>
         .animal-page {
+            --ap-card: rgba(255, 255, 255, 0.045);
+            --ap-card-hover: rgba(255, 255, 255, 0.075);
+            --ap-line: rgba(255, 255, 255, 0.12);
+            --ap-text: var(--text-primary);
+            --ap-muted: var(--text-secondary);
+            --ap-accent: #ffca3a;
+            --ap-on-accent: #111226;
+            --ap-hero-bg:
+                linear-gradient(90deg, rgba(13, 14, 28, 0.98) 0%, rgba(13, 14, 28, 0.92) 56%, rgba(13, 14, 28, 0.72) 100%),
+                linear-gradient(180deg, rgba(123, 92, 255, 0.08), rgba(56, 189, 248, 0.03));
+            --ap-hero-fade: linear-gradient(180deg, rgba(16, 17, 29, 0), rgba(16, 17, 29, 0.96));
+            --ap-media-bg: #0d0e1c;
             background:
                 radial-gradient(circle at 12% 8%, rgba(123, 92, 255, 0.22), transparent 34%),
                 linear-gradient(180deg, #111226 0%, #15162b 48%, #10111d 100%);
-            color: var(--text-primary);
+            color: var(--ap-text);
+        }
+        [data-theme="light"] .animal-page {
+            --ap-card: #ffffff;
+            --ap-card-hover: #f6f6fd;
+            --ap-line: rgba(20, 20, 60, 0.14);
+            --ap-text: #14142b;
+            --ap-muted: #474a66;
+            --ap-accent: #ffca3a;
+            --ap-hero-bg: linear-gradient(180deg, rgba(123, 92, 255, 0.10), rgba(56, 189, 248, 0.06));
+            --ap-hero-fade: linear-gradient(180deg, rgba(244, 244, 251, 0), rgba(244, 244, 251, 0));
+            --ap-media-bg: #eceef8;
+            background:
+                radial-gradient(circle at 12% 8%, rgba(123, 92, 255, 0.14), transparent 34%),
+                linear-gradient(180deg, #f6f6fc 0%, #eef0f9 100%);
         }
         .animal-hero {
             position: relative;
-            min-height: clamp(420px, 58vh, 620px);
-            display: flex;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--ap-line);
             overflow: hidden;
-            background:
-                linear-gradient(90deg, rgba(13, 14, 28, 0.98) 0%, rgba(13, 14, 28, 0.92) 56%, rgba(13, 14, 28, 0.72) 100%),
-                linear-gradient(180deg, rgba(123, 92, 255, 0.08), rgba(56, 189, 248, 0.03));
+            background: var(--ap-hero-bg);
         }
         .animal-hero::after {
             content: "";
             position: absolute;
             inset: auto 0 0;
-            height: 140px;
+            height: 120px;
             pointer-events: none;
-            background: linear-gradient(180deg, rgba(16, 17, 29, 0), rgba(16, 17, 29, 0.96));
+            background: var(--ap-hero-fade);
         }
         .animal-hero-inner {
             position: relative;
             z-index: 1;
-            width: 100%;
-            padding: clamp(3rem, 7vw, 6rem) 1.5rem clamp(3rem, 7vw, 6rem);
+            display: grid;
+            grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+            gap: clamp(1.5rem, 4vw, 3rem);
+            align-items: center;
+            padding-block: clamp(2.5rem, 6vw, 5rem);
         }
         .animal-hero-copy {
-            max-width: 720px;
+            min-width: 0;
         }
         .animal-kicker {
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
             margin-bottom: 1rem;
-            color: #ffca3a;
+            color: var(--ap-accent);
             font-size: 0.9rem;
             font-weight: 800;
             letter-spacing: 0;
             text-transform: uppercase;
         }
+        [data-theme="light"] .animal-kicker {
+            color: #8a5a00;
+        }
         .animal-hero h1 {
             margin: 0;
-            max-width: 680px;
-            font-size: clamp(2.35rem, 5.7vw, 5.2rem);
-            line-height: 0.98;
+            font-size: clamp(2rem, 4.6vw, 3.9rem);
+            line-height: 1.04;
             letter-spacing: 0;
+            overflow-wrap: anywhere;
         }
         .animal-gradient-text {
-            color: #ffffff;
             background: linear-gradient(90deg, #ffffff 0%, #a78bfa 46%, #38bdf8 100%);
             -webkit-background-clip: text;
             background-clip: text;
             -webkit-text-fill-color: transparent;
+            color: #ffffff;
+        }
+        [data-theme="light"] .animal-gradient-text {
+            background: linear-gradient(90deg, #3b2bb5 0%, #6d4be0 50%, #0c7bb3 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: #3b2bb5;
         }
         .animal-lead {
-            max-width: 680px;
+            max-width: 640px;
             margin: 1.25rem 0 0;
-            color: var(--text-secondary);
-            font-size: clamp(1.02rem, 2vw, 1.25rem);
+            color: var(--ap-muted);
+            font-size: clamp(1rem, 1.8vw, 1.2rem);
             line-height: 1.65;
         }
         .animal-actions {
@@ -97,7 +140,7 @@
             align-items: center;
             justify-content: center;
             min-height: 44px;
-            padding: 0.75rem 1rem;
+            padding: 0.75rem 1.1rem;
             border-radius: 8px;
             border: 1px solid transparent;
             font-weight: 800;
@@ -105,13 +148,13 @@
             transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
         }
         .animal-btn-primary {
-            color: #111226;
-            background: #ffca3a;
+            color: var(--ap-on-accent);
+            background: var(--ap-accent);
         }
         .animal-btn-secondary {
-            color: var(--text-primary);
-            border-color: rgba(255, 255, 255, 0.18);
-            background: rgba(255, 255, 255, 0.08);
+            color: var(--ap-text);
+            border-color: var(--ap-line);
+            background: var(--ap-card);
         }
         .animal-btn:hover {
             transform: translateY(-1px);
@@ -121,123 +164,261 @@
             flex-wrap: wrap;
             gap: 0.55rem;
             margin-top: 1.6rem;
-            max-width: 700px;
         }
         .animal-pill {
             display: inline-flex;
             align-items: center;
-            min-height: 32px;
-            padding: 0.45rem 0.65rem;
-            border: 1px solid rgba(255, 255, 255, 0.14);
+            min-height: 36px;
+            padding: 0.4rem 0.75rem;
+            border: 1px solid var(--ap-line);
             border-radius: 8px;
-            background: rgba(255, 255, 255, 0.07);
-            color: var(--text-secondary);
-            font-size: 0.86rem;
+            background: var(--ap-card);
+            color: var(--ap-muted);
+            font-size: 0.88rem;
             font-weight: 700;
+            text-decoration: none;
+            transition: border-color 0.15s ease, color 0.15s ease;
+        }
+        a.animal-pill:hover {
+            color: var(--ap-text);
+            border-color: rgba(255, 202, 58, 0.6);
+        }
+        .animal-hero-figure,
+        .animal-media {
+            margin: 0;
+            min-width: 0;
+        }
+        .animal-hero-figure img,
+        .animal-media img,
+        .animal-cat-card img,
+        .animal-gal-card img {
+            display: block;
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            background: var(--ap-media-bg);
+        }
+        .animal-hero-figure img,
+        .animal-media > img {
+            border: 1px solid var(--ap-line);
+            box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+        }
+        figcaption {
+            margin-top: 0.7rem;
+            color: var(--ap-muted);
+            font-size: 0.9rem;
+            line-height: 1.5;
         }
         .animal-section {
-            padding: clamp(2.5rem, 5vw, 4.5rem) 0;
+            padding: clamp(2.25rem, 5vw, 4rem) 0;
+        }
+        .animal-section-tight {
+            padding-block: 1.5rem;
         }
         .animal-section-header {
-            max-width: 760px;
+            max-width: 780px;
             margin-bottom: 1.5rem;
         }
         .animal-section-header h2 {
             margin: 0;
-            font-size: clamp(1.75rem, 3.8vw, 3rem);
-            line-height: 1.05;
+            font-size: clamp(1.6rem, 3.4vw, 2.6rem);
+            line-height: 1.1;
             letter-spacing: 0;
         }
         .animal-section-header p {
             margin: 0.75rem 0 0;
-            color: var(--text-secondary);
+            color: var(--ap-muted);
             font-size: 1rem;
             line-height: 1.65;
         }
-        .animal-video-frame {
-            overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 8px;
-            background: #0d0e1c;
-            box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
-        }
-        .animal-video-frame video {
-            display: block;
-            width: 100%;
-            aspect-ratio: 16 / 9;
-            object-fit: cover;
-            background: #0d0e1c;
-        }
-        .animal-lazy-video {
-            pointer-events: none;
-        }
-        .animal-lazy-video::-webkit-media-controls,
-        .animal-lazy-video::-webkit-media-controls-panel,
-        .animal-lazy-video::-webkit-media-controls-play-button,
-        .animal-lazy-video::-webkit-media-controls-start-playback-button {
-            display: none !important;
-            opacity: 0 !important;
-        }
-        .animal-video-caption {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem 0.7rem;
-            justify-content: space-between;
-            padding: 0.85rem 1rem;
-            color: var(--text-secondary);
-            font-size: 0.92rem;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        .animal-video-caption strong {
-            color: var(--text-primary);
-        }
-        .animal-compare-grid,
-        .animal-example-grid,
-        .animal-type-grid,
+        .animal-cat-grid,
+        .animal-steps,
+        .animal-joint-grid,
+        .animal-clip-grid,
         .animal-feature-grid,
+        .animal-gal-grid,
+        .animal-type-grid,
         .animal-faq-grid {
             display: grid;
             gap: 1rem;
         }
-        .animal-compare-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .animal-example-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-        .animal-type-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-        .animal-feature-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-        .animal-example-card,
+        .animal-cat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .animal-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0; padding: 0; counter-reset: step; }
+        .animal-joint-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .animal-clip-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .animal-feature-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .animal-gal-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        .animal-type-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .animal-faq-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .animal-cat-card,
+        .animal-step,
         .animal-type-card,
         .animal-feature-card,
-        .animal-faq-card {
-            border: 1px solid rgba(255, 255, 255, 0.12);
+        .animal-faq-card,
+        .animal-gal-card {
+            border: 1px solid var(--ap-line);
             border-radius: 8px;
-            background: rgba(255, 255, 255, 0.045);
+            background: var(--ap-card);
+            min-width: 0;
         }
-        .animal-example-card {
-            overflow: hidden;
-        }
-        .animal-example-card video {
-            display: block;
-            width: 100%;
+        .animal-cat-card { overflow: hidden; }
+        .animal-cat-card img,
+        .animal-cat-diagram {
+            border-radius: 0;
             aspect-ratio: 4 / 3;
             object-fit: cover;
-            background: #10111d;
         }
+        .animal-cat-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(123, 92, 255, 0.28), rgba(56, 189, 248, 0.14));
+        }
+        .animal-cat-diagram svg {
+            width: 100%;
+            height: 100%;
+        }
+        .serpent-body { fill: none; stroke: rgba(167, 139, 250, 0.45); stroke-width: 46; stroke-linecap: round; }
+        .serpent-bone { fill: none; stroke: #ffffff; stroke-width: 4; stroke-linecap: round; }
+        .serpent-joints circle { fill: #ffca3a; stroke: #111226; stroke-width: 2; }
+        [data-theme="light"] .serpent-body { stroke: rgba(109, 75, 224, 0.35); }
+        [data-theme="light"] .serpent-bone { stroke: #14142b; }
         .animal-card-body,
+        .animal-step,
         .animal-type-card,
         .animal-feature-card,
         .animal-faq-card {
             padding: 1rem;
         }
+        .animal-card-body h3,
+        .animal-step h3,
+        .animal-feature-card h3,
+        .animal-faq-card h3 {
+            margin: 0;
+            font-size: 1.05rem;
+            line-height: 1.25;
+        }
+        .animal-card-body p,
+        .animal-step p,
+        .animal-feature-card p,
+        .animal-faq-card p {
+            margin: 0.55rem 0 0;
+            color: var(--ap-muted);
+            font-size: 0.95rem;
+            line-height: 1.55;
+        }
+        .animal-card-body p.animal-who {
+            color: var(--ap-text);
+            font-size: 0.88rem;
+            font-weight: 700;
+        }
+        .animal-step {
+            position: relative;
+            counter-increment: step;
+        }
+        .animal-step::before {
+            content: counter(step);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            margin-bottom: 0.7rem;
+            border-radius: 50%;
+            background: var(--ap-accent);
+            color: var(--ap-on-accent);
+            font-weight: 800;
+        }
+        .animal-split {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+            gap: clamp(1.25rem, 3vw, 2.25rem);
+            align-items: start;
+        }
+        .animal-split-text {
+            display: grid;
+            gap: 1rem;
+            min-width: 0;
+        }
+        .animal-gait-card {
+            border-color: rgba(255, 202, 58, 0.45);
+        }
+        .animal-gif-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+        .animal-bird-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.55fr);
+            gap: 0.75rem;
+            align-items: center;
+        }
+        .animal-bird-grid img {
+            border: 1px solid var(--ap-line);
+        }
+        .animal-scene-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+        .animal-scene-grid img {
+            border: 1px solid var(--ap-line);
+        }
+        .animal-note {
+            margin: 1.25rem 0 0;
+            color: var(--ap-muted);
+            font-weight: 700;
+        }
+        .animal-check-list {
+            display: grid;
+            gap: 0.7rem;
+            margin: 1.25rem 0 0;
+            padding: 0;
+            list-style: none;
+            max-width: 820px;
+        }
+        .animal-check-list li {
+            position: relative;
+            padding-inline-start: 1.9rem;
+            color: var(--ap-muted);
+            line-height: 1.6;
+        }
+        .animal-check-list li::before {
+            content: "";
+            position: absolute;
+            inset-inline-start: 0;
+            top: 0.45rem;
+            width: 0.9rem;
+            height: 0.9rem;
+            border-radius: 50%;
+            background: var(--ap-accent);
+        }
+        .animal-gal-card {
+            display: block;
+            overflow: hidden;
+            color: var(--ap-text);
+            text-decoration: none;
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .animal-gal-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 202, 58, 0.55);
+        }
+        .animal-gal-card img {
+            border-radius: 0;
+            aspect-ratio: 4 / 5;
+            object-fit: cover;
+        }
+        .animal-gal-card span {
+            display: block;
+            padding: 0.6rem 0.8rem;
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
         .animal-type-card {
             display: block;
-            min-height: 100%;
             color: inherit;
             text-decoration: none;
             transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
@@ -245,87 +426,62 @@
         .animal-type-card:hover {
             transform: translateY(-1px);
             border-color: rgba(255, 202, 58, 0.5);
-            background: rgba(255, 255, 255, 0.075);
+            background: var(--ap-card-hover);
         }
         .animal-type-card strong {
             display: block;
-            color: var(--text-primary);
+            color: var(--ap-text);
             font-size: 1rem;
             line-height: 1.25;
         }
         .animal-type-card span {
             display: block;
             margin-top: 0.55rem;
-            color: var(--text-secondary);
-            font-size: 0.94rem;
+            color: var(--ap-muted);
+            font-size: 0.92rem;
             line-height: 1.5;
-        }
-        .animal-card-body h3,
-        .animal-feature-card h3,
-        .animal-faq-card h3 {
-            margin: 0;
-            font-size: 1rem;
-            line-height: 1.25;
-        }
-        .animal-card-body p,
-        .animal-feature-card p,
-        .animal-faq-card p {
-            margin: 0.55rem 0 0;
-            color: var(--text-secondary);
-            font-size: 0.95rem;
-            line-height: 1.55;
-        }
-        .animal-faq-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .animal-cta-band {
             padding: 2rem;
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            border: 1px solid var(--ap-line);
             border-radius: 8px;
             background: linear-gradient(135deg, rgba(123, 92, 255, 0.26), rgba(56, 189, 248, 0.12));
         }
         .animal-cta-band h2 {
             margin: 0;
-            font-size: clamp(1.6rem, 3vw, 2.4rem);
+            font-size: clamp(1.5rem, 3vw, 2.3rem);
             letter-spacing: 0;
         }
         .animal-cta-band p {
             max-width: 760px;
             margin: 0.75rem 0 0;
-            color: var(--text-secondary);
+            color: var(--ap-muted);
             line-height: 1.65;
         }
         @media (max-width: 1020px) {
-            .animal-hero {
-                align-items: flex-start;
+            .animal-hero-inner,
+            .animal-split {
+                grid-template-columns: minmax(0, 1fr);
             }
-            .animal-example-grid,
-            .animal-type-grid,
-            .animal-feature-grid {
+            .animal-cat-grid,
+            .animal-clip-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .animal-steps,
+            .animal-feature-grid,
+            .animal-type-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .animal-gal-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
             }
         }
         @media (max-width: 700px) {
-            .animal-hero {
-                min-height: auto;
-                overflow: visible;
-            }
             .animal-hero-inner {
-                padding: 2rem 0.875rem 2.25rem;
-            }
-            .animal-hero-copy {
-                max-width: 100%;
-                min-width: 0;
+                padding-block: 2rem 2.25rem;
             }
             .animal-hero h1 {
-                max-width: 100%;
-                font-size: clamp(1.95rem, 9.5vw, 2.45rem);
-                line-height: 1.06;
-                overflow-wrap: anywhere;
-            }
-            .animal-lead {
-                font-size: 1rem;
-                line-height: 1.55;
+                font-size: clamp(1.8rem, 8.5vw, 2.3rem);
             }
             .animal-actions {
                 flex-direction: column;
@@ -333,41 +489,58 @@
             .animal-btn {
                 width: 100%;
             }
-            .animal-pill-row {
-                align-items: stretch;
-            }
-            .animal-pill {
-                max-width: 100%;
-                justify-content: center;
-                text-align: center;
-            }
-            .animal-compare-grid,
-            .animal-example-grid,
-            .animal-type-grid,
+            .animal-cat-grid,
+            .animal-steps,
+            .animal-joint-grid,
+            .animal-clip-grid,
             .animal-feature-grid,
-            .animal-faq-grid {
-                grid-template-columns: 1fr;
+            .animal-type-grid,
+            .animal-faq-grid,
+            .animal-scene-grid,
+            .animal-bird-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .animal-bird-grid img[src$=".gif"] {
+                max-width: 240px;
+                justify-self: center;
+            }
+            .animal-gal-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
             .animal-cta-band {
                 padding: 1.25rem;
             }
         }
+
     </style>
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "WebPage",
-        "name": "AI Animal Rigging Online for Non-Humanoid 3D Models",
+        "@id": "https://autorig.online/animal-rig#webpage",
+        "name": "AI Animal Rigging Online: Horse, Dog, Bird | AutoRig",
         "url": "https://autorig.online/animal-rig",
-        "description": "AutoRig V2 animal rigging for non-humanoid 3D models with before/after and animation examples.",
+        "description": "AutoRig V3 rigs animals and creatures from one upload: quadruped, equine, bird, serpent, monster, multilimb. Skeleton, skin and gait clips in seconds.",
+        "inLanguage": "en",
         "isPartOf": {
             "@type": "WebSite",
             "name": "AutoRig.online",
             "url": "https://autorig.online/"
         },
+        "primaryImageOfPage": {
+            "@type": "ImageObject",
+            "url": "https://autorig.online/static/images/og/animal-rig.jpg",
+            "width": 1200,
+            "height": 630
+        },
+        "breadcrumb": {
+            "@id": "https://autorig.online/animal-rig#breadcrumb"
+        },
         "about": [
             "AI animal rigging",
-            "non-humanoid 3D model rigging",
+            "quadruped rigging",
+            "equine rigging",
+            "bird rigging",
             "creature animation"
         ]
     }
@@ -375,71 +548,20 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "ItemList",
-        "name": "AutoRig V2 Animal RIG video examples",
+        "@type": "BreadcrumbList",
+        "@id": "https://autorig.online/animal-rig#breadcrumb",
         "itemListElement": [
             {
-                "@type": "VideoObject",
+                "@type": "ListItem",
                 "position": 1,
-                "name": "AutoRig V2 Animal RIG presentation",
-                "description": "Beaver model after AutoRig V2 animal rigging with animation preview.",
-                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/after-poster-20260516.png",
-                "contentUrl": "https://autorig.online/static/videos/animal-rig/after.mp4",
-                "uploadDate": "2026-05-16"
+                "name": "AutoRig.online",
+                "item": "https://autorig.online/"
             },
             {
-                "@type": "VideoObject",
+                "@type": "ListItem",
                 "position": 2,
-                "name": "Before V2 animal rig",
-                "description": "Original beaver model before V2 animal rigging.",
-                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/before-poster-20260516.png",
-                "contentUrl": "https://autorig.online/static/videos/animal-rig/before.mp4",
-                "uploadDate": "2026-05-16"
-            },
-            {
-                "@type": "VideoObject",
-                "position": 3,
-                "name": "Cat V2 rig animation example",
-                "description": "Cat animation generated with AutoRig V2 animal rigging.",
-                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/cat-v2-rig-poster-20260516.png",
-                "contentUrl": "https://autorig.online/static/videos/animal-rig/cat-v2-rig.mp4",
-                "uploadDate": "2026-05-16"
-            },
-            {
-                "@type": "VideoObject",
-                "position": 4,
-                "name": "Alpaca V2 rig animation example",
-                "description": "Alpaca animation generated with AutoRig V2 animal rigging.",
-                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png",
-                "contentUrl": "https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.mp4",
-                "uploadDate": "2026-05-16"
-            },
-            {
-                "@type": "VideoObject",
-                "position": 5,
-                "name": "Rabbit V2 rig animation example",
-                "description": "Rabbit animation generated with AutoRig V2 animal rigging.",
-                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png",
-                "contentUrl": "https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.mp4",
-                "uploadDate": "2026-05-16"
-            },
-            {
-                "@type": "VideoObject",
-                "position": 6,
-                "name": "Turtle V2 rig animation example",
-                "description": "Turtle animation generated with AutoRig V2 animal rigging.",
-                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png",
-                "contentUrl": "https://autorig.online/static/videos/animal-rig/turtle-v2-rig.mp4",
-                "uploadDate": "2026-05-16"
-            },
-            {
-                "@type": "VideoObject",
-                "position": 7,
-                "name": "Spider robot V2 rig animation example",
-                "description": "Spider robot animation generated with AutoRig V2 non-humanoid rigging.",
-                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig-poster-20260516.png",
-                "contentUrl": "https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.mp4",
-                "uploadDate": "2026-05-16"
+                "name": "AI animal rigging",
+                "item": "https://autorig.online/animal-rig"
             }
         ]
     }
@@ -451,26 +573,50 @@
         "mainEntity": [
             {
                 "@type": "Question",
-                "name": "What is AutoRig V2 Animal RIG?",
+                "name": "Which animals can AutoRig V3 rig?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "AutoRig V2 Animal RIG is AutoRig.online's animal and non-humanoid rigging workflow for 3D models such as quadrupeds, creatures and stylized robot models."
+                    "text": "Quadrupeds (dogs, cats, bears, cows, pigs, rabbits, mice, elephants, giraffes, turtles), equines (horses, deer, zebras), birds, serpents, monsters and multilimb creatures such as spiders. Humanoids, hands, primates and cars have their own categories."
                 }
             },
             {
                 "@type": "Question",
-                "name": "Can it rig non-humanoid models?",
+                "name": "Do I have to prepare a pose?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Yes. The page shows non-humanoid examples including a beaver before/after, cat, alpaca, rabbit, turtle and spider robot animation previews."
+                    "text": "No special preparation is needed. V3 works from the geometry. If the file already carries a skeleton or an animation, V3 uses the file's own bind pose instead of fitting a posed mesh."
                 }
             },
             {
                 "@type": "Question",
-                "name": "Do I need Blender to use animal rigging online?",
+                "name": "Can I start from a picture?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "No. The online service runs in the browser. AutoRig.online also offers a separate Blender plugin for users who prefer a Blender-native workflow."
+                    "text": "Yes. A picture of an animal becomes a 3D model first, then it is rigged like any other model."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Do I have to confirm the skeleton?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "No. The viewer offers the skeleton for confirmation, but the animation is made without waiting for it. You can open blueprint mode (B) at any time, move the bones and re-rig."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Which animations do I get?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The clips of the model's category, retargeted automatically: for example walk, trot and gallop for equines. They come from generated reference videos and are checked numerically. You can add custom clips in the viewer."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What can I download, and do I need Blender?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "No Blender is needed: the service runs in the browser. Downloads: GLB, FBX, USDZ, a ZIP, a Unity package and a Blender file. A separate Blender plugin exists for a Blender-native workflow."
                 }
             }
         ]
@@ -484,20 +630,253 @@
         <section class="animal-hero" aria-labelledby="animal-hero-title">
             <div class="container animal-hero-inner">
                 <div class="animal-hero-copy">
-                    <span class="animal-kicker">New: AutoRig V2 Animal RIG</span>
-                    <h1 id="animal-hero-title"><span class="animal-gradient-text">AI animal rigging</span> for non-humanoid 3D models</h1>
-                    <p class="animal-lead">See the beaver before and after V2 rigging, then watch animal animation examples for cat, alpaca, rabbit, turtle and spider robot models.</p>
+                    <span class="animal-kicker" data-i18n="animal_kicker">AutoRig V3 · Animals and creatures</span>
+                    <h1 id="animal-hero-title"><span class="animal-gradient-text" data-i18n="animal_h1_a">AI animal rigging</span> <span data-i18n="animal_h1_b">for any four-legged, winged or many-legged model</span></h1>
+                    <p class="animal-lead" data-i18n="animal_lead">Drop a 3D model or a picture of an animal. V3 finds its category, builds the skeleton and skin from the geometry in seconds, retargets the animation clips at once and checks the quality in the background of the viewer.</p>
                     <div class="animal-actions">
-                        <a class="animal-btn animal-btn-primary" href="#presentation">Watch animal rig presentation</a>
-                        <a class="animal-btn animal-btn-secondary" href="/">Try animal rigging online</a>
+                        <a class="animal-btn animal-btn-primary" href="/" data-i18n="animal_cta_try">Rig an animal</a>
+                        <a class="animal-btn animal-btn-secondary" href="/gallery" data-i18n="animal_cta_gallery">See rigged animals</a>
                     </div>
-                    <div class="animal-pill-row" aria-label="Supported example model types">
-                        <span class="animal-pill">Quadrupeds</span>
-                        <span class="animal-pill">Creatures</span>
-                        <span class="animal-pill">Stylized animals</span>
-                        <span class="animal-pill">Spider robots</span>
-                        <span class="animal-pill">Game-ready previews</span>
+                    <div class="animal-pill-row" aria-label="Animal categories" data-i18n-aria-label="animal_pills_label">
+                        <a class="animal-pill" href="#categories" data-i18n="animal_cat_quad_name">Quadruped</a>
+                        <a class="animal-pill" href="#equine" data-i18n="animal_cat_equine_name">Equine</a>
+                        <a class="animal-pill" href="#bird" data-i18n="animal_cat_bird_name">Bird</a>
+                        <a class="animal-pill" href="#categories" data-i18n="animal_cat_serpent_name">Serpent</a>
+                        <a class="animal-pill" href="#categories" data-i18n="animal_cat_monster_name">Monster</a>
+                        <a class="animal-pill" href="#categories" data-i18n="animal_cat_multi_name">Multilimb</a>
                     </div>
+                </div>
+                <figure class="animal-hero-figure">
+                    <img src="/static/images/animal-rig/horse-gallop-sheet-a.jpg" alt="Gallop clip of a white horse on the V3 check sheet: T-pose and five frames, each shown from the front, the side, the top and in 3D" data-i18n-alt="animal_hero_alt" width="768" height="572" fetchpriority="high">
+                    <figcaption data-i18n="animal_hero_cap">A real V3 check sheet: the gallop clip retargeted onto a white horse.</figcaption>
+                </figure>
+            </div>
+        </section>
+
+        <section id="categories" class="animal-section" aria-labelledby="animal-cat-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-cat-title" data-i18n="animal_cat_title">Six animal categories, six rigs</h2>
+                    <p data-i18n="animal_cat_lead">Every category has its own skeleton template, fit rules, skin rules, clip library and quality checks. V3 detects the category of your model, and you can still edit the skeleton in the viewer.</p>
+                </div>
+                <div class="animal-cat-grid">
+                    <article class="animal-cat-card">
+                        <img src="/static/images/animal-rig/cat-quadruped.jpg" alt="A wolf rigged by AutoRig V3 in a viewer scene" data-i18n-alt="animal_cat_quad_alt" width="640" height="480" loading="lazy">
+                        <div class="animal-card-body">
+                            <h3 data-i18n="animal_cat_quad_name">Quadruped</h3>
+                            <p class="animal-who" data-i18n="animal_cat_quad_who">Dogs, cats, bears, cows, pigs, rabbits, mice, elephants, giraffes, turtles</p>
+                            <p data-i18n="animal_cat_quad_text">The template for animals that stand on four legs: head, neck, spine, tail and four legs, fitted to the mesh and skinned for walking.</p>
+                        </div>
+                    </article>
+                    <article class="animal-cat-card">
+                        <img src="/static/images/animal-rig/cat-equine.jpg" alt="A brown horse rigged by AutoRig V3 in a viewer scene" data-i18n-alt="animal_cat_equine_alt" width="640" height="480" loading="lazy">
+                        <div class="animal-card-body">
+                            <h3 data-i18n="animal_cat_equine_name">Equine</h3>
+                            <p class="animal-who" data-i18n="animal_cat_equine_who">Horses, deer, zebras</p>
+                            <p data-i18n="animal_cat_equine_text">A richer template with scapula, elbow, mid-neck and leg profile joints. Gaits keep the hooves planted: walk, trot, gallop.</p>
+                        </div>
+                    </article>
+                    <article class="animal-cat-card">
+                        <img src="/static/images/animal-rig/cat-bird.jpg" alt="A green bird of prey with spread wings in a viewer scene" data-i18n-alt="animal_cat_bird_alt" width="640" height="480" loading="lazy">
+                        <div class="animal-card-body">
+                            <h3 data-i18n="animal_cat_bird_name">Bird</h3>
+                            <p class="animal-who" data-i18n="animal_cat_bird_who">Birds of prey, parrots, chickens</p>
+                            <p data-i18n="animal_cat_bird_text">Wings are rigged as wings, never as arms: the wing has its own joints, and the body, neck and legs follow the bird template.</p>
+                        </div>
+                    </article>
+                    <article class="animal-cat-card">
+                        <div class="animal-cat-diagram" role="img" aria-label="Serpent skeleton: a chain of joints along a long body" data-i18n-aria-label="animal_cat_serpent_alt">
+                            <svg viewBox="0 0 640 480" width="640" height="480" aria-hidden="true" focusable="false">
+                                <path class="serpent-body" d="M40 330 C120 120 200 120 280 240 S440 360 520 200 S590 120 604 150"/>
+                                <path class="serpent-bone" d="M40 330 C120 120 200 120 280 240 S440 360 520 200 S590 120 604 150"/>
+                                <g class="serpent-joints">
+                                    <circle cx="40" cy="330" r="7"/><circle cx="108" cy="190" r="7"/><circle cx="196" cy="153" r="7"/>
+                                    <circle cx="280" cy="240" r="7"/><circle cx="366" cy="318" r="7"/><circle cx="450" cy="300" r="7"/>
+                                    <circle cx="520" cy="200" r="7"/><circle cx="578" cy="140" r="7"/><circle cx="604" cy="150" r="7"/>
+                                </g>
+                            </svg>
+                        </div>
+                        <div class="animal-card-body">
+                            <h3 data-i18n="animal_cat_serpent_name">Serpent</h3>
+                            <p class="animal-who" data-i18n="animal_cat_serpent_who">Snakes, eels, worms, long-bodied dragons</p>
+                            <p data-i18n="animal_cat_serpent_text">A long body without legs. The skeleton runs along the body as one chain, so the whole body can bend.</p>
+                        </div>
+                    </article>
+                    <article class="animal-cat-card">
+                        <img src="/static/images/animal-rig/cat-monster.jpg" alt="An ice monster rigged by AutoRig V3 in a viewer scene" data-i18n-alt="animal_cat_monster_alt" width="640" height="480" loading="lazy">
+                        <div class="animal-card-body">
+                            <h3 data-i18n="animal_cat_monster_name">Monster</h3>
+                            <p class="animal-who" data-i18n="animal_cat_monster_who">Fantasy beasts, creatures with odd proportions</p>
+                            <p data-i18n="animal_cat_monster_text">Creatures that fit no plain animal get their own template, fit rules and skin rules instead of being forced into a dog or a horse.</p>
+                        </div>
+                    </article>
+                    <article class="animal-cat-card">
+                        <img src="/static/images/animal-rig/cat-multilimb.jpg" alt="A spider with eight legs in a viewer scene" data-i18n-alt="animal_cat_multi_alt" width="640" height="480" loading="lazy">
+                        <div class="animal-card-body">
+                            <h3 data-i18n="animal_cat_multi_name">Multilimb</h3>
+                            <p class="animal-who" data-i18n="animal_cat_multi_who">Spiders, crabs, insects, many-legged robots</p>
+                            <p data-i18n="animal_cat_multi_text">Bodies with more than four limbs. Every leg gets its own chain, so each one can move on its own.</p>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="animal-flow-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-flow-title" data-i18n="animal_flow_title">From upload to animated animal</h2>
+                    <p data-i18n="animal_flow_lead">One upload zone takes any input. The four steps below run without you clicking through them.</p>
+                </div>
+                <ol class="animal-steps">
+                    <li class="animal-step"><h3 data-i18n="animal_s1_t">Drop anything</h3><p data-i18n="animal_s1_d">A 3D model (GLB, FBX, OBJ, ZIP with textures) or a picture of the animal. A picture becomes a 3D model first, then it is rigged. A model&#x27;s own textures are kept; a model without textures gets PBR textures automatically.</p></li>
+                    <li class="animal-step"><h3 data-i18n="animal_s2_t">Category and skeleton</h3><p data-i18n="animal_s2_d">V3 detects the category and fits that category&#x27;s skeleton template to the geometry.</p></li>
+                    <li class="animal-step"><h3 data-i18n="animal_s3_t">Rig and clips in seconds</h3><p data-i18n="animal_s3_d">The fast rig builds the skeleton and skin from the geometry in seconds, and the category&#x27;s animation clips are retargeted at once. The target is a rigged, animated model within one minute from pickup.</p></li>
+                    <li class="animal-step"><h3 data-i18n="animal_s4_t">Checks in the background</h3><p data-i18n="animal_s4_d">Joint placement, skin tears, limb collisions and numeric deformation QA run in the background of the viewer while you already watch the animal move.</p></li>
+                </ol>
+            </div>
+        </section>
+
+        <section id="equine" class="animal-section" aria-labelledby="animal-eq-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-eq-title" data-i18n="animal_eq_title">Horses, deer and zebras: the equine template</h2>
+                    <p data-i18n="animal_eq_lead">A horse is not a dog with a longer neck. The equine template adds the joints that make a gait read right, and the clips are made with planted hooves.</p>
+                </div>
+                <div class="animal-split">
+                    <div class="animal-split-text">
+                        <div class="animal-joint-grid">
+                            <article class="animal-feature-card"><h3 data-i18n="animal_eq_j1_t">Scapula</h3><p data-i18n="animal_eq_j1_d">The shoulder blade moves with the front leg, so the shoulder deforms like a shoulder.</p></article>
+                            <article class="animal-feature-card"><h3 data-i18n="animal_eq_j2_t">Elbow</h3><p data-i18n="animal_eq_j2_d">A separate elbow joint in the front leg.</p></article>
+                            <article class="animal-feature-card"><h3 data-i18n="animal_eq_j3_t">Mid-neck</h3><p data-i18n="animal_eq_j3_d">The neck bends in the middle as well as at its base.</p></article>
+                            <article class="animal-feature-card"><h3 data-i18n="animal_eq_j4_t">Leg profile</h3><p data-i18n="animal_eq_j4_d">Joints along the bends of the leg as seen from the side.</p></article>
+                        </div>
+                        <article class="animal-feature-card animal-gait-card"><h3 data-i18n="animal_eq_gait_t">Planted-hoof gaits</h3><p data-i18n="animal_eq_gait_d">A hoof that touches the ground stays on it while the body moves over it. Gaits: walk, trot, gallop.</p></article>
+                    </div>
+                    <figure class="animal-media">
+                        <img src="/static/images/animal-rig/horse-gallop-sheet-b.jpg" alt="Gallop clip of a second horse on the V3 check sheet: T-pose and five frames, four views each" data-i18n-alt="animal_eq_sheet_alt" width="768" height="572" loading="lazy">
+                        <div class="animal-gif-row">
+                            <img src="/static/images/animal-rig/horse-gait-a.gif" alt="Animated gallop preview of the white horse rig" data-i18n-alt="animal_eq_gif_a_alt" width="300" height="307" loading="lazy">
+                            <img src="/static/images/animal-rig/horse-gait-b.gif" alt="Animated gallop preview of the second horse rig" data-i18n-alt="animal_eq_gif_b_alt" width="300" height="307" loading="lazy">
+                        </div>
+                        <figcaption data-i18n="animal_eq_cap">Check sheet of a horse rig: the T-pose, then the gallop clip at 0, 20, 40, 60 and 80 %, and animated previews of two horse rigs.</figcaption>
+                    </figure>
+                </div>
+            </div>
+        </section>
+
+        <section id="bird" class="animal-section" aria-labelledby="animal-bird-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-bird-title" data-i18n="animal_bird_title">Birds: wings are wings</h2>
+                    <p data-i18n="animal_bird_lead">A bird&#x27;s wing is not an arm. V3 rigs it with wing joints of its own, so the wing opens and folds as a wing, while the body, neck and legs follow the bird template.</p>
+                </div>
+                <figure class="animal-media animal-media-wide">
+                    <div class="animal-bird-grid">
+                        <img src="/static/images/animal-rig/bird-rig-sheet.jpg" alt="Rig check sheet of a green bird of prey: T-pose and clip frames from the front, the side and the top" data-i18n-alt="animal_bird_sheet_alt" width="768" height="572" loading="lazy">
+                        <img src="/static/images/animal-rig/bird-weights.jpg" alt="Skin weights of the bird: each wing and body part in its own colour, with the skeleton drawn over it" data-i18n-alt="animal_bird_w_alt" width="800" height="400" loading="lazy">
+                        <img src="/static/images/animal-rig/bird-wings.gif" alt="Animated preview of the bird rig" data-i18n-alt="animal_bird_gif_alt" width="300" height="307" loading="lazy">
+                    </div>
+                    <figcaption data-i18n="animal_bird_cap">A green bird of prey: the rig check sheet, the skin weights with the skeleton on top, and the animated preview.</figcaption>
+                </figure>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="animal-clip-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-clip-title" data-i18n="animal_clip_title">Clips from generated reference videos</h2>
+                    <p data-i18n="animal_clip_lead">Nobody animates one model by hand. Each category keeps its own library of clips, and every new model of that category gets them by automatic retarget.</p>
+                </div>
+                <div class="animal-clip-grid">
+                    <article class="animal-feature-card"><h3 data-i18n="animal_clip1_t">Reference videos</h3><p data-i18n="animal_clip1_d">For every category the engine generates reference videos of gaits and actions: walk, trot, canter, gallop, idle, rear, look around, attack and more. Each video is quality-checked before it is kept.</p></article>
+                    <article class="animal-feature-card"><h3 data-i18n="animal_clip2_t">Motion extracted once</h3><p data-i18n="animal_clip2_d">The motion is extracted from the video once, so the clip can be reused for every model of the category.</p></article>
+                    <article class="animal-feature-card"><h3 data-i18n="animal_clip3_t">Retarget and numeric QA</h3><p data-i18n="animal_clip3_d">Each clip is retargeted onto the new rig automatically and measured by numeric QA. Procedural clips are only the fallback when a category has no clip yet.</p></article>
+                </div>
+                <p class="animal-note" data-i18n="animal_clip_custom">You can add your own clips in the viewer.</p>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="animal-conf-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-conf-title" data-i18n="animal_conf_title">The skeleton is offered, never blocking</h2>
+                    <p data-i18n="animal_conf_lead">The viewer shows the skeleton and offers it for confirmation. You do not have to answer: the animation is made without waiting for you.</p>
+                </div>
+                <ul class="animal-check-list">
+                    <li data-i18n="animal_conf_b1">Press B for blueprint mode and move the bones, with symmetry.</li>
+                    <li data-i18n="animal_conf_b2">The model is re-rigged 15 seconds after your last edit, or at once with the button.</li>
+                    <li data-i18n="animal_conf_b3">Camera presets jump to the face, elbows, knees, feet and heels.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="animal-view-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-view-title" data-i18n="animal_view_title">Your animal in the Unity viewer</h2>
+                    <p data-i18n="animal_view_lead">One task is one viewer. It opens on a black scene at once and plays the stages (voxels, erosion, bones, rig) while the mesh loads. Then it loads the environment scene.</p>
+                </div>
+                <figure class="animal-media animal-media-wide">
+                    <div class="animal-scene-grid">
+                        <img src="/static/images/animal-rig/scene-river-glade.jpg" alt="River glade, a viewer environment scene" data-i18n-alt="animal_view_scene_a_alt" width="800" height="450" loading="lazy">
+                        <img src="/static/images/animal-rig/scene-jungle-ruins.jpg" alt="Jungle ruins, a viewer environment scene" data-i18n-alt="animal_view_scene_b_alt" width="800" height="450" loading="lazy">
+                    </div>
+                    <figcaption data-i18n="animal_view_cap">Environment scenes with baked lighting, reflection and light probes and colliders: river glade, jungle ruins, cathedral, Sponza.</figcaption>
+                </figure>
+                <ul class="animal-check-list">
+                    <li data-i18n="animal_view_b1">A session agent chat in every task: one shared agent for everyone who opens it, in the task creator&#x27;s language.</li>
+                    <li data-i18n="animal_view_b2">Right mouse button pans, middle mouse button orbits, and every control shows its hotkey.</li>
+                    <li data-i18n="animal_view_b3">Download GLB, FBX, USDZ, a ZIP, a Unity package or a Blender file.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="animal-q-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-q-title" data-i18n="animal_q_title">Quality comes before speed</h2>
+                    <p data-i18n="animal_q_lead">A stage that makes the rig right stays in the conveyor, even when it costs seconds.</p>
+                </div>
+                <div class="animal-feature-grid">
+                    <article class="animal-feature-card"><h3 data-i18n="animal_q1_t">Numeric QA on every clip</h3><p data-i18n="animal_q1_d">Every retargeted clip is measured, not eyeballed.</p></article>
+                    <article class="animal-feature-card"><h3 data-i18n="animal_q2_t">Background checks</h3><p data-i18n="animal_q2_d">Joint placement, skin tears, limb collisions and deformation are checked while the viewer is already open.</p></article>
+                    <article class="animal-feature-card"><h3 data-i18n="animal_q3_t">Every bad model becomes a test</h3><p data-i18n="animal_q3_d">A model that once rigged badly joins the regression suite, so the same defect cannot come back.</p></article>
+                    <article class="animal-feature-card"><h3 data-i18n="animal_q4_t">Releases pass the autotests</h3><p data-i18n="animal_q4_d">The engine goes live only after the regression autotests pass.</p></article>
+                </div>
+            </div>
+        </section>
+
+        <section id="examples" class="animal-section" aria-labelledby="animal-gal-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-gal-title" data-i18n="animal_gal_title">Animals rigged by V3</h2>
+                    <p data-i18n="animal_gal_lead">Real public tasks from the gallery. Open one to watch it move in the viewer.</p>
+                </div>
+                <div class="animal-gal-grid">
+                    <a class="animal-gal-card" href="/task?id=c8e0491f-d10c-4459-b68c-c282efec50e4">
+                        <img src="/static/images/animal-rig/g-bison.jpg" alt="A low-poly bison rigged by AutoRig V3" data-i18n-alt="animal_gal_alt_bison" width="400" height="500" loading="lazy">
+                        <span data-i18n="animal_gal_bison">Bison</span>
+                    </a>
+                    <a class="animal-gal-card" href="/task?id=decc58d1-570f-4b74-b798-65651d4c27e4">
+                        <img src="/static/images/animal-rig/g-bear.jpg" alt="A bear rigged by AutoRig V3" data-i18n-alt="animal_gal_alt_bear" width="400" height="500" loading="lazy">
+                        <span data-i18n="animal_gal_bear">Bear</span>
+                    </a>
+                    <a class="animal-gal-card" href="/task?id=7deaaa48-4d96-40a5-9caa-94c1306eeffd">
+                        <img src="/static/images/animal-rig/g-elephant.jpg" alt="An elephant rigged by AutoRig V3" data-i18n-alt="animal_gal_alt_elephant" width="400" height="500" loading="lazy">
+                        <span data-i18n="animal_gal_elephant">Elephant</span>
+                    </a>
+                    <a class="animal-gal-card" href="/task?id=e063c134-6f7d-407e-b30e-fa75da2d45d7">
+                        <img src="/static/images/animal-rig/g-zebra.jpg" alt="A zebra rigged by AutoRig V3" data-i18n-alt="animal_gal_alt_zebra" width="400" height="500" loading="lazy">
+                        <span data-i18n="animal_gal_zebra">Zebra</span>
+                    </a>
+                    <a class="animal-gal-card" href="/task?id=43dde6df-70bc-4aaf-b86e-100ae5417744">
+                        <img src="/static/images/animal-rig/g-sheep.jpg" alt="A sheep rigged by AutoRig V3" data-i18n-alt="animal_gal_alt_sheep" width="400" height="500" loading="lazy">
+                        <span data-i18n="animal_gal_sheep">Sheep</span>
+                    </a>
+                </div>
+                <div class="animal-actions">
+                    <a class="animal-btn animal-btn-secondary" href="/gallery" data-i18n="animal_gal_all">Open the full gallery</a>
                 </div>
             </div>
         </section>
@@ -505,136 +884,22 @@
         <section class="animal-section" aria-labelledby="animal-types-title">
             <div class="container">
                 <div class="animal-section-header">
-                    <h2 id="animal-types-title">Animal rig types</h2>
-                    <p>Choose a focused AI animal rigging page for the body shape you need. These links are server-rendered so search engines can crawl every supported animal preset directly.</p>
+                    <h2 id="animal-types-title" data-i18n="animal_types_title">Pages by animal</h2>
+                    <p data-i18n="animal_types_lead">A focused page for each body shape. The links are in the HTML, so every page can be crawled directly.</p>
                 </div>
                 <div class="animal-type-grid">
-                    <a class="animal-type-card" href="/dog-auto-rig"><strong>Dog and wolf auto rig</strong><span>Quadruped rigs for dogs, wolves, stylized pets, and canine game creatures.</span></a>
-                    <a class="animal-type-card" href="/cat-auto-rig"><strong>Cat auto rig</strong><span>Flexible feline rigs for cats, panthers, kittens, and long-tail fantasy animals.</span></a>
-                    <a class="animal-type-card" href="/horse-auto-rig"><strong>Horse auto rig</strong><span>Equine rigs for horses, ponies, mounts, unicorns, and gait-focused previews.</span></a>
-                    <a class="animal-type-card" href="/rabbit-auto-rig"><strong>Rabbit auto rig</strong><span>Compact animal rigs for rabbits, hares, small pets, and stylized creature bodies.</span></a>
-                    <a class="animal-type-card" href="/turtle-auto-rig"><strong>Turtle auto rig</strong><span>Low-body rigs for turtles, tortoises, shell creatures, and reptile-like models.</span></a>
-                    <a class="animal-type-card" href="/bear-auto-rig"><strong>Bear auto rig</strong><span>Heavy quadruped rigs for bears, cubs, bulky fantasy beasts, and large animals.</span></a>
-                    <a class="animal-type-card" href="/cow-auto-rig"><strong>Cow auto rig</strong><span>Farm animal rigs for cows, bulls, calves, hooves, horns, and broad torsos.</span></a>
-                    <a class="animal-type-card" href="/deer-auto-rig"><strong>Deer auto rig</strong><span>Light quadruped rigs for deer, elk-like creatures, antlers, and forest animals.</span></a>
-                    <a class="animal-type-card" href="/elephant-auto-rig"><strong>Elephant auto rig</strong><span>Large animal rigs for elephants, mammoths, trunk silhouettes, and heavy legs.</span></a>
-                    <a class="animal-type-card" href="/giraffe-auto-rig"><strong>Giraffe auto rig</strong><span>Tall animal rigs for giraffes, long necks, long legs, and safari-style creatures.</span></a>
-                    <a class="animal-type-card" href="/mouse-auto-rig"><strong>Mouse auto rig</strong><span>Small animal rigs for mice, rats, rodents, short legs, and long tails.</span></a>
-                    <a class="animal-type-card" href="/pig-auto-rig"><strong>Pig auto rig</strong><span>Farm creature rigs for pigs, boars, piglets, rounded bodies, and short legs.</span></a>
-                </div>
-            </div>
-        </section>
-
-        <section id="presentation" class="animal-section" aria-labelledby="presentation-title">
-            <div class="container">
-                <div class="animal-section-header">
-                    <h2 id="presentation-title">Animal rig presentation</h2>
-                    <p>AutoRig V2 builds a usable rig for an animal model and shows the result through an animated preview.</p>
-                </div>
-                <div class="animal-video-frame">
-                    <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/after-poster-20260516.png" data-src="/static/videos/animal-rig/after.mp4" aria-label="After V2 animal rig animation"></video>
-                    <div class="animal-video-caption">
-                        <strong>After V2 animal rig</strong>
-                        <span>Beaver model with generated rig and animation preview</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="animal-section" aria-labelledby="before-after-title">
-            <div class="container">
-                <div class="animal-section-header">
-                    <h2 id="before-after-title">Before V2 animal rig</h2>
-                    <p>Compare the original animal model with the rigged and animated result generated by AutoRig V2.</p>
-                </div>
-                <div class="animal-compare-grid">
-                    <article class="animal-video-frame">
-                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/before-poster-20260516.png" data-src="/static/videos/animal-rig/before.mp4" aria-label="Original beaver model before V2 animal rigging"></video>
-                        <div class="animal-video-caption">
-                            <strong>Before</strong>
-                            <span>Original beaver model</span>
-                        </div>
-                    </article>
-                    <article class="animal-video-frame">
-                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/after-poster-20260516.png" data-src="/static/videos/animal-rig/after.mp4" aria-label="Rigged beaver model after V2 animal rigging"></video>
-                        <div class="animal-video-caption">
-                            <strong>After</strong>
-                            <span>Rigged and animated with V2</span>
-                        </div>
-                    </article>
-                </div>
-            </div>
-        </section>
-
-        <section class="animal-section" aria-labelledby="examples-title">
-            <div class="container">
-                <div class="animal-section-header">
-                    <h2 id="examples-title">Animal animation examples</h2>
-                    <p>Examples include organic animals and hard-surface non-humanoid models so you can judge the range of the V2 animal rig.</p>
-                </div>
-                <div class="animal-example-grid">
-                    <article class="animal-example-card">
-                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/cat-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/cat-v2-rig.mp4" aria-label="Cat V2 rig animation"></video>
-                        <div class="animal-card-body">
-                            <h3>Cat V2 rig</h3>
-                            <p>Quadruped body motion for a small animal model.</p>
-                        </div>
-                    </article>
-                    <article class="animal-example-card">
-                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/alpaca-v2-rig.mp4" aria-label="Alpaca V2 rig animation"></video>
-                        <div class="animal-card-body">
-                            <h3>Alpaca V2 rig</h3>
-                            <p>Long-neck animal motion with generated animation preview.</p>
-                        </div>
-                    </article>
-                    <article class="animal-example-card">
-                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/rabbit-v2-rig.mp4" aria-label="Rabbit V2 rig animation"></video>
-                        <div class="animal-card-body">
-                            <h3>Rabbit V2 rig</h3>
-                            <p>Compact creature rigging for stylized animal proportions.</p>
-                        </div>
-                    </article>
-                    <article class="animal-example-card">
-                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/turtle-v2-rig.mp4" aria-label="Turtle V2 rig animation"></video>
-                        <div class="animal-card-body">
-                            <h3>Turtle V2 rig</h3>
-                            <p>Low-profile animal animation with a different body structure.</p>
-                        </div>
-                    </article>
-                    <article class="animal-example-card">
-                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/spider-robot-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/spider-robot-v2-rig.mp4" aria-label="Spider robot V2 rig animation"></video>
-                        <div class="animal-card-body">
-                            <h3>Spider robot V2 rig</h3>
-                            <p>Non-humanoid mechanical model with multiple legs.</p>
-                        </div>
-                    </article>
-                </div>
-            </div>
-        </section>
-
-        <section class="animal-section" aria-labelledby="workflow-title">
-            <div class="container">
-                <div class="animal-section-header">
-                    <h2 id="workflow-title">How V2 animal rigging helps</h2>
-                    <p>Use the online service when you need a fast rigging pass for animal, creature or other non-humanoid models without hand-placing every control.</p>
-                </div>
-                <div class="animal-feature-grid">
-                    <article class="animal-feature-card">
-                        <h3>Non-humanoid focus</h3>
-                        <p>Designed for models that do not fit a standard human biped skeleton.</p>
-                    </article>
-                    <article class="animal-feature-card">
-                        <h3>Animation preview</h3>
-                        <p>Review the generated rig with a motion preview before using it in your pipeline.</p>
-                    </article>
-                    <article class="animal-feature-card">
-                        <h3>Browser workflow</h3>
-                        <p>Upload a model online and get a rigged result without installing a full DCC pipeline.</p>
-                    </article>
-                    <article class="animal-feature-card">
-                        <h3>Production direction</h3>
-                        <p>Useful for prototyping game assets, marketplace models, videos and animation tests.</p>
-                    </article>
+                    <a class="animal-type-card" href="/dog-auto-rig"><strong data-i18n="animal_t_dog_n">Dog and wolf auto rig</strong><span data-i18n="animal_t_dog_d">Quadruped rigs for dogs, wolves, stylized pets, and canine game creatures.</span></a>
+                    <a class="animal-type-card" href="/cat-auto-rig"><strong data-i18n="animal_t_cat_n">Cat auto rig</strong><span data-i18n="animal_t_cat_d">Flexible feline rigs for cats, panthers, kittens, and long-tail fantasy animals.</span></a>
+                    <a class="animal-type-card" href="/horse-auto-rig"><strong data-i18n="animal_t_horse_n">Horse auto rig</strong><span data-i18n="animal_t_horse_d">Equine rigs for horses, ponies, mounts, unicorns, and gait-focused previews.</span></a>
+                    <a class="animal-type-card" href="/rabbit-auto-rig"><strong data-i18n="animal_t_rabbit_n">Rabbit auto rig</strong><span data-i18n="animal_t_rabbit_d">Compact animal rigs for rabbits, hares, small pets, and stylized creature bodies.</span></a>
+                    <a class="animal-type-card" href="/turtle-auto-rig"><strong data-i18n="animal_t_turtle_n">Turtle auto rig</strong><span data-i18n="animal_t_turtle_d">Low-body rigs for turtles, tortoises, shell creatures, and reptile-like models.</span></a>
+                    <a class="animal-type-card" href="/bear-auto-rig"><strong data-i18n="animal_t_bear_n">Bear auto rig</strong><span data-i18n="animal_t_bear_d">Heavy quadruped rigs for bears, cubs, bulky fantasy beasts, and large animals.</span></a>
+                    <a class="animal-type-card" href="/cow-auto-rig"><strong data-i18n="animal_t_cow_n">Cow auto rig</strong><span data-i18n="animal_t_cow_d">Farm animal rigs for cows, bulls, calves, hooves, horns, and broad torsos.</span></a>
+                    <a class="animal-type-card" href="/deer-auto-rig"><strong data-i18n="animal_t_deer_n">Deer auto rig</strong><span data-i18n="animal_t_deer_d">Equine-template rigs for deer, elk-like creatures, antlers, and forest animals.</span></a>
+                    <a class="animal-type-card" href="/elephant-auto-rig"><strong data-i18n="animal_t_elephant_n">Elephant auto rig</strong><span data-i18n="animal_t_elephant_d">Large animal rigs for elephants, mammoths, trunk silhouettes, and heavy legs.</span></a>
+                    <a class="animal-type-card" href="/giraffe-auto-rig"><strong data-i18n="animal_t_giraffe_n">Giraffe auto rig</strong><span data-i18n="animal_t_giraffe_d">Tall animal rigs for giraffes, long necks, long legs, and safari-style creatures.</span></a>
+                    <a class="animal-type-card" href="/mouse-auto-rig"><strong data-i18n="animal_t_mouse_n">Mouse auto rig</strong><span data-i18n="animal_t_mouse_d">Small animal rigs for mice, rats, rodents, short legs, and long tails.</span></a>
+                    <a class="animal-type-card" href="/pig-auto-rig"><strong data-i18n="animal_t_pig_n">Pig auto rig</strong><span data-i18n="animal_t_pig_d">Farm creature rigs for pigs, boars, piglets, rounded bodies, and short legs.</span></a>
                 </div>
             </div>
         </section>
@@ -642,38 +907,45 @@
         <section class="animal-section" aria-labelledby="faq-title">
             <div class="container">
                 <div class="animal-section-header">
-                    <h2 id="faq-title">Animal rigging FAQ</h2>
-                    <p>Short answers for creators comparing humanoid auto-rigging with animal and creature rigging.</p>
+                    <h2 id="faq-title" data-i18n="animal_faq_title">Animal rigging FAQ</h2>
+                    <p data-i18n="animal_faq_lead">Short answers for creators who rig animals and creatures.</p>
                 </div>
                 <div class="animal-faq-grid">
-                    <article class="animal-faq-card">
-                        <h3>What is AutoRig V2 Animal RIG?</h3>
-                        <p>It is the AutoRig.online V2 workflow for animal and non-humanoid models such as quadrupeds, creatures and stylized robot models.</p>
-                    </article>
-                    <article class="animal-faq-card">
-                        <h3>Does it only work for animals?</h3>
-                        <p>No. The examples include a spider robot because the same page targets broader non-humanoid rigging problems.</p>
-                    </article>
-                    <article class="animal-faq-card">
-                        <h3>Can I use it without Blender?</h3>
-                        <p>Yes. The online version runs through AutoRig.online. A separate Blender plugin exists for users who want a Blender-native workflow.</p>
-                    </article>
-                    <article class="animal-faq-card">
-                        <h3>Which examples are shown here?</h3>
-                        <p>The page includes beaver before/after V2 rigging plus animation examples for cat, alpaca, rabbit, turtle and spider robot models.</p>
-                    </article>
+                    <article class="animal-faq-card"><h3 data-i18n="animal_faq1_q">Which animals can AutoRig V3 rig?</h3><p data-i18n="animal_faq1_a">Quadrupeds (dogs, cats, bears, cows, pigs, rabbits, mice, elephants, giraffes, turtles), equines (horses, deer, zebras), birds, serpents, monsters and multilimb creatures such as spiders. Humanoids, hands, primates and cars have their own categories.</p></article>
+                    <article class="animal-faq-card"><h3 data-i18n="animal_faq2_q">Do I have to prepare a pose?</h3><p data-i18n="animal_faq2_a">No special preparation is needed. V3 works from the geometry. If the file already carries a skeleton or an animation, V3 uses the file&#x27;s own bind pose instead of fitting a posed mesh.</p></article>
+                    <article class="animal-faq-card"><h3 data-i18n="animal_faq3_q">Can I start from a picture?</h3><p data-i18n="animal_faq3_a">Yes. A picture of an animal becomes a 3D model first, then it is rigged like any other model.</p></article>
+                    <article class="animal-faq-card"><h3 data-i18n="animal_faq4_q">Do I have to confirm the skeleton?</h3><p data-i18n="animal_faq4_a">No. The viewer offers the skeleton for confirmation, but the animation is made without waiting for it. You can open blueprint mode (B) at any time, move the bones and re-rig.</p></article>
+                    <article class="animal-faq-card"><h3 data-i18n="animal_faq5_q">Which animations do I get?</h3><p data-i18n="animal_faq5_a">The clips of the model&#x27;s category, retargeted automatically: for example walk, trot and gallop for equines. They come from generated reference videos and are checked numerically. You can add custom clips in the viewer.</p></article>
+                    <article class="animal-faq-card"><h3 data-i18n="animal_faq6_q">What can I download, and do I need Blender?</h3><p data-i18n="animal_faq6_a">No Blender is needed: the service runs in the browser. Downloads: GLB, FBX, USDZ, a ZIP, a Unity package and a Blender file. A separate Blender plugin exists for a Blender-native workflow.</p></article>
                 </div>
             </div>
         </section>
 
-        <section class="animal-section" aria-label="Try AutoRig animal rigging">
+        <section class="animal-section animal-section-tight" aria-labelledby="animal-more-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="animal-more-title" data-i18n="animal_more_title">Keep exploring</h2>
+                </div>
+                <nav class="animal-pill-row animal-more-row" aria-label="Related pages" data-i18n-aria-label="animal_aria_more">
+                    <a class="animal-pill" href="/guides" data-i18n="animal_more_guides">Rigging guides</a>
+                    <a class="animal-pill" href="/how-it-works" data-i18n="animal_more_how">How it works</a>
+                    <a class="animal-pill" href="/gallery" data-i18n="animal_more_gallery">Gallery</a>
+                    <a class="animal-pill" href="/t-pose-rig" data-i18n="animal_more_pose">Rigging in any pose</a>
+                    <a class="animal-pill" href="/blender-plugin" data-i18n="animal_more_blender">Blender plugin</a>
+                    <a class="animal-pill" href="/developers" data-i18n="animal_more_api">API for developers</a>
+                    <a class="animal-pill" href="/faq" data-i18n="animal_more_faq">FAQ</a>
+                </nav>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="animal-end-title">
             <div class="container">
                 <div class="animal-cta-band">
-                    <h2>Try AI animal rigging online</h2>
-                    <p>Upload an animal, creature or other non-humanoid 3D model and use AutoRig.online to generate a rigging result with animation preview.</p>
+                    <h2 id="animal-end-title" data-i18n="animal_end_title">Rig your animal now</h2>
+                    <p data-i18n="animal_end_text">Drop a 3D model or a picture of an animal on the home page. The target is a rigged, animated model within one minute from pickup.</p>
                     <div class="animal-actions">
-                        <a class="animal-btn animal-btn-primary" href="/">Upload a model</a>
-                        <a class="animal-btn animal-btn-secondary" href="/blender-plugin">Blender plugin</a>
+                        <a class="animal-btn animal-btn-primary" href="/" data-i18n="animal_end_upload">Upload a model</a>
+                        <a class="animal-btn animal-btn-secondary" href="/blender-plugin" data-i18n="animal_end_blender">Blender plugin</a>
                     </div>
                 </div>
             </div>
@@ -687,60 +959,23 @@
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>
     <script>
-        (() => {
-            const videos = Array.from(document.querySelectorAll("video.animal-lazy-video[data-src]"));
-            if (!videos.length) return;
-
-            const playVideo = (video) => {
-                const playPromise = video.play();
-                if (playPromise && typeof playPromise.catch === "function") {
-                    playPromise.catch(() => {});
-                }
-            };
-
-            const loadVideo = (video) => {
-                if (video.dataset.loaded === "1") {
-                    playVideo(video);
-                    return;
-                }
-                video.src = video.dataset.src;
-                video.dataset.loaded = "1";
-                video.load();
-                if (video.readyState >= 2) {
-                    playVideo(video);
-                } else {
-                    video.addEventListener("canplay", () => playVideo(video), { once: true });
-                }
-            };
-
-            if ("IntersectionObserver" in window) {
-                const observer = new IntersectionObserver((entries) => {
-                    entries.forEach((entry) => {
-                        const video = entry.target;
-                        if (entry.isIntersecting) {
-                            loadVideo(video);
-                        } else if (video.dataset.loaded === "1") {
-                            video.pause();
-                        }
-                    });
-                }, { rootMargin: "420px 0px", threshold: 0.08 });
-                videos.forEach((video) => observer.observe(video));
-            } else {
-                videos.forEach(loadVideo);
-            }
-
-            document.addEventListener("visibilitychange", () => {
-                if (document.hidden) {
-                    videos.forEach((video) => video.pause());
-                    return;
-                }
-                videos.forEach((video) => {
-                    const rect = video.getBoundingClientRect();
-                    if (rect.bottom > 0 && rect.top < window.innerHeight) {
-                        loadVideo(video);
-                    }
+        // img alt text has no data-i18n attribute, so the page applies data-i18n-alt itself.
+        (function () {
+            function applyAlt() {
+                if (!window.I18n || !I18n.has) return;
+                document.querySelectorAll('[data-i18n-alt]').forEach(function (el) {
+                    var key = el.getAttribute('data-i18n-alt');
+                    if (I18n.has(key)) el.setAttribute('alt', I18n.t(key));
                 });
-            });
+            }
+            function start() {
+                if (!window.I18n || !I18n.init) return;
+                var p = I18n.init();
+                if (p && p.then) p.then(applyAlt);
+                window.addEventListener('languageChanged', applyAlt);
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+            else start();
         })();
     </script>
 </body>
