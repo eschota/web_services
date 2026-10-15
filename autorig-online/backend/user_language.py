@@ -293,7 +293,7 @@ def _header_map(scope) -> Dict[str, str]:
 
 
 # Paths that never get a /<lang>/ page form.
-_NO_PREFIX = ("/api/", "/auth/", "/static/", "/u/", "/renderfin/", "/dev", "/admin", "/thumb", "/m/",
+_NO_PREFIX = ("/api/", "/auth/", "/static/", "/u/", "/renderfin/", "/dev/", "/admin", "/thumb", "/m/",
               "/_", "/sitemap", "/robots.txt", "/favicon", "/llm", "/skill.md", "/airacing", "/oneclick",
               "/BingSiteAuth", "/793f81f63218433f87e43c0afd353c14.txt")
 _PREFIX_RE = re.compile(r"^/(ru|zh|hi|fa)(/.*)?$")
@@ -316,7 +316,7 @@ class LanguageMiddleware:
         m = _PREFIX_RE.match(path)
         if m and method in ("GET", "HEAD"):
             rest = m.group(2) or "/"
-            if not rest.startswith(_NO_PREFIX):
+            if not rest.startswith(_NO_PREFIX) and rest != "/dev":      # "/dev" was a prefix and hid /developers (2026-10-16)
                 url_lang = m.group(1)
                 scope = dict(scope)
                 scope["path"] = rest
