@@ -845,6 +845,23 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   then LAN), and runs the same inputs through the same checks as Qwen (the truck cut, the wheel restore, a corpus
   sedan: seconds, VRAM, the fast wheel finder, the wheel ellipse fill). Downloads for this test are allowed by this
   order. It replaces Qwen in the vehicle conveyor only if it passes those checks with the owner's ✅ on the sheets.
+* **✅ on every card = the order: status and a progress bar at once, the model generated and placed over the picture**
+  (owner, 2026-10-16 ~06:00 UTC, on the sedan's «Запчасти» panel: «я галочки поставил и сразу должен получить статус и
+  прогресс бар, модель должна быть сгенерирована и вставлена в сцену поверх картинки в тот же ракурс в тоже место, а
+  колеса по своим местам»):
+  * when the last card is accepted (or «accept all»), the vehicle service starts `model` at once, no other button: the
+    stage strip shows the stage and a progress bar within a second (генерация кузова / подвески / колеса → сборка →
+    сцена), fed by the gen3d job progress; the free farm queue (Hunyuan on the fleet) makes the body, the suspension
+    and one wheel from the split pictures (the restored wheel); the paid cloud still only by the paid button;
+  * `assemble` places the model **over the picture in the same view and the same place**: the camera is measured from
+    the picture (`camera_from_wheels`, then refined by the silhouette IoU of the rendered body against the body's 2D
+    silhouette on canon.png: yaw, pitch, focal, scale, translation), the body is fitted to its own silhouette, every
+    wheel is placed at its detected ellipse (the wheel's centre ray from the camera meets the axle at the wheel's
+    radius; the generated wheel is instanced per wheel, normalised to its cylinder), the suspension sits under the
+    body between the axles; `vehicle/scene.json` (camera, the picture plane, node transforms) and `vehicle.glb`;
+  * the check is the composite: the model rendered over the picture from that camera (silhouette IoU, wheel-centre
+    error in px) goes to DEV; the viewer opens the task in that camera with the picture behind the model and a
+    picture/scene toggle; the person then accepts or sends the 3D result back (✅ / 🔁 on the result).
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
