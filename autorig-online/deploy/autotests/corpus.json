@@ -1074,6 +1074,13 @@
    "what": "anime warrior (Vegeta) in a walking step, one leg forward and bent, arms at the sides (V3 run 55a34dcc)",
    "sha256": "af0b514a3055b7ce440ba70e64416edf702084fabef0161c9de0503c9b985bdd",
    "bytes": 1516168
+  },
+  "e6ce6c41.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/b697279ba03011b4d14f/proj/model_source.glb",
+   "task": "e6ce6c41-4402-46fb-b9fd-3237b171ab3c",
+   "what": "coiled serpent-like creature, one mesh, no skin (customer upload 2026-10-16)",
+   "sha256": "3d70e247f8ce370864fa1ea7ebcbb461fa9ac4552712c934be32e7a4f07c6d86",
+   "bytes": 4242388
   }
  },
  "profiles": {
@@ -16480,6 +16487,39 @@
      "xfail": {
       "reason": "the stepping-leg trace (fastrig.biped_leg_masks + the reference-leg lengths) is off by default: on a warrior's fighting stance it fires on two real feet and the rig gets worse (posed_fox_warrior empty leg bones, warrior_sword arms; cases6 2026-10-15). Measured with the trace on: leg_outside 17, stand 4x ok; off: 24 / 74. The real fix for this model is its own Mixamo bind pose (the file carries the skin and six clips): limb_stabilize reads model_source.glb now, the un-bake of the baked walking pose is open",
       "owner": "Rig path · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "serpent_coil_crash_e6ce6c41",
+   "task": "e6ce6c41-4402-46fb-b9fd-3237b171ab3c",
+   "cost": 2,
+   "defect": "rig_build crashed: the orientator chose up -x / plan bird by limb topology (3 'legs' of a coiled body), fit_biped ran with the shoulders at the top, throat_and_nose built an empty head band and np.nanmin raised 'zero-size array to reduction operation fmin' (2026-10-16). The guard returns None; the rig builds and Vision's words re-plan it later.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "e6ce6c41.model.glb",
+     "params": {
+      "words": ""
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       120
+      ],
+      "bones": [
+       ">=",
+       4
+      ],
+      "clips": [
+       ">=",
+       1
+      ]
      }
     }
    ]
