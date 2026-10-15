@@ -920,6 +920,12 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   models the truck and its parts in Blender by the reference-modelling skill (one scene, one object per part, doors in
   their apertures, wheels on hubs, procedural PBR, GLB per part + scene) as a «Plan V» test against the generated
   (Hunyuan / Tripo) parts; results to DEV for the owner's verdict.
+* **No DEV spam: the lead checks everything itself and sends one summary per milestone** (owner, 2026-10-16 ~13:50
+  UTC: «я не в состоянии проверить 100 файлов не шли мне спам, проверяй сам»): subagents never post to the DEV channel;
+  they write their results into the run directories and their report, and the lead (Fable) reviews them (opens the
+  pictures, reads the numbers) and sends the owner at most one consolidated sheet per milestone with a verdict and the
+  numbers, only when there is a decision for him to make or a result to accept. Intermediate attempts, per-vehicle
+  tables and per-stage pictures stay out of DEV. This applies to every project of this session, not only vehicles.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
