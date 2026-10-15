@@ -926,6 +926,14 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   pictures, reads the numbers) and sends the owner at most one consolidated sheet per milestone with a verdict and the
   numbers, only when there is a decision for him to make or a result to accept. Intermediate attempts, per-vehicle
   tables and per-stage pictures stay out of DEV. This applies to every project of this session, not only vehicles.
+* **C/D: the providers' own clustering and part-level generation, compared on the motorhome** (owner, 2026-10-16
+  ~14:00 UTC: «исследуй какие возможности кластеризации и пообъектной генерации есть в трипо и в хуньяне и сравни эти
+  варианты на примере автодома … надо поставить все модели на свои места и правильно их спозиционировать … покажи мне
+  результаты АБ а потом и СД»): a Sonnet 5.5 agent researches Tripo's mesh segmentation / part generation and
+  Hunyuan's part models (Hunyuan3D-Part, P3-SAM, X-Part; what the Tencent cloud API exposes), runs C (Tripo part path)
+  and D (Hunyuan part path) on the motorhome within a small credit budget, maps every part to our segmentation
+  (`parts_map.json`), and the assembler places every part over the picture. The owner gets two consolidated sheets
+  from the lead: A/B first, then C/D, with cost, time, faces and placement metrics.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
