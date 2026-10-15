@@ -1081,6 +1081,27 @@
    "what": "coiled serpent-like creature, one mesh, no skin (customer upload 2026-10-16)",
    "sha256": "3d70e247f8ce370864fa1ea7ebcbb461fa9ac4552712c934be32e7a4f07c6d86",
    "bytes": 4242388
+  },
+  "2261320c.source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/76478338b9f67f0719f8/proj/model_source.glb",
+   "task": "2261320c",
+   "what": "wooden T-pose humanoid giant, file +y up (rigged lying as -z quadruped on v3.2026-10-16.1)",
+   "sha256": "5db3f4568ca274542245194dad323c30d7d7c1ffe8b931d454b1b4200104bcaa",
+   "bytes": 6054784
+  },
+  "17ec9c6a.source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/17ec9c6a17ce7bbcd340/proj/model_source.glb",
+   "task": "69032a11",
+   "what": "standing anime girl with a big skirt and bat wings, file +y up (rigged lying as +x quadruped on v3.2026-10-16.1)",
+   "sha256": "020df2d4911b9d113b62d4f8f122699eff66f9a09bfe495d231ba3e33b28141a",
+   "bytes": 23754760
+  },
+  "c7b7b92f.source.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/c469620e12e61bc2bc03/proj/model.glb",
+   "task": "c7b7b92f",
+   "what": "man in a long tailcoat, 1.5M vertices, hands against the coat (stand tear x180 on v3.2026-10-16.1)",
+   "sha256": "b5eaacacbbef05e697fd0c4c6e9bb9f918953f9010c50d544923547e9f66409c",
+   "bytes": 7767160
   }
  },
  "profiles": {
@@ -16520,6 +16541,239 @@
        ">=",
        1
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "tpose_giant_not_lying",
+   "task": "2261320c",
+   "cost": 1,
+   "defect": "Orientation · V3 (owner 2026-10-16, defect button transform, task 2261320c run 76478338b9f67f0719f8): a wooden T-pose humanoid giant (arm span 1.79, height 1.41, legs together, file stands on +y) was laid on its side as -z «quadruped: 5 foot blobs» (0.9): the hanging fingers / toes of the T-pose seen from the front counted as paws (z extent 0.296 of the long side, over the 0.25 slab guard). The trace of -z has 1 limb end on the floor (a quadruped stands on >= 3), +y reads legs dy -0.88, head dy +0.85, 2 arm chains, a hand pair. No Vision answer (the rig-derived category said quadruped). Fix: rig_first._limb_topology standing_humanoid rule (mt/up_prior.standing_humanoid): an unconfirmed quadruped / bird pick yields to the file own +y when that reads a standing humanoid.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "2261320c.source.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       20
+      ],
+      "hips_above_feet_pct_H": [
+       ">=",
+       10
+      ]
+     },
+     "xfail": {
+      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "xfail": {
+      "reason": "Orientation V3 fix is in the gate queue; the stand runs on the rig as production builds it until it installs",
+      "owner": "Orientation · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "skirt_anime_girl_not_lying",
+   "task": "17ec9c6a",
+   "cost": 2,
+   "defect": "Orientation · V3 (owner 2026-10-16, defect button transform, task 69032a11 run 17ec9c6a17ce7bbcd340): a standing anime girl (big skirt, bat wings, file +y up, 38593 x 64452 x 43863) was laid on her back as +x «quadruped: 5 foot blobs» (0.9; the skirt hem and wing tips as paws). The +y trace has the legs merged under the skirt hem (feet blobs [66, 6]: the biped rule needed two comparable), +x had 2 limb ends on the floor, the head-side estimate on +y was -0.11 (wings), so the biped tie-break and the head veto failed. Vision said biped / anime female (disagreement recorded only). Fix: rig_first._limb_topology standing_humanoid rule (legs dy <= -0.8, head dy >= -0.3, a limb end in the floor band, an arm chain or a hand pair; the pick has < 3 limb ends on the floor).",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "17ec9c6a.source.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "head_above_hips_pct_H": [
+       ">=",
+       5
+      ]
+     },
+     "xfail": {
+      "reason": "Orientation V3 fix (standing_humanoid in rig_first._limb_topology, owner 2026-10-16) is in the gate queue; until it installs production lays this model on its side",
+      "owner": "Orientation · V3"
+     }
+    },
+    {
+     "id": "mt_upright_fit",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "head_above_hips_pct_H": [
+       ">=",
+       30
+      ],
+      "hips_above_feet_pct_H": [
+       ">=",
+       20
+      ]
+     },
+     "xfail": {
+      "reason": "the biped fit under wings + a big skirt: measured 2026-10-16 with the up fixed, head 8.2 % H above the hips, hips 9.9 % above the feet, 4 joints outside the mesh (the legs sit inside the skirt, the wings take the arms); the rig judge fixes joints on the conveyor, the engine fit does not",
+      "owner": "Rig fit · skirted humanoids"
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "xfail": {
+      "reason": "Orientation V3 fix is in the gate queue; the stand runs on the rig as production builds it until it installs",
+      "owner": "Orientation · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "coat_hands_leak_tear",
+   "task": "c7b7b92f",
+   "cost": 4,
+   "defect": "Skin / joints · V3 (owner 2026-10-16, defect button tear, task c7b7b92f run c469620e12e61bc2bc03): a man in a long tailcoat (1.5M vertices, hands against the coat, no source skeleton, arm pose none): the hand joints were fitted from proportions 7 % H inside the coat (LeftHand head x 0.145, the fist at 0.22), so the LeftHand bone captured 1460 proxy vertices from the sleeve down to the coat front at the centreline (x 0.02..0.20, y -0.32..-0.02): a vertex 100 % LeftHand next to a Hips / LeftUpLeg one. The stand Running clip stretches that edge x183 (1186 edges over 4x); detach check: 11 hole copies, slit 92.8 % H (RightUpLeg | RightHand); seam policy split on armL|legL / armR|legR (912 / 771 positions). Weight mask (MT_WEIGHT_MASK=on) measured on the stand proxy: worst 183 -> 622, not a fix. Also measured on the stand proxy: a Euclidean reach clamp of the hand / forearm weights (0.06 / 0.08 H) moves the worst edge to x348 and 1255 edges over 4x; the seam policy numbers (rig.json seam_policy) for armL|legL / armR|legR already show the best option (split / lid) leaves 88 / 112 edges over 4x at x171 / x186 and weld 2801 / 2342: no seam option removes the stretch, the contact has to be cut along its loop (both sides capped) or the hands kept off the coat (a mesh-only pressed-arms stabilisation).",
+   "checks": [
+    {
+     "id": "coat_hand_leak",
+     "kind": "pending_detector",
+     "paths": [
+      "mt"
+     ],
+     "pending": {
+      "reason": "needs a mesh-only pressed-arms path (limb_stabilize has none: stabilization.why = the model carries no skeleton) or a hand capture limit in the skin; input c7b7b92f.source.glb is registered, the detector is the stand tear (worst edge <= 30, edges over 4x <= 200) on the rig built from it, heavy (1.5M vertices, 177 s): run it on the farm",
+      "owner": "Skin / joints · V3"
      }
     }
    ]
