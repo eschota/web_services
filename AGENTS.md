@@ -819,6 +819,23 @@ obot_\HumanoidRobotsPack`, HR-01 first,
     the wheel band; the frame region and the cut's leftovers under the body are erased before the shell completion; the
     suspension comes from the wheels-erased original by removing the body (`split_susp_mode: remove_body`) and must span
     the axles (`_span_check`, `split_span_tolerance` 0.25); the wheel crop is the largest SAM component, never upscaled.
+* **Every cut-out part is restored to a whole object by Qwen-image edit with its own prompt** (owner, 2026-10-16
+  ~01:30 UTC, on the isolate sheets of the minivan, the motorhome and the pickup: «тут везде колеса были обрезаны
+  рамой, я надеюсь ты понимаешь что их надо после вырезания отдельно восстановить с помощью квен имейдж эдит с промптом
+  для этого колеса и так же для остальных элементов отдельных»):
+  * a SAM crop is only the visible fragment: a wheel is bitten by the fender and the frame, a door by the mirror and
+    the pillar, a hood by the windshield. After the cut every part goes through its own `restore` edit: Qwen-image
+    edit gets the fragment on the plain backdrop and a per-kind prompt (wheel: «complete this one wheel into a whole
+    wheel: full round tyre with its tread and the full rim and hub, the part hidden by the fender drawn in, same
+    size, angle, material and lighting, nothing else»; door: the whole door panel with its frame, window opening and
+    handle; hood, trunk, hatch, bumper, light, mirror, rack, pipe, seat… each its own wording), with the vehicle
+    system prompt and the no-wheel / no-vehicle negatives for the non-wheel parts;
+  * the restore is checked: a wheel's silhouette must fit an ellipse (fill ≥ 0.9, no bite: the convex-hull deficit
+    under 5 %), the part must stay within its grown bbox and keep its colours (median colour delta small); a failed
+    check retries with a fix wording and then marks the part `review`;
+  * the sheet shows fragment → restored per part, and the viewer's «Запчасти» panel shows the restored render (the
+    fragment on hover) so the person accepts the whole object, never a bitten fragment; only restored parts go to
+    modelling.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
