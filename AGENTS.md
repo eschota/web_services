@@ -751,6 +751,15 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   waits, worker-4090 takes no other work; and an AutoRig task that has waited `RENDERFIN_AUTORIG_PREEMPT_SECONDS`
   with no free capable box takes the 4090 from a running non-AutoRig render, which is re-queued under its own id
   (the owner warns the video generator's queue). Boxes: `RENDERFIN_AUTORIG_PRIORITY_BOXES` (default worker-4090).
+* **After the cut, Qwen never draws a wheel back, not even a small one; the fast wheel finder checks every repaint**
+  (owner, 2026-10-15 ~16:40 UTC, on the split masks of the truck: «это должно быть вырезано … после того как колеса
+  вырезаны - квен не должна дорисовывать новые даже если они маленькие, должно быть автотестирование с помощью
+  быстрого находильщика колес и отправлено указание на исправление, но вообще просто исправь промпт на правильный,
+  чтобы квен рисовала машину и подвеску только, без колес»): the cut and split completions ask for the vehicle and
+  its suspension only (the measured «wheels taken off, on jack stands» wording); after every repaint GroundingDINO +
+  SAM2 look for wheels on the result; any wheel found is erased by raster and the picture goes back to Qwen with a
+  fix instruction naming how many were drawn (`cut_attempts`, 3); after the last attempt the wheels stay erased and
+  the stage is `review`. A result with a wheel on it never goes to modelling.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
