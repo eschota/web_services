@@ -83,6 +83,9 @@ td.m{font-family:var(--mono);font-size:11.5px;white-space:nowrap}
 <rect class="n must" x="1240" y="70" width="150" height="54" rx="7"/><text class="t" x="1315" y="93" text-anchor="middle">риг ≠ категория?</text><text class="s" x="1315" y="110" text-anchor="middle">plan · forward · props</text>
 
 <path class="e" d="M110 97H140"/><path class="e" d="M260 97H290"/><path class="e" d="M440 97H470"/><path class="e" d="M600 97H630"/><path class="e" d="M750 97H803"/><path class="e" d="M857 97H900"/><path class="e" d="M1070 97H1100"/><path class="e" d="M1210 97H1240"/>
+<!-- Joints confirmation · V3 (owner 2026-10-15): the first skeleton waits for the person; a humanoid confirmed by Vision with a trusted front goes on by itself -->
+<rect class="n must" x="470" y="140" width="280" height="44" rx="7" stroke-dasharray="5 4"/><text class="t" x="610" y="158" text-anchor="middle">подтверждение скелета</text><text class="s" x="610" y="175" text-anchor="middle">пауза needs_review/joints_confirm · гуманоид + Vision → авто · confirm → новая попытка</text>
+<path class="e" d="M535 124V140"/><path class="e" d="M690 140V124"/>
 <!-- re-rig loop from A9 back to rig -->
 <path class="e loop" d="M1315 70V36H365V70"/><text class="lab loop" x="840" y="31" text-anchor="middle">да → перериг: rig → fast → retarget</text>
 <!-- analysis failure note -->
@@ -130,7 +133,7 @@ td.m{font-family:var(--mono);font-size:11.5px;white-space:nowrap}
 <!-- ===== lane D: QA y=600 ===== -->
 <rect class="n farm" x="470" y="600" width="170" height="54" rx="7"/><text class="t" x="555" y="623" text-anchor="middle">limb check</text><text class="s" x="555" y="640" text-anchor="middle">ферма · QA ждёт ≤420</text>
 <rect class="n farm" x="680" y="600" width="230" height="54" rx="7"/><text class="t" x="795" y="623" text-anchor="middle">numeric QA + detach</text><text class="s" x="795" y="640" text-anchor="middle">прокси 50k · ферма · ≤600 · hedge 60</text>
-<rect class="n must" x="950" y="600" width="110" height="54" rx="7"/><text class="t" x="1005" y="623" text-anchor="middle">QA gates</text><text class="s" x="1005" y="640" text-anchor="middle">9 ворот</text>
+<rect class="n must" x="950" y="600" width="110" height="54" rx="7"/><text class="t" x="1005" y="623" text-anchor="middle">QA gates</text><text class="s" x="1005" y="640" text-anchor="middle">10 ворот · joints</text>
 <rect class="n must" x="1100" y="600" width="130" height="54" rx="7"/><text class="t" x="1165" y="623" text-anchor="middle">confirm wait</text><text class="s" x="1165" y="640" text-anchor="middle">кэш анализа · ≤40</text>
 <rect class="n must" x="1270" y="600" width="110" height="54" rx="7"/><text class="t" x="1325" y="623" text-anchor="middle">publish</text><text class="s" x="1325" y="640" text-anchor="middle">sha · attempt-N</text>
 <rect class="n opt" x="1240" y="690" width="170" height="54" rx="7"/><text class="t" x="1325" y="713" text-anchor="middle">exports · scene</text><text class="s" x="1325" y="730" text-anchor="middle">FBX/ZIP ≤400 · notify</text>
@@ -148,6 +151,9 @@ td.m{font-family:var(--mono);font-size:11.5px;white-space:nowrap}
 <!-- confirm disagree → re-rig -->
 <path class="e loop" d="M1165 600V525H1440V36H1315" marker-end="none"/><text class="lab loop" x="1300" y="520" text-anchor="middle">кэш не сошёлся → перериг</text>
 <text class="s" x="1005" y="672" text-anchor="middle">FAIL → needs_review</text>
+<!-- Joints · V3 (2026-10-14): the Vision joint judge for every run, on the farm -->
+<rect class="n farm" x="760" y="700" width="250" height="54" rx="7" stroke-dasharray="5 4"/><text class="t" x="885" y="723" text-anchor="middle">joint judge · mt_joint_judge</text><text class="s" x="885" y="740" text-anchor="middle">ферма · ждёт текстуры ≤600 · фикс → skin vN</text>
+<path class="e bg" d="M965 654V700"/>
 
 <!-- ===== lane E: rerig_open y=830 ===== -->
 <rect class="n opt" x="20" y="830" width="160" height="54" rx="7"/><text class="t" x="100" y="853" text-anchor="middle">запрос перерига</text><text class="s" x="100" y="870" text-anchor="middle">rerig_requests/*.json</text>
@@ -176,6 +182,7 @@ td.m{font-family:var(--mono);font-size:11.5px;white-space:nowrap}
 <tr><td>source</td><td class="m">VPS</td><td>да (sha256)</td><td class="m">—</td><td class="m">proj/model.glb · proj/helpers.json</td></tr>
 <tr><td>rig</td><td class="m">VPS · child</td><td>да (≥1 кость, rigged.glb)</td><td class="m">5 ГБ · 900 с</td><td class="m">rig/rigged.glb · rig/rig.json · timings_s</td></tr>
 <tr><td>fast analysis</td><td class="m">VPS · child</td><td>нет</td><td class="m">300 с</td><td class="m">analysis/fast.json · category.json · limb_collision.json</td></tr>
+<tr><td>подтверждение скелета</td><td class="m">VPS · joints_confirm</td><td>да: needs_review / stage joints_confirm до нажатия владельца (root и гуманоид с доверенным фронтом по Vision — авто)</td><td class="m">ждёт Vision ≤90 с</td><td class="m">rig/joints_confirm.json · joints_confirm/&lt;task&gt;.json · POST /api/mt/runs/&lt;run&gt;/joints-confirm → POST /api/task/&lt;id&gt;/restart</td></tr>
 <tr><td>retarget</td><td class="m">VPS · child</td><td>только исключение</td><td class="m">—</td><td class="m">клипы в rigged.glb · rig.json.clips · anim_qa</td></tr>
 <tr><td>★ риг во вьювере</td><td class="m">—</td><td>цель 60 с</td><td class="m">нет жёсткого</td><td class="m">first_rig_in_viewer · live_rig_first_ready</td></tr>
 <tr><td>texture</td><td class="m">ферма</td><td>нет (QA ждёт 60 с)</td><td class="m">12 мин</td><td class="m">texture/&lt;id&gt;/model.glb · новая версия скина</td></tr>
@@ -184,7 +191,8 @@ td.m{font-family:var(--mono);font-size:11.5px;white-space:nowrap}
 <tr><td>риг ≠ категория</td><td class="m">VPS · child</td><td>перериг</td><td class="m">—</td><td class="m">analysis/category.json · parts</td></tr>
 <tr><td>limb check</td><td class="m">ферма · hedge</td><td>QA ждёт 420 с</td><td class="m">300 с</td><td class="m">analysis/limb_collision.{json,png}</td></tr>
 <tr><td>numeric QA + detach</td><td class="m">ферма · hedge 60 с</td><td>ворота</td><td class="m">600 с</td><td class="m">rig/numeric-qa.json · rig/.numeric/</td></tr>
-<tr><td>QA gates</td><td class="m">VPS</td><td>FAIL → needs_review</td><td class="m">—</td><td class="m">rig/rig-qa.json</td></tr>
+<tr><td>QA gates (10, с joints)</td><td class="m">VPS · 1 мс</td><td>FAIL → needs_review</td><td class="m">—</td><td class="m">rig/rig-qa.json (joints, notice_string)</td></tr>
+<tr><td>joint judge</td><td class="m">ферма · rig-judge очередь</td><td>нет (фон)</td><td class="m">1200 с на фазу</td><td class="m">rig/joint-judge.json · rig/joint_judge/&lt;job&gt;/ · skin vN при фиксе</td></tr>
 <tr><td>publish</td><td class="m">VPS</td><td>да (sha)</td><td class="m">3 попытки</td><td class="m">v3-dispatch/runs/…/attempt-N/</td></tr>
 <tr><td>exports · scene</td><td class="m">blender-worker</td><td>нет</td><td class="m">400 с</td><td class="m">rig/rigged.fbx · zip · downloads.json</td></tr>
 <tr><td>rerig_open</td><td class="m">VPS · child</td><td>нет QA</td><td class="m">900 с</td><td class="m">rig/skin/vN · poster</td></tr>
