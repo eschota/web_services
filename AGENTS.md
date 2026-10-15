@@ -714,6 +714,11 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   regions, the original pixels come back everywhere else (a feathered composite), the wheels are re-detected on the
   result as the check, and the body without wheels, weapons and cargo goes to DEV for the owner's validation before
   any modelling (`mt/vehicle_v3.cut`, `mt/vehicle_masks_worker.py`).
+* **The masked things are erased before Qwen sees the picture** (owner, 2026-10-15 14:30: «ПОСЛЕ ПОЛУЧЕНИЯ МАСКИ
+  КОЛЕС ВЫРЕЗАЙ ИХ С ПОМОЩЬЮ ОБЫЧНОГО ВЫЧИТАНИЯ ИЗ КАРТИНКИ ЛЮБЫМ РАСТРОВЫМ РЕДАКТОРОМ И ПОДАВАЙ В КВЕН ЭДИТ УЖЕ БЕЗ
+  ЛИШНИХ ПРЕДМЕТОВ, ЧТОБЫ ОНА КОРРЕКТНО ДОРИСОВАЛА КОРПУС БЕЗ КОЛЕС»): the mask pixels are subtracted (filled with
+  the backdrop colour), Qwen-edit gets that picture and completes the body (empty wheel wells, closed panels); the
+  marker-colour variant is kept only as an option (`cut_mode`), Qwen ignored the green regions (14 % left).
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
