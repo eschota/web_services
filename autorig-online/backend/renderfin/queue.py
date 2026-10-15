@@ -344,8 +344,24 @@ def _host_managed_progress(
         "stale_at": stale_at,
     }
 
+def is_autorig(task) -> bool:
+    """An AutoRig task (owner 2026-10-15: priority on worker-4090): the farm client
+    marked it, or it came under an AutoRig user name. Collection background work
+    is AutoRig's own bulk and never takes priority."""
+    if not config.AUTORIG_PRIORITY:
+        return False
+    if str(getattr(task, "queue_class", "") or "") == "collection_background":
+        return False
+    prompt = getattr(task, "prompt", None)
+    if str(getattr(prompt, "priority_class", "") or "").strip().lower() == "autorig":
+        return True
+    return str(getattr(prompt, "user_name", "") or "").strip() in config.AUTORIG_USER_NAMES
+
+
 def dispatch_order(tasks, now: Optional[float] = None) -> List[Any]:
     """The waiting tasks in the order the pump dispatches them.
+
+    AutoRig tasks first, oldest first (owner 2026-10-15); then:
 
     LIFO by submission burst: tasks submitted within LIFO_GROUP_SECONDS of the
     previous one form a group (an X9 batch, a list run) that keeps its own
@@ -357,8 +373,10 @@ def dispatch_order(tasks, now: Optional[float] = None) -> List[Any]:
         (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
         key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
     )
+    autorig = [t for t in waiting if is_autorig(t)]
+    waiting = [t for t in waiting if not is_autorig(t)]
     if not config.LIFO or len(waiting) < 2:
-        return waiting
+        return autorig + waiting
     now = time.time() if now is None else now
     starving = [t for t in waiting if now - float(t.created_at or 0) > config.STARVE_MINUTES * 60]
     rest = [t for t in waiting if now - float(t.created_at or 0) <= config.STARVE_MINUTES * 60]
@@ -368,7 +386,7 @@ def dispatch_order(tasks, now: Optional[float] = None) -> List[Any]:
             groups[-1].append(task)
         else:
             groups.append([task])
-    ordered = list(starving)
+    ordered = autorig + list(starving)
     for group in reversed(groups):
         ordered.extend(group)
     return ordered
@@ -1440,6 +1458,64 @@ class RenderQueue:
             f"- lower the size or the frame count"
         )
 
+    def _autorig_waiting_for(self, server: RenderServer) -> str:
+        """The id of an AutoRig task waiting that this priority box could run, else ''."""
+        for other in self._tasks.values():
+            if other.status == TASK_PENDING and is_autorig(other) and routing.server_can_run(server, other.workflow):
+                return other.id
+        return ""
+
+    async def _preempt_for_autorig(self, task: RenderTask) -> bool:
+        """Owner 2026-10-15: an AutoRig task that waited AUTORIG_PREEMPT_SECONDS with
+        no free capable box takes a priority box (worker-4090) from a running
+        non-AutoRig render. The victim's prompt is taken off the box and the
+        victim goes back to pending under its own id (its output URL stays), as
+        a restart resume does, without spending its restart cap."""
+        if not config.AUTORIG_PRIORITY or config.AUTORIG_PREEMPT_SECONDS <= 0 or not is_autorig(task):
+            return False
+        if time.time() - float(task.created_at or 0) < config.AUTORIG_PREEMPT_SECONDS:
+            return False
+        for victim in list(self._tasks.values()):
+            box = str(victim.server_name or "")
+            if victim.status != TASK_RENDERING or box not in config.AUTORIG_PRIORITY_BOXES or is_autorig(victim):
+                continue
+            server = self.registry.get(box)
+            if server is None or server.status != "online" or not routing.server_can_run(server, task.workflow):
+                continue
+            fits, _ = self._hard_fit(server, task)
+            if not fits:
+                continue
+            freed = await self._free_box_after_restart(box, str(victim.comfy_prompt_id or ""))
+            old_prompt_id = str(victim.comfy_prompt_id or "")
+            victim.recovery_log.append(f"preempted-for-autorig:{task.id}@{box}")
+            if old_prompt_id and old_prompt_id not in victim.retired_comfy_prompt_ids:
+                victim.retired_comfy_prompt_ids.append(old_prompt_id)
+            victim.status = TASK_PENDING
+            victim.error = ""
+            victim.notice = config.AUTORIG_PREEMPTED_NOTICE
+            victim.server_name = ""
+            victim.comfy_prompt_id = ""
+            victim.started_at = 0
+            victim.finished_at = 0
+            victim.submit_failures = 0
+            victim.workload_request_id = f"rf_{uuid.uuid4().hex}"
+            victim.workload_lease_id = ""
+            victim.workload_physical_resource_id = ""
+            victim.workload_node_id = ""
+            victim.workload_lease_state = "waiting"
+            victim.workload_heartbeat_at = 0
+            victim.managed_prompt = False
+            victim.host_comfy_registered = False
+            victim.artifact_sha256 = ""
+            victim.output_path = ""
+            victim.extra_outputs = {}
+            await self._persist(victim)
+            print(f"[Renderfin][Queue] {box}: render {victim.id} ({victim.prompt.user_name}, {victim.workflow}) "
+                  f"re-queued for AutoRig task {task.id} ({task.workflow}) after "
+                  f"{int(time.time() - float(task.created_at or 0))} s waiting: {freed}")
+            return True
+        return False
+
     def _busy_servers(self) -> Dict[str, str]:
         busy: Dict[str, str] = {}
         for task in self._tasks.values():
@@ -1482,6 +1558,10 @@ class RenderQueue:
                 return soft
         if server.render_server_name in busy:
             return ("busy", busy[server.render_server_name])
+        if task is not None and server.render_server_name in config.AUTORIG_PRIORITY_BOXES and not is_autorig(task):
+            held = self._autorig_waiting_for(server)
+            if held:
+                return ("reserved-autorig", held)
         if self._server_missing_nodes.get((server.render_server_name, token), 0) > now:
             return ("missing-node", token)
         until = self._server_submit_cooldowns.get(server.render_server_name, 0)
@@ -1655,6 +1735,8 @@ class RenderQueue:
                 self._client, self.registry.all(), task.prompt
             )
             server = self._pick_server(task.workflow, depths, task, eligible)
+            if server is None and await self._preempt_for_autorig(task):
+                return False                                  # the next pass puts it on the freed box
             if server is None:
                 key, text = self._starvation_report(task, eligible)
                 token, _, waiting = stalls.get(key, (task.workflow, text, 0))

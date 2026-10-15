@@ -89,6 +89,9 @@ class RenderPrompt(BaseModel):
     # public API has already resolved names against the catalogue.
     loras: List["LoraStackItem"] = Field(default_factory=list)
     user_name: str = "default_user"
+    # "autorig": an AutoRig task (owner 2026-10-15: priority on worker-4090); set by
+    # the MT farm client / the AutoRig backend paths through ai_graph_context.
+    priority_class: str = ""
     render_mode: str = ""
     # Music (renderfin.music): clip length in seconds; 0 = the default 30 s.
     audio_seconds: float = 0

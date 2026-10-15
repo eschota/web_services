@@ -326,6 +326,19 @@ TURNTABLE_NODE = os.getenv("RENDERFIN_TURNTABLE_NODE", "node")
 LIFO = os.getenv("RENDERFIN_LIFO", "1").strip() not in ("0", "false", "no", "")
 STARVE_MINUTES = float(os.getenv("RENDERFIN_STARVE_MIN", "30"))
 LIFO_GROUP_SECONDS = float(os.getenv("RENDERFIN_LIFO_GROUP_SECONDS", "10"))
+# Owner rule 2026-10-15: «приоритет авториг задач для 4090 должен быть отдан».
+# An AutoRig task (prompt.priority_class == "autorig", or an AutoRig user_name)
+# is dispatched before everything else; while one waits, the priority boxes
+# take no other work; after AUTORIG_PREEMPT_SECONDS of waiting with no free
+# capable box it takes a priority box from a running non-AutoRig render, which
+# is re-queued under its own id (the owner warned the video generator's queue).
+AUTORIG_PRIORITY = os.getenv("RENDERFIN_AUTORIG_PRIORITY", "1").strip() not in ("0", "false", "no", "")
+AUTORIG_PRIORITY_BOXES = frozenset(
+    b.strip() for b in os.getenv("RENDERFIN_AUTORIG_PRIORITY_BOXES", "worker-4090").split(",") if b.strip())
+AUTORIG_USER_NAMES = frozenset(
+    b.strip() for b in os.getenv("RENDERFIN_AUTORIG_USER_NAMES", "site,autorig-bot,autorig,autorig-mt,mt").split(",") if b.strip())
+AUTORIG_PREEMPT_SECONDS = float(os.getenv("RENDERFIN_AUTORIG_PREEMPT_SECONDS", "45"))   # 0 = never preempt
+AUTORIG_PREEMPTED_NOTICE = "preempted_for_autorig"
 # Owner rule 2026-10-11 (replaces the 2026-09-27 wipe): «перезапускай сервер не
 # дожидаясь завершения графов, они должны подхватываться автоматически при
 # рестарте». A restart of renderfin or autorig-storage never loses work: a
