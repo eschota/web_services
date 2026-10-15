@@ -18,6 +18,9 @@ Group=autorig
 Slice=autorig.slice
 WorkingDirectory=/srv/autorig/fleet
 Environment="PYTHONUNBUFFERED=1"
+# the disk reserve the backend really pauses on lives in storage-host.env (owner 2026-10-15: the 10 GB barrier);
+# on the VPS this is the drop-in autorig-fleet.service.d/reserve-env.conf
+Environment="FLEET_BACKEND_ENV=/srv/autorig/secrets/storage-host.env"
 ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/fleet/fleet_api.py
 Restart=always
 RestartSec=3
