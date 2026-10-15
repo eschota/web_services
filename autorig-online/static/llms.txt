@@ -1,15 +1,33 @@
 # AutoRig Online
 
-> Cloud service for automatic 3D character rigging and animation-ready exports. Upload GLB, FBX, or OBJ models and receive rigged assets, animation previews, posters, and engine-ready files for Unity, Unreal Engine, Blender, and web viewers.
+> Cloud service that rigs and animates 3D models with the AutoRig V3 conveyor. One task takes any input (a 3D model, a picture, a picture of a car, or text) and returns a rigged, animated model in a browser viewer, with downloads for Unity, Unreal Engine and Blender. Public HTTP API for apps and autonomous agents.
 
 ## Primary Resources
 
-- Home and upload: https://autorig.online/
-- Gallery: https://autorig.online/gallery
-- Animal and non-humanoid rigging: https://autorig.online/animal-rig
+- Home and upload (one upload zone for any input): https://autorig.online/
+- How it works: https://autorig.online/how-it-works
+- FAQ: https://autorig.online/faq
+- Guides index: https://autorig.online/guides
+- Gallery of rigged models: https://autorig.online/gallery
+- Animal and creature rigging: https://autorig.online/animal-rig
+- Rigging in any pose: https://autorig.online/t-pose-rig
+- Image to rigged character: https://autorig.online/image-to-rigged-3d-character
 - Blender plugin: https://autorig.online/blender-plugin
 - Developer API overview: https://autorig.online/developers
+- Buy credits: https://autorig.online/buy-credits
 - Agent/API skill: https://autorig.online/skill.md
+
+## What AutoRig Does
+
+- One conveyor for any input: a 3D model (GLB, FBX, OBJ, ZIP with textures), a picture, a picture of a car, or text. 1 task = 1 viewer (Unity WebGL) with an AI agent chat.
+- Rig in seconds, animated at once: the skeleton and skin are built from the geometry in seconds, animation clips are retargeted at once, quality checks (joint placement, skin tears, limb collisions, numeric deformation QA) run in the background. Target: a rigged, animated model within one minute from pickup.
+- Categories, each with its own skeleton template, fit rules, skin rules, clip library and QA: biped / humanoid, quadruped (dogs, cats, bears, cows, pigs), equine (horses, deer, zebras; planted-hoof walk, trot, gallop), bird (wings rigged as wings), serpent, monster, multilimb, hands (per-finger joints), primate, vehicle (cars).
+- Vehicles are rigged too: one picture is segmented into body, wheels, doors, hood, trunk, glass, lights and bumpers; each part is modelled as its own object, wheels become cylinder colliders, doors are hinged, the interior takes a rigged driver. Paid 3D clouds only on the user's explicit button.
+- Textures: a model's own textures are kept; a model without textures gets PBR textures automatically.
+- Animation clips come from generated reference videos per category, retargeted automatically with numeric QA per clip; custom clips can be added in the viewer.
+- The skeleton is offered for confirmation in the viewer but never blocks the animation; blueprint mode (B) edits bones with symmetry.
+- Downloads: GLB, FBX, USDZ, ZIP, Unity package, Blender file. A separate Blender plugin exists.
+- Languages: English, Russian (`/ru/`), Chinese (`/zh/`), Hindi (`/hi/`), Persian (`/fa/`, right-to-left).
 
 ## Search Discovery
 
@@ -17,13 +35,6 @@
 - Marketing pages sitemap: https://autorig.online/sitemap/pages.xml
 - Public task pages use canonical URLs in the form `https://autorig.online/task?id={task_id}`.
 - Public task sitemap chunks are SEO-gated and include only completed, non-adult tasks with poster/video and LLM-enriched metadata.
-
-## What AutoRig Does
-
-- AI-assisted humanoid character auto-rigging.
-- Animal and non-humanoid rigging for quadrupeds and stylized creatures.
-- Animation retargeting and preview generation.
-- Exports for GLB, FBX, OBJ-oriented workflows, Unity packages, Blender, Unreal Engine, and web previews.
 
 ## Crawler Notes
 

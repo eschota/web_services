@@ -6,92 +6,61 @@
   <!-- Main pages -->
   <url>
     <loc>https://autorig.online/</loc>
-    <lastmod>2026-01-01</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/"/>
   </url>
 
   <url>
     <loc>https://autorig.online/gallery</loc>
-    <lastmod>2026-01-01</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/gallery"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/gallery"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/gallery"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/gallery"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/gallery"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/gallery"/>
   </url>
 
   <url>
     <loc>https://autorig.online/animal-rig</loc>
-    <lastmod>2026-05-16</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.88</priority>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/before-poster-20260516.png</video:thumbnail_loc>
-      <video:title>Before V2 animal rig</video:title>
-      <video:description>Original beaver model before AutoRig V2 animal rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/before.mp4</video:content_loc>
-      <video:publication_date>2026-05-16</video:publication_date>
-    </video:video>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/after-poster-20260516.png</video:thumbnail_loc>
-      <video:title>AutoRig V2 Animal RIG presentation</video:title>
-      <video:description>AI animal rigging and animation preview for a beaver model after V2 rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/after.mp4</video:content_loc>
-      <video:publication_date>2026-05-16</video:publication_date>
-    </video:video>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig-poster-20260516.png</video:thumbnail_loc>
-      <video:title>Cat V2 animal rig animation example</video:title>
-      <video:description>Cat animation generated with AutoRig V2 animal rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-16</video:publication_date>
-    </video:video>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png</video:thumbnail_loc>
-      <video:title>Alpaca V2 animal rig animation example</video:title>
-      <video:description>Alpaca animation generated with AutoRig V2 animal rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-16</video:publication_date>
-    </video:video>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png</video:thumbnail_loc>
-      <video:title>Rabbit V2 animal rig animation example</video:title>
-      <video:description>Rabbit animation generated with AutoRig V2 animal rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-16</video:publication_date>
-    </video:video>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png</video:thumbnail_loc>
-      <video:title>Turtle V2 animal rig animation example</video:title>
-      <video:description>Turtle animation generated with AutoRig V2 animal rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/turtle-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-16</video:publication_date>
-    </video:video>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig-poster-20260516.png</video:thumbnail_loc>
-      <video:title>Spider robot non-humanoid V2 rig animation example</video:title>
-      <video:description>Spider robot animation generated with AutoRig V2 non-humanoid rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-16</video:publication_date>
-    </video:video>
   </url>
 
   <url>
     <loc>https://autorig.online/guides</loc>
-    <lastmod>2026-01-01</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>https://autorig.online/buy-credits</loc>
-    <lastmod>2026-01-01</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/buy-credits"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/buy-credits"/>
   </url>
 
   <url>
     <loc>https://autorig.online/blender-plugin</loc>
-    <lastmod>2026-05-16</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
@@ -99,7 +68,7 @@
 
   <url>
     <loc>https://autorig.online/developers</loc>
-    <lastmod>2026-03-24</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.65</priority>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
@@ -107,14 +76,21 @@
 
   <url>
     <loc>https://autorig.online/skill.md</loc>
-    <lastmod>2026-03-27</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
 
   <url>
     <loc>https://autorig.online/llm.txt</loc>
-    <lastmod>2026-03-27</lastmod>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.55</priority>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/llms.txt</loc>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.55</priority>
   </url>
@@ -122,16 +98,20 @@
   <!-- How It Works -->
   <url>
     <loc>https://autorig.online/how-it-works</loc>
-    <lastmod>2026-01-03</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/how-it-works"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/how-it-works"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
   </url>
 
-
   <url>
     <loc>https://autorig.online/faq</loc>
-    <lastmod>2026-01-01</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -153,33 +133,28 @@
   <!-- Format-specific landing pages -->
   <url>
     <loc>https://autorig.online/glb-auto-rig</loc>
-    <lastmod>2026-01-27</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>https://autorig.online/fbx-auto-rig</loc>
-    <lastmod>2026-01-27</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>https://autorig.online/obj-auto-rig</loc>
-    <lastmod>2026-01-01</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/obj-auto-rig"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/obj-auto-rig-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/obj-auto-rig-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/obj-auto-rig-hi"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/obj-auto-rig"/>
   </url>
 
   <url>
     <loc>https://autorig.online/t-pose-rig</loc>
-    <lastmod>2026-01-01</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -782,7 +757,7 @@
   <!-- Localized interface pages (ru, zh, hi, fa) -->
   <url>
     <loc>https://autorig.online/ru/</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/"/>
@@ -794,7 +769,7 @@
   </url>
   <url>
     <loc>https://autorig.online/zh/</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/"/>
@@ -806,7 +781,7 @@
   </url>
   <url>
     <loc>https://autorig.online/hi/</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/"/>
@@ -818,7 +793,7 @@
   </url>
   <url>
     <loc>https://autorig.online/fa/</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/"/>
@@ -830,7 +805,7 @@
   </url>
   <url>
     <loc>https://autorig.online/ru/gallery</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/gallery"/>
@@ -842,7 +817,7 @@
   </url>
   <url>
     <loc>https://autorig.online/zh/gallery</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/gallery"/>
@@ -854,7 +829,7 @@
   </url>
   <url>
     <loc>https://autorig.online/hi/gallery</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/gallery"/>
@@ -866,7 +841,7 @@
   </url>
   <url>
     <loc>https://autorig.online/fa/gallery</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/gallery"/>
@@ -878,7 +853,7 @@
   </url>
   <url>
     <loc>https://autorig.online/ru/buy-credits</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/buy-credits"/>
@@ -890,7 +865,7 @@
   </url>
   <url>
     <loc>https://autorig.online/zh/buy-credits</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/buy-credits"/>
@@ -902,7 +877,7 @@
   </url>
   <url>
     <loc>https://autorig.online/hi/buy-credits</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/buy-credits"/>
@@ -914,7 +889,7 @@
   </url>
   <url>
     <loc>https://autorig.online/fa/buy-credits</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/buy-credits"/>
@@ -926,7 +901,7 @@
   </url>
   <url>
     <loc>https://autorig.online/ru/how-it-works</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
@@ -938,7 +913,7 @@
   </url>
   <url>
     <loc>https://autorig.online/zh/how-it-works</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
@@ -950,7 +925,7 @@
   </url>
   <url>
     <loc>https://autorig.online/hi/how-it-works</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
@@ -962,7 +937,7 @@
   </url>
   <url>
     <loc>https://autorig.online/fa/how-it-works</loc>
-    <lastmod>2026-10-10</lastmod>
+    <lastmod>2026-10-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
@@ -971,54 +946,6 @@
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/how-it-works"/>
     <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/how-it-works"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-  <url>
-    <loc>https://autorig.online/ru/developers</loc>
-    <lastmod>2026-10-10</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
-    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
-  </url>
-  <url>
-    <loc>https://autorig.online/zh/developers</loc>
-    <lastmod>2026-10-10</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
-    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
-  </url>
-  <url>
-    <loc>https://autorig.online/hi/developers</loc>
-    <lastmod>2026-10-10</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
-    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
-  </url>
-  <url>
-    <loc>https://autorig.online/fa/developers</loc>
-    <lastmod>2026-10-10</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
-    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
   </url>
 
 </urlset>

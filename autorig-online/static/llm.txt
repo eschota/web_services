@@ -1,6 +1,6 @@
 # AutoRig Online
 
-> Cloud service for automatic 3D character rigging (GLB, FBX, OBJ). Upload or link a model; get a rigged asset with animations. Public HTTP API for apps and autonomous agents.
+> Cloud service that rigs and animates 3D models with the AutoRig V3 conveyor: upload a 3D model (GLB, FBX, OBJ), a picture, or a picture of a car; get a rigged, animated model in a browser viewer and downloads for Unity, Unreal Engine and Blender. Public HTTP API for apps and autonomous agents.
 
 ## For AI agents and tools
 
@@ -10,7 +10,11 @@
 ## Site
 
 - **Home:** https://autorig.online/
-- **Animal and non-humanoid rigging:** https://autorig.online/animal-rig
+- **How it works:** https://autorig.online/how-it-works
+- **FAQ:** https://autorig.online/faq
+- **Guides:** https://autorig.online/guides
+- **Gallery:** https://autorig.online/gallery
+- **Animal and creature rigging:** https://autorig.online/animal-rig
 - **Blender plugin:** https://autorig.online/blender-plugin
 
 ## Discovery

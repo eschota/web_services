@@ -1,0 +1,159 @@
+<!-- Add to static/sitemap-pages.xml ONLY after the backend release that puts these paths into ADVERTISED_PATHS
+     (user_language.py) and fixes the "/dev" prefix in _NO_PREFIX. Until then /ru/<page> is noindex and /<lang>/developers is 404.
+     For /animal-rig, /faq and /developers also replace the existing English block's alternates by the same six links. -->
+
+  <url>
+    <loc>https://autorig.online/ru/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/zh/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/hi/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/fa/animal-rig</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/animal-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/ru/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/zh/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/hi/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/fa/faq</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/faq"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/faq"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/faq"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/faq"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/faq"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/faq"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/ru/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.55</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/zh/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.55</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/hi/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.55</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/fa/developers</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.55</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/developers"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/ru/developers"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/zh/developers"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/hi/developers"/>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://autorig.online/fa/developers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
+  </url>
