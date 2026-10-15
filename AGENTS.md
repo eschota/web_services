@@ -934,6 +934,18 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   and D (Hunyuan part path) on the motorhome within a small credit budget, maps every part to our segmentation
   (`parts_map.json`), and the assembler places every part over the picture. The owner gets two consolidated sheets
   from the lead: A/B first, then C/D, with cost, time, faces and placement metrics.
+* **Plan C: only the wheels come off, the body stays whole, A/B/C on the motorhome** (owner, 2026-10-16 ~06:20 UTC,
+  on the A/B sheet of the shell-split assemblies: «я вижу тут провал полный, переходим к плану С: отделяем только
+  колеса, оставляем корпус целиком и делаем модель АБС сравнение. приступай на автодоме»): the shell split (body
+  without openables, glass and suspension, every part its own model) is dropped as the main path. Plan C: the cut
+  picture (the vehicle with its suspension, fenders, doors and glass, wheels erased and completed by Qwen, `cut.png`)
+  is generated as ONE body model; the restored wheel (`parts/wheel.png`) is the one wheel asset, instanced at every
+  detected wheel ellipse and normalised to its cylinder; nothing else is split before modelling. The assembler puts
+  the body over the picture by its silhouette and the wheels on their ellipses (the wheels sit in the body's own
+  wheel wells, so the far-wheel occlusion follows from the body). The comparison on `rv_motorhome` is A/B/C: A Tripo
+  (the paid confirmation of 2026-10-16 ~08:40 UTC still stands, 2 parts), B the Hunyuan cloud (2 parts), C the free
+  farm Hunyuan (gen3d queue). One consolidated sheet with cost, time, faces, IoU and the renders goes to the owner;
+  the doors / interior / driver work later cuts the parts from the whole body mesh, not from the picture.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
