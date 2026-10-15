@@ -1203,6 +1203,25 @@ Owner rule, 2026-10-10:
   `message_string`. Persian is right to left. Page URLs per language are
   `/fa/...` and `/ru/...`; English has no prefix.
 
+Owner rule, 2026-10-16 (the viewer's session agent):
+
+> он должен быть на языке того пользователя что создал задачу на старте это
+> должен быть один агент на всех в одной сессии а не каждому своя сессия
+
+* **One shared session per task.** The viewer's agent chat is one session
+  for everyone who opens the run (`POST /api/mt/runs/<run>/viewer/session`
+  returns the run's shared session, its whole log from cursor 0), not a
+  session per visitor. `MT_VIEWER_SHARED_SESSION=off` restores the old way.
+* **The agent speaks the task creator's language**: `GET
+  /api/language/resolve?task_id=` (`owner_language` of the task), not the
+  visitor's browser language. The viewer's own interface language is still
+  `language.ui` of the page that embeds it (the task page passes the rendered
+  page language as `agent_lang`; never a Russian default).
+* Capabilities and quotas are the writer's own, per message (an admin's
+  `Astra …` escalation, the daily chat allowance), never inherited from
+  whoever opened the shared session. The creator-chat view resolves the
+  asking person's role on each request.
+
 ## General Workflow
 
 ### Persistent development handoff
