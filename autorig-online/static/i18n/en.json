@@ -2064,5 +2064,10 @@
   "gallery_rig_type_monster": "Monster",
   "gallery_rig_type_multilimb": "Multilimb",
   "gallery_rig_type_hands": "Hands",
-  "gallery_rig_type_vehicle": "Vehicle"
+  "gallery_rig_type_vehicle": "Vehicle",
+  "chrome_nav_close": "Close navigation",
+  "chrome_credits_balance": "Credits",
+  "chrome_credits_unlimited": "Unlimited Monthly",
+  "chrome_untitled": "Untitled",
+  "chrome_free3d_random": "Random search"
 }

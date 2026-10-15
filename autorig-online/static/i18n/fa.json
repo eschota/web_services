@@ -2044,5 +2044,10 @@
   "gallery_rig_type_monster": "هیولا",
   "gallery_rig_type_multilimb": "چنداندامی",
   "gallery_rig_type_hands": "دست",
-  "gallery_rig_type_vehicle": "خودرو"
+  "gallery_rig_type_vehicle": "خودرو",
+  "chrome_nav_close": "بستن ناوبری",
+  "chrome_credits_balance": "اعتبار",
+  "chrome_credits_unlimited": "Unlimited ماهانه",
+  "chrome_untitled": "بدون عنوان",
+  "chrome_free3d_random": "جستجوی تصادفی"
 }

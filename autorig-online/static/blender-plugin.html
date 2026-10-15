@@ -724,6 +724,8 @@
                 return Object.keys(params || {}).reduce((s, k) => s.split('{' + k + '}').join(params[k]), fallback);
             };
             const render = () => {
+                // before the translations load, keep the server-rendered (already localized) text unless a price is known
+                if (!displayPrice && !(window.I18n && I18n.has && I18n.has('plugin_buy'))) return;
                 const priceEl = document.getElementById('plugin-offer-price');
                 document.querySelectorAll('.plugin-buy-link[data-plugin-price]').forEach((link) => {
                     link.textContent = displayPrice
@@ -743,8 +745,10 @@
                     link.href = `${base}${separator}page_url=${encodeURIComponent(window.location.href)}`;
                 });
             };
+            // This page has no app.js, so it starts the i18n module itself (translations, language menu).
             const afterI18n = () => {
-                const ready = window.I18n && I18n._initPromise;
+                let ready = null;
+                try { ready = window.I18n && I18n.init ? I18n.init() : null; } catch (e) { ready = null; }
                 if (ready && ready.then) ready.then(render, render);
             };
             window.addEventListener('languageChanged', render);
@@ -755,8 +759,7 @@
                 .then((offer) => {
                     displayPrice = (offer && offer.display_price) || null;
                     tagLinks();
-                    if (displayPrice) render();
-                    afterI18n();
+                    render();
                 });
         });
     </script>

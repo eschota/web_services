@@ -2046,5 +2046,10 @@
   "gallery_rig_type_monster": "राक्षस",
   "gallery_rig_type_multilimb": "बहु-अंग",
   "gallery_rig_type_hands": "हाथ",
-  "gallery_rig_type_vehicle": "वाहन"
+  "gallery_rig_type_vehicle": "वाहन",
+  "chrome_nav_close": "नेविगेशन बंद करें",
+  "chrome_credits_balance": "क्रेडिट",
+  "chrome_credits_unlimited": "Unlimited मासिक",
+  "chrome_untitled": "बिना शीर्षक",
+  "chrome_free3d_random": "यादृच्छिक खोज"
 }

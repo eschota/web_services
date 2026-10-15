@@ -2064,5 +2064,10 @@
   "gallery_rig_type_monster": "Монстр",
   "gallery_rig_type_multilimb": "Многоконечные",
   "gallery_rig_type_hands": "Кисти рук",
-  "gallery_rig_type_vehicle": "Транспорт"
+  "gallery_rig_type_vehicle": "Транспорт",
+  "chrome_nav_close": "Закрыть навигацию",
+  "chrome_credits_balance": "Кредиты",
+  "chrome_credits_unlimited": "Unlimited на месяц",
+  "chrome_untitled": "Без названия",
+  "chrome_free3d_random": "Случайный поиск"
 }

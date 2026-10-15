@@ -3,16 +3,41 @@
  * Generates consistent header and Free3D search across all pages
  */
 
-const GOOGLE_ICON_SVG = `<svg viewBox="0 0 24 24" width="18" height="18">
+const GOOGLE_ICON_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
 </svg>`;
 
-const DROPDOWN_ARROW_SVG = `<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+const DROPDOWN_ARROW_SVG = `<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
     <path d="M3 4.5L6 7.5L9 4.5"/>
 </svg>`;
+
+/**
+ * Strings of the chrome come from I18n when its translations are loaded; English is only the fallback.
+ * (Elements that keep a data-i18n key are translated again by I18n.applyTranslations on every language change.)
+ */
+function chromeT(key, fallback, params) {
+    try {
+        if (window.I18n && typeof window.I18n.has === 'function' && window.I18n.has(key)) {
+            return window.I18n.t(key, params);
+        }
+    } catch (e) { /* fall through to the English text */ }
+    return fallback;
+}
+
+function chromeSetText(el, key, fallback) {
+    if (!el) return;
+    el.setAttribute('data-i18n', key);
+    el.textContent = chromeT(key, fallback);
+}
+
+function chromeEscape(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 /**
  * Normalize path for nav active comparison (trailing slash, empty → /)
@@ -52,7 +77,7 @@ function renderSiteHeader(options = {}) {
     } = options;
     
     const mobileNavToggleHtml = showNav ? `
-        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-controls="site-primary-nav" aria-expanded="false">
+        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation" data-i18n-aria-label="chrome_nav_open" aria-controls="site-primary-nav" aria-expanded="false">
             <span></span>
             <span></span>
             <span></span>
@@ -60,14 +85,14 @@ function renderSiteHeader(options = {}) {
     ` : '';
 
     const navHtml = showNav ? `
-        <nav class="nav" id="site-primary-nav" aria-label="Primary navigation">
+        <nav class="nav" id="site-primary-nav" aria-label="Primary navigation" data-i18n-aria-label="chrome_nav_primary">
             <a href="/guides" class="${navLinkClass('/guides', activePath)}" data-i18n="nav_guides">Guides</a>
             <a href="/gallery" class="${navLinkClass('/gallery', activePath)}" data-i18n="nav_gallery">Gallery</a>
             <a href="/animal-rig" class="${navLinkClass('/animal-rig', activePath)}" data-i18n="nav_animal_rig">Animals</a>
             <a href="/buy-credits" class="${navLinkClass('/buy-credits', activePath)}" data-i18n="nav_buy">Buy</a>
             <a href="/blender-plugin" class="${navLinkClass('/blender-plugin', activePath)}" data-i18n="nav_blender_plugin">Blender Plugin</a>
             <a href="/developers" class="${navLinkClass('/developers', activePath)}" data-i18n="nav_api">API</a>
-            <a href="#" class="nav-link header-admin-tab hidden" id="header-admin-tab" title="Admin queue monitor">АДМИНКА</a>
+            <a href="#" class="nav-link header-admin-tab hidden" id="header-admin-tab" title="Admin queue monitor" data-i18n-title="chrome_admin_title">ADMIN</a>
         </nav>
     ` : '';
     
@@ -82,10 +107,10 @@ function renderSiteHeader(options = {}) {
     <header class="header">
         <div class="container">
             <div class="header-inner">
-                <a href="/" class="logo">
+                <a href="/" class="logo" aria-label="AutoRig.online home" data-i18n-aria-label="chrome_logo_aria">
                     <img src="/static/images/logo/autorig-logo.png" 
                          srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x"
-                         alt="Autorig.Online" 
+                         alt="AutoRig.online" 
                          class="logo-img" 
                          width="120"
                          height="80">
@@ -99,21 +124,21 @@ function renderSiteHeader(options = {}) {
                     
                     <!-- Language Selector -->
                     <div class="lang-selector">
-                        <button class="lang-btn">
-                            <span>EN</span>
+                        <button class="lang-btn" type="button" aria-label="Language" data-i18n-aria-label="lang_label">
+                            <span data-lang-current>EN</span>
                             ${DROPDOWN_ARROW_SVG}
                         </button>
                         <div class="lang-dropdown">
-                            <button class="lang-option" data-lang="en">English</button>
-                            <button class="lang-option" data-lang="ru">Русский</button>
-                            <button class="lang-option" data-lang="zh">中文</button>
-                            <button class="lang-option" data-lang="hi">हिंदी</button>
-                            <button class="lang-option" data-lang="fa" lang="fa" dir="rtl">فارسی</button>
+                            <button class="lang-option" type="button" data-lang="en" lang="en">English</button>
+                            <button class="lang-option" type="button" data-lang="ru" lang="ru">Русский</button>
+                            <button class="lang-option" type="button" data-lang="zh" lang="zh">中文</button>
+                            <button class="lang-option" type="button" data-lang="hi" lang="hi">हिंदी</button>
+                            <button class="lang-option" type="button" data-lang="fa" lang="fa" dir="rtl">فارسی</button>
                         </div>
                     </div>
                     
                     <!-- Theme Toggle -->
-                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle theme" data-i18n-title="chrome_theme_toggle">🌙</button>
                     
                     <!-- Login Button -->
                     <a href="/auth/login" class="btn btn-google" id="login-btn">
@@ -123,7 +148,7 @@ function renderSiteHeader(options = {}) {
                     
                     <!-- User Info (hidden when not logged in); avatar+name → /dashboard -->
                     <div id="user-info" class="hidden flex items-center gap-2">
-                        <a href="/dashboard" class="user-account-hit" title="Dashboard">
+                        <a href="/dashboard" class="user-account-hit" title="Dashboard" data-i18n-title="nav_dashboard">
                             <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
                             <span class="user-name"></span>
                         </a>
@@ -162,7 +187,7 @@ function renderFree3DSearch() {
                            data-i18n-placeholder="free3d_search_placeholder"
                            placeholder="girl, robot, warrior..."
                            autocomplete="off">
-                    <button type="button" class="free3d-randomize-btn" id="free3d-randomize-btn" title="Random search">🎲</button>
+                    <button type="button" class="free3d-randomize-btn" id="free3d-randomize-btn" title="Random search" data-i18n-title="chrome_free3d_random">🎲</button>
                 </div>
                 <span class="free3d-search-status hidden" id="free3d-search-status" data-i18n="free3d_searching">Searching...</span>
             </div>
@@ -188,11 +213,19 @@ async function initSiteHeader() {
     const primaryNav = document.getElementById('site-primary-nav') || document.querySelector('.nav');
 
     if (header && mobileNavToggle && primaryNav) {
+        const navLabel = (open) => open
+            ? chromeT('chrome_nav_close', 'Close navigation')
+            : chromeT('chrome_nav_open', 'Open navigation');
         const setNavOpen = (open) => {
             header.classList.toggle('mobile-nav-open', open);
             mobileNavToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-            mobileNavToggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+            mobileNavToggle.setAttribute('aria-label', navLabel(open));
         };
+
+        // I18n puts the "open" label back on every language change: keep the label of the current state
+        window.addEventListener('languageChanged', () => {
+            mobileNavToggle.setAttribute('aria-label', navLabel(header.classList.contains('mobile-nav-open')));
+        });
 
         mobileNavToggle.addEventListener('click', () => {
             setNavOpen(!header.classList.contains('mobile-nav-open'));
@@ -209,20 +242,34 @@ async function initSiteHeader() {
         });
     }
 
-    // Theme toggle
+    // Theme toggle. The stylesheet follows html[data-theme] and the choice lives in localStorage "autorig_theme"
+    // (app.js and several pages bind their own toggle with the same rule). Pages without such a script (animal-rig,
+    // blender-plugin...) got a toggle that only flipped body.light, which no CSS reads: it did nothing. Now the
+    // saved theme is applied everywhere, and this handler flips the theme only when no other handler did it
+    // during the same click, so a page with its own toggle is never toggled twice.
     const themeToggle = document.getElementById('theme-toggle');
     if (themeToggle) {
-        const savedTheme = localStorage.getItem('theme') || 'dark';
+        const root = document.documentElement;
+        let savedTheme = 'dark';
+        try { savedTheme = localStorage.getItem('autorig_theme') || localStorage.getItem('theme') || 'dark'; } catch (e) { /* storage blocked */ }
+        if (savedTheme !== 'light') savedTheme = 'dark';
+        if (root.getAttribute('data-theme') !== savedTheme) root.setAttribute('data-theme', savedTheme);
         document.body.classList.toggle('light', savedTheme === 'light');
-        themeToggle.textContent = savedTheme === 'light' ? '☀️' : '🌙';
-        
+        if (!/[☀🌙]/.test(themeToggle.textContent)) themeToggle.textContent = savedTheme === 'light' ? '☀️' : '🌙';
+
         themeToggle.addEventListener('click', () => {
-            const isLight = document.body.classList.toggle('light');
-            localStorage.setItem('theme', isLight ? 'light' : 'dark');
-            themeToggle.textContent = isLight ? '☀️' : '🌙';
+            const before = root.getAttribute('data-theme') || 'dark';
+            setTimeout(() => {
+                if ((root.getAttribute('data-theme') || 'dark') !== before) return;   // another handler already did it
+                const next = before === 'light' ? 'dark' : 'light';
+                root.setAttribute('data-theme', next);
+                try { localStorage.setItem('autorig_theme', next); } catch (e) { /* storage blocked */ }
+                document.body.classList.toggle('light', next === 'light');
+                themeToggle.textContent = next === 'light' ? '☀️' : '🌙';
+            }, 0);
         });
     }
-    
+
     // Language selector
     const langBtn = document.querySelector('.lang-btn');
     const langDropdown = document.querySelector('.lang-dropdown');
@@ -263,24 +310,15 @@ async function initSiteHeader() {
                 }
                 if (data.user.subscription_active) {
                     if (creditsCount) creditsCount.textContent = '∞';
-                    if (creditsLabel) {
-                        creditsLabel.textContent = 'Unlimited Monthly';
-                        creditsLabel.removeAttribute('data-i18n');
-                    }
+                    chromeSetText(creditsLabel, 'chrome_credits_unlimited', 'Unlimited Monthly');
                 } else {
                     if (creditsCount) creditsCount.textContent = data.user.balance_credits || 0;
-                    if (creditsLabel) {
-                        creditsLabel.textContent = 'Credits';
-                        creditsLabel.setAttribute('data-i18n', 'credits_balance');
-                    }
+                    chromeSetText(creditsLabel, 'chrome_credits_balance', 'Credits');
                 }
             } else if (data.anon && data.anon.free_remaining !== undefined) {
                 // Anonymous user
                 if (creditsCount) creditsCount.textContent = data.anon.free_remaining;
-                if (creditsLabel) {
-                    creditsLabel.textContent = 'Free conversions left';
-                    creditsLabel.setAttribute('data-i18n', 'credits_free');
-                }
+                chromeSetText(creditsLabel, 'credits_free', 'Free conversions left');
             } else if (typeof data.credits_remaining === 'number') {
                 // Fallback for anonymous response
                 if (creditsCount) creditsCount.textContent = data.credits_remaining;
@@ -513,7 +551,7 @@ function initFree3DSearch(onModelSelectOrOptions, maybeOptions = {}) {
             '';
 
         return {
-            title: (title && String(title).trim()) || 'Untitled',
+            title: (title && String(title).trim()) || chromeT('chrome_untitled', 'Untitled'),
             preview: preview || '/static/images/placeholder-thumb.svg',
             glbUrl: (glbUrl && String(glbUrl).trim()) || '',
             modelPageUrl: (modelPageUrl && String(modelPageUrl).trim()) || '',
@@ -523,17 +561,18 @@ function initFree3DSearch(onModelSelectOrOptions, maybeOptions = {}) {
     function renderSearchResults(results) {
         const normalized = (results || []).map(normalizeResultItem).filter(Boolean);
         if (!normalized.length) {
-            resultsContainer.innerHTML = '<div style="padding: 1rem; color: var(--text-muted);">No models found</div>';
+            resultsContainer.innerHTML = '<div style="padding: 1rem; color: var(--text-muted);">' + chromeEscape(chromeT('free3d_no_results', 'No models found')) + '</div>';
             resultsContainer.classList.remove('hidden');
             return;
         }
         
+        // titles and urls come from an external search API: escape them before they enter innerHTML / attributes
         resultsContainer.innerHTML = normalized.map(model => `
-            <div class="free3d-item free3d-result-item" data-url="${model.glbUrl}" data-page-url="${model.modelPageUrl}" data-name="${model.title}" title="${model.title}">
+            <div class="free3d-item free3d-result-item" data-url="${chromeEscape(model.glbUrl)}" data-page-url="${chromeEscape(model.modelPageUrl)}" data-name="${chromeEscape(model.title)}" title="${chromeEscape(model.title)}">
                 <div class="free3d-item-inner">
-                    <img src="${model.preview}" alt="${model.title}" loading="lazy" onerror="this.src='/static/images/placeholder-thumb.svg'">
+                    <img src="${chromeEscape(model.preview)}" alt="${chromeEscape(model.title)}" loading="lazy" onerror="this.src='/static/images/placeholder-thumb.svg'">
                 </div>
-                <div class="free3d-item-title free3d-result-name">${model.title}</div>
+                <div class="free3d-item-title free3d-result-name">${chromeEscape(model.title)}</div>
             </div>
         `).join('');
         
