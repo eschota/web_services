@@ -1,0 +1,22 @@
+{
+  "footer_tagline": "Загрузите любую 3D-модель, картинку или картинку машины: риг и анимация примерно за минуту, готово для Unity, Unreal и Blender.",
+  "nav_animal_rig": "Животные",
+  "footer_animal_rig": "Риггинг животных",
+  "nav_blender_plugin": "Плагин Blender",
+  "footer_blender_plugin": "Плагин Blender",
+  "footer_faq": "Вопросы и ответы",
+  "footer_glb_vs_fbx": "GLB или FBX",
+  "footer_tpose": "T-поза или A-поза",
+  "chrome_logo_aria": "AutoRig.online: главная",
+  "chrome_nav_open": "Открыть навигацию",
+  "chrome_nav_primary": "Основная навигация",
+  "chrome_theme_toggle": "Сменить тему",
+  "chrome_admin_title": "Монитор очереди (админ)",
+  "chrome_legal": "Правовая информация",
+  "chrome_ph_title": "AutoRig.online на Product Hunt",
+  "chrome_ph_cta": "Посмотреть →",
+  "chrome_footer_dev_api": "API для разработчиков",
+  "chrome_footer_any_pose": "Риггинг в любой позе",
+  "chrome_footer_obj_guide": "Гид по риггингу OBJ",
+  "chrome_footer_buy": "Купить кредиты"
+}

@@ -1,0 +1,22 @@
+{
+  "footer_tagline": "Upload any 3D model, a picture or a car picture: rigged and animated in about a minute, ready for Unity, Unreal and Blender.",
+  "nav_animal_rig": "Animals",
+  "footer_animal_rig": "Animal Rigging",
+  "nav_blender_plugin": "Blender Plugin",
+  "footer_blender_plugin": "Blender Plugin",
+  "footer_faq": "FAQ",
+  "footer_glb_vs_fbx": "GLB vs FBX",
+  "footer_tpose": "T-Pose vs A-Pose",
+  "chrome_logo_aria": "AutoRig.online home",
+  "chrome_nav_open": "Open navigation",
+  "chrome_nav_primary": "Primary navigation",
+  "chrome_theme_toggle": "Toggle theme",
+  "chrome_admin_title": "Admin queue monitor",
+  "chrome_legal": "Legal",
+  "chrome_ph_title": "AutoRig.online on Product Hunt",
+  "chrome_ph_cta": "Check it out →",
+  "chrome_footer_dev_api": "Developer API",
+  "chrome_footer_any_pose": "Rigging in any pose",
+  "chrome_footer_obj_guide": "OBJ rigging guide",
+  "chrome_footer_buy": "Buy credits"
+}

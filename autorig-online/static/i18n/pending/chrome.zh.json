@@ -1,0 +1,22 @@
+{
+  "footer_tagline": "上传任意 3D 模型、图片或汽车图片：约一分钟内完成绑定和动画，可直接用于 Unity、Unreal 和 Blender。",
+  "nav_animal_rig": "动物",
+  "footer_animal_rig": "动物绑定",
+  "nav_blender_plugin": "Blender 插件",
+  "footer_blender_plugin": "Blender 插件",
+  "footer_faq": "常见问题",
+  "footer_glb_vs_fbx": "GLB 与 FBX 对比",
+  "footer_tpose": "T 姿势与 A 姿势",
+  "chrome_logo_aria": "AutoRig.online 首页",
+  "chrome_nav_open": "打开导航",
+  "chrome_nav_primary": "主导航",
+  "chrome_theme_toggle": "切换主题",
+  "chrome_admin_title": "管理员队列监控",
+  "chrome_legal": "法律信息",
+  "chrome_ph_title": "Product Hunt 上的 AutoRig.online",
+  "chrome_ph_cta": "去看看 →",
+  "chrome_footer_dev_api": "开发者 API",
+  "chrome_footer_any_pose": "任意姿势下的绑定",
+  "chrome_footer_obj_guide": "OBJ 绑定指南",
+  "chrome_footer_buy": "购买积分"
+}

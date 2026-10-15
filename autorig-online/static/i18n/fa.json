@@ -173,7 +173,7 @@
   "queue_wait_minutes": "حدود {minutes} دقیقه",
   "queue_wait_hours": "حدود {hours} ساعت و {minutes} دقیقه",
   "footer_text": "AutoRig Online © ۲۰۲۶",
-  "footer_tagline": "ریگینگ خودکار کاراکترهای سه‌بعدی با هوش مصنوعی. مدل خود را آپلود کنید و در چند دقیقه آن را ریگ‌شده و همراه با انیمیشن تحویل بگیرید.",
+  "footer_tagline": "هر مدل سه‌بعدی، تصویر یا تصویر خودرو را بارگذاری کنید: در حدود یک دقیقه ریگ‌شده و انیمیت‌شده، آماده برای Unity، Unreal و Blender.",
   "footer_services": "خدمات",
   "footer_glb_rig": "ریگینگ خودکار GLB",
   "footer_fbx_rig": "ریگینگ خودکار FBX",
@@ -1877,5 +1877,17 @@
   "tpose_cta_h2": "مدل را در هر حالتی ریگ کنید",
   "tpose_cta_p": "در صفحهٔ اصلی یک مدل سه‌بعدی، تصویر، تصویر خودرو یا هر چیز دیگری بیندازید. ریگ و انیمیشن در نمایشگر ظاهر می‌شوند.",
   "tpose_cta_btn": "شروع ریگ",
-  "tpose_leg_svg_title": "طرح شماتیک دو پا: پای مرجع روی زمین است، پای ردیابی‌شده بالا آمده و مفصل‌های هر دو در طول‌های L1، L2 و L3 قرار دارند."
+  "tpose_leg_svg_title": "طرح شماتیک دو پا: پای مرجع روی زمین است، پای ردیابی‌شده بالا آمده و مفصل‌های هر دو در طول‌های L1، L2 و L3 قرار دارند.",
+  "chrome_logo_aria": "صفحه اصلی AutoRig.online",
+  "chrome_nav_open": "باز کردن ناوبری",
+  "chrome_nav_primary": "ناوبری اصلی",
+  "chrome_theme_toggle": "تغییر پوسته",
+  "chrome_admin_title": "پایشگر صف (مدیر)",
+  "chrome_legal": "اطلاعات حقوقی",
+  "chrome_ph_title": "AutoRig.online در Product Hunt",
+  "chrome_ph_cta": "ببینید ←",
+  "chrome_footer_dev_api": "API توسعه‌دهندگان",
+  "chrome_footer_any_pose": "ریگ در هر ژست",
+  "chrome_footer_obj_guide": "راهنمای ریگ OBJ",
+  "chrome_footer_buy": "خرید اعتبار"
 }

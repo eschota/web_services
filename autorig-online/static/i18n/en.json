@@ -170,7 +170,7 @@
   "queue_wait_minutes": "~{minutes} min",
   "queue_wait_hours": "~{hours}h {minutes}m",
   "footer_text": "AutoRig Online © 2026",
-  "footer_tagline": "AI-powered automatic 3D character rigging. Upload your model and get it rigged with animations in minutes.",
+  "footer_tagline": "Upload any 3D model, a picture or a car picture: rigged and animated in about a minute, ready for Unity, Unreal and Blender.",
   "footer_services": "Services",
   "footer_glb_rig": "GLB Auto Rigging",
   "footer_fbx_rig": "FBX Auto Rigging",
@@ -2035,5 +2035,17 @@
   "tpose_cta_h2": "Rig a model in any pose",
   "tpose_cta_p": "Drop a 3D model, a picture, a picture of a car, or anything on the home page. The rig and the animation appear in the viewer.",
   "tpose_cta_btn": "Start rigging",
-  "tpose_leg_svg_title": "Schematic of two legs: the reference leg stands on the floor, the traced leg is raised, and both have their joints at the lengths L1, L2 and L3."
+  "tpose_leg_svg_title": "Schematic of two legs: the reference leg stands on the floor, the traced leg is raised, and both have their joints at the lengths L1, L2 and L3.",
+  "chrome_logo_aria": "AutoRig.online home",
+  "chrome_nav_open": "Open navigation",
+  "chrome_nav_primary": "Primary navigation",
+  "chrome_theme_toggle": "Toggle theme",
+  "chrome_admin_title": "Admin queue monitor",
+  "chrome_legal": "Legal",
+  "chrome_ph_title": "AutoRig.online on Product Hunt",
+  "chrome_ph_cta": "Check it out →",
+  "chrome_footer_dev_api": "Developer API",
+  "chrome_footer_any_pose": "Rigging in any pose",
+  "chrome_footer_obj_guide": "OBJ rigging guide",
+  "chrome_footer_buy": "Buy credits"
 }
