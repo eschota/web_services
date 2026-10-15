@@ -145,6 +145,9 @@ def state(task: Any, request: Any = None, *, trigger: bool = True) -> dict:
                                                  "seconds", "timings_s")}
     if out["current_version"] or doc or not trigger or not ENABLED:
         return out
+    if run and _read(MT_ROOT / "runs" / run / "run.json").get("kind") == "vehicle_v3":
+        out["rerig"] = {"state": "not_for_vehicles"}        # Vehicles V3: never re-rigged as a humanoid
+        return out
     status = str(getattr(task, "status", "") or "")
     if status in ("created", "processing"):
         out["rerig"] = {"state": "not_now", "why": "the task is still being processed"}

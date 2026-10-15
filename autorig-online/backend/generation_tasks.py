@@ -138,6 +138,12 @@ async def _start_generation(db, task: Task) -> None:
     if last_try and (time.time() - last_try) < DETECT_RETRY_SECONDS:
         return
 
+    # Vehicles V3 (owner 2026-10-15): a picture the uploader marked as a vehicle goes to the vehicle conveyor at once
+    import vehicle_intake
+
+    if await vehicle_intake.maybe_route(db, task, None):
+        return
+
     image_bytes = await _fetch_image_bytes(task.input_url)
     if image_bytes is None:
         task.status = "error"
@@ -198,6 +204,11 @@ async def _start_generation(db, task: Task) -> None:
             f"vision unavailable for {int(waited)}s; assumed riggable "
             f"({str(verdict.get('reason') or '')[:100]})"
         )
+
+    # Vehicles V3 (owner 2026-10-15: «авториг должен уметь ригать и коней и тачки»): a vehicle is never generated as a
+    # character nor rigged as a humanoid; it goes to the vehicle conveyor (segmentation, cut, split, isolated parts)
+    if await vehicle_intake.maybe_route(db, task, verdict):
+        return
 
     try:
         job_id = await render_prompting.start_character_gen_from_image(
@@ -400,3 +411,11 @@ async def pump_generation_tasks(db) -> None:
         except Exception as exc:
             print(f"[Generation] tick failed for {task.id}: {type(exc).__name__}: {exc}")
             await db.rollback()
+    # Vehicles V3: the vehicle runs' stages mirrored into their task rows (the task page reads only the row)
+    try:
+        import vehicle_intake
+
+        await vehicle_intake.sync_vehicle_tasks(db)
+    except Exception as exc:                                     # noqa: BLE001
+        print(f"[Vehicle intake] sync failed: {type(exc).__name__}: {exc}")
+        await db.rollback()
