@@ -1102,6 +1102,20 @@
    "what": "man in a long tailcoat, 1.5M vertices, hands against the coat (stand tear x180 on v3.2026-10-16.1)",
    "sha256": "b5eaacacbbef05e697fd0c4c6e9bb9f918953f9010c50d544923547e9f66409c",
    "bytes": 7767160
+  },
+  "332fb890.upload.glb": {
+   "source": "/srv/autorig/data/var/uploads/8dd31583-71f5-4b77-8828-a69065c84e03/meshy_1791912515612_2.glb",
+   "task": "332fb890-a089-48cd-8b9b-b6a102a9cd80",
+   "what": "angel with wings (Meshy upload: KHR_mesh_quantization 12-bit UVs + KHR_texture_transform scale 16, EXT_texture_webp required, 20 056 vertices)",
+   "sha256": "85060f4022521f817fc9f706b1f9dd1fd6cb7fc32350697563cd08ba3ea78ffe",
+   "bytes": 2016712
+  },
+  "77cc1b88.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/dd3b2e1e9d5a4b205f63/proj/model.glb",
+   "task": "77cc1b88-be21-4d73-85a3-9c0e9551c4d1",
+   "what": "creepy santa claus: a heavy biped, the beard over the chest, the arms hanging along a wide coat, no skeleton (V3 run dd3b2e1e)",
+   "sha256": "533ec90903003f4c6f5358999bb4b2d1840517ed78571657bcc4ec6676d2ae7a",
+   "bytes": 11417944
   }
  },
  "profiles": {
@@ -16750,6 +16764,203 @@
      "pending": {
       "reason": "needs a mesh-only pressed-arms path (limb_stabilize has none: stabilization.why = the model carries no skeleton) or a hand capture limit in the skin; input c7b7b92f.source.glb is registered, the detector is the stand tear (worst edge <= 30, edges over 4x <= 200) on the rig built from it, heavy (1.5M vertices, 177 s): run it on the farm",
       "owner": "Skin / joints · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "meshy_texture_transform",
+   "task": "332fb890-a089-48cd-8b9b-b6a102a9cd80",
+   "cost": 1,
+   "defect": "Meshy / gltfpack GLB: 12-bit UVs (normalized uint16, 0..1/16) scaled back by KHR_texture_transform (scale 16); the viewer build drops the transform (glTFast _TEXTURE_TRANSFORM shader_feature stripped), the MT renderers ignored it and did not read EXT_texture_webp: the model sampled 1/256 of its atlas (blotches), Vision sheets were white (owner 2026-10-16)",
+   "checks": [
+    {
+     "id": "uv_bake",
+     "kind": "texture_transform",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "role": "regression",
+     "params": {
+      "inputs": [
+       "332fb890.upload.glb",
+       "a742491a.upload.glb",
+       "66ba97ba.upload.glb"
+      ]
+     },
+     "thresholds": {
+      "tt_left": [
+       "==",
+       0
+      ],
+      "uv_max_delta": [
+       "<=",
+       0.0001
+      ],
+      "untextured": [
+       "==",
+       0
+      ],
+      "viewer_tt_left": [
+       "==",
+       0
+      ],
+      "with_transform": [
+       ">=",
+       2
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "bearded_arms_down_biped",
+   "task": "77cc1b88-be21-4d73-85a3-9c0e9551c4d1",
+   "cost": 2,
+   "defect": "Spine order V3 (owner 2026-10-16, 77cc1b88 «creepy santa claus»: «надо чтобы этот дед мороз был идеально зариган»): a heavy biped, the beard fills the chest (no neck narrowing), the arms hang along a wide coat. The farthest lateral point is the elbow (reach 24 % H), so the arm counted as reaching out and the armpit search walked down to the crotch: both Arm joints on the centre line at 35 % H, the neck sections took the belt as the neck (band 39-68.6 % H): Neck 41 % H UNDER the Hips 45.4, the Head bone owned the torso, box_arms pinned shoulders 5.4 % H apart (71.4 / 66.2). Before: rig_check 4x 11, stand Running worst 158, 2869 edges over 4x, leak 13.9 %. Fix: fastrig.hanging_arm_lobes (a shoulder on the mid-plane -> the hanging arm from the constitution's lateral lobe, both sides levelled) + fastrig.spine_order_guard (Hips < Spine.. < Neck < Head < HeadTop_End, Neck >= Hips + 20 % H, else the fallback) + constitution.combine (a weak blob verdict gives way to a confident vision verdict) + pose_skeleton.box_arms levels its shoulders. After: Neck 82.3, Head 89.9, shoulders 73.0 / 73.0, rig_check 4x 1, stand worst 47, 48-56 edges over 4x, leak 4.3-4.9 %",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "77cc1b88.model.glb",
+     "params": {
+      "words": "creepy santa claus",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ],
+      "rig_check_4x": [
+       "<=",
+       10
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "spine_order_ok": [
+       "==",
+       1
+      ],
+      "neck_over_ground_pct_H": [
+       "between",
+       [
+        72,
+        92
+       ]
+      ],
+      "neck_minus_hips_pct_H": [
+       ">=",
+       20
+      ],
+      "shoulder_mirror_pct_H": [
+       "<=",
+       2
+      ],
+      "min_arm_off_axis_pct_H": [
+       ">=",
+       8
+      ],
+      "head_to_height": [
+       "between",
+       [
+        0.08,
+        0.35
+       ]
+      ]
+     },
+     "note": "Spine order V3 2026-10-16: measured spine_order_ok 1, neck 82.3 % H over the ground, neck - hips 36.9, shoulder mirror 0.0, arm off axis 13-15 % H, head_to_height 0.085; before: 0, 41.0, -4.4, 5.4, 1.3-1.7, 0.43"
+    },
+    {
+     "id": "stand_collapse",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       100
+      ],
+      "edges_over_4x": [
+       "<=",
+       150
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Spine order · V3",
+     "note": "the collapsed chain must never come back: before 158 / 2869 edges over 4x, after 47 / 48-56 (Running, 2026-10-16)"
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       4
+      ],
+      "edges_over_4x": [
+       "<=",
+       80
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "xfail": {
+      "reason": "the inner upper arm is one surface with the coat at 55-65 % H (13-18 % H under the Arm joint): edges of the bridge blend LeftArm 0.63-0.72 / Spine1 0.27-0.37 and stretch 44-47x in Running (worst 47, 48-56 over 4x, measured 2026-10-16 after the spine fix); the arm | coat contact split / the beard-fur layer is the next step",
+      "owner": "Seams · V3"
+     },
+     "measured_2026_10_16": {
+      "worst_edge_ratio": 46.9,
+      "edges_over_4x": 56,
+      "tear": true,
+      "clip": "Running"
      }
     }
    ]

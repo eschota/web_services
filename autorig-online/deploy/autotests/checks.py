@@ -734,6 +734,46 @@ def rig_joints(ctx):
                 out[f"{side.lower()}_hand_off_axis_pct_H"] = round(float(np.hypot(hd[0] - hips[0], hd[2] - hips[2])) / H * 100, 2)
         offs = [v for k, v in out.items() if k.endswith("_arm_off_axis_pct_H")]
         out["min_arm_off_axis_pct_H"] = min(offs) if offs else None
+    try:                                                 # Spine order · V3 (2026-10-16, 77cc1b88 the bearded Santa:
+        out.update(spine_order(run, rig, heads, H))      # Neck at 41 % H under the Hips, shoulders 5.4 % H apart)
+    except Exception as exc:                             # noqa: BLE001 - the other numbers stand
+        out["spine_order_error"] = f"{type(exc).__name__}: {exc}"[:160]
+    return out
+
+
+def spine_order(run, rig, heads, H):
+    """The spine chain along the up axis (Hips < Spine < Spine1 < Spine2 < Neck < Head < HeadTop_End), heights as %
+    of H over the ground (the rest mesh's lowest point, from the GLB's POSITION accessors), the Arm joints' mirror
+    error about the Hips' mid-plane, head_to_height = |HeadTop_End - Head| / H (fast analysis' joint rule)."""
+    import struct
+    ground = None
+    try:
+        data = (run / "rig" / "rigged.glb").read_bytes()
+        n = struct.unpack_from("<I", data, 12)[0]
+        js = json.loads(data[20:20 + n])
+        ys = [float(js["accessors"][p["attributes"]["POSITION"]]["min"][1]) for m in js.get("meshes") or []
+              for p in m.get("primitives") or [] if "POSITION" in (p.get("attributes") or {})
+              and "min" in js["accessors"][p["attributes"]["POSITION"]]]
+        ground = min(ys) if ys else None
+    except Exception:                                    # noqa: BLE001
+        ground = None
+    if ground is None:
+        ground = min(float(h[1]) for h in heads.values())
+    chain = [n for n in ("Hips", "Spine", "Spine1", "Spine2", "Neck", "Head", "HeadTop_End") if n in heads]
+    ys = [float(heads[n][1]) for n in chain]
+    out = {"spine_order_ok": 1 if len(chain) == 7 and all(a_ < b_ for a_, b_ in zip(ys, ys[1:])) else 0}
+    for n in ("Neck", "Head", "Hips"):
+        if n in heads:
+            out[f"{n.lower()}_over_ground_pct_H"] = round((float(heads[n][1]) - ground) / H * 100, 2)
+    if "Neck" in heads and "Hips" in heads:
+        out["neck_minus_hips_pct_H"] = round(float(heads["Neck"][1] - heads["Hips"][1]) / H * 100, 2)
+    if "HeadTop_End" in heads and "Head" in heads:
+        out["head_to_height"] = round(float(np.linalg.norm(heads["HeadTop_End"] - heads["Head"])) / H, 3)
+    if all(k in heads for k in ("LeftArm", "RightArm", "Hips")):
+        x0 = float(heads["Hips"][0])
+        mir = heads["RightArm"] * np.array([-1.0, 1.0, 1.0]) + np.array([2 * x0, 0.0, 0.0])
+        out["shoulder_mirror_pct_H"] = round(float(np.linalg.norm(heads["LeftArm"] - mir)) / H * 100, 2)
+        out["shoulder_dy_pct_H"] = round(abs(float(heads["LeftArm"][1] - heads["RightArm"][1])) / H * 100, 2)
     return out
 
 
@@ -773,6 +813,42 @@ def autotex_upload_refs(ctx, upload_input, name):
     r = A.upload_refs(d / name)
     return {"referenced": len(r.get("referenced") or []), "missing": len(r.get("missing") or []),
             "missing_names": ",".join(r.get("missing") or [])}
+
+
+def anthro_rig(ctx):
+    """Anthro rig · V3 (2026-10-15, button «Новая категория», task 51335965): an anthropomorphic animal is a biped with
+    a tail and ears of its own. What the rig carries (rig.json "anthro" + the bones): the verdict, the category the
+    registry gives (mt/fast_analysis.categorize), the tail and ear chains, the tail's length and thickness."""
+    try:
+        from mt import anthro as _AN  # noqa: F401
+    except ImportError:
+        return {"pending": True, "why": "mt/anthro.py is not in the tree under test"}
+    run = ctx["run"]
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    an = rig.get("anthro") or {}
+    names = [b.get("name") or "" for b in rig.get("bones") or []]
+    tail = an.get("tail") or {}
+    out = {"is_anthro": 1 if an.get("use") else 0, "subcategory": an.get("subcategory"), "category": an.get("category"),
+           "category_anthro": 1 if an.get("category") == "anthro" else 0,
+           "tail_bones": sum(1 for n in names if n.startswith("Tail")),
+           "ear_bones": sum(1 for n in names if "Crest" in n),
+           "tail_length_pct_H": tail.get("length_pct_H"), "tail_radius_pct_H": tail.get("radius_pct_H"),
+           "bones": len(names), "body_plan": rig.get("body_plan")}
+    return out
+
+
+def anthro_words(cases):
+    """Anthro rig · V3: the words rule on a list of Vision `what` strings: {what: expected} -> mismatches (0 = all right)."""
+    try:
+        from mt import anthro as AN
+    except ImportError:
+        return {"pending": True, "why": "mt/anthro.py is not in the tree under test"}
+    bad = []
+    for what, want in (cases or {}).items():
+        got = bool(AN.verdict(what, "biped")["anthro"])
+        if got != bool(want):
+            bad.append(what)
+    return {"mismatches": len(bad), "wrong": bad[:8]}
 
 
 def arm_fit(ctx):
@@ -1392,7 +1468,27 @@ def multilimb_rig(ctx):
             "joints_outside": len((rig.get("checks") or {}).get("joints_outside_mesh") or []),
             "stretch_4x": sum(int(v.get("edges_over_4x") or 0) for v in st.values()),
             "stretch_2x": sum(int(v.get("edges_over_2x") or 0) for v in st.values()),
-            "detect_s": ml.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total")}
+            "detect_s": ml.get("seconds"), "rig_total_s": (rig.get("timings_s") or {}).get("total"),
+            **_wing_arm_metrics(run)}
+
+
+def _wing_arm_metrics(run):
+    """Wings V3 (2026-10-15): the arm chain of the finished rig against the wings multilimb found (mt.multilimb.
+    arm_wing_overlap): arm_joints_on_wing (a joint inside a wing's voxel region = the Arm chain runs along a wing),
+    hand_reach_pct_wing_reach (the hand tip's reach over the wing tip's, in %), wing_vertices_excluded (the wing mesh
+    fastrig's arm fit left out), wing_bones, and the probe's own numbers."""
+    try:
+        from mt import multilimb as ML
+        r = ML.arm_wing_overlap(run)
+        rig = json.loads((run / "rig" / "rig.json").read_text())
+        ml = json.loads((run / "rig" / "multilimb.json").read_text()) if (run / "rig" / "multilimb.json").is_file() else {}
+        pr = ml.get("wing_probe") or {}
+        return {"arm_joints_on_wing": r.get("on_wing"), "hand_reach_pct_wing_reach": r.get("hand_reach_pct_wing_reach"),
+                "wing_vertices_excluded": int(((rig.get("arm_chain") or {}).get("wing_vertices_excluded")) or 0),
+                "wing_bones": sum(1 for b in rig.get("bones") or [] if "Wing" in str(b.get("name"))),
+                "wing_probe_act": int(bool(pr.get("act"))), "wing_probe_pair": pr.get("pair")}
+    except Exception as exc:                             # noqa: BLE001 - a metric never costs the case
+        return {"arm_joints_on_wing": None, "wing_arm_error": f"{type(exc).__name__}: {exc}"[:120]}
 
 
 def rig_upright(ctx):
@@ -1535,6 +1631,45 @@ def helper_geometry(ctx, inputs=None):
             "names": [h.get("name") for h in helpers], "kinds": [h.get("kind") for h in helpers],
             "source_kept": int((run / "proj" / "model_source.glb").is_file()), "meshes_rigged": len(kept),
             "kept": kept}
+
+
+def texture_transform(ctx, inputs):
+    """Texture transform · V3 (task 332fb890, 2026-10-16, «почему тут текстуры так коряво лежат»): Meshy / gltfpack
+    GLBs keep 12-bit UVs and scale them back with KHR_texture_transform, which the viewer build drops and the MT
+    renderers ignored; their WebP-only textures were not read at all. On each corpus file: mt.tex_transform.bake must
+    leave no transform (tt_left), the baked plain UVs must equal the transformed source UVs (uv_max_delta), every
+    material with a base colour texture must load it (untextured), and the viewer copy (mt.view_glb.convert) must
+    carry no transform (viewer_tt_left). A file without a transform is the control: unchanged, delta 0."""
+    if not (MT_TREE / "mt" / "tex_transform.py").is_file():
+        return {"pending": True, "why": "mt/tex_transform.py is not in the tree under test"}
+    code = ("import json, sys, numpy as np\n"
+            "from mt import tex_transform as T, glb as G, view_glb as V\n"
+            "def left(b):\n"
+            "    js, _ = T.read_glb(b)\n"
+            "    return sum(1 for m in js.get('materials') or [] for _p, i in T._texinfos(m) if T._tt(i) is not None)\n"
+            "out = {}\n"
+            "for n, f in zip(sys.argv[1::2], sys.argv[2::2]):\n"
+            "    data = open(f, 'rb').read()\n"
+            "    ref = G.load_glb(data)\n"
+            "    baked, rep = T.bake(data)\n"
+            "    m = G.load_glb(baked)\n"
+            "    d = float(np.abs(m.uvs - ref.uvs).max()) if m.uvs.shape == ref.uvs.shape else 9.0\n"
+            "    js, _ = T.read_glb(data)\n"
+            "    want = sum(1 for x in js.get('materials') or [] if (x.get('pbrMetallicRoughness') or {}).get('baseColorTexture'))\n"
+            "    got = sum(1 for x in m.materials if x.texture is not None)\n"
+            "    view, _ = V.convert(data)\n"
+            "    out[n] = {'had_tt': left(data), 'tt_left': left(baked), 'uv_max_delta': d, 'untextured': max(0, want - got),\n"
+            "              'viewer_tt_left': left(view), 'baked_primitives': rep.get('baked_primitives') or 0}\n"
+            "print(json.dumps(out))\n")
+    args = [x for n in inputs for x in (n, str(_input(n)))]
+    p, wall = _child([PY, "-P", "-c", code, *args], timeout=600)
+    if p.returncode != 0:
+        raise RuntimeError(f"texture_transform exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    per = json.loads(p.stdout.strip().splitlines()[-1])
+    agg = lambda k: max(v[k] for v in per.values())                       # noqa: E731
+    return {"inputs": len(per), "with_transform": sum(1 for v in per.values() if v["had_tt"]),
+            "tt_left": agg("tt_left"), "uv_max_delta": agg("uv_max_delta"), "untextured": agg("untextured"),
+            "viewer_tt_left": agg("viewer_tt_left"), "per_input": per, "seconds": wall}
 
 
 def monster_rig(ctx):
@@ -1718,6 +1853,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return mt_quadruped_rig(ctx, inp, a.get("what", ""), a.get("forward_axis", "+z"))
     if k == "helper_geometry":
         return helper_geometry(ctx, a.get("inputs"))
+    if k == "texture_transform":
+        return texture_transform(ctx, a.get("inputs") or ([inp] if inp else []))
     if k == "viewer_opens":
         return viewer_opens(target)
     if k == "quadruped_legs":
@@ -1743,6 +1880,10 @@ def run_check(check: dict, ctx: dict) -> dict:
         return hair_limbs(ctx)
     if k == "constitution":
         return constitution(ctx)
+    if k == "anthro":
+        return anthro_rig(ctx)
+    if k == "anthro_words":
+        return anthro_words(a.get("cases"))
     if k == "rig_joints":
         return rig_joints(ctx)
     if k == "autotex_bake":
