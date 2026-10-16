@@ -1,0 +1,31 @@
+# /etc/systemd/system/autorig-datasets.service
+# AutoRig datasets store (owner 2026-10-16): POST /datasets/api/keep, files at /datasets/files/<set>/<name>.
+# Lives in /srv/autorig/datasets (outside the release tree, like /srv/autorig/fleet). Never deletes.
+# Deploy: write datasets_api.py / datasets_client.py there atomically (tmp + mv), then
+# `systemctl restart autorig-datasets`. nginx: deploy/datasets/nginx-datasets.conf.
+[Unit]
+Description=AutoRig datasets store (/datasets/api, /datasets/files)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/datasets
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/datasets/datasets_api.py serve
+Restart=always
+RestartSec=3
+Nice=5
+MemoryMax=2G
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/data/datasets
+
+[Install]
+WantedBy=multi-user.target
