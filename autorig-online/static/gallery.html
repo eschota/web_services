@@ -119,6 +119,14 @@
                         <select id="gallery-rig-type" class="form-select" style="width: 220px;">
                             <option value="all" data-i18n="gallery_rig_type_all">All rig types</option>
                             <option value="humanoid" data-i18n="gallery_rig_type_humanoid">Humanoid</option>
+                            <option value="quadruped" data-i18n="gallery_rig_type_quadruped">Quadruped</option>
+                            <option value="equine" data-i18n="gallery_rig_type_equine">Equine (horse, deer)</option>
+                            <option value="bird" data-i18n="gallery_rig_type_bird">Bird</option>
+                            <option value="serpent" data-i18n="gallery_rig_type_serpent">Serpent</option>
+                            <option value="monster" data-i18n="gallery_rig_type_monster">Monster</option>
+                            <option value="multilimb" data-i18n="gallery_rig_type_multilimb">Multilimb</option>
+                            <option value="hands" data-i18n="gallery_rig_type_hands">Hands</option>
+                            <option value="vehicle" data-i18n="gallery_rig_type_vehicle">Vehicle</option>
                             <option value="dog" data-i18n="gallery_rig_type_dog">Dog</option>
                             <option value="bear" data-i18n="gallery_rig_type_bear">Bear</option>
                             <option value="cat" data-i18n="gallery_rig_type_cat">Cat</option>
@@ -179,7 +187,7 @@
             sort: 'date',
             rigType: (() => {
                 const value = new URLSearchParams(window.location.search).get('rig_type') || 'all';
-                const allowed = ['all', 'humanoid', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+                const allowed = ['all', 'humanoid', 'quadruped', 'equine', 'bird', 'serpent', 'monster', 'multilimb', 'hands', 'vehicle', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
                 return allowed.includes(value) ? value : 'all';
             })(),
             loading: false,

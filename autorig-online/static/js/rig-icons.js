@@ -8,6 +8,8 @@
     const RIG_ICON_ANIMAL_KEYS = [
         'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe',
         'horse', 'mouse', 'pig', 'rabbit', 'turtle',
+        // V3 rig categories (2026-10-16): Bird.png, Serpent.png, Monster.png, Multilimb.png, Hands.png, Vehicle.png, Other.png
+        'bird', 'serpent', 'monster', 'multilimb', 'hands', 'vehicle', 'other',
     ];
     const animalSet = new Set(RIG_ICON_ANIMAL_KEYS);
 
