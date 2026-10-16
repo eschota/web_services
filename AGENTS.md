@@ -997,6 +997,18 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   proven in the real browser on the corpus tasks (camera accepts input within 1 s of the load event, one handle moves
   its pair, a reload shows the saved axles, no console errors, time to interactive and FPS light vs full) and by the
   assembler's own check numbers before / after.
+* **Parts are placed by voxel analysis of each mesh, wheels and frame symmetric** (owner, 2026-10-16 ~12:10 UTC, on
+  the shell-split assembly of the motorhome with the frame floating in front of the body and a wheel in the air: «что с
+  позиционированием колес и рамы относительно корпуса? нужно отправить спецагента решать эту задачу через воксельный
+  анализ мешей по отдельности. колеса должны быть симметричны и рама тоже»): a dedicated agent builds
+  `mt/vehicle_fit3d.py`: every part is voxelised on its own; the body gives its symmetry plane, longitudinal axis, ground
+  plane and wheel arches (cavities under the sills); the frame gives its own symmetry plane and axle lines and is
+  symmetrised; the wheel is one cylinder instance; the placement aligns the symmetry planes, puts the axle lines into
+  the arches, the wheels symmetrically on the axle ends with all four on one ground, and openables into their
+  apertures; the picture (ellipses, silhouette) is only the check. Metrics before / after: plane angle and offset,
+  wheel-to-arch distance, ground contact spread, body / frame / wheel intersection volumes, mirror IoU of the assembly,
+  plus the assembler's silhouette IoU; the Blender truck scene (known object placement) is the ground truth for the
+  method. Option `assemble_fit3d`, off until the owner's verdict.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
