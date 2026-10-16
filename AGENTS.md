@@ -968,6 +968,19 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   reprojection); TSDF and Gaussians-to-mesh; textures baked from the views; wheels as RANSAC cylinders with physical
   invariants; proof on synthetic cars with ground truth (Chamfer, F-score, IoU, wheel radius / centre error) and on
   the corpus (silhouette IoU, far side), beside the single-image Hunyuan / Tripo baselines.
+* **One Z-depth and symmetry instead of the orbit video** (owner, 2026-10-16 ~09:50 UTC: «зачем нам облет по видео,
+  если достаточно одного Z_depth, просто отсимметрировать его, мы же знаем что корпус машины и колеса симметричны, надо
+  просто дальнюю сторону вокселей относительно центра симметрии симметрировать и все, вопрос только в том как найти
+  центр симметрии по глубине и габаритам … Z_depth, и нормали есть на рендерфине по апи»): the orbit-video / multi-view
+  study is stopped; the Sonnet agent now tests the single-view path: Z-depth and normals from renderfin's API for the
+  cut picture, unprojected with the measured camera and scaled by the wheel base / wheel diameter; the symmetry plane
+  from the axle axis (its normal) and the midpoints of symmetric part pairs seen on both sides (lights, mirrors,
+  windshield and roof edges), refined by a mirror ICP of the visible points on themselves; the visible half voxelised
+  and mirrored across the plane, the mesh extracted and textured by projection; wheels as cylinders on their ellipses.
+  The method's limit is measured honestly: from a 3/4 view the mirror fills the far side only, the rear and the
+  underside are absent from one depth map, so the candidate is a hybrid: the Plan C whole model (Hunyuan) as the base
+  and the visible half + its mirror refining it by depth. The same metrics as Plan C decide (silhouette IoU, Chamfer
+  on synthetic ground truth). No paid API, farm only.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
