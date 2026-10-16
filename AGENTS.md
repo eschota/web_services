@@ -981,6 +981,22 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   underside are absent from one depth map, so the candidate is a hybrid: the Plan C whole model (Hunyuan) as the base
   and the visible half + its mirror refining it by depth. The same metrics as Plan C decide (silhouette IoU, Chamfer
   on synthetic ground truth). No paid API, farm only.
+* **The vehicle viewer has its own UX engineer (Sonnet 5.5, persistent context)** (owner, 2026-10-16 ~10:10 UTC, on
+  the high-poly motorhome that answered «The 3D model did not load: Failed to fetch»: «когда 3д модель загрузилась
+  камера должна разлочиться, и управляться как в обычном вьювере, так же в режиме блюпринт должно быть можно
+  симметрично двигать оси колес чтобы их корректно настроить. отправляй соннета делать быстрые правки в UX, пусть у
+  него будет роль с большим контекстом по UX, чтобы он быстро вносил правки и делал интерфейс тачек интерактивным по
+  моим указаниям»): one Sonnet agent owns the vehicle viewer UX and receives the owner's later UX orders through the
+  lead. Its contract: load errors name the cause (HTTP code, size, timeout) with a progress in MB and a retry; a light
+  copy of the model (meshopt / draco, ~150 k faces, `model_light_url`) loads first and the full one replaces it in the
+  background; after the load the camera unlocks with a smooth hand-over from the measured camera into the orbit
+  controls (picture mode keeps the fixed camera, a button returns to it); the wheel blueprint has gizmos on axles and
+  wheels, symmetry about the body's longitudinal mid-plane by default (a switch), snapping to the picture's ellipses,
+  live numbers (track, wheel base, radius, centre error in % width), undo / redo, and saves a new version of
+  `wheels/rig.json` through the vehicle service with the previous one kept and the scene re-assembled; every change is
+  proven in the real browser on the corpus tasks (camera accepts input within 1 s of the load event, one handle moves
+  its pair, a reload shows the saved axles, no console errors, time to interactive and FPS light vs full) and by the
+  assembler's own check numbers before / after.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
