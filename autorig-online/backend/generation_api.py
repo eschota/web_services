@@ -9,6 +9,7 @@ front of traffic that has nothing to do with generation.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Optional
 from urllib.parse import quote
@@ -16,7 +17,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from generation_tasks import GENERATION_CREDITS, set_generation_meta
+from generation_tasks import GENERATION_CREDITS, kick_start, set_generation_meta
+from subscription_access import user_has_active_subscription
 
 router = APIRouter()
 
@@ -64,7 +66,8 @@ def register_generation_routes(app, deps: dict) -> None:
             )
 
         balance = int(getattr(user, "balance_credits", 0) or 0)
-        if balance < GENERATION_CREDITS:
+        subscription_active = user_has_active_subscription(user)
+        if not subscription_active and balance < GENERATION_CREDITS:
             raise HTTPException(
                 status_code=402,
                 detail=f"Not enough credits: {GENERATION_CREDITS} required, {balance} available",
@@ -111,17 +114,26 @@ def register_generation_routes(app, deps: dict) -> None:
             raise HTTPException(status_code=500, detail=error or "Could not create the task")
 
         # Charge only once the task exists, so a failed creation cannot bill.
-        user.balance_credits = balance - GENERATION_CREDITS
-        set_generation_meta(task, stage="detect", charged=GENERATION_CREDITS)
+        credits_charged = 0 if subscription_active else GENERATION_CREDITS
+        if credits_charged:
+            user.balance_credits = balance - credits_charged
+        # picture intake (owner 2026-10-16): the stage is `isolate` from the first second; the cutout and the 3D job are
+        # started right away in the background (the Vision detection runs alongside the job, never before it)
+        set_generation_meta(task, stage="isolate", isolate_started_at=time.time(), charged=credits_charged)
         await db.commit()
+        try:
+            kick_start(str(task.id))
+        except Exception as exc:                                   # noqa: BLE001 - the pump tick starts it
+            print(f"[Generation] immediate start of {task.id} failed (the tick will): {exc}")
         print(
             f"[Generation] task {task.id} created for {user.email} "
-            f"({GENERATION_CREDITS} credits, {written} bytes)"
+            f"({credits_charged} credits, subscription={subscription_active}, {written} bytes)"
         )
         return {
             "task_id": task.id,
             "status": task.status,
-            "credits_charged": GENERATION_CREDITS,
+            "credits_charged": credits_charged,
             "credits_remaining": user.balance_credits,
+            "subscription_active": subscription_active,
             "progress_url": f"/task?id={task.id}",
         }

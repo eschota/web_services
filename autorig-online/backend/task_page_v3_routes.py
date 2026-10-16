@@ -337,6 +337,65 @@ def _v3_state(task: Any, *, is_admin: bool) -> dict[str, Any]:
     }
 
 
+# Picture intake (owner 2026-10-16): a `generate` task (a picture on its way to a 3D model) opens the V3 viewer at
+# once with the picture in a black scene; the page swaps the iframe to the run viewer when the mesh is bound.
+_GEN_SUB_PROGRESS = {"detect": 0.02, "isolate": 0.02, "waiting_3d_worker": 0.04, "ready": 0.29}
+
+
+def _generate_meta(task: Any) -> dict[str, Any]:
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+    except (TypeError, ValueError):
+        return {}
+    meta = settings.get("generation") if isinstance(settings, dict) else None
+    return meta if isinstance(meta, dict) else {}
+
+
+def _generate_state(task: Any) -> Optional[dict[str, Any]]:
+    """The contract of a picture on its way to 3D (None when the row is not such a task: the classic answer stays)."""
+    if str(getattr(task, "pipeline_kind", "") or "").strip().lower() != "generate":
+        return None
+    if _task_status(task) not in ("created", "processing"):
+        return None
+    meta = _generate_meta(task)
+    stage = str(meta.get("stage") or "")
+    if stage not in ("", "detect", "isolate", "model", "rigging"):
+        return None
+    picture = str(getattr(task, "input_url", "") or "")
+    if not picture.startswith(("http://", "https://")):
+        return None
+    sub = {"": "isolate", "isolate": "isolate", "detect": "detect", "rigging": "ready"}.get(stage) \
+        or str(meta.get("sub_key") or "waiting_3d_worker")
+    cutout = None
+    try:
+        import picture_isolate
+        from config import APP_URL
+
+        token = picture_isolate.token_of(picture)
+        if token and picture_isolate.cutout_ready(token):
+            cutout = f"{APP_URL}/u/{token}/cutout.png"
+    except Exception as exc:  # noqa: BLE001 - an older release: the viewer simply shows no cutout
+        log.info("picture cutout lookup unavailable: %s", exc)
+    began = meta.get("sub_started_at") or meta.get("isolate_started_at")
+    try:
+        seconds = max(0, int(time.time() - float(began))) if began else _seconds_since(getattr(task, "created_at", None))
+    except (TypeError, ValueError):
+        seconds = _seconds_since(getattr(task, "created_at", None))
+    v3 = _v3_projection(task)
+    progress = float(_GEN_SUB_PROGRESS.get(sub, 0.04))
+    if stage in ("model", "rigging") and isinstance(v3.get("progress"), (int, float)):
+        progress = max(progress, min(0.30, float(v3["progress"])))
+    job = str(meta.get("job_id") or "") or "detect"
+    return {
+        "stage": "generation", "stage_title": None, "stage_key": "generation", "sub_key": sub, "stage_seconds": seconds,
+        "status": "processing", "progress": max(0.02, min(0.30, progress)), "queue": None,
+        "viewer": {"kind": "picture", "page": UNITY_PAGE,
+                   "params": {"picture": picture, "cutout": cutout, "task": str(task.id)},
+                   "rigged": False, "revision": f"gen:{job}"},
+        "model": {"state": "generating"}, "v3": None, "eta_s": None, "progress_basis": None,
+    }
+
+
 async def _classic_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path) -> dict[str, Any]:
     """A classic conveyor task: its own cached GLBs feed the Unity viewer."""
     task_id = str(task.id)
@@ -415,8 +474,9 @@ async def build_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path,
                       is_admin: bool) -> dict[str, Any]:
     task_id = str(task.id)
     v3_task = str(getattr(task, "pipeline_kind", "") or "").strip().lower() == "v3"
-    part = _v3_state(task, is_admin=is_admin) if v3_task else \
-        await _classic_state(task, db, task_model=task_model, cache_dir=cache_dir)
+    picture_part = None if v3_task else _generate_state(task)
+    part = _v3_state(task, is_admin=is_admin) if v3_task else (picture_part or
+        await _classic_state(task, db, task_model=task_model, cache_dir=cache_dir))
     return {
         "schema": "autorig.task-page-v3/1",
         "task_id": task_id,
@@ -431,7 +491,7 @@ async def build_state(task: Any, db: Any, *, task_model: Any, cache_dir: Path,
         "eta_s": part.get("eta_s"),
         "progress_basis": part.get("progress_basis"),
         "queue": part["queue"],
-        "pipeline": "v3" if v3_task else "classic",
+        "pipeline": "v3" if (v3_task or picture_part) else "classic",
         "v3": part["v3"],
         "viewer": part["viewer"],
         "model": part["model"],
