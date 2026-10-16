@@ -195,7 +195,7 @@ class MainBlockTest(unittest.TestCase):
     def test_icon_key_function(self):
         f = self.ns["_gallery_rig_icon_key"]
         self.assertEqual(f(SimpleNamespace(v3_category="equine", input_type="t_pose", viewer_settings=None)), "horse")
-        self.assertEqual(f(SimpleNamespace(v3_category="vehicle", input_type="t_pose", viewer_settings=None)), "humanoid")
+        self.assertEqual(f(SimpleNamespace(v3_category="vehicle", input_type="t_pose", viewer_settings=None)), "vehicle")
         self.assertEqual(f(SimpleNamespace(input_type="t_pose", viewer_settings=None)), "humanoid")
         self.assertEqual(f(SimpleNamespace(v3_category=None, input_type="animal", viewer_settings=animal_settings("cat"))), "cat")
 
