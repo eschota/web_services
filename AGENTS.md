@@ -946,6 +946,28 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   (the paid confirmation of 2026-10-16 ~08:40 UTC still stands, 2 parts), B the Hunyuan cloud (2 parts), C the free
   farm Hunyuan (gen3d queue). One consolidated sheet with cost, time, faces, IoU and the renders goes to the owner;
   the doors / interior / driver work later cuts the parts from the whole body mesh, not from the picture.
+* **Hypothesis under test by the lead: no reflections, no glass, a 55 % longitudinal cut, high-poly, mirror** (owner,
+  2026-10-16 ~08:10 UTC: «1. нужно стирать со всех стекол отражения 2. нужно удалять все стекла с изображения, чтобы был
+  виден салон 3. нужно разрезать машину на 55% относительно продольной оси, чтобы оставить одну сторону без руля
+  желательно и уже 55% корпуса без колес отдать на моделинг, а модель полученную скорректировать перспективно и сделать
+  symmetry на 50% чтобы получить детализацию в х2 раза проработанную, и надо получать хайполи максимальный, типа 1 млн
+  поликов или больше если трипо платное это выдает. займись этим в ручную как исследователь и проверь эту гипотезу»):
+  the lead runs it by hand on the motorhome as research, not as conveyor code: Qwen edits in order (reflections wiped
+  from every pane; every pane removed so the cabin shows; the vehicle cut along its longitudinal mid-plane at 55 %,
+  keeping the side without the steering wheel; wheels off), the 55 % body goes to modelling at the highest polygon
+  count the generator returns (Tripo paid, `face_limit` at its maximum, 1 M faces if it gives them; the free farm as
+  the control), the mesh is corrected in perspective, cut at 50 % and mirrored, so the detail per side doubles. The
+  verdict is numbers: faces, silhouette IoU to the picture, mirror IoU, detail on the far side, time and credits,
+  against the Plan C whole-body model of the same vehicle.
+* **Orbit video and voxel geometry: a Sonnet 5.5 research agent** (owner, same message: «параллельно запусти соннет
+  5.5 медиум с подробной инструкцией про видео и воксельную геометрию на основе него», after his idea «сделать видео
+  облет генератором видео для авто и на основе облета и Z_depth каждого кадра построить воксельную сетку … запечь
+  текстуры дифузные и нормальки, и колеса будут идеально определены с помощью воксельной сетки»): a research task on
+  the farm only, no paid API, no conveyor changes before the verdict: generated orbit video vs fixed-pose multi-view
+  diffusion vs Hunyuan3D-2 multi-view; consistency measured before reconstruction (SfM reprojection, cross-frame depth
+  reprojection); TSDF and Gaussians-to-mesh; textures baked from the views; wheels as RANSAC cylinders with physical
+  invariants; proof on synthetic cars with ground truth (Chamfer, F-score, IoU, wheel radius / centre error) and on
+  the corpus (silhouette IoU, far side), beside the single-image Hunyuan / Tripo baselines.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
