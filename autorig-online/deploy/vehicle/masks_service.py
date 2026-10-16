@@ -9,9 +9,13 @@ through a reverse tunnel (`ssh -R 19411:127.0.0.1:8989 autorig-vps`); mt/vehicle
 VEHICLE_MASKS_URL first and falls back to the CPU worker.
 
     POST /masks   {"image_b64": <png/jpg>, "queries": {"wheel": "wheel,tire", ...}, "box_threshold": 0.3,
-                   "wheel_threshold": 0.4, "text_threshold": 0.25, "nms_iou": 0.5, "max_share": 0.35}
+                   "wheel_threshold": 0.4, "text_threshold": 0.25, "nms_iou": 0.5, "max_share": 0.35,
+                   "boxes": [{"kind": "hood", "box": [x0, y0, x1, y1]}, ...]}      (boxes: optional)
               ->  the masks.json document (objects with box, scores, pixels, centre, ellipse) plus
                   "masks": {"<kind>_<i>.png": <png b64, 0/255>} and "seconds" {dino, sam, total}
+              `boxes` (2026-10-16): one SAM2 mask per box hint, no DINO; objects with "source": "box",
+              "prompt_box", masks "<kind>_box_<i>.png"; "boxes_done" counts them. With `boxes` and no `queries`
+              DINO does not run at all. Without `boxes` the request is the text path as before.
     GET  /health  {"ok": true, "device": "cuda", "gpu": "...", "loaded": true, "box": "f12", "requests": 3,
                    "inflight": 0, "last_seconds": 1.8, "vram_mb": 2210, "idle_unload_s": 600}
 
@@ -118,7 +122,8 @@ def _vram_mb():
     return None
 
 
-def segment(img_bgr, queries, box_threshold=0.3, wheel_threshold=0.4, text_threshold=0.25, nms_iou=0.5, max_share=0.35):
+def segment(img_bgr, queries, box_threshold=0.3, wheel_threshold=0.4, text_threshold=0.25, nms_iou=0.5, max_share=0.35,
+            boxes=None):
     import torch
     from PIL import Image
     proc, gd, sam, device = STATE["proc"], STATE["gd"], STATE["sam"], STATE["device"]
@@ -189,8 +194,44 @@ def segment(img_bgr, queries, box_threshold=0.3, wheel_threshold=0.4, text_thres
                             "sam_score": round(best[1], 3), "box": [round(v) for v in k["box"]], "mask": name,
                             "pixels": int(m.sum()), "centre": [round(float(xs.mean()), 1), round(float(ys.mean()), 1)],
                             "ellipse": ell})
+    boxes_done = 0
+    with torch.inference_mode():                    # the box hints (no DINO): one SAM2 mask per box
+        for bx in boxes or []:
+            try:
+                box = np.array([float(v) for v in bx["box"]][:4], np.float32)
+            except (KeyError, TypeError, ValueError):
+                continue
+            box = np.clip(box, 0, [W, H, W, H]).astype(np.float32)
+            if box[2] - box[0] < 3 or box[3] - box[1] < 3:
+                continue
+            kind = str(bx.get("kind") or "part")
+            ctr = np.array([[(box[0] + box[2]) / 2, (box[1] + box[3]) / 2]], np.float32)
+            ms, scores, _ = sam.predict(point_coords=ctr, point_labels=np.array([1], np.int32), box=box[None, :], multimask_output=True)
+            best = None
+            for m, s in zip(ms.astype(bool), scores):
+                ys, xs = np.nonzero(m)
+                if not len(xs):
+                    continue
+                inside = float(((xs >= box[0]) & (xs <= box[2]) & (ys >= box[1]) & (ys <= box[3])).mean())
+                if inside >= 0.55 and (best is None or s > best[1]):
+                    best = (m, float(s), inside)
+            if best is None:
+                continue
+            m = best[0]
+            i = counts.get(kind + "_box", 0)
+            counts[kind + "_box"] = i + 1
+            name = f"{kind}_box_{i}.png"
+            ok, png = cv2.imencode(".png", m.astype(np.uint8) * 255)
+            masks[name] = base64.b64encode(png.tobytes()).decode("ascii")
+            ys, xs = np.nonzero(m)
+            objects.append({"id": len(objects), "kind": kind, "word": None, "dino_score": None, "source": "box",
+                            "prompt_box": [round(float(v)) for v in box], "tag": bx.get("tag"),
+                            "sam_score": round(best[1], 3), "box": [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())],
+                            "mask": name, "pixels": int(m.sum()),
+                            "centre": [round(float(xs.mean()), 1), round(float(ys.mean()), 1)], "ellipse": None})
+            boxes_done += 1
     sam_s = round(time.perf_counter() - t, 3)
-    return {"schema": "autorig.vehicle.masks/1", "size": [W, H], "queries": qlist,
+    return {"schema": "autorig.vehicle.masks/1", "size": [W, H], "queries": qlist, "boxes_done": boxes_done,
             "thresholds": {"box": box_threshold, "text": text_threshold, "nms_iou": nms_iou},
             "raw": raw, "objects": objects, "masks": masks,
             "seconds": {"dino": dino_s, "sam": sam_s, "total": round(time.perf_counter() - t0, 3)},
@@ -244,9 +285,12 @@ class H(BaseHTTPRequestHandler):
                     if not STATE["loaded"]:
                         STATE["errors"] += 1
                         return self._send(503, {"error": "models unloaded"})
-                    doc = segment(img, body.get("queries") or {"wheel": "wheel,tire"},
+                    queries = (body.get("queries") or {}) if body.get("boxes") else \
+                        (body.get("queries") or {"wheel": "wheel,tire"})      # the text path: as before
+                    doc = segment(img, queries,
                                   float(body.get("box_threshold", 0.3)), float(body.get("wheel_threshold", 0.4)),
-                                  float(body.get("text_threshold", 0.25)), float(body.get("nms_iou", 0.5)), float(body.get("max_share", 0.35)))
+                                  float(body.get("text_threshold", 0.25)), float(body.get("nms_iou", 0.5)), float(body.get("max_share", 0.35)),
+                                  boxes=body.get("boxes") or None)
                     STATE["last_used"] = time.time()
                 doc["box_name"] = STATE["box"]
                 doc["seconds"]["request"] = round(time.perf_counter() - t0, 3)
