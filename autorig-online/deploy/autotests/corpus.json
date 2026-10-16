@@ -16772,7 +16772,7 @@
    "id": "meshy_texture_transform",
    "task": "332fb890-a089-48cd-8b9b-b6a102a9cd80",
    "cost": 1,
-   "defect": "Meshy / gltfpack GLB: 12-bit UVs (normalized uint16, 0..1/16) scaled back by KHR_texture_transform (scale 16); the viewer build drops the transform (glTFast _TEXTURE_TRANSFORM shader_feature stripped), the MT renderers ignored it and did not read EXT_texture_webp: the model sampled 1/256 of its atlas (blotches), Vision sheets were white (owner 2026-10-16)",
+   "defect": "Meshy / gltfpack GLB: 12-bit UVs (normalized uint16, 0..1/16) scaled back by KHR_texture_transform (scale 16); the viewer build drops the transform (glTFast _TEXTURE_TRANSFORM shader_feature stripped), the MT renderers ignored it and did not read EXT_texture_webp: the model sampled 1/256 of its atlas (blotches), Vision sheets were white (owner 2026-10-16). Fallback for missing / broken textures: the clay look (mt/clay_look.py), built by a child process for the viewer.",
    "checks": [
     {
      "id": "uv_bake",
@@ -16809,6 +16809,47 @@
       "with_transform": [
        ">=",
        2
+      ]
+     }
+    },
+    {
+     "id": "clay_look",
+     "kind": "clay_look",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "role": "regression",
+     "params": {
+      "inputs": [
+       "332fb890.upload.glb",
+       "66ba97ba.upload.glb"
+      ]
+     },
+     "thresholds": {
+      "built": [
+       "==",
+       1
+      ],
+      "no_color": [
+       "==",
+       0
+      ],
+      "textures": [
+       "==",
+       0
+      ],
+      "materials": [
+       "==",
+       1
+      ],
+      "vertex_delta": [
+       "==",
+       0
+      ],
+      "bake_seconds_max": [
+       "<=",
+       60
       ]
      }
     }

@@ -1672,6 +1672,41 @@ def texture_transform(ctx, inputs):
             "viewer_tt_left": agg("viewer_tt_left"), "per_input": per, "seconds": wall}
 
 
+def clay_look(ctx, inputs):
+    """Clay look · V3 (mt/clay_look.py, 2026-10-16, owner: «cavity ao falloff shader sss для объектов где текстур нет или
+    они повреждены»): on each corpus GLB, in a scratch run, resolve(look=clay, wait=True) must build the clay copy through
+    its child process (the path the viewer uses), carry COLOR_0 on every primitive, no textures, one material, and the
+    same vertex count; the bake time is reported."""
+    if not (MT_TREE / "mt" / "clay_look.py").is_file():
+        return {"pending": True, "why": "mt/clay_look.py is not in the tree under test"}
+    code = ("import json, sys, shutil, tempfile, pathlib, time\n"
+            "from mt import clay_look as C, tex_transform as T\n"
+            "out = {}\n"
+            "for n, f in zip(sys.argv[1::2], sys.argv[2::2]):\n"
+            "    d = pathlib.Path(tempfile.mkdtemp(prefix='claylook-'))\n"
+            "    (d / 'run.json').write_text('{}'); (d / 'rig').mkdir()\n"
+            "    src = d / 'rig' / 'rigged.glb'; shutil.copyfile(f, src)\n"
+            "    t = time.time(); got, dec = C.resolve(src, 'clay', wait=True); sec = time.time() - t\n"
+            "    js, b = T.read_glb(got.read_bytes()); js0, _ = T.read_glb(src.read_bytes())\n"
+            "    prims = [p for m in js.get('meshes') or [] for p in m.get('primitives') or []]\n"
+            "    vc = lambda j: sum(j['accessors'][p['attributes']['POSITION']]['count'] for m in j.get('meshes') or [] for p in m.get('primitives') or [])\n"
+            "    out[n] = {'built': int(got != src), 'no_color': sum(1 for p in prims if 'COLOR_0' not in p['attributes']),\n"
+            "              'textures': len(js.get('textures') or []), 'materials': len(js.get('materials') or []),\n"
+            "              'vertex_delta': abs(vc(js) - vc(js0)), 'seconds': round(sec, 2), 'error': dec.get('error')}\n"
+            "    shutil.rmtree(d, ignore_errors=True)\n"
+            "print(json.dumps(out))\n")
+    args = [x for n in inputs for x in (n, str(_input(n)))]
+    p, wall = _child([PY, "-P", "-c", code, *args], timeout=900)
+    if p.returncode != 0:
+        raise RuntimeError(f"clay_look exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    per = json.loads(p.stdout.strip().splitlines()[-1])
+    return {"inputs": len(per), "built": min(v["built"] for v in per.values()),
+            "no_color": max(v["no_color"] for v in per.values()), "textures": max(v["textures"] for v in per.values()),
+            "materials": max(v["materials"] for v in per.values()),
+            "vertex_delta": max(v["vertex_delta"] for v in per.values()),
+            "bake_seconds_max": max(v["seconds"] for v in per.values()), "per_input": per, "seconds": wall}
+
+
 def monster_rig(ctx):
     """«Monster rig · V3» (mt/monster.py, 2026-10-13, task 35356012 «elongated humanoid creature»): the monster verdict of
     this case's MT run, the leg type (crouched / digitigrade / stumpy / long_thin / plantigrade), the pinned joints,
@@ -1853,6 +1888,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return mt_quadruped_rig(ctx, inp, a.get("what", ""), a.get("forward_axis", "+z"))
     if k == "helper_geometry":
         return helper_geometry(ctx, a.get("inputs"))
+    if k == "clay_look":
+        return clay_look(ctx, a.get("inputs") or ([inp] if inp else []))
     if k == "texture_transform":
         return texture_transform(ctx, a.get("inputs") or ([inp] if inp else []))
     if k == "viewer_opens":
