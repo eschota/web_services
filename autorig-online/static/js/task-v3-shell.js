@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261016.1';
+const BUILD = 'tv3-20261016.2';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -159,6 +159,13 @@ function viewerUrl(viewer) {
     if (api !== `/api/task-viewer/${taskId}` || p.run !== 'task') return null;
     url.searchParams.set('api', location.origin + api);
     url.searchParams.set('run', 'task');
+  } else if (viewer.kind === 'picture') {
+    // Picture intake V3 (owner 2026-10-16: «вьювер V3 сразу должен открываться с пустой сценой и показывать картинку»):
+    // the viewer opens on the black scene with the picture (and its cutout when it exists) while the model is generated
+    const pic = String(p.picture || '');
+    if (!/^https?:\/\//.test(pic) && !pic.startsWith('/')) return null;
+    url.searchParams.set('picture', pic);
+    if (p.cutout) url.searchParams.set('cutout', String(p.cutout));
   } else {
     return null;
   }
@@ -205,12 +212,12 @@ function agentStatus(state, status, finished, stageTitle) {
 function showViewer(viewer) {
   const url = viewerUrl(viewer);
   if (!url) return false;
-  const run = url.searchParams.get('run');
+  const run = url.searchParams.get('run') || (viewer.kind === 'picture' ? 'picture' : null);
   if (shown && shown.kind === viewer.kind && shown.run === run) {
     if (shown.revision !== viewer.revision) {
       shown.revision = viewer.revision;
       const bridge = els.viewer.contentWindow && els.viewer.contentWindow.autorigUnity;
-      if (bridge && typeof bridge.send === 'function') bridge.send('LoadRun', run);
+      if (bridge && typeof bridge.send === 'function' && viewer.kind !== 'picture') bridge.send('LoadRun', run);
       else els.viewer.src = url.toString();
     }
     return true;
@@ -332,6 +339,8 @@ function render(state) {
   els.chip.title = chip;
   // Session agent V3: the agent tells the stage and shows the progress; no separate pill while it does
   if (hasViewer && agentStatus(state, status, finished, stageTitle)) els.chip.hidden = true;
+  // Picture intake V3: the stage into the iframe (picture-plate.js shows it under the picture while the model is made)
+  if (hasViewer) { try { els.viewer.contentWindow && els.viewer.contentWindow.postMessage({ type: 'autorig.v3.stage', stage_key: state.stage_key || null, sub_key: state.sub_key || null, progress: Number(progress || 0), title: stageTitle || line, status }, location.origin); } catch (e) { /* ignore */ } }
   // the big top banner (owner 2026-10-16) while the rig is in the making; the small chip steps aside for it
   if (hasViewer && topStatus(state, status, finished, hasViewer, stageTitle, progress, waiting)) els.chip.hidden = true;
   else if (!hasViewer && els.status) els.status.hidden = true;
@@ -350,7 +359,7 @@ const V3_EN = {
   source_registered: 'Source accepted', model_validation: 'Checking the model', failed: 'Failed',
 };
 const V3_SUB_EN = {
-  projections: 'projections', vision: 'Vision analysis', bones_and_weights: 'bones and weights', library_clips: 'animations',
+  projections: 'projections', vision: 'Vision analysis', isolate: 'isolating the character', bones_and_weights: 'bones and weights', library_clips: 'animations',
   numeric: 'numeric check', scale: 'scale', detect: 'reading the picture', waiting_3d_worker: 'waiting for a 3D worker',
   hunyuan: 'Hunyuan 3D', turntable: 'turntable', ready: 'model ready', killed_retry: 'retry after a failure',
 };
