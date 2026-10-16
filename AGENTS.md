@@ -1009,6 +1009,20 @@ obot_\HumanoidRobotsPack`, HR-01 first,
   wheel-to-arch distance, ground contact spread, body / frame / wheel intersection volumes, mirror IoU of the assembly,
   plus the assembler's silhouette IoU; the Blender truck scene (known object placement) is the ground truth for the
   method. Option `assemble_fit3d`, off until the owner's verdict.
+* **R&D «photo → 3D in a minute, free, on the farm»: view chains, a 120-frame orbit, feed-forward 3D, PBR channels**
+  (owner, 2026-10-16 ~19:00 UTC: «давай поворачивать камеру с помощью Flux3 эдита в 2 потока, один влево на 45 градусов,
+  второй вправо … до облёта каждые 45 градусов … потом усреднение по глубине всех ракурсов и запекание. так же рассмотри
+  быструю генерацию видео 360 за 120 кадров … сравни точность модели и консистентность кадров … 1. быстрый способ в
+  пределах 1 минуты … 2. ключевые кадры в Z_depth и normal, и с помощью Flux 3 … доп. каналы Metallic PBR и Emissive для
+  фар 3. генерировать модель быстрее и бесплатно у себя на ферме»): the spec is `docs/vehicle-nvs-rnd-spec-20261016.md`
+  in the MT repo. Three Sonnet research agents, one protocol, one ground truth (6 Objaverse cars rendered at 8 yaws with
+  metric depth, normals and PBR passes; ≥ 2 real CO3D car sequences): branch 1 FLUX 3 edit chains ±45° to closure at
+  180° vs a pose-conditioned model, plus LTX-2.5 / H3 orbit videos of 120 frames (closure error, drift, consistency);
+  branch 2 TRELLIS / Hunyuan3D-2mini / views → Hunyuan3D-2mv / MoGe-2 + VGGT depth → TSDF (Chamfer, F@5 all / far /
+  rear, held-out IoU, wheels, seconds, VRAM); branch 3 Marigold-IID vs FLUX 3 vs Hunyuan-Paint for albedo / metallic /
+  roughness, emissive from the headlight masks (MAE per channel, HDRI re-render). Downloads for the test are allowed by
+  this order (TRELLIS, MoGe-2, Marigold-IID); VGGT / MASt3R are CC-BY-NC and serve measurement only, never the conveyor.
+  The candidate for the conveyor must beat plan C on F@5 and take ≤ 60 s on a farm box; the owner decides on one sheet.
 * **Wheel masks come from GroundingDINO + SAM2** (`/srv/autorig/data/vehicle-segmentation/` on the VPS, queries
   «wheel» / «tire», DINO threshold about 0.4): 3 of 3 visible wheels on both owner pictures (2026-10-15). The
   Detectron2 container (`docker-detectron2-1`, COCO classes) has no wheel class and only gives a rough body mask.
