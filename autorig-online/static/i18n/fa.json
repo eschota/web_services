@@ -2069,5 +2069,17 @@
   "dlv3_pack_hint": "هر بازگشایی همهٔ دانلودهای یک تسک را برای همیشه باز می‌کند",
   "dlv3_unlock_cta": "بازگشایی این تسک · {cost} اعتبار",
   "dlv3_unlock_left": "{n} باقی‌مانده",
-  "dlv3_unlock_failed": "بازگشایی انجام نشد · دوباره تلاش کنید"
+  "dlv3_unlock_failed": "بازگشایی انجام نشد · دوباره تلاش کنید",
+  "taskv3_step_queue": "صف",
+  "taskv3_step_source": "منبع",
+  "taskv3_step_analysis": "تحلیل",
+  "taskv3_step_rig": "ریگ",
+  "taskv3_step_retarget": "انیمیشن‌ها",
+  "taskv3_step_qa": "بررسی",
+  "taskv3_step_publish": "انتشار",
+  "taskv3_status_step": "گام {n} از {total}",
+  "taskv3_status_ready_sub": "ریگ در نمایشگر است، انیمیشن‌ها پخش می‌شوند",
+  "taskv3_status_review_sub": "ریگ منتشر شده؛ بررسی کیفیت نگاهی می‌خواهد",
+  "taskv3_status_fail_sub": "برای صفحهٔ کلاسیک و شروع دوباره بزنید",
+  "taskv3_status_details": "برای جزئیات بزنید"
 }

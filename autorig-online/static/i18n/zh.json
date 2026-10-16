@@ -2071,5 +2071,17 @@
   "dlv3_pack_hint": "每次解锁永久开放一个任务的全部下载",
   "dlv3_unlock_cta": "解锁此任务 · {cost} 积分",
   "dlv3_unlock_left": "剩余 {n}",
-  "dlv3_unlock_failed": "解锁失败 · 请重试"
+  "dlv3_unlock_failed": "解锁失败 · 请重试",
+  "taskv3_step_queue": "排队",
+  "taskv3_step_source": "源文件",
+  "taskv3_step_analysis": "分析",
+  "taskv3_step_rig": "绑定",
+  "taskv3_step_retarget": "动画",
+  "taskv3_step_qa": "检查",
+  "taskv3_step_publish": "发布",
+  "taskv3_status_step": "第 {n} 步，共 {total} 步",
+  "taskv3_status_ready_sub": "骨架已在查看器中，动画正在播放",
+  "taskv3_status_review_sub": "骨架已发布；质量检查需要人工查看",
+  "taskv3_status_fail_sub": "点击打开经典页面并重新开始",
+  "taskv3_status_details": "点击查看详情"
 }

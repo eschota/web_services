@@ -2089,5 +2089,17 @@
   "dlv3_pack_hint": "Каждая открывает все скачивания одной задачи навсегда",
   "dlv3_unlock_cta": "Открыть эту задачу · {cost} кредитов",
   "dlv3_unlock_left": "осталось {n}",
-  "dlv3_unlock_failed": "Не удалось открыть · попробуйте ещё раз"
+  "dlv3_unlock_failed": "Не удалось открыть · попробуйте ещё раз",
+  "taskv3_step_queue": "Очередь",
+  "taskv3_step_source": "Исходник",
+  "taskv3_step_analysis": "Анализ",
+  "taskv3_step_rig": "Риг",
+  "taskv3_step_retarget": "Анимации",
+  "taskv3_step_qa": "Проверка",
+  "taskv3_step_publish": "Публикация",
+  "taskv3_status_step": "шаг {n} из {total}",
+  "taskv3_status_ready_sub": "Риг во вьювере, анимации играют",
+  "taskv3_status_review_sub": "Риг опубликован; проверка качества просит взглянуть",
+  "taskv3_status_fail_sub": "Нажмите: классическая страница и перезапуск",
+  "taskv3_status_details": "нажмите для подробностей"
 }

@@ -2089,5 +2089,17 @@
   "dlv3_pack_hint": "Each unlock opens every download of one task, forever",
   "dlv3_unlock_cta": "Unlock this task · {cost} credits",
   "dlv3_unlock_left": "{n} left",
-  "dlv3_unlock_failed": "Could not unlock · try again"
+  "dlv3_unlock_failed": "Could not unlock · try again",
+  "taskv3_step_queue": "Queue",
+  "taskv3_step_source": "Source",
+  "taskv3_step_analysis": "Analysis",
+  "taskv3_step_rig": "Rig",
+  "taskv3_step_retarget": "Animations",
+  "taskv3_step_qa": "Check",
+  "taskv3_step_publish": "Publish",
+  "taskv3_status_step": "step {n} of {total}",
+  "taskv3_status_ready_sub": "The rig is in the viewer, animations are playing",
+  "taskv3_status_review_sub": "The rig is published; the quality check asks for a look",
+  "taskv3_status_fail_sub": "Tap for the classic page and a restart",
+  "taskv3_status_details": "tap for details"
 }

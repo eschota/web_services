@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261011.1';
+const BUILD = 'tv3-20261016.1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -13,6 +13,8 @@ const els = {
   bar: document.querySelector('#tv3-card .tv3-bar'), fill: $('tv3-fill'), line: $('tv3-line'),
   pct: $('tv3-pct'), chip: $('tv3-chip'), classic: $('tv3-classic'), share: $('tv3-share'),
   full: $('tv3-full'), build: $('tv3-build'),
+  status: $('tv3-status'), statusTitle: $('tv3-status-title'), statusSub: $('tv3-status-sub'),
+  statusPct: $('tv3-status-pct'), statusFill: $('tv3-status-fill'), statusSteps: $('tv3-status-steps'),
 };
 const params = new URLSearchParams(location.search);
 const taskId = String(params.get('id') || '').trim().toLowerCase();
@@ -25,6 +27,11 @@ const FALLBACK = {
     taskv3_offline: 'Offline, retrying…', taskv3_copied: 'Link copied', taskv3_review: 'Needs review',
     taskv3_preparing: 'Preparing the model for the viewer',
     taskv3_unavailable: '3D model unavailable',
+    taskv3_step_queue: 'Queue', taskv3_step_source: 'Source', taskv3_step_analysis: 'Analysis', taskv3_step_rig: 'Rig',
+    taskv3_step_retarget: 'Animations', taskv3_step_qa: 'Check', taskv3_step_publish: 'Publish',
+    taskv3_status_step: 'step {n} of {total}', taskv3_status_ready_sub: 'The rig is in the viewer, animations are playing',
+    taskv3_status_review_sub: 'The rig is published; the quality check asks for a look', taskv3_status_fail_sub: 'Tap for the classic page and a restart',
+    taskv3_status_details: 'tap for details',
     live_stage_cl_prepare: 'Preparing the model', live_stage_cl_openpose: 'Finding arms, legs and fingers',
     live_stage_cl_pose: 'Straightening the pose', live_stage_cl_rig: 'Rigging', live_stage_cl_retarget: 'Animations',
     live_stage_cl_export: 'Unity package', live_stage_cl_preview: 'Preview video', live_stage_cl_finish: 'Packing the results',
@@ -36,6 +43,11 @@ const FALLBACK = {
     taskv3_offline: 'Нет связи, повторяем…', taskv3_copied: 'Ссылка скопирована', taskv3_review: 'Нужна проверка',
     taskv3_preparing: 'Готовим модель для вьювера',
     taskv3_unavailable: '3D-модель недоступна',
+    taskv3_step_queue: 'Очередь', taskv3_step_source: 'Исходник', taskv3_step_analysis: 'Анализ', taskv3_step_rig: 'Риг',
+    taskv3_step_retarget: 'Анимации', taskv3_step_qa: 'Проверка', taskv3_step_publish: 'Публикация',
+    taskv3_status_step: 'шаг {n} из {total}', taskv3_status_ready_sub: 'Риг во вьювере, анимации играют',
+    taskv3_status_review_sub: 'Риг опубликован; проверка качества просит взглянуть', taskv3_status_fail_sub: 'Нажмите: классическая страница и перезапуск',
+    taskv3_status_details: 'нажмите для подробностей',
     live_stage_cl_prepare: 'Готовлю модель', live_stage_cl_openpose: 'Ищу руки, ноги и пальцы',
     live_stage_cl_pose: 'Выравниваю позу', live_stage_cl_rig: 'Ригаю', live_stage_cl_retarget: 'Анимации',
     live_stage_cl_export: 'Пакет для Unity', live_stage_cl_preview: 'Превью-видео', live_stage_cl_finish: 'Упаковываю результат',
@@ -75,6 +87,66 @@ function setProgress(value, waiting) {
   els.pct.textContent = waiting ? '' : `${pct}%`;
 }
 
+// Top status banner (owner 2026-10-16: «большую кнопку сверху с прогрессбаром и статусом текущего рига, заметную
+// сверху, пока ждём непонятно что происходит»): the stage, the percent, the bar and the pipeline steps over the viewer.
+// It stays while the task is queued or processing, turns amber for needs_review, red for a failure, shows «Ready»
+// for a few seconds when the rig is done and then hides. A tap toggles the step strip (remembered per browser).
+const STEPS = ['queue', 'source', 'analysis', 'rig', 'retarget', 'qa', 'publish'];
+const STEP_OF = {
+  intake: 0, normalization: 0, dispatch: 0, pending_register: 0, pending_submit: 0, queued: 0, starting: 0, resuming: 0,
+  retrying: 0, source: 1, source_registered: 1, model_validation: 1, generation: 1, running: 1, analysis: 2, rig: 3,
+  retarget: 4, qa: 5, qa_review: 5, publish: 6, complete: 6,
+};
+let statusHide = 0;
+let statusCompact = false;
+try { statusCompact = localStorage.getItem('tv3_status_compact') === '1'; } catch (e) { /* private mode */ }
+function topStatus(state, status, finished, hasViewer, stageTitle, progress, waiting) {
+  const el = els.status;
+  if (!el) return false;
+  const active = status === 'created' || status === 'processing' || (!finished && status !== 'error' && hasViewer === false);
+  let kind = active ? (waiting ? 'wait' : 'run') : status === 'error' ? 'fail' : status === 'needs_review' ? 'review' : finished ? 'done' : '';
+  if (!kind) { el.hidden = true; return false; }
+  const step = active ? (STEP_OF[String(state.stage_key || '')] ?? (status === 'created' ? 0 : 3)) : STEPS.length;
+  let title = stageTitle ? stageTitle.replace(/^V3 · /, '') : '';
+  let sub = '';
+  if (kind === 'wait' || status === 'created') {
+    title = title || tr('taskv3_queued');
+    sub = state.queue && state.queue.ahead > 0 ? tr('taskv3_ahead', { count: state.queue.ahead }) : tr('taskv3_next');
+  } else if (kind === 'run') {
+    title = title || tr('taskv3_rigging');
+    sub = `${tr('taskv3_status_step', { n: Math.min(step + 1, STEPS.length), total: STEPS.length })}${state.eta_s ? ` · ~${Math.max(1, Math.round(state.eta_s / 60))} min` : ''}`;
+  } else if (kind === 'review') { title = tr('taskv3_review'); sub = tr('taskv3_status_review_sub'); }
+  else if (kind === 'fail') { title = tr('taskv3_failed'); sub = tr('taskv3_status_fail_sub'); }
+  else { title = tr('taskv3_ready'); sub = tr('taskv3_status_ready_sub'); }
+  const pct = Math.max(0, Math.min(100, Math.round((kind === 'done' || kind === 'review' ? 1 : Number(progress || 0)) * 100)));
+  els.statusTitle.textContent = title;
+  els.statusSub.textContent = sub;
+  els.statusPct.textContent = kind === 'wait' ? '' : `${pct}%`;
+  els.statusFill.style.width = `${kind === 'wait' ? 0 : pct}%`;
+  if (els.statusSteps.children.length !== STEPS.length) {
+    els.statusSteps.textContent = '';
+    for (const s of STEPS) { const li = document.createElement('li'); li.dataset.step = s; li.textContent = tr(`taskv3_step_${s}`); els.statusSteps.appendChild(li); }
+  }
+  Array.from(els.statusSteps.children).forEach((li, i) => { li.className = i < step ? 'done' : (i === step && active) ? 'run' : ''; });
+  el.className = `tv3-status ${kind}${statusCompact ? ' compact' : ''}`;
+  el.title = kind === 'fail' ? tr('taskv3_status_fail_sub') : tr('taskv3_status_details');
+  el.hidden = false;
+  clearTimeout(statusHide);
+  if (kind === 'done' || kind === 'review') {
+    // the finished states linger, then fade: the viewer owns the screen
+    statusHide = setTimeout(() => { el.classList.add('fading'); setTimeout(() => { el.hidden = true; el.classList.remove('fading'); }, 400); }, kind === 'done' ? 7000 : 15000);
+  }
+  return true;
+}
+if (els.status) {
+  els.status.addEventListener('click', () => {
+    if (els.status.classList.contains('fail')) { location.href = els.classic.href || `/task?id=${encodeURIComponent(taskId)}&classic=1`; return; }
+    statusCompact = !statusCompact;
+    els.status.classList.toggle('compact', statusCompact);
+    els.status.setAttribute('aria-expanded', statusCompact ? 'false' : 'true');
+    try { localStorage.setItem('tv3_status_compact', statusCompact ? '1' : '0'); } catch (e) { /* private mode */ }
+  });
+}
 function viewerUrl(viewer) {
   if (!viewer || viewer.page !== UNITY_PAGE) return null;
   const url = new URL(UNITY_PAGE, location.origin);
@@ -260,6 +332,9 @@ function render(state) {
   els.chip.title = chip;
   // Session agent V3: the agent tells the stage and shows the progress; no separate pill while it does
   if (hasViewer && agentStatus(state, status, finished, stageTitle)) els.chip.hidden = true;
+  // the big top banner (owner 2026-10-16) while the rig is in the making; the small chip steps aside for it
+  if (hasViewer && topStatus(state, status, finished, hasViewer, stageTitle, progress, waiting)) els.chip.hidden = true;
+  else if (!hasViewer && els.status) els.status.hidden = true;
 
   if ((finished && rigged) || status === 'error') return 30000;
   return status === 'created' ? 4000 : 2500;

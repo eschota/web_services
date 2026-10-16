@@ -2071,5 +2071,17 @@
   "dlv3_pack_hint": "हर अनलॉक एक टास्क के सभी डाउनलोड हमेशा के लिए खोलता है",
   "dlv3_unlock_cta": "यह टास्क अनलॉक करें · {cost} क्रेडिट",
   "dlv3_unlock_left": "{n} बाकी",
-  "dlv3_unlock_failed": "अनलॉक नहीं हो सका · फिर कोशिश करें"
+  "dlv3_unlock_failed": "अनलॉक नहीं हो सका · फिर कोशिश करें",
+  "taskv3_step_queue": "कतार",
+  "taskv3_step_source": "स्रोत",
+  "taskv3_step_analysis": "विश्लेषण",
+  "taskv3_step_rig": "रिग",
+  "taskv3_step_retarget": "एनिमेशन",
+  "taskv3_step_qa": "जाँच",
+  "taskv3_step_publish": "प्रकाशन",
+  "taskv3_status_step": "चरण {n} / {total}",
+  "taskv3_status_ready_sub": "रिग व्यूअर में है, एनिमेशन चल रहे हैं",
+  "taskv3_status_review_sub": "रिग प्रकाशित है; गुणवत्ता जाँच एक नज़र माँगती है",
+  "taskv3_status_fail_sub": "क्लासिक पेज और पुनः आरंभ के लिए टैप करें",
+  "taskv3_status_details": "विवरण के लिए टैप करें"
 }
