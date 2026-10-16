@@ -133,3 +133,12 @@ html[dir="rtl"] .dl3-hero-shine{transform:translateX(120%);animation-name:dl3-sh
 @media (max-width:640px){.dl3-hero{height:36px;padding:0 12px;margin-inline-end:44px;font-size:13px}.dl3-targets{grid-template-columns:repeat(3,1fr)}}
 @media (prefers-reduced-motion:reduce){.dl3-hero,.dl3-hero *,.dl3-go *{animation:none!important}.dl3-hero-shine{display:none}}
 @media (max-width:420px){.dl3-hero{padding:0 11px}.dl3-hero span{display:none}}
+
+/* pricing 2026-10-16: the launch offer, the task pack and the unlock button */
+.dl3-pay-price s{opacity:.5;font-weight:500;margin-right:8px;text-decoration:line-through}
+.dl3-pay-off{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,.18);color:#22c55e;font-style:normal;font-size:12px;font-weight:700;vertical-align:middle}
+.dl3-pay-or{margin:10px 0 6px;font-size:11px;opacity:.6;text-transform:uppercase;letter-spacing:.1em}
+.dl3-cta-alt{background:transparent;color:inherit;border:1px solid rgba(128,128,128,.4);box-shadow:none}
+.dl3-cta-alt:hover,.dl3-cta-alt:focus-visible{box-shadow:none;border-color:var(--tv3-accent,#6366f1)}
+.dl3-cta-alt small{opacity:.65;font-weight:500;margin-left:4px}
+.dl3-cta[disabled]{opacity:.5;pointer-events:none}

@@ -55,7 +55,7 @@ _JOB_ID = re.compile(r"^[0-9a-f]{20}$")
 _FMT = re.compile(r"^(glb|fbx|zip|clip-(\d{1,2})\.(glb|fbx))$")
 _CUSTOM = re.compile(r"^x-([0-9a-f]{12})\.(fbx|glb|blend)$")       # a custom export (spec in specs/<hash>.json)
 TARGETS = {"unity": "fbx", "unreal": "fbx", "blender": "blend", "glb": "glb"}
-MIXAMO_CATEGORIES = {"humanoid"}
+MIXAMO_CATEGORIES = {"humanoid", "anthro"}       # anthro: a biped with a tail and ears (Anthro rig, 2026-10-15)
 _NO_STORE = {"Cache-Control": "private, no-store, max-age=0", "X-Robots-Tag": "noindex"}
 
 # id -> (kind shown in the menu, file extension, made by)

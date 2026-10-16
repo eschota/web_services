@@ -58,6 +58,12 @@ from config import (
     GUMROAD_PRODUCT_CREDITS,
     BLENDER_PLUGIN_AB_VARIANTS,
     AUTORIG_DONATION_PRODUCT_KEYS,
+    AUTORIG_SUBSCRIPTION_PRODUCT_KEYS,
+    AUTORIG_SUBSCRIPTION_PRICE_USD,
+    AUTORIG_TASK_PACK_PRODUCT_KEY,
+    AUTORIG_TASK_PACK_TASKS,
+    AUTORIG_TASK_PACK_PRICE_USD,
+    subscription_offer,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
     AUTORIG_CRYPTO_TIERS,
@@ -228,6 +234,7 @@ import httpx
 
 from ai_fleet import router as ai_fleet_router
 from ai_graph import router as ai_graph_router
+from ai_video_tools import router as ai_video_tools_router
 from ai_controlnet_api import router as ai_controlnet_router
 from ai_model_catalogue import router as ai_model_catalogue_router
 from ai_services import router as ai_services_router
@@ -647,6 +654,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
+                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -732,6 +740,7 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                 select(Task).where(
                     Task.status == "processing",
                     Task.pipeline_kind != "generate",
+                    Task.pipeline_kind != "v3",
                     Task.queue_class == QUEUE_CLASS_BACKGROUND,
                     Task.preemption_state == "none",
                 )
@@ -928,6 +937,8 @@ async def background_task_updater():
                 # a generation task has no worker progress to go stale on;
                 # its own pump owns the lifecycle until the mesh exists
                 Task.pipeline_kind != "generate",
+                # V3 rows belong to the durable V3 runtime (v3_runtime_mount)
+                Task.pipeline_kind != "v3",
             )
         )
         processing_tasks = result.scalars().all()
@@ -1191,6 +1202,43 @@ async def lifespan(app: FastAPI):
     global background_task_running
     
     # Startup
+    # Owner rule 2026-10-11 (replaces the 2026-09-27 wipe): a site restart
+    # never loses render work. Renderfin keeps its queue; the start only asks
+    # it to bring back what an older wipe cancelled moments ago.
+    # AUTORIG_RESTART_POLICY=wipe brings the old wipe back.
+    if os.getenv("AUTORIG_RESTART_POLICY", "resume").strip().lower() != "wipe":
+        async def _resume_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with worker_http_client() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/resume", timeout=60.0)
+                data = response.json()
+                print(f"[Startup] render queue kept (restart resume): revived "
+                      f"{data.get('revived_int')} job(s) a restart had cancelled")
+            except Exception as exc:
+                print(f"[Startup] render queue resume skipped: {exc}")
+        asyncio.create_task(_resume_render_queue_on_start())
+    elif os.getenv("AUTORIG_WIPE_QUEUE_ON_START", "1").strip() not in ("0", "false", "no", ""):
+        async def _wipe_render_queue_on_start():
+            try:
+                import ai_vision_api
+                async with worker_http_client() as client:
+                    response = await client.post(
+                        ai_vision_api.RENDERFIN_BASE.rstrip("/") + "/api-render/reset",
+                        params={"spare_non_graph": 1, "reason": "cancelled: server restarted — press Render again"}, timeout=120.0)
+                data = response.json()
+                print(f"[Startup] render queue wiped: {data.get('cancelled_queued_int')} queued, "
+                      f"{data.get('cancelled_running_int')} running; boxes {data.get('boxes_object')}")
+            except Exception as exc:
+                print(f"[Startup] render queue wipe skipped: {exc}")
+        asyncio.create_task(_wipe_render_queue_on_start())
+    # Deferred Civitai posting (2026-09-30): the queue drains with no tab open.
+    try:
+        import ai_civitai_post
+        ai_civitai_post.start_schedule_loop()
+    except Exception as exc:
+        print(f"[Startup] civitai schedule loop not started: {exc}")
     if AUTORIG_MIGRATION_READ_ONLY:
         # The staging database is migrated once offline before this mode is
         # enabled. Runtime startup performs no schema or filesystem writes.
@@ -1237,6 +1285,15 @@ async def lifespan(app: FastAPI):
         _artifact_cache_retention_loop(),
         name="artifact-cache-retention",
     )
+    # V3 task runtime (2026-10-10): durable outbox -> Motion Transfer /api/mt/v3.
+    # Restart-safe: unsettled bindings are re-enqueued, lost projections replayed.
+    app.state.v3_runtime = None
+    try:
+        from v3_runtime_mount import start_v3_runtime
+
+        app.state.v3_runtime = await start_v3_runtime(AsyncSessionLocal)
+    except Exception as exc:
+        print(f"[V3] runtime not started: {type(exc).__name__}: {exc}")
     
     # Send Telegram startup notification (fire-and-forget)
     try:
@@ -1262,6 +1319,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     background_task_running = False
+    try:
+        from v3_runtime_mount import stop_v3_runtime
+
+        await stop_v3_runtime(getattr(app.state, "v3_runtime", None))
+    except Exception as exc:
+        print(f"[V3] runtime stop: {type(exc).__name__}: {exc}")
     background_worker = getattr(app.state, "background_worker", None)
     youtube_worker = getattr(app.state, "youtube_retry_worker", None)
     startup_disk_maintenance = getattr(app.state, "startup_disk_maintenance", None)
@@ -1314,16 +1377,26 @@ app = FastAPI(
 
 # Add GZip compression for responses > 500 bytes.
 # GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
+from task_owner import TaskOwnerMiddleware
+
+# Inside GZip, so it reads plain JSON: records who submitted each render task.
+app.add_middleware(TaskOwnerMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 # Civitai pages and CDN previews as media inputs (civitai_media.py).
 from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
 app.add_middleware(CivitaiMediaMiddleware)
 app.include_router(civitai_media_router)
+# Search node: popular / random Civitai media (ai_civitai_search.py, 2026-09-28).
+from ai_civitai_search import router as civitai_search_router
+app.include_router(civitai_search_router)
 
 app.state.limiter = limiter
 
 app.include_router(ai_fleet_router)
 app.include_router(ai_graph_router)
+app.include_router(ai_video_tools_router)
+from ai_wan_image import router as ai_wan_image_router
+app.include_router(ai_wan_image_router)
 app.include_router(ai_controlnet_router)
 app.include_router(ai_model_catalogue_router)
 app.include_router(ai_services_router)
@@ -1547,19 +1620,17 @@ from ai_avatar_assets import build_avatar_asset_router
 from ai_avatar_render import build_avatar_render_router
 from ai_avatar_video import build_avatar_video_router
 from ai_avatar_build import build_avatar_build_router
-from ai_avatar_from_image import build_avatar_from_image_router
 from ai_video_reference import router as ai_video_reference_router
 from ai_graph_edits import router as ai_graph_edits_router
 from ai_pipelines_api import router as ai_pipelines_router
-from vehicle_generation import build_vehicle_router
 
 app.include_router(build_avatar_router(get_avatar_owner))
-app.include_router(build_vehicle_router(get_avatar_owner))
 app.include_router(build_avatar_asset_router(get_avatar_owner))
 app.include_router(build_avatar_render_router(get_avatar_owner))
 app.include_router(build_avatar_video_router(get_avatar_owner))
 app.include_router(build_avatar_build_router(get_avatar_owner))
-app.include_router(build_avatar_from_image_router(get_avatar_owner))
+from ai_avatar_ready import build_avatar_ready_router
+app.include_router(build_avatar_ready_router(get_avatar_owner))
 app.include_router(ai_video_reference_router)
 app.include_router(ai_graph_edits_router)
 app.include_router(ai_pipelines_router)
@@ -1592,6 +1663,30 @@ from ai_lora_manager import build_lora_admin_router, router as ai_lora_router
 
 app.include_router(ai_lora_router)
 app.include_router(build_lora_admin_router(require_admin))
+
+from ai_character_swap import build_character_swap_router
+
+# Subgraph · Character swap (2026-10-02): admins and scripts on this server start jobs.
+app.include_router(build_character_swap_router(get_current_user, is_admin_email))
+
+from ai_civitai_post import build_civitai_post_router
+
+app.include_router(build_civitai_post_router(require_admin))
+# /queue - the phone's gallery of finished renders (owner 2026-09-30).
+from ai_queue_page import router as queue_page_router
+
+app.include_router(queue_page_router)
+# /system_prompts - the live prompt library (owner 2026-09-30).
+from ai_prompts_page import build_prompts_router
+
+app.include_router(build_prompts_router(require_admin))
+# Join texts - many small text nodes into one prompt, no model (owner 2026-09-30).
+from ai_text_join import router as text_join_router
+
+app.include_router(text_join_router)
+from ai_fleet_models import build_admin_router as build_fleet_models_admin_router, router as ai_fleet_models_router
+app.include_router(ai_fleet_models_router)
+app.include_router(build_fleet_models_admin_router(require_admin))
 
 
 ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
@@ -1746,6 +1841,10 @@ def _safe_checkout_task_id(value: Any) -> Optional[str]:
 
 def _checkout_pack_price_label(product_key: str) -> str:
     key = _normalize_gumroad_product_key(product_key)
+    if key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS:
+        return f"{_format_usd_price(subscription_offer()['price_usd'])}/month"
+    if key == AUTORIG_TASK_PACK_PRODUCT_KEY:                     # the task pack (owner 2026-10-16)
+        return _format_usd_price(AUTORIG_TASK_PACK_PRICE_USD)
     for tier_key, _credits, usd in AUTORIG_CRYPTO_TIERS:
         if _normalize_gumroad_product_key(tier_key) == key:
             if float(usd).is_integer():
@@ -1755,6 +1854,8 @@ def _checkout_pack_price_label(product_key: str) -> str:
 
 
 def _checkout_pack_label(product_key: str) -> str:
+    if _normalize_gumroad_product_key(product_key) == AUTORIG_TASK_PACK_PRODUCT_KEY:
+        return f"{AUTORIG_TASK_PACK_TASKS} task unlocks"
     credits = int(GUMROAD_PRODUCT_CREDITS.get(_normalize_gumroad_product_key(product_key), 0) or 0)
     return f"{credits} credits" if credits > 0 else "credits"
 
@@ -1805,7 +1906,11 @@ def _blender_plugin_price_label(product_key: str, price_cents: int = 0) -> str:
 
 
 def _gumroad_checkout_url(product_key: str, user_email: str) -> str:
-    base = f"https://u3d.gumroad.com/l/{quote(_normalize_gumroad_product_key(product_key))}"
+    key = _normalize_gumroad_product_key(product_key)
+    base = f"https://u3d.gumroad.com/l/{quote(key)}"
+    offer = subscription_offer() if key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS else None
+    if offer and offer["active"]:                  # the launch discount code (owner 2026-10-16): /l/<product>/<code>
+        base += f"/{quote(offer['code'])}"
     return f"{base}?{urlencode({'userid': user_email})}"
 
 
@@ -2808,12 +2913,51 @@ async def auth_callback(
     return redirect
 
 
-# Keep the standalone upload API admin-only; API keys resolve to their owner
-# through get_current_user, so only keys belonging to an admin can use it.
+# Keep video uploads behind administrator authentication.
 from youtube_api import build_youtube_upload_api_router
-
 app.include_router(build_youtube_upload_api_router(require_admin, get_db))
+@app.get("/api/admin/u3d-youtube/oauth/start")
+async def admin_u3d_youtube_oauth_start(admin: User = Depends(require_admin)):
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
+    if not U3D_YOUTUBE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
+    state = secrets.token_urlsafe(32)
+    query = urlencode({"client_id": U3D_YOUTUBE_CLIENT_ID, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "response_type": "code", "scope": YOUTUBE_UPLOAD_SCOPE, "access_type": "offline", "prompt": "consent", "state": state})
+    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
+    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
+    return response
 
+
+@app.get("/api/oauth/u3d-youtube/callback")
+async def admin_u3d_youtube_oauth_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, db: AsyncSession = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
+    if error:
+        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
+    if not user or not is_admin_email(user.email):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
+    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
+    if not code:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
+    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
+    async with worker_http_client() as client:
+        token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": U3D_YOUTUBE_CLIENT_ID, "client_secret": U3D_YOUTUBE_CLIENT_SECRET, "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI, "grant_type": "authorization_code"}, timeout=30.0)
+    if token_response.status_code != 200:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
+    refresh = token_response.json().get("refresh_token")
+    if not refresh:
+        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
+    from database import U3dYoutubeCredentials
+    row = await db.get(U3dYoutubeCredentials, 1)
+    now = datetime.utcnow()
+    if row:
+        row.refresh_token, row.updated_at = refresh, now
+    else:
+        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
+    await db.commit()
+    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
+    response.delete_cookie("u3d_yt_oauth_state")
+    return response
 
 @app.get("/api/admin/youtube/oauth/start")
 async def admin_youtube_oauth_start(
@@ -2863,85 +3007,11 @@ async def admin_youtube_oauth_callback(
     refresh = tokens.get("refresh_token")
     if not refresh:
         return RedirectResponse(url="/?youtube_error=no_refresh_token_reauthorize_with_prompt")
-    # Channel selection happens in Google's Brand Account chooser. The upload
-    # response includes channelId for validation against the owner channel.
+    # The Google Brand Account chooser selects the channel. The first upload
+    # response reports channelId so the client can verify the destination.
     await save_youtube_refresh_token(db, refresh)
     response = RedirectResponse(url="/?youtube_connected=1")
     response.delete_cookie("yt_oauth_state")
-    return response
-
-
-@app.get("/api/admin/u3d-youtube/oauth/start")
-async def admin_u3d_youtube_oauth_start(
-    admin: User = Depends(require_admin),
-):
-    """Start the separate U3D provider OAuth flow; never changes AutoRig credentials."""
-    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_OAUTH_REDIRECT_URI
-    from youtube_upload import YOUTUBE_UPLOAD_SCOPE
-    if not U3D_YOUTUBE_CLIENT_ID:
-        raise HTTPException(status_code=503, detail="U3D YouTube OAuth client is not configured")
-    state = secrets.token_urlsafe(32)
-    query = urlencode({
-        "client_id": U3D_YOUTUBE_CLIENT_ID,
-        "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI,
-        "response_type": "code",
-        "scope": YOUTUBE_UPLOAD_SCOPE,
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": state,
-    })
-    response = RedirectResponse(url=f"https://accounts.google.com/o/oauth2/auth?{query}")
-    response.set_cookie("u3d_yt_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="lax")
-    return response
-
-
-@app.get("/api/oauth/u3d-youtube/callback")
-async def admin_u3d_youtube_oauth_callback(
-    request: Request,
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
-):
-    """Store U3D provider OAuth in its own table; do not alter AutoRig's token."""
-    if error:
-        return RedirectResponse(url=f"/dev/youtube?u3d_youtube_error={quote(error)}")
-    if not user or not is_admin_email(user.email):
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=not_admin")
-    if not state or state != request.cookies.get("u3d_yt_oauth_state"):
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=state")
-    if not code:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_code")
-    from config import U3D_YOUTUBE_CLIENT_ID, U3D_YOUTUBE_CLIENT_SECRET, U3D_YOUTUBE_OAUTH_REDIRECT_URI
-    async with worker_http_client() as client:
-        token_response = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": U3D_YOUTUBE_CLIENT_ID,
-                "client_secret": U3D_YOUTUBE_CLIENT_SECRET,
-                "redirect_uri": U3D_YOUTUBE_OAUTH_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            },
-            timeout=30.0,
-        )
-    if token_response.status_code != 200:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=token_exchange")
-    refresh = token_response.json().get("refresh_token")
-    if not refresh:
-        return RedirectResponse(url="/dev/youtube?u3d_youtube_error=no_refresh_token")
-    from database import U3dYoutubeCredentials
-    row = await db.get(U3dYoutubeCredentials, 1)
-    now = datetime.utcnow()
-    if row:
-        row.refresh_token = refresh
-        row.updated_at = now
-    else:
-        db.add(U3dYoutubeCredentials(id=1, refresh_token=refresh, updated_at=now))
-    await db.commit()
-    response = RedirectResponse(url="/dev/youtube?u3d_youtube_connected=1")
-    response.delete_cookie("u3d_yt_oauth_state")
     return response
 
 
@@ -3608,7 +3678,10 @@ async def buy_credits_checkout(
     if required_credits is not None and required_credits <= 0:
         required_credits = None
     page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
-    package_label = _checkout_pack_label(product_key)
+    package_label = (
+        "AutoRig Unlimited Monthly" if product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
+        else _checkout_pack_label(product_key)
+    )
     price_label = _checkout_pack_price_label(product_key)
     intent_id = None
 
@@ -4553,6 +4626,7 @@ async def api_create_task(
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
             file = fu
 
+    explicit_v3 = pipeline == "v3"
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
@@ -4600,12 +4674,58 @@ async def api_create_task(
         # Generate public URL (URL-encode filename for special chars, spaces, cyrillic)
         from urllib.parse import quote
         final_url = f"{APP_URL}/u/{upload_token}/{quote(filename)}"
+
+        # ASCII FBX (owner 2026-10-10): the converters reject it and Blender cannot
+        # import it, so it becomes a GLB here for legacy and V3 alike. The original
+        # upload stays beside the GLB; a failure is told in the visitor's language.
+        import fbx_ascii
+
+        if fbx_ascii.is_ascii_fbx(Path(filepath)):
+            glb_name = os.path.splitext(os.path.basename(filename))[0] + ".glb"
+            try:
+                receipt = await asyncio.to_thread(
+                    fbx_ascii.ascii_fbx_to_glb, Path(filepath), Path(upload_dir) / glb_name)
+            except Exception as exc:
+                print(f"[Upload] ASCII FBX {upload_token}/{filename} not convertible: {exc}")
+                from user_language import user_error_detail
+                raise HTTPException(status_code=422, detail=user_error_detail("fbx_unreadable"))
+            print(f"[Upload] ASCII FBX {upload_token}/{filename} -> {glb_name} "
+                  f"({receipt['inserted_a_keys']} array key(s) repaired, {receipt['bytes']} bytes)")
+            final_url = f"{APP_URL}/u/{upload_token}/{quote(glb_name)}"
+            uploaded_bytes = int(receipt["bytes"])
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
     if not disk_headroom_checked:
         await ensure_request_disk_headroom(db, context="task_create")
+
+    # V3 conveyor (2026-10-10): the route switch picks V3; a V3 task never
+    # falls back to the legacy rig (v3_intake.route_enabled, AUTORIG_V3_ROUTES).
+    from v3_intake import route_enabled as _v3_route_enabled
+
+    if _v3_route_enabled("api" if via_api else "website",
+                         is_admin=bool(user and is_admin_email(user.email)), explicit=explicit_v3):
+        from v3_intake import V3IntakeError, admit_upload as _v3_admit_upload, local_upload_path
+
+        v3_source = local_upload_path(final_url)
+        if v3_source is None:
+            raise HTTPException(status_code=400, detail={
+                "code": "v3_upload_required",
+                "message": "V3 needs the model file itself (GLB, FBX or OBJ upload).",
+            })
+        try:
+            task = await _v3_admit_upload(
+                db, path=v3_source, original_url=final_url, filename=v3_source.name,
+                owner_type=owner_type, owner_id=owner_id, origin="api" if via_api else "website",
+                created_via_api=via_api, requested_intent="convert" if pipeline == "convert" else "rig",
+                input_type=input_type, input_bytes=uploaded_bytes,
+            )
+        except V3IntakeError as exc:
+            raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.detail})
+        _save_preflight_render_image(task.id, preflight_render_image_data_url
+                                     or _pop_preflight_render_image_from_meta(rig_v2_detection_meta))
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     preflight_render_image_data_url = (
         preflight_render_image_data_url
@@ -5726,8 +5846,15 @@ async def api_gumroad_ping(
         or is_plugin_product
     )
     should_notify_purchase = False
+    # The monthly membership is not a credit pack: it gets its own branch below
+    # and must never be paid out as credits.
+    is_subscription_product = product_key in AUTORIG_SUBSCRIPTION_PRODUCT_KEYS
 
-    if _is_autorig_credit_product(product_key) and email and email != "unknown":
+    if (
+        _is_autorig_credit_product(product_key)
+        and not is_subscription_product
+        and email and email != "unknown"
+    ):
         try:
             async with AsyncSessionLocal() as db:
                 purchase = GumroadPurchase(
@@ -5777,6 +5904,56 @@ async def api_gumroad_ping(
         except Exception as e:
             print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
 
+    if is_subscription_product and email and email != "unknown":
+        # Every membership event (first sale, monthly renewal, cancellation,
+        # refund) is stored in the ledger, then the ledger is replayed onto the
+        # user with the same code that runs at login, so a buyer who is already
+        # signed in gets the plan at once and one who signs up later gets it then.
+        try:
+            from auth import apply_pending_gumroad_credits
+
+            async with AsyncSessionLocal() as db:
+                purchase = GumroadPurchase(
+                    sale_id=sale_id,
+                    email=email,
+                    product_permalink=product_key,
+                    product_name=product_name,
+                    price=price_cents,
+                    refunded=refunded,
+                    is_recurring_charge=is_recurring_charge,
+                    subscription_id=subscription_id,
+                    license_key=license_key,
+                    test=is_test,
+                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                    credited=False,
+                    credits_added=0,
+                )
+                db.add(purchase)
+                try:
+                    await db.flush()
+                except IntegrityError:
+                    await db.rollback()
+                    purchase = None
+                if purchase is not None:
+                    user_result = await db.execute(
+                        select(User).where(func.lower(User.email) == email.lower())
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if user:
+                        await apply_pending_gumroad_credits(db, user)
+                        if checkout_email != "unknown":
+                            user.gumroad_email = checkout_email
+                        print(
+                            f"[Gumroad] Subscription event sale={sale_id} user={email} "
+                            f"status={user.autorig_subscription_status} "
+                            f"until={user.autorig_subscription_period_end}",
+                            flush=True,
+                        )
+                    await db.commit()
+                    should_notify_purchase = True
+        except Exception as e:
+            print(f"[Gumroad] Subscription handling failed for {sale_id}: {e}", flush=True)
+
     if is_plugin_product:
         try:
             async with AsyncSessionLocal() as db:
@@ -5821,9 +5998,12 @@ async def api_gumroad_ping(
         notice_package = (
             f"Blender Plugin ABCD {notice_price}" if is_plugin_product else _checkout_pack_label(product_key)
         )
+        if is_subscription_product:
+            notice_kind = "subscription"
+            notice_package = "AutoRig Unlimited Monthly" + (" (renewal)" if is_recurring_charge else "")
         asyncio.create_task(
             broadcast_credits_purchased(
-                credits=0 if is_plugin_product else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
+                credits=0 if (is_plugin_product or is_subscription_product) else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
                 price=notice_price,
                 user_email=email,
                 product=product_key or product,
@@ -7601,6 +7781,11 @@ async def api_retry_task(
     
     if not is_owner:
         raise HTTPException(status_code=403, detail="Not authorized to retry this task")
+    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
+        from v3_runtime_mount import v3_retry
+
+        await v3_retry(db, task)
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
     
     # Check if task is eligible for retry
     if task.status == "done":
@@ -7699,6 +7884,12 @@ async def api_restart_task(
     )
     if not (is_owner or is_admin):
         raise HTTPException(status_code=403, detail="Not authorized to restart this task")
+
+    if str(getattr(task, "pipeline_kind", "") or "") == "v3":
+        from v3_runtime_mount import v3_retry
+
+        await v3_retry(db, task)
+        return TaskCreateResponse(task_id=task.id, status=task.status, message=None)
 
     # Age gate: 1 minute
     task_age = datetime.utcnow() - task.created_at
@@ -8642,6 +8833,14 @@ async def api_get_gallery(
     if rig_filter not in GALLERY_RIG_TYPES:
         rig_filter = "all"
     should_filter_rig = rig_filter != "all"
+    import gallery_categories as _gallery_categories
+    if should_filter_rig:
+        # V3 categories: filter in SQL on tasks.v3_category, so offset/limit, total and has_more are exact.
+        # (None = the column is not there yet: the Python filter below stays in charge.)
+        _rig_sql = _gallery_categories.rig_filter_condition(Task, rig_filter)
+        if _rig_sql is not None:
+            base_conditions.append(_rig_sql)
+            should_filter_rig = False
 
     # Get task IDs with like counts
     offset = (page - 1) * per_page
@@ -8765,6 +8964,7 @@ async def api_get_gallery(
                 author_nicknames.get(t.owner_id) if t.owner_type == "user" else None),
             content_rating=getattr(t, "content_rating", None),
             rig_icon_key=_gallery_rig_icon_key(t),
+            category=_gallery_categories.category_for_task(t),
         ))
     
     has_more = (page * per_page) < total
@@ -9922,9 +10122,12 @@ async def api_admin_restart_incomplete_tasks(
     """
     from database import Task
     
-    # Count incomplete tasks
+    # Count incomplete tasks (V3 rows restart only as a new V3 attempt)
     result = await db.execute(
-        select(Task).where(Task.status.in_(["created", "processing", "error"]))
+        select(Task).where(
+            Task.status.in_(["created", "processing", "error"]),
+            Task.pipeline_kind != "v3",
+        )
     )
     incomplete_tasks = result.scalars().all()
     task_count = len(incomplete_tasks)
@@ -11782,8 +11985,17 @@ def _gallery_task_has_poster_sql():
     return or_(*[func.instr(col, p) > 0 for col in cols for p in pats])
 
 
+# V3 category slugs first (gallery_categories.V3_CATEGORIES), then the old V2 animal presets, which stay accepted.
 GALLERY_RIG_TYPES = (
     "humanoid",
+    "quadruped",
+    "equine",
+    "bird",
+    "serpent",
+    "monster",
+    "multilimb",
+    "hands",
+    "vehicle",
     "dog",
     "bear",
     "cat",
@@ -11803,7 +12015,8 @@ def _gallery_rig_icon_key(task: Task) -> str:
     """Humanoid vs animal rig key for gallery UI icons and filters."""
     input_type = str(getattr(task, "input_type", "") or "").strip().lower()
     if input_type != "animal":
-        return "humanoid"
+        import gallery_categories as _gallery_categories
+        return _gallery_categories.icon_key_for_task(task)  # V3: quadruped -> dog, equine -> horse, else humanoid
     try:
         settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
     except Exception:
@@ -11826,7 +12039,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "Guides",
         "kicker": "Rig type SEO guide",
         "overview": "What this rig type is for",
-        "workflow": "Online workflow",
+        "workflow": "How it works",
         "prep": "Model preparation tips",
         "examples": "Real AutoRig examples",
         "faq": "FAQ",
@@ -11842,7 +12055,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "Руководства",
         "kicker": "SEO-статья по типу рига",
         "overview": "Для чего нужен этот тип рига",
-        "workflow": "Онлайн workflow",
+        "workflow": "Как это работает",
         "prep": "Как подготовить модель",
         "examples": "Реальные примеры AutoRig",
         "faq": "FAQ",
@@ -11858,7 +12071,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "指南",
         "kicker": "绑定类型 SEO 指南",
         "overview": "这个绑定类型适合什么",
-        "workflow": "在线工作流",
+        "workflow": "工作方式",
         "prep": "模型准备建议",
         "examples": "真实 AutoRig 示例",
         "faq": "FAQ",
@@ -11874,7 +12087,7 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
         "guides": "Guides",
         "kicker": "Rig type SEO guide",
         "overview": "यह rig type किसके लिए है",
-        "workflow": "Online workflow",
+        "workflow": "यह कैसे काम करता है",
         "prep": "Model preparation tips",
         "examples": "Real AutoRig examples",
         "faq": "FAQ",
@@ -11941,7 +12154,7 @@ RIG_ARTICLE_TYPES: Dict[str, Dict[str, Any]] = {
         "labels": {"en": "humanoid character", "ru": "humanoid-персонаж", "zh": "人形角色", "hi": "humanoid character"},
         "shape": {"en": "biped characters with arms, legs, hands, head, and animation-ready proportions", "ru": "двуногие персонажи с руками, ногами, кистями, головой и animation-ready пропорциями", "zh": "带有手臂、腿部、手、头部和动画比例的人形角色", "hi": "arms, legs, hands, head और animation-ready proportions वाले biped characters"},
         "use": {"en": "game heroes, NPCs, stylized people, robots, and human-like creatures", "ru": "игровых героев, NPC, stylized people, роботов и human-like creatures", "zh": "游戏主角、NPC、风格化人物、机器人和类人生物", "hi": "game heroes, NPCs, stylized people, robots और human-like creatures"},
-        "tip": {"en": "Use a clear T-pose or relaxed A-pose, keep arms away from the torso, and avoid fused fingers if hand motion matters.", "ru": "Используйте чистую T-pose или relaxed A-pose, держите руки отдельно от тела и не склеивайте пальцы, если важна анимация кистей.", "zh": "使用清晰的 T-pose 或放松的 A-pose，让手臂离开身体；如果需要手部动画，避免手指粘连。", "hi": "Clear T-pose या relaxed A-pose रखें, arms को torso से अलग रखें, और hand motion चाहिए तो fused fingers से बचें।"},
+        "tip": {"en": "Any pose works, because the rig is fitted to the model as it is. Keep arms and legs clear of the torso, and avoid fused fingers if hand motion matters.", "ru": "Подойдёт любая поза: риг подгоняется под модель как есть. Держите руки и ноги отдельно от корпуса и не склеивайте пальцы, если важна анимация кистей.", "zh": "任意姿势都可以，因为绑定会按模型当前的样子拟合。让手臂和腿离开躯干；如果需要手部动画，避免手指粘连。", "hi": "कोई भी पोज़ चलता है, क्योंकि रिग मॉडल पर वैसे ही फ़िट होता है जैसा वह है। हाथ-पैर धड़ से अलग रखें, और हाथ की गति चाहिए तो उँगलियाँ आपस में न जुड़ी हों।"},
     },
     "dog": {
         "labels": {"en": "dog and wolf", "ru": "собака и wolf", "zh": "狗和狼", "hi": "dog और wolf"},
@@ -12030,6 +12243,44 @@ def _rig_article_localized_urls(base: str, rig_key: str) -> Dict[str, str]:
     }
 
 
+# Site refresh to V3 (2026-10-16): the per-animal pages describe the V3 conveyor and the category the engine
+# really uses: quadruped for most animals, the equine template for horse and deer, a low-body quadruped for the
+# turtle (there is no turtle template), biped for the humanoid page. Value: (short phrase, one sentence).
+RIG_ARTICLE_V3_CATEGORIES: Dict[str, Dict[str, Tuple[str, str]]] = {
+    "quadruped": {
+        "en": ("quadruped category", "The rig uses the quadruped category, with a skeleton template, fit rules, skin rules and a clip library made for four-legged bodies."),
+        "ru": ("категория четвероногих", "Риг строится в категории четвероногих: свой шаблон скелета, правила подгонки и скина и библиотека клипов для четвероногих тел."),
+        "zh": ("四足动物类别", "绑定使用四足动物类别：拥有专为四足身体准备的骨架模板、拟合规则、蒙皮规则和动画库。"),
+        "hi": ("चौपाए श्रेणी", "रिग चौपाए श्रेणी का इस्तेमाल करता है: चार पैरों वाले शरीरों के लिए बना कंकाल टेम्पलेट, फ़िट नियम, स्किन नियम और क्लिप लाइब्रेरी।"),
+    },
+    "equine": {
+        "en": ("equine template", "The rig uses the equine template: scapula, elbow, mid-neck and leg profile joints, and planted-hoof gaits (walk, trot, gallop) that keep the hooves on the ground."),
+        "ru": ("шаблон лошадиных", "Риг строится по шаблону лошадиных: лопатка, локоть, середина шеи и профильные суставы ноги, а походки (шаг, рысь, галоп) держат копыта на земле."),
+        "zh": ("马科模板", "绑定使用马科模板：肩胛、肘部、颈中段和腿部轮廓关节，步态（行走、小跑、飞奔）让蹄子始终踩稳地面。"),
+        "hi": ("अश्व टेम्पलेट", "रिग अश्व टेम्पलेट का इस्तेमाल करता है: स्कैपुला, कोहनी, गर्दन का मध्य और पैर की रूपरेखा वाले जोड़, और चालें (चलना, ट्रॉट, गैलप) जिनमें खुर ज़मीन पर टिके रहते हैं।"),
+    },
+    "turtle": {
+        "en": ("low-body quadruped rig", "The rig is a low-body quadruped: four short legs, a neck and a tail around a rigid shell volume. There is no separate turtle template."),
+        "ru": ("риг низкого четвероногого", "Риг строится как у низкого четвероногого: четыре короткие ноги, шея и хвост вокруг жёсткого объёма панциря. Отдельного шаблона черепахи нет."),
+        "zh": ("低身体四足动物绑定", "绑定按低身体四足动物构建：四条短腿、脖子和尾巴围绕刚性的龟壳体积。没有单独的乌龟模板。"),
+        "hi": ("कम ऊँचाई वाले चौपाए का रिग", "रिग कम ऊँचाई वाले चौपाए की तरह बनता है: कठोर कवच के आसपास चार छोटे पैर, गर्दन और पूँछ। कछुए का अलग टेम्पलेट नहीं है।"),
+    },
+    "biped": {
+        "en": ("biped category", "The rig uses the biped category, which also covers primates. If the legs do not stand side by side, the leg on the floor sets the bone lengths for the other leg."),
+        "ru": ("категория двуногих", "Риг строится в категории двуногих, куда входят и приматы. Если ноги стоят не рядом, нога на полу задаёт длины костей для другой ноги."),
+        "zh": ("双足类别", "绑定使用双足类别，灵长类也属于此类。如果双腿没有并排站立，踩在地面上的那条腿会决定另一条腿的骨骼长度。"),
+        "hi": ("द्विपाद श्रेणी", "रिग द्विपाद श्रेणी का इस्तेमाल करता है, जिसमें प्राइमेट भी आते हैं। अगर पैर साथ-साथ नहीं खड़े, तो ज़मीन पर टिका पैर दूसरे पैर की हड्डियों की लंबाई तय करता है।"),
+    },
+}
+RIG_ARTICLE_V3_CATEGORY_BY_KEY: Dict[str, str] = {"horse": "equine", "deer": "equine", "turtle": "turtle", "humanoid": "biped"}
+
+
+def _rig_article_v3_category(rig_key: str, lang: str) -> Tuple[str, str]:
+    """V3 rig category of a per-animal page: (short phrase, one sentence) in the page language."""
+    texts = RIG_ARTICLE_V3_CATEGORIES[RIG_ARTICLE_V3_CATEGORY_BY_KEY.get(rig_key, "quadruped")]
+    return texts.get(lang, texts["en"])
+
+
 def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
     ui = RIG_ARTICLE_LANGS.get(lang, RIG_ARTICLE_LANGS["en"])
     info = RIG_ARTICLE_TYPES[rig_key]
@@ -12037,53 +12288,54 @@ def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
     shape = info["shape"].get(lang, info["shape"]["en"])
     use = info["use"].get(lang, info["use"]["en"])
     tip = info["tip"].get(lang, info["tip"]["en"])
+    cat_short, cat_line = _rig_article_v3_category(rig_key, lang)
     if lang == "ru":
         title = f"AI auto rigging online: {label} | AutoRig.online"
-        description = f"Онлайн AI-риггинг для типа {label}: загрузите GLB, FBX или OBJ и получите rigged модель с animation-ready preview для Blender, Unity и Unreal Engine."
+        description = f"Онлайн авториг для типа «{label}»: риг за секунды, клипы сразу, вьювер с режимом чертежа, экспорт GLB/FBX для Blender, Unity и Unreal."
         h1 = f"AI auto rigging online: {label}"
-        lead = f"AutoRig.online автоматически строит rig для {label}: {shape}. Страница сфокусирована на задачах, где пользователю нужно быстро получить готовый rig онлайн без ручной расстановки костей."
-        workflow = f"Загрузите GLB, FBX или OBJ, дождитесь обработки, откройте task preview и скачайте результат для Blender, Unity, Unreal Engine или web viewers. Такой workflow подходит для {use}."
+        lead = f"AutoRig.online ригует модели «{label}» одним конвейером: {shape}. {cat_line} Скелет и скин строятся за секунды, клипы анимации сразу переносятся на модель, а всё открывается в одном вьювере."
+        workflow = f"Перетащите GLB, FBX, OBJ, ZIP с текстурами или картинку в зону загрузки. Быстрый риг строит скелет и скин за секунды, а клипы из библиотеки категории сразу переносятся на модель. Вьювер предлагает подтвердить скелет (это никогда не обязательно), создаёт текстуры для модели без них и запускает проверки качества в фоне. Затем скачайте GLB, FBX, USDZ, ZIP, пакет Unity или файл Blender для Blender, Unity, Unreal Engine или веба. Процесс рассчитан на {use}."
         prep = tip
         faq = [
-            (f"Можно ли сделать auto rig для {label} онлайн?", f"Да. AutoRig.online принимает GLB, FBX и OBJ модели и запускает AI-assisted rigging workflow для {label}, если геометрия подходит для выбранного типа."),
-            (f"Какие файлы подходят для {label} rigging?", "Лучше всего подходят чистые GLB, FBX или OBJ модели с разделёнными конечностями, читаемым силуэтом и достаточной topology в местах сгиба."),
-            (f"Можно ли использовать результат в Blender, Unity и Unreal Engine?", "Да. После обработки можно открыть preview, скачать rigged файлы и использовать их в Blender, Unity, Unreal Engine и других 3D pipelines."),
+            (f"Можно ли сделать auto rig для {label} онлайн?", f"Да. Загрузите GLB, FBX или OBJ, ZIP с текстурами или картинку. Движок сам выбирает категорию рига ({cat_short}), за секунды строит скелет и скин и сразу переносит клипы анимации."),
+            (f"Какие файлы подходят для {label} rigging?", "Ничего особенного. Риг подгоняется под модель как есть, в любой позе. Чистый силуэт, разделённые конечности и достаточная топология у суставов дают самый чистый результат, а вьювер предлагает подтвердить скелет, что можно пропустить."),
+            (f"Можно ли использовать результат в Blender, Unity и Unreal Engine?", "Да. Скачайте GLB, FBX, USDZ, ZIP, пакет Unity или файл Blender из вьювера и используйте их в обычных 3D-пайплайнах и пайплайнах игр."),
         ]
     elif lang == "zh":
         title = f"{label} AI 在线自动绑定 | AutoRig.online"
-        description = f"面向 {label} 的在线 AI 自动绑定。上传 GLB、FBX 或 OBJ，生成适合 Blender、Unity、Unreal Engine 和网页预览的可动画 rigged 模型。"
+        description = f"在线为{label}自动绑定：几秒内完成绑定，动画片段即时生成，查看器带蓝图模式，可导出 GLB/FBX 用于 Blender、Unity 和 Unreal。"
         h1 = f"{label} AI 在线自动绑定"
-        lead = f"AutoRig.online 为 {label} 自动生成 rig：{shape}。此页面面向需要在线自动绑定特定动物或模型类型的创作者。"
-        workflow = f"上传 GLB、FBX 或 OBJ，等待处理，打开 task preview，并导出到 Blender、Unity、Unreal Engine 或网页查看器。该流程适合 {use}。"
+        lead = f"AutoRig.online 用一条流水线为 {label} 完成绑定：{shape}。{cat_line}骨架和蒙皮在几秒内生成，动画片段立即重定向，所有内容在同一个查看器中打开。"
+        workflow = f"把 GLB、FBX、OBJ、带贴图的 ZIP 或一张图片放入上传区。快速绑定在几秒内生成骨架和蒙皮，类别动画库中的片段立即重定向。查看器会提示确认骨架（绝不强制），为没有贴图的模型补全贴图，并在后台运行质量检查。之后可下载 GLB、FBX、USDZ、ZIP、Unity 包或 Blender 文件，用于 Blender、Unity、Unreal Engine 或网页。该流程适合 {use}。"
         prep = tip
         faq = [
-            (f"可以在线自动绑定 {label} 吗？", f"可以。AutoRig.online 支持上传 GLB、FBX 或 OBJ，并为 {label} 运行 AI-assisted rigging workflow。"),
-            (f"{label} 绑定前模型应该怎样准备？", "保持轮廓清晰、四肢分离，并在关节和弯曲区域保留足够拓扑。"),
-            ("结果可以用于 Blender、Unity 和 Unreal Engine 吗？", "可以。处理完成后可打开 preview，下载 rigged 文件，并用于常见 3D 和游戏开发流程。"),
+            (f"可以在线自动绑定 {label} 吗？", f"可以。上传 GLB、FBX 或 OBJ、带贴图的 ZIP 或一张图片。引擎会选择绑定类别（{cat_short}），几秒内生成骨架和蒙皮，并立即重定向动画片段。"),
+            (f"{label} 绑定前模型应该怎样准备？", "不需要特别准备。绑定会按模型当前的样子、在任意姿势下拟合。干净的轮廓、分离的四肢和关节周围足够的拓扑会得到最干净的结果，查看器会提示确认骨架，你也可以跳过。"),
+            ("结果可以用于 Blender、Unity 和 Unreal Engine 吗？", "可以。从查看器下载 GLB、FBX、USDZ、ZIP、Unity 包或 Blender 文件，并用于常见的 3D 和游戏开发流程。"),
         ]
     elif lang == "hi":
         title = f"{label} AI auto rigging online | AutoRig.online"
-        description = f"{label} के लिए online AI auto rigging. GLB, FBX या OBJ upload करें और Blender, Unity, Unreal Engine तथा web previews के लिए rigged animation-ready model export करें."
+        description = f"{label} को online auto rig करें: सेकंडों में रिग, तुरंत क्लिप, ब्लूप्रिंट मोड वाला व्यूअर, Blender, Unity और Unreal के लिए GLB/FBX एक्सपोर्ट।"
         h1 = f"{label} AI auto rigging online"
-        lead = f"AutoRig.online {label} के लिए automatically rig बनाता है: {shape}. यह page उन creators के लिए है जिन्हें specific rig type के लिए online automatic rigging चाहिए."
-        workflow = f"GLB, FBX या OBJ upload करें, processing complete होने दें, task preview खोलें, और Blender, Unity, Unreal Engine या web viewers के लिए result download करें. यह workflow {use} के लिए useful है."
+        lead = f"AutoRig.online {label} मॉडल को एक ही कन्वेयर पर रिग करता है: {shape}। {cat_line} कंकाल और स्किन सेकंडों में बनते हैं, एनिमेशन क्लिप तुरंत रीटारगेट होते हैं, और सब कुछ एक व्यूअर में खुलता है।"
+        workflow = f"GLB, FBX, OBJ, टेक्सचर वाली ZIP या एक तस्वीर अपलोड ज़ोन में डालें। तेज़ रिग सेकंडों में कंकाल और स्किन बनाता है, और श्रेणी की लाइब्रेरी के क्लिप तुरंत रीटारगेट होते हैं। व्यूअर कंकाल की पुष्टि का सुझाव देता है (यह कभी अनिवार्य नहीं), बिना टेक्सचर वाले मॉडल को टेक्सचर देता है और बैकग्राउंड में गुणवत्ता जाँच चलाता है। फिर Blender, Unity, Unreal Engine या वेब के लिए GLB, FBX, USDZ, ZIP, Unity पैकेज या Blender फ़ाइल डाउनलोड करें। यह प्रक्रिया {use} के लिए बनी है।"
         prep = tip
         faq = [
-            (f"क्या {label} को online auto rig किया जा सकता है?", f"हाँ. AutoRig.online GLB, FBX और OBJ uploads लेकर {label} के लिए AI-assisted rigging workflow चलाता है."),
-            (f"{label} rigging के लिए model कैसे prepare करें?", "Clear silhouette, separated limbs और bending areas में enough topology रखें ताकि animation preview साफ रहे।"),
-            ("क्या result Blender, Unity और Unreal Engine में काम करेगा?", "हाँ. Processing के बाद preview खोलें, rigged files download करें, और उन्हें common 3D/game pipelines में use करें।"),
+            (f"क्या {label} को online auto rig किया जा सकता है?", f"हाँ। GLB, FBX या OBJ, टेक्सचर वाली ZIP या एक तस्वीर अपलोड करें। इंजन रिग श्रेणी चुनता है ({cat_short}), सेकंडों में कंकाल और स्किन बनाता है और एनिमेशन क्लिप तुरंत रीटारगेट करता है।"),
+            (f"{label} rigging के लिए model कैसे prepare करें?", "कुछ ख़ास नहीं। रिग मॉडल पर वैसे ही फ़िट होता है जैसा वह है, किसी भी पोज़ में। साफ़ सिल्हूट, अलग अंग और जोड़ों के आसपास पर्याप्त टोपोलॉजी सबसे साफ़ नतीजा देती है, और व्यूअर कंकाल की पुष्टि का सुझाव देता है, जिसे आप छोड़ सकते हैं।"),
+            ("क्या result Blender, Unity और Unreal Engine में काम करेगा?", "हाँ। व्यूअर से GLB, FBX, USDZ, ZIP, Unity पैकेज या Blender फ़ाइल डाउनलोड करें और उन्हें सामान्य 3D और गेम डेवलपमेंट पाइपलाइन में इस्तेमाल करें।"),
         ]
     else:
         title = f"{label.title()} AI auto rigging online | AutoRig.online"
-        description = f"Online AI auto rigging for {label} 3D models. Upload GLB, FBX, or OBJ and export a rigged, animation-ready result for Blender, Unity, Unreal Engine, and web previews."
+        description = f"Auto rig a {label} 3D model online: rig in seconds, clips at once, a viewer with blueprint mode, GLB/FBX exports for Blender, Unity and Unreal."
         h1 = f"{label.title()} AI auto rigging online"
-        lead = f"AutoRig.online automatically builds rigs for {label} models: {shape}. This page targets creators who need a fast online workflow for a specific rig type, not only generic humanoid character rigging."
-        workflow = f"Upload a GLB, FBX, or OBJ file, wait for the AI-assisted rigging task, open the task preview, and export the rigged result for Blender, Unity, Unreal Engine, or web viewers. The workflow is designed for {use}."
+        lead = f"AutoRig.online rigs {label} models on one conveyor: {shape}. {cat_line} The skeleton and the skin are built in seconds, animation clips are retargeted at once, and everything opens in one viewer."
+        workflow = f"Drop a GLB, FBX, OBJ, a ZIP with textures or a picture on the upload zone. The fast rig builds the skeleton and the skin in seconds, and clips from the category library are retargeted at once. The viewer offers to confirm the skeleton, which is never required, textures a model that has none, and runs quality checks in the background. Then download GLB, FBX, USDZ, a ZIP, a Unity package or a Blender file for Blender, Unity, Unreal Engine or the web. The workflow is designed for {use}."
         prep = tip
         faq = [
-            (f"Can I auto rig a {label} model online?", f"Yes. AutoRig.online accepts GLB, FBX, and OBJ uploads and runs an AI-assisted rigging workflow for {label} models when the geometry matches the supported rig type."),
-            (f"What should I prepare before {label} auto rigging?", "Use a clean silhouette, separated limbs, and enough topology around bending areas so the generated rig and animation preview can deform cleanly."),
-            ("Can I use the result in Blender, Unity, and Unreal Engine?", "Yes. After processing, open the preview, download the rigged files, and use them in common 3D and game development pipelines."),
+            (f"Can I auto rig a {label} model online?", f"Yes. Upload a GLB, FBX or OBJ, a ZIP with textures or a picture. The engine picks the rig category ({cat_short}), builds the skeleton and the skin in seconds and retargets animation clips at once."),
+            (f"What should I prepare before {label} auto rigging?", "Nothing special. The rig is fitted to the model as it is, in any pose. A clean silhouette, separated limbs and enough topology around the joints give the cleanest result, and the viewer offers to confirm the skeleton, which you can skip."),
+            ("Can I use the result in Blender, Unity, and Unreal Engine?", "Yes. Download GLB, FBX, USDZ, a ZIP, a Unity package or a Blender file from the viewer and use them in common 3D and game development pipelines."),
         ]
     return {
         "title": title,
@@ -12873,6 +13125,7 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
     r = await db.execute(
         select(Task).where(
             Task.status == "processing",
+            Task.pipeline_kind != "v3",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )
@@ -13193,6 +13446,59 @@ async def ensure_disk_headroom_for_new_task(
     return summary
 
 
+# Downloads · V3 (owner bug 2026-10-12: from 19:24 to 05:55 UTC every upload got 503 and nobody knew): one DEV
+# alert when the disk guard starts refusing new work, one when it lets work in again. The episode lives in a file so
+# a restart neither repeats nor loses it.
+NEW_WORK_PAUSE_STATE = Path(os.getenv("AUTORIG_NEW_WORK_PAUSE_STATE", "/srv/autorig/data/var/funnel/new-work-pause.json"))
+
+
+def _dev_alert_text(text: str) -> None:
+    import urllib.request
+
+    boundary = "pause" + os.urandom(8).hex()
+    parts = []
+    for name, value in (("agent", "Downloads · V3"), ("project", "AutoRig V3"), ("kind", "text"), ("caption", text)):
+        parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n"
+                      f"Content-Type: text/plain; charset=utf-8\r\n\r\n").encode("utf-8") + value.encode("utf-8") + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    req = urllib.request.Request(os.getenv("AUTORIG_DEV_SEND", "https://autorig.online/dev/api/send"),
+                                 data=b"".join(parts), method="POST",
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                                          "User-Agent": "autorig-storage/1"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            print(f"[Request Disk] DEV alert sent ({resp.status})")
+    except Exception as exc:
+        print(f"[Request Disk] DEV alert failed: {exc}")
+
+
+def _new_work_pause_event(paused: bool, reason: str = "") -> None:
+    """Called on every guarded request: alerts only when the paused/open state changes."""
+    try:
+        exists = NEW_WORK_PAUSE_STATE.is_file()
+        if paused and not exists:
+            NEW_WORK_PAUSE_STATE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = NEW_WORK_PAUSE_STATE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"since": datetime.utcnow().isoformat() + "Z", "reason": reason[:300]}))
+            os.replace(tmp, NEW_WORK_PAUSE_STATE)
+            text = (f"🛑 AutoRig: new tasks are PAUSED by the disk guard — every upload gets 503 until it clears. "
+                    f"{reason[:240]}")
+        elif not paused and exists:
+            try:
+                since = json.loads(NEW_WORK_PAUSE_STATE.read_text()).get("since", "?")
+            except (OSError, ValueError):
+                since = "?"
+            NEW_WORK_PAUSE_STATE.unlink(missing_ok=True)
+            text = f"✅ AutoRig: new tasks accepted again (paused since {since})."
+        else:
+            return
+        import threading
+
+        threading.Thread(target=_dev_alert_text, args=(text,), daemon=True).start()
+    except Exception as exc:  # an alert never breaks the request path
+        print(f"[Request Disk] pause alert bookkeeping failed: {exc}")
+
+
 async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dict[str, Any]:
     """
     Request-path disk guard. It may remove regenerable bundle ZIPs, stale terminal
@@ -13206,6 +13512,7 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
         # The storage numbers are for the log; the visitor gets a sentence in their language
         # (Localization V3: a Persian customer once saw this raw string in an alert).
         print(f"[Request Disk] new work paused before {context}: {cache_block}")
+        _new_work_pause_event(True, f"artifact cache: {cache_block}")
         from user_language import user_error_detail
 
         raise HTTPException(
@@ -13232,6 +13539,7 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
             f"[Request Disk] new work paused before {context}: {free_gb:.2f}GB free, "
             f"target is {NEW_TASK_MIN_FREE_GB:.2f}GB"
         )
+        _new_work_pause_event(True, f"free {free_gb:.1f} GB < {NEW_TASK_MIN_FREE_GB:.0f} GB")
         from user_language import user_error_detail
 
         raise HTTPException(
@@ -13239,6 +13547,7 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
             detail=user_error_detail("storage_paused", retry_after_seconds=600),
             headers={"Retry-After": "600"},
         )
+    _new_work_pause_event(False)
     return result
 
 
@@ -14601,7 +14910,7 @@ async def api_free3d_search(
     endpoint = "/api-embeddings/browse" if use_browse else "/api-embeddings/"
 
     last_error: Optional[str] = None
-    for attempt in range(2):
+    for attempt in range(3):
         timeout = 8.0 if attempt == 0 else 12.0
         try:
             async with worker_http_client(timeout=timeout) as client:
@@ -14630,7 +14939,8 @@ async def api_free3d_search(
             }
         except Exception as e:
             last_error = str(e)
-            if attempt == 0:
+            if attempt < 2:
+                await asyncio.sleep(0.3 * (attempt + 1))
                 continue
 
             print(f"[Free3D] Search error ({endpoint}): {e}")
@@ -17012,6 +17322,18 @@ app.include_router(
     )
 )
 
+# V3 conveyor read API for the task page: /api/task/{id}/v3-shell and /api/task/{id}/v3.
+from v3_runtime_mount import build_v3_read_router
+
+app.include_router(
+    build_v3_read_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
+    )
+)
+
 # Task page V3 (Task page · V3 agent, 2026-10-10): the live task page, its
 # state API and the feed that opens a task's own models in the Unity viewer.
 import task_page_live
@@ -17043,6 +17365,22 @@ app.include_router(
         task_model=Task,
         is_admin_email=is_admin_email,
         glb_cache_dir=GLB_CACHE_DIR,
+        effective_anon_id=_effective_anon_id,
+        has_task_purchase=_has_full_task_download_purchase,   # a task pack unlock (owner 2026-10-16)
+        unlock_task=_ensure_full_task_unlock,
+    )
+)
+
+# Texturing · V3 (2026-10-11, «Every Model Gets Textures»): the texture status of a V3 task and the upload of the
+# missing texture / material files (or a ZIP) into the same task, which then runs a new attempt with them.
+from v3_textures import build_v3_textures_router
+
+app.include_router(
+    build_v3_textures_router(
+        get_db=get_db,
+        get_current_user=get_current_user,
+        task_model=Task,
+        is_admin_email=is_admin_email,
         effective_anon_id=_effective_anon_id,
     )
 )
@@ -17407,6 +17745,18 @@ async def video_page():
 async def model3d_page():
     """A picture turned into geometry by the farm's own Hunyuan3D."""
     return _static_html_response("3dmodel.html")
+
+
+@app.get("/system_prompts")
+async def system_prompts_page():
+    """Every system prompt of the graphs and the server's own rules, edited live."""
+    return _static_html_response("system_prompts.html")
+
+
+@app.get("/queue")
+async def queue_page():
+    """Every finished render of this device, a page at a time, made for a phone."""
+    return _static_html_response("queue.html")
 
 
 @app.get("/nodes")

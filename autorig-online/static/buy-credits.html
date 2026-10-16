@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title data-i18n="seo_buy_title">AutoRig Unlimited Monthly ($20) and Blender Plugin</title>
+    <title data-i18n="seo_buy_title">AutoRig Unlimited Monthly: $10 this month (50% off), 5 task unlocks for $9</title>
     <meta name="description" content="AutoRig Unlimited Monthly, $20/month: unlimited V3 rigging with animation clips and textures, private models, gallery control. Blender plugin sold separately.">
     <meta name="keywords" content="autorig pricing, autorig unlimited monthly, auto rig subscription, blender auto rig plugin, rig 3d models online, rigging price">
     <link rel="canonical" href="https://autorig.online/buy-credits">
@@ -52,10 +52,11 @@
                         "@type": "Offer",
                         "url": "https://autorig.online/buy-credits/checkout/autorig-unlimited-monthly",
                         "priceCurrency": "USD",
-                        "price": "20",
+                        "price": "10",
+                        "validThrough": "2026-11-15",
                         "priceSpecification": {
                             "@type": "UnitPriceSpecification",
-                            "price": "20",
+                            "price": "10",
                             "priceCurrency": "USD",
                             "billingDuration": 1,
                             "unitCode": "MON"
@@ -77,6 +78,27 @@
                     "offers": {
                         "@type": "Offer",
                         "url": "https://autorig.online/blender-plugin/checkout",
+                        "availability": "https://schema.org/InStock"
+                    }
+                }
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "item": {
+                    "@type": "Product",
+                    "name": "AutoRig 5 Task Unlocks",
+                    "description": "Five task unlocks for AutoRig.online: each one opens every download of one rigged model (GLB, FBX, .blend, ZIP with all animations) for good. One-time payment, no subscription.",
+                    "image": "https://autorig.online/static/images/og/buy-credits.jpg",
+                    "brand": {
+                        "@type": "Brand",
+                        "name": "AutoRig.online"
+                    },
+                    "offers": {
+                        "@type": "Offer",
+                        "url": "https://autorig.online/buy-credits/checkout/autorig-5-tasks",
+                        "priceCurrency": "USD",
+                        "price": "9",
                         "availability": "https://schema.org/InStock"
                     }
                 }
@@ -392,7 +414,7 @@
             <section class="card buy-hero" aria-labelledby="buy-page-title">
                 <p class="buy-hero-kicker" data-i18n="buy_page_kicker">AutoRig Store</p>
                 <h1 id="buy-page-title" data-i18n="buy_page_title">AutoRig Unlimited Monthly and Blender Plugin</h1>
-                <p data-i18n="buy_page_intro">Create unlimited models for $20/month. Every model runs on the V3 conveyor: fast rig, animation clips, textures and exports. Keep models private when needed and control whether your work appears in the public gallery.</p>
+                <p data-i18n="buy_page_intro">Create unlimited models for $10/month this month: 50% off the regular $20. Every model runs on the V3 conveyor: fast rig, animation clips, textures and exports. Or pay per model: 5 task unlocks for $9, each one opening every download of one task forever.</p>
             </section>
 
             <section class="buy-product-grid" aria-label="AutoRig products" data-i18n-aria-label="buy_products_label">
@@ -477,11 +499,11 @@
                 </p>
                 <p class="buy-section-intro" data-i18n="buy_credits_section_intro">One plan for the complete web app: unlimited model creation for one month on the V3 conveyor, private models, and gallery visibility controls. The subscription renews automatically every month until cancelled.</p>
 
-            <div id="panel-billing-card" class="billing-panel pricing-grid-billing" style="display: grid; grid-template-columns: minmax(0, 560px); justify-content: center; gap: 1rem; margin-top: 0;">
+            <div id="panel-billing-card" class="billing-panel pricing-grid-billing" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 460px)); justify-content: center; gap: 1rem; margin-top: 0;">
                 <div class="card" style="padding: 1.75rem; text-align: center; border: 2px solid var(--accent); position: relative;">
-                    <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;" data-i18n="buy_plan_badge">ONE SIMPLE PLAN</span>
+                    <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;" data-i18n="buy_plan_badge_offer">50% OFF THIS MONTH</span>
                     <h3 style="margin-top: 0;" data-i18n="buy_plan_title">Unlimited Monthly</h3>
-                    <div style="font-size: 2.4rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$20<span style="font-size: 1rem; font-weight: 500; color: var(--text-muted);" data-i18n="buy_per_month"> / month</span></div>
+                    <div style="font-size: 2.4rem; font-weight: 700; color: var(--accent); margin: 1rem 0;"><s style="font-size: 1.4rem; font-weight: 500; color: var(--text-muted); margin-right: 0.4rem;">$20</s>$10<span style="font-size: 1rem; font-weight: 500; color: var(--text-muted);" data-i18n="buy_per_month"> / month</span></div>
                     <ul style="max-width: 360px; margin: 0 auto 1.25rem; text-align: left; color: var(--text-secondary); line-height: 1.8;">
                         <li data-i18n="buy_plan_feature_unlimited">Unlimited model creation for one month</li>
                         <li data-i18n="buy_plan_feature_v3">Fast rig, animation clips and textures for every model</li>
@@ -489,8 +511,22 @@
                         <li data-i18n="buy_plan_feature_gallery">Remove or restore your models in the public gallery</li>
                         <li data-i18n="buy_plan_feature_parallel">No per-account model or parallel-task limit</li>
                     </ul>
-                    <a href="/buy-credits/checkout/autorig-unlimited-monthly?source=buy_credits_page" class="btn btn-primary" id="buy-unlimited-monthly" style="width: 100%;" data-i18n="buy_plan_cta">Subscribe for $20/month</a>
-                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.85rem;" data-i18n="buy_plan_cancel">Auto-renews monthly. Cancel anytime; access remains active through the paid billing period.</div>
+                    <a href="/buy-credits/checkout/autorig-unlimited-monthly?source=buy_credits_page" class="btn btn-primary" id="buy-unlimited-monthly" style="width: 100%;" data-i18n="buy_plan_cta_offer">Subscribe for $10/month</a>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.85rem;" data-i18n="buy_plan_offer_note">Launch offer: the 50% discount code is applied at checkout automatically. Regular price $20/month.</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.5rem;" data-i18n="buy_plan_cancel">Auto-renews monthly. Cancel anytime; access remains active through the paid billing period.</div>
+                </div>
+                <div class="card" style="padding: 1.75rem; text-align: center; position: relative;">
+                    <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--bg-tertiary, #333); color: var(--text-primary, #fff); font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;" data-i18n="buy_pack_badge">PAY PER MODEL</span>
+                    <h3 style="margin-top: 0;" data-i18n="buy_pack_title">5 Task Unlocks</h3>
+                    <div style="font-size: 2.4rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$9<span style="font-size: 1rem; font-weight: 500; color: var(--text-muted);" data-i18n="buy_pack_once"> one-time</span></div>
+                    <ul style="max-width: 360px; margin: 0 auto 1.25rem; text-align: left; color: var(--text-secondary); line-height: 1.8;">
+                        <li data-i18n="buy_pack_feature_each">Each unlock opens every download of one task, forever</li>
+                        <li data-i18n="buy_pack_feature_files">GLB, FBX, .blend and ZIP with every animation</li>
+                        <li data-i18n="buy_pack_feature_any">Spend them on any of your finished models, any time</li>
+                        <li data-i18n="buy_pack_feature_noexpire">Unused unlocks never expire</li>
+                    </ul>
+                    <a href="/buy-credits/checkout/autorig-5-tasks?source=buy_credits_page" class="btn btn-secondary" id="buy-task-pack" style="width: 100%;" data-i18n="buy_pack_cta">Buy 5 unlocks for $9</a>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.85rem;" data-i18n="buy_pack_note">One-time payment, no subscription. The unlock is spent from the task page when you download.</div>
                 </div>
             </div>
 

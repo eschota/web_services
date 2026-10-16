@@ -7,7 +7,7 @@
 // model or animations only, Mixamo bone names for humanoids, the rig version. The export runs on request with a real
 // percent and stage, behind the Unlimited paywall. The server decides everything (/api/task/<id>/downloads-v3); the
 // clips are the run's current ones, so clips added in the viewport show up here on the next open.
-const BUILD = 'dlv3-20261011.1';
+const BUILD = 'dlv3-20261016.1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const params = new URLSearchParams(location.search);
 const taskId = String(params.get('id') || '').trim().toLowerCase();
@@ -36,6 +36,10 @@ const FALLBACK = {
     dlv3_pay_signin_first: 'Sign in first, then subscribe', dlv3_pay_waiting: 'Waiting for the payment · the download starts by itself',
     dlv3_pay_not_owner: 'Only the owner of this task can download its files', dlv3_view_as_free: 'View as a free user (admin)',
     dlv3_offline: 'No connection, retrying…',
+    dlv3_pay_offer: '{percent}% off this month', dlv3_pay_was: 'regular price {price}', dlv3_pay_or: 'or',
+    dlv3_pack_cta: '{n} task unlocks · {price}', dlv3_pack_hint: 'Each unlock opens every download of one task, forever',
+    dlv3_unlock_cta: 'Unlock this task · {cost} credits', dlv3_unlock_left: '{n} left',
+    dlv3_unlock_failed: 'Could not unlock · try again',
   },
   ru: {
     dlv3_title: 'Скачать', dlv3_hero: 'Скачать риг', dlv3_hero_tip: 'Риг готов: скачайте его с анимациями',
@@ -57,6 +61,10 @@ const FALLBACK = {
     dlv3_pay_signin_first: 'Сначала войдите, потом подписка', dlv3_pay_waiting: 'Ждём оплату · скачивание начнётся само',
     dlv3_pay_not_owner: 'Скачать файлы может только владелец задачи', dlv3_view_as_free: 'Смотреть как бесплатный (админ)',
     dlv3_offline: 'Нет связи, повторяем…',
+    dlv3_pay_offer: 'Скидка {percent}% в этом месяце', dlv3_pay_was: 'обычная цена {price}', dlv3_pay_or: 'или',
+    dlv3_pack_cta: '{n} разблокировок задач · {price}', dlv3_pack_hint: 'Каждая открывает все скачивания одной задачи навсегда',
+    dlv3_unlock_cta: 'Открыть эту задачу · {cost} кредитов', dlv3_unlock_left: 'осталось {n}',
+    dlv3_unlock_failed: 'Не удалось открыть · попробуйте ещё раз',
   },
 };
 
@@ -149,9 +157,22 @@ function remember(req) { store(PENDING_KEY, req); }
 function pending() { return load(PENDING_KEY); }
 function forget() { store(PENDING_KEY, null); }
 
+function usd(value) { const n = Number(value) || 0; return `$${Number.isInteger(n) ? n : n.toFixed(2)}`; }
 function priceText(plan) {
   const price = Number(plan && plan.price_usd) || 20;
-  return tr('dlv3_pay_price', { price: `$${Number.isInteger(price) ? price : price.toFixed(2)}` });
+  return tr('dlv3_pay_price', { price: usd(price) });
+}
+// The price line (owner 2026-10-16): while the launch offer runs, the offer price with the list price struck through
+// and the discount badge; the server says what the buyer pays now (plan.price_usd) and the list price.
+function priceNode(plan) {
+  const offer = plan && plan.offer && plan.offer.active ? plan.offer : null;
+  const p = el('p', { class: 'dl3-pay-price' });
+  if (offer && Number(plan.list_price_usd) > Number(plan.price_usd)) {
+    p.appendChild(el('s', { text: usd(plan.list_price_usd), title: tr('dlv3_pay_was', { price: usd(plan.list_price_usd) }) }));
+    p.appendChild(el('span', { text: priceText(plan) }));
+    p.appendChild(el('em', { class: 'dl3-pay-off', text: tr('dlv3_pay_offer', { percent: offer.percent }) }));
+  } else p.textContent = priceText(plan);
+  return p;
 }
 
 // ---------------------------------------------------------------- the choice: target × clips × model × names × version
@@ -405,12 +426,14 @@ function paywall(access, plan, req) {
       el('li', { title: tr('dlv3_pay_files') }, icon('files'), el('span', { text: tr('dlv3_pay_files') })),
       el('li', { title: tr('dlv3_pay_engines') }, icon('engines'), el('span', { text: tr('dlv3_pay_engines') })),
       el('li', { title: tr('dlv3_pay_unlimited') }, icon('infinite'), el('span', { text: tr('dlv3_pay_unlimited') }))));
-    box.appendChild(el('p', { class: 'dl3-pay-price', text: priceText(plan) }));
+    box.appendChild(priceNode(plan));
+    const pack = plan && plan.pack && plan.pack.checkout_url ? plan.pack : null;
     if (!access.signed_in) {
       box.appendChild(el('a', { class: 'dl3-cta', id: 'dl3-signin', href: plan.login_url, title: tr('dlv3_pay_signin_first'),
         onclick: () => { try { window.autorigFunnel && window.autorigFunnel.track('sign_up_prompt', { task_id: taskId }); } catch (e) { /* ignore */ } } },
         icon('google'), el('span', { text: tr('dlv3_pay_signin') })));
       box.appendChild(el('p', { class: 'dl3-pay-hint', text: tr('dlv3_pay_signin_first') }));
+      if (pack) box.appendChild(el('p', { class: 'dl3-pay-hint', text: `${tr('dlv3_pack_cta', { n: pack.tasks, price: usd(pack.price_usd) })} · ${tr('dlv3_pack_hint')}` }));
     } else {
       const wait = el('p', { class: 'dl3-pay-hint', id: 'dl3-wait', hidden: true, text: tr('dlv3_pay_waiting') });
       box.appendChild(el('a', {
@@ -418,6 +441,24 @@ function paywall(access, plan, req) {
         onclick: () => { wait.hidden = false; try { window.autorigFunnel && window.autorigFunnel.track('checkout_start', { task_id: taskId, props: { plan: 'unlimited_monthly' } }); } catch (e) { /* ignore */ } watchPayment(req); },
       }, icon('infinite'), el('span', { text: tr('dlv3_pay_subscribe') })));
       box.appendChild(wait);
+      // The task pack (owner 2026-10-16): with pack credits on the account the task is unlocked here; otherwise the
+      // pack is bought (the checkout intent carries this task, so the purchase unlocks it by itself).
+      const cost = Number(access.unlock_cost) || 10;
+      if (access.can_unlock && Number(access.credits) >= cost) {
+        const left = Math.floor(Number(access.credits) / cost);
+        box.appendChild(el('p', { class: 'dl3-pay-or', text: tr('dlv3_pay_or') }));
+        box.appendChild(el('button', {
+          type: 'button', class: 'dl3-cta dl3-cta-alt', id: 'dl3-unlock', title: tr('dlv3_unlock_left', { n: left }),
+          onclick: (ev) => unlockTask(ev.currentTarget, req),
+        }, icon('lock'), el('span', { text: tr('dlv3_unlock_cta', { cost }) }), el('small', { text: tr('dlv3_unlock_left', { n: left }) })));
+      } else if (pack) {
+        box.appendChild(el('p', { class: 'dl3-pay-or', text: tr('dlv3_pay_or') }));
+        box.appendChild(el('a', {
+          class: 'dl3-cta dl3-cta-alt', id: 'dl3-pack', href: pack.checkout_url, target: '_blank', rel: 'noopener', title: tr('dlv3_pack_hint'),
+          onclick: () => { wait.hidden = false; try { window.autorigFunnel && window.autorigFunnel.track('checkout_start', { task_id: taskId, props: { plan: 'task_pack' } }); } catch (e) { /* ignore */ } watchPayment(req); },
+        }, icon('files'), el('span', { text: tr('dlv3_pack_cta', { n: pack.tasks, price: usd(pack.price_usd) }) })));
+        box.appendChild(el('p', { class: 'dl3-pay-hint', text: tr('dlv3_pack_hint') }));
+      }
     }
   }
   const old = panel.querySelector('.dl3-pay');
@@ -443,6 +484,21 @@ function watchPayment(req) {
   };
   payWatch = setInterval(check, 5000);
   addEventListener('focus', check, { once: true });
+}
+
+// A task pack unlock (owner 2026-10-16): 10 credits open every download of this task for good; the remembered
+// download then continues by itself.
+async function unlockTask(btn, req) {
+  if (btn) btn.disabled = true;
+  const r = await api(`/api/task/${encodeURIComponent(taskId)}/unlock-v3`, { method: 'POST', body: '{}' });
+  if (r.ok && r.body && r.body.access && r.body.access.allowed) {
+    try { window.autorigFunnel && window.autorigFunnel.track('purchase', { task_id: taskId, value: 0, currency: 'USD', props: { plan: 'task_unlock' } }); } catch (e) { /* ignore */ }
+    manifest = r.body;
+    render();
+    choose(req);
+    return;
+  }
+  if (btn) { btn.disabled = false; const s = btn.querySelector('small'); if (s) s.textContent = tr('dlv3_unlock_failed'); }
 }
 
 function progress(view) {
@@ -477,9 +533,26 @@ function save(url) {
   setTimeout(() => a.remove(), 1000);
 }
 
+// The owner's Telegram «Purchase intent» notice for every download click (2026-10-13: the V3 page never sent it, so
+// none came after 10.10). Once per page and request; the server decides nothing from it.
+const intentSent = new Set();
+function notifyIntent(req, locked) {
+  try {
+    const target = (req.custom && req.custom.target) || req.fmt || '';
+    const k = target + (locked ? ':locked' : ':open');
+    if (intentSent.has(k)) return;
+    intentSent.add(k);
+    fetch('/api/task/' + encodeURIComponent(taskId) + '/purchase-intent', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'v3 ' + target + (locked ? ' · paywall' : ' · download') }),
+    }).catch(() => {});
+  } catch (e) { /* ignore */ }
+}
+
 async function choose(req) {
   if (!manifest || !req) return;
   if (typeof req === 'string') req = { fmt: req };          // an older remembered download
+  notifyIntent(req, !!(manifest.access && !manifest.access.allowed));
   const key = requestKey(req);
   if (busy && busy.key === key && busy.view && busy.view.state !== 'failed') return;
   if (manifest.access && !manifest.access.allowed) {
