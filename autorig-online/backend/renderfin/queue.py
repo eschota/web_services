@@ -10,7 +10,7 @@ import os
 import time
 import uuid
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiosqlite
 import httpx
@@ -18,8 +18,14 @@ import httpx
 from . import (
     comfy_adapter,
     config,
+    errors,
+    gpu_budget,
     image_quality,
+    model_eligibility,
+    multiref,
+    music,
     routing,
+    stream_decode,
     templating,
     workload_lease,
 )
@@ -38,6 +44,126 @@ from .registry import ServerRegistry
 # backlog, so an unreachable box is never mistaken for an idle one - but still
 # finite, so it stays usable when every box is unreadable.
 _UNKNOWN_DEPTH = 10_000
+_AVATAR_WORKFLOW = "gen_image_flux2_avatar.json"
+# Why a queued graph job was stood down (its error text; the editor shows it).
+MISSING_NODE_EXCLUDE_SECONDS = 6 * 3600
+GRAPH_STALE_REASON = "cancelled: the graph no longer needs this render"
+GRAPH_SUPERSEDED_REASON = "cancelled: this node was rendered again"
+
+
+def _utc_stamp(when: float) -> str:
+    """Absolute UTC for a journal line.
+
+    The journal stamps its own lines in the box's local time, so a cooldown
+    printed as "in 480s" has to be added to a clock the reader is converting
+    in their head. An absolute UTC instant can be compared to the next line
+    directly.
+    """
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when))
+
+
+def _exclusion_text(kind: str, detail: str) -> str:
+    """Human half of an _exclusion_reason pair."""
+    if kind == "offline":
+        return f"offline (status={detail})"
+    if kind == "cannot-run":
+        return f"does not advertise {detail}"
+    if kind == "missing-model":
+        return "does not have the requested checkpoint/lora"
+    if kind == "busy":
+        return f"busy with {detail}"
+    if kind == "cooling":
+        return f"cooling down until {detail}"
+    if kind == "unbound":
+        return f"not the GPU this task is leased to ({detail})"
+    if kind == "too-large":
+        return f"too small for this job ({detail})"
+    if kind == "avoid":
+        return f"already failed this job ({detail})"
+    if kind == "oom-ceiling":
+        return f"ran out of GPU memory on a job this size ({detail})"
+    if kind == "recovering":
+        return f"ComfyUI restarting, out of rotation until {detail}"
+    return f"{kind} {detail}".strip()
+
+
+def _exclusion_key(kind: str, detail: str) -> str:
+    """Throttle half of an _exclusion_reason pair.
+
+    Deliberately drops the volatile detail (which task is occupying a box)
+    and keeps the actionable one (the status, the token, the cooldown
+    deadline), so ordinary task turnover does not re-print the same stall and
+    a genuinely new cooldown does.
+    """
+    if kind in ("offline", "cannot-run", "cooling", "recovering"):
+        return f"{kind}:{detail}"
+    return kind
+
+
+def _inject_avatar_reference_images(
+    workflow: Dict[str, Any], image_filenames: List[str]
+) -> None:
+    """Chain native FLUX.2 ReferenceLatent nodes in caller-provided order.
+
+    Native ComfyUI explicitly supports chaining ReferenceLatent for multiple
+    images. Building only the branches that have real uploaded files avoids
+    placeholder LoadImage nodes and keeps one audited workflow for 1..4 refs.
+    """
+    if not 1 <= len(image_filenames) <= 4:
+        raise ValueError("Avatar workflow requires 1 to 4 reference images")
+    required = {"positive", "vae", "guider"}
+    missing = sorted(required.difference(workflow))
+    if missing:
+        raise ValueError(
+            "Avatar workflow is missing reference anchors: " + ", ".join(missing)
+        )
+    positive = workflow["positive"]
+    vae = workflow["vae"]
+    guider = workflow["guider"]
+    if (
+        not isinstance(positive, dict)
+        or positive.get("class_type") != "CLIPTextEncode"
+        or not isinstance(vae, dict)
+        or vae.get("class_type") != "VAELoader"
+        or not isinstance(guider, dict)
+        or guider.get("class_type") != "BasicGuider"
+    ):
+        raise ValueError("Avatar workflow reference anchors have unexpected node types")
+
+    conditioning: List[Any] = ["positive", 0]
+    for index, filename in enumerate(image_filenames, start=1):
+        prefix = f"avatar_reference_{index}"
+        image_node = f"{prefix}_image"
+        scale_node = f"{prefix}_scale"
+        encode_node = f"{prefix}_encode"
+        condition_node = f"{prefix}_conditioning"
+        workflow[image_node] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": filename},
+            "_meta": {"title": f"Avatar reference {index}"},
+        }
+        workflow[scale_node] = {
+            "class_type": "ImageScaleToTotalPixels",
+            "inputs": {
+                "image": [image_node, 0],
+                "upscale_method": "area",
+                "megapixels": 1.0,
+                "resolution_steps": 1,
+            },
+        }
+        workflow[encode_node] = {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": [scale_node, 0], "vae": ["vae", 0]},
+        }
+        workflow[condition_node] = {
+            "class_type": "ReferenceLatent",
+            "inputs": {
+                "conditioning": conditioning,
+                "latent": [encode_node, 0],
+            },
+        }
+        conditioning = [condition_node, 0]
+    guider.setdefault("inputs", {})["conditioning"] = conditioning
 
 
 class ManagedComfyCleanupPending(RuntimeError):
@@ -218,6 +344,87 @@ def _host_managed_progress(
         "stale_at": stale_at,
     }
 
+def is_autorig(task) -> bool:
+    """An AutoRig task (owner 2026-10-15: priority on worker-4090): the farm client
+    marked it, or it came under an AutoRig user name. Collection background work
+    is AutoRig's own bulk and never takes priority."""
+    if not config.AUTORIG_PRIORITY:
+        return False
+    if str(getattr(task, "queue_class", "") or "") == "collection_background":
+        return False
+    prompt = getattr(task, "prompt", None)
+    if str(getattr(prompt, "priority_class", "") or "").strip().lower() == "autorig":
+        return True
+    return str(getattr(prompt, "user_name", "") or "").strip() in config.AUTORIG_USER_NAMES
+
+
+def excluded_boxes(task) -> Tuple[str, set]:
+    """(key, boxes) this task must never run on (RENDERFIN_EXCLUDE_BOXES_FOR),
+    by its prompt's priority_class first, then its user_name; ("", empty) when none."""
+    rules = config.EXCLUDE_BOXES_FOR
+    if not rules or task is None:
+        return "", set()
+    prompt = getattr(task, "prompt", None)
+    for key in (str(getattr(prompt, "priority_class", "") or "").strip(),
+                str(getattr(prompt, "user_name", "") or "").strip()):
+        if key and key in rules:
+            return key, rules[key]
+    return "", set()
+
+
+def dispatch_order(tasks, now: Optional[float] = None) -> List[Any]:
+    """The waiting tasks in the order the pump dispatches them.
+
+    AutoRig tasks first, oldest first (owner 2026-10-15); then:
+
+    LIFO by submission burst: tasks submitted within LIFO_GROUP_SECONDS of the
+    previous one form a group (an X9 batch, a list run) that keeps its own
+    first-in order; groups go newest first. A task waiting longer than
+    STARVE_MINUTES jumps ahead of every group, oldest first, so nothing waits
+    forever behind a stream of new work.
+    """
+    waiting = sorted(
+        (task for task in tasks if getattr(task, "status", "") == TASK_PENDING),
+        key=lambda task: (float(getattr(task, "created_at", 0.0) or 0.0), str(task.id)),
+    )
+    autorig = [t for t in waiting if is_autorig(t)]
+    waiting = [t for t in waiting if not is_autorig(t)]
+    if not config.LIFO or len(waiting) < 2:
+        return autorig + waiting
+    now = time.time() if now is None else now
+    starving = [t for t in waiting if now - float(t.created_at or 0) > config.STARVE_MINUTES * 60]
+    rest = [t for t in waiting if now - float(t.created_at or 0) <= config.STARVE_MINUTES * 60]
+    groups: List[List[Any]] = []
+    for task in rest:
+        if groups and float(task.created_at or 0) - float(groups[-1][-1].created_at or 0) <= config.LIFO_GROUP_SECONDS:
+            groups[-1].append(task)
+        else:
+            groups.append([task])
+    ordered = autorig + list(starving)
+    for group in reversed(groups):
+        ordered.extend(group)
+    return ordered
+
+
+def pending_queue_position(tasks, task_id: str) -> Dict[str, int]:
+    """1-based rank of a waiting task among everything else that is waiting.
+
+    Order is by submission time, which is the order the pump dispatches in, so
+    the rank is the number somebody waiting actually wants: not "queued", but
+    seventh of twenty-one. A task that is rendering, done or failed has no
+    place in the queue and gets position 0 — the caller then shows nothing
+    rather than a stale number that only ever counted down to a lie.
+    """
+    waiting = dispatch_order(tasks)
+    wanted = str(task_id or "")
+    position = 0
+    for index, task in enumerate(waiting):
+        if str(task.id) == wanted:
+            position = index + 1
+            break
+    return {"queue_position_int": position, "queue_length_int": len(waiting)}
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS render_tasks (
     id TEXT PRIMARY KEY,
@@ -365,6 +572,32 @@ class RenderQueue:
         # Without a cooldown, one broken disk/proxy can spend all three task
         # attempts while healthy renderers sit unused.
         self._server_submit_cooldowns: Dict[str, float] = {}
+        # (box, workflow token) -> until: a box whose ComfyUI lacks a node class
+        # a workflow needs (missing_node_type) is kept off THAT workflow and
+        # the task goes to another box (2026-09-29: worker-4090 advertised
+        # gen_image.json without the QwenImage21Cache node; 3 identical
+        # refusals failed the task instead of moving it).
+        self._server_missing_nodes: Dict[Tuple[str, str], float] = {}
+        # signature of a starved dispatch pass -> when it was last printed.
+        self._starvation_logged: Dict[str, float] = {}
+        # GPU memory / hang recovery (2026-09-29, see renderfin.gpu_budget).
+        # box -> (measured_at, vram_total, vram_free) from its /system_stats
+        self._box_vram: Dict[str, Tuple[float, int, int]] = {}
+        # (box, family) -> (smallest job that ran out of memory there, until)
+        self._oom_ceilings: Dict[Tuple[str, str], Tuple[int, float]] = {}
+        # box -> recent out-of-memory times (a second one soon means restart)
+        self._box_ooms: Dict[str, List[float]] = {}
+        # box -> until: a ComfyUI restart is in flight, keep work off it
+        self._recovering: Dict[str, float] = {}
+        self._restart_requested_at: Dict[str, float] = {}
+        # task id -> start of the current stretch of unanswered polls, and
+        # the earliest moment to ask that box again
+        self._poll_failing_since: Dict[str, float] = {}
+        self._poll_not_before: Dict[str, float] = {}
+        self._hang_checked_at: Dict[str, float] = {}
+        self._restart_poll_seconds = 5.0
+        self._background: set = set()
+        self._cancelling: set = set()
 
     # ---------- lifecycle ----------
 
@@ -380,6 +613,25 @@ class RenderQueue:
             self._client = httpx.AsyncClient(follow_redirects=True)
         await self._resurrect()
         await self._reconcile_terminal_leases()
+        if config.WIPE_QUEUE_ON_START:
+            try:
+                wiped = await self.reset_farm(reason="cancelled: server restarted — press Render again", spare_non_graph=True)
+                print(f"[Renderfin][Queue] START WIPE: cancelled {wiped.get('cancelled_queued_int')} queued, "
+                      f"{wiped.get('cancelled_running_int')} running; boxes {wiped.get('boxes_object')}")
+                self.last_start_wipe = {k: v for k, v in wiped.items() if k != "task_ids_array"}
+            except Exception as exc:
+                print(f"[Renderfin][Queue] START WIPE failed: {exc}")
+        else:
+            # Owner rule 2026-10-11: a restart resumes. _resurrect above put
+            # back what was queued or running; this brings back what a restart
+            # cancelled anyway (an older release's wipe) a short while ago.
+            try:
+                resumed = await self.resume_after_restart(reason="renderfin start")
+                self.last_start_resume = {k: v for k, v in resumed.items() if k != "skipped_array"}
+                print(f"[Renderfin][Queue] START RESUME: {self._resurrect_counts} "
+                      f"revived {resumed.get('revived_int')} cancelled-by-restart job(s)")
+            except Exception as exc:
+                print(f"[Renderfin][Queue] START RESUME failed: {exc}")
         self._stopped.clear()
         self._pump_task = asyncio.create_task(self._pump())
 
@@ -388,6 +640,9 @@ class RenderQueue:
         for finisher in list(self._finishers.values()):
             finisher.cancel()
         self._finishers.clear()
+        for job in list(self._background):
+            job.cancel()
+        self._background.clear()
         if self._pump_task:
             self._pump_task.cancel()
             try:
@@ -407,6 +662,8 @@ class RenderQueue:
         # active tasks restart from Pending; recent finished tasks are loaded
         # read-only so in-flight character_gen jobs can resume against them
         day_ago = time.time() - 86400
+        counts = {"queued_int": 0, "followed_int": 0, "requeued_int": 0, "exhausted_int": 0}
+        self._resurrect_counts = counts
         async with self._db.execute(
             "SELECT payload FROM render_tasks WHERE status IN (?, ?) OR created_at > ?",
             (TASK_PENDING, TASK_RENDERING, day_ago),
@@ -441,11 +698,22 @@ class RenderQueue:
                     # Error) and spends an attempt per window until it dies.
                     # One job was killed exactly this way on 2026-08-03.
                     task.started_at = task.started_at or time.time()
-                else:
+                    if not config.WIPE_QUEUE_ON_START:
+                        # Followed on its box, not rendered twice (2026-10-11).
+                        task.notice = config.RESUMED_NOTICE
+                        task.recovery_log.append(f"followed@{task.server_name}")
+                        counts["followed_int"] += 1
+                elif config.WIPE_QUEUE_ON_START:
                     task.status = TASK_PENDING
                     task.server_name = ""
                     task.comfy_prompt_id = ""
+                elif not await self._rearm_after_restart(task, why="restart"):
+                    counts["exhausted_int"] += 1
+                else:
+                    counts["requeued_int"] += 1
                 await self._persist(task)
+            elif task.status == TASK_PENDING:
+                counts["queued_int"] += 1
             self._tasks[task.id] = task
         if self._tasks:
             print(f"[Renderfin][Queue] resurrected {len(self._tasks)} task(s)")
@@ -485,7 +753,117 @@ class RenderQueue:
         )
         self._tasks[task.id] = task
         await self._persist(task)
+        # A node rendered again from another Render press (another tab, a
+        # reopened link) replaces what the same node still has waiting: two
+        # jobs for one socket would only ever keep the newer result.
+        if prompt.graph_id and prompt.node_id and prompt.submit_session:
+            stale = [
+                other.id for other in self._tasks.values()
+                if other.id != task.id and other.status == TASK_PENDING
+                and other.prompt.graph_id == prompt.graph_id
+                and other.prompt.node_id == prompt.node_id
+                and other.prompt.submit_session != prompt.submit_session
+                # Render pressed again without a change keeps the job that is
+                # already waiting (2026-09-29): only a changed node replaces it.
+                and (not prompt.node_signature or not other.prompt.node_signature
+                     or other.prompt.node_signature != prompt.node_signature)
+            ]
+            for other_id in stale:
+                await self.cancel(other_id, reason=GRAPH_SUPERSEDED_REASON)
+            if stale:
+                print(f"[Renderfin][Queue] graph {prompt.graph_id} node {prompt.node_id}: "
+                      f"{len(stale)} queued job(s) replaced by a newer Render")
         return task
+
+    # ---------- graph binding (2026-09-28) ----------
+
+    def graph_tasks(self, graph_id: str) -> List[RenderTask]:
+        graph_id = str(graph_id or "")
+        if not graph_id:
+            return []
+        return [task for task in self.all_tasks() if task.prompt.graph_id == graph_id]
+
+    def graph_summary(self, graph_id: str) -> Dict[str, Any]:
+        """How much of the queue is this graph's, and how much is everybody else's."""
+        mine = self.graph_tasks(graph_id)
+        pending = [t for t in self._tasks.values() if t.status == TASK_PENDING]
+        rendering = [t for t in self._tasks.values() if t.status == TASK_RENDERING]
+        mine_pending = [t for t in mine if t.status == TASK_PENDING]
+        mine_rendering = [t for t in mine if t.status == TASK_RENDERING]
+        return {
+            "graph_id_string": str(graph_id or ""),
+            "queued_int": len(mine_pending),
+            "running_int": len(mine_rendering),
+            "other_queued_int": len(pending) - len(mine_pending),
+            "other_running_int": len(rendering) - len(mine_rendering),
+            "total_queued_int": len(pending),
+            "total_running_int": len(rendering),
+            "tasks_array": [
+                {"id": t.id, "status": t.status, "node_id_string": t.prompt.node_id,
+                 "node_signature_string": t.prompt.node_signature,
+                 "submit_session_string": t.prompt.submit_session,
+                 "workflow": t.workflow, "created_at": t.created_at}
+                for t in mine if t.status in (TASK_PENDING, TASK_RENDERING)
+            ],
+        }
+
+    async def cancel_stale_for_graph(
+        self, graph_id: str, wanted: Dict[str, str], *, reason: str = "",
+        identities: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Stand down this graph's queued jobs its current nodes do not want.
+
+        `wanted` maps every node the graph still runs (present, not bypassed)
+        to its current signature. A queued task whose node is missing from it,
+        or whose signature at submit time differs, renders something the graph
+        no longer shows, so it is cancelled. Running jobs are left alone: the
+        GPU minutes are spent and the editor discards a stale result itself.
+        A task submitted without a signature (an older editor, a node the
+        stored graph did not have yet) is judged by node presence only.
+        """
+        reason = reason or GRAPH_STALE_REASON
+        cancelled: List[Dict[str, str]] = []
+        kept = 0
+        for task in list(self._tasks.values()):
+            if task.status != TASK_PENDING or task.prompt.graph_id != str(graph_id or ""):
+                continue
+            node_id = task.prompt.node_id
+            current = wanted.get(node_id)
+            if current is None:
+                why = "node gone or bypassed"
+            elif task.prompt.node_signature and str(current) != task.prompt.node_signature:
+                why = "node changed"
+            else:
+                kept += 1
+                continue
+            if await self.cancel(task.id, reason=reason + " (" + why + ")"):
+                cancelled.append({"id": task.id, "node_id_string": node_id, "why_string": why})
+                if why == "node changed":
+                    print(f"[Renderfin][Queue] graph {graph_id} node {node_id} changed: "
+                          f"was {task.prompt.node_identity[:1200]} || now {(identities or {}).get(node_id, '')[:1200]}")
+        if cancelled:
+            print(f"[Renderfin][Queue] graph {graph_id}: {len(cancelled)} stale queued job(s) "
+                  f"cancelled, {kept} kept")
+        return {"graph_id_string": str(graph_id or ""), "cancelled_int": len(cancelled),
+                "kept_int": kept, "cancelled_array": cancelled}
+
+    async def cancel_graph_pending(self, graph_id: str, *, task_ids: Optional[List[str]] = None,
+                                   reason: str = "") -> Dict[str, Any]:
+        """Stand down every queued job of a graph (or the listed subset of them)."""
+        reason = reason or "cancelled: this graph's queue was cleared"
+        allowed = set(task_ids) if task_ids is not None else None
+        cancelled = 0
+        for task in list(self._tasks.values()):
+            if task.status != TASK_PENDING or task.prompt.graph_id != str(graph_id or ""):
+                continue
+            if allowed is not None and task.id not in allowed:
+                continue
+            if await self.cancel(task.id, reason=reason):
+                cancelled += 1
+        running = sum(1 for t in self._tasks.values()
+                      if t.status == TASK_RENDERING and t.prompt.graph_id == str(graph_id or ""))
+        return {"graph_id_string": str(graph_id or ""), "cancelled_int": cancelled,
+                "running_untouched_int": running}
 
     def get(self, task_id: str) -> Optional[RenderTask]:
         return self._tasks.get(task_id)
@@ -500,19 +878,284 @@ class RenderQueue:
     def all_tasks(self) -> List[RenderTask]:
         return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
 
+    def queue_position(self, task_id: str) -> Dict[str, int]:
+        """Where this task is in the line, and how long the line is.
+
+        Only a task that is still waiting has a place in it; one already on a
+        card is not queued behind anything.
+        """
+        return pending_queue_position(self._tasks.values(), task_id)
+
+    async def cancel_all_pending(
+        self, *, reason: str = "queue cleared by an administrator"
+    ) -> Dict[str, int]:
+        """Stand down everything that has not started; touch nothing that has.
+
+        A render already on a card has spent real GPU minutes and its output is
+        usually still wanted, so clearing the queue means clearing the *queue*.
+        The list is taken before anything is cancelled, because the pump is
+        free to start one of these while this runs; a task that begins in the
+        meantime simply fails the Pending check and is left alone.
+        """
+        waiting = [task.id for task in self._tasks.values() if task.status == TASK_PENDING]
+        cancelled = 0
+        for task_id in waiting:
+            task = self._tasks.get(task_id)
+            if task is None or task.status != TASK_PENDING:
+                continue
+            if await self.cancel(task_id, reason=reason):
+                cancelled += 1
+        running = sum(1 for task in self._tasks.values() if task.status == TASK_RENDERING)
+        return {
+            "cancelled_int": cancelled,
+            "running_untouched_int": running,
+            "pending_seen_int": len(waiting),
+        }
+
+    # ---------- restart resume (owner rule 2026-10-11) ----------
+
+    async def _free_box_after_restart(self, box: str, prompt_id: str) -> str:
+        """Take this task's old prompt off its box before it is dispatched again.
+
+        Only that prompt is touched: deleted while it waits, interrupted (and
+        the card freed) while it runs. Another client's prompt is never hit.
+        """
+        server = self.registry.get(box) if box else None
+        if server is None or self._client is None or not prompt_id:
+            return "no box"
+        ids = await comfy_adapter.running_prompt_ids(self._client, server, timeout=8.0)
+        if ids is None:
+            return "box did not answer"
+        running, waiting = ids
+        try:
+            if prompt_id in waiting:
+                base = comfy_adapter._validate_server_url(server.render_server_url)
+                await self._client.post(f"{base}/queue", json={"delete": [prompt_id]}, timeout=10.0,
+                                        auth=comfy_adapter._auth_for(server))
+                return "deleted from the box queue"
+            if prompt_id in running:
+                await comfy_adapter.interrupt(self._client, server)
+                await comfy_adapter.free_memory(self._client, server, timeout=10.0)
+                return "interrupted and freed"
+        except Exception as exc:
+            return f"free failed: {exc}"[:160]
+        return "already gone"
+
+    async def _rearm_after_restart(self, task: RenderTask, *, why: str) -> bool:
+        """Put an interrupted task back in the queue under its own id.
+
+        The output URL is the task id, so the result lands where the caller
+        already looks and nothing is rendered twice. False (and the task
+        fails with RESTART_RESUME_EXHAUSTED) once the cap is used up.
+        """
+        box = str(task.server_name or "")
+        old_prompt_id = str(task.comfy_prompt_id or "")
+        if int(task.restart_resumes or 0) >= config.RESTART_RESUME_MAX:
+            task.status = TASK_ERROR
+            task.error = (f"{config.RESTART_RESUME_EXHAUSTED}: interrupted by "
+                          f"{task.restart_resumes + 1} server restarts")
+            task.notice = ""
+            task.finished_at = time.time()
+            await self._persist(task)
+            print(f"[Renderfin][Queue] task {task.id} not resumed: restart cap {config.RESTART_RESUME_MAX} used up")
+            return False
+        freed = await self._free_box_after_restart(box, old_prompt_id) if box else "no box"
+        task.restart_resumes = int(task.restart_resumes or 0) + 1
+        task.recovery_log.append(f"{why}@{box or '-'}")
+        if old_prompt_id and old_prompt_id not in task.retired_comfy_prompt_ids:
+            task.retired_comfy_prompt_ids.append(old_prompt_id)
+        task.status = TASK_PENDING
+        task.error = ""
+        task.notice = config.RESUMED_NOTICE
+        task.server_name = ""
+        task.comfy_prompt_id = ""
+        task.started_at = 0
+        task.finished_at = 0
+        task.submit_failures = 0
+        # A fresh admission identity, exactly as a lease retry does.
+        task.workload_request_id = f"rf_{uuid.uuid4().hex}"
+        task.workload_lease_id = ""
+        task.workload_physical_resource_id = ""
+        task.workload_node_id = ""
+        task.workload_lease_state = "waiting"
+        task.workload_heartbeat_at = 0
+        task.managed_prompt = False
+        task.host_comfy_registered = False
+        task.artifact_sha256 = ""
+        task.output_path = ""
+        task.extra_outputs = {}
+        await self._persist(task)
+        print(f"[Renderfin][Queue] task {task.id} resumed after a restart "
+              f"({task.restart_resumes}/{config.RESTART_RESUME_MAX}, was on {box or '-'}: {freed})")
+        return True
+
+    def _revive_refusal(self, task: RenderTask, now: float, window: Optional[float]) -> str:
+        """'' when a restart cancelled this task and it may come back, else why not."""
+        if task.status != TASK_ERROR:
+            return "not cancelled (" + str(task.status) + ")"
+        if not str(task.error or "").startswith("cancelled: server restarted"):
+            return "not cancelled by a restart"
+        if task.output_path:
+            return "already has its output"
+        if window is not None and now - float(task.finished_at or task.created_at or 0) > window:
+            return "cancelled too long ago"
+        if int(task.restart_resumes or 0) >= config.RESTART_RESUME_MAX:
+            return "restart cap used up"
+        graph, node = task.prompt.graph_id, task.prompt.node_id
+        if graph and node and any(
+            other.id != task.id and other.created_at > task.created_at
+            and other.prompt.graph_id == graph and other.prompt.node_id == node
+            for other in self._tasks.values()
+        ):
+            return "superseded by a newer Render of the same node"
+        return ""
+
+    async def resume_after_restart(
+        self, *, task_ids: Optional[List[str]] = None, dry_run: bool = False,
+        window_seconds: Optional[float] = None, reason: str = "",
+    ) -> Dict[str, Any]:
+        """Bring back the jobs a server restart cancelled (owner rule 2026-10-11).
+
+        Without ids: every job a restart cancelled within the revive window.
+        With ids: exactly those, whatever their age. Same task id, same output.
+        """
+        now = time.time()
+        wanted = [str(t) for t in task_ids] if task_ids else None
+        window = None if wanted else (config.RESTART_REVIVE_WINDOW_SECONDS
+                                      if window_seconds is None else float(window_seconds))
+        pool = ([self._tasks[t] for t in wanted if t in self._tasks] if wanted
+                else sorted(self._tasks.values(), key=lambda t: t.created_at))
+        revived: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        for task in pool:
+            why = self._revive_refusal(task, now, window)
+            if why:
+                if wanted or str(task.error or "").startswith("cancelled: server restarted"):
+                    skipped.append({"id": task.id, "why_string": why})
+                continue
+            row = {"id": task.id, "workflow": task.workflow, "user_name": task.prompt.user_name,
+                   "graph_id_string": task.prompt.graph_id, "node_id_string": task.prompt.node_id,
+                   "was_on_string": task.server_name, "output_url_string": task.output_url}
+            if not dry_run:
+                await self._rearm_after_restart(task, why="revive")
+            revived.append(row)
+        for missing in (t for t in (wanted or []) if t not in self._tasks):
+            skipped.append({"id": missing, "why_string": "unknown task"})
+        if revived and not dry_run:
+            print(f"[Renderfin][Queue] RESUME ({reason or 'api'}): revived {len(revived)} "
+                  f"job(s) a restart cancelled: {[r['id'] for r in revived]}")
+        return {"dry_run_bool": bool(dry_run), "policy_string": config.RESTART_POLICY,
+                "revived_int": len(revived), "revived_array": revived, "skipped_array": skipped[:50],
+                "resume_cap_int": config.RESTART_RESUME_MAX}
+
+    def farm_snapshot(self) -> Dict[str, Any]:
+        """Everything queued or on a card, by box and by owner (for the reset dialog)."""
+        active = [t for t in self._tasks.values() if t.status in (TASK_PENDING, TASK_RENDERING)]
+        by_box: Dict[str, int] = {}
+        by_owner: Dict[str, int] = {}
+        by_workflow: Dict[str, int] = {}
+        for task in active:
+            if task.status == TASK_RENDERING:
+                box = task.server_name or "?"
+                by_box[box] = by_box.get(box, 0) + 1
+            owner = str(getattr(task.prompt, "user_name", "") or "?")
+            by_owner[owner] = by_owner.get(owner, 0) + 1
+            workflow = str(task.workflow or "?")
+            by_workflow[workflow] = by_workflow.get(workflow, 0) + 1
+        return {
+            "queued_int": sum(1 for t in active if t.status == TASK_PENDING),
+            "running_int": sum(1 for t in active if t.status == TASK_RENDERING),
+            "running_by_box_object": by_box,
+            "by_owner_object": by_owner,
+            "by_workflow_object": by_workflow,
+            "task_ids_array": [t.id for t in active],
+            "boxes_array": [s.render_server_name for s in self.registry.all()],
+        }
+
+    @staticmethod
+    def _outside_the_farm_reset(task: RenderTask) -> bool:
+        """Hunyuan 3D conversions and the Telegram character pipeline are not
+        graph renders: a restart must not throw away their long jobs."""
+        return (str(task.workflow or "") == routing.WORKFLOW_IMAGE_TO_3D
+                or bool(getattr(task, "logical_owner_task_id", "")))
+
+    async def reset_farm(self, *, dry_run: bool = False,
+                         reason: str = "cancelled: farm reset by an administrator",
+                         spare_non_graph: bool = False) -> Dict[str, Any]:
+        """Cancel every queued and running task and empty each box's ComfyUI queue.
+
+        Only the render-worker ComfyUI instances in this registry are touched
+        (their prompt queue is cleared and the current prompt interrupted);
+        results, caches and models stay where they are.
+        """
+        summary = self.farm_snapshot()
+        if dry_run:
+            summary["dry_run_bool"] = True
+            # What a restart does with them (2026-10-11): nothing is cancelled.
+            summary["restart_policy_string"] = config.RESTART_POLICY
+            summary["on_restart_string"] = (
+                "wiped" if config.WIPE_QUEUE_ON_START else
+                "resumed: queued stay queued, running are followed on their box or re-queued "
+                f"under the same id (at most {config.RESTART_RESUME_MAX}x per task)")
+            return summary
+        cancelled_queued = cancelled_running = 0
+        for task_id in list(summary["task_ids_array"]):
+            task = self._tasks.get(task_id)
+            if task is None or task.status not in (TASK_PENDING, TASK_RENDERING):
+                continue
+            if spare_non_graph and self._outside_the_farm_reset(task):
+                continue
+            was_running = task.status == TASK_RENDERING
+            if await self.cancel(task_id, reason=reason):
+                if was_running:
+                    cancelled_running += 1
+                else:
+                    cancelled_queued += 1
+        boxes: Dict[str, str] = {}
+        if self._client is not None:
+            for server in self.registry.all():
+                name = server.render_server_name
+                if (server.status or "") != "online":
+                    boxes[name] = "skipped (" + (server.status or "unknown") + ")"
+                    continue
+                try:
+                    base = comfy_adapter._validate_server_url(server.render_server_url)
+                    auth = comfy_adapter._auth_for(server)
+                    await self._client.post(f"{base}/queue", json={"clear": True}, timeout=15.0, auth=auth)
+                    await self._client.post(f"{base}/interrupt", timeout=15.0, auth=auth)
+                    boxes[name] = "cleared"
+                except Exception as exc:
+                    boxes[name] = f"unreachable: {exc}"[:200]
+        summary.update({
+            "dry_run_bool": False,
+            "cancelled_queued_int": cancelled_queued,
+            "cancelled_running_int": cancelled_running,
+            "boxes_object": boxes,
+            "after_object": {k: v for k, v in self.farm_snapshot().items() if k != "task_ids_array"},
+        })
+        print(f"[Renderfin][Queue] FARM RESET: cancelled {cancelled_queued} queued, "
+              f"{cancelled_running} running; boxes {boxes}")
+        return summary
+
     async def cancel(self, task_id: str, *, reason: str = "cancelled") -> bool:
         """Stop a queued/running task and best-effort interrupt the worker."""
         task = self._tasks.get(task_id)
         if task is None or task.status in (TASK_DONE, TASK_ERROR):
             return False
-        if task.status == TASK_RENDERING and task.server_name and self._client is not None:
-            server = self.registry.get(task.server_name)
-            if server is not None:
-                try:
-                    await comfy_adapter.interrupt(self._client, server)
-                except Exception as exc:
-                    print(f"[Renderfin][Queue] interrupt {task.server_name} failed: {exc}")
-        await self._fail(task, reason)
+        # Our own interrupt must not read as "interrupted from outside" (which
+        # is retried) if the poller sees the history before _fail below runs.
+        self._cancelling.add(task_id)
+        try:
+            if task.status == TASK_RENDERING and task.server_name and self._client is not None:
+                server = self.registry.get(task.server_name)
+                if server is not None:
+                    try:
+                        await comfy_adapter.interrupt(self._client, server)
+                    except Exception as exc:
+                        print(f"[Renderfin][Queue] interrupt {task.server_name} failed: {exc}")
+            await self._fail(task, reason)
+        finally:
+            self._cancelling.discard(task_id)
         return True
 
     async def wait_for(self, task_id: str, timeout: float = 1800) -> RenderTask:
@@ -699,6 +1342,193 @@ class RenderQueue:
             if server.status != new_status or workload_lease.managed_server(server):
                 server.status = new_status
                 self.registry.save(server)
+        if config.OOM_RECOVERY_ENABLED:
+            await self._refresh_box_vram()
+
+    # ---------- GPU budget (2026-09-29) ----------
+
+    async def _refresh_box_vram(self) -> None:
+        """Measure each online box's VRAM from /system_stats every few minutes."""
+        now = time.time()
+        due = [
+            server for server in self.registry.all()
+            if server.status == "online"
+            and now - self._box_vram.get(server.render_server_name, (0.0, 0, 0))[0]
+            >= config.BOX_VRAM_REFRESH_SECONDS
+        ]
+        if not due:
+            return
+        results = await asyncio.gather(
+            *(comfy_adapter.system_stats(self._client, server) for server in due),
+            return_exceptions=True,
+        )
+        for server, stats in zip(due, results):
+            total, free = gpu_budget.vram_from_stats(stats) if isinstance(stats, dict) else (0, 0)
+            if total:
+                self._box_vram[server.render_server_name] = (now, total, free)
+
+    def _box_vram_bytes(self, server: RenderServer) -> int:
+        """The card size: measured when the box told us, else the static table."""
+        measured = self._box_vram.get(server.render_server_name)
+        if measured and measured[1] > 0:
+            return int(measured[1])
+        gib = gpu_budget.static_vram_gb().get(server.render_server_name.lower())
+        return int(gib * 2 ** 30) if gib else 0
+
+    def _hard_fit(self, server: RenderServer, task: RenderTask) -> Tuple[bool, str]:
+        """Is the job within this box's VRAM budget? (fits, why not)."""
+        if not config.OOM_RECOVERY_ENABLED:
+            return True, ""
+        fam = gpu_budget.task_family(task)
+        cost = gpu_budget.task_cost(task)
+        vram = self._box_vram_bytes(server)
+        budget = gpu_budget.budget_pxf(fam, vram)
+        if budget is None or not cost or cost <= budget:
+            return True, ""
+        return False, (
+            f"{vram / 2 ** 30:.0f} GB takes {budget / 1e6:.0f}M px-frames of "
+            f"{fam}, this job is {cost / 1e6:.0f}M"
+        )
+
+    def _oom_ceiling(self, box: str, fam: Optional[str], now: float) -> Optional[int]:
+        if not fam:
+            return None
+        entry = self._oom_ceilings.get((box, fam))
+        if not entry:
+            return None
+        cost, until = entry
+        if until <= now:
+            self._oom_ceilings.pop((box, fam), None)
+            return None
+        return cost
+
+    def _soft_reason(
+        self, server: RenderServer, task: RenderTask, now: float
+    ) -> Optional[Tuple[str, str]]:
+        """Rules that keep a task off a box only while another box can take it."""
+        if not config.OOM_RECOVERY_ENABLED:
+            return None
+        name = server.render_server_name
+        if name in (task.avoid_servers or []):
+            events = [event for event in task.recovery_log if event.endswith("@" + name)]
+            return ("avoid", ", ".join(events[-2:]) or name)
+        fam = gpu_budget.task_family(task)
+        cost = gpu_budget.task_cost(task)
+        ceiling = self._oom_ceiling(name, fam, now)
+        if ceiling is not None and cost and cost >= ceiling:
+            return ("oom-ceiling", f"{ceiling / 1e6:.0f}M px-frames")
+        return None
+
+    def _soft_relax(
+        self,
+        token: str,
+        task: Optional[RenderTask],
+        eligible_names: Optional[set[str]],
+        now: float,
+    ) -> bool:
+        """May the task go back to a box it failed on?
+
+        Only when no online box that can run it passes the soft rules while at
+        least one passes the hard budget: then the same box, after its
+        restart, is the only way to run the job ("otherwise on the same box
+        after the restart"). A busy or restarting box that fits still counts
+        as an alternative worth waiting for.
+        """
+        if task is None or not config.OOM_RECOVERY_ENABLED:
+            return False
+        if not task.avoid_servers and not self._oom_ceilings:
+            return False
+        live = [
+            server for server in self.registry.all()
+            if server.status == "online"
+            and routing.server_can_run(server, token)
+            and (eligible_names is None or server.render_server_name in eligible_names)
+            and self._hard_fit(server, task)[0]
+        ]
+        return bool(live) and all(
+            self._soft_reason(server, task, now) is not None for server in live
+        )
+
+    def _too_large_for_farm(self, task: RenderTask) -> str:
+        """Error text when no registered box that runs the token can hold the job."""
+        if not config.OOM_RECOVERY_ENABLED:
+            return ""
+        fam = gpu_budget.task_family(task)
+        cost = gpu_budget.task_cost(task)
+        if not fam or not cost:
+            return ""
+        able = [s for s in self.registry.all() if routing.server_can_run(s, task.workflow)]
+        if not able:
+            return ""
+        best_name, best = gpu_budget.best_budget(
+            (s.render_server_name, gpu_budget.budget_pxf(fam, self._box_vram_bytes(s)))
+            for s in able
+        )
+        if best is None or cost <= best:
+            return ""
+        return (
+            f"Too large for the render farm: {gpu_budget.describe_job(task)}; "
+            f"the biggest box that runs it ({best_name}) takes {best / 1e6:.0f}M "
+            f"- lower the size or the frame count"
+        )
+
+    def _autorig_waiting_for(self, server: RenderServer) -> str:
+        """The id of an AutoRig task waiting that this priority box could run, else ''."""
+        for other in self._tasks.values():
+            if other.status == TASK_PENDING and is_autorig(other) and routing.server_can_run(server, other.workflow):
+                return other.id
+        return ""
+
+    async def _preempt_for_autorig(self, task: RenderTask) -> bool:
+        """Owner 2026-10-15: an AutoRig task that waited AUTORIG_PREEMPT_SECONDS with
+        no free capable box takes a priority box (worker-4090) from a running
+        non-AutoRig render. The victim's prompt is taken off the box and the
+        victim goes back to pending under its own id (its output URL stays), as
+        a restart resume does, without spending its restart cap."""
+        if not config.AUTORIG_PRIORITY or config.AUTORIG_PREEMPT_SECONDS <= 0 or not is_autorig(task):
+            return False
+        if time.time() - float(task.created_at or 0) < config.AUTORIG_PREEMPT_SECONDS:
+            return False
+        for victim in list(self._tasks.values()):
+            box = str(victim.server_name or "")
+            if victim.status != TASK_RENDERING or box not in config.AUTORIG_PRIORITY_BOXES or is_autorig(victim):
+                continue
+            server = self.registry.get(box)
+            if server is None or server.status != "online" or not routing.server_can_run(server, task.workflow):
+                continue
+            fits, _ = self._hard_fit(server, task)
+            if not fits:
+                continue
+            freed = await self._free_box_after_restart(box, str(victim.comfy_prompt_id or ""))
+            old_prompt_id = str(victim.comfy_prompt_id or "")
+            victim.recovery_log.append(f"preempted-for-autorig:{task.id}@{box}")
+            if old_prompt_id and old_prompt_id not in victim.retired_comfy_prompt_ids:
+                victim.retired_comfy_prompt_ids.append(old_prompt_id)
+            victim.status = TASK_PENDING
+            victim.error = ""
+            victim.notice = config.AUTORIG_PREEMPTED_NOTICE
+            victim.server_name = ""
+            victim.comfy_prompt_id = ""
+            victim.started_at = 0
+            victim.finished_at = 0
+            victim.submit_failures = 0
+            victim.workload_request_id = f"rf_{uuid.uuid4().hex}"
+            victim.workload_lease_id = ""
+            victim.workload_physical_resource_id = ""
+            victim.workload_node_id = ""
+            victim.workload_lease_state = "waiting"
+            victim.workload_heartbeat_at = 0
+            victim.managed_prompt = False
+            victim.host_comfy_registered = False
+            victim.artifact_sha256 = ""
+            victim.output_path = ""
+            victim.extra_outputs = {}
+            await self._persist(victim)
+            print(f"[Renderfin][Queue] {box}: render {victim.id} ({victim.prompt.user_name}, {victim.workflow}) "
+                  f"re-queued for AutoRig task {task.id} ({task.workflow}) after "
+                  f"{int(time.time() - float(task.created_at or 0))} s waiting: {freed}")
+            return True
+        return False
 
     def _busy_servers(self) -> Dict[str, str]:
         busy: Dict[str, str] = {}
@@ -707,11 +1537,61 @@ class RenderQueue:
                 busy[task.server_name] = task.id
         return busy
 
+    def _exclusion_reason(
+        self,
+        server: RenderServer,
+        token: str,
+        busy: Dict[str, str],
+        eligible_names: Optional[set[str]],
+        now: float,
+        task: Optional[RenderTask] = None,
+        relax_soft: bool = False,
+    ) -> Optional[Tuple[str, str]]:
+        """Why this box cannot take this token right now, or None if it can.
+
+        Single source of truth for the dispatch filters: _pick_server selects
+        on it and the starvation log explains with it, so the two can never
+        drift into saying different things about the same fleet.
+        """
+        if server.status != "online":
+            return ("offline", server.status or "unknown")
+        if not routing.server_can_run(server, token):
+            return ("cannot-run", token)
+        key, banned = excluded_boxes(task)
+        if server.render_server_name in banned:   # a hard rule: never relaxed by starvation
+            return ("excluded-for-client", key)
+        if eligible_names is not None and server.render_server_name not in eligible_names:
+            return ("missing-model", "")
+        if task is not None:
+            fits, why = self._hard_fit(server, task)
+            if not fits:
+                return ("too-large", why)
+        recovering_until = self._recovering.get(server.render_server_name, 0)
+        if recovering_until > now:
+            return ("recovering", _utc_stamp(recovering_until))
+        if task is not None and not relax_soft:
+            soft = self._soft_reason(server, task, now)
+            if soft is not None:
+                return soft
+        if server.render_server_name in busy:
+            return ("busy", busy[server.render_server_name])
+        if task is not None and server.render_server_name in config.AUTORIG_PRIORITY_BOXES and not is_autorig(task):
+            held = self._autorig_waiting_for(server)
+            if held:
+                return ("reserved-autorig", held)
+        if self._server_missing_nodes.get((server.render_server_name, token), 0) > now:
+            return ("missing-node", token)
+        until = self._server_submit_cooldowns.get(server.render_server_name, 0)
+        if until > now:
+            return ("cooling", _utc_stamp(until))
+        return None
+
     def _pick_server(
         self,
         token: str,
         depths: Optional[Dict[str, int]] = None,
         task: Optional[RenderTask] = None,
+        eligible_names: Optional[set[str]] = None,
     ) -> Optional[RenderServer]:
         """Least-loaded box first, fastest box to break the tie.
 
@@ -733,13 +1613,13 @@ class RenderQueue:
             for name, until in self._server_submit_cooldowns.items()
             if until > now
         }
+        relax = self._soft_relax(token, task, eligible_names, now)
         candidates = [
             s
             for s in self.registry.all()
-            if s.status == "online"
-            and routing.server_can_run(s, token)
-            and s.render_server_name not in busy
-            and self._server_submit_cooldowns.get(s.render_server_name, 0) <= now
+            if self._exclusion_reason(
+                s, token, busy, eligible_names, now, task=task, relax_soft=relax
+            ) is None
         ]
         if task is not None and task.workload_lease_id and task.workload_physical_resource_id:
             bound = [
@@ -764,6 +1644,71 @@ class RenderQueue:
         )
         return candidates[0] if candidates else None
 
+    def _starvation_report(
+        self,
+        task: RenderTask,
+        eligible_names: Optional[set[str]] = None,
+    ) -> Tuple[str, str]:
+        """(throttle key, human text) for a task no box would take.
+
+        _pick_server answers None for five different reasons and used to say
+        nothing at all, so a fleet quarantined by one bad request looked
+        exactly like an empty queue: Pending tasks, idle boxes, not a single
+        journal line between the failure and the cooldown expiry.
+        """
+        token = task.workflow
+        servers = sorted(self.registry.all(), key=lambda s: s.render_server_name)
+        if not servers:
+            return (f"{token}|no-servers", "no render servers are registered")
+        busy = self._busy_servers()
+        now = time.time()
+        keys: List[str] = []
+        parts: List[str] = []
+        relax = self._soft_relax(token, task, eligible_names, now)
+        for server in servers:
+            reason = self._exclusion_reason(
+                server, token, busy, eligible_names, now, task=task, relax_soft=relax
+            )
+            if reason is None:
+                # It passed every filter, so the only thing left that can have
+                # excluded it is the workload lease binding this task to one
+                # physical GPU.
+                reason = ("unbound", task.workload_physical_resource_id or "unknown")
+            kind, detail = reason
+            keys.append(f"{server.render_server_name}={_exclusion_key(kind, detail)}")
+            parts.append(
+                f"{server.render_server_name} {_exclusion_text(kind, detail)}"
+            )
+        return (f"{token}|" + ",".join(keys), "; ".join(parts))
+
+    def _log_starvation(self, stalls: Dict[str, Tuple[str, str, int]]) -> None:
+        """Print one throttled line per distinct stall, not per waiting task.
+
+        A thirty-task backlog stalled on the same four boxes is one fact, and
+        the journal is told it once. The key carries the cooldown deadlines,
+        so a new quarantine is a new fact and is printed immediately.
+        """
+        if not stalls:
+            return
+        now = time.time()
+        interval = config.STARVATION_LOG_INTERVAL_SECONDS
+        for key, (token, text, waiting) in stalls.items():
+            last = self._starvation_logged.get(key, 0.0)
+            if now - last < interval:
+                continue
+            self._starvation_logged[key] = now
+            print(
+                f"[Renderfin][Queue] no server for {waiting} pending task(s) "
+                f"on {token}: {text}"
+            )
+        # Forget stalls that have not recurred for two intervals, so the
+        # throttle map cannot grow with every cooldown the fleet ever had.
+        self._starvation_logged = {
+            key: when
+            for key, when in self._starvation_logged.items()
+            if now - when < interval * 2
+        }
+
     async def _queue_depths(self) -> Dict[str, int]:
         """Ask every online box how much work it is already sitting on."""
         servers = [s for s in self.registry.all() if s.status == "online"]
@@ -780,16 +1725,39 @@ class RenderQueue:
         return depths
 
     async def _dispatch_one(self) -> bool:
-        pending = sorted(
-            (t for t in self._tasks.values() if t.status == TASK_PENDING),
-            key=lambda t: t.created_at,
-        )
+        pending = dispatch_order(self._tasks.values())
         if not pending:
             return False
         depths = await self._queue_depths()
+        stalls: Dict[str, Tuple[str, str, int]] = {}
+        try:
+            return await self._dispatch_pending(pending, depths, stalls)
+        finally:
+            self._log_starvation(stalls)
+
+    async def _dispatch_pending(
+        self,
+        pending: List[RenderTask],
+        depths: Dict[str, int],
+        stalls: Dict[str, Tuple[str, str, int]],
+    ) -> bool:
         for task in pending:
-            server = self._pick_server(task.workflow, depths, task)
+            too_big = self._too_large_for_farm(task)
+            if too_big:
+                # No box that runs this workflow can hold it: say so now
+                # instead of letting it sit Pending or run out of memory.
+                await self._fail(task, too_big)
+                continue
+            eligible = await model_eligibility.eligible_names(
+                self._client, self.registry.all(), task.prompt
+            )
+            server = self._pick_server(task.workflow, depths, task, eligible)
+            if server is None and await self._preempt_for_autorig(task):
+                return False                                  # the next pass puts it on the freed box
             if server is None:
+                key, text = self._starvation_report(task, eligible)
+                token, _, waiting = stalls.get(key, (task.workflow, text, 0))
+                stalls[key] = (token, text, waiting + 1)
                 continue
             try:
                 await self._ensure_workload_lease(task, server)
@@ -832,15 +1800,48 @@ class RenderQueue:
                 await self._fail(task, f"invalid render request: {exc}")
                 continue
             except Exception as exc:
+                # Two completely different failures used to land here and were
+                # treated identically. A request the fleet cannot satisfy - an
+                # image_url that 404s, a control video that will not download,
+                # a prompt ComfyUI refuses to validate - is reproduced byte for
+                # byte by the next box, so quarantining the box it happened to
+                # hit punishes a healthy machine and, one attempt at a time,
+                # the whole fleet. Only a failure that describes the box earns
+                # a cooldown.
+                request_fault = errors.is_request_fault(exc)
+                await self._release_workload(task, outcome="released", retry=True)
+                if "missing_node_type" in str(exc):
+                    # The box, not the request: its ComfyUI lacks a node this
+                    # workflow needs. Keep it off this workflow for a while and
+                    # let another box take the task without spending a retry.
+                    until = time.time() + MISSING_NODE_EXCLUDE_SECONDS
+                    self._server_missing_nodes[(server.render_server_name, task.workflow)] = until
+                    print(
+                        f"[Renderfin][Queue] {server.render_server_name} lacks a node for "
+                        f"{task.workflow} ({str(exc)[:160]}); kept off it until {_utc_stamp(until)}, "
+                        f"task {task.id} goes to another box"
+                    )
+                    await self._persist(task)
+                    continue
+                task.submit_failures += 1
+                if request_fault:
+                    print(
+                        f"[Renderfin][Queue] submit {task.id} to "
+                        f"{server.render_server_name} failed (bad request, "
+                        f"{server.render_server_name} stays in rotation): {exc}"
+                    )
+                    if task.submit_failures >= 3:
+                        await self._fail(task, f"bad render request 3x: {exc}")
+                    else:
+                        await self._persist(task)
+                    continue
+                until = time.time() + config.SUBMIT_FAILURE_COOLDOWN_SECONDS
                 print(
                     f"[Renderfin][Queue] submit {task.id} to "
-                    f"{server.render_server_name} failed: {exc}"
+                    f"{server.render_server_name} failed (worker fault, "
+                    f"cooling until {_utc_stamp(until)}): {exc}"
                 )
-                await self._release_workload(task, outcome="released", retry=True)
-                task.submit_failures += 1
-                self._server_submit_cooldowns[server.render_server_name] = (
-                    time.time() + config.SUBMIT_FAILURE_COOLDOWN_SECONDS
-                )
+                self._server_submit_cooldowns[server.render_server_name] = until
                 if task.submit_failures >= 3:
                     await self._fail(task, f"submit failed 3x: {exc}")
                 else:
@@ -1161,32 +2162,140 @@ class RenderQueue:
         runtime_name = routing.resolve_runtime_workflow(server, workflow_file)
         template_path = config.WORKFLOWS_DIR / runtime_name
         if not template_path.is_file():
-            raise comfy_adapter.ComfyAdapterError(f"workflow template missing: {runtime_name}")
+            # A missing template is the request's fault when the prompt named
+            # the file itself, and the box's fault when this worker's
+            # workflow_overrides rewrote a canonical name to something we do
+            # not ship - only then can a peer still run the same task.
+            overridden = (server.workflow_overrides or {}).get(workflow_file)
+            missing = (
+                comfy_adapter.ComfyAdapterError
+                if overridden and overridden != workflow_file
+                else comfy_adapter.ComfyRequestError
+            )
+            raise missing(f"workflow template missing: {runtime_name}")
         template_text = template_path.read_text(encoding="utf-8")
 
         image_filename = ""
-        if (prompt.image_url or "").strip():
+        reference_urls = list(getattr(prompt, "reference_image_urls", []) or [])
+        is_avatar_workflow = workflow_file == _AVATAR_WORKFLOW
+        is_multiref_workflow = multiref.is_multiref_workflow(workflow_file)
+        if is_avatar_workflow and not reference_urls:
+            raise comfy_adapter.ComfyRequestError(
+                "Avatar workflow requires 1 to 4 reference images"
+            )
+        if is_multiref_workflow:
+            try:
+                multiref.check_reference_count(workflow_file, len(reference_urls))
+            except ValueError as exc:
+                raise comfy_adapter.ComfyRequestError(str(exc)) from None
+        if reference_urls and not (is_avatar_workflow or is_multiref_workflow):
+            raise comfy_adapter.ComfyRequestError(
+                "reference_image_urls require gen_image_flux2_avatar.json "
+                "or a multi-reference workflow"
+            )
+        if not (is_avatar_workflow or is_multiref_workflow) and (prompt.image_url or "").strip():
             name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url)
             image_filename = await comfy_adapter.upload_image(self._client, server, name, data)
+        image_end_filename = ""
+        control_video_filename = ""
+        control_url = str(getattr(prompt, "control_video_url", "") or "").strip()
+        controlled_video = workflow_file in {
+            "gen_video_ltx23_control_by_url.json", "gen_video_ltx23_pose_by_url.json",
+            "gen_video_ltx23_depth_by_url.json", "gen_video_wan_animate2_by_url.json",
+            "gen_video_ltx25_crossview_by_url.json",
+            "upscale_video_x2.json"}
+        if bool(control_url) != controlled_video:
+            raise comfy_adapter.ComfyRequestError(
+                "A video control workflow requires its driving video"
+            )
+        if control_url:
+            from .video_input import download_prepare_video
+            name, data = await download_prepare_video(
+                self._client, control_url, prompt.frame_count,
+                # An enlargement keeps the clip's own length; no held tail.
+                allow_shorter=workflow_file == "upscale_video_x2.json",
+                # The enlarged clip keeps its sound (CreateVideo takes it from LoadVideo).
+                keep_audio=workflow_file == "upscale_video_x2.json")
+            control_video_filename = await comfy_adapter.upload_image(self._client, server, name, data)
+        if (getattr(prompt, "image_url_end", "") or "").strip():
+            name, data = await comfy_adapter.download_input_image(self._client, prompt.image_url_end)
+            image_end_filename = await comfy_adapter.upload_image(self._client, server, name, data)
+        video_prefix_filename = ""
+        prefix_url = str(getattr(prompt, "video_prefix_url", "") or "").strip()
+        if prefix_url:
+            # The clip this video continues: its last frames and their sound go
+            # to the template's prefix guide (MiniMax H3), pruned when absent.
+            from .video_input import download_prepare_prefix
+            name, data = await download_prepare_prefix(
+                self._client, prefix_url, int(getattr(prompt, "video_prefix_frames", 22) or 22))
+            video_prefix_filename = await comfy_adapter.upload_image(self._client, server, name, data)
+        reference_filenames: List[str] = []
+        for reference_url in reference_urls:
+            name, data = await comfy_adapter.download_input_image(
+                self._client, reference_url
+            )
+            reference_filenames.append(
+                await comfy_adapter.upload_image(self._client, server, name, data)
+            )
 
         if forced:
             width, height = forced
+        elif (prompt.type or "").strip().lower() in routing.ENHANCE_TYPES:
+            width, height = routing.clamp_enhance_dims(
+                prompt.main_size_width, prompt.main_size_height)
         elif routing.is_image_request(prompt):
             width, height = routing.clamp_image_dims(prompt.main_size_width, prompt.main_size_height)
         else:
             width, height = routing.clamp_video_dims(prompt.main_size_width, prompt.main_size_height)
 
+        from .runtime_settings import apply_runtime_settings
         workflow = templating.render_workflow_text(
             template_text,
             width=width,
             height=height,
             prompt=prompt.prompt,
             negative_prompt=prompt.negative_prompt,
+            pose_prompt=prompt.pose_prompt,
             image_filename=image_filename,
+            image_end_filename=image_end_filename,
+            control_video_filename=control_video_filename,
+            video_prefix_filename=video_prefix_filename,
             output_prefix=task.id,
             workflow_type=prompt.type,
+            frames=prompt.frame_count,
+            fps=int(getattr(prompt, "fps", 24) or 24),
             seed=prompt.noise_seed or None,
+            checkpoint=model_eligibility.local_name(
+                server, "checkpoint", getattr(prompt, "checkpoint", "") or ""),
+            upscale_model=getattr(prompt, "upscale_model", "") or "",
+            lora=getattr(prompt, "lora", "") or "",
+            lora_strength=(getattr(prompt, "lora_strength", 0) or None),
+            loras=list(getattr(prompt, "loras", None) or []),
         )
+        if is_avatar_workflow:
+            _inject_avatar_reference_images(workflow, reference_filenames)
+        elif is_multiref_workflow:
+            multiref.inject_references(workflow_file, workflow, reference_filenames,
+                                       list(getattr(prompt, "reference_strengths", None) or []))
+        apply_runtime_settings(workflow, prompt, width, height)
+        if music.is_music(prompt):
+            music.apply_music_settings(workflow, prompt)
+        if stream_decode.has_video_decode_chain(workflow):
+            # Decode straight to disk where the box has our streaming node;
+            # elsewhere refuse clips the in-RAM decode chain cannot hold.
+            box = await stream_decode.probe(
+                self._client,
+                comfy_adapter._validate_server_url(server.render_server_url),
+                comfy_adapter._auth_for(server),
+            )
+            if box["stream"]:
+                stream_decode.to_streaming(workflow)
+            else:
+                too_big = stream_decode.ram_guard_error(
+                    width, height, templating._ltxv_frames(prompt.frame_count), box["ram_total"])
+                if too_big:
+                    raise comfy_adapter.ComfyAdapterError(too_big)
+            stream_decode.apply_decode_policy(workflow, box["vram_total"])
         prompt_id = task.comfy_prompt_id or str(uuid.uuid4())
         task.comfy_prompt_id = prompt_id
         task.server_name = server.render_server_name
@@ -1492,8 +2601,12 @@ class RenderQueue:
                             task, server, reason=watchdog_reason
                         )
                         continue
+            unmanaged = not (task.managed_prompt and task.workload_lease_id)
+            recovery = unmanaged and config.OOM_RECOVERY_ENABLED
+            if task.id in self._cancelling:
+                continue  # cancel() is interrupting it; its _fail decides
             if (
-                not (task.managed_prompt and task.workload_lease_id)
+                unmanaged
                 and time.time() - task.started_at > config.TASK_TIMEOUT_SECONDS
             ):
                 await self._fail(task, "render timeout")
@@ -1502,13 +2615,36 @@ class RenderQueue:
             if server is None:
                 await self._fail(task, f"server {task.server_name} vanished")
                 continue
+            if recovery and self._poll_not_before.get(task.id, 0) > time.time():
+                # This box did not answer the last poll: ask again later and
+                # briefly rather than stall the pump on its 30 s timeout.
+                continue
             try:
-                state, entry = await comfy_adapter.poll_history(
-                    self._client, server, task.comfy_prompt_id
-                )
+                if recovery:
+                    state, entry = await comfy_adapter.poll_history(
+                        self._client, server, task.comfy_prompt_id,
+                        timeout=(
+                            config.POLL_FAILURE_TIMEOUT_SECONDS
+                            if task.id in self._poll_failing_since
+                            else 30.0
+                        ),
+                        strict=True,
+                    )
+                else:
+                    state, entry = await comfy_adapter.poll_history(
+                        self._client, server, task.comfy_prompt_id
+                    )
             except Exception as exc:
                 print(f"[Renderfin][Queue] poll {task.id} failed: {exc!r}")
+                if recovery:
+                    await self._note_unanswered_poll(task, server)
                 continue
+            if state == "unavailable":
+                print(f"[Renderfin][Queue] poll {task.id} failed: {task.server_name} answered 5xx")
+                await self._note_unanswered_poll(task, server)
+                continue
+            self._poll_failing_since.pop(task.id, None)
+            self._poll_not_before.pop(task.id, None)
             if state == "unknown":
                 # the worker has no record of this prompt: either it is queued
                 # but not started, or the worker forgot it (restart/crash).
@@ -1520,8 +2656,12 @@ class RenderQueue:
                     )
                 except Exception as exc:
                     print(f"[Renderfin][Queue] queue check {task.id} failed: {exc!r}")
+                    if recovery:
+                        await self._note_unanswered_poll(task, server)
                     continue
                 if still_queued:
+                    if recovery:
+                        await self._check_long_running(task, server)
                     continue
                 if task.managed_prompt and task.workload_lease_id:
                     try:
@@ -1566,6 +2706,17 @@ class RenderQueue:
                     f"[Renderfin][Queue] task {task.id} vanished from "
                     f"{task.server_name}; requeueing"
                 )
+                if (
+                    recovery
+                    and gpu_budget.task_family(task)
+                    and task.server_name not in task.avoid_servers
+                ):
+                    # A video prompt that took its ComfyUI down with it (a GPU
+                    # driver reset crashes the process) should try another
+                    # box first; the same box stays allowed when it is the
+                    # only one that can run the job.
+                    task.avoid_servers.append(task.server_name)
+                    task.recovery_log.append(f"vanished@{task.server_name}")
                 task.status = TASK_PENDING
                 task.server_name = ""
                 task.comfy_prompt_id = ""
@@ -1575,10 +2726,35 @@ class RenderQueue:
             if state == "pending":
                 continue
             if state == "error":
+                failure = gpu_budget.classify_failure(entry) if recovery else None
+                if failure == "oom":
+                    await self._handle_oom(task, server, entry or {})
+                    continue
+                if failure == "gpu_fault":
+                    await self._handle_gpu_fault(task, server, entry or {})
+                    continue
+                if failure == "interrupted":
+                    # Stopped by somebody else's /interrupt (renderfin's own
+                    # cancel marks the task Error before this poll can run):
+                    # Raptor, 2026-09-29 14:54, a 13-minute H3 render.
+                    box = server.render_server_name
+                    if await self._requeue_for_recovery(
+                        task, kind="interrupted", box=box,
+                        final_error=(
+                            f"The render was interrupted on {box} and the retries "
+                            f"are used up - press Render again"
+                        ),
+                    ):
+                        print(
+                            f"[Renderfin][Queue] task {task.id} was interrupted on {box} "
+                            f"from outside renderfin; retry "
+                            f"{task.hang_retries}/{config.HANG_MAX_RETRIES}"
+                        )
+                    continue
                 err = ""
                 if entry:
                     err = json.dumps(entry.get("status", {}))[:500]
-                await self._fail(task, f"comfy error: {err}")
+                await self._fail(task, _readable_comfy_error(task, entry) + f" | details: comfy error: {err}")
                 continue
             # Finish (download artifacts) off the pump so a slow transfer cannot
             # stall dispatch or status polling for every other task.
@@ -1587,6 +2763,321 @@ class RenderQueue:
             self._finishers[task.id] = asyncio.create_task(
                 self._finish_guarded(task, server, entry or {})
             )
+
+    # ---------- GPU memory / hang recovery (2026-09-29) ----------
+
+    def _spawn(self, coro) -> None:
+        """Run box care (free VRAM, restart ComfyUI, wait) off the pump."""
+        job = asyncio.create_task(coro)
+        self._background.add(job)
+        job.add_done_callback(self._background.discard)
+
+    async def _requeue_for_recovery(
+        self, task: RenderTask, *, kind: str, box: str, final_error: str
+    ) -> bool:
+        """Send the same task back to Pending, away from `box`, within its cap.
+
+        Returns False (and fails the task with `final_error` plus its retry
+        history) once the cap for this kind of failure is used up.
+        """
+        if kind == "oom":
+            task.oom_retries += 1
+            exhausted = task.oom_retries > config.OOM_MAX_RETRIES
+        else:
+            task.hang_retries += 1
+            exhausted = task.hang_retries > config.HANG_MAX_RETRIES
+        task.recovery_log.append(f"{kind}@{box}")
+        if box and box not in task.avoid_servers:
+            task.avoid_servers.append(box)
+        self._poll_failing_since.pop(task.id, None)
+        self._poll_not_before.pop(task.id, None)
+        self._hang_checked_at.pop(task.id, None)
+        if exhausted:
+            await self._fail(
+                task, f"{final_error} [tried: {', '.join(task.recovery_log)}]"
+            )
+            return False
+        old_prompt_id = str(task.comfy_prompt_id or "")
+        if old_prompt_id and old_prompt_id not in task.retired_comfy_prompt_ids:
+            task.retired_comfy_prompt_ids.append(old_prompt_id)
+        task.status = TASK_PENDING
+        task.server_name = ""
+        task.comfy_prompt_id = ""
+        task.started_at = 0
+        task.finished_at = 0
+        await self._persist(task)
+        return True
+
+    async def _handle_oom(
+        self, task: RenderTask, server: RenderServer, entry: Dict[str, Any]
+    ) -> None:
+        """Out of GPU memory: remember it, free the card, retry the task."""
+        box = server.render_server_name
+        now = time.time()
+        fam = gpu_budget.task_family(task)
+        cost = gpu_budget.task_cost(task)
+        if fam and cost:
+            previous = self._oom_ceiling(box, fam, now)
+            self._oom_ceilings[(box, fam)] = (
+                min(previous, cost) if previous else cost,
+                now + config.OOM_CEILING_TTL_SECONDS,
+            )
+        recent = [t for t in self._box_ooms.get(box, []) if now - t < 1800] + [now]
+        self._box_ooms[box] = recent
+        prompt = task.prompt
+        frames = gpu_budget.model_frames(prompt.frame_count)
+        details = json.dumps((entry or {}).get("status", {}))[:500]
+        boxes = [e.split("@", 1)[1] for e in task.recovery_log if e.startswith("oom@")] + [box]
+        final_error = (
+            f"Out of GPU memory at {prompt.main_size_width}x{prompt.main_size_height}x"
+            f"{frames} frames on {', '.join(dict.fromkeys(boxes))} "
+            f"({task.oom_retries + 1} attempts) - lower the size or the frame count"
+            f" | details: comfy error: {details}"
+        )
+        requeued = await self._requeue_for_recovery(
+            task, kind="oom", box=box, final_error=final_error
+        )
+        # The prompt is gone from the card, so the card can be cleaned now.
+        self._spawn(self._after_oom(server, repeated=len(recent) >= 2))
+        if requeued:
+            fits, why = self._hard_fit(server, task)
+            print(
+                f"[Renderfin][Queue] task {task.id} ran out of GPU memory on {box} "
+                f"({gpu_budget.describe_job(task) if fam else 'image'}); retry "
+                f"{task.oom_retries}/{config.OOM_MAX_RETRIES} "
+                + ("on a box with more VRAM" if not fits else
+                   "on another box, or on this one after its restart")
+            )
+
+    async def _handle_gpu_fault(
+        self, task: RenderTask, server: RenderServer, entry: Dict[str, Any]
+    ) -> None:
+        """The GPU/CUDA context failed under the job: move the job, restart the box.
+
+        No size ceiling is learned - the job was not too big, the process was
+        sick (f15 2026-09-29 15:06, "Fault failed: 2" on a 544x960 Qwen edit
+        after seven out-of-memory errors in the same ComfyUI process).
+        """
+        box = server.render_server_name
+        prompt_id = task.comfy_prompt_id
+        readable = _readable_comfy_error(task, entry)
+        details = json.dumps((entry or {}).get("status", {}))[:500]
+        if await self._requeue_for_recovery(
+            task, kind="gpu_fault", box=box,
+            final_error=f"{readable} (GPU fault, retries used up) | details: comfy error: {details}",
+        ):
+            print(
+                f"[Renderfin][Queue] task {task.id} hit a GPU fault on {box} ({readable}); "
+                f"retry {task.hang_retries}/{config.HANG_MAX_RETRIES} on another box"
+            )
+        self._spawn(self._restart_comfy(
+            server, reason=f"GPU fault: {readable[:160]}",
+            own_prompt_ids={prompt_id} if prompt_id else set(),
+        ))
+
+    async def _after_oom(self, server: RenderServer, *, repeated: bool) -> None:
+        """Free the box's VRAM; restart its ComfyUI when it still looks sick."""
+        box = server.render_server_name
+        freed = await comfy_adapter.free_memory(self._client, server)
+        await asyncio.sleep(min(3.0, self._restart_poll_seconds))
+        stats = await comfy_adapter.system_stats(self._client, server, timeout=10.0)
+        total, free = gpu_budget.vram_from_stats(stats) if stats else (0, 0)
+        if total:
+            self._box_vram[box] = (time.time(), total, free)
+        sick: List[str] = []
+        if stats is None:
+            sick.append("no answer to /system_stats after /free")
+        elif total and free < config.UNHEALTHY_FREE_VRAM_SHARE * total:
+            sick.append(f"only {free / 2 ** 30:.1f} of {total / 2 ** 30:.1f} GB free after /free")
+        if repeated:
+            sick.append("second out-of-memory within 30 min")
+        print(
+            f"[Renderfin][Queue] {box} after out-of-memory: /free "
+            f"{'ok' if freed else 'failed'}, "
+            + (f"{free / 2 ** 30:.1f}/{total / 2 ** 30:.1f} GB free" if total else "VRAM unknown")
+            + (f"; restart wanted: {'; '.join(sick)}" if sick else "")
+        )
+        if sick:
+            await self._restart_comfy(server, reason="; ".join(sick))
+
+    def _restart_refusal(self, box: str) -> str:
+        name = box.lower()
+        if name in {b.lower() for b in config.NEVER_RESTART_BOXES}:
+            return "the owner's workstation is never restarted by the farm"
+        if name not in config.COMFY_RESTART_BOXES:
+            return "not in RENDERFIN_COMFY_RESTART_BOXES"
+        last = self._restart_requested_at.get(box, 0.0)
+        if time.time() - last < config.COMFY_RESTART_MIN_INTERVAL_SECONDS:
+            return f"already restarted {time.time() - last:.0f}s ago"
+        return ""
+
+    async def _restart_comfy(
+        self,
+        server: RenderServer,
+        *,
+        reason: str,
+        own_prompt_ids: Optional[set] = None,
+    ) -> bool:
+        """Restart this box's ComfyUI through ComfyUI-Manager and wait for it.
+
+        Refused for boxes outside the allow-list (never worker-4090), for a
+        box that renders another renderfin task, and for a box whose queue
+        holds prompts that are not ours (renderfin.com shares these boxes).
+        A box whose HTTP server is dead cannot take the request at all; its
+        own watchdog has to restart it (deploy/onlyrender comfy watchdog).
+        """
+        box = server.render_server_name
+        refusal = self._restart_refusal(box)
+        if not refusal:
+            other = self._busy_servers().get(box)
+            if other:
+                refusal = f"busy with task {other}"
+        if refusal:
+            print(f"[Renderfin][Queue] {box} ComfyUI restart not done ({refusal}): {reason}")
+            return False
+        # Reserve the box before the first await, so the pump cannot hand it
+        # a new task while we look at its queue.
+        self._recovering[box] = time.time() + config.COMFY_RESTART_WAIT_SECONDS
+        snapshot = await comfy_adapter.running_prompt_ids(self._client, server)
+        if snapshot is not None:
+            foreign = [
+                pid for pid in snapshot[0] + snapshot[1]
+                if pid not in (own_prompt_ids or set())
+            ]
+            if foreign:
+                self._recovering.pop(box, None)
+                print(
+                    f"[Renderfin][Queue] {box} ComfyUI restart not done "
+                    f"({len(foreign)} other prompt(s) in its queue): {reason}"
+                )
+                return False
+        self._restart_requested_at[box] = time.time()
+        outcome = await comfy_adapter.request_restart(self._client, server)
+        print(f"[Renderfin][Queue] {box} ComfyUI restart {outcome} ({reason})")
+        if outcome != "requested":
+            self._recovering.pop(box, None)
+            return False
+        return await self._await_comfy_back(server)
+
+    async def _await_comfy_back(self, server: RenderServer) -> bool:
+        """Keep the box out of rotation until its restarted ComfyUI answers."""
+        box = server.render_server_name
+        started = time.time()
+        deadline = started + config.COMFY_RESTART_WAIT_SECONDS
+        went_down = False
+        while time.time() < deadline:
+            await asyncio.sleep(self._restart_poll_seconds)
+            stats = await comfy_adapter.system_stats(self._client, server, timeout=5.0)
+            if stats is None:
+                went_down = True
+                continue
+            if not went_down and time.time() - started < 30.0:
+                continue  # the old process may still be on its way out
+            total, free = gpu_budget.vram_from_stats(stats)
+            if total:
+                self._box_vram[box] = (time.time(), total, free)
+            self._recovering.pop(box, None)
+            print(
+                f"[Renderfin][Queue] {box} ComfyUI answering again "
+                f"{time.time() - started:.0f}s after the restart request"
+                + ("" if went_down else " (it never stopped answering)")
+            )
+            return True
+        print(
+            f"[Renderfin][Queue] {box} ComfyUI did not answer within "
+            f"{config.COMFY_RESTART_WAIT_SECONDS:.0f}s of the restart request; "
+            f"it stays out of rotation until it answers (box watchdog or owner)"
+        )
+        return False
+
+    async def _note_unanswered_poll(self, task: RenderTask, server: RenderServer) -> None:
+        """Count a stretch of unanswered polls; move the task when it is too long.
+
+        f5, 2026-09-29: a GPU driver reset at 14:19:32 left its ComfyUI a
+        one-thread process that kept the port open and never answered again.
+        The task stayed Rendering for the whole 90-minute timeout, and every
+        poll first waited its full 30 s, stalling the pump.
+        """
+        now = time.time()
+        first = self._poll_failing_since.setdefault(task.id, now)
+        self._poll_not_before[task.id] = now + config.POLL_FAILURE_BACKOFF_SECONDS
+        silent = now - first
+        if silent < config.UNREACHABLE_REQUEUE_SECONDS:
+            return
+        box = server.render_server_name
+        prompt_id = task.comfy_prompt_id
+        print(
+            f"[Renderfin][Queue] {box} has not answered for {silent:.0f}s while "
+            f"rendering task {task.id}; moving the task and asking for a ComfyUI restart"
+        )
+        if await self._requeue_for_recovery(
+            task, kind="hang", box=box,
+            final_error=(
+                f"The render box {box} stopped answering while rendering this job "
+                f"and the retries are used up - press Render again"
+            ),
+        ):
+            print(
+                f"[Renderfin][Queue] task {task.id} returned Pending "
+                f"(retry {task.hang_retries}/{config.HANG_MAX_RETRIES}) after {box} stopped answering"
+            )
+        # Best effort: a ComfyUI that does not answer HTTP usually cannot take
+        # the Manager's restart either; the box watchdog is the real cure.
+        self._spawn(self._restart_comfy(
+            server, reason=f"not answering for {silent:.0f}s",
+            own_prompt_ids={prompt_id} if prompt_id else set(),
+        ))
+
+    async def _check_long_running(self, task: RenderTask, server: RenderServer) -> None:
+        """A prompt executing far longer than its size predicts is hung."""
+        fam = gpu_budget.task_family(task)
+        if not fam or not task.started_at:
+            return
+        now = time.time()
+        if now - self._hang_checked_at.get(task.id, 0.0) < 60.0:
+            return
+        limit = gpu_budget.hang_after_seconds(
+            fam, self._box_vram_bytes(server), gpu_budget.task_cost(task),
+            factor=config.HANG_FACTOR, floor=config.HANG_MIN_SECONDS,
+            ceiling=config.TASK_TIMEOUT_SECONDS,
+        )
+        elapsed = now - float(task.started_at)
+        if limit is None or elapsed < limit:
+            return
+        self._hang_checked_at[task.id] = now
+        snapshot = await comfy_adapter.running_prompt_ids(self._client, server)
+        if snapshot is None:
+            return  # unanswered polls have their own rule
+        running, _pending = snapshot
+        if task.comfy_prompt_id not in running:
+            return  # still waiting behind other clients' prompts: queued, not hung
+        box = server.render_server_name
+        prompt_id = task.comfy_prompt_id
+        print(
+            f"[Renderfin][Queue] task {task.id} has run {elapsed:.0f}s on {box} "
+            f"(limit {limit:.0f}s for {gpu_budget.describe_job(task)}); "
+            f"interrupting it as hung"
+        )
+        if running == [prompt_id]:
+            try:
+                await comfy_adapter.interrupt(self._client, server)
+            except Exception as exc:
+                print(f"[Renderfin][Queue] interrupt {box} failed: {exc}")
+        if await self._requeue_for_recovery(
+            task, kind="hang", box=box,
+            final_error=(
+                f"The render hung on {box} (no result after {elapsed / 60:.0f} min) "
+                f"and the retries are used up - lower the size or the frame count"
+            ),
+        ):
+            print(
+                f"[Renderfin][Queue] task {task.id} returned Pending "
+                f"(retry {task.hang_retries}/{config.HANG_MAX_RETRIES}) after hanging on {box}"
+            )
+        self._spawn(self._restart_comfy(
+            server, reason=f"prompt ran {elapsed:.0f}s (limit {limit:.0f}s)",
+            own_prompt_ids={prompt_id},
+        ))
 
     async def _validate_tpose_bundle_bytes(
         self,
@@ -2308,3 +3799,31 @@ class RenderQueue:
         if self._client is not None:
             await self._release_workload(task, outcome="released")
         print(f"[Renderfin][Queue] task {task.id} FAILED: {error[:200]}")
+
+
+def _readable_comfy_error(task, entry) -> str:
+    """One line a person can act on, from a ComfyUI execution_error (2026-09-27)."""
+    info = {}
+    try:
+        for message in (entry or {}).get("status", {}).get("messages", []) or []:
+            if isinstance(message, (list, tuple)) and len(message) > 1 and message[0] == "execution_error":
+                info = message[1] or {}
+    except Exception:
+        info = {}
+    kind = str(info.get("exception_type") or "")
+    text = str(info.get("exception_message") or "").strip().splitlines()
+    node = str(info.get("node_type") or "")
+    prompt = getattr(task, "prompt", None)
+    size = ""
+    try:
+        w, h = int(prompt.main_size_width or 0), int(prompt.main_size_height or 0)
+        frames = int(getattr(prompt, "frame_count", 0) or 0)
+        if w and h:
+            size = f" at {w}x{h}" + (f"x{frames} frames" if frames and not str(prompt.type or "").strip() else "")
+    except Exception:
+        pass
+    box = getattr(task, "server_name", "") or "the render box"
+    if "OutOfMemory" in kind or "out of memory" in " ".join(text).lower():
+        return f"Out of GPU memory on {box}{size} - lower the size or the frame count"
+    first = text[0][:200] if text else ""
+    return f"{node or 'The workflow'} failed on {box}{size}: {kind or 'error'}" + (f" - {first}" if first else "")
