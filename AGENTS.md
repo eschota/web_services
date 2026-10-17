@@ -616,6 +616,37 @@ Owner rule, 2026-10-10:
   category's handoff in the same change, with the date and the numbers. The
   general `HANDOFF.md` only points to them.
 
+## Rig Contract V3.1 (owner order, 2026-10-17)
+
+> запиши контракт v3.1 и добавь туда обязательный скиннинг не в позе контакта, а в свободную А или Т позу, ту что
+> проще достижима либо уже достигнута … визуализация найденных предметов одежды, бороды, волос, класс персонажа — всё
+> это должно отображаться во вьювере по мере анализа интерактивно и последовательно, а при загрузке страницы
+> проигрываться последовательно начиная с этапа вокселизации … привязку объёмной … проверял бы в чужом движке
+
+* The contract is `docs/rig-contract-v3.1.md` in the MT repo (`rig.json.contract = autorig.mt.rig/v3.1`). V3.1 = V3
+  plus these mandatory stages, each with `seconds` in `timings_s` (Quality First: never dropped for the 60 s budget):
+  1. **Analysis first:** voxel parts (detached meshes and held objects leave the body rig), parts labelled from the
+     source structure (objects, materials, MTL, vertex colours) and Vision (`body, head, hair, beard, hat, mitten,
+     coat, skirt, boot, prop:<name>, wing, tail, ear`), the character class with confidence (`analysis/parts.json`,
+     `analysis/class.json`).
+  2. **Skinning only in a standardised contact-free pose:** the cheaper of A / T (or the one already reached), opened
+     with a draft skin and checked by voxels (no lobe touches another), weights solved there, the rig returned to the
+     source rest pose; `rig.json.skin.pose` records it; `contact_after > 0` fails QA.
+  3. **Volumetric binding:** geodesic voxel heat diffusion on the solid with SDF thickness (a far-side coat vertex
+     follows the body under it), dual-quaternion at elbows / wrists / knees / ankles, delta-mush at the end, real
+     layers for beard / hair / hat / gloves / coat hem / sleeves (`no_separate_layers` is satisfied only by layers).
+  4. **QA on every clip, four views, and in a foreign engine:** stretch ≤ 2×, 0 self-intersections, volume ±3 %,
+     mirror ≤ 1 % H, far leak ≤ 1 %; `gltf-validator` 0 errors, Unity Humanoid import without muscle warnings,
+     Blender plays the clips with the same numbers (`rig/qa-external.json`).
+  5. **Every stage is drawn in the viewer, live and replayed:** `mt/live.py` events `live_voxels, live_parts,
+     live_garments, live_props, live_class, live_pose, live_layers, live_qa_clip, live_qa_external` beside the
+     existing rig keys; the viewer draws them in order on the black presentation scene (parts clickable and
+     relabelable), and on page load replays the sequence from the voxelisation on, with a scrub bar, before the
+     environment scene loads.
+* The first task to carry the full contract is 77cc1b88 (Santa), then the 5 similar tasks of its notice, then the
+  biped category. Subagents for this work run on Claude Opus 5.5 medium, one per task, reused by their context; the
+  lead (Fable) writes the specs, reviews the results and sends the owner one sheet per milestone.
+
 ## Reference Leg Rule for an Asymmetric Pose (owner order, 2026-10-15)
 
 > если одна нога находится на поверхности, то её длина должна быть эталонной и
