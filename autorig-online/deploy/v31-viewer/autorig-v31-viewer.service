@@ -1,0 +1,24 @@
+# autorig-v31-viewer: Viewer V3.1 (2026-10-17): part relabel, the fixture stream, the replay preference.
+# Source: autorig-online/deploy/v31-viewer/v31_viewer.py in eschota/web_services, installed in /srv/autorig/v31-viewer.
+# nginx: nested locations inside `location ^~ /api/mt/` (nginx-v31-viewer.conf).
+[Unit]
+Description=AutoRig Viewer V3.1: /api/mt/runs/<run>/parts/*, /v31/* (127.0.0.1:8277)
+After=network-online.target
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+WorkingDirectory=/srv/autorig/v31-viewer
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/autorig/venv/bin/python3 -m uvicorn v31_viewer:app --host 127.0.0.1 --port 8277 --workers 1 --no-access-log
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=600M
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
