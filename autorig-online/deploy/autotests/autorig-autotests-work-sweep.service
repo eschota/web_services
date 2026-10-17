@@ -1,0 +1,8 @@
+[Unit]
+Description=AutoRig release-gate work/ retention (finished gates older than 3 h)
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+ExecStart=/bin/bash /srv/autorig/autotests/work_sweep.sh
