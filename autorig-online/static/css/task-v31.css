@@ -48,6 +48,8 @@
 .v31 .ok{color:#80ed99}.v31 .bad{color:#ff6b6b}
 .v31-std{font-weight:900;font-size:16px;line-height:1;color:#06d6a0}
 .v31-wimg{display:block;width:100%;max-height:150px;object-fit:contain;border-radius:8px;background:#000}
+.v31-wimg[data-src]{min-height:90px;background:linear-gradient(90deg,#05070b,#111827,#05070b);background-size:200% 100%;animation:v31shim 1.6s linear infinite}
+@keyframes v31shim{to{background-position:-200% 0}}
 .v31-chips{display:flex;flex-wrap:wrap;gap:4px;list-style:none;margin:0;padding:0}
 .v31-chips li{padding:2px 7px;border-radius:999px;background:rgba(142,202,230,.13);font-size:11px;animation:v31in .3s ease both}
 .v31-chips li.ok{background:rgba(128,237,153,.16)}.v31-chips li.bad{background:rgba(255,107,107,.18)}

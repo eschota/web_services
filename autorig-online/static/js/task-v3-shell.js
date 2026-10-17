@@ -3,7 +3,7 @@
 // come from /api/task/<id>/v3-view, resolved on the server; a run id is never
 // read from this page's URL. Strings go through I18n.t() (Localization · V3
 // owns the dictionaries); the built-in English/Russian lines are only fallbacks.
-const BUILD = 'tv3-20261016.2';
+const BUILD = 'tv3-20261017.1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MT_RUN = /^[0-9a-f]{20}$/;
 const UNITY_PAGE = '/api/mt/unity/test/index.html';
@@ -216,13 +216,22 @@ function showViewer(viewer) {
   if (shown && shown.kind === viewer.kind && shown.run === run) {
     if (shown.revision !== viewer.revision) {
       shown.revision = viewer.revision;
-      const bridge = els.viewer.contentWindow && els.viewer.contentWindow.autorigUnity;
-      if (bridge && typeof bridge.send === 'function' && viewer.kind !== 'picture') bridge.send('LoadRun', run);
-      else els.viewer.src = url.toString();
+      const swap = () => {
+        const bridge = els.viewer.contentWindow && els.viewer.contentWindow.autorigUnity;
+        if (bridge && typeof bridge.send === 'function' && viewer.kind !== 'picture') bridge.send('LoadRun', run);
+        else els.viewer.src = url.toString();
+      };
+      // Scene gate (owner 2026-10-17 «полноценная сцена грузилась только после того как риг готов»): a new model version
+      // of a rig already on screen (a re-skin, the full mesh after the light one) waits behind the presentation; the
+      // first rigged model never waits, the gate needs it to open (task-v31-stages.js owns window.autorigSceneGate)
+      const gate = window.autorigSceneGate;
+      if (gate && !gate.open && shown.rigged && viewer.rigged) gate.whenOpen(swap, `LoadRun ${run} (model swap)`);
+      else swap();
     }
+    shown.rigged = !!viewer.rigged;
     return true;
   }
-  shown = { kind: viewer.kind, run, revision: viewer.revision };
+  shown = { kind: viewer.kind, run, revision: viewer.revision, rigged: !!viewer.rigged };
   els.viewer.src = url.toString();
   els.viewer.hidden = false;
   return true;

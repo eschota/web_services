@@ -364,7 +364,7 @@ function start(viewerEl) {
     paint();
   }
   function loadFor(st) {
-    if (st.k === 'vox') {
+    if (st.k === 'vox' && !(Number(st.res) > 48)) {      // the splat draws up to the 48 level; the 96 (~155 KB) is Unity's
       loadVox(url(st.url)).then((v) => {
         if (v && !W.t.firstVoxel) { W.t.firstVoxel = Math.round(performance.now() - T_OPEN); draw(performance.now(), 0); }
       });
@@ -375,6 +375,7 @@ function start(viewerEl) {
 
   // ---------------------------------------------------------------- the panel
   let lastCards = '';
+  const gateIsOpen = () => !!(window.autorigSceneGate && window.autorigSceneGate.open);
   function stepLabel(k) { return tr(`v31_step_${STEP_NAME[k] || k}`); }
   function paint() {
     const cur = steps[idx - 1];
@@ -401,6 +402,9 @@ function start(viewerEl) {
       if ((playing || live) && cards.children.length > n0) cards.lastElementChild.scrollIntoView({ block: 'nearest' });
     }
     root.classList.toggle('has-cards', !!html);
+    // pictures of the cards (the weights preview, ~125 KB each) load once the scene gate is open: nothing heavy while
+    // the presentation runs; the card shows its frame until then
+    if (gateIsOpen()) cards.querySelectorAll('img[data-src]').forEach((im) => { im.src = im.dataset.src; im.removeAttribute('data-src'); });
     syncUnity();
     paintPartsTool();
   }
@@ -438,7 +442,7 @@ function start(viewerEl) {
         `${ev.symmetry_iou != null ? `<dt>${esc(tr('v31_symmetry'))}</dt><dd>${num(ev.symmetry_iou, 3)}</dd>` : ''}${ev.lobes != null ? `<dt>${esc(tr('v31_lobes'))}</dt><dd>${num(ev.lobes, 0)}</dd>` : ''}</dl></section>`);
     }
     if (S.weights && S.weights.img) {
-      out.push(`<section class="v31-card"><h4>${svg('weights')}<span>${esc(tr('v31_step_weights'))}</span><b>${(S.bones || []).length}</b></h4><img class="v31-wimg" alt="" src="${esc(url(S.weights.img))}"></section>`);
+      out.push(`<section class="v31-card"><h4>${svg('weights')}<span>${esc(tr('v31_step_weights'))}</span><b>${(S.bones || []).length}</b></h4><img class="v31-wimg" alt="" loading="lazy" decoding="async" data-src="${esc(url(S.weights.img))}"></section>`);
     }
     if (S.pose) {
       const p = S.pose, op = p.opening_deg || {};
@@ -630,7 +634,7 @@ function start(viewerEl) {
   function unityParts() {
     return S.order.map((id) => {
       const p = S.parts.get(id);
-      const m = p.mask_url_96 || p.mask_url;
+      const m = p.mask_url || p.mask_url_96;          // the 48 mask during the presentation (~3 KB a part), not the 96 (~20-70 KB)
       const o = { id, label: partLabel(p), color: p.color || '', priority: p.group === 'props' ? 2 : p.group === 'garments' ? 1 : 0 };
       if (p.icon) o.icon = p.icon;
       if (m) o.mask_url = abs(m);
@@ -798,20 +802,41 @@ function start(viewerEl) {
     return [pivot[0] + x * c - y * s, pivot[1] + x * s + y * c, p[2]];
   }
 
-  let lastFrame = 0, raf = 0;
+  // frame cost and rate of the presentation (window.autorigV31.perf(): draw ms p50 / p95, frames per second)
+  const perfMs = [], perfAt = [];
+  function perfNote(ms) {
+    perfMs.push(ms); perfAt.push(performance.now());
+    if (perfMs.length > 600) { perfMs.shift(); perfAt.shift(); }
+  }
+  W.perf = (windowMs = 5000) => {
+    const now = performance.now();
+    const ms = perfMs.filter((_, i) => now - perfAt[i] < windowMs).slice().sort((a, b) => a - b);
+    const q = (f) => (ms.length ? Math.round(ms[Math.min(ms.length - 1, Math.floor(f * ms.length))] * 10) / 10 : null);
+    return { frames: ms.length, fps: Math.round((ms.length / windowMs) * 10000) / 10, draw_p50_ms: q(0.5), draw_p95_ms: q(0.95), draw_max_ms: q(1) };
+  };
+  // the same frames without the display (a hidden tab has no requestAnimationFrame): n draws back to back
+  W.bench = async (n = 120) => {
+    perfMs.length = 0; perfAt.length = 0;
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) await draw(performance.now(), 1 / 60);
+    const wall = performance.now() - t0;
+    return { ...W.perf(1e9), frames: n, wall_ms: Math.round(wall), max_fps: Math.round((n / wall) * 10000) / 10 };
+  };
+  let lastFrame = 0, raf = 0, cvShown = null, cvRect = null;
+  try { new ResizeObserver(() => { cvRect = null; }).observe(cv); } catch (e) { /* old browser: read every frame */ }
   function frame(now) {
     raf = requestAnimationFrame(frame);
     if (!root.isConnected || collapsed) return;
     const showCanvas = !docked || mapOn;
-    cv.style.display = showCanvas ? '' : 'none';
+    if (cvShown !== showCanvas) { cvShown = showCanvas; cv.style.display = showCanvas ? '' : 'none'; }
     if (!showCanvas) return;
-    if (now - lastFrame < 30) return;
+    if (now - lastFrame < 12) return;                    // every display frame (a draw costs ~3 ms), at most ~80 Hz
     const dt = Math.min(0.1, (now - lastFrame) / 1000);
     lastFrame = now;
     draw(now, dt);
   }
   async function draw(now, dt) {
-    const r = cv.getBoundingClientRect();
+    const r = cvRect || (cvRect = cv.getBoundingClientRect());
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const Wd = Math.max(1, Math.round(r.width * dpr)), Hd = Math.max(1, Math.round(r.height * dpr));
     if (cv.width !== Wd || cv.height !== Hd) { cv.width = Wd; cv.height = Hd; }
@@ -823,6 +848,7 @@ function start(viewerEl) {
     const pick = fine.find((u) => /vox_48\.bin$/.test(u)) && S.vox.res >= 48 ? fine.find((u) => /vox_48\.bin$/.test(u)) : S.vox.url;
     const v = await voxCache.get(url(pick));
     if (!v) { loadVox(url(pick)); return; }
+    const tDraw = performance.now();
     if (dragYaw == null) yaw += dt * (docked ? 0.35 : 0.45);
     const pitch = 0.22;
     // bounds
@@ -955,6 +981,7 @@ function start(viewerEl) {
       }
     }
     if (!W.t.firstDraw) W.t.firstDraw = Math.round(performance.now() - T_OPEN);
+    perfNote(performance.now() - tDraw);
   }
   function arrow(a, b, col, lw, label) {
     ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
@@ -978,7 +1005,7 @@ function start(viewerEl) {
     replayMode = true;
     // the build answers live_ready_v31 and has presented: the stages play in 3D, the panel stays docked
     if (u3d && unityReady()) { if (!replay3d) start3d(); setDocked(true); }
-    else { setDocked(false); hold(true); }
+    else setDocked(false);
     scrub.hidden = false;
     if (from != null) seek(from);
     paint();
@@ -999,9 +1026,12 @@ function start(viewerEl) {
     replayMode = false;
     end3d();
     paint();
-    if (!live || runDone) { setDocked(true); hold(false); }
+    if (!live || runDone) setDocked(true);
+    replayDone(skipping ? 'skip' : 'replay_end');
+    skipping = false;
   }
-  function skip() { playToken++; playing = false; seek(steps.length); finishReplay(); }
+  let skipping = false;
+  function skip() { playToken++; playing = false; skipping = true; seek(steps.length); finishReplay(); }
   function setDocked(on) {
     docked = on;
     root.classList.toggle('docked', on);
@@ -1032,32 +1062,114 @@ function start(viewerEl) {
   track.addEventListener('pointermove', (e) => { if (scrubbing) scrubTo(e); });
   track.addEventListener('pointerup', () => { scrubbing = false; });
 
-  // ---------------------------------------------------------------- the environment scene waits for the replay
-  // scene-gate.js waits while window.autorigEnvHold is set (it also never loads the scene before the mesh is in and
-  // live.js has presented); the flag is set on the iframe's own window, again on every new document, and only cleared
-  // by us when we set it (a vehicle holds it for the person's 🌄 and keeps it).
-  let wantHold = false, holdTimer = 0;
+  // ---------------------------------------------------------------- the scene gate
+  // Owner 2026-10-17 (AGENTS «The Environment Scene Loads Only After The Rig Is Ready»): «сделай чтобы полноценная
+  // сцена грузилась только после того как риг готов, а до этого чтобы была красивая и быстрая визуализация». One
+  // flag, one owner (this page): scene-gate.js in the viewer waits while window.autorigEnvHold is set; it is set from
+  // boot and cleared once, when
+  //   open = (the replay is done or skipped, or there is none) AND (the rig is ready and animated, or the run was
+  //          already finished when the page opened)
+  // A live run's rig is ready at its live_rig_first_ready event plus the first clip the viewer plays (Unity «clip»);
+  // a run that ends (done / needs_review / failed) counts as ready too. Hard cap: 120 s after rig-ready; a live run
+  // with no event for 10 min opens it as stalled. Every decision goes to the console as [v31-gate] with its reason
+  // (window.autorigV31.gateLog). Heavy work of the page waits behind it (window.autorigSceneGate.whenOpen).
+  // A hold that someone else set (a vehicle waits for the person's 🌄, a picture-only view) is never ours to clear.
+  const G = { open: false, replayDone: false, live: null, firstReady: false, clip: false, rigReady: false, capped: false,
+    reason: '' };
+  const gateLog = W.gateLog = [];
+  const gateQueue = [];
+  let capTimer = 0, lastEventAt = Date.now(), foreignLogged = false;
+  function glog(what, why) {
+    const row = { t: Math.round(performance.now()), what, why, replayDone: G.replayDone, live: G.live,
+      firstReady: G.firstReady, clip: G.clip, rigReady: G.rigReady };
+    gateLog.push(row);
+    try { console.info('[v31-gate]', what, '·', why, JSON.stringify(row)); } catch (e) { /* no console */ }
+  }
   function gateWin() { try { return viewerEl.contentWindow; } catch (e) { return null; } }
   function isVehicle(w) { try { return !!(w.autorigVehicle && w.autorigVehicle.state && w.autorigVehicle.state()); } catch (e) { return false; } }
+  function onGateUnity(ev) {
+    const d = ev.detail || {};
+    if (d.name === 'clip' && !G.clip) { G.clip = true; glog('clip_playing', 'unity «clip» event'); rigCheck('first clip playing'); }
+  }
   function ensureHold() {
     const w = gateWin();
-    if (!w || !wantHold || !w.__autorigSceneGate || w.__v31hold) return;
-    if (w.autorigEnvHold || (w.autorigEnv && w.autorigEnv.gate)) return;   // someone else holds it, or the scene went
+    if (!w) return;
+    try { if (!w.__v31gatehook) { w.__v31gatehook = true; w.addEventListener('autorig-unity', onGateUnity); } } catch (e) { return; }
+    if (G.open || !w.__autorigSceneGate || w.__v31hold) return;
+    if (w.autorigEnv && w.autorigEnv.gate) return;                  // the scene went already
+    if (w.autorigEnvHold) {
+      if (!foreignLogged) { foreignLogged = true; glog('hold_foreign', 'someone else holds the scene (vehicle / picture)'); }
+      return;
+    }
     w.autorigEnvHold = true;
     w.__v31hold = true;
+    glog('hold', G.live === null ? 'page opened, the run not read yet' : (G.live ? 'live run' : 'replay'));
   }
-  setInterval(ensureHold, 120);
-  function hold(on) {
-    wantHold = on;
-    clearTimeout(holdTimer);
-    if (on) { ensureHold(); holdTimer = setTimeout(() => hold(false), 120000); return; }   // never two minutes of black
+  // the first clip plays: a Unity «clip» event, or the viewer state says the rigged model with its clips is in and
+  // not paused (the showreel starts on load without an event)
+  let vsTick = 0;
+  function clipFromState() {
+    if (G.clip || G.open || (vsTick++ % 4)) return;
+    try {
+      const u = gateWin() && gateWin().autorigUnity;
+      const vs = u && typeof u.viewerState === 'function' ? u.viewerState() : null;
+      if (vs && vs.ready && vs.rigged && (vs.clips || []).length && !vs.paused) {
+        G.clip = true;
+        glog('clip_playing', `viewer state: rigged, ${vs.clips.length} clips, playing`);
+        rigCheck('first clip playing');
+      }
+    } catch (e) { /* the viewer is loading */ }
+  }
+  setInterval(() => {
+    ensureHold();
+    clipFromState();
+    if (!G.open && G.live && Date.now() - lastEventAt > 10 * 60 * 1000) openGate('stalled_run: no event for 10 min');
+  }, 120);
+  function rigCheck(why) {
+    if (G.rigReady || G.open) return;
+    if (G.live === false || (G.firstReady && G.clip)) {
+      G.rigReady = true;
+      glog('rig_ready', why);
+      clearTimeout(capTimer);
+      capTimer = setTimeout(() => { G.capped = true; openGate('cap: 120 s after rig-ready'); }, 120000);
+      gateEval(why);
+    } else glog('rig_wait', why);
+  }
+  function replayDone(why) {
+    if (G.replayDone) return;
+    G.replayDone = true;
+    glog('replay_done', why);
+    gateEval(why);
+  }
+  function gateEval(why) {
+    if (!G.open && G.replayDone && G.rigReady) openGate(why);
+  }
+  function openGate(why) {
+    if (G.open) return;
+    G.open = true;
+    setTimeout(paint, 0);
+    G.reason = why;
+    clearTimeout(capTimer);
+    glog('open', why);
     const w = gateWin();
     if (w && w.__v31hold) {
       w.__v31hold = false;
       if (!isVehicle(w)) w.autorigEnvHold = false;
-      if (!W.t.envRelease) W.t.envRelease = Math.round(performance.now() - T_OPEN);
+      // «skip» loads the scene at once when the mesh is in (otherwise scene-gate.js goes as soon as it lands)
+      try {
+        if (/^skip/.test(why) && w.autorigEnv && w.autorigEnv.t && w.autorigEnv.t.mesh != null && !w.autorigEnv.gate
+          && w.autorigUnity && typeof w.autorigUnity.envGo === 'function') w.autorigUnity.envGo('v31_skip');
+      } catch (e) { /* the viewer went away */ }
     }
+    if (!W.t.envRelease) W.t.envRelease = Math.round(performance.now() - T_OPEN);
+    gateQueue.splice(0).forEach((q) => { glog('run_queued', q.label); try { q.fn(); } catch (e) { console.warn('[v31-gate]', e); } });
   }
+  window.autorigSceneGate = {
+    owner: 'task-v31-stages.js', state: () => ({ ...G }), log: gateLog,
+    get open() { return G.open; },
+    whenOpen(fn, label) { if (G.open) fn(); else { gateQueue.push({ fn, label: label || 'job' }); glog('queued', label || 'job'); } },
+  };
+  W.gate = () => ({ ...G });
 
   // ---------------------------------------------------------------- the stream
   async function follow() {
@@ -1078,13 +1190,24 @@ function start(viewerEl) {
       cursor = d.cursor || cursor;
       const before = steps.length;
       (d.events || []).forEach(ingest);
+      if ((d.events || []).length) lastEventAt = Date.now();
+      if (!G.firstReady && (d.events || []).some((e) => e.key === 'live_rig_first_ready' || (e.stage === 'rig' && e.kind === 'first_ready'))) {
+        G.firstReady = true;
+        glog('first_ready', 'live_rig_first_ready event');
+        if (G.live !== null) rigCheck('live_rig_first_ready');
+      }
       const added = steps.length - before;
       runDone = !!d.done;
       ticks.innerHTML = ticksHtml();
       if (first) {
         first = false;
         W.t.firstEvents = Math.round(performance.now() - T_OPEN);
-        if (!steps.length) { if (runDone) { teardown(); return; } hold(false); }
+        if (!steps.length) {
+          if (runDone) { teardown(); return; }
+          G.live = true;                                 // a queued run: the presentation starts with its first event
+          replayDone('live run, nothing to replay');
+          rigCheck('live run, no event yet');
+        }
         else begin(runDone);
       } else if (added && W.mode === 'wait') {
         begin(runDone);
@@ -1092,7 +1215,11 @@ function start(viewerEl) {
         seek(steps.length);                              // drawn as it arrives
         if (!replayTool.hidden || steps.length) replayTool.hidden = false;
       }
-      if (runDone && live && !replayMode && !d.events.length) { live = false; setDocked(true); hold(false); }
+      if (runDone && live && !replayMode && !d.events.length) {
+        live = false;
+        setDocked(true);
+        if (!G.rigReady) { G.live = false; rigCheck('the run ended'); }
+      }
       paint();
       if (d.done && !(d.events || []).length) {
         if (FIXTURE) return;
@@ -1112,19 +1239,25 @@ function start(viewerEl) {
     scrub.hidden = false;
     if (!done) {
       live = true;
+      if (G.live === null) {
+        G.live = true;
+        replayDone('live run: drawn as it arrives, no replay');
+        rigCheck('live run opened');
+      }
       setDocked(unityReady());
       seek(steps.length);
-      if (!docked) hold(true);
       return;
     }
+    G.live = false;
+    rigCheck('the run had finished before the page opened');
     if (autoReplay) play(0);
-    else { seek(steps.length); setDocked(true); hold(false); }
+    else { seek(steps.length); setDocked(true); replayDone('replay on load is off'); }
   }
   function unityReady() {
     try { const veil = viewerEl.contentDocument && viewerEl.contentDocument.getElementById('veil'); return !!(veil && veil.classList.contains('off')); } catch (e) { return false; }
   }
   // live: once the Unity build is in, the panel docks and Unity draws in 3D; the splat stays one click away
-  setInterval(() => { if (live && !replayMode && !docked && unityReady()) { setDocked(true); hold(false); } }, 1000);
+  setInterval(() => { if (live && !replayMode && !docked && unityReady()) setDocked(true); }, 1000);
   Object.assign(W, { seek: (n) => { playToken++; playing = false; seek(n); }, play: (n) => play(n), skip: () => skip(),
     state: () => S, kinds: () => steps.map((x) => x.k), unity: () => ({ u3d, replay3d, partsMode, uState, sent: { ...uSent } }) });
   function teardown() {
@@ -1132,7 +1265,7 @@ function start(viewerEl) {
     root.remove();
     replayTool.remove();
     partsTool.remove();
-    hold(false);
+    openGate('no presentation for this run');
     W.mode = 'none';
   }
 
@@ -1150,14 +1283,14 @@ function start(viewerEl) {
     // the voxel levels are fetched alongside the first log answer (their names are fixed by mt/live_voxels.py), so the
     // first voxel is drawn as soon as the log says so: one round trip less on a slow line
     [12, 24, 48].forEach((r) => loadVox(`${FILES}live/vox_${r}.bin`));
-    hold(true);                                          // decided after the first answer; released at once if no replay
+    ensureHold();                                        // held from the first moment; only the gate opens it
     raf = requestAnimationFrame(frame);
     follow();
     // keep the hold on a reloaded iframe (a new run, LoadRun) and let a person's first touch of the viewer skip
 
   }
   window.addEventListener('languageChanged', () => { ticks.innerHTML = ticksHtml(); paint(); });
-  return { boot, hold };
+  return { boot };
 }
 
 // wait for the viewer of the task and its run (an MT run in the iframe URL, or the classic task's live run)
