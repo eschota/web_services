@@ -647,6 +647,27 @@ Owner rule, 2026-10-10:
   biped category. Subagents for this work run on Claude Opus 5.5 medium, one per task, reused by their context; the
   lead (Fable) writes the specs, reviews the results and sends the owner one sheet per milestone.
 
+## Body Parts Are Entities; Secondary Rigs; Part Icons (owner order, 2026-10-17)
+
+> части тела получили свои сущности … классификация должна определять всё и визуализировать на вокселях и с помощью
+> шейдеров на 3д модели, а по готовности анимации отключать всё кроме иконок … плащ должен автоматически ригаться как
+> ткань, так же волосы, борода; хвост должен иметь универсальный ИК движок под разных животных
+
+* Spec `docs/v31-part-entities-spec-20261017.md` (MT repo); the second Santa task 4102abd1 is the paired control of
+  77cc1b88: both must get the same labels and the same QA verdict automatically.
+* `analysis/parts.json` is the one record per part for every stage (id, label, sources, confidence, mask, volume,
+  attachment, behaviour bone|chain|cloth|tail|prop|static, layer, chain, QA, colour, icon). Labels come from three
+  voters merged with the voxel lobes: the source file (object / material names, UV islands, vertex colours), 2D
+  SAM2 + GroundingDINO on the standard views back-projected onto the mesh, and a mesh part segmenter (PartField /
+  SAMPart3D); accuracy is per-label IoU on a hand-labelled corpus of 30–50 models (head / arms / legs ≥ 0.9, cloak /
+  beard / tail ≥ 0.8). The skeleton template is chosen by the part graph within the category.
+* Secondary rigs by behaviour, automatic: cloth chains with Verlet dynamics and auto-fitted body capsules, baked into
+  every clip; hair / beard chains; the universal tail engine (medial-axis chain with the tail fit, spline IK + FK
+  follow-through, species profiles). QA per clip: penetration into the body = 0 (counted in Blender), chain length
+  ±2 %, tail lag in profile.
+* Viewer: voxels take the part colours as parts are found; a 3D icon per part with a hover card (the record's numbers,
+  relabel); a part shader on the mesh until the animation is ready; then everything off except the icons.
+
 ## Classification First, Category `legless` (owner order, 2026-10-17)
 
 > добавь безногих существ по классификации, но с головой и руками. надо чтобы наш классификатор всех сначала
