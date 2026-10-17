@@ -1116,6 +1116,13 @@
    "what": "creepy santa claus: a heavy biped, the beard over the chest, the arms hanging along a wide coat, no skeleton (V3 run dd3b2e1e)",
    "sha256": "533ec90903003f4c6f5358999bb4b2d1840517ed78571657bcc4ec6676d2ae7a",
    "bytes": 11417944
+  },
+  "8ebfeeb8.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/385bcba56b26eec48f6e/proj/model.glb",
+   "task": "8ebfeeb8-7693-4380-8640-bbb2883cedf9",
+   "what": "demonic creature: head, two clawed arms, a tapering trail instead of legs (V3 run 385bcba5, the same source as 6 other tasks)",
+   "sha256": "17deaddea800b7aafe03b88282b9c7561e0b430021899937c715c0bc6eaa6cf3",
+   "bytes": 37394504
   }
  },
  "profiles": {
@@ -16859,7 +16866,7 @@
    "id": "bearded_arms_down_biped",
    "task": "77cc1b88-be21-4d73-85a3-9c0e9551c4d1",
    "cost": 2,
-   "defect": "Spine order V3 (owner 2026-10-16, 77cc1b88 «creepy santa claus»: «надо чтобы этот дед мороз был идеально зариган»): a heavy biped, the beard fills the chest (no neck narrowing), the arms hang along a wide coat. The farthest lateral point is the elbow (reach 24 % H), so the arm counted as reaching out and the armpit search walked down to the crotch: both Arm joints on the centre line at 35 % H, the neck sections took the belt as the neck (band 39-68.6 % H): Neck 41 % H UNDER the Hips 45.4, the Head bone owned the torso, box_arms pinned shoulders 5.4 % H apart (71.4 / 66.2). Before: rig_check 4x 11, stand Running worst 158, 2869 edges over 4x, leak 13.9 %. Fix: fastrig.hanging_arm_lobes (a shoulder on the mid-plane -> the hanging arm from the constitution's lateral lobe, both sides levelled) + fastrig.spine_order_guard (Hips < Spine.. < Neck < Head < HeadTop_End, Neck >= Hips + 20 % H, else the fallback) + constitution.combine (a weak blob verdict gives way to a confident vision verdict) + pose_skeleton.box_arms levels its shoulders. After: Neck 82.3, Head 89.9, shoulders 73.0 / 73.0, rig_check 4x 1, stand worst 47, 48-56 edges over 4x, leak 4.3-4.9 %",
+   "defect": "Spine order V3 (owner 2026-10-16, 77cc1b88 «creepy santa claus»: «надо чтобы этот дед мороз был идеально зариган»): a heavy biped, the beard fills the chest (no neck narrowing), the arms hang along a wide coat. The farthest lateral point is the elbow (reach 24 % H), so the arm counted as reaching out and the armpit search walked down to the crotch: both Arm joints on the centre line at 35 % H, the neck sections took the belt as the neck (band 39-68.6 % H): Neck 41 % H UNDER the Hips 45.4, the Head bone owned the torso, box_arms pinned shoulders 5.4 % H apart (71.4 / 66.2). Before: rig_check 4x 11, stand Running worst 158, 2869 edges over 4x, leak 13.9 %. Fix: fastrig.hanging_arm_lobes (a shoulder on the mid-plane -> the hanging arm from the constitution's lateral lobe, both sides levelled) + fastrig.spine_order_guard (Hips < Spine.. < Neck < Head < HeadTop_End, Neck >= Hips + 20 % H, else the fallback) + constitution.combine (a weak blob verdict gives way to a confident vision verdict) + pose_skeleton.box_arms levels its shoulders. After: Neck 82.3, Head 89.9, shoulders 73.0 / 73.0, rig_check 4x 1, stand worst 47, 48-56 edges over 4x, leak 4.3-4.9 % | Milestone 2 (Seams V3, 2026-10-16): Seams V3 milestone 2 (2026-10-16, scratch rig of 77cc1b88 on the candidate tree, Running at 12 fps): worst real stretch 47.2 -> 7.6 (the 47x was a 0.033 % H near-copy edge, weights 0.72 / 0.63, now one weight: micro_edge_weld), edges over 4x 48 -> 22 (arm_contact_band 3: the coat side of the upper arm ramp below the shoulder), tear true -> false, Toe_End mirror 3.02 -> 0.0 % H (end_pull_mirror), rig_check [344, 1] -> [304, 1], no hole copies; the far leak is the stand's region rule (see stand_leak)",
    "checks": [
     {
      "id": "mt_rig",
@@ -16929,6 +16936,14 @@
         0.08,
         0.35
        ]
+      ],
+      "toe_end_mirror_pct_H": [
+       "<=",
+       2
+      ],
+      "pair_mirror_max_pct_H": [
+       "<=",
+       2
       ]
      },
      "note": "Spine order V3 2026-10-16: measured spine_order_ok 1, neck 82.3 % H over the ground, neck - hips 36.9, shoulder mirror 0.0, arm off axis 13-15 % H, head_to_height 0.085; before: 0, 41.0, -4.4, 5.4, 1.3-1.7, 0.43"
@@ -16950,9 +16965,17 @@
        "<=",
        100
       ],
+      "worst_stretch_ratio": [
+       "<=",
+       12
+      ],
       "edges_over_4x": [
        "<=",
-       150
+       40
+      ],
+      "tear": [
+       "==",
+       false
       ],
       "stretch_valid": [
        "==",
@@ -16960,7 +16983,7 @@
       ]
      },
      "owner": "Spine order · V3",
-     "note": "the collapsed chain must never come back: before 158 / 2869 edges over 4x, after 47 / 48-56 (Running, 2026-10-16)"
+     "note": "the collapsed chain must never come back: before 158 / 2869 edges over 4x, after 47 / 48-56 (Running, 2026-10-16); milestone 2 (Seams V3 2026-10-16): Seams V3 milestone 2 (2026-10-16, scratch rig of 77cc1b88 on the candidate tree, Running at 12 fps): worst real stretch 47.2 -> 7.6 (the 47x was a 0.033 % H near-copy edge, weights 0.72 / 0.63, now one weight: micro_edge_weld), edges over 4x 48 -> 22 (arm_contact_band 3: the coat side of the upper arm ramp below the shoulder), tear true -> false, Toe_End mirror 3.02 -> 0.0 % H (end_pull_mirror), rig_check [344, 1] -> [304, 1], no hole copies; this check on the gate's own rig step (mt-deploy 20261016T212827Z, installed): worst real stretch 6.64, 32 edges over 4x at 12 fps, tear false, Toe_End mirror 0.0 % H"
     },
     {
      "id": "stand_tear",
@@ -16979,9 +17002,13 @@
        "<=",
        4
       ],
+      "worst_stretch_ratio": [
+       "<",
+       4
+      ],
       "edges_over_4x": [
        "<=",
-       80
+       0
       ],
       "tear": [
        "==",
@@ -16994,7 +17021,7 @@
      },
      "owner": "Anim stand · V3",
      "xfail": {
-      "reason": "the inner upper arm is one surface with the coat at 55-65 % H (13-18 % H under the Arm joint): edges of the bridge blend LeftArm 0.63-0.72 / Spine1 0.27-0.37 and stretch 44-47x in Running (worst 47, 48-56 over 4x, measured 2026-10-16 after the spine fix); the arm | coat contact split / the beard-fur layer is the next step",
+      "reason": "spec 2026-10-16 (worst < 4, no edge over 4x) not met: after milestone 2 the fused sleeve | coat contact still stretches 22 edges over 4x, worst 7.6 (LeftArm | Spine1 58-62 % H); cutting it (arm_contact_blend hanging) opens 3.5-7.9 % H slits whose rims get no lids (cut_cap). Needs a garment layer / lidded release",
       "owner": "Seams · V3"
      },
      "measured_2026_10_16": {
@@ -17002,6 +17029,161 @@
       "edges_over_4x": 56,
       "tear": true,
       "clip": "Running"
+     },
+     "measured_2026_10_16_m2": {
+      "worst_stretch_ratio": 7.604,
+      "edges_over_4x": 22,
+      "tear": false,
+      "clip": "Running"
+     }
+    },
+    {
+     "id": "stand_leak",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "clip": "auto",
+      "size": 256
+     },
+     "thresholds": {
+      "metrics_present": [
+       "==",
+       1
+      ],
+      "leak_far_pct": [
+       "<=",
+       1.0
+      ]
+     },
+     "owner": "Anim stand · V3",
+     "note": "leak_far_pct_radii / leak_far_pct_tube are recorded beside it (anim_stand leak.alt)",
+     "xfail": {
+      "reason": "the far leak left (3.3 %, nearest-segment regions) is the stand's region rule, not the skin: RightHand <- RightUpLeg 1058 / LeftHand <- LeftUpLeg 789 are coat vertices under the mittens (40-52 welded rings from the hand skin, 1-5 from the thigh skin), Arm <- Spine the coat's side under the hanging arms (slices 42-67 % H); with the radii rule (leak_region radii) 1.3 %, tube 1.65 %. Decide the detector's region rule (Anim stand · V3)",
+      "owner": "Anim stand · V3"
+     }
+    }
+   ]
+  },
+  {
+   "id": "legless_demonic_creature",
+   "task": "8ebfeeb8-7693-4380-8640-bbb2883cedf9",
+   "cost": 2,
+   "defect": "owner 2026-10-17 (notice of 8ebfeeb8: «добавь безногих существ по классификации, но с головой и руками … надо чтобы наш классификатор всех сначала классифицировал, а потом отправлял на супер риг … воксели же тоже могут видеть ноги»): a demonic creature with a head, arms and a tapering trail instead of legs was rigged as a humanoid (needs_review, an arm through the body, leg_to_height 0.621 out of [0.30, 0.58]; 7 uploads of the same source). Fix: classification first (mt/legless.py: voxel legs + Vision + the embedding DB -> analysis/class.json) and the legless rig (the biped upper body, NO leg chain, a Tail chain along the trail, hover clips)",
+   "checks": [
+    {
+     "id": "voxel_legs",
+     "kind": "voxel_legs",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "input": "8ebfeeb8.model.glb",
+     "thresholds": {
+      "legs": [
+       "==",
+       "none"
+      ],
+      "trail": [
+       "==",
+       true
+      ],
+      "taper_ratio": [
+       "<=",
+       0.3
+      ]
+     },
+     "note": "the voxel leg detector: one lower lobe tapering to 0.21 of its top, hanging from a waist 0.16 of the chest section; no foot section pair",
+     "xfail": {
+      "reason": "legless detector pending (mt/legless.py not installed yet; flip to pass in the mt-deploy that installs it)",
+      "owner": "Category legless · V3.2 (agent 2026-10-17)"
+     }
+    },
+    {
+     "id": "biped_has_legs",
+     "kind": "voxel_legs",
+     "paths": [
+      "mt"
+     ],
+     "tier": "base",
+     "input": "1ceccd8a.model.glb",
+     "thresholds": {
+      "legless": [
+       "==",
+       false
+      ]
+     },
+     "note": "no false legless on a biped (Vegeta 1ceccd8a mid-step, one leg forward): the detector abstains (unknown, taper 0.48), never none",
+     "xfail": {
+      "reason": "legless detector pending (mt/legless.py not installed yet; flip to pass in the mt-deploy that installs it)",
+      "owner": "Category legless · V3.2 (agent 2026-10-17)"
+     }
+    },
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "tier": "extended",
+     "input": "8ebfeeb8.model.glb",
+     "params": {
+      "words": "demonic creature",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       300
+      ],
+      "body_plan": [
+       "==",
+       "legless"
+      ],
+      "bones": [
+       ">=",
+       15
+      ],
+      "clips": [
+       ">=",
+       6
+      ]
+     },
+     "note": "Vision's words say biped: the voxels' strong trail still dispatches to the legless rig (37 MB model, extended tier)"
+    }
+   ],
+   "owner": "Legless rig · V3"
+  },
+  {
+   "id": "backend_task_privacy",
+   "task": null,
+   "cost": 1,
+   "defect": "a private model (tasks.is_public=0) was served to anyone on every path: page, API, OG, MT run files, uploads, posters (owner 2026-10-17, support 48307)",
+   "checks": [
+    {
+     "id": "unittests",
+     "kind": "backend_unittests",
+     "paths": [
+      "backend"
+     ],
+     "params": {
+      "modules": [
+       "tests.test_my_tasks_privacy"
+      ]
+     },
+     "thresholds": {
+      "exit": [
+       "==",
+       0
+      ],
+      "ran": [
+       ">=",
+       8
+      ]
      }
     }
    ]
