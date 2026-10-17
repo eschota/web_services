@@ -1843,6 +1843,65 @@ def stand_tear(ctx, clip="auto", fps=12):
             "worst_pairs": _wp}
 
 
+def parts_iou(ctx, models, pass_="fine", santa=("santa1", "santa2")):
+    """V3.1 part labels (spec B.5, 2026-10-17): mt.analyzer labels every model of the hand-labelled parts corpus on a
+    fleet mask service box; area-weighted IoU against parts_gt.json per label, averaged over the models that carry
+    the label (coarse: head / arm / leg / tail / wing / torso; fine: beard, hat; cloth = cloak|coat|cape|skirt|robe)."""
+    import base64 as _b64
+    import zlib as _zlib
+    from mt import parts_entities as PE, parts_seg as PS
+    from mt.glb import load_glb
+    cloth = {"cloak", "coat", "cape", "skirt", "robe"}
+    agg, per, secs, failed, label_sets = {}, {}, [], [], {}
+    for m in models:
+        glb, gtp = _input(f"parts_{m}.model.glb"), _input(f"parts_{m}.parts_gt.json")
+        gd = json.loads(gtp.read_text(encoding="utf-8"))
+        codes = np.frombuffer(_zlib.decompress(_b64.b64decode(gd["face_label_zlib_b64"])), np.uint8)
+        gt = np.array(gd["labels"], dtype=object)[codes]
+        out = pathlib.Path(ctx["work"]) / "parts_iou" / m
+        out.mkdir(parents=True, exist_ok=True)
+        p, wall = _child([PY, "-P", "-m", "mt.analyzer", "--glb", str(glb), "--pass", pass_, "--no-emit",
+                          "--forward", gd.get("forward") or "+z", "--category", gd.get("category") or "biped",
+                          "--out", str(out)], timeout=300)
+        if p.returncode != 0 or not (out / "parts_seg.npz").is_file():
+            failed.append(m)
+            per[m] = {"error": (p.stderr or p.stdout)[-300:]}
+            continue
+        z = np.load(out / "parts_seg.npz", allow_pickle=True)
+        pred = np.array([str(x) for x in z["labels"]], dtype=object)[z["face_label"]]
+        if len(pred) != len(gt):
+            failed.append(m)
+            per[m] = {"error": f"faces {len(pred)} != gt {len(gt)}"}
+            continue
+        mesh = load_glb(glb.read_bytes())
+        area = PS.face_area(mesh.positions.astype(np.float64), mesh.faces)
+        secs.append(wall)
+        r = dict(PE.iou(gt, pred, area, level="coarse"))
+        for lab in ("beard", "hat"):
+            r.update(PE.iou(gt, pred, area, [lab]))
+        cg = np.array(["cloth" if str(x).split(".")[0] in cloth else "other" for x in gt], dtype=object)
+        cp = np.array(["cloth" if str(x).split(".")[0] in cloth else "other" for x in pred], dtype=object)
+        r.update(PE.iou(cg, cp, area, ["cloth"]))
+        per[m] = {"seconds": wall, "iou": r}
+        tot = float(area.sum()) or 1.0
+        label_sets[m] = sorted({str(l) for l in np.unique(pred) if str(l) != "none"
+                                and float(area[pred == l].sum()) / tot >= 0.01})
+        for k, v in r.items():
+            if v is not None:
+                agg.setdefault(k.split(".")[0], []).append(v)
+    res = {f"{k}_iou_mean": round(float(np.mean(v)), 3) for k, v in sorted(agg.items())}
+    res.update({f"{k}_models": len(v) for k, v in sorted(agg.items())})
+    res.update({"models": len(models), "models_failed": len(failed), "failed": failed,
+                "seconds_max": round(max(secs), 1) if secs else None,
+                "seconds_median": round(float(np.median(secs)), 1) if secs else None, "per_model": per})
+    a, b = (label_sets.get(s) for s in santa)
+    if a is not None and b is not None:
+        res["santa_label_sets"] = {santa[0]: a, santa[1]: b}
+        res["santa_labels_same"] = int(a == b)
+        res["santa_labels_jaccard"] = round(len(set(a) & set(b)) / max(1, len(set(a) | set(b))), 3)
+    return res
+
+
 # ------------------------------------------------------------------------------------------------ dispatch
 def run_check(check: dict, ctx: dict) -> dict:
     k = check["kind"]
@@ -1971,6 +2030,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return arm_fit(ctx)
     if k == "tessellation":
         return tessellation(ctx)
+    if k == "parts_iou":                                           # V3.1 part labels (2026-10-17)
+        return parts_iou(ctx, a.get("models") or [], a.get("pass", "fine"))
     if k == "pending_detector":
         return {"pending": True}
     if k == "posed_prop_fit":
