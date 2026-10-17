@@ -1,5 +1,5 @@
 [Unit]
-Description=AutoRig release-gate work/ retention (finished gates older than 3 h)
+Description=AutoRig release-gate work/ retention (finished gates older than 90 min)
 
 [Service]
 Type=oneshot
