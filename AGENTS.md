@@ -647,6 +647,20 @@ Owner rule, 2026-10-10:
   biped category. Subagents for this work run on Claude Opus 5.5 medium, one per task, reused by their context; the
   lead (Fable) writes the specs, reviews the results and sends the owner one sheet per milestone.
 
+## Picture Intake: Fast Model in ~5 s, Then Progressive Upgrade (owner order, 2026-10-17)
+
+> нельзя это вот на фаст мини перевести, чтобы 3д модель появлялась через 5 секунд, а потом просто улучшалась
+> постепенно, но анализ можно делать и на лоуполи, чтобы не ждать 10 минут
+
+* Spec `docs/picture-intake-fast-preview-spec-20261017.md` (MT repo). Every picture task spawns two gen3d jobs: a
+  `fast` tier (Hunyuan3D-2mini-turbo, ~5 s, its own worker slot on the mini boxes: Raptor, then f7 / f13 / f12) and
+  the `full` tier (Hunyuan 2.1 with textures). The viewer shows the fast model at once and the V3.1 analysis, fastrig
+  and clips run on that low-poly immediately. When the full model lands the run is upgraded in place: the rig is
+  transferred (same template, re-fit only where the meshes differ, weights re-solved in the same open pose), the
+  textures arrive, the viewer swaps the mesh without resetting the camera or the clips; the preview version stays.
+  Mesh uploads never take the fast tier. Timings (picture → fast model → animated preview → full → upgraded) are
+  recorded per run and the fast tier's capacity shows in the fleet API.
+
 ## Body Parts Are Entities; Secondary Rigs; Part Icons (owner order, 2026-10-17)
 
 > части тела получили свои сущности … классификация должна определять всё и визуализировать на вокселях и с помощью
