@@ -647,6 +647,26 @@ Owner rule, 2026-10-10:
   biped category. Subagents for this work run on Claude Opus 5.5 medium, one per task, reused by their context; the
   lead (Fable) writes the specs, reviews the results and sends the owner one sheet per milestone.
 
+## Classification First, Category `legless` (owner order, 2026-10-17)
+
+> добавь безногих существ по классификации, но с головой и руками. надо чтобы наш классификатор всех сначала
+> классифицировал, а потом отправлял на супер риг … воксели же тоже могут видеть ноги, ты про базу эмбеддингов не забыл?
+
+* Spec `docs/category-legless-spec-20261017.md` (MT repo). Every task is classified before any fit by three voters,
+  each with its evidence in `analysis/class.json`: the voxel lobes (legs = lobes below the pelvis reaching the floor /
+  foot sections; `analysis/voxel_legs.json`), Vision («legs: none / two / four / many, floating, trail») and the
+  embedding DB (k = 10 nearest by the CLIP sheet vector and the pose vector; a neighbour with similarity ≥ 0.97 and an
+  owner-confirmed category outweighs the others). Disagreement → `needs_review` with the three answers in the notice.
+  Nothing is rigged as a humanoid while the voxels see no legs.
+* New category `legless` (head + torso + arms, no legs; variants `legless/tail`, `legless/base`): the biped upper
+  body, no leg chain, an optional trail chain from the Hips, hover clips instead of walk / run, QA norms without
+  leg_to_height / stride; handoff `docs/categories/legless/handoff.md`.
+* The embedding DB is the category memory: every record carries `category`, `category_source`, `confidence`; the
+  «похожие» lines show the neighbours' categories; a correction (button, reply, agent) propagates to neighbours with
+  similarity ≥ 0.97 as queued re-rigs, and the corrected task becomes a corpus case.
+* First case: the demonic creature of 2026-10-17 ~10:00 UTC (customer darkerdanker8) and its 5 pose-1.00 neighbours
+  (b9b2e370, 8d9d378f, 4b6fbefb, 0ba2b87b, 62cf0f1f), re-rigged in place under `legless`.
+
 ## Reference Leg Rule for an Asymmetric Pose (owner order, 2026-10-15)
 
 > если одна нога находится на поверхности, то её длина должна быть эталонной и
