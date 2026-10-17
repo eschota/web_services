@@ -116,6 +116,14 @@ MASKS_URLS: Dict[str, str] = {
     "f2": "http://127.0.0.1:19802",
     "f5": "http://127.0.0.1:19805",
 }
+# AutoRig Fast 3D (deploy/fast3d/fast3d_service.py: Hunyuan3D-2mini, models hunyuan_mini30 / hunyuan_mini_turbo), one
+# VPS-local URL per box through its tunnel (owner 2026-10-17: «делай мини-30»; «чтобы 3д модель появлялась через 5
+# секунд»; AGENTS.md «Fast 3D Generator On Every Box»). The client is mt/gen3d_queue (policy farm.mini_boxes, tier fast).
+FAST3D_SECONDS = 15.0
+FAST3D_URLS: Dict[str, str] = {
+    "worker-4090": "http://127.0.0.1:19832",   # reverse tunnel, deploy/fast3d/fast3d-4090.ps1
+    "raptor": "http://127.0.0.1:19828",        # autorig-masks-raptor-tunnel.service (conf line raptor-mini3d)
+}
 MASKS_NOT_SERVING: Dict[str, str] = {
     "f7": "installed, task disabled 2026-10-15: the ai-node LLM holds the 1080 Ti (149 s per picture)",
     "f15": "not installed: no shell (SSH 48588 times out, LAN port 22 closed)",
@@ -542,6 +550,23 @@ class Collector:
             entry["health"] = previous.get("health") or {}
         self._store("masks:" + bid, entry)
 
+    # -- Fast 3D services (deploy/fast3d/fast3d_service.py) ---------------------
+    def _probe_fast3d(self, bid: str, url: str) -> None:
+        status, body, error, elapsed = _http_json(url + "/health", timeout=5.0)
+        entry: Dict[str, Any] = {"checked_at": _now(), "url": url, "http_status": status, "error": error,
+                                 "elapsed": round(elapsed, 3),
+                                 "ok": status == 200 and isinstance(body, dict) and body.get("ok", True) is not False}
+        previous = self._get("fast3d:" + bid)
+        if entry["ok"]:
+            entry["health"] = {k: body.get(k) for k in ("models_array", "loaded", "resident", "busy", "jobs", "pictures",
+                                                        "errors", "loads", "seconds_median", "last", "vram_free_mb",
+                                                        "max_batch", "queue_depth", "dtype", "idle_unload_s")}
+            entry["last_ok_at"] = entry["checked_at"]
+        else:
+            entry["last_ok_at"] = previous.get("last_ok_at")
+            entry["health"] = previous.get("health") or {}
+        self._store("fast3d:" + bid, entry)
+
     # -- refresh loop ---------------------------------------------------------
     def refresh(self) -> None:
         futures = []
@@ -577,6 +602,9 @@ class Collector:
         if self._is_due("masks", MASKS_SECONDS):
             for bid, murl in MASKS_URLS.items():
                 futures.append(self.pool.submit(self._probe_masks, bid, murl))
+        if self._is_due("fast3d", FAST3D_SECONDS):
+            for bid, furl in FAST3D_URLS.items():
+                futures.append(self.pool.submit(self._probe_fast3d, bid, furl))
         for future in futures:
             try:
                 future.result(timeout=20)
@@ -1437,6 +1465,44 @@ def compose(col: Collector) -> Dict[str, Any]:
         elif b["id"] in MASKS_NOT_SERVING:
             b.setdefault("services_object", {})["masks"] = {"ok_bool": False, "state_string": "off",
                                                             "note_string": MASKS_NOT_SERVING[b["id"]]}
+    # the Fast 3D service on the box (deploy/fast3d): services_object.fast3d, and its models in hunyuan.models_array
+    for b in boxes_out:
+        if b["id"] not in FAST3D_URLS:
+            continue
+        m = col._get("fast3d:" + b["id"])
+        h = m.get("health") or {}
+        last = h.get("last") if isinstance(h.get("last"), dict) else {}
+        fobj = {
+            "url_string": FAST3D_URLS[b["id"]], "ok_bool": bool(m.get("ok")),
+            "models_array": h.get("models_array") or [], "loaded_string": h.get("loaded") or "",
+            "resident_array": h.get("resident") or [], "busy_bool": bool(h.get("busy")),
+            "queue_depth_int": h.get("queue_depth"), "jobs_int": h.get("jobs"), "pictures_int": h.get("pictures"),
+            "errors_int": h.get("errors"), "seconds_median_object": h.get("seconds_median") or {},
+            "last_seconds_float": last.get("seconds_per_picture") or last.get("seconds"),
+            "last_model_string": last.get("model") or "", "last_at_string": last.get("at") or "",
+            "vram_free_mb_int": h.get("vram_free_mb"), "max_batch_int": h.get("max_batch"), "dtype_string": h.get("dtype") or "",
+            "error_string": m.get("error") or "", "checked_age_seconds_int": _age(m.get("checked_at")),
+            "last_ok_age_seconds_int": _age(m.get("last_ok_at")),
+            "state_string": ("down" if not m.get("ok") else ("busy" if h.get("busy") else
+                             ("loaded" if h.get("loaded") else "idle (loads on the next job)"))),
+        }
+        sv = b.setdefault("services_object", {})
+        sv["fast3d"] = fobj
+        hy = sv.get("hunyuan")
+        models = (["hunyuan21"] if isinstance(hy, dict) and hy.get("reachable") else []) + \
+            (list(fobj["models_array"]) if fobj["ok_bool"] else [])
+        if isinstance(hy, dict):
+            hy["models_array"] = models
+            hy["fast"] = {"ok_bool": fobj["ok_bool"], "state_string": fobj["state_string"],
+                          "seconds_median_object": fobj["seconds_median_object"]}
+        elif models:
+            sv["hunyuan"] = {"models_array": models, "fast": {"ok_bool": fobj["ok_bool"],
+                                                              "state_string": fobj["state_string"],
+                                                              "seconds_median_object": fobj["seconds_median_object"]}}
+    for b in boxes_out:                                    # every other box with a Hunyuan 2.1 route lists its model too
+        hy = (b.get("services_object") or {}).get("hunyuan")
+        if isinstance(hy, dict) and "models_array" not in hy:
+            hy["models_array"] = ["hunyuan21"] if hy.get("reachable") else []
     # the farm runner file each box runs (box agent: sha256-checked self-update between jobs, 2026-10-13)
     latest_runner = _runner_sha()
     for b in boxes_out:
@@ -1500,6 +1566,7 @@ def compose(col: Collector) -> Dict[str, Any]:
         "low_disk_array": sorted({b["id"] for b in in_fleet
                                   for w in b["blockers_array"] + b["warnings_array"] if w.startswith("disk ")}),
         "masks_ready_array": [b["id"] for b in in_fleet if ((b.get("services_object") or {}).get("masks") or {}).get("ok_bool")],
+        "fast3d_ready_array": [b["id"] for b in in_fleet if ((b.get("services_object") or {}).get("fast3d") or {}).get("ok_bool")],
     }
     def worker_box(worker_api: Any) -> str:
         match = re.search(r"converter-(f\d+)\.", str(worker_api or ""))
@@ -1581,7 +1648,8 @@ def render_text(snapshot: Dict[str, Any]) -> str:
                  f"hunyuan: {','.join(s.get('hunyuan_ready_array') or []) or '-'}  "
                  f"ai: {','.join(s.get('ai_ready_array') or []) or '-'}  "
                  f"V3 ready: {','.join(s.get('v3_ready_array') or []) or '-'}"
-                 f"  masks: {','.join(s.get('masks_ready_array') or []) or '-'}")
+                 f"  masks: {','.join(s.get('masks_ready_array') or []) or '-'}"
+                 f"  fast3d: {','.join(s.get('fast3d_ready_array') or []) or '-'}")
     lines.append("")
     for box in snapshot.get("boxes_array") or []:
         gpu = box.get("gpu_object") or {}
@@ -1607,6 +1675,11 @@ def render_text(snapshot: Dict[str, Any]) -> str:
                           + (f"(last {mk.get('last_seconds_float')}s)" if mk.get("last_seconds_float") else ""))
             else:
                 disks += "  masks=off"
+        f3 = (box.get("services_object") or {}).get("fast3d")
+        if f3:
+            disks += ("  fast3d=" + ("down" if not f3.get("ok_bool") else ("busy" if f3.get("busy_bool") else
+                                                                            ("loaded" if f3.get("loaded_string") else "idle")))
+                      + (f"(last {f3.get('last_seconds_float')}s)" if f3.get("last_seconds_float") else ""))
         busy = "; ".join(
             f"{b.get('service')}:{b.get('what')}" + (f"[{b.get('stage')}]" if b.get("stage") else "")
             for b in box.get("busy_with_array") or [])
