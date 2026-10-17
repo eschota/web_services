@@ -81,9 +81,176 @@ CLIP_KIND_SINCE = 1791758539.0   # viewer capture mode (blueprint-r3, 2026-10-12
 
 
 # ====================================================================================================== the render
+# Memory (2026-10-17, 26 failures a day, most of them «no output» = an OOM kill of the render child at the unit's 1.5 GB):
+# mt.render.rasterize keeps every splat sample of every triangle until one global depth sort, so its peak grows with
+# the covered samples, not with the file: a 23k-face low-poly (task 332fb890, big triangles at 1024 px) took 1.7 GB,
+# a 350k-face mesh more than 4 GB; and mt.glb decodes every texture to float32 at full size (5510f781: 17 maps,
+# 322 MB). The poster child swaps in the same rasterizer resolved chunk by chunk against a running z-buffer (the same
+# pixels, ~100 MB peak whatever the mesh) and textures cut to GP_TEX_MAX px (the poster shows the model ~800 px tall).
+TEX_MAX = int(os.getenv("GP_TEX_MAX", "1024"))
+RASTER_CHUNK = int(os.getenv("GP_RASTER_CHUNK", "1000000"))      # splat samples per chunk
+
+
+def _rasterize_stream(uv, depth, faces, size):
+    """mt.render.rasterize with a bounded memory: per chunk, the nearest sample per pixel is merged into a running
+    z-buffer (strictly nearer wins, so ties keep the earlier triangle, as the global stable sort did)."""
+    import numpy as np
+    a, b, c = uv[faces[:, 0]], uv[faces[:, 1]], uv[faces[:, 2]]
+    edge = np.maximum.reduce([np.hypot(*(b - a).T), np.hypot(*(c - b).T), np.hypot(*(a - c).T)])
+    steps = np.clip(np.ceil(edge * 1.6).astype(np.int64) + 1, 1, 96)
+    del a, b, c, edge
+    tri = np.full(size * size, -1, np.int64)
+    bary = np.zeros((size * size, 3), np.float32)
+    zbuf = np.full(size * size, np.inf, np.float64)
+    for k in np.unique(steps):
+        sel = np.nonzero(steps == k)[0]
+        i, j = np.meshgrid(np.arange(k + 1), np.arange(k + 1), indexing="ij")
+        m = (i + j) <= k
+        w1, w2 = i[m] / k, j[m] / k
+        w0 = 1.0 - w1 - w2
+        wst = np.stack([w0, w1, w2], -1)
+        for chunk in np.array_split(sel, max(1, len(sel) * len(w0) // RASTER_CHUNK + 1)):
+            if not len(chunk):
+                continue
+            f = faces[chunk]
+            px = (uv[f[:, 0], None, 0] * w0 + uv[f[:, 1], None, 0] * w1 + uv[f[:, 2], None, 0] * w2)
+            py = (uv[f[:, 0], None, 1] * w0 + uv[f[:, 1], None, 1] * w1 + uv[f[:, 2], None, 1] * w2)
+            dz = (depth[f[:, 0], None] * w0 + depth[f[:, 1], None] * w1 + depth[f[:, 2], None] * w2)
+            ix, iy = np.floor(px).astype(np.int64), np.floor(py).astype(np.int64)
+            del px, py
+            ok = (ix >= 0) & (iy >= 0) & (ix < size) & (iy < size)
+            pix = (iy * size + ix)[ok]
+            if not len(pix):
+                continue
+            d = dz[ok]
+            t = np.broadcast_to(chunk[:, None], ok.shape)[ok]
+            ws = np.nonzero(ok)[1]                                   # lattice index of each kept sample
+            del ix, iy, dz, ok
+            order = np.lexsort((d, pix))
+            first = order[np.r_[True, pix[order][1:] != pix[order][:-1]]]
+            pix, d, t, ws = pix[first], d[first], t[first], ws[first]
+            near = d < zbuf[pix]
+            pix = pix[near]
+            zbuf[pix] = d[near]
+            tri[pix] = t[near]
+            bary[pix] = wst[ws[near]]
+    return tri.reshape(size, size), bary.reshape(size, size, 3), zbuf.astype(np.float32).reshape(size, size)
+
+
+def _image_small(js, binary, image_index):
+    """mt.glb._image with the picture cut to TEX_MAX before it becomes float32."""
+    import base64
+    import cv2
+    import numpy as np
+    from mt import glb as GL
+    img = js["images"][image_index]
+    if "bufferView" in img:
+        raw, _ = GL._view_bytes(js, binary, img["bufferView"])
+    elif str(img.get("uri", "")).startswith("data:"):
+        raw = base64.b64decode(img["uri"].split(",", 1)[1])
+    else:
+        return None
+    pic = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
+    if pic is None:
+        return None
+    longest = max(pic.shape[:2])
+    if longest > TEX_MAX:
+        s = TEX_MAX / longest
+        pic = cv2.resize(pic, (max(1, round(pic.shape[1] * s)), max(1, round(pic.shape[0] * s))),
+                         interpolation=cv2.INTER_AREA)
+    if pic.ndim == 2:
+        pic = cv2.cvtColor(pic, cv2.COLOR_GRAY2RGB)
+    elif pic.shape[2] == 4:
+        pic = cv2.cvtColor(pic, cv2.COLOR_BGRA2RGB)
+    else:
+        pic = cv2.cvtColor(pic, cv2.COLOR_BGR2RGB)
+    if pic.dtype == np.uint16:
+        return pic.astype(np.float32) / 65535.0
+    return pic.astype(np.float32) / 255.0
+
+
+def lean_render():
+    """Install the bounded-memory rasterizer and texture loader in this (child) process."""
+    from mt import glb as GL
+    from mt import render as R
+    R.rasterize = _rasterize_stream
+    GL._image = _image_small
+
+
+# Framing (2026-10-17, «model too small in frame (0.022)», task 448f4cb8): a few tiny loose shards (VFX sparks) far
+# from the body widened the box the camera frames, so the character came out a third of the poster's height. The frame
+# is the mesh's main parts: connected components at least FRAME_PART of the largest one's size (a pair of separate arms
+# or a rider and his horse stay together); small loose pieces outside that box are not drawn.
+FRAME_PART = float(os.getenv("GP_FRAME_PART", "0.2"))
+MIN_COVERAGE = float(os.getenv("GP_MIN_COVERAGE", "0.012"))
+
+
+def main_parts(mesh):
+    """(face mask, vertex mask) of the mesh's main parts; everything when it is one piece or the rule keeps all."""
+    import numpy as np
+    P, F = mesh.positions, mesh.faces
+    n = len(P)
+    # vertices sharing a position are one piece (UV / normal seams split them in a GLB)
+    _u, weld = np.unique(np.round(P.astype(np.float64) / max(float(np.ptp(P, 0).max()), 1e-12) * 2 ** 20)
+                         .astype(np.int64), axis=0, return_inverse=True)
+    weld = weld.reshape(-1)
+    lab = np.arange(len(_u))                              # lab[v] <= v always, so pointer jumping ends
+    WF = weld[F]
+    for _ in range(500):                                  # hook every face's roots to its smallest label, then jump
+        m = lab[WF].min(1)
+        new = lab.copy()
+        for k in range(3):
+            np.minimum.at(new, WF[:, k], m)
+            np.minimum.at(new, lab[WF[:, k]], m)
+        while True:
+            nxt = new[new]
+            if np.array_equal(nxt, new):
+                break
+            new = nxt
+        if np.array_equal(new, lab):
+            break
+        lab = new
+    vlab = lab[weld]
+    ids, inv = np.unique(vlab, return_inverse=True)
+    if len(ids) == 1:
+        return np.ones(len(F), bool), np.ones(n, bool)
+    lo = np.full((len(ids), 3), np.inf)
+    hi = np.full((len(ids), 3), -np.inf)
+    np.minimum.at(lo, inv, P)
+    np.maximum.at(hi, inv, P)
+    diag = np.linalg.norm(hi - lo, axis=1)
+    keep_c = diag >= FRAME_PART * diag.max()
+    klo, khi = lo[keep_c].min(0), hi[keep_c].max(0)
+    pad = 0.05 * (khi - klo)
+    inside = np.all((lo >= klo - pad) & (hi <= khi + pad), axis=1)   # small parts within the body: eyes, buttons, props
+    keep_c |= inside
+    vmask = keep_c[inv]
+    fmask = vmask[F].all(1)
+    return fmask, vmask
+
+
+def frame_main(mesh):
+    """Drop the loose far pieces from the faces (positions untouched, so a rig's vertex order still matches)."""
+    fmask, vmask = main_parts(mesh)
+    dropped = int((~fmask).sum())
+    if dropped and fmask.any():
+        mesh.faces = mesh.faces[fmask]
+        mesh.face_material = mesh.face_material[fmask]
+    return vmask, dropped
+
+
+def _framed(mesh):
+    """The points the camera frames: the vertices the faces use (frame_main dropped the loose far pieces)."""
+    import numpy as np
+    used = np.zeros(len(mesh.positions), bool)
+    used[mesh.faces.reshape(-1)] = True
+    return mesh.positions[used]
+
+
 def _mask_of(R, mesh, yaw, size):
     import numpy as np
-    cam = R.cameras_for(mesh.positions, size=size, names=("front",), yaw=yaw, frame_points=mesh.positions)["front"]
+    pts = _framed(mesh)
+    cam = R.cameras_for(pts, size=size, names=("front",), yaw=yaw, frame_points=pts)["front"]
     m = np.asarray(R.mask_png(R.render_view(mesh, cam)))
     return (m[..., 0] if m.ndim == 3 else m) > 127
 
@@ -135,18 +302,21 @@ def render_model(glb_path: str):
     from mt import render as R
     from mt.glb import load_glb
 
+    lean_render()
     with open(glb_path, "rb") as handle:
         mesh = load_glb(handle.read())
     if len(mesh.faces) < 20:
         raise RuntimeError("no geometry")
+    tris = int(len(mesh.faces))
+    _vmask, dropped = frame_main(mesh)
     yaw, fwd = facing_yaw(R, mesh)
-    cam = R.persp_camera(mesh.positions, size=RENDER, yaw=yaw, name="persp")
+    cam = R.persp_camera(_framed(mesh), size=RENDER, yaw=yaw, name="persp")
     view = R.render_view(mesh, cam)
     lit = np.asarray(R.lit_png(view), dtype=np.uint8)[..., :3]
     mask = np.asarray(R.mask_png(view), dtype=np.uint8)
     if mask.ndim == 3:
         mask = mask[..., 0]
-    return np.dstack([lit, mask]), {"facing": fwd, "tris": int(len(mesh.faces))}
+    return np.dstack([lit, mask]), {"facing": fwd, "tris": tris, "loose_tris_dropped": dropped}
 
 
 def load_backdrop(name: str):
@@ -239,7 +409,7 @@ def cmd_render(args) -> int:
                 break                                    # the model reads against this environment
         img, meta = best
         info.update(meta)
-        if meta["coverage"] < 0.03:
+        if meta["coverage"] < MIN_COVERAGE:              # the frame is the main parts: a low fill is a sparse model
             raise RuntimeError(f"model too small in frame ({meta['coverage']})")
         if meta["spread"] < 0.02 and meta["contrast"] < 0.06:
             raise RuntimeError("blank capture")
@@ -288,11 +458,13 @@ def cmd_clip(args) -> int:
     t0 = time.time()
     clip_name = None
     try:
+        lean_render()
         with open(args.glb, "rb") as handle:
             data = handle.read()
         mesh = load_glb(data)
         if len(mesh.faces) < 20:
             raise RuntimeError("no geometry")
+        vmask, _dropped = frame_main(mesh)
         yaw, _fwd = facing_yaw(R, mesh)
         n_faces = len(mesh.faces)
         fps, size = ((6, 448) if n_faces > 250_000 else (9, 512) if n_faces > 80_000 else (CLIP_FPS, CLIP_RENDER))
@@ -317,7 +489,7 @@ def cmd_clip(args) -> int:
                 posed[:, [0, 2]] -= posed[:, [0, 2]].mean(0) - c0      # in place: no root drift out of frame
                 frames_pos.append(rest + (posed - base))
         every = max(1, n_frames // 8)
-        sample = np.concatenate([fp[:: max(1, len(fp) // 4000)] for fp in frames_pos[::every]])
+        sample = np.concatenate([fp[vmask][:: max(1, int(vmask.sum()) // 4000)] for fp in frames_pos[::every]])
         frames = []
         for i, fp in enumerate(frames_pos):
             mesh.positions = fp.astype(np.float32)
