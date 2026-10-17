@@ -756,19 +756,33 @@ PROXY_VERTS = int(os.getenv("GP_PROXY_VERTS", "150000"))
 def poster_proxy(con, tid: str, glb: Path, st, sig: str):
     """A decimated copy of a huge GLB (mt.proxy_glb in a child: the unit's cgroup contains an OOM), cached per source."""
     out = poster_path(tid).parent / "proxy" / f"{tid}.{int(st.st_mtime)}.glb"
+    direct = out.with_suffix(".direct")                  # marker: the source itself is light enough to render
     if out.is_file() and out.stat().st_size > 2000:
         return out
+    if direct.is_file():
+        return glb
     if attempt(con, f"proxy:{tid}", sig) > MAX_ATTEMPTS:
         return None
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f".{out.name}.{os.getpid()}.tmp")
+    report = {}
     try:
-        subprocess.run(["nice", "-n", os.getenv("GP_NICE", "15"), "timeout", "300", sys.executable, "-m", "mt.proxy_glb",
-                        str(glb), str(tmp), "--max", str(PROXY_VERTS)], capture_output=True, timeout=320,
-                       env=dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="2"), preexec_fn=_child_limits)
+        proc = subprocess.run(["nice", "-n", os.getenv("GP_NICE", "15"), "timeout", "300", sys.executable, "-m",
+                               "mt.proxy_glb", str(glb), str(tmp), "--max", str(PROXY_VERTS)], capture_output=True,
+                              text=True, timeout=320, env=dict(os.environ, PYTHONPATH=str(MT_ROOT), OMP_NUM_THREADS="2"),
+                              preexec_fn=_child_limits)
+        with contextlib.suppress(ValueError, IndexError):
+            report = json.loads(proc.stdout.strip().splitlines()[-1])
     except (subprocess.TimeoutExpired, OSError):
         pass
     attempt_done(con, f"proxy:{tid}")
+    if report.get("proxy") is False and 0 < int(report.get("vertices") or 0) <= PROXY_VERTS:
+        # few vertices, heavy textures (655fd2ed: 53k verts, 64 MB): the lean render child cuts the textures itself
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        direct.write_text(json.dumps(report))
+        return glb
     if tmp.is_file() and tmp.stat().st_size > 2000:
         os.replace(tmp, out)
         for old in out.parent.glob(f"{tid}.*.glb"):                 # one proxy per task
