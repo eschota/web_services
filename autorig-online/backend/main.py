@@ -1385,6 +1385,10 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # Civitai pages and CDN previews as media inputs (civitai_media.py).
 from civitai_media import CivitaiMediaMiddleware, router as civitai_media_router
 app.add_middleware(CivitaiMediaMiddleware)
+# Private models (owner 2026-10-17): every GET/HEAD naming a private task is 404 for everyone but its owner and
+# admins (task_privacy.py; nginx checks the files it serves itself through the same module's gate).
+from task_privacy import PrivacyMiddleware
+app.add_middleware(PrivacyMiddleware)
 app.include_router(civitai_media_router)
 # Search node: popular / random Civitai media (ai_civitai_search.py, 2026-09-28).
 from ai_civitai_search import router as civitai_search_router
@@ -1554,6 +1558,15 @@ async def get_current_user(
 app.include_router(build_model_sale_router(get_current_user))
 from oneclick_auth_bridge import install as install_oneclick_bridge
 install_oneclick_bridge(app, get_current_user)
+# «My models» (owner 2026-10-17): the owner's gallery with per-card privacy and deletion (my_tasks_routes.py).
+import my_tasks_routes as _my_tasks_routes
+_my_tasks_routes.install(
+    app, get_current_user=get_current_user, get_db=get_db,
+    static_html_response=lambda name: _static_html_response(name),
+    thumb_url_for=lambda tid: thumb_url_for(tid),
+    delete_artifacts=lambda task: _delete_task_artifacts(task),
+    delete_record=lambda db, tid: _delete_task_record_and_related(db, tid),
+    is_admin_email=is_admin_email, user_model=User, task_model=Task)
 
 
 
@@ -6267,10 +6280,15 @@ async def api_get_task(
     from user_language import task_language_fields as _i18n_task_language
 
     _owner_lang = await _i18n_task_language(db, task)
+    from subscription_access import user_has_active_subscription as _has_sub
+    _is_admin_viewer = bool(user and is_admin_email(user.email))
     return TaskStatusResponse(
         owner_language=_owner_lang["owner_language"],
         owner_language_code=_owner_lang["owner_language_code"],
         task_id=task.id,
+        is_public=task.is_public is not False,
+        is_owner=bool(can_download_task),
+        can_manage_visibility=bool(can_download_task) and (_is_admin_viewer or _has_sub(user)),
         status=task.status,
         progress=task.progress,
         ready_count=downloadable_ready_count,
@@ -8806,6 +8824,7 @@ async def api_get_gallery(
     # autorig-gallery-poster for done and needs_review tasks), no classic video needed; V3 tasks come first.
     # V2-only tasks stay until they are re-rigged on open.
     base_conditions = [
+        Task.is_public.is_(True),        # private models (2026-10-17): never listed
         or_(
             and_(Task.status == "done", Task.video_ready == True, _gallery_task_has_poster_sql()),
             and_(Task.pipeline_kind == "v3", Task.status.in_(("done", "needs_review")), Task.is_public.is_(True),
@@ -9064,6 +9083,12 @@ async def api_get_owner_tasks(
     tasks, total = await get_user_tasks(db, task.owner_type, task.owner_id, page, per_page)
     import site_mode as _site_mode  # site_mode (NSFW split, 2026-10-11)
     tasks = [t for t in tasks if not _site_mode.hides(request, t)]
+    # Private models (2026-10-17): another visitor never sees the owner's private tasks in this list.
+    import task_privacy as _tp
+    _hdrs = {k.lower(): v for k, v in request.headers.items()}
+    _ip = _hdrs.get("x-real-ip") or (request.client.host if request.client else None)
+    tasks = [t for t in tasks if t.is_public is not False
+             or _tp.decide("/t/" + t.id, _hdrs.get("cookie", ""), _hdrs, _ip)[0]]
     
     # Get author nicknames if needed
     author_nicknames = {}
@@ -12364,6 +12389,7 @@ def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
 
 async def _rig_article_examples(db: AsyncSession, rig_key: str, limit: int = 6) -> List[Task]:
     base_conditions = [
+        Task.is_public.is_(True),
         Task.status == "done",
         Task.video_ready == True,
         _gallery_task_has_poster_sql(),
@@ -13126,6 +13152,10 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
         select(Task).where(
             Task.status == "processing",
             Task.pipeline_kind != "v3",
+            # a picture task (pipeline_kind generate) waits for renderfin CharGen, which owns its retries and deadline;
+            # the legacy requeue wiped its job and after 3 rounds deleted the customer task (owner tasks 50d0b9b4,
+            # 3aa044dc, 591c0b79, 2026-10-17)
+            Task.pipeline_kind != "generate",
             Task.preemption_state.notin_(("requested", "stopping")),
         )
     )
@@ -13175,17 +13205,30 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
                 )
         except Exception as e:
             print(f"[StuckHour] Collection recovery failed {task.id}: {e}")
+    # customer sources and outputs are never deleted (AGENTS.md): an exhausted task is closed as failed_stuck with its
+    # row and files kept (it used to be deleted here). The status stays the terminal "error" that every reader, refund
+    # and the task page already understand; the error_string failed_stuck names the cause.
+    from tasks import _schedule_task_error_notification, release_task_workload_lease
+
     for tid in to_delete_ids:
         try:
             t = await get_task_by_id(db, tid)
             if not t:
                 continue
-            _delete_task_artifacts(t)
-            await _delete_task_record_and_related(db, tid)
+            await release_task_workload_lease(db, t, outcome="released", clear_for_retry=False)
+            t.status = "error"
+            t.error_message = (
+                f"failed_stuck: no progress after {t.stuck_hour_requeue_count or 0} automatic requeues "
+                f"({STUCK_HOUR_MINUTES} min each); files kept"
+            )
+            t.updated_at = datetime.utcnow()
+            await db.commit()
+            _schedule_task_error_notification(t.id)
             actions += 1
-            print(f"[StuckHour] Deleted {tid} (stuck_hour requeues exhausted)")
+            print(f"[StuckHour] failed_stuck {tid} (stuck_hour requeues exhausted; row and files kept)")
         except Exception as e:
-            print(f"[StuckHour] Delete failed {tid}: {e}")
+            print(f"[StuckHour] failed_stuck close failed {tid}: {e}")
+            await db.rollback()
     return actions
 
 
@@ -14771,8 +14814,9 @@ async def api_proxy_thumb(
         raise HTTPException(status_code=404, detail="Task not found")
 
     v3_poster = v3_poster_path(task_id)
-    if v3_poster is not None and getattr(task, "is_public", True) is not False \
-            and getattr(task, "content_rating", None) != "adult":
+    # Private models (2026-10-17): PrivacyMiddleware has already refused everyone but the owner and admins, so the
+    # owner's My models card gets the poster of a private task too (served no-store by the middleware).
+    if v3_poster is not None and getattr(task, "content_rating", None) != "adult":
         return FileResponse(
             v3_poster,
             media_type="image/jpeg",

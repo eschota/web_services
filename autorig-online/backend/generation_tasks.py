@@ -266,7 +266,17 @@ async def _start_generation(db, task: Task) -> None:
             iso = {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:200]}
         if iso.get("ok") and picture_isolate.cutout_ready(token):
             cutout_url = f"{APP_URL}/u/{token}/cutout.png"
-    image_url = cutout_url or str(task.input_url)
+    # Picture normalisation (rig contract V3.2 §3): the stage starts now, beside the job; its redrawn front / cleaned
+    # picture is used when it is already decided (a retry), otherwise it replaces the queued job later.
+    canon_in = None
+    try:
+        import picture_canon_bridge
+
+        picture_canon_bridge.kick(token, str(task.id))
+        canon_in = picture_canon_bridge.generation_input(token, APP_URL)
+    except Exception as exc:                                   # noqa: BLE001 - the intake goes on without it
+        print(f"[Generation] picture canon unavailable for {task.id}: {type(exc).__name__}: {exc}")
+    image_url = (canon_in or {}).get("url") or cutout_url or str(task.input_url)
 
     try:
         job_id = await render_prompting.start_character_gen_from_image(
@@ -293,13 +303,23 @@ async def _start_generation(db, task: Task) -> None:
         # V3 rigs any pose: the verdict (when it comes) only gives the category hints.
         riggable=True if rig_all() else None,
         cutout_url=cutout_url,
-        dispatch_input="cutout" if cutout_url else "original",
+        dispatch_input=("picture_canon:" + canon_in["kind"]) if canon_in else ("cutout" if cutout_url else "original"),
+        canon_redispatched=True if canon_in else None,
+        canon_input_url=(canon_in or {}).get("url"),
         isolate_ok=bool(iso.get("ok")) if iso else None,
         isolate_error=(str(iso.get("error"))[:200] if iso and iso.get("error") else None),
         isolate_seconds=iso.get("seconds") if iso else None,
         isolate_box=iso.get("box") if iso else None,
     )
     _start_detect(task)
+    # the fast tier (owner 2026-10-17: «чтобы 3д модель появлялась через 5 секунд»): Hunyuan3D-2mini beside the job
+    try:
+        import generation_fast
+
+        if generation_fast.enabled() and image_url.startswith("https://"):
+            set_generation_meta(task, fast=await generation_fast.request(task, image_url))
+    except Exception as exc:                                    # noqa: BLE001 - the full job is already running
+        print(f"[Generation] fast tier request failed for {task.id}: {type(exc).__name__}: {exc}")
     task.error_message = None
     task.status = "processing"
     task.processing_started_at = task.processing_started_at or datetime.utcnow()
@@ -427,6 +447,46 @@ def _note_v3_generation(task: Task, job: Dict[str, Any]) -> bool:
     return True
 
 
+async def _canon_redispatch(db, task: Task, meta: Dict[str, Any], job: Dict[str, Any]) -> bool:
+    """The picture normalisation decided on another input (a redrawn front, the hands emptied) while the full job still
+    waits for a 3D worker: the job is replaced once by one on that picture. A job already on a worker is kept; the
+    decided picture is recorded (`canon_after_start`) for the upgrade path. True when the job was replaced."""
+    import picture_canon_bridge
+    import picture_isolate
+    import render_prompting
+    from config import APP_URL
+
+    if meta.get("canon_redispatched") or not picture_canon_bridge.redispatch_enabled():
+        return False
+    token = picture_isolate.token_of(str(task.input_url))
+    gi = picture_canon_bridge.generation_input(token, APP_URL)
+    if not gi:
+        return False
+    if job.get("hunyuan_worker") and job.get("hunyuan_task_id"):
+        if not meta.get("canon_after_start"):
+            set_generation_meta(task, canon_after_start=gi["url"], canon_kind=gi["kind"])
+            await db.commit()
+        return False
+    old = str(meta.get("job_id") or "")
+    try:
+        new = await render_prompting.start_character_gen_from_image(gi["url"], source_task_id=task.id, user_name="site")
+    except Exception as exc:                                    # noqa: BLE001 - the old job goes on
+        print(f"[Generation] picture canon re-dispatch refused for {task.id}: {exc}")
+        set_generation_meta(task, canon_redispatched=True, canon_error=str(exc)[:200])
+        await db.commit()
+        return False
+    await _discard_job(old)
+    now = time.time()
+    prev = list(meta.get("previous_job_ids") or []) + ([old] if old else [])
+    set_generation_meta(task, job_id=new, previous_job_ids=prev, canon_redispatched=True,
+                        dispatch_input="picture_canon:" + gi["kind"], canon_input_url=gi["url"], canon_kind=gi["kind"],
+                        sub_key="waiting_3d_worker", sub_started_at=now)
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    print(f"[Generation] task {task.id}: the waiting job {old} replaced by {new} on the picture canon {gi['kind']}")
+    return True
+
+
 async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
     """Poll renderfin; publish the mesh, then either rig it or finish."""
     import render_prompting
@@ -446,6 +506,10 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
         _tok = picture_isolate.token_of(str(task.input_url))
         if _tok and not picture_isolate.cutout_ready(_tok):
             picture_isolate.kick(_tok)
+        if _tok and picture_isolate.cutout_ready(_tok):
+            import picture_canon_bridge
+
+            picture_canon_bridge.kick(_tok, str(task.id))      # the picture normalisation (idempotent)
     except Exception:                                           # noqa: BLE001
         pass
     # The Vision detection runs alongside the job: collect it; a vehicle verdict re-routes the task.
@@ -469,6 +533,9 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
         task.updated_at = datetime.utcnow()
         await db.commit()               # the task card shows the generation's own stage, never a frozen 0 %
 
+    if not glb_url and stage != "failed" and await _canon_redispatch(db, task, meta, job):
+        return
+
     if stage == "failed":
         task.status = "error"
         task.error_message = f"3D generation failed: {str(job.get('error') or '')[:200]}"
@@ -477,6 +544,16 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
         task.updated_at = datetime.utcnow()
         await db.commit()
         return
+
+    if not glb_url and v3_route:
+        # the fast preview (generation_fast): bound to V3 with the low-poly mesh while the full model renders
+        import generation_fast
+
+        if await generation_fast.advance(db, task, meta, job_id, {
+                "renderfin_job_id": job_id, "subject": str(meta.get("subject") or "")[:200],
+                "pose": str(meta.get("pose") or "")[:120], "animal_type": str(meta.get("animal_type") or ""),
+                "detect_reason": str(meta.get("detect_reason") or "")[:200]}):
+            return
 
     if not glb_url:
         return  # still rendering; renderfin owns the retries and the deadline
@@ -588,6 +665,14 @@ async def pump_generation_tasks(db) -> None:
         except Exception as exc:
             print(f"[Generation] tick failed for {task.id}: {type(exc).__name__}: {exc}")
             await db.rollback()
+    # the fast tier's upgrades: the full model of a task bound with its preview (generation_fast.pump_upgrades)
+    try:
+        import generation_fast
+
+        await generation_fast.pump_upgrades(db)
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[Generation] upgrade pump failed: {type(exc).__name__}: {exc}")
+        await db.rollback()
     # Vehicles V3: the vehicle runs' stages mirrored into their task rows (the task page reads only the row)
     try:
         import vehicle_intake

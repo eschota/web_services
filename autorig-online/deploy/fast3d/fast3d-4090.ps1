@@ -41,7 +41,7 @@ set TMP=$Root\tmp
 set TEMP=$Root\tmp
 cd /d "$Root"
 :loop
-"$Python" -X utf8 "$Root\fast3d_service.py" --root "$Root" --port $Port --box worker-4090 --hunyuan "$Root\Hunyuan3D-2" --pylib "$Root\pylib" --hf "$Root\hf" --max-batch $MaxBatch --idle-unload $IdleUnload --min-free-mb $MinFreeMb --comfy http://127.0.0.1:8988 --keep 2 --yield-3d 1 >> "$Root\logs\fast3d.out.log" 2>> "$Root\logs\fast3d.err.log"
+"$Python" -X utf8 "$Root\fast3d_service.py" --root "$Root" --port $Port --box worker-4090 --hunyuan "$Root\Hunyuan3D-2" --pylib "$Root\pylib" --hf "$Root\hf" --max-batch $MaxBatch --idle-unload $IdleUnload --min-free-mb $MinFreeMb --comfy http://127.0.0.1:8988 --keep 2 --yield-3d 1 --exit-on-unload 1 >> "$Root\logs\fast3d.out.log" 2>> "$Root\logs\fast3d.err.log"
 ping -n 6 127.0.0.1 >nul
 goto loop
 "@

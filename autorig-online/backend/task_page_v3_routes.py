@@ -367,6 +367,7 @@ def _generate_state(task: Any) -> Optional[dict[str, Any]]:
     sub = {"": "isolate", "isolate": "isolate", "detect": "detect", "rigging": "ready"}.get(stage) \
         or str(meta.get("sub_key") or "waiting_3d_worker")
     cutout = None
+    canon = None
     try:
         import picture_isolate
         from config import APP_URL
@@ -374,6 +375,12 @@ def _generate_state(task: Any) -> Optional[dict[str, Any]]:
         token = picture_isolate.token_of(picture)
         if token and picture_isolate.cutout_ready(token):
             cutout = f"{APP_URL}/u/{token}/cutout.png"
+        try:
+            import picture_canon_bridge
+
+            canon = picture_canon_bridge.summary(token, APP_URL)   # V3.2 §3: view, redrawn front, props
+        except Exception as exc:  # noqa: BLE001 - the picture still shows
+            log.info("picture canon summary unavailable: %s", exc)
     except Exception as exc:  # noqa: BLE001 - an older release: the viewer simply shows no cutout
         log.info("picture cutout lookup unavailable: %s", exc)
     began = meta.get("sub_started_at") or meta.get("isolate_started_at")
@@ -390,7 +397,8 @@ def _generate_state(task: Any) -> Optional[dict[str, Any]]:
         "stage": "generation", "stage_title": None, "stage_key": "generation", "sub_key": sub, "stage_seconds": seconds,
         "status": "processing", "progress": max(0.02, min(0.30, progress)), "queue": None,
         "viewer": {"kind": "picture", "page": UNITY_PAGE,
-                   "params": {"picture": picture, "cutout": cutout, "task": str(task.id)},
+                   "params": {"picture": picture, "cutout": cutout, "task": str(task.id),
+                              **({"canon": canon} if canon else {})},
                    "rigged": False, "revision": f"gen:{job}"},
         "model": {"state": "generating"}, "v3": None, "eta_s": None, "progress_basis": None,
     }

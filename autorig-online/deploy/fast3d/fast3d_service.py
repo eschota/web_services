@@ -301,7 +301,13 @@ def _idle_watch():
             with STATE["lock"]:
                 if STATE["pipe"] is not None and time.time() - STATE["last_used"] > lim:
                     unload()
-                    _log({"unloaded": True, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+                    _log({"unloaded": True, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                          "exit": bool(STATE.get("exit_on_unload"))})
+                    if STATE.get("exit_on_unload"):
+                        # a fresh process loads in ~6 s; a reload inside this one crashed torch 2.11 in torch_cpu.dll
+                        # (worker-4090, 2026-10-17: a 95 s hang + restart on the first fast job after an idle unload).
+                        # The run-fast3d.cmd loop starts the next process; the GPU is left with no CUDA context.
+                        os._exit(0)
 
 
 def _free_cuda():
@@ -432,6 +438,8 @@ def main():
     ap.add_argument("--yield-3d", type=int, default=0, help="1: busy while another app drives the 3D engine (the "
                     "owner's games on worker-4090)")
     ap.add_argument("--yield-3d-pct", type=int, default=40)
+    ap.add_argument("--exit-on-unload", type=int, default=0, help="1: exit after an idle unload (the service loop "
+                    "restarts a clean process; worker-4090, where a reload after an unload crashed torch)")
     ap.add_argument("--keep", type=int, default=1, help="pipelines kept resident (2 on a 24 GB card: no unload+load "
                     "switch; torch 2.11 on worker-4090 crashed in torch_cpu.dll loading after an unload, 2026-10-17)")
     a = ap.parse_args()
@@ -445,7 +453,8 @@ def main():
     os.makedirs(os.path.join(a.root, "logs"), exist_ok=True)
     STATE.update(box=a.box, root=a.root, idle_unload_s=max(0.0, a.idle_unload), min_free_mb=a.min_free_mb,
                  batch_mb=a.batch_mb, max_batch=max(1, a.max_batch), comfy=a.comfy, dtype=a.dtype, keep=max(1, a.keep),
-                 yield_3d=bool(a.yield_3d), yield_3d_pct=a.yield_3d_pct)
+                 yield_3d=bool(a.yield_3d), yield_3d_pct=a.yield_3d_pct,
+                 exit_on_unload=bool(a.exit_on_unload))
     try:                                                  # the last 50 seconds per model survive a restart
         with open(os.path.join(a.root, "logs", "jobs.jsonl"), encoding="utf-8") as fh:
             for line in fh.readlines()[-500:]:
