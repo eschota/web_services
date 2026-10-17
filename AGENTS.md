@@ -616,6 +616,20 @@ Owner rule, 2026-10-10:
   category's handoff in the same change, with the date and the numbers. The
   general `HANDOFF.md` only points to them.
 
+## The Environment Scene Loads Only After The Rig Is Ready (owner order, 2026-10-17)
+
+> сделай чтобы полноценная сцена грузилась только после того как риг готов, а до этого чтобы была красивая и
+> быстрая визуализация, иначе тормоза постоянные
+
+* On a live run the viewer stays on the black presentation scene (voxels, parts, icons, bones, weights, the pose
+  opening — the V3.1 visualisation) until the rig is ready and animated (`live_rig_first_ready` + the first clip
+  playing); only then does the environment scene start loading, in the background, and it swaps in without a hitch.
+  On a finished run the replay runs first, the scene after it (the «Viewer Load Order» rule), and «skip» loads the
+  scene at once. Nothing heavy (environment assets, weather, the full-resolution mesh of a picture task) loads
+  while the presentation is running; the presentation itself must stay above 30 fps on an ordinary laptop.
+* The scene gate is one flag with one owner (the page's stage logic), with a hard cap (120 s) so a stuck run never
+  blocks the scene forever; its decisions are logged in the console with the reason.
+
 ## Rig Contract V3.1 (owner order, 2026-10-17)
 
 > запиши контракт v3.1 и добавь туда обязательный скиннинг не в позе контакта, а в свободную А или Т позу, ту что
