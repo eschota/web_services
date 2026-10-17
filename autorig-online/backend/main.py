@@ -14797,8 +14797,9 @@ async def api_proxy_thumb(
         raise HTTPException(status_code=404, detail="Task not found")
 
     v3_poster = v3_poster_path(task_id)
-    if v3_poster is not None and getattr(task, "is_public", True) is not False \
-            and getattr(task, "content_rating", None) != "adult":
+    # Private models (2026-10-17): PrivacyMiddleware has already refused everyone but the owner and admins, so the
+    # owner's My models card gets the poster of a private task too (served no-store by the middleware).
+    if v3_poster is not None and getattr(task, "content_rating", None) != "adult":
         return FileResponse(
             v3_poster,
             media_type="image/jpeg",

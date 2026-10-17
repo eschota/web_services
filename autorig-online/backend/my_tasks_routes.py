@@ -383,7 +383,9 @@ async def _full_delete(task_id: str, by: str, delete_artifacts, delete_record, g
                   MT_ROOT / "task_agents" / task_id):
             _rm(p, report)
         for base, pattern in ((DATA / "artifact-cache", f"{task_id}*"), (Path("/var/autorig/preflight-renders"), f"{task_id}*"),
-                              (DATA / "var/rig_defects", f"{task_id}.*"), (DATA / "static/og", f"{task_id}*")):
+                              (DATA / "var/rig_defects", f"{task_id}.*"), (DATA / "static/og", f"{task_id}*"),
+                              (DATA / "static/og-cards/task", f"{task_id}*")) + tuple(
+                (MT_ROOT / "triage/backfill/qa_work", f"{run}.*") for run in runs):
             try:
                 for p in base.glob(pattern):
                     _rm(p, report)
@@ -391,6 +393,8 @@ async def _full_delete(task_id: str, by: str, delete_artifacts, delete_record, g
                 pass
         for run in runs:
             _rm(MT_ROOT / "runs" / run, report)
+        if runs:
+            report["mt_db"] = await asyncio.to_thread(_mt_forget, runs)
         for sha in shas:
             if not _source_shared(sha, task_id):
                 for p in (DATA / "v3-intake/sources").glob(f"{sha}.*"):
@@ -406,8 +410,38 @@ async def _full_delete(task_id: str, by: str, delete_artifacts, delete_record, g
         await delete_record(db, task_id)
     task_privacy.INDEX.invalidate()
     task_privacy.audit("deleted", task_id, by=by, removed=report["removed"], failed=report["failed"],
-                       runs=len(report["runs"]), telegram=report["telegram"], youtube_video=report["youtube"])
+                       runs=len(report["runs"]), mt_db=report.get("mt_db"), telegram=report["telegram"],
+                       youtube_video=report["youtube"])
     return report
+
+
+_MT_FORGET = r"""
+import json, sys
+from mt import analysis_db, skeleton_db
+runs = sys.argv[1:]
+for run in runs:
+    analysis_db.drop_run(run)
+doc = json.loads(json.dumps(skeleton_db.load()))
+gone = [r for r in runs if doc.get("records", {}).pop(r, None) is not None]
+if gone:
+    skeleton_db._save(doc)
+print(json.dumps({"analysis": len(runs), "skeleton": len(gone)}))
+"""
+
+
+def _mt_forget(runs: List[str]) -> Dict[str, Any]:
+    """Drop the runs from MT's similarity stores (analysis_db: CLIP sheet vectors; skeleton_db: pose vectors), so the
+    model never comes back as a «similar model» to anyone."""
+    import subprocess
+    import sys
+    try:
+        p = subprocess.run([sys.executable, "-c", _MT_FORGET, *runs], cwd=str(MT_ROOT), capture_output=True,
+                           text=True, timeout=120)
+        if p.returncode:
+            return {"error": (p.stderr or "")[-300:]}
+        return json.loads((p.stdout or "{}").strip().splitlines()[-1])
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 async def _telegram_cleanup(task_id: str, *, broadcast_only: bool, reason: str) -> Dict[str, int]:

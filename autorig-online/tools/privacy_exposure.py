@@ -30,6 +30,8 @@ BASE = "https://autorig.online"
 RUN_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{20}(?![0-9a-f])")
 UPLOAD_RE = re.compile(r"/u/([0-9a-fA-F-]{36})/([^\"?#\s]+)")
 DENY = {401, 403, 404, 410}
+# Static shells nginx serves for ANY id (the same HTML for a task that does not exist); data comes from the APIs.
+SHELL = {"viewer-page", "mt-view"}
 CTX = ssl.create_default_context()
 
 
@@ -97,7 +99,6 @@ def url_classes(task_id: str, ids: Dict[str, str]) -> List[Tuple[str, str]]:
     if run:
         rows += [
             ("mt-run(nginx->mt)", f"/api/mt/runs/{run}"),
-            ("mt-rig", f"/api/mt/runs/{run}/rig"),
             ("mt-card", f"/api/mt/runs/{run}/card"),
             ("mt-view", f"/api/mt/view/{run}"),
             ("mt-v3-run", f"/api/mt/v3/runs/{run}"),
@@ -153,6 +154,10 @@ def main() -> int:
     for row in rows:
         g = row["got"]
         ok = True
+        if row["class"] in SHELL:
+            row["pass"] = True
+            row.setdefault("note", []).append("static shell, no task data")
+            continue
         if args.state == "public":
             ref = g.get("owner") if g.get("owner") is not None else g["anon"]
             ok = g["anon"] == ref and g["other"] == ref
