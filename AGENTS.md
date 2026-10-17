@@ -647,6 +647,23 @@ Owner rule, 2026-10-10:
   biped category. Subagents for this work run on Claude Opus 5.5 medium, one per task, reused by their context; the
   lead (Fable) writes the specs, reviews the results and sends the owner one sheet per milestone.
 
+## Fast 3D Generator On Every Box, worker-4090 First And Batched (owner order, 2026-10-17)
+
+> нужно на все доступные компы раскатать быстрый 3д генератор и 4090 отдать приоритет под эти задачи, чтобы он
+> остальные прерывал и генерил быстро 3д модели, желательно сразу батчами для скорости
+
+* The fast tier (Hunyuan3D-2mini-turbo / mini-30, `docs/picture-intake-fast-preview-spec-20261017.md`) is installed
+  on every GPU box that can hold it as the scheduled task «AutoRig Fast 3D» (the same pattern as the masks service):
+  worker-4090, Raptor, f12, f15, f5, then the 1080 Ti converters f1 / f2 / f7 / f11 / f13 (fp16 mini fits 11 GB);
+  weights come to a site once and spread over the LAN. The fleet API lists `services_object.fast3d` per box
+  (loaded model, queue depth, last seconds) and the fast tier spreads jobs least-busy first.
+* **worker-4090 has priority for fast 3D**: a fast 3D job on the 4090 is dispatched before everything else and
+  preempts a running non-AutoRig render there (the renderfin AutoRig priority rules of 2026-10-15 apply: the
+  preempted render is re-queued under its own id); the 4090's fast3d service keeps the model resident.
+* **Batched**: the fast3d service takes several pictures per forward pass (batch 2–8 by VRAM: 4090 up to 8,
+  12 GB boxes 2–3) and the queue groups waiting jobs into one batch when more than one is pending, so N pictures
+  cost about the time of one; per-job seconds are still recorded.
+
 ## Rig Contract V3.2 (owner order, 2026-10-17)
 
 > надо делать микс семантики через гпу детекторы, которые у нас для тачек используются: сделать анализатор в
