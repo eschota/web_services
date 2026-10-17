@@ -1796,6 +1796,37 @@ def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512, on_run=Non
             "edges_over_4x": (m.get("stretch") or {}).get("edges_over_4x")}
 
 
+def rig_contract_check(ctx, frames=12):
+    """Rig contract V3.1 (owner 2026-10-17, docs/rig-contract-v3.1.md; mt/rig_contract.py) on the case's rig step:
+    every clip of the rigged GLB at `frames` samples: edges over 2x / 4x (welded surface), the worst ratio, the volume,
+    the far leak (thickness-scaled radii), the L/R mirror; with the skin pose record (rig.json skin.pose: standard,
+    contact after, the measured A/T choice) and the layers. Self-intersections are not counted here (no pymeshlab in
+    the gate's venv)."""
+    run = ctx["run"]
+    out = pathlib.Path(ctx["work"]) / "rig_contract.json"
+    p_, wall = _child([PY, "-P", "-m", "mt.rig_contract", str(run), "--out", str(out), "--frames", str(int(frames)),
+                       "--no-intersections"], timeout=300)
+    if p_.returncode != 0:
+        raise RuntimeError(f"rig_contract exit {p_.returncode}: {(p_.stderr or p_.stdout)[-600:]}")
+    d = json.loads(out.read_text())
+    c = d.get("clips") or {}
+    rig = json.loads((run / "rig" / "rig.json").read_text())
+    pose = (rig.get("skin") or {}).get("pose") or {}
+    layers = rig.get("layers") or []
+    return {"seconds": wall, "clips": len(c),
+            "edges_over_2x_sum": sum(int(x.get("edges_over_2x") or 0) for x in c.values()),
+            "edges_over_4x_sum": sum(int(x.get("edges_over_4x") or 0) for x in c.values()),
+            "edges_over_4x_max": max([int(x.get("edges_over_4x") or 0) for x in c.values()] or [0]),
+            "worst_ratio": max([float(x.get("worst_ratio") or 0) for x in c.values()] or [0]),
+            "volume_dev_max_pct": max([abs(float(x.get("volume_dev_pct") or 0)) for x in c.values()] or [0]),
+            "far_leak_max_pct": max([float((x.get("leak") or {}).get("far_pct") or 0) for x in c.values()] or [0]),
+            "mirror_pct_H": (d.get("mirror") or {}).get("max_pct_H"),
+            "contact_after": pose.get("contact_after"), "pose_reached": pose.get("reached"),
+            "pose_standard": pose.get("standard"), "layers": len(layers),
+            "chain_layers": sum(1 for x in layers if x.get("kind") == "chain"),
+            "contract": rig.get("contract")}
+
+
 def stand_tear(ctx, clip="auto", fps=12):
     """«Mesh falls apart» on every rig of the corpus (owner order 2026-10-14, Anim stand · V3): the stand's stretch
     (mt.anim_stand.stretch_metrics = mt.skin_postvalidate.validate_glb) on the case's rig step with the stand's clip
@@ -2036,6 +2067,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         return {"pending": True}
     if k == "posed_prop_fit":
         return posed_prop_fit(ctx, a.get("front", ""))
+    if k == "rig_contract":                               # Rig contract V3.1 (2026-10-17)
+        return rig_contract_check(ctx, int(a.get("frames", 12)))
     if k == "detach":                                     # Rig fixes · V3 (2026-10-14): mt/detach_check.py on
         from mt import detach_check as _dc                 # the rig: weld-split holes / torn pieces in the clips
         _r = _dc.check(pathlib.Path(target).read_bytes(), frames=int(a.get("frames", 12)))

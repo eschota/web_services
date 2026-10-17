@@ -1578,6 +1578,13 @@
    "what": "5b8dcdac «T Pose» (t_pose.glb, 895 291 vertices, no skeleton) decimated by a vertex grid of 240 cells over the largest extent to 96 897 vertices, extents kept 1.1005 x 1.1195 x 0.3417 (a T-pose standing on +y, z the thin axis); geometry only (positions + indices). Old code: -z «quadruped: 4 foot blobs» 0.9, lying, 32 quad bones.",
    "sha256": "080e2841cee402044f09d766cb311db168d64409d2e786776da4f8342587330f",
    "bytes": 3677984
+  },
+  "4102abd1.model.glb": {
+   "source": "/srv/autorig/data/motion_transfer/runs/f98bc5933a41cdcf035d/proj/model.glb",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "what": "robot santa from a picture: a heavy biped, fur collar and beard over the chest, the arms hanging free of a wide coat, no skeleton (V3 run f98bc593, the paired control of 77cc1b88)",
+   "sha256": "12f73722436bf19af6ad636908a650cb09462cc05f24d544f22fb8f061a8c069",
+   "bytes": 13270132
   }
  },
  "profiles": {
@@ -17520,6 +17527,80 @@
       "reason": "the far leak left (3.3 %, nearest-segment regions) is the stand's region rule, not the skin: RightHand <- RightUpLeg 1058 / LeftHand <- LeftUpLeg 789 are coat vertices under the mittens (40-52 welded rings from the hand skin, 1-5 from the thigh skin), Arm <- Spine the coat's side under the hanging arms (slices 42-67 % H); with the radii rule (leak_region radii) 1.3 %, tube 1.65 %. Decide the detector's region rule (Anim stand · V3)",
       "owner": "Anim stand · V3"
      }
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "clips": [
+       ">=",
+       1
+      ],
+      "contact_after": [
+       "==",
+       0
+      ],
+      "pose_reached": [
+       "==",
+       "opened"
+      ],
+      "chain_layers": [
+       ">=",
+       1
+      ],
+      "layers": [
+       ">=",
+       3
+      ],
+      "contract": [
+       "==",
+       "autorig.mt.rig/v3.1"
+      ],
+      "edges_over_4x_sum": [
+       "<=",
+       150
+      ],
+      "mirror_pct_H": [
+       "<=",
+       3.5
+      ]
+     },
+     "owner": "Biped skin · V3.1",
+     "note": "Rig contract V3.1 milestone 3 (2026-10-17): the skin solved in a contact-free standard pose (A/T by the probe), the sleeve | coat contacts released with hinged lids, voxel heat + delta-mush, the beard chain Hair_Beard_0..2. Scratch re-rig of 77cc1b88, 9 clips at 24 frames: edges over 2x 7259 -> 1767, over 4x 527 -> 101 (prod v3.2026-10-16.2 vs the candidate); the thresholds guard against a regression",
+     "target": {
+      "thresholds": {
+       "edges_over_2x_sum": [
+        "<=",
+        0
+       ],
+       "edges_over_4x_sum": [
+        "<=",
+        0
+       ],
+       "volume_dev_max_pct": [
+        "<=",
+        3.0
+       ],
+       "far_leak_max_pct": [
+        "<=",
+        1.0
+       ],
+       "mirror_pct_H": [
+        "<=",
+        1.0
+       ]
+      },
+      "reason": "the full contract (0 edges over 2x / 4x on every clip, volume within 3 %, far leak within 1 %, mirror within 1 % H) is not held yet: the coat skirt | thighs (Hips | UpLeg 29-54 % H) and the armpit hinge still stretch in Jump / Waving1 / Hip Hop; the mittens are asymmetric (Hand_tip 2.9 % H). Needs the hem bones under the Hips and the sleeve twist bones",
+      "owner": "Biped skin · V3.1"
+     }
     }
    ]
   },
@@ -17796,6 +17877,124 @@
       ]
      },
      "owner": "Anim stand · V3"
+    }
+   ]
+  },
+  {
+   "id": "robot_santa_picture_biped",
+   "task": "4102abd1-4fbc-40be-8e5a-1a921d11368e",
+   "cost": 2,
+   "owner": "Biped skin · V3.1",
+   "defect": "Free arm · V3.1 (owner 2026-10-17 on the picture Santa 4102abd1, run f98bc593, the paired control of 77cc1b88: «тут до сих пор не могут правильно найтись плечи и руки ригаются вне сетки»): a heavy biped, fur collar and beard over the chest, arms hanging free of a wide coat. The fit put the shoulders at the belly (LeftArm 59.5 / RightArm 57.8 % H, 5.2 % H asymmetric), the neck at 69.4 % H, the hands beside the sleeves. Fix: mt/free_arm.py traces the free arm in the side slices; a fitted shoulder under the armpit moves to the arm root (one radius under its top), the fingertip to the trace's bottom, both sides mirrored; the neck over the shoulders (0.29 to the head top). After (scratch): Arm 76.2 / 76.2, mirror 0.0, Neck 81.9, hand 0.09 radii from the sleeve axis; 9 clips edges over 2x / 4x 5676 / 681 -> 1137 / 70",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "4102abd1.model.glb",
+     "params": {
+      "words": "santa claus",
+      "body": "biped",
+      "forward_axis": "+z"
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       90
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_joints",
+     "kind": "rig_joints",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "spine_order_ok": [
+       "==",
+       1
+      ],
+      "neck_over_ground_pct_H": [
+       "between",
+       [
+        76,
+        90
+       ]
+      ],
+      "left_arm_y_pct_H": [
+       ">=",
+       68
+      ],
+      "right_arm_y_pct_H": [
+       ">=",
+       68
+      ],
+      "shoulder_mirror_pct_H": [
+       "<=",
+       2
+      ],
+      "min_arm_off_axis_pct_H": [
+       ">=",
+       12
+      ]
+     },
+     "note": "free arm 2026-10-17: Arm 76.2 % H both sides (before 59.5 / 57.8), Neck 81.9 (before 69.4)"
+    },
+    {
+     "id": "rig_contract",
+     "kind": "rig_contract",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "base",
+     "params": {
+      "frames": 12
+     },
+     "thresholds": {
+      "clips": [
+       ">=",
+       1
+      ],
+      "contact_after": [
+       "==",
+       0
+      ],
+      "chain_layers": [
+       ">=",
+       1
+      ],
+      "edges_over_4x_sum": [
+       "<=",
+       150
+      ]
+     },
+     "target": {
+      "thresholds": {
+       "edges_over_2x_sum": [
+        "<=",
+        0
+       ],
+       "edges_over_4x_sum": [
+        "<=",
+        0
+       ]
+      },
+      "reason": "the full contract is not held yet (coat skirt | thighs, armpit hinge); paired with bearded_arms_down_biped",
+      "owner": "Biped skin · V3.1"
+     }
     }
    ]
   }
