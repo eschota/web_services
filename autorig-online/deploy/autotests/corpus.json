@@ -1571,6 +1571,13 @@
    "what": "hand part labels of robe_woman (schema autorig.autotests.parts-gt/1)",
    "sha256": "a07334ef0d214ad34dcce9f0c57f037869f2306fcddc7d6bcea7d9042179a4de",
    "bytes": 6838
+  },
+  "5b8dcdac.tpose_slab.glb": {
+   "source": "/srv/autorig/data/autotests/synthetic/5b8dcdac_tpose_slab_030.glb",
+   "task": "5b8dcdac-4ca5-4ff8-acfa-016b5bbbf27e",
+   "what": "5b8dcdac «T Pose» (t_pose.glb, 895 291 vertices, no skeleton) decimated by a vertex grid of 240 cells over the largest extent to 96 897 vertices, extents kept 1.1005 x 1.1195 x 0.3417 (a T-pose standing on +y, z the thin axis); geometry only (positions + indices). Old code: -z «quadruped: 4 foot blobs» 0.9, lying, 32 quad bones.",
+   "sha256": "080e2841cee402044f09d766cb311db168d64409d2e786776da4f8342587330f",
+   "bytes": 3677984
   }
  },
  "profiles": {
@@ -17709,6 +17716,86 @@
        0.28
       ]
      }
+    }
+   ]
+  },
+  {
+   "id": "tpose_slab_030_upright",
+   "task": "5b8dcdac",
+   "cost": 1,
+   "defect": "Orientation · V3 (owner 2026-10-17, task 5b8dcdac «T Pose», run 9ca94222ced33d716a4e: «если вертикалка выше горизонталки это повод проверить позиционирование со старта»): a standing T-pose (extents 1.10 x 1.12 x 0.34) was laid on its back as -z «quadruped: 4 foot blobs» (0.9): the hands and feet seen along the thin axis; 0.34 / 1.12 = 0.305 passed the 0.25 x max slab guard, the -z trace took 59-62 s on 895k vertices and the 40 s cap skipped +y, so the confident pick stood (body plan quadruped, 32 bones, stretch 148x). Fix (mt/orient.py, mt/rig_first.py): a quadruped up is a slab under 0.5 x the smaller other span (ORIENT_SLAB_RATIO), a tall file (+y >= 0.95 x the largest extent, ORIENT_TALL_RATIO) has its own +y judged first by the voxel trace (clustered to <= 300k vertices), the judge's record is written to proj/orient.json on every pass.",
+   "checks": [
+    {
+     "id": "mt_rig",
+     "kind": "mt_rig_first",
+     "paths": [
+      "mt"
+     ],
+     "input": "5b8dcdac.tpose_slab.glb",
+     "params": {
+      "words": "",
+      "v3_bound": true
+     },
+     "thresholds": {
+      "seconds": [
+       "<=",
+       60
+      ],
+      "bones": [
+       ">=",
+       20
+      ]
+     }
+    },
+    {
+     "id": "mt_upright",
+     "kind": "rig_upright",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "thresholds": {
+      "up": [
+       "==",
+       "+y"
+      ],
+      "body_plan": [
+       "==",
+       "biped"
+      ]
+     }
+    },
+    {
+     "id": "stand_tear",
+     "kind": "anim_stand",
+     "paths": [
+      "mt"
+     ],
+     "on": "mt_rig",
+     "tier": "extended",
+     "params": {
+      "mode": "tear",
+      "clip": "auto"
+     },
+     "thresholds": {
+      "worst_edge_ratio": [
+       "<=",
+       30
+      ],
+      "edges_over_4x": [
+       "<=",
+       200
+      ],
+      "tear": [
+       "==",
+       false
+      ],
+      "stretch_valid": [
+       "==",
+       1
+      ]
+     },
+     "owner": "Anim stand · V3"
     }
    ]
   }
