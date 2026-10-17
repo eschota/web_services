@@ -135,7 +135,7 @@ def main() -> int:
             ids = {}
     if not ids:
         ids = discover(args.task_id, args.owner_cookie)
-        if args.ids:
+        if args.ids and ids:          # never overwrite a saved id file with an empty discovery (private / deleted)
             json.dump(ids, open(args.ids, "w", encoding="utf-8"), indent=1)
 
     who = {"anon": None, "other": f"anon_id={uuid.uuid4()}", "owner": args.owner_cookie, "admin": args.admin_cookie}
