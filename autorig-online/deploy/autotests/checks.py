@@ -1824,7 +1824,9 @@ def rig_contract_check(ctx, frames=12):
             "contact_after": pose.get("contact_after"), "pose_reached": pose.get("reached"),
             "pose_standard": pose.get("standard"), "layers": len(layers),
             "chain_layers": sum(1 for x in layers if x.get("kind") == "chain"),
-            "contract": rig.get("contract")}
+            "contract": rig.get("contract"),
+            "synthetic_faces": (d.get("synthetic") or {}).get("faces"),
+            "strip_max_stretch": max([float(x.get("strip_max_stretch") or 0) for x in c.values()] or [0]) or None}
 
 
 def stand_tear(ctx, clip="auto", fps=12):
