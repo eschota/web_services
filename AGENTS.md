@@ -647,6 +647,24 @@ Owner rule, 2026-10-10:
   biped category. Subagents for this work run on Claude Opus 5.5 medium, one per task, reused by their context; the
   lead (Fable) writes the specs, reviews the results and sends the owner one sheet per milestone.
 
+## Rig Contract V3.2 (owner order, 2026-10-17)
+
+> надо делать микс семантики через гпу детекторы, которые у нас для тачек используются: сделать анализатор в
+> конвейере общим, который сразу и воксели подкрасит, и на 3д модели обведёт объекты, материалы … максимальное
+> быстродействие с минимальными задержками между этапами: быстро генерим лоуполи 3д модель, используем воксели,
+> визуализацию, а в фоне уже пускаем тяжёлые запросы … все эти задачи должны быть реализованы автоматически
+> пайплайном, без ручных правок, в том числе дорисованы картинки спереди
+
+* `docs/rig-contract-v3.2.md` (MT repo) = V3.1 plus: (1) one common GPU analyser (`mt/analyzer.py`) for every input
+  — GroundingDINO + SAM2 on the fleet mask boxes, Object-ID / Material-ID maps, back-projection onto mesh and voxels,
+  `analysis/{parts,materials,objects}.json`, drawn at once (voxel colours, outlines, icons), first coarse result in
+  the viewer ≤ 10 s after the mesh; (2) fast first, heavy in the background: fast model → voxels → coarse parts →
+  visualisation → fastrig + clips, then Vision / full model / picture edits / textures / fine analysis / heavy QA in
+  parallel, each upgrading the run in place; ≤ 2 s between stages, the fast path ≤ 60 s, every farm wait named in the
+  viewer; (3) pictures normalised automatically: view detection, a front view redrawn by Qwen-edit when the picture is
+  from behind / side, held objects cut out and generated as `prop` on the hand bone, multiple characters split.
+* Acceptance set: the two Santas (77cc1b88, 4102abd1), 50d0b9b4, 591c0b79, 3aa044dc — automatic, no manual fixes.
+
 ## Picture Intake: Fast Model in ~5 s, Then Progressive Upgrade (owner order, 2026-10-17)
 
 > нельзя это вот на фаст мини перевести, чтобы 3д модель появлялась через 5 секунд, а потом просто улучшалась
