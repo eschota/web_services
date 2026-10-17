@@ -42,6 +42,11 @@ MODELS = {   # name -> (V3 run, what)
     "boar": ("5b49fa4f622634597cbb", "boar"),
     "bird_of_prey": ("48bc7952b573f99f1636", "bird of prey, wings spread"),
     "rooster": ("1b361561a6614ba5c8fd", "rooster"),
+    "hero": ("3fe3648b902dcae448ba", "superhero with a floor-length cape (a clear cloak)"),
+    "cape_mesh": ("f6e483234400204fc7fe", "armoured knight with a cape and a staff"),
+    "elf_woman": ("7146046d151eb301414d", "elf woman in a T-pose, hair down the back"),
+    "elf_girl": ("36d76becb174d3a4e945", "anime elf girl with very long hair"),
+    "robe_woman": ("83f910e1bd94b57ed715", "stout woman in a hooded robe (coat family)"),
 }
 
 CHECK_FN = '''
@@ -118,10 +123,11 @@ GT_DIR = "/srv/autorig/data/autotests/parts_gt"
 
 # the measured floor of 2026-10-17 (regression guard); the spec targets (head / arm / leg >= 0.9, cloak / beard /
 # tail >= 0.8) are the open work, recorded in `defect`
-THRESHOLDS = {"models_failed": ["<=", 1],          # measured 2026-10-17 (27 models, fine pass): head 0.61,
-              "head_iou_mean": [">=", 0.52],        # arm 0.59, leg 0.66, tail 0.58, wing 0.60, torso 0.53
-              "arm_iou_mean": [">=", 0.50], "leg_iou_mean": [">=", 0.58],
-              "tail_iou_mean": [">=", 0.45], "wing_iou_mean": [">=", 0.45]}
+THRESHOLDS = {"models_failed": ["<=", 1],          # measured 2026-10-17 (32 models, fine pass, after the borders /
+              "head_iou_mean": [">=", 0.52],        # garment levers): head 0.59, arm 0.56, leg 0.68, tail 0.58,
+              "arm_iou_mean": [">=", 0.48], "leg_iou_mean": [">=", 0.60],   # wing 0.59, torso 0.57, cloth 0.35,
+              "tail_iou_mean": [">=", 0.45], "wing_iou_mean": [">=", 0.45],  # beard 0.49
+              "cloth_iou_mean": [">=", 0.28]}
 
 CASE = {
     "id": "parts_labels_corpus",
