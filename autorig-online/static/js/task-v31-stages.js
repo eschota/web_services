@@ -1,0 +1,972 @@
+// Viewer V3.1 stages on the task page (2026-10-17). Owner: «визуализация найденных предметов одежды, обычных
+// предметов, бороды, волос, класс персонажа — всё это должно отображаться во вьювере по мере анализа интерактивно и
+// последовательно, а при загрузке страницы проигрываться последовательно начиная с этапа вокселизации,
+// позиционирования и т. п.» Spec: MT docs/v31-viewer-visualisation-spec-20261017.md, rig contract V3.1 §5.
+//
+// Over the Unity viewer of the task (#tv3-viewer, same origin) this draws the run's rig stages from its live log
+// (GET /api/mt/runs/<run>/live, the reader of mt/live.py; with ?v31fixture=1 the V3.1 fixture of the run through the
+// same reader, /v31/fixture): the voxel solid (a 2D voxel splat that is on screen within a second, long before the
+// Unity build), the positioning (up / forward, the height ruler), every part / garment / held object in its colour
+// with a legend (a click selects it, shows its numbers and offers the contract labels: POST
+// /api/mt/runs/<run>/parts/<id>/label), the class card, the bones, the dominant weights, the pose opening and return
+// (the arm chains and their voxels turn to the standard pose and back; contacts red before, green after), the
+// layers, the clips and the QA cards. A finished run is replayed on load from the voxels on (≈1.5 s a step, a scrub
+// bar, pause, skip); the environment scene waits for it (scene-gate.js autorigEnvHold) and loads after the replay or
+// the skip. A run in progress is drawn as its events arrive. The person's «replay on load» is saved with their
+// viewer prefs (/api/mt/v31/prefs). Runs without the V3.1 events still get the voxels, bones, weights, clips and
+// checks they have; the Unity presentation (mt/static/live.js) is never driven from here, so it works as before.
+// Off: ?v31=0. Icons with tooltips; every name goes through I18n (v31_* keys, en/ru/zh/hi/fa).
+const BUILD = 'v31-20261017.1';
+const params = new URLSearchParams(location.search);
+const OFF = params.get('v31') === '0';
+const FIXTURE = params.get('v31fixture') === '1';
+const SIM = Math.max(0, Math.min(50, Number(params.get('v31sim') || 0)));
+const RUN_RE = /^[0-9a-f]{20}$/;
+const T_OPEN = 0;                     // W.t timings: ms since the page was opened (navigation start)
+
+const FB = {
+  en: {
+    v31_replay: 'Replay the rig stages', v31_pause: 'Pause', v31_play: 'Play', v31_skip: 'Skip to the result',
+    v31_autoplay_on: 'Replay on load: on', v31_autoplay_off: 'Replay on load: off', v31_map: 'Parts map',
+    v31_step_voxels: 'Voxels', v31_step_erosion: 'Erosion', v31_step_frame: 'Positioning', v31_step_parts: 'Parts',
+    v31_step_class: 'Class', v31_step_bones: 'Bones', v31_step_weights: 'Weights', v31_step_pose: 'Skin pose',
+    v31_step_layers: 'Layers', v31_step_clips: 'Clips', v31_step_qa: 'Checks', v31_step_done: 'Done',
+    v31_parts: 'Parts', v31_class: 'Character class', v31_pose: 'Skin pose', v31_layers: 'Layers',
+    v31_clips: 'Clips', v31_qa: 'Clip checks', v31_qa_external: 'External checks', v31_relabel: 'Relabel',
+    v31_relabel_saved: 'Saved as analysis version {version}', v31_relabel_denied: 'Only the task owner or an administrator',
+    v31_relabel_failed: 'Not saved', v31_up: 'Up', v31_forward: 'Forward', v31_height: 'Height',
+    v31_voxels_n: 'Voxels', v31_volume: 'Volume', v31_confidence: 'Confidence', v31_bone: 'Bone', v31_source: 'Source',
+    v31_symmetry: 'Mirror symmetry', v31_lobes: 'Limbs', v31_body_type: 'Body type', v31_pose_class: 'Pose',
+    v31_opening: 'Opening', v31_contacts: 'Contacts', v31_contacts_before: 'before', v31_contacts_after: 'after',
+    v31_no_layers: 'No separate layers yet', v31_edges4x: 'Edges over 4×', v31_stretch: 'Worst stretch',
+    v31_stride: 'Stride', v31_elbows: 'Elbow width', v31_verdict_pass: 'Clean', v31_verdict_fail: 'To fix',
+    v31_not_run: 'not run yet', v31_fixture: 'fixture', v31_side_L: 'left', v31_side_R: 'right',
+    v31_gltf: 'glTF validator', v31_unity: 'Unity Humanoid', v31_blender: 'Blender', v31_props_none: 'No held objects',
+    v31_label_body: 'body', v31_label_torso: 'torso', v31_label_head: 'head', v31_label_arm: 'arm', v31_label_leg: 'leg',
+    v31_label_hand: 'hand', v31_label_foot: 'foot', v31_label_hair: 'hair', v31_label_beard: 'beard',
+    v31_label_hat: 'hat', v31_label_glove: 'glove', v31_label_mitten: 'mitten', v31_label_coat: 'coat',
+    v31_label_cloak: 'cloak', v31_label_skirt: 'skirt', v31_label_boot: 'boot', v31_label_wing: 'wing',
+    v31_label_tail: 'tail', v31_label_ear: 'ear', v31_label_prop: 'held object',
+    v31_cat_biped: 'Biped', v31_cat_humanoid: 'Humanoid', v31_cat_quadruped: 'Quadruped', v31_cat_equine: 'Equine',
+    v31_cat_monster: 'Monster', v31_cat_serpent: 'Serpent', v31_cat_bird: 'Bird', v31_cat_multilimb: 'Many limbs',
+    v31_cat_hands: 'Hands', v31_cat_vehicle: 'Vehicle', v31_cat_primate: 'Primate',
+    v31_poseclass_T: 'T pose', v31_poseclass_A: 'A pose', v31_poseclass_hanging: 'arms hanging',
+    v31_poseclass_contact: 'limbs touching', v31_poseclass_posed: 'posed frame',
+    v31_body_heavy: 'heavy', v31_body_slim: 'slim', v31_body_normal: 'normal', v31_body_athletic: 'athletic', v31_body_stocky: 'stocky', v31_body_child: 'child', v31_body_chibi: 'chibi', v31_body_toy_mascot: 'toy mascot', v31_body_ultra_fat: 'very heavy', v31_body_slim_tall: 'slim and tall', v31_body_long_limbed: 'long-limbed', v31_body_realistic: 'realistic', v31_body_toy: 'toy',
+  },
+  ru: {
+    v31_replay: 'Проиграть этапы рига', v31_pause: 'Пауза', v31_play: 'Играть', v31_skip: 'К результату',
+    v31_autoplay_on: 'Проигрывать при загрузке: да', v31_autoplay_off: 'Проигрывать при загрузке: нет', v31_map: 'Карта частей',
+    v31_step_voxels: 'Воксели', v31_step_erosion: 'Эрозия', v31_step_frame: 'Позиционирование', v31_step_parts: 'Части',
+    v31_step_class: 'Класс', v31_step_bones: 'Кости', v31_step_weights: 'Веса', v31_step_pose: 'Поза скина',
+    v31_step_layers: 'Слои', v31_step_clips: 'Клипы', v31_step_qa: 'Проверки', v31_step_done: 'Готово',
+    v31_parts: 'Части', v31_class: 'Класс персонажа', v31_pose: 'Поза скина', v31_layers: 'Слои',
+    v31_clips: 'Клипы', v31_qa: 'Проверка клипов', v31_qa_external: 'Внешние проверки', v31_relabel: 'Переименовать',
+    v31_relabel_saved: 'Сохранено: версия анализа {version}', v31_relabel_denied: 'Только владелец задачи или администратор',
+    v31_relabel_failed: 'Не сохранено', v31_up: 'Верх', v31_forward: 'Вперёд', v31_height: 'Рост',
+    v31_voxels_n: 'Воксели', v31_volume: 'Объём', v31_confidence: 'Уверенность', v31_bone: 'Кость', v31_source: 'Источник',
+    v31_symmetry: 'Зеркальная симметрия', v31_lobes: 'Конечности', v31_body_type: 'Телосложение', v31_pose_class: 'Поза',
+    v31_opening: 'Раскрытие', v31_contacts: 'Касания', v31_contacts_before: 'до', v31_contacts_after: 'после',
+    v31_no_layers: 'Отдельных слоёв пока нет', v31_edges4x: 'Рёбер длиннее 4×', v31_stretch: 'Худшее растяжение',
+    v31_stride: 'Шаг', v31_elbows: 'Ширина локтей', v31_verdict_pass: 'Чисто', v31_verdict_fail: 'Исправить',
+    v31_not_run: 'ещё не запускалась', v31_fixture: 'фикстура', v31_side_L: 'левая', v31_side_R: 'правая',
+    v31_gltf: 'glTF-валидатор', v31_unity: 'Unity Humanoid', v31_blender: 'Blender', v31_props_none: 'Предметов в руках нет',
+    v31_label_body: 'тело', v31_label_torso: 'торс', v31_label_head: 'голова', v31_label_arm: 'рука', v31_label_leg: 'нога',
+    v31_label_hand: 'кисть', v31_label_foot: 'стопа', v31_label_hair: 'волосы', v31_label_beard: 'борода',
+    v31_label_hat: 'шапка', v31_label_glove: 'перчатка', v31_label_mitten: 'варежка', v31_label_coat: 'пальто',
+    v31_label_cloak: 'плащ', v31_label_skirt: 'юбка', v31_label_boot: 'сапог', v31_label_wing: 'крыло',
+    v31_label_tail: 'хвост', v31_label_ear: 'ухо', v31_label_prop: 'предмет в руке',
+    v31_cat_biped: 'Двуногий', v31_cat_humanoid: 'Гуманоид', v31_cat_quadruped: 'Четвероногий', v31_cat_equine: 'Лошадиные',
+    v31_cat_monster: 'Монстр', v31_cat_serpent: 'Змей', v31_cat_bird: 'Птица', v31_cat_multilimb: 'Много конечностей',
+    v31_cat_hands: 'Кисти', v31_cat_vehicle: 'Транспорт', v31_cat_primate: 'Примат',
+    v31_poseclass_T: 'T-поза', v31_poseclass_A: 'A-поза', v31_poseclass_hanging: 'руки опущены',
+    v31_poseclass_contact: 'конечности касаются', v31_poseclass_posed: 'кадр позы',
+    v31_body_heavy: 'плотное', v31_body_slim: 'стройное', v31_body_normal: 'обычное', v31_body_athletic: 'атлетичное', v31_body_stocky: 'коренастое', v31_body_child: 'детское', v31_body_chibi: 'чиби', v31_body_toy_mascot: 'игрушка-маскот', v31_body_ultra_fat: 'очень полное', v31_body_slim_tall: 'высокое стройное', v31_body_long_limbed: 'длинноногое', v31_body_realistic: 'реалистичное', v31_body_toy: 'игрушка',
+  },
+};
+const CONTRACT_LABELS = ['body', 'torso', 'head', 'arm', 'leg', 'hand', 'foot', 'hair', 'beard', 'hat', 'glove', 'mitten',
+  'coat', 'cloak', 'skirt', 'boot', 'wing', 'tail', 'ear', 'prop'];
+const STEP_COLOR = {
+  vox: '#4cc9f0', erosion: '#7b5cff', frame: '#90e0ef', part: '#f4a261', cls: '#ffd166', bones: '#e9ecef',
+  weights: '#ff6b6b', pose: '#06d6a0', layers: '#c77dff', clip: '#8ecae6', qa: '#95d5b2', qa_ext: '#95d5b2',
+  judge: '#ffb703', relabel: '#f4a261', done: '#80ed99',
+};
+const PACE = { vox: 900, erosion: 1600, frame: 1400, part: 650, cls: 1500, bones: 1400, weights: 1500, pose: 2600,
+  layers: 900, clip: 220, qa: 260, qa_ext: 900, judge: 900, relabel: 300, done: 600 };
+const ICON = {
+  vox: '<path d="M3 13h5v5H3zM8 13h5v5H8zM13 13h5v5h-5zM5.5 8h5v5h-5zM10.5 8h5v5h-5zM8 3h5v5H8z"/>',
+  erosion: '<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 2"/><rect x="8" y="8" width="8" height="8" rx="1"/>',
+  frame: '<path d="M6 20V5M6 5l-3 3M6 5l3 3M6 20h14M20 20l-3-3M20 20l-3 3"/><path d="M14 6v8M12 6h4M12 14h4"/>',
+  part: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4z"/><path d="M13 16.5h7M16.5 13v7"/>',
+  cls: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.4"/><path d="M5.5 17c.8-2 2-3 3.5-3s2.7 1 3.5 3M14.5 9.5h4M14.5 13h3"/>',
+  bones: '<circle cx="12" cy="4" r="1.7"/><circle cx="12" cy="11" r="1.5"/><circle cx="7" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M12 5.7v3.8M10.8 12.2l-3 6.4M13.2 12.2l3 6.4M10.6 10.4l-3.8-1M13.4 10.4l3.8-1"/>',
+  weights: '<path d="M12 3c3.5 4.5 6 7.6 6 11a6 6 0 0 1-12 0c0-3.4 2.5-6.5 6-11z"/><path d="M8.5 15.5a3.6 3.6 0 0 0 3.5 3"/>',
+  pose: '<circle cx="12" cy="4.5" r="1.8"/><path d="M12 6.5v7M12 13.5l-3.5 7M12 13.5l3.5 7M12 8.5L5 12.5M12 8.5l7 4"/><path d="M4 7a9 9 0 0 1 3-3M20 7a9 9 0 0 0-3-3" stroke-dasharray="2 1.5"/>',
+  layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12.5l9 5 9-5M3 16.5l9 5 9-5"/>',
+  clip: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>',
+  qa: '<path d="M4 12.5l5 5L20 6.5"/>',
+  qa_ext: '<path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  judge: '<path d="M12 3v18M5 7h14M5 7l-3 7h6zM19 7l-3 7h6z"/>',
+  relabel: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
+  done: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
+  play: '<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+  pause: '<path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/>',
+  skip: '<path d="M5 5l9 7-9 7z" fill="currentColor"/><path d="M17 5v14" stroke-width="2.4"/>',
+  replay: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/><path d="M10.2 9.2l4.6 2.8-4.6 2.8z" fill="currentColor"/>',
+  auto: '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>',
+  map: '<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+};
+const STEP_NAME = { vox: 'voxels', erosion: 'erosion', frame: 'frame', part: 'parts', cls: 'class', bones: 'bones',
+  weights: 'weights', pose: 'pose', layers: 'layers', clip: 'clips', qa: 'qa', qa_ext: 'qa', judge: 'qa',
+  relabel: 'parts', done: 'done' };
+
+function lang() {
+  const l = (window.I18n && window.I18n.currentLang) || document.documentElement.lang || 'en';
+  return String(l).slice(0, 2).toLowerCase();
+}
+function tr(key, rep) {
+  const i18n = window.I18n;
+  let text = '';
+  if (i18n && typeof i18n.has === 'function' && i18n.has(key)) text = i18n.t(key, rep);
+  else text = (FB[lang()] || FB.en)[key] || FB.en[key] || '';
+  if (!text) return '';
+  for (const [k, v] of Object.entries(rep || {})) text = text.split(`{${k}}`).join(String(v));
+  return text;
+}
+const labelName = (l) => {
+  const s = String(l || '');
+  if (s.startsWith('prop:')) return `${tr('v31_label_prop')}: ${s.slice(5)}`;
+  return tr(`v31_label_${s}`) || s;
+};
+const svg = (name, cls = '') => `<svg class="v31i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name] || ''}</svg>`;
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = (v, d = 2) => (v == null || !isFinite(Number(v)) ? '—' : Number(v).toLocaleString(lang(), { maximumFractionDigits: d }));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ------------------------------------------------------------------------------------------------ voxels
+const voxCache = new Map();
+function parseArv(buf) {
+  const dv = new DataView(buf);
+  if (buf.byteLength < 32 || dv.getUint8(0) !== 65 || dv.getUint8(1) !== 82 || dv.getUint8(2) !== 86 || dv.getUint8(3) !== 49) return null;
+  const n = dv.getUint32(28, true);
+  if (32 + n * 4 > buf.byteLength) return null;
+  const ox = dv.getFloat32(12, true), oy = dv.getFloat32(16, true), oz = dv.getFloat32(20, true), cell = dv.getFloat32(24, true);
+  const b = new Uint8Array(buf, 32, n * 4);
+  const pos = new Float32Array(n * 3), depth = new Uint8Array(n), core = new Uint8Array(n);
+  let maxD = 0;
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = ox + (b[i * 4] + 0.5) * cell;
+    pos[i * 3 + 1] = oy + (b[i * 4 + 1] + 0.5) * cell;
+    pos[i * 3 + 2] = oz + (b[i * 4 + 2] + 0.5) * cell;
+    const d = b[i * 4 + 3] & 127;
+    depth[i] = d;
+    core[i] = b[i * 4 + 3] >> 7;
+    if (d !== 127 && d > maxD) maxD = d;
+  }
+  return { n, pos, depth, core, cell, maxD, origin: [ox, oy, oz] };
+}
+function loadVox(url) {
+  if (!voxCache.has(url)) {
+    voxCache.set(url, fetch(url, { credentials: 'same-origin' }).then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((b) => (b ? parseArv(b) : null)).catch(() => null));
+  }
+  return voxCache.get(url);
+}
+const qkey = (x, y, z, cell) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+
+// ------------------------------------------------------------------------------------------------ the module
+function start(viewerEl) {
+  const viewport = viewerEl.parentElement;
+  const root = document.createElement('div');
+  root.className = 'v31';
+  root.innerHTML = `
+    <div class="v31-back"></div>
+    <canvas class="v31-cv" aria-hidden="true"></canvas>
+    <aside class="v31-panel" aria-live="polite">
+      <div class="v31-panel-head">
+        <button class="v31-btn v31-mapbtn" type="button">${svg('map')}</button>
+        <span class="v31-now"></span>
+        <button class="v31-btn v31-fold" type="button">${svg('close')}</button>
+      </div>
+      <div class="v31-cards"></div>
+    </aside>
+    <div class="v31-pop" hidden></div>
+    <div class="v31-scrub" hidden>
+      <button class="v31-btn v31-playbtn" type="button">${svg('pause')}</button>
+      <div class="v31-track"><div class="v31-ticks"></div><i class="v31-fill"></i><b class="v31-thumb"></b></div>
+      <span class="v31-stepname"></span>
+      <button class="v31-btn v31-skipbtn" type="button">${svg('skip')}</button>
+      <button class="v31-btn v31-autobtn" type="button">${svg('auto')}</button>
+    </div>
+    <div class="v31-toast" hidden></div>`;
+  viewport.appendChild(root);
+  const $ = (s) => root.querySelector(s);
+  const cv = $('.v31-cv'), ctx = cv.getContext('2d');
+  const panel = $('.v31-panel'), cards = $('.v31-cards'), pop = $('.v31-pop'), scrub = $('.v31-scrub');
+  const track = $('.v31-track'), ticks = $('.v31-ticks'), fill = $('.v31-fill'), thumb = $('.v31-thumb');
+  const playBtn = $('.v31-playbtn'), skipBtn = $('.v31-skipbtn'), autoBtn = $('.v31-autobtn');
+  const nowEl = $('.v31-now'), stepName = $('.v31-stepname'), toast = $('.v31-toast');
+
+  // the tool bar of the task page: «replay» (icons only)
+  const tools = document.getElementById('tv3-tools');
+  const replayTool = document.createElement('button');
+  replayTool.className = 'tv3-tool v31-tool';
+  replayTool.type = 'button';
+  replayTool.hidden = true;
+  replayTool.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON.replay}</svg>`;
+  if (tools) tools.insertBefore(replayTool, document.getElementById('tv3-build') || null);
+
+  const W = window.autorigV31 = { build: BUILD, run: null, steps: [], idx: 0, mode: 'wait', fixture: FIXTURE, t: {} };
+  let run = '', FILES = '';
+  let steps = W.steps;
+  let idx = 0;              // steps applied
+  let playing = false, replayMode = false, live = false, runDone = false, docked = false, collapsed = false;
+  let S = null;             // the drawn state
+  let selected = null, autoReplay = true, mapOn = false;
+  let yaw = 0.5, dragYaw = null, stepT0 = performance.now(), stepKind = '';
+  let boneLab = null;       // voxel index -> bone index (dominant weights picture)
+
+  function fresh() {
+    return { vox: null, voxRes: 0, erosion: false, frame: null, parts: new Map(), order: [], cls: null, bones: null,
+      weights: null, pose: null, layers: null, clips: [], qa: new Map(), ext: null, judge: null, done: false,
+      labels: {}, heightM: null };
+  }
+  S = fresh();
+
+  // ---------------------------------------------------------------- events -> steps
+  let lastBonesStep = null, lastWeights = null, voxStart = null;
+  function push(step) { steps.push(step); return step; }
+  function ingest(ev) {
+    const k = `${ev.stage}/${ev.kind}`, d = ev.data || {}, p = ev.params || {}, key = ev.key || '';
+    if (String(ev.kind || '').startsWith('v3.')) return;
+    if (k === 'voxels/start') { voxStart = d; return; }
+    if (k === 'voxels/level' && ev.url) {
+      push({ k: 'vox', url: ev.url, res: d.res || p.res, fine: !!d.fine, count: d.count || p.count, t: ev.t });
+      return;
+    }
+    if (k === 'voxels/erosion') { push({ k: 'erosion', steps: p.steps, core: p.core, t: ev.t }); return; }
+    if (key === 'live_voxels') {
+      const lf = steps.find((s) => s.k === 'frame' && s.legacy);
+      if (lf) { lf.data = d; lf.legacy = false; } else push({ k: 'frame', data: d, t: ev.t });
+      return;
+    }
+    if (k === 'voxels/done' && !steps.some((s) => s.k === 'frame')) {
+      push({ k: 'frame', data: { res: voxStart && voxStart.dims, voxel_m: null }, legacy: true, t: ev.t });
+      return;
+    }
+    if (key === 'live_parts' || key === 'live_garments' || key === 'live_props') {
+      if (d.id) push({ k: 'part', group: key.slice(5), data: d, t: ev.t });
+      return;
+    }
+    if (key === 'live_class') { push({ k: 'cls', data: d, t: ev.t }); return; }
+    if (k === 'analysis/classify' && !steps.some((s) => s.k === 'cls' && !s.legacy)) {
+      push({ k: 'cls', legacy: true, data: { category: p.body, what: p.what, hair: p.hair, props: p.props }, t: ev.t });
+      return;
+    }
+    if (k === 'rig/fast_category') {
+      const c = steps.find((s) => s.k === 'cls');
+      if (c && c.legacy) c.data.registry = p.category;
+      return;
+    }
+    if (k === 'rig/bones' || k === 'rig/weights') {
+      if (!(d.bones || []).length) return;
+      // a rig made again after the run (an edit, a re-skin) updates the bones and weights already shown
+      const after = steps.some((s) => s.k === 'done');
+      if (k === 'rig/bones') {
+        if (after && lastBonesStep) lastBonesStep.bones = d.bones;
+        else lastBonesStep = push({ k: 'bones', bones: d.bones, t: ev.t });
+      } else {
+        if (lastBonesStep) lastBonesStep.bones = d.bones;
+        if (after && lastWeights) lastWeights.bones = d.bones;
+        else lastWeights = push({ k: 'weights', bones: d.bones, t: ev.t });
+      }
+      return;
+    }
+    if (k === 'rig/preview' && ev.url && lastWeights) { lastWeights.img = ev.url; return; }
+    if (key === 'live_pose') { push({ k: 'pose', data: d, t: ev.t }); return; }
+    if (key === 'live_layers') { push({ k: 'layers', data: d, t: ev.t }); return; }
+    if (k === 'retarget/clip') { push({ k: 'clip', name: p.name || d.name, n: p.n, total: p.total, t: ev.t }); return; }
+    if (key === 'live_qa_clip') { push({ k: 'qa', data: d, t: ev.t }); return; }
+    if (k === 'qa/clip' && !FIXTURE) {
+      push({ k: 'qa', legacy: true, data: { clip: p.name, verdict: key === 'live_qa_clip_ok' ? 'pass' : 'fail', bad_frames: p.bad }, t: ev.t });
+      return;
+    }
+    if (key === 'live_qa_external') { push({ k: 'qa_ext', data: d, t: ev.t }); return; }
+    if (k === 'judge/verdict') { push({ k: 'judge', data: { score: p.score, fix: p.fix }, t: ev.t }); return; }
+    if (k === 'analysis/relabel') { push({ k: 'relabel', data: d, t: ev.t }); return; }
+    if (k === 'run/finish' || key === 'live_run_done' || key === 'live_run_needs_review') push({ k: 'done', t: ev.t });
+  }
+
+  // ---------------------------------------------------------------- one step onto the state
+  function apply(st) {
+    switch (st.k) {
+      case 'vox': S.vox = st; S.erosion = false; break;
+      case 'erosion': S.erosion = true; break;
+      case 'frame': S.frame = st.data || {}; if (st.data && st.data.height_m) S.heightM = st.data.height_m; break;
+      case 'part': if (!S.parts.has(st.data.id)) S.order.push(st.data.id); S.parts.set(st.data.id, { ...st.data, group: st.group }); break;
+      case 'cls': S.cls = st.data; break;
+      case 'bones': S.bones = st.bones; break;
+      case 'weights': S.bones = st.bones; S.weights = st; boneLab = null; break;
+      case 'pose': S.pose = st.data; break;
+      case 'layers': S.layers = st.data; break;
+      case 'clip': if (!S.clips.includes(st.name)) S.clips.push(st.name); break;
+      case 'qa': S.qa.set(st.data.clip, st.data); break;
+      case 'qa_ext': S.ext = st.data; break;
+      case 'judge': S.judge = st.data; break;
+      case 'relabel': if (st.data && st.data.id) S.labels[st.data.id] = st.data.label; break;
+      case 'done': S.done = true; break;
+      default:
+    }
+  }
+  function seek(n) {
+    n = Math.max(0, Math.min(steps.length, n));
+    if (n < idx) { S = fresh(); for (let i = 0; i < n; i++) apply(steps[i]); }
+    else for (let i = idx; i < n; i++) apply(steps[i]);
+    idx = n;
+    W.idx = idx;
+    const cur = steps[idx - 1];
+    stepKind = cur ? cur.k : '';
+    stepT0 = performance.now();
+    if (cur) loadFor(cur);
+    paint();
+  }
+  function loadFor(st) {
+    if (st.k === 'vox') {
+      loadVox(url(st.url)).then((v) => {
+        if (v && !W.t.firstVoxel) { W.t.firstVoxel = Math.round(performance.now() - T_OPEN); draw(performance.now(), 0); }
+      });
+    }
+    if (st.k === 'part' && st.data.mask_url) loadVox(url(st.data.mask_url)).then(() => { maskIndex = null; });
+  }
+  const url = (u) => (/^(https?:)?\//.test(u) ? u : FILES + u);
+
+  // ---------------------------------------------------------------- the panel
+  let lastCards = '';
+  function stepLabel(k) { return tr(`v31_step_${STEP_NAME[k] || k}`); }
+  function paint() {
+    const cur = steps[idx - 1];
+    nowEl.innerHTML = cur ? `${svg(cur.k)}<span>${esc(stepLabel(cur.k))}</span>` : '';
+    stepName.textContent = cur ? stepLabel(cur.k) : '';
+    const f = steps.length ? idx / steps.length : 0;
+    fill.style.width = `${f * 100}%`;
+    thumb.style.left = `${f * 100}%`;
+    playBtn.innerHTML = svg(playing ? 'pause' : 'play');
+    playBtn.title = tr(playing ? 'v31_pause' : 'v31_play');
+    skipBtn.title = tr('v31_skip');
+    autoBtn.title = tr(autoReplay ? 'v31_autoplay_on' : 'v31_autoplay_off');
+    autoBtn.classList.toggle('on', autoReplay);
+    replayTool.title = tr('v31_replay');
+    replayTool.setAttribute('aria-label', tr('v31_replay'));
+    $('.v31-mapbtn').title = tr('v31_map');
+    $('.v31-fold').title = tr('v31_skip');
+    const html = cardsHtml();
+    if (html !== lastCards) {
+      const n0 = cards.children.length;
+      cards.innerHTML = html;
+      lastCards = html;
+      // a new card scrolls into view while the stages play
+      if ((playing || live) && cards.children.length > n0) cards.lastElementChild.scrollIntoView({ block: 'nearest' });
+    }
+    root.classList.toggle('has-cards', !!html);
+  }
+  function ticksHtml() {
+    if (!steps.length) return '';
+    return steps.map((s, i) => `<i style="left:${(i / steps.length) * 100}%;width:${100 / steps.length}%;background:${STEP_COLOR[s.k] || '#888'}" title="${esc(stepLabel(s.k))}"></i>`).join('');
+  }
+  function partLabel(p) { return S.labels[p.id] || p.label || p.id; }
+  function cardsHtml() {
+    const out = [];
+    if (S.parts.size) {
+      const rows = S.order.map((id) => {
+        const p = S.parts.get(id);
+        const side = p.side ? ` <small>${esc(tr(`v31_side_${p.side}`))}</small>` : '';
+        const conf = Math.round(Number(p.confidence || 0) * 100);
+        const fx = p.fixture && p.source === 'fixture' ? ` <em>${esc(tr('v31_fixture'))}</em>` : '';
+        const relab = S.labels[p.id] && S.labels[p.id] !== p.label ? ' relab' : '';
+        return `<li class="v31-part${selected === id ? ' sel' : ''}${relab}" data-part="${esc(id)}" title="${esc(tr('v31_relabel'))}">` +
+          `<i style="background:${esc(p.color || '#ccc')}"></i><span>${esc(labelName(partLabel(p)))}${side}${fx}</span>` +
+          `<b title="${esc(tr('v31_volume'))}">${num(p.volume_m3, 3)} m³</b><u title="${esc(tr('v31_confidence'))}"><s style="width:${conf}%"></s></u></li>`;
+      }).join('');
+      const nGarm = [...S.parts.values()].filter((p) => p.group === 'garments').length;
+      const nProps = [...S.parts.values()].filter((p) => p.group === 'props').length;
+      out.push(`<section class="v31-card"><h4>${svg('part')}<span>${esc(tr('v31_parts'))}</span><b>${S.parts.size - nGarm - nProps} · ${nGarm} · ${nProps}</b></h4><ul class="v31-parts">${rows}</ul>` +
+        (nProps ? '' : `<p class="v31-mute">${esc(tr('v31_props_none'))}</p>`) + '</section>');
+    }
+    if (S.cls) {
+      const c = S.cls, ev = c.evidence || {};
+      const cat = tr(`v31_cat_${c.category}`) || c.category || '—';
+      const pc = c.pose_class ? (tr(`v31_poseclass_${c.pose_class}`) || c.pose_class) : '';
+      out.push(`<section class="v31-card v31-cls"><h4>${svg('cls')}<span>${esc(tr('v31_class'))}</span>${c.confidence != null ? `<b title="${esc(tr('v31_confidence'))}">${Math.round(c.confidence * 100)}%</b>` : ''}</h4>` +
+        `<div class="v31-big">${esc(cat)}${c.registry && c.registry !== c.category ? ` <small>${esc(tr(`v31_cat_${c.registry}`) || c.registry)}</small>` : ''}</div>` +
+        (c.what ? `<div class="v31-what">${esc(c.what)}</div>` : '') +
+        `<dl>${c.body_type ? `<dt>${esc(tr('v31_body_type'))}</dt><dd>${esc(tr(`v31_body_${c.body_type}`) || c.body_type)}</dd>` : ''}${pc ? `<dt>${esc(tr('v31_pose_class'))}</dt><dd>${esc(pc)}</dd>` : ''}` +
+        `${ev.symmetry_iou != null ? `<dt>${esc(tr('v31_symmetry'))}</dt><dd>${num(ev.symmetry_iou, 3)}</dd>` : ''}${ev.lobes != null ? `<dt>${esc(tr('v31_lobes'))}</dt><dd>${num(ev.lobes, 0)}</dd>` : ''}</dl></section>`);
+    }
+    if (S.weights && S.weights.img) {
+      out.push(`<section class="v31-card"><h4>${svg('weights')}<span>${esc(tr('v31_step_weights'))}</span><b>${(S.bones || []).length}</b></h4><img class="v31-wimg" alt="" src="${esc(url(S.weights.img))}"></section>`);
+    }
+    if (S.pose) {
+      const p = S.pose, op = p.opening_deg || {};
+      const bad = Number(p.contact_after || 0) > 0;
+      out.push(`<section class="v31-card v31-posecard"><h4>${svg('pose')}<span>${esc(tr('v31_pose'))}</span><b class="v31-std">${esc(p.standard || '?')}</b></h4>` +
+        `<dl>${Object.keys(op).map((b) => `<dt>${esc(tr('v31_opening'))} · ${esc(b)}</dt><dd>${num(op[b], 1)}°</dd>`).join('')}` +
+        `<dt>${esc(tr('v31_contacts'))}</dt><dd><span class="bad">${num(p.contact_before, 0)}</span> ${esc(tr('v31_contacts_before'))} → <span class="${bad ? 'bad' : 'ok'}">${num(p.contact_after, 0)}</span> ${esc(tr('v31_contacts_after'))}</dd></dl></section>`);
+    }
+    if (S.layers) {
+      const L = S.layers.layers || [];
+      out.push(`<section class="v31-card"><h4>${svg('layers')}<span>${esc(tr('v31_layers'))}</span><b class="${L.length ? '' : 'warn'}">${L.length}</b></h4>` +
+        (L.length ? `<ul class="v31-chips">${L.map((l) => `<li title="${esc((l.bones || []).join(', '))}">${esc(labelName(l.name))} <small>${(l.bones || []).length}</small></li>`).join('')}</ul>`
+          : `<p class="v31-mute warn">${esc(tr('v31_no_layers'))}</p>`) + '</section>');
+    }
+    if (S.clips.length) {
+      out.push(`<section class="v31-card"><h4>${svg('clip')}<span>${esc(tr('v31_clips'))}</span><b>${S.clips.length}</b></h4><ul class="v31-chips">${S.clips.map((c) => {
+        const q = S.qa.get(c);
+        return `<li class="${q ? (q.verdict === 'pass' ? 'ok' : 'bad') : ''}">${esc(c)}</li>`;
+      }).join('')}</ul></section>`);
+    }
+    if (S.qa.size) {
+      const rows = [...S.qa.values()].map((q) => `<tr class="${q.verdict === 'pass' ? 'ok' : 'bad'}" title="${esc(tr(q.verdict === 'pass' ? 'v31_verdict_pass' : 'v31_verdict_fail'))}">` +
+        `<td><i></i>${esc(q.clip)}</td><td>${num(q.edges_over_4x, 0)}</td><td>${num(q.worst_stretch, 2)}</td><td>${num(q.stride_H, 2)}</td><td>${num(q.elbow_width_sw, 2)}</td></tr>`).join('');
+      const pass = [...S.qa.values()].filter((q) => q.verdict === 'pass').length;
+      out.push(`<section class="v31-card"><h4>${svg('qa')}<span>${esc(tr('v31_qa'))}</span><b>${pass}/${S.qa.size}</b></h4><table class="v31-qa"><thead><tr><th></th>` +
+        `<th title="${esc(tr('v31_edges4x'))}">4×</th><th title="${esc(tr('v31_stretch'))}">⇔</th><th title="${esc(tr('v31_stride'))}">⟿</th><th title="${esc(tr('v31_elbows'))}">⟷</th></tr></thead><tbody>${rows}</tbody></table></section>`);
+    }
+    if (S.ext) {
+      const e = S.ext, g = e.gltf_validator || {}, u = e.unity_humanoid || {}, b = e.blender || {};
+      const cell = (v, okv) => (v == null ? `<span class="v31-mute">${esc(tr('v31_not_run'))}</span>` : `<span class="${okv ? 'ok' : 'bad'}">${esc(num(v, 2))}</span>`);
+      out.push(`<section class="v31-card"><h4>${svg('qa_ext')}<span>${esc(tr('v31_qa_external'))}</span></h4><dl>` +
+        `<dt>${esc(tr('v31_gltf'))}</dt><dd>${cell(g.errors, g.errors === 0)}</dd>` +
+        `<dt>${esc(tr('v31_unity'))}</dt><dd>${u.valid == null ? cell(null) : `<span class="${u.valid ? 'ok' : 'bad'}">${u.valid ? '✓' : '✗'}</span>`}</dd>` +
+        `<dt>${esc(tr('v31_blender'))}</dt><dd>${cell(b.worst_stretch, Number(b.worst_stretch) < 4)}</dd></dl></section>`);
+    }
+    if (S.judge) {
+      out.push(`<section class="v31-card"><h4>${svg('judge')}<span>${esc(stepLabel('judge'))}</span><b>${num(S.judge.score, 2)}</b></h4></section>`);
+    }
+    return out.join('');
+  }
+
+  // ---------------------------------------------------------------- relabel
+  function openPop(id, x, y) {
+    const p = S.parts.get(id);
+    if (!p) { pop.hidden = true; return; }
+    const cur = partLabel(p);
+    pop.innerHTML = `<h5><i style="background:${esc(p.color)}"></i>${esc(labelName(cur))}</h5><dl>` +
+      `<dt>${esc(tr('v31_voxels_n'))}</dt><dd>${num(p.voxels, 0)}</dd><dt>${esc(tr('v31_volume'))}</dt><dd>${num(p.volume_m3, 4)} m³</dd>` +
+      `<dt>${esc(tr('v31_bone'))}</dt><dd>${esc(p.attachment_bone || '—')}</dd><dt>${esc(tr('v31_source'))}</dt><dd>${esc(p.source || '—')}</dd>` +
+      `<dt>${esc(tr('v31_confidence'))}</dt><dd>${Math.round(Number(p.confidence || 0) * 100)}%</dd></dl>` +
+      `<div class="v31-relabel" title="${esc(tr('v31_relabel'))}">${CONTRACT_LABELS.map((l) => `<button type="button" data-label="${l}" class="${l === cur ? 'cur' : ''}">${esc(labelName(l))}</button>`).join('')}</div>`;
+    pop.dataset.part = id;
+    pop.hidden = false;
+    const r = root.getBoundingClientRect();
+    const pw = Math.min(260, r.width - 16);
+    pop.style.left = `${Math.max(8, Math.min(r.width - pw - 8, x - r.left - pw - 12))}px`;
+    pop.style.top = `${Math.max(8, Math.min(r.height - 240, y - r.top - 20))}px`;
+  }
+  async function relabel(id, label) {
+    let res = null;
+    try {
+      const r = await fetch(`/api/mt/runs/${run}/parts/${encodeURIComponent(id)}/label`, {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }),
+      });
+      res = { status: r.status, body: await r.json().catch(() => ({})) };
+    } catch (e) { res = { status: 0, body: {} }; }
+    W.lastRelabel = res;
+    if (res.status === 200 && res.body.ok) {
+      S.labels[id] = res.body.label;
+      steps.push({ k: 'relabel', data: { id, label: res.body.label, version: res.body.version }, t: Date.now() / 1000, local: true });
+      if (idx === steps.length - 1) idx = steps.length;
+      ticks.innerHTML = ticksHtml();
+      say(tr('v31_relabel_saved', { version: res.body.version }), 'ok');
+    } else if (res.status === 403 || res.status === 401) say(tr('v31_relabel_denied'), 'bad');
+    else say(`${tr('v31_relabel_failed')} (${res.status || 'net'})`, 'bad');
+    pop.hidden = true;
+    paint();
+  }
+  let toastT = 0;
+  function say(text, cls) {
+    toast.textContent = text;
+    toast.className = `v31-toast ${cls || ''}`;
+    toast.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(() => { toast.hidden = true; }, 3200);
+  }
+  cards.addEventListener('click', (e) => {
+    const li = e.target.closest('.v31-part');
+    if (!li) return;
+    const id = li.dataset.part;
+    selected = selected === id && !pop.hidden ? null : id;
+    if (selected) openPop(id, li.getBoundingClientRect().left, e.clientY); else pop.hidden = true;
+    paint();
+  });
+  pop.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-label]');
+    if (b && pop.dataset.part) relabel(pop.dataset.part, b.dataset.label);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { pop.hidden = true; selected = null; paint(); } });
+
+  // ---------------------------------------------------------------- the canvas (the voxel splat)
+  let maskIndex = null;     // quantized position -> part id, from the loaded masks
+  const maskData = new Map();
+  async function buildMaskIndex() {
+    const idx2 = new Map();
+    let cell = 0;
+    for (const id of S.order) {
+      const p = S.parts.get(id);
+      if (!p.mask_url) continue;
+      const v = await loadVox(url(p.mask_url));
+      if (!v) continue;
+      cell = cell || v.cell;
+      for (let i = 0; i < v.n; i++) {
+        const key = qkey(v.pos[i * 3] - v.origin[0], v.pos[i * 3 + 1] - v.origin[1], v.pos[i * 3 + 2] - v.origin[2], v.cell);
+        if (!idx2.has(key) || p.group !== 'parts') idx2.set(key, id);   // garments / props over the body part
+      }
+      maskData.set(id, { cell: v.cell, origin: v.origin });
+    }
+    return { map: idx2, cell, origin: maskData.size ? [...maskData.values()][0].origin : [0, 0, 0] };
+  }
+  let maskBuilding = false, maskFor = '';
+  function partsKey() { return S.order.join('|'); }
+  function voxColor(v, i, partId, partsOn) {
+    if (partsOn && partId) {
+      const p = S.parts.get(partId);
+      return hex(p && p.color ? p.color : '#cccccc');
+    }
+    const d = v.depth[i];
+    if (v.core[i] && S.erosion) return [255, 200, 70];
+    const t = d === 127 || !v.maxD ? 0 : d / v.maxD;
+    return [Math.round(76 + (158 - 76) * t), Math.round(217 + (82 - 217) * t), Math.round(255 + (255 - 255) * t)];
+  }
+  const hexCache = {};
+  function hex(h) {
+    if (hexCache[h]) return hexCache[h];
+    const m = /^#?([0-9a-f]{6})$/i.exec(h || '');
+    const n = m ? parseInt(m[1], 16) : 0xcccccc;
+    return (hexCache[h] = [(n >> 16) & 255, (n >> 8) & 255, n & 255]);
+  }
+  function bonePalette(i) { const h = (i * 0.618034) % 1; return hsv(h, 0.62, 0.95); }
+  function hsv(h, s, v) {
+    const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    const [r, g, b] = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i % 6];
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  }
+  function nearestBones(v, bones) {
+    const lab = new Int16Array(v.n);
+    for (let i = 0; i < v.n; i++) {
+      const x = v.pos[i * 3], y = v.pos[i * 3 + 1], z = v.pos[i * 3 + 2];
+      let best = 1e9, bi = -1;
+      for (let j = 0; j < bones.length; j++) {
+        const a = bones[j].head, b = bones[j].tail;
+        if (!a || !b) continue;
+        const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+        const L = abx * abx + aby * aby + abz * abz || 1e-9;
+        let t = ((x - a[0]) * abx + (y - a[1]) * aby + (z - a[2]) * abz) / L;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = x - (a[0] + t * abx), dy = y - (a[1] + t * aby), dz = z - (a[2] + t * abz);
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < best) { best = d; bi = j; }
+      }
+      lab[i] = bi;
+    }
+    return lab;
+  }
+  // the pose opening: the arm chains turn about their shoulders in the frontal plane (and back)
+  function armPivots() {
+    const bones = S.bones || [];
+    const by = Object.fromEntries(bones.map((b) => [b.name, b]));
+    const out = [];
+    for (const [side, sgn] of [['Left', 1], ['Right', -1]]) {
+      const arm = by[`${side}Arm`];
+      if (!arm) continue;
+      const deg = Number((S.pose && S.pose.opening_deg && S.pose.opening_deg[`${side}Arm`]) || 0);
+      const names = new Set();
+      const walk = (n) => { names.add(n); bones.forEach((b) => { if (b.parent === n) walk(b.name); }); };
+      walk(`${side}Arm`);
+      out.push({ side, sgn, deg, pivot: arm.head, names });
+    }
+    return out;
+  }
+  function rotZ(p, pivot, a) {
+    const x = p[0] - pivot[0], y = p[1] - pivot[1], c = Math.cos(a), s = Math.sin(a);
+    return [pivot[0] + x * c - y * s, pivot[1] + x * s + y * c, p[2]];
+  }
+
+  let lastFrame = 0, raf = 0;
+  function frame(now) {
+    raf = requestAnimationFrame(frame);
+    if (!root.isConnected || collapsed) return;
+    const showCanvas = !docked || mapOn;
+    cv.style.display = showCanvas ? '' : 'none';
+    if (!showCanvas) return;
+    if (now - lastFrame < 30) return;
+    const dt = Math.min(0.1, (now - lastFrame) / 1000);
+    lastFrame = now;
+    draw(now, dt);
+  }
+  async function draw(now, dt) {
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const Wd = Math.max(1, Math.round(r.width * dpr)), Hd = Math.max(1, Math.round(r.height * dpr));
+    if (cv.width !== Wd || cv.height !== Hd) { cv.width = Wd; cv.height = Hd; }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, Wd, Hd);
+    if (!S.vox) return;
+    const fine = steps.slice(0, idx).filter((s) => s.k === 'vox').map((s) => s.url);
+    // the 48 level is the splat (≈6 k cells); finer levels are drawn by Unity
+    const pick = fine.find((u) => /vox_48\.bin$/.test(u)) && S.vox.res >= 48 ? fine.find((u) => /vox_48\.bin$/.test(u)) : S.vox.url;
+    const v = await voxCache.get(url(pick));
+    if (!v) { loadVox(url(pick)); return; }
+    if (dragYaw == null) yaw += dt * (docked ? 0.35 : 0.45);
+    const pitch = 0.22;
+    // bounds
+    let minx = 1e9, miny = 1e9, minz = 1e9, maxx = -1e9, maxy = -1e9, maxz = -1e9;
+    for (let i = 0; i < v.n; i++) {
+      const x = v.pos[i * 3], y = v.pos[i * 3 + 1], z = v.pos[i * 3 + 2];
+      if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; if (z < minz) minz = z; if (z > maxz) maxz = z;
+    }
+    const cx = (minx + maxx) / 2, cy = (miny + maxy) / 2, cz = (minz + maxz) / 2;
+    const span = Math.max(maxy - miny, Math.hypot(maxx - minx, maxz - minz)) || 1;
+    const narrow = r.width < 720;
+    const scale = Math.min(Wd * (docked ? 0.7 : narrow ? 0.5 : 0.45), Hd * (docked ? 0.78 : 0.58)) / span;
+    const ox = Wd * (docked ? 0.5 : narrow ? 0.4 : 0.44), oy = Hd * (docked ? 0.5 : 0.47);
+    const cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const proj = (x, y, z) => {
+      const X = (x - cx) * cyw + (z - cz) * syw, Z = -(x - cx) * syw + (z - cz) * cyw, Y = y - cy;
+      const Y2 = Y * cp - Z * sp, Z2 = Y * sp + Z * cp;
+      return [ox + X * scale, oy - Y2 * scale, Z2];
+    };
+    // parts
+    const partsOn = S.parts.size > 0;
+    if (partsOn && maskFor !== partsKey() && !maskBuilding) {
+      maskBuilding = true;
+      const key = partsKey();
+      buildMaskIndex().then((m) => { maskIndex = m; maskFor = key; maskBuilding = false; }).catch(() => { maskBuilding = false; });
+    }
+    const weightsOn = S.weights && !partsOn ? true : (stepKind === 'weights' && performance.now() - stepT0 < (PACE.weights + 600));
+    if (weightsOn && S.bones && !boneLab) boneLab = { v, lab: nearestBones(v, S.bones) };
+    // pose animation: 0 -> 1 -> 0 over the step (open, hold, return); a docked view keeps the source pose
+    let open = 0;
+    if (S.pose && stepKind === 'pose') {
+      const u = (performance.now() - stepT0) / PACE.pose;
+      open = u < 0.35 ? u / 0.35 : u < 0.65 ? 1 : u < 1 ? 1 - (u - 0.65) / 0.35 : 0;
+      open = open * open * (3 - 2 * open);
+    }
+    const pivots = open > 0 ? armPivots() : [];
+    const armPart = { Left: 'arm_left', Right: 'arm_right' };
+    // eroding: shells peel away over the step
+    let minDepth = 0;
+    if (stepKind === 'erosion') {
+      const u = Math.min(1, (performance.now() - stepT0) / PACE.erosion);
+      minDepth = Math.floor((u < 0.75 ? u / 0.75 : 1) * v.maxD);
+      if (u >= 0.98) minDepth = 0;
+    }
+    const n = v.n, sx = new Float32Array(n), sy = new Float32Array(n), sz = new Float32Array(n), order = new Uint32Array(n);
+    const ids = new Array(n);
+    let cnt = 0;
+    const mi = maskIndex && maskFor === partsKey() ? maskIndex : null;
+    for (let i = 0; i < n; i++) {
+      if (minDepth && (v.depth[i] === 127 || v.depth[i] < minDepth)) continue;
+      let p = [v.pos[i * 3], v.pos[i * 3 + 1], v.pos[i * 3 + 2]];
+      let id = null;
+      if (mi) id = mi.map.get(qkey(p[0] - mi.origin[0], p[1] - mi.origin[1], p[2] - mi.origin[2], mi.cell)) || null;
+      if (open > 0) {
+        for (const pv of pivots) {
+          const inArm = id ? (id === armPart[pv.side]) : (boneLab && S.bones[boneLab.lab[i]] && pv.names.has(S.bones[boneLab.lab[i]].name));
+          if (inArm) p = rotZ(p, pv.pivot, pv.sgn * pv.deg * open * Math.PI / 180);
+        }
+      }
+      const q = proj(p[0], p[1], p[2]);
+      sx[i] = q[0]; sy[i] = q[1]; sz[i] = q[2]; ids[i] = id;
+      order[cnt++] = i;
+    }
+    const ord = Array.from(order.subarray(0, cnt)).sort((a, b) => sz[a] - sz[b]);
+    let zmin = 1e9, zmax = -1e9;
+    for (const i of ord) { if (sz[i] < zmin) zmin = sz[i]; if (sz[i] > zmax) zmax = sz[i]; }
+    const size = Math.max(1.2, v.cell * scale * 1.08);
+    const appear = stepKind === 'part' ? Math.min(1, (performance.now() - stepT0) / 450) : 1;
+    const newest = stepKind === 'part' ? steps[idx - 1].data.id : null;
+    for (const i of ord) {
+      let c;
+      const id = ids[i];
+      if (weightsOn && boneLab && boneLab.v === v && boneLab.lab[i] >= 0) c = bonePalette(boneLab.lab[i]);
+      else c = voxColor(v, i, id, partsOn && !!mi);
+      let k = 0.55 + 0.45 * ((sz[i] - zmin) / ((zmax - zmin) || 1));
+      if (selected && id !== selected) k *= 0.28;
+      if (newest && id === newest) k *= 0.6 + 0.8 * appear;
+      ctx.fillStyle = `rgb(${Math.min(255, c[0] * k) | 0},${Math.min(255, c[1] * k) | 0},${Math.min(255, c[2] * k) | 0})`;
+      ctx.fillRect(sx[i] - size / 2, sy[i] - size / 2, size, size);
+    }
+    // positioning: up / forward and the height ruler
+    if (S.frame && !(docked && !mapOn)) {
+      const gx = minx - (maxx - minx) * 0.18;
+      const base = proj(gx, miny, cz), top = proj(cx, maxy, cz);
+      const fwd = proj(gx, miny, cz + span * 0.3);
+      const lw = Math.max(1.5, 2 * dpr);
+      arrow(base, proj(gx, miny + (maxy - miny) * 0.3, cz), '#80ed99', lw, tr('v31_up'));
+      arrow(base, fwd, '#4cc9f0', lw, tr('v31_forward'));
+      const rx = ox + span * scale * 0.42, foot = proj(cx, miny, cz)[1];
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = lw * 0.7;
+      ctx.beginPath(); ctx.moveTo(rx, foot); ctx.lineTo(rx, top[1]); ctx.stroke();
+      const hm = S.heightM;
+      const tick = 10;
+      for (let j = 0; j <= tick; j++) {
+        const yy = foot + (top[1] - foot) * (j / tick);
+        ctx.beginPath(); ctx.moveTo(rx, yy); ctx.lineTo(rx + (j % 5 ? 4 : 8) * dpr, yy); ctx.stroke();
+      }
+      ctx.fillStyle = '#fff'; ctx.font = `${600} ${11 * dpr}px system-ui,sans-serif`;
+      ctx.fillText(hm ? `${num(hm, 2)} m` : 'H', rx + 10 * dpr, top[1] + 4 * dpr);
+    }
+    // bones
+    if (S.bones && idx && ['bones', 'weights', 'pose', 'layers', 'clip', 'qa', 'qa_ext', 'judge', 'done', 'relabel', 'part', 'cls'].includes(stepKind) && S.bones.length && (!partsOn || stepKind !== 'part')) {
+      const grow = stepKind === 'bones' ? Math.min(1, (performance.now() - stepT0) / 900) : 1;
+      ctx.lineWidth = Math.max(1.5, 2.2 * dpr);
+      for (const b of S.bones) {
+        if (!b.head || !b.tail) continue;
+        let h = b.head, t = b.tail;
+        for (const pv of pivots) if (pv.names.has(b.name)) { h = rotZ(h, pv.pivot, pv.sgn * pv.deg * open * Math.PI / 180); t = rotZ(t, pv.pivot, pv.sgn * pv.deg * open * Math.PI / 180); }
+        const a = proj(...h), e = proj(h[0] + (t[0] - h[0]) * grow, h[1] + (t[1] - h[1]) * grow, h[2] + (t[2] - h[2]) * grow);
+        ctx.strokeStyle = 'rgba(255,255,255,.9)';
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke();
+        ctx.fillStyle = '#ffd166';
+        ctx.beginPath(); ctx.arc(a[0], a[1], 2.4 * dpr, 0, Math.PI * 2); ctx.fill();
+      }
+      // contacts of the pose: red before the opening, green once open
+      if (S.pose && (stepKind === 'pose')) {
+        const by = Object.fromEntries(S.bones.map((b) => [b.name, b]));
+        for (const pv of armPivots()) {
+          const hand = by[`${pv.side}Hand`];
+          if (!hand) continue;
+          const hp = rotZ(hand.head, pv.pivot, pv.sgn * pv.deg * open * Math.PI / 180);
+          const q = proj(...hp);
+          const touching = (S.pose.contacts || []).includes(pv.side[0]) || Number(S.pose.contact_before) > 0;
+          ctx.strokeStyle = open > 0.6 || !touching ? '#80ed99' : '#ff4d4d';
+          ctx.lineWidth = 2.5 * dpr;
+          ctx.beginPath(); ctx.arc(q[0], q[1], (7 + 3 * Math.sin(performance.now() / 160)) * dpr, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.fillStyle = '#fff'; ctx.font = `700 ${28 * dpr}px system-ui,sans-serif`;
+        ctx.fillText(open > 0.6 ? (S.pose.standard || '') : '', ox - 9 * dpr, oy - span * scale * 0.56);
+      }
+    }
+    if (!W.t.firstDraw) W.t.firstDraw = Math.round(performance.now() - T_OPEN);
+  }
+  function arrow(a, b, col, lw, label) {
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), h = 9 * lw / 2;
+    ctx.beginPath(); ctx.moveTo(b[0], b[1]);
+    ctx.lineTo(b[0] - h * Math.cos(ang - 0.45), b[1] - h * Math.sin(ang - 0.45));
+    ctx.lineTo(b[0] - h * Math.cos(ang + 0.45), b[1] - h * Math.sin(ang + 0.45)); ctx.fill();
+    ctx.font = `600 ${5.5 * lw}px system-ui,sans-serif`;
+    ctx.fillText(label, b[0] + 5, b[1] - 5);
+  }
+  cv.addEventListener('pointerdown', (e) => { dragYaw = { x: e.clientX, yaw }; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', (e) => { if (dragYaw) yaw = dragYaw.yaw + (e.clientX - dragYaw.x) * 0.01; });
+  cv.addEventListener('pointerup', () => { dragYaw = null; });
+
+  // ---------------------------------------------------------------- the player
+  let playToken = 0;
+  async function play(from) {
+    const token = ++playToken;
+    playing = true;
+    replayMode = true;
+    setDocked(false);
+    hold(true);
+    scrub.hidden = false;
+    if (from != null) seek(from);
+    paint();
+    while (playing && token === playToken && idx < steps.length) {
+      seek(idx + 1);
+      const cur = steps[idx - 1];
+      let ms = PACE[cur.k] || 1000;
+      const next = steps[idx];
+      if (next && next.k === cur.k && (cur.k === 'vox' || cur.k === 'bones' || cur.k === 'weights')) ms = 350;   // repeated passes compressed
+      await sleep(ms);
+    }
+    if (token !== playToken) return;
+    if (idx >= steps.length) finishReplay();
+  }
+  function pause() { playing = false; playToken++; paint(); }
+  function finishReplay() {
+    playing = false;
+    replayMode = false;
+    paint();
+    if (!live || runDone) { setDocked(true); hold(false); }
+  }
+  function skip() { playToken++; playing = false; seek(steps.length); finishReplay(); }
+  function setDocked(on) {
+    docked = on;
+    root.classList.toggle('docked', on);
+    root.classList.toggle('staging', !on);
+    if (!on) { mapOn = false; root.classList.remove('mapon'); }
+    replayTool.hidden = !steps.length;
+  }
+  playBtn.addEventListener('click', () => { if (playing) pause(); else play(idx >= steps.length ? 0 : null); });
+  skipBtn.addEventListener('click', skip);
+  $('.v31-fold').addEventListener('click', () => { if (!docked) skip(); else { collapsed = !collapsed; root.classList.toggle('collapsed', collapsed); } });
+  $('.v31-mapbtn').addEventListener('click', () => { if (!docked) return; mapOn = !mapOn; root.classList.toggle('mapon', mapOn); });
+  replayTool.addEventListener('click', () => { collapsed = false; root.classList.remove('collapsed'); play(0); });
+  autoBtn.addEventListener('click', () => {
+    autoReplay = !autoReplay;
+    paint();
+    fetch('/api/mt/v31/prefs', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ replay: autoReplay }) }).catch(() => {});
+    try { localStorage.setItem('autorig_v31_replay', autoReplay ? '1' : '0'); } catch (e) { /* storage off */ }
+  });
+  function scrubTo(e) {
+    const r = track.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    playToken++;
+    playing = false;
+    seek(Math.round(f * steps.length));
+  }
+  let scrubbing = false;
+  track.addEventListener('pointerdown', (e) => { scrubbing = true; track.setPointerCapture(e.pointerId); scrubTo(e); });
+  track.addEventListener('pointermove', (e) => { if (scrubbing) scrubTo(e); });
+  track.addEventListener('pointerup', () => { scrubbing = false; });
+
+  // ---------------------------------------------------------------- the environment scene waits for the replay
+  // scene-gate.js waits while window.autorigEnvHold is set (it also never loads the scene before the mesh is in and
+  // live.js has presented); the flag is set on the iframe's own window, again on every new document, and only cleared
+  // by us when we set it (a vehicle holds it for the person's 🌄 and keeps it).
+  let wantHold = false, holdTimer = 0;
+  function gateWin() { try { return viewerEl.contentWindow; } catch (e) { return null; } }
+  function isVehicle(w) { try { return !!(w.autorigVehicle && w.autorigVehicle.state && w.autorigVehicle.state()); } catch (e) { return false; } }
+  function ensureHold() {
+    const w = gateWin();
+    if (!w || !wantHold || !w.__autorigSceneGate || w.__v31hold) return;
+    if (w.autorigEnvHold || (w.autorigEnv && w.autorigEnv.gate)) return;   // someone else holds it, or the scene went
+    w.autorigEnvHold = true;
+    w.__v31hold = true;
+  }
+  setInterval(ensureHold, 120);
+  function hold(on) {
+    wantHold = on;
+    clearTimeout(holdTimer);
+    if (on) { ensureHold(); holdTimer = setTimeout(() => hold(false), 120000); return; }   // never two minutes of black
+    const w = gateWin();
+    if (w && w.__v31hold) {
+      w.__v31hold = false;
+      if (!isVehicle(w)) w.autorigEnvHold = false;
+      if (!W.t.envRelease) W.t.envRelease = Math.round(performance.now() - T_OPEN);
+    }
+  }
+
+  // ---------------------------------------------------------------- the stream
+  async function follow() {
+    let cursor = 0, first = true, quiet = 0;
+    const t0 = Date.now() / 1000;
+    for (;;) {
+      if (!root.isConnected) return;
+      let d = null;
+      try {
+        const u = FIXTURE ? `/api/mt/runs/${run}/v31/fixture?cursor=${cursor}${SIM ? `&sim=${SIM}&t0=${t0}` : ''}`
+          : `/api/mt/runs/${run}/live?cursor=${cursor}&wait=${first ? 0 : (document.visibilityState === 'visible' ? 20 : 25)}`;
+        const r = await fetch(u, { credentials: 'same-origin', cache: 'no-store' });
+        if (r.status === 404) { if (first) { teardown(); return; } await sleep(5000); continue; }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        d = await r.json();
+      } catch (e) { await sleep(4000); continue; }
+      if (d.reset) { cursor = 0; steps.length = 0; S = fresh(); idx = 0; continue; }
+      cursor = d.cursor || cursor;
+      const before = steps.length;
+      (d.events || []).forEach(ingest);
+      const added = steps.length - before;
+      runDone = !!d.done;
+      ticks.innerHTML = ticksHtml();
+      if (first) {
+        first = false;
+        W.t.firstEvents = Math.round(performance.now() - T_OPEN);
+        if (!steps.length) { if (runDone) { teardown(); return; } hold(false); }
+        else begin(runDone);
+      } else if (added && W.mode === 'wait') {
+        begin(runDone);
+      } else if (added && live && !replayMode) {
+        seek(steps.length);                              // drawn as it arrives
+        if (!replayTool.hidden || steps.length) replayTool.hidden = false;
+      }
+      if (runDone && live && !replayMode && !d.events.length) { live = false; setDocked(true); hold(false); }
+      paint();
+      if (d.done && !(d.events || []).length) {
+        if (FIXTURE) return;
+        quiet = quiet || Date.now();
+        if (Date.now() - quiet > 15 * 60 * 1000) return;
+        await sleep(document.visibilityState === 'visible' ? 5000 : 20000);
+      } else {
+        quiet = 0;
+        if (SIM || (FIXTURE && !d.done)) await sleep(700);
+      }
+    }
+  }
+  function begin(done) {
+    W.mode = done ? 'replay' : 'live';
+    root.classList.add('on');
+    replayTool.hidden = false;
+    scrub.hidden = false;
+    if (!done) {
+      live = true;
+      setDocked(unityReady());
+      seek(steps.length);
+      if (!docked) hold(true);
+      return;
+    }
+    if (autoReplay) play(0);
+    else { seek(steps.length); setDocked(true); hold(false); }
+  }
+  function unityReady() {
+    try { const veil = viewerEl.contentDocument && viewerEl.contentDocument.getElementById('veil'); return !!(veil && veil.classList.contains('off')); } catch (e) { return false; }
+  }
+  // live: once the Unity build is in, the panel docks and Unity draws in 3D; the splat stays one click away
+  setInterval(() => { if (live && !replayMode && !docked && unityReady()) { setDocked(true); hold(false); } }, 1000);
+  Object.assign(W, { seek: (n) => { playToken++; playing = false; seek(n); }, play: (n) => play(n), skip: () => skip(),
+    state: () => S, kinds: () => steps.map((x) => x.k) });
+  function teardown() {
+    cancelAnimationFrame(raf);
+    root.remove();
+    replayTool.remove();
+    hold(false);
+    W.mode = 'none';
+  }
+
+  async function boot(r) {
+    run = r;
+    W.run = r;
+    FILES = `/api/mt/files/${run}/`;
+    try { const v = localStorage.getItem('autorig_v31_replay'); if (v === '0') autoReplay = false; } catch (e) { /* storage off */ }
+    fetch('/api/mt/v31/prefs', { credentials: 'same-origin', cache: 'no-store' }).then((x) => (x.ok ? x.json() : null))
+      .then((p) => { if (p && p.person !== 'none' && typeof p.replay === 'boolean') { autoReplay = p.replay; paint(); } }).catch(() => {});
+    fetch(`${FILES}analysis/scale.json`, { credentials: 'same-origin' }).then((x) => (x.ok ? x.json() : null))
+      .then((s) => { if (s && !S.heightM) S.heightM = s.display_height_m || s.estimated_real_height_m || null; }).catch(() => {});
+    fetch(`/api/mt/runs/${run}/parts/labels`, { credentials: 'same-origin', cache: 'no-store' }).then((x) => (x.ok ? x.json() : null))
+      .then((l) => { if (l && l.labels) { Object.assign(S.labels, l.labels); paint(); } }).catch(() => {});
+    // the voxel levels are fetched alongside the first log answer (their names are fixed by mt/live_voxels.py), so the
+    // first voxel is drawn as soon as the log says so: one round trip less on a slow line
+    [12, 24, 48].forEach((r) => loadVox(`${FILES}live/vox_${r}.bin`));
+    hold(true);                                          // decided after the first answer; released at once if no replay
+    raf = requestAnimationFrame(frame);
+    follow();
+    // keep the hold on a reloaded iframe (a new run, LoadRun) and let a person's first touch of the viewer skip
+
+  }
+  window.addEventListener('languageChanged', () => { ticks.innerHTML = ticksHtml(); paint(); });
+  return { boot, hold };
+}
+
+// wait for the viewer of the task and its run (an MT run in the iframe URL, or the classic task's live run)
+(function wait() {
+  if (OFF) return;
+  const el = document.getElementById('tv3-viewer');
+  if (!el) return;
+  let mod = null, tries = 0;
+  const tick = () => {
+    tries += 1;
+    let run = '';
+    try { run = new URL(el.src || '', location.origin).searchParams.get('run') || ''; } catch (e) { run = ''; }
+    if (run === 'task') { try { run = (el.contentWindow && el.contentWindow.autorigLive && el.contentWindow.autorigLive.run) || ''; } catch (e) { run = ''; } }
+    if (RUN_RE.test(run)) {
+      mod = start(el);
+      mod.boot(run);
+      return;
+    }
+    if (tries < 600) setTimeout(tick, tries < 50 ? 100 : 1000);
+  };
+  tick();
+}());
