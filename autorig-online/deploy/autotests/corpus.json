@@ -17096,11 +17096,7 @@
        0.3
       ]
      },
-     "note": "the voxel leg detector: one lower lobe tapering to 0.21 of its top, hanging from a waist 0.16 of the chest section; no foot section pair",
-     "xfail": {
-      "reason": "legless detector pending (mt/legless.py not installed yet; flip to pass in the mt-deploy that installs it)",
-      "owner": "Category legless · V3.2 (agent 2026-10-17)"
-     }
+     "note": "the voxel leg detector: one lower lobe tapering to 0.21 of its top, hanging from a waist 0.16 of the chest section; no foot section pair"
     },
     {
      "id": "biped_has_legs",
@@ -17116,11 +17112,7 @@
        false
       ]
      },
-     "note": "no false legless on a biped (Vegeta 1ceccd8a mid-step, one leg forward): the detector abstains (unknown, taper 0.48), never none",
-     "xfail": {
-      "reason": "legless detector pending (mt/legless.py not installed yet; flip to pass in the mt-deploy that installs it)",
-      "owner": "Category legless · V3.2 (agent 2026-10-17)"
-     }
+     "note": "no false legless on a biped (Vegeta 1ceccd8a mid-step, one leg forward): the detector abstains (unknown, taper 0.48), never none"
     },
     {
      "id": "mt_rig",

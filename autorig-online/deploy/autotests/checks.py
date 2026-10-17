@@ -774,6 +774,19 @@ def spine_order(run, rig, heads, H):
         mir = heads["RightArm"] * np.array([-1.0, 1.0, 1.0]) + np.array([2 * x0, 0.0, 0.0])
         out["shoulder_mirror_pct_H"] = round(float(np.linalg.norm(heads["LeftArm"] - mir)) / H * 100, 2)
         out["shoulder_dy_pct_H"] = round(abs(float(heads["LeftArm"][1] - heads["RightArm"][1])) / H * 100, 2)
+    if "Hips" in heads:                                  # Seams · V3 (77cc1b88): every mirrored pair, the joint gate's
+        x0 = float(heads["Hips"][0])                     # rule (fast_analysis symmetry_check), *_End included
+        per = {}
+        for n_ in heads:
+            if n_.startswith("Left") and "Right" + n_[4:] in heads:
+                a_, b_ = heads[n_], heads["Right" + n_[4:]]
+                per[n_[4:]] = round(float(np.linalg.norm([(a_[0] - x0) + (b_[0] - x0), a_[1] - b_[1], a_[2] - b_[2]]))
+                                    / H * 100, 2)
+        if per:
+            out["pair_mirror_max_pct_H"] = max(per.values())
+            out["pair_mirror_worst"] = max(per, key=per.get)
+        if "Toe_End" in per:
+            out["toe_end_mirror_pct_H"] = per["Toe_End"]
     return out
 
 
@@ -1013,6 +1026,19 @@ def quad_leg_frame(run, rig) -> dict:
     return {"quad_crossed_pairs": crossed, "quad_front_knees_ahead": round((zf - zh) / max(front - back, 1e-9), 3),
             "quad_up_biped_trace": int(str(oj.get("plan")) == "biped" and "voxel trace" in str(oj.get("why"))),
             "quad_legs_final_fail": len(ql.get("final_fail") or []) if isinstance(ql, dict) else -1}
+
+
+def voxel_legs(input_name):
+    """Legless rig · V3 (2026-10-17, docs/category-legless-spec-20261017.md): mt.legless's voxel leg detector on a
+    corpus input -> legs (none / two / four / many / unknown), the trail, the evidence (seconds, no rig)."""
+    p, wall = _child([PY, "-P", "-m", "mt.legless", "legs", str(_input(input_name))], timeout=240)
+    if p.returncode != 0:
+        raise RuntimeError(f"mt.legless legs exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+    d = json.loads(p.stdout)
+    e = d.get("evidence") or {}
+    return {"seconds": wall, "legs": d.get("legs"), "legless": d.get("legs") == "none", "trail": bool(d.get("trail")),
+            "why": d.get("why"), "leg_columns": e.get("leg_columns"), "foot_sections": e.get("foot_sections"),
+            "taper_ratio": e.get("taper_ratio"), "floor_contact": e.get("floor_contact"), "upright": e.get("upright")}
 
 
 def mt_rig_first(ctx, input_name, words="", forward_axis="", v3_bound=False, body=""):
@@ -1764,6 +1790,9 @@ def anim_stand(ctx, rig_input, rig_json_input, clip="auto", size=512, on_run=Non
             "worst_edge_ratio": (m.get("stretch") or {}).get("worst_edge_ratio"),
             "leak_pct": (m.get("leak") or {}).get("share_pct"), "seconds_by_stage": m.get("seconds"),
             "leak_far_pct": (m.get("leak") or {}).get("far_share_pct"),
+            "leak_far_pct_radii": (((m.get("leak") or {}).get("alt") or {}).get("radii") or {}).get("far_share_pct"),
+            "leak_far_pct_tube": (((m.get("leak") or {}).get("alt") or {}).get("tube") or {}).get("far_share_pct"),
+            "worst_stretch_ratio": (m.get("stretch") or {}).get("worst_stretch_ratio"),
             "edges_over_4x": (m.get("stretch") or {}).get("edges_over_4x")}
 
 
@@ -1793,7 +1822,14 @@ def stand_tear(ctx, clip="auto", fps=12):
             return {"seconds": round(time.time() - t, 3), "clip": c.get("name"), "status": "no_clip",
                     "worst_edge_ratio": 1.0, "edges_over_4x": 0, "tear": False, "stretch_valid": 1}
         idx = AS.resample(c, np.arange(n) / fps)["_idx"]
-        st = AS.stretch_metrics(AS.Model(glb), c, idx, int(o["stretch_proxy_verts"]))
+        _model = AS.Model(glb)
+        st = AS.stretch_metrics(_model, c, idx, int(o["stretch_proxy_verts"]))
+        _wp, _ws = None, None
+        if hasattr(AS, "stretch_pairs"):                 # Seams · V3 (77cc1b88): the real worst stretch and its bones
+            try:
+                _wp, _ws = AS.stretch_pairs(_model, c, idx, 6)
+            except Exception:                            # noqa: BLE001 - the stretch numbers stand
+                _wp, _ws = None, None
     finally:
         for d in holder:
             _sh.rmtree(d, ignore_errors=True)
@@ -1802,7 +1838,9 @@ def stand_tear(ctx, clip="auto", fps=12):
             "edges_over_4x": st.get("edges_over_4x"), "tear": bool(st.get("tear")), "samples": st.get("samples"),
             "stretch_valid": int(st.get("status") in ("failed", "numeric_deformation_passed")),
             "stretch_reason": st.get("reason"),
-            "proxy": bool(st.get("proxy"))}
+            "proxy": bool(st.get("proxy")),
+            "worst_stretch_ratio": None if _ws is None else round(float(_ws), 3),
+            "worst_pairs": _wp}
 
 
 # ------------------------------------------------------------------------------------------------ dispatch
@@ -1822,6 +1860,8 @@ def run_check(check: dict, ctx: dict) -> dict:
         target = run / "rig" / "rigged.glb"
     elif inp:
         target = _input(inp)
+    if k == "voxel_legs":                                          # Legless rig · V3 (2026-10-17)
+        return voxel_legs(inp)
     if k == "mt_rig_first":
         return mt_rig_first(ctx, inp, a.get("words", ""), a.get("forward_axis", ""), a.get("v3_bound", False),
                             a.get("body", ""))
