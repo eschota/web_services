@@ -805,6 +805,47 @@ async def broadcast_new_task(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def _v3_task_photo(task_id: str) -> tuple[Path | None, str | None]:
+    """The task's V3 picture (gallery poster, else the run's own render) and its title; never a classic poster."""
+    photo: Path | None = None
+    title: str | None = None
+    try:
+        p = Path(os.getenv("AUTORIG_V3_POSTER_DIR", "/srv/autorig/data/static/posters-v3")) / f"{task_id}.jpg"
+        if p.is_file() and 8000 < p.stat().st_size <= 9 * 1024 * 1024:
+            photo = p
+    except OSError:
+        pass
+    try:
+        async with AsyncSessionLocal() as db:
+            task = await db.get(Task, task_id)
+        if task is not None and getattr(task, "is_public", True) is False:
+            return None, None                            # a private model never shows its picture in group chats
+        if task is not None:
+            title = (getattr(task, "poster_llm_title", None) or "").strip() or None
+            if photo is None:
+                from v3_notify import _run_preview, run_id_of
+
+                photo = await asyncio.to_thread(_run_preview, run_id_of(task))
+    except Exception as e:
+        print(f"[Telegram] V3 photo lookup failed for {task_id}: {type(e).__name__}: {e}")
+    return photo, title
+
+
+async def _send_task_notice(bot, chat_id: int, text: str, photo: Path | None):
+    """A photo with the caption when there is a V3 picture, else plain text without a link card."""
+    from telegram.constants import ParseMode
+
+    if photo is not None and len(text) <= 1000:
+        async def _photo(cid=chat_id, p=photo):
+            with p.open("rb") as f:
+                return await bot.send_photo(chat_id=cid, photo=f, caption=text, parse_mode=ParseMode.HTML)
+        result = await _send_with_retry(_photo, retry_network=False)
+        if result:
+            return result
+    return await _send_with_retry(lambda cid=chat_id: bot.send_message(
+        chat_id=cid, text=text, parse_mode=ParseMode.HTML, disable_web_page_preview=True))
+
+
 async def broadcast_purchase_intent(
     task_id: str,
     user_email: str | None = None,
@@ -840,19 +881,27 @@ async def broadcast_purchase_intent(
     chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
+    photo, task_title = await _v3_task_photo(task_id)
+    if task_title:
+        text += f"\n🖼️ <b>{html.escape(task_title)}</b>"
 
     sem = asyncio.Semaphore(3)
 
     async def _one(chat_id: int):
         async with sem:
-            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
-                chat_id=cid,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False
-            ))
+            # one purchase-intent message per model (owner 2026-10-17: «очищай удаляй предыдущие пурчас интент
+            # сообщения этой модели, чтобы не заспамливать чат»): the previous one is deleted, the new one remembered
+            old_mid = await pop_notification_message_id(chat_id, "purchase_intent", task_id)
+            if old_mid:
+                await _send_with_retry(lambda cid=chat_id, mid=old_mid: bot.delete_message(chat_id=cid, message_id=mid),
+                                       retry_network=False)
+            await release_notification(chat_id, "purchase_intent", task_id)
+            await reserve_notification(chat_id, "purchase_intent", task_id)
+            result = await _send_task_notice(bot, chat_id, text, photo)
             if result:
-                print(f"[Telegram] Purchase intent sent to chat {chat_id}")
+                await attach_notification_message_id(chat_id, "purchase_intent", task_id,
+                                                     getattr(result, "message_id", None))
+                print(f"[Telegram] Purchase intent sent to chat {chat_id} ({'photo' if photo else 'text'})")
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
@@ -981,6 +1030,9 @@ async def broadcast_full_bundle_download(task_id: str, user_email: str | None = 
     chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
+    photo, task_title = await _v3_task_photo(task_id)
+    if task_title:
+        text += f"\n🖼️ <b>{html.escape(task_title)}</b>"
 
     sem = asyncio.Semaphore(3)
 
@@ -990,12 +1042,7 @@ async def broadcast_full_bundle_download(task_id: str, user_email: str | None = 
             if not reserved:
                 print(f"[Telegram] Skip duplicate bundle download notice chat={chat_id} key={event_key}")
                 return
-            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
-                chat_id=cid,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False,
-            ))
+            result = await _send_task_notice(bot, chat_id, text, photo)
             if result:
                 print(f"[Telegram] Full bundle download notice sent to chat {chat_id}")
 
