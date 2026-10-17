@@ -2224,5 +2224,11 @@
   "v31_body_slim_tall": "लंबा पतला",
   "v31_body_long_limbed": "लंबे अंग",
   "v31_body_realistic": "यथार्थवादी",
-  "v31_body_toy": "खिलौना"
+  "v31_body_toy": "खिलौना",
+  "live_stage_picture": "चित्र पढ़ा जा रहा है",
+  "live_picture_view_quick": "चित्र: {characters} पात्र मिले",
+  "live_picture_view": "चित्र: {view} दृश्य, हाथ में {props} वस्तु",
+  "live_picture_front": "सामने का दृश्य फिर से बनाया गया: {status}",
+  "live_picture_props": "हाथ की वस्तुएँ अलग प्रॉप के रूप में काटी गईं: {n}",
+  "live_picture_done": "चित्र 3D के लिए तैयार: {input}"
 }

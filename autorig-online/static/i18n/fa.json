@@ -2222,5 +2222,11 @@
   "v31_body_slim_tall": "بلند و لاغر",
   "v31_body_long_limbed": "دست‌وپا بلند",
   "v31_body_realistic": "واقع‌گرا",
-  "v31_body_toy": "اسباب‌بازی"
+  "v31_body_toy": "اسباب‌بازی",
+  "live_stage_picture": "در حال خواندن تصویر",
+  "live_picture_view_quick": "تصویر: {characters} شخصیت پیدا شد",
+  "live_picture_view": "تصویر: نمای {view}، {props} شیء در دست",
+  "live_picture_front": "نمای روبه‌رو دوباره کشیده شد: {status}",
+  "live_picture_props": "اشیای دست به‌صورت پراپ جدا بریده شدند: {n}",
+  "live_picture_done": "تصویر برای سه‌بعدی آماده است: {input}"
 }

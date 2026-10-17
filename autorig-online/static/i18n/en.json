@@ -2242,5 +2242,11 @@
   "v31_body_slim_tall": "slim and tall",
   "v31_body_long_limbed": "long-limbed",
   "v31_body_realistic": "realistic",
-  "v31_body_toy": "toy"
+  "v31_body_toy": "toy",
+  "live_stage_picture": "Reading the picture",
+  "live_picture_view_quick": "Picture: {characters} character(s) found",
+  "live_picture_view": "Picture: {view} view, {props} held object(s)",
+  "live_picture_front": "Front view redrawn: {status}",
+  "live_picture_props": "Held objects cut out as separate props: {n}",
+  "live_picture_done": "Picture ready for 3D: {input}"
 }

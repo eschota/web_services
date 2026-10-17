@@ -2242,5 +2242,11 @@
   "v31_body_slim_tall": "высокое стройное",
   "v31_body_long_limbed": "длинноногое",
   "v31_body_realistic": "реалистичное",
-  "v31_body_toy": "игрушка"
+  "v31_body_toy": "игрушка",
+  "live_stage_picture": "Разбираю картинку",
+  "live_picture_view_quick": "Картинка: найдено персонажей: {characters}",
+  "live_picture_view": "Картинка: вид {view}, предметов в руках: {props}",
+  "live_picture_front": "Дорисован вид спереди: {status}",
+  "live_picture_props": "Предметы из рук вырезаны отдельными пропами: {n}",
+  "live_picture_done": "Картинка готова к 3D: {input}"
 }

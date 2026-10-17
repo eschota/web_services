@@ -2224,5 +2224,11 @@
   "v31_body_slim_tall": "高挑",
   "v31_body_long_limbed": "长肢",
   "v31_body_realistic": "写实",
-  "v31_body_toy": "玩具"
+  "v31_body_toy": "玩具",
+  "live_stage_picture": "正在读取图片",
+  "live_picture_view_quick": "图片：找到 {characters} 个角色",
+  "live_picture_view": "图片：{view} 视角，手持物品 {props} 个",
+  "live_picture_front": "已重绘正面视图：{status}",
+  "live_picture_props": "手持物品已切出为独立道具：{n}",
+  "live_picture_done": "图片已可用于 3D：{input}"
 }
